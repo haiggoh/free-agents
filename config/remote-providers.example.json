@@ -1,0 +1,56 @@
+{
+  "_comment": "Reference for the remote-fallback lane's providers. This file is DOCUMENTATION, not loaded — providers are defined in code (bin/remote_provider_core.py) so the tier policy cannot drift. Secrets are NEVER written here: each provider reads its key from the named environment variable at call time. Copy the env var names into your shell profile to enable a provider; leave them unset and that provider's lane is disabled (the privacy default).",
+  "_how_to_check": "Run `bin/remote-provider-doctor.py [provider ...]` to see which configured keys are actually alive and which models each serves right now. It is read-only and never burns quota.",
+  "_default_posture": "No env var set = remote lane disabled = local-only. Set one or more keys to opt into the remote fallback. The router (bin/agent-fallback.py) picks which tiers a routing mode may touch.",
+  "providers": {
+    "gemini": {
+      "display": "Gemini API",
+      "tier": "renewing_free",
+      "env": ["GEMINI_API_KEY"],
+      "key_source": "https://aistudio.google.com/apikey",
+      "notes": "OpenAI-compatible. Free tier with a resetting per-day quota. The primary emergency lane and the only provider fully implemented in the MVP."
+    },
+    "groq": {
+      "display": "Groq",
+      "tier": "renewing_free",
+      "env": ["GROQ_API_KEY"],
+      "key_source": "https://console.groq.com/keys",
+      "notes": "OpenAI-compatible, fast. Free tier resets. Declared; its dispatch path lands in a later phase."
+    },
+    "openrouter": {
+      "display": "OpenRouter",
+      "tier": "unknown",
+      "env": ["OPENROUTER_API_KEY"],
+      "key_source": "https://openrouter.ai/keys",
+      "notes": "Model-dependent cost: free models are namespaced ('openrouter/free' or ':free'). The router's free-model rule decides tier per model. Declared; later phase."
+    },
+    "cloudflare": {
+      "display": "Cloudflare Workers AI",
+      "tier": "renewing_free",
+      "env": ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+      "key_source": "Cloudflare dashboard → Workers AI → API tokens",
+      "notes": "Free monthly quota. Needs BOTH the token and the account id (the base URL has a {CLOUDFLARE_ACCOUNT_ID} placeholder filled from the env). Declared; later phase."
+    },
+    "github": {
+      "display": "GitHub Models",
+      "tier": "renewing_free",
+      "env": ["GITHUB_TOKEN"],
+      "key_source": "GitHub → Settings → Developer settings → Tokens (needs models:read scope)",
+      "notes": "Rate limits are per-token and reset. Model catalog is a separate endpoint (models.github.ai/catalog/models), not /models. Declared; later phase."
+    },
+    "cerebras": {
+      "display": "Cerebras",
+      "tier": "trial",
+      "env": ["CEREBRAS_API_KEY"],
+      "key_source": "https://cloud.cerebras.ai",
+      "notes": "CLASSIFIED AS TRIAL, not permanently free. The router only selects it in include-trials / research-emergency modes — it is never silently used by the default emergency lane."
+    },
+    "nvidia": {
+      "display": "NVIDIA NIM",
+      "tier": "unknown",
+      "env": ["NVIDIA_API_KEY"],
+      "key_source": "https://build.nvidia.com",
+      "notes": "Free tier but the EFFECTIVE limits are dynamic (NVIDIA throttles free keys unpredictably) — treated as unknown, verified per call. Only in research-emergency. Declared; later phase."
+    }
+  }
+}
