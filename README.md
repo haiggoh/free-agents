@@ -110,6 +110,41 @@ auto-discovers brew → `PATH` → newest `~/.venvs/rapid-mlx-*`, so a machine t
 install still works. The weekly `local-stack-update-check` launchd job watches PyPI for new Rapid
 releases and only *notifies* — it never installs.
 
+**What does install is `install/manage-rapid-mlx.py`**, the runtime lifecycle manager. Before it
+existed, the notify half had no counterpart: you were told a release was out and then hand-rolled
+the venv. It closes that loop without ever starting a model server:
+
+```bash
+./install/manage-rapid-mlx.py releases              # what PyPI offers
+./install/manage-rapid-mlx.py installed             # what this machine has, and which pin is active
+./install/manage-rapid-mlx.py install 0.14.0        # build ~/.venvs/rapid-mlx-0.14.0, validate, promote pins
+./install/manage-rapid-mlx.py install 0.14.0 --skip-pin-update   # install WITHOUT promoting
+./install/manage-rapid-mlx.py smoke 0.14.0          # package + CLI surfaces, no server
+./install/manage-rapid-mlx.py promote 0.13.4        # move active pins (this is the rollback path)
+./install/manage-rapid-mlx.py snapshot 0.14.0       # exact recreation receipt
+./install/manage-rapid-mlx.py remove 0.12.18        # only if inactive, unpinned and reproducible
+```
+
+`--dry-run` is a GLOBAL flag and must come BEFORE the subcommand
+(`./install/manage-rapid-mlx.py --dry-run install 0.14.0`, not `install 0.14.0 --dry-run`, which
+argparse rejects). It prints the plan and writes nothing.
+
+Three properties matter more than the command list:
+
+- **Side by side, not in place.** Each version is its own `~/.venvs/rapid-mlx-<version>`, so a new
+  runtime is built and validated while the working one keeps serving. `promote` is a separate,
+  transactional step — installing is not adopting.
+- **Promotion is not qualification.** `promote` moves `LA_RAPID_BIN`; it says nothing about whether
+  a model still performs. Recorded Metal and cache figures from an older runtime are baselines, not
+  transferable evidence — re-measure per runtime.
+- **Retirement is guarded.** `remove` refuses a venv that is active, pinned, or lacks a valid
+  recreation receipt, which is what makes a rollback window real rather than aspirational.
+
+To change version safely: `install <new>` → `smoke <new>` → exercise a real session → keep the
+previous venv until the new one has proven itself → `remove` the old one only once it is unpinned.
+If the new runtime misbehaves, `promote <previous>` is the whole rollback. Full reference:
+[`docs/RAPID_RUNTIME_MANAGER.md`](docs/RAPID_RUNTIME_MANAGER.md).
+
 ## Roadmap
 
 What shipped is in [`CHANGELOG.md`](CHANGELOG.md). What is **specced but not shipped** — the
@@ -137,6 +172,9 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - **`config/`** — the overlay: `config.example.sh`, the shipped `local-agent-system-prompt.txt` template, and your gitignored `config.local.sh`.
 - **`install/`** — `install-backend.sh` (venv + vllm-mlx + fork patches), `download-models.sh`
   (the downloader ENGINE: revisions, resume, dedupe, selective GGUF files, disk preflight),
+  `manage-rapid-mlx.py` (the Rapid-MLX runtime lifecycle: release discovery, side-by-side versioned
+  venvs, validation, transactional pin promotion and rollback, recreation receipts, guarded
+  retirement — never starts a server; see [`docs/RAPID_RUNTIME_MANAGER.md`](docs/RAPID_RUNTIME_MANAGER.md)),
   and `vllm-mlx-local-fork-patches.patch`.
 - **`bin/` diagnostics** — `tournament-dispatch.py`, `cancellation-matrix.py`,
   `check-tool-roundtrip.py`, `direct-route-acceptance.py`, `auto-mode-probe.sh`,

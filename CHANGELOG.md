@@ -79,6 +79,25 @@ is not qualification.
   `local-roles` and `local-disk`. `local-logs` now matches the `rapid_auto_*` and
   `omlx_*` logs the current backends actually write, not only `vllm_*`.
 
+### Documentation
+
+- The Rapid-MLX runtime manager is now DISCOVERABLE. `install/manage-rapid-mlx.py` shipped with its
+  own reference (`docs/RAPID_RUNTIME_MANAGER.md`) but was absent from the README entirely — not in
+  the "What's in the box" inventory, and not in the section that explains why Rapid lives in a
+  pinned venv. That section stated the weekly update check "never installs" without saying what
+  does, so the documented story ended at the notification. The README now covers the version-change
+  routine (install → smoke → exercise → promote/rollback → guarded retirement), the three properties
+  that matter (side-by-side rather than in-place, promotion is not qualification, retirement is
+  gated on a recreation receipt), and the fact that `--dry-run` is a GLOBAL flag that must precede
+  the subcommand — verified by running every documented subcommand's `--help`, and by confirming
+  argparse rejects the trailing form.
+
+- `docs/ROADMAP.md` claimed the manager "lives on a dedicated feature branch … and is mergeable
+  once that test plus `smoke 0.14.0` pass". It has been on `main` since `e9faaa8`. Corrected in
+  place, with the consequence stated: an update routine is no longer missing, so open items that
+  deferred work for lack of a safe upgrade/rollback path should call this manager rather than add a
+  second installer.
+
 ### Fixed
 
 - `local-llm-hotswap.sh` had no RAM preflight, while `launch-claude-agent.sh` has
