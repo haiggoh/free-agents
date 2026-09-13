@@ -8,7 +8,36 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
-Nothing awaiting a number.
+### Added
+
+- `bin/la-reboot.sh` — restarts a CRASHED local model server in place: same port, same argv, so a
+  still-open Claude Code session reconnects on its next request with no exit, no `/resume` and no
+  context replay. Recovery previously meant exit → `la-evict` → new session → `/resume`, paying for a
+  full model reload *and* a context replay. This is the bandaid half of the recurring Rapid
+  D-METAL-CAP OOM; the climbing-residency root cause is tracked separately, and needing this often is
+  data for that investigation rather than a reason to automate it.
+
+  It is the only script in this repo permitted to stop a server on the session port range, so the
+  guards are strict and tested: it acts on exactly one port, never a range; it requires positive
+  crash evidence (a failed completion probe, a dead listener, or a Metal/OOM log signature) because
+  liveness is not the test — an OOM-refusing Rapid server answers `/v1/models` while failing every
+  real request; a server that still completes a request is refused unless `--force` is passed; and
+  the argv is captured from the live process via `KERN_PROCARGS2` *before* anything is stopped,
+  rather than from `ps` (whose space-joined output corrupts any argument containing a space) or from
+  current config (which may have changed since launch). Ships `--status`, `--dry-run`, `--force`,
+  `--port`, `--wait` and `--help`, with documented exit codes 0/1/2/3.
+
+  Covered by `tests/test_la_reboot.sh` (25 checks) including an end-to-end stop-and-relaunch against
+  a fixture server that refuses completions, argv fidelity for an argument containing a space, and
+  mutation-tested: disabling the healthy-server refusal lets a working server be rebooted.
+
+### Fixed
+
+- `la-reboot` readiness parsed `"id":"…"` without tolerating whitespace after the colon, so a server
+  that pretty-prints its `/v1/models` payload was reported "not ready" while actually serving.
+  Found by running the script against a real server. The same tight pattern exists in
+  `local-llm-hotswap.sh`, `la-ram-preflight.sh` and `launch-claude-agent.sh`; those are not changed
+  here because Rapid emits compact JSON, but they carry the same latent brittleness.
 
 ## [0.13.11] — 2026-09-13
 

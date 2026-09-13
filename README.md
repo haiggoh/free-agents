@@ -189,6 +189,36 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   within the window (default 600 s, `LA_EVICT_WINDOW` to change); once it expires the next invocation
   is a first run again, and `--reset` clears the saved escalation state and exits without evicting.
   See [Safety](#safety).
+- **`bin/la-reboot.sh`** — `la-evict`'s sibling for the opposite problem: a session whose backend
+  **already crashed**. It restarts the *same* model on the *same* port with the *same* arguments, so
+  a still-open Claude Code session reconnects on its next request — no exit, no `/resume`, no context
+  replay. Recovery used to be exit → `la-evict` → new session → `/resume`, which pays for a full
+  model reload *and* a context replay.
+
+  It is the **only** script here allowed to stop a server on the session port range, so the guards
+  are strict. It acts on exactly one port (never a range). It requires positive evidence of a crash —
+  a failed completion probe, a dead listener, or a Metal/OOM signature — because liveness is *not*
+  the test: an OOM-refusing Rapid server answers `/v1/models` perfectly while failing every real
+  request. A server that still completes a request is refused unless you pass `--force`. And the
+  argv is captured from the live process *before* anything is stopped, via `KERN_PROCARGS2` rather
+  than `ps` (whose space-joined output would corrupt any argument containing a space) — after the
+  kill that information is gone, and re-deriving the command from current config would silently
+  launch something *else* if the config changed since launch.
+
+  ```bash
+  ./bin/la-reboot.sh --status            # what would be targeted, and the evidence for it
+  ./bin/la-reboot.sh --dry-run           # the plan, including the exact argv
+  ./bin/la-reboot.sh                     # rescue the attached session's port
+  ./bin/la-reboot.sh --port 8001 --force # restart a port that still looks healthy
+  ```
+
+  With no `--port` it uses this shell's own `ANTHROPIC_BASE_URL`, else the single attached session
+  port; with several candidates it refuses to guess. Exit codes: `0` rebooted, `1` nothing to reboot
+  or never became ready, `2` usage, `3` refused because the server is healthy.
+
+  **It is a bandaid on purpose.** Running out of memory is not how local inference is meant to work;
+  the root cause of the climbing residency is tracked separately. Needing this often is data for that
+  investigation, not a reason to automate it.
 - **`bin/la-stream-render.py`** — renders a session transcript for a human watcher: thinking as
   clean paragraphs, one concise line per tool call. `local-watch.sh` uses it by default.
 - **`bin/la-disk-inventory.sh`** — disk-first inventory: what's actually in your models dir, and
