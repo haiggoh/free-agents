@@ -8,10 +8,20 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
-Awaiting a release number on branch `fix/omlx-classifier-prewarm`: the Auto Mode
-local-classifier readiness work. Not released because no live Claude Code smoke
-test has confirmed either backend's classifier route yet — startup success alone
-is not qualification.
+Nothing awaiting a number.
+
+## [0.13.11] — 2026-09-13
+
+Two safety fixes in the local RAM path, one source of truth for the Claude spoof
+identities, the opt-in remote emergency-fallback lane, and the Rapid runtime
+manager made discoverable.
+
+⚠️ **CARRIED-FORWARD CAVEAT — the Auto Mode local-classifier readiness work ships
+in this release WITHOUT live qualification.** It previously sat unreleased for
+exactly this reason, and numbering it does not qualify it: no live Claude Code
+smoke test has confirmed either backend's classifier route, and startup success
+alone is not qualification. Treat the classifier route as unproven until that
+smoke test is run and recorded. Nothing else in this release depends on it.
 
 ### Added
 
