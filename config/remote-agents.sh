@@ -5,38 +5,47 @@
 # selected on its own menu and never mixed into the local model list.
 #
 # Each entry:  alias|provider|model-id|display|tier|notes
-# provider must exist in bin/remote-keys.sh and bin/remote_provider_core.py.
+# provider must have a key mapping and a remote-session.sh proxy route.
 # tier: renewing_free | trial | unknown   (matches remote_provider_core.py)
 #
-# Model ids are RESOLVED LIVE where a provider rotates them — never trust a
-# pinned id: Gemini retired gemini-2.5-flash for new keys mid-2026 while the
-# repo still pinned it, which is why remote-session.sh verifies the id against
-# the provider's own /models before launching.
+# Recheck pinned ids with remote-session.sh --verify <alias> (catalog GET only).
+# Launch does not consume a separate generation probe. A catalog listing is not
+# evidence of working tool calls, remaining quota, or an account billing limit.
 
 LA_REMOTE_AGENTS=(
-  # Every model id below was verified LIVE against the provider's own catalogue
-  # AND a real tool-calling round-trip on 2026-09-14. Re-verify with
-  # `bin/remote-session.sh --verify <alias>` — providers retire ids without notice
-  # (Gemini dropped gemini-2.5-flash for new keys while this repo still pinned it).
+  # Catalogs checked 2026-09-14. Newly added rows are CATALOG ONLY: no generation
+  # probes were spent. Historical tool checks are identified individually below.
 
   # --- Gemini: primary free lane; largest renewing quota, best tool-calling
   "gemini-flash|gemini|gemini-3.6-flash|Gemini 3.6 Flash|renewing_free|VERIFIED. Primary free lane, fast, solid tool use. Thinking off for latency."
   "gemini-flash-thinking|gemini|gemini-3.6-flash|Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning."
+  "gemini-3.8-flash|gemini|gemini-3.8-flash|Gemini 3.8 Flash|renewing_free|Catalog only. Separate selection from 3.6; account quotas apply. Thinking off."
+  "gemini-3.8-flash-thinking|gemini|gemini-3.8-flash|Gemini 3.8 Flash (thinking)|renewing_free|Catalog only. Provider default thinking enabled."
   "gemini-flash-lite|gemini|gemini-3.1-flash-lite|Gemini 3.1 Flash-Lite|renewing_free|VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use."
 
   # --- Groq: fastest tokens/sec of any free lane
   "groq-oss120|groq|openai/gpt-oss-120b|Groq gpt-oss-120b|renewing_free|VERIFIED chat+tools. Very fast; best once Gemini quota is spent."
   "groq-oss20|groq|openai/gpt-oss-20b|Groq gpt-oss-20b|renewing_free|Smaller/faster sibling for utility work."
+  "groq-qwen36|groq|qwen/qwen3.6-27b|Groq Qwen 3.6 27B|renewing_free|Catalog only; account quotas apply."
+  "groq-qwen38|groq|qwen/qwen3.8-27b|Groq Qwen 3.8 27B|renewing_free|Catalog only; account quotas apply."
 
   # --- NVIDIA hosted NIM: broad catalogue, limits dynamic
   "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|VERIFIED chat+tools. Largest verified free lane; NVIDIA throttles unpredictably."
   "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|Second NIM lane when Nemotron is throttled."
+  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra|unknown|Catalog only; account quota and billing not verified."
 
-  # --- OpenRouter: only :free-suffixed models are actually free
-  "openrouter-free|openrouter|openrouter/auto|OpenRouter auto (free variants)|unknown|NOT verified — router picks per call; confirm the model is :free before trusting."
+  # --- OpenRouter: explicit free router or zero-priced, tool-capable catalog rows
+  "openrouter-free|openrouter|openrouter/free|OpenRouter free router|renewing_free|Catalog only. Routes among free models; account limits still apply."
+  "openrouter-nemotron|openrouter|nvidia/nemotron-3-super-120b-a12b:free|OpenRouter Nemotron 3 Super (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe."
+  "openrouter-code|openrouter|cohere/north-mini-code:free|OpenRouter North Mini Code (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe."
 
-  # --- Cerebras: LEGACY TRIAL — never recommended for new setup (revisions plan §2)
-  "cerebras-legacy|cerebras|llama-3.3-70b|Cerebras Llama 3.3 70B (legacy trial)|trial|TRIAL, not free. Offered only behind --include-trials."
+  # --- Cloudflare Workers AI: account-specific OpenAI-compatible endpoint
+  "cloudflare-oss20|cloudflare|@cf/openai/gpt-oss-20b|Cloudflare gpt-oss-20b|unknown|Catalog only. Requires cloudflare token and cloudflare-account-id; account billing applies."
+  "cloudflare-qwen38|cloudflare|@cf/qwen/qwen3.8-27b|Cloudflare Qwen 3.8 27B|unknown|Catalog only; free allocation and paid overage depend on the account."
+
+  # --- Cerebras: retain explicit trial opt-in until this account is requalified.
+  "cerebras-oss120|cerebras|gpt-oss-120b|Cerebras gpt-oss-120b|trial|Catalog only. Use --include-trials; account billing not verified."
+  "cerebras-qwen38|cerebras|qwen-3.8-27b|Cerebras Qwen 3.8 27B|trial|Catalog only. Use --include-trials; account billing not verified."
 )
 
 # Which spoofed Claude ids the proxy should answer to. Claude Code asks for these

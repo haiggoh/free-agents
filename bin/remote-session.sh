@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# remote-session.sh — launch a full Claude Code session against a FREE REMOTE
+# remote-session.sh — launch a full Claude Code session against a REMOTE
 # cloud API (Gemini / Groq / NVIDIA / …) instead of the paid Anthropic gateway.
 #
 # Why a proxy: none of the free providers speak Anthropic's /v1/messages — they
@@ -22,8 +22,8 @@
 #   LA_REMOTE_MAX_OUTPUT_TOKENS   CLAUDE_CODE_MAX_OUTPUT_TOKENS (default 8192)
 #   LA_REMOTE_KEEP_PROXY=1        leave the proxy running after the session exits
 #
-# Cost: the provider lanes are free tiers. This session does NOT touch the
-# Anthropic gateway, so it does not consume the daily paid budget.
+# Cost: provider quota and billing apply; see the selected tier. This session
+# does not use the Anthropic gateway. Catalog checks consume no generation tokens.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
@@ -31,7 +31,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROSTER="$REPO_ROOT/config/remote-agents.sh"
 KEYS="$SCRIPT_DIR/remote-keys.sh"
 RUNDIR="${TMPDIR:-/tmp}/local-agents-remote"
-mkdir -p "$RUNDIR"
 
 # Corporate wifi runs a TLS-inspecting proxy, so Python's certifi bundle rejects every
 # HTTPS call while the macOS Keychain accepts it. The repo already ships the fix as a
@@ -61,6 +60,10 @@ _field() { # _field <entry> <n>
 }
 _entry_for() { # _entry_for <alias>  -> the roster line, or empty
     local a="$1" e
+    if [[ "$a" == "cerebras-legacy" ]]; then
+        echo "remote-session: cerebras-legacy now selects cerebras-oss120; the old Llama id is unavailable." >&2
+        a="cerebras-oss120"
+    fi
     for e in "${LA_REMOTE_AGENTS[@]}"; do
         [[ "$(_field "$e" 1)" == "$a" ]] && { printf '%s' "$e"; return 0; }
     done
@@ -72,7 +75,7 @@ _visible() { # tier filter: hide trials unless asked
 }
 
 print_list() {
-    printf '\n\033[1m☁️  REMOTE cloud-API agents\033[0m  (free tiers — separate from the local MLX models)\n\n'
+    printf '\n\033[1m☁️  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n'
     printf '  %-3s %-22s %-34s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
     local i=0 e alias prov model disp tier keystate
     for e in "${LA_REMOTE_AGENTS[@]}"; do
@@ -103,9 +106,21 @@ pick_alias() { # interactive numbered picker -> echoes the chosen alias
 }
 
 # ---- live verification ------------------------------------------------------
-# Confirm the credential works AND the pinned model id still exists. A retired
-# id is the failure mode that bit us before, so this is checked before launch.
-verify_alias() { # verify_alias <alias>  (0 = usable)
+# On-demand catalog GET only: public catalogs do not validate credentials,
+# and no catalog proves generation access or tool use.
+_cloudflare_base() {
+    local line account=""
+    while IFS= read -r line; do
+        [[ "$line" == CLOUDFLARE_ACCOUNT_ID=* ]] && account="${line#*=}"
+    done < <("$KEYS" --env cloudflare)
+    [[ "$account" =~ ^[a-fA-F0-9]{32}$ ]] || {
+        echo 'remote-session: cloudflare-account-id must contain the 32-character account ID.' >&2
+        return 1
+    }
+    printf 'https://api.cloudflare.com/client/v4/accounts/%s/ai/v1' "$account"
+}
+
+verify_alias() { # verify_alias <alias>  (0 = catalog-listed)
     local entry alias prov model tier
     entry="$(_entry_for "$1")" || { echo "remote-session: unknown alias: $1" >&2; return 2; }
     alias="$(_field "$entry" 1)"; prov="$(_field "$entry" 2)"
@@ -119,7 +134,8 @@ verify_alias() { # verify_alias <alias>  (0 = usable)
     printf '  credential : ✓ present\n'
 
     local envline key base
-    envline="$("$KEYS" --env "$prov" | head -1)" || return 1
+    envline="$("$KEYS" --env "$prov")" || return 1
+    envline="${envline%%$'\n'*}"
     key="${envline#*=}"
     case "$prov" in
         gemini)     base="https://generativelanguage.googleapis.com/v1beta/openai/models" ;;
@@ -127,22 +143,32 @@ verify_alias() { # verify_alias <alias>  (0 = usable)
         nvidia)     base="https://integrate.api.nvidia.com/v1/models" ;;
         openrouter) base="https://openrouter.ai/api/v1/models" ;;
         cerebras)   base="https://api.cerebras.ai/v1/models" ;;
-        *)          printf '  model check : (skipped — no catalogue endpoint known for %s)\n' "$prov"; return 0 ;;
+        cloudflare) base="$(_cloudflare_base)" || return 1
+                    base="${base%/v1}/models/search?per_page=100" ;;
+        *)          printf '  model check : no catalogue endpoint known for %s\n' "$prov"; return 2 ;;
     esac
     # curl, not python: it uses the system trust store, which survives the
     # corporate TLS-inspecting proxy that breaks python's default bundle.
     local body
-    body="$(curl -s -m 25 "$base" -H "Authorization: Bearer $key")" || {
-        printf '  model check : ? network unavailable (not a bad credential)\n'; return 0; }
+    # Keep the credential out of argv; escape curl-config quotes/backslashes.
+    key="${key//\\/\\\\}"; key="${key//\"/\\\"}"
+    body="$(printf 'header = "Authorization: Bearer %s"\n' "$key" |
+        curl --config - --fail --silent --max-time 25 "$base")" || {
+        printf '  model check : ? catalog request failed (network, authorization, or service error)\n'; return 1; }
     printf '%s' "$body" | MODEL_ID="$model" python3 -c '
 import json,os,sys
 want=os.environ["MODEL_ID"]
-try: ids=[m["id"] for m in json.load(sys.stdin).get("data",[])]
-except Exception: print("  model check : ? unparseable catalogue response"); sys.exit(0)
+try:
+    payload=json.load(sys.stdin)
+    rows=payload.get("data",payload.get("result"))
+    if payload.get("success") is False or not isinstance(rows,list): raise ValueError()
+    ids=[m.get("name",m.get("id")) if "result" in payload else m.get("id") for m in rows]
+    if not all(isinstance(i,str) for i in ids): raise ValueError()
+except Exception: print("  model check : ? unparseable or error catalogue response"); sys.exit(1)
 ids=[i.split("/",1)[1] if i.startswith("models/") else i for i in ids]
-if want in ids: print("  model check : \033[32m✓ %s is served right now (%d models)\033[0m" % (want,len(ids)))
+if want in ids: print("  model check : \033[32m✓ %s is catalog-listed (%d models); generation and quota untested\033[0m" % (want,len(ids)))
 else:
-    print("  model check : \033[31m✗ %s NOT in the catalogue\033[0m (%d models) — the id was retired" % (want,len(ids)))
+    print("  model check : \033[31m✗ %s NOT in this catalogue response\033[0m (%d models)" % (want,len(ids)))
     near=[i for i in ids if want.split("/")[-1].split("-")[0] in i][:5]
     if near: print("                closest live ids: " + ", ".join(near))
     sys.exit(3)
@@ -205,13 +231,14 @@ stop_proxy() {
 # Code can ask for "claude-opus-5" and get the free provider underneath.
 write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking>
     local cfg="$1" prov="$2" model="$3" thinking="$4"
-    local litellm_model think_line=""
+    local litellm_model think_line="" api_base=""
     case "$prov" in
         gemini)     litellm_model="gemini/$model" ;;
         groq)       litellm_model="groq/$model" ;;
         nvidia)     litellm_model="nvidia_nim/$model" ;;
         openrouter) litellm_model="openrouter/$model" ;;
         cerebras)   litellm_model="cerebras/$model" ;;
+        cloudflare) litellm_model="openai/$model"; api_base="$(_cloudflare_base)" || return 1 ;;
         *)          echo "remote-session: no LiteLLM prefix for provider $prov" >&2; return 1 ;;
     esac
     # Gemini 3.x spends its whole token budget on thinking unless told not to;
@@ -220,7 +247,8 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         think_line='      thinking: {"type": "disabled"}'
 
     local key_env
-    key_env="$("$KEYS" --names "$prov" | head -1)"
+    key_env="$("$KEYS" --names "$prov")" || return 1
+    key_env="${key_env%%$'\n'*}"
 
     : > "$cfg"; chmod 600 "$cfg"
     echo "model_list:" >> "$cfg"
@@ -232,6 +260,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             echo "    litellm_params:"
             echo "      model: $litellm_model"
             echo "      api_key: os.environ/$key_env"
+            [[ -n "$api_base" ]] && echo "      api_base: $api_base"
             [[ -n "$think_line" ]] && echo "$think_line"
         } >> "$cfg"
     done
@@ -254,9 +283,9 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
     write_proxy_config "$cfg" "$prov" "$model" "$thinking" || return 1
 
     # Only THIS provider's credential enters the proxy environment.
-    local envassign
+    local envassign line
     envassign="$("$KEYS" --env "$prov")" || return 1
-    ( set -a; eval "$envassign"; set +a
+    ( while IFS= read -r line; do export "$line"; done <<< "$envassign"
       exec litellm --config "$cfg" --port "$port" ) > "$log" 2>&1 &
     echo $! > "$pidf"
 
@@ -288,7 +317,11 @@ while [[ $# -gt 0 ]]; do
         --dry-run)        DRY_RUN=1; shift ;;
         --include-trials) INCLUDE_TRIALS=1; shift ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
-        -*)               PASSTHRU+=("$1"); shift ;;
+        -*)               if [[ -z "$ALIAS" ]]; then
+                              echo "remote-session: unknown option: $1; use --help or put Claude options after an alias / --." >&2
+                              exit 2
+                          fi
+                          PASSTHRU+=("$1"); shift ;;
         *)                if [[ -z "$ALIAS" && ${#PASSTHRU[@]} -eq 0 ]]; then ALIAS="$1"; else PASSTHRU+=("$1"); fi; shift ;;
     esac
 done
@@ -330,6 +363,12 @@ fi
     exit 1
 }
 
+case "$TIER" in
+    renewing_free) COST_NOTE='renewing free allocation; account limits/billing still apply' ;;
+    trial) COST_NOTE='trial/paid access explicitly selected; check provider balance' ;;
+    *) COST_NOTE='account quota and billing unverified; do not assume free' ;;
+esac
+
 cat <<BANNER
 
 ╭──────────────────────────────────────────────────────────────╮
@@ -338,7 +377,7 @@ cat <<BANNER
    agent    : $ALIAS  ($DISP)
    provider : $PROV      tier: $TIER
    model    : $MODEL      thinking: $THINKING
-   cost     : free tier — does NOT consume the Anthropic daily budget
+   cost     : $COST_NOTE
    privacy  : prompts and file contents LEAVE this machine → $PROV
 BANNER
 
@@ -349,6 +388,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     exit 0
 fi
 
+mkdir -p "$RUNDIR"
 echo "   proxy    : starting LiteLLM (Anthropic /v1/messages → $PROV)…"
 PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING")" || {
     echo "remote-session: could not start the translating proxy." >&2; exit 1; }

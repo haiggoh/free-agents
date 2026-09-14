@@ -1,11 +1,15 @@
-# Remote free-API sessions
+# Remote API sessions
 
-Launch a **full Claude Code session** on a free cloud API (Gemini, Groq, NVIDIA)
-instead of the paid Anthropic gateway. Faster than local MLX inference, and it
-does not touch the daily gateway budget.
+Launch a **full Claude Code session** on Gemini, Groq, NVIDIA, OpenRouter,
+Cloudflare Workers AI, or Cerebras. Usage goes to the selected provider, with
+its own quota and billing, rather than the Anthropic gateway budget.
 
 ```bash
 csl                     # then press  r   → the remote roster
+csl remote              # same picker, even without local models installed
+csl remote gemini-flash  # retain the Gemini 3.6 Flash lane
+csl remote gemini-3.8-flash # select Gemini 3.8 Flash independently
+csl remote --include-trials # include Cerebras in the picker
 bin/remote-session.sh                 # the roster directly
 bin/remote-session.sh gemini-flash    # launch a named agent
 bin/remote-session.sh --list          # roster + which credentials are present
@@ -49,9 +53,26 @@ Pinned ids go stale silently and the failure looks like a broken lane:
 * `moonshotai/kimi-k3` and `z-ai/glm-5.3-flash` **are listed** in NVIDIA's
   catalogue but return empty bodies — catalogue presence is not qualification.
 
-So every id in `config/remote-agents.sh` was confirmed against the provider's own
-catalogue *and* a real tool-calling round-trip, and `--verify` re-checks on demand,
-naming the closest live ids when one has been retired.
+The expanded roster was checked against provider catalogs on 2026-09-14 without
+spending generation tokens. Newly added entries are marked **catalog only** in
+the roster notes; successful tool calls or full sessions are not implied.
+`--verify` rechecks catalog membership on demand and makes no generation request.
+A public catalog may not authenticate the supplied key. Catalog membership does
+not establish remaining free quota, tool behavior, or generation permission.
+
+Gemini 3.6 and 3.8 have independent selections using the same Gemini key; neither
+automatically falls back to the other. The `-thinking` variants retain provider
+default thinking; the other variants disable it. Groq adds Qwen 3.6/3.8 alongside
+GPT-OSS. NVIDIA adds Nemotron 3 Ultra alongside the existing Super and GPT-OSS lanes.
+
+`openrouter-free` now uses `openrouter/free`, rather than `openrouter/auto`, which
+could select paid models. Two explicit `:free` tool-capable catalog choices are
+also listed. Cloudflare uses its account-specific OpenAI-compatible endpoint
+and has GPT-OSS 20B and Qwen 3.8 options. Cerebras uses current GPT-OSS 120B and
+Qwen 3.8 IDs; the old `cerebras-legacy` alias redirects with a notice to
+`cerebras-oss120`. Cerebras retains the existing `--include-trials` opt-in until
+the account is requalified. NVIDIA/Cloudflare quota and billing remain marked
+unknown. Tier labels do not enforce an account spending cap.
 
 `--verify` uses `curl` rather than Python for the catalogue call because curl uses
 the system trust store, which survives the corporate TLS-inspecting proxy. For the
@@ -86,6 +107,17 @@ It refuses symlinked or non-user-owned credential files, never accepts a secret 
 argv, and loads **only the selected provider's** variable into the proxy
 environment. The directory is treated as a private store, never sourced as a shell
 file.
+
+Cloudflare requires both `cloudflare` (API token) and `cloudflare-account-id`
+(32-character account ID). The token must authorize Workers AI on that account.
+The additional `cloudflare-workers-ai` file is not loaded implicitly; the existing
+`cloudflare` token was sufficient for the catalog check. GitHub Models has no roster
+entry while its dedicated `github-models` credential is absent. ElevenLabs is an
+audio API, not a Claude Code conversation engine.
+
+Offline regression tests: `python3 tests/test_remote_session.py -v`. These cover
+all roster routes, proxy configs, catalog response/error shapes, credential
+handling, trial opt-in, and direct `csl remote` access without local model config.
 
 ## Privacy
 

@@ -10,6 +10,16 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ### Added
 
+- Remote session roster: Gemini 3.8 Flash (standard/thinking), Groq Qwen 3.6/3.8,
+  NVIDIA Nemotron 3 Ultra, explicit free OpenRouter models, Cloudflare Workers AI
+  routing, and current Cerebras GPT-OSS/Qwen models. `csl remote` opens the picker
+  directly, including on machines without local models; `--include-trials` exposes
+  Cerebras. The legacy Cerebras alias redirects with a notice. Catalog-only checks
+  and offline fixture tests preserve provider generation quota. Cost labels now
+  distinguish free allocations, trial access, and unverified account billing;
+  OpenRouter's free alias uses the explicit free router. Catalog errors fail the
+  check, and provider credentials are exported as literal values, never evaluated.
+
 - `bin/la-reboot.sh` — restarts a CRASHED local model server in place: same port, same argv, so a
   still-open Claude Code session reconnects on its next request with no exit, no `/resume` and no
   context replay. Recovery previously meant exit → `la-evict` → new session → `/resume`, paying for a

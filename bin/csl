@@ -3,6 +3,7 @@
 #
 #   csl              -> interactive picker (all available models, effort override, watcher toggle)
 #   csl roles        -> disk-aware role resolver (which on-disk model fills each role)
+#   csl remote [args...] -> remote picker, alias, --list, --verify, or --include-trials
 #   csl <args...>    -> passed straight through to the launcher, unchanged (no picker, no watcher)
 #
 # WHY the picker offers free model×effort and not just presets: dispatching local models as
@@ -22,6 +23,19 @@ LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 WATCHER="$CSL_DIR/local-watch.sh"
 
 if [ "${1:-}" = "roles" ]; then shift; exec "$CSL_DIR/la-roles.sh" "$@"; fi
+if [ "${1:-}" = "remote" ]; then
+  shift
+  exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" "$@"
+fi
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  printf '%s\n' 'csl: choose a local or remote Claude Code session.' \
+    'Usage: csl | csl roles [args] | csl remote [alias/options] | csl <local-launcher args>' \
+    'Remote help: csl remote --help; include Cerebras: csl remote --include-trials' \
+    'Environment: CSL_LAUNCHER, CSL_REMOTE_LAUNCHER override launchers; CSL_WATCH,' \
+    'CSL_AUTO_MODE, CSL_TELEMETRY control local picker defaults (0/1).' \
+    'For local launcher details: launch-claude-agent.sh --help'
+  exit 0
+fi
 # shellcheck source=/dev/null
 . "$CSL_DIR/../config/config-lib.sh"
 la_load_config || exit 1
@@ -175,7 +189,8 @@ while :; do
   done
   echo
   echo "  c) choose a listed model × custom effort"
-  echo "  r) ☁️  remote free-API agents (Gemini/Groq/NVIDIA — separate list, \$0, faster than local)"
+  echo "  r) ☁️  remote API agents (Gemini/Groq/NVIDIA/OpenRouter/Cloudflare; account quotas apply)"
+  echo "     Cerebras trial opt-in: csl remote --include-trials"
   if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
   if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — cached startup is quick; cold refresh may take several minutes (toggle)"
