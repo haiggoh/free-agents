@@ -128,6 +128,22 @@ _pick_from() {   # $1=prompt  $2=default index (1-based)  rest=items -> echoes c
   echo "$c"
 }
 
+# ☁️  REMOTE cloud-API agents are a DELIBERATELY SEPARATE list from the local models
+# above: a remote agent runs on a third party's hardware over the network, with a
+# different cost model (free-tier quota, not free compute) and a different privacy
+# posture (prompts leave this machine). Mixing them into one menu would make those
+# two very different choices look interchangeable, so `r` opens its own roster.
+_remote_launcher() { echo "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}"; }
+
+_launch_remote() {  # opens the remote roster and hands off; never returns on success
+  local rl; rl="$(_remote_launcher)"
+  if [ ! -x "$rl" ]; then
+    echo "csl: remote session launcher not found or not executable: $rl" >&2
+    return 1
+  fi
+  exec "$rl"
+}
+
 _launch() {  # $1=alias  $2=effort(optional)
   local alias="$1" effort="${2:-}"
   _apply_session_profile "$alias"
@@ -159,6 +175,7 @@ while :; do
   done
   echo
   echo "  c) choose a listed model × custom effort"
+  echo "  r) ☁️  remote free-API agents (Gemini/Groq/NVIDIA — separate list, \$0, faster than local)"
   if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
   if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — cached startup is quick; cold refresh may take several minutes (toggle)"
@@ -170,6 +187,7 @@ while :; do
   printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
   case "$sel" in
     q|Q) exit 0 ;;
+    r|R) _launch_remote || continue ;;
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
     a|A) if [ "$AUTO_MODE" = "1" ]; then AUTO_MODE=0; else AUTO_MODE=1; fi; continue ;;
     t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
