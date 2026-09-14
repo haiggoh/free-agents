@@ -389,7 +389,11 @@ echo "🧾 Local agent prompt: $LA_AGENT_PROMPT_FILE ($(printf '%s' "$AGENT_PROM
 
 # Log which model drives this session (the spoof id is shared across tiers, so the alias lives here).
 mkdir -p "$HOME/.claude/logs"
-if [ "$LA_AUTO_MODE" = "1" ]; then _LA_MODE="auto"; else _LA_MODE="direct"; fi
+if [ "$LA_AUTO_MODE" = "1" ]; then
+    if [ "${LA_BLIND_AUTO:-0}" = "1" ]; then _LA_MODE="auto (blind)"; else _LA_MODE="auto"; fi
+else
+    _LA_MODE="direct"
+fi
 echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  declared=$BACKEND_DECLARED  vllm_port=$VLLM_PORT  mode=$_LA_MODE" >> "$HOME/.claude/logs/local-agents-sessions.log"
 echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
 # State the traffic posture out loud. A suppression the user cannot see is indistinguishable from one
@@ -448,9 +452,27 @@ done
 # The classifier follows the local Anthropic endpoint. Segmented transcripts are enabled
 # above so repeated long-context decisions can expose stable cache boundaries; routing
 # locally is not itself proof that the backend reuses those boundaries.
+#
+# LA_BLIND_AUTO=1 (set by the CSL blind-trust toggle) is an auto-mode variant: when ON, the
+# session launches in --permission-mode auto with NO classifier backend, so every consequential
+# call is routed directly to auto without waiting for classifier approval. This is a
+# convenience fallback for when the classifier path is unresponsive — not a replacement for it.
+# A session launched with blind-trust retains the flag across auto-mode toggle cycles (the toggle
+# flips LA_AUTO_MODE only, leaving LA_BLIND_AUTO intact).
+#
+# Guard: blind-trust requires auto mode. If someone passes LA_BLIND_AUTO=1 without LA_AUTO_MODE,
+# refuse rather than silently picking acceptEdits — that would contradict the user's intent.
+if [ "${LA_BLIND_AUTO:-0}" = "1" ] && [ "$LA_AUTO_MODE" != "1" ]; then
+    echo "ERROR: LA_BLIND_AUTO=1 requires LA_AUTO_MODE=1. Set auto mode (CSL_AUTO_MODE=1 or 'a' in csl) first." >&2
+    exit 2
+fi
 if [ "$LA_AUTO_MODE" = "1" ]; then
     _PERM_MODE="auto"
-    _AUTO_MODE_APPEND="You are running in LOCAL auto mode with a local safety-classifier backend."
+    if [ "${LA_BLIND_AUTO:-0}" = "1" ]; then
+        _AUTO_MODE_APPEND="You are running in LOCAL auto mode with blind-trust enabled (no classifier review)."
+    else
+        _AUTO_MODE_APPEND="You are running in LOCAL auto mode with a local safety-classifier backend."
+    fi
 else
     _PERM_MODE="acceptEdits"
     _AUTO_MODE_APPEND=""

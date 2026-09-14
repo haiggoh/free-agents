@@ -37,7 +37,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
     'Remote help: csl remote --help; include Cerebras: csl remote --include-trials' \
     'Key setup: csl setup-remote [providers] | csl setup-remote --list (no API calls)' \
     'Environment: CSL_LAUNCHER, CSL_REMOTE_LAUNCHER override launchers; CSL_WATCH,' \
-    'CSL_AUTO_MODE, CSL_TELEMETRY control local picker defaults (0/1).' \
+    'CSL_AUTO_MODE, CSL_BLIND_AUTO, CSL_TELEMETRY control local picker defaults (0/1).' \
     'For local launcher details: launch-claude-agent.sh --help'
   exit 0
 fi
@@ -92,6 +92,23 @@ AUTO_MODE="${CSL_AUTO_MODE:-1}"
 # to leave the stock behaviour in place. The launcher turns this into the actual env vars, so the
 # same switch works for any caller of launch-claude-agent.sh, not just this picker.
 TELEMETRY="${CSL_TELEMETRY:-0}"
+
+# Blind-trust auto mode: a convenience shortcut when the classifier emulation path is unresponsive
+# or the user just wants auto-mode behaviour without waiting for the classifier to start. When ON,
+# the session launches in --permission-mode auto with NO classifier backend — every consequential
+# permission call is routed directly to auto, and the system prompt is amended to flag this.
+#
+# This is NOT a replacement for the classifier emulation path. It is a fallback for "in a pinch"
+# use: when the classifier is slow, broken, or absent, but the user still wants auto-mode behaviour.
+# Toggle with `b`, or set CSL_BLIND_AUTO=1 to opt in by default. The launcher honors it as
+# LA_BLIND_AUTO=1 in addition to LA_AUTO_MODE=1; when only LA_BLIND_AUTO=1 is set (no
+# LA_AUTO_MODE), the launcher refuses to launch rather than silently turning auto mode on, because
+# blind-trust is an auto-mode variant and auto mode off would contradict the intent.
+#
+# Cycling auto mode via the `a` toggle flips LA_AUTO_MODE but leaves LA_BLIND_AUTO untouched, so a
+# session that was launched with blind-trust remains blind-trust even after toggling auto mode off
+# and back on again — the flag survives the toggle cycle.
+BLIND_AUTO="${CSL_BLIND_AUTO:-0}"
 
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
@@ -181,7 +198,11 @@ OSA
       echo "👁  watcher (run in another terminal): $WATCHER --attach $$"
     fi
   fi
-  if [ -n "$effort" ]; then exec env LA_AUTO_MODE="$AUTO_MODE" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias" "$effort"; else exec env LA_AUTO_MODE="$AUTO_MODE" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias"; fi
+  if [ -n "$effort" ]; then
+    exec env LA_AUTO_MODE="$AUTO_MODE" LA_BLIND_AUTO="$BLIND_AUTO" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias" "$effort"
+  else
+    exec env LA_AUTO_MODE="$AUTO_MODE" LA_BLIND_AUTO="$BLIND_AUTO" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias"
+  fi
 }
 
 while :; do
@@ -201,6 +222,8 @@ while :; do
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
   if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — cached startup is quick; cold refresh may take several minutes (toggle)"
   else                           echo "  a) auto-mode: OFF — acceptEdits; classifier startup skipped (toggle)"; fi
+  if [ "$BLIND_AUTO" = "1" ]; then echo "  b) blind-trust:  ON — auto mode with no classifier (toggle; only applies with auto ON)"
+  else                            echo "  b) blind-trust:  OFF — normal auto mode behaviour (toggle)"; fi
   if [ "$TELEMETRY" = "1" ]; then echo "  t) telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
   else                            echo "  t) telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
   echo "  q) quit"
@@ -212,6 +235,7 @@ while :; do
     r|R) _launch_remote || continue ;;
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
     a|A) if [ "$AUTO_MODE" = "1" ]; then AUTO_MODE=0; else AUTO_MODE=1; fi; continue ;;
+    b|B) if [ "$BLIND_AUTO" = "1" ]; then BLIND_AUTO=0; else BLIND_AUTO=1; fi; continue ;;
     t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
     c|C)
       echo >&2

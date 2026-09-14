@@ -74,7 +74,7 @@ cat > "$SB/bin/stub-launcher" <<'CSL_STUB_LAUNCHER'
 #!/usr/bin/env bash
 # Record LA_AUTO_MODE too: the menu text is cosmetic, but the value the launcher
 # actually receives is the contract, so assert on that.
-printf '%s|%s|auto=%s|telemetry=%s\n' "${1:-}" "${2:-}" "${LA_AUTO_MODE:-unset}" "${LA_TELEMETRY:-unset}" > "$CSL_TEST_RESULT"
+printf '%s|%s|auto=%s|blind=%s|telemetry=%s\n' "${1:-}" "${2:-}" "${LA_AUTO_MODE:-unset}" "${LA_BLIND_AUTO:-unset}" "${LA_TELEMETRY:-unset}" > "$CSL_TEST_RESULT"
 CSL_STUB_LAUNCHER
 chmod +x "$SB/bin/csl" "$SB/bin/stub-launcher"
 
@@ -107,6 +107,8 @@ assert_grep 'watcher: OFF' "$out" 'watcher defaults off'
 assert_no_grep 'watcher: ON' "$out" 'watcher is not enabled implicitly'
 assert_grep 'auto-mode: ON  — cached startup is quick; cold refresh may take several minutes' "$out"   'auto mode default explains cached and cold startup'
 assert_no_grep 'auto-mode: OFF' "$out" 'auto mode is not silently disabled'
+assert_grep 'blind-trust:  OFF — normal auto mode behaviour' "$out" 'blind-trust defaults off'
+assert_no_grep 'blind-trust:  ON' "$out" 'blind-trust is not silently enabled'
 assert_grep 'telemetry: OFF' "$out" 'telemetry defaults off (a local session stays local)'
 assert_no_grep 'telemetry: ON' "$out" 'telemetry is not silently enabled'
 assert_grep 'c) choose a listed model × custom effort' "$out" \
@@ -159,10 +161,32 @@ run_csl 'a\n1\n' "$SB/auto-toggled-result" >/dev/null
 assert_grep 'alpha|high|auto=0' "$(cat "$SB/auto-toggled-result" 2>/dev/null)" \
   'the a toggle reaches the launcher as LA_AUTO_MODE=0'
 
-echo "== 8. telemetry suppression reaches the launcher, and can be opted back in =="
+echo "== 8. the blind-trust toggle reaches the launcher =="
+rm -f "$SB/blind-launch-result"
+run_csl 'b\n1\n' "$SB/blind-launch-result" >/dev/null
+assert_grep '|blind=1|' "$(cat "$SB/blind-launch-result" 2>/dev/null)" \
+  'the b toggle reaches the launcher as LA_BLIND_AUTO=1'
+assert_grep '|auto=1|' "$(cat "$SB/blind-launch-result" 2>/dev/null)" \
+  'blind-trust preserves LA_AUTO_MODE=1 on the same launch'
+
+echo "== 9. blind-trust menu flips ON to OFF =="
+out="$(
+  printf 'q\n' |
+    HOME="$SB/home" \
+    CSL_BLIND_AUTO=1 \
+    CSL_LAUNCHER="$SB/bin/stub-launcher" \
+    CSL_TEST_RESULT="$SB/blind-on-result" \
+      bash "$SB/bin/csl" 2>&1
+)"
+assert_grep 'blind-trust:  ON' "$out" 'CSL_BLIND_AUTO=1 shows ON in the menu'
+rm -f "$SB/blind-off-result"
+off_out="$(run_csl 'b\nq\n' "$SB/blind-off-result")"
+assert_grep 'blind-trust:  OFF' "$off_out" 'the b toggle flips ON to OFF in the menu'
+
+echo "== 11. telemetry suppression reaches the launcher, and can be opted back in =="
 rm -f "$SB/telemetry-result"
 run_csl '1\n' "$SB/telemetry-result" >/dev/null
-assert_grep 'telemetry=0' "$(cat "$SB/telemetry-result" 2>/dev/null)" \
+assert_grep '|telemetry=0' "$(cat "$SB/telemetry-result" 2>/dev/null)" \
   'a default launch hands the launcher LA_TELEMETRY=0'
 out="$(
   printf 'q\n' |
@@ -174,10 +198,10 @@ out="$(
 )"
 assert_grep 'telemetry: ON' "$out" 'CSL_TELEMETRY=1 opts back in by default'
 
-echo "== 9. pressing t flips telemetry, all the way to the launcher =="
+echo "== 12. pressing t flips telemetry, all the way to the launcher =="
 rm -f "$SB/telemetry-toggled"
 run_csl 't\n1\n' "$SB/telemetry-toggled" >/dev/null
-assert_grep 'telemetry=1' "$(cat "$SB/telemetry-toggled" 2>/dev/null)" \
+assert_grep '|telemetry=1' "$(cat "$SB/telemetry-toggled" 2>/dev/null)" \
   'the t toggle reaches the launcher as LA_TELEMETRY=1'
 
 echo "== 10. install choice opens key setup and returns to menu =="
