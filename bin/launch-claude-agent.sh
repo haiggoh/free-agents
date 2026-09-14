@@ -258,7 +258,7 @@ VLLM_PORT=$(echo "$LAUNCH_OUTPUT" | grep -o "SUCCESS_PORT=[0-9]*" | cut -d'=' -f
 # Intersecting the configured preference list with /v1/models makes the launcher correct against
 # servers of any vintage, with no restart required.
 _served=$(curl -s --max-time 5 "http://localhost:$VLLM_PORT/v1/models" 2>/dev/null \
-          | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ')
+          | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/' | tr '\n' ' ')
 MODEL_SPOOF=""
 for _cand in $(printf '%s' "$LA_CUR_SPOOF" | tr ',' ' '); do
     case " $_served " in *" $_cand "*) MODEL_SPOOF="$_cand"; break ;; esac

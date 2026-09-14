@@ -86,7 +86,7 @@ wait_ready() {
     done
     if [ -n "$expected_id" ]; then
         local observed
-        observed=$(curl -s --max-time 4 "http://localhost:$port/v1/models" 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ')
+        observed=$(curl -s --max-time 4 "http://localhost:$port/v1/models" 2>/dev/null | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/' | tr '\n' ' ')
         case " $observed " in *" $expected_id "*) : ;; *) echo "⚠️  $label: expected id '$expected_id' not in /v1/models (observed: ${observed:-none})." >&2 ;; esac
     fi
 }
@@ -124,7 +124,7 @@ echo "Scanning ports $LA_PORT_START-$LA_PORT_MAX for a free slot (config: ${LA_C
 TARGET_PORT=""
 for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
     if lsof -i :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-        CURRENT_IDS=$(curl -s --max-time 4 "http://localhost:$port/v1/models" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+        CURRENT_IDS=$(curl -s --max-time 4 "http://localhost:$port/v1/models" | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
         CURRENT_MODEL=$(printf '%s\n' "$CURRENT_IDS" | head -n 1)
 
         # Rapid serves the public spoof id rather than the private registry alias.
