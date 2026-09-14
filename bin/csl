@@ -23,6 +23,10 @@ LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 WATCHER="$CSL_DIR/local-watch.sh"
 
 if [ "${1:-}" = "roles" ]; then shift; exec "$CSL_DIR/la-roles.sh" "$@"; fi
+if [ "${1:-}" = "setup-remote" ]; then
+  shift
+  exec python3 "$CSL_DIR/../install/setup-api-keys.py" "$@"
+fi
 if [ "${1:-}" = "remote" ]; then
   shift
   exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" "$@"
@@ -31,6 +35,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   printf '%s\n' 'csl: choose a local or remote Claude Code session.' \
     'Usage: csl | csl roles [args] | csl remote [alias/options] | csl <local-launcher args>' \
     'Remote help: csl remote --help; include Cerebras: csl remote --include-trials' \
+    'Key setup: csl setup-remote [providers] | csl setup-remote --list (no API calls)' \
     'Environment: CSL_LAUNCHER, CSL_REMOTE_LAUNCHER override launchers; CSL_WATCH,' \
     'CSL_AUTO_MODE, CSL_TELEMETRY control local picker defaults (0/1).' \
     'For local launcher details: launch-claude-agent.sh --help'
@@ -191,6 +196,7 @@ while :; do
   echo "  c) choose a listed model × custom effort"
   echo "  r) ☁️  remote API agents (Gemini/Groq/NVIDIA/OpenRouter/Cloudflare; account quotas apply)"
   echo "     Cerebras trial opt-in: csl remote --include-trials"
+  echo "  i) install / set up remote API keys"
   if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
   if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — cached startup is quick; cold refresh may take several minutes (toggle)"
@@ -202,6 +208,7 @@ while :; do
   printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
   case "$sel" in
     q|Q) exit 0 ;;
+    i|I) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
     r|R) _launch_remote || continue ;;
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
     a|A) if [ "$AUTO_MODE" = "1" ]; then AUTO_MODE=0; else AUTO_MODE=1; fi; continue ;;

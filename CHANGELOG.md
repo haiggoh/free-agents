@@ -10,6 +10,12 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ### Added
 
+- Guided key setup under `install/setup-api-keys.py`, also available as
+  `csl setup-remote` or `i` in the main picker. Choose among 15 providers,
+  open official key pages, and paste credentials into hidden terminal prompts.
+  New keys use private flat files in `~/.api_keys`; existing files are kept.
+  This add-only wizard makes no API calls and does not add session integrations.
+
 - Remote session roster: Gemini 3.8 Flash (standard/thinking), Groq Qwen 3.6/3.8,
   NVIDIA Nemotron 3 Ultra, explicit free OpenRouter models, Cloudflare Workers AI
   routing, and current Cerebras GPT-OSS/Qwen models. `csl remote` opens the picker

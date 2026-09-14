@@ -48,6 +48,10 @@ mkdir -p \
 
 cp "$REPO/bin/csl" "$SB/bin/csl"
 cp "$REPO/config/config-lib.sh" "$SB/config/config-lib.sh"
+mkdir -p "$SB/install"
+cat > "$SB/install/setup-api-keys.py" <<'SETUP_STUB'
+print("KEY_SETUP_REACHED")
+SETUP_STUB
 
 head -c 2097152 /dev/zero > "$SB/home/.models/ModelAlpha/weights.bin"
 head -c 2097152 /dev/zero > "$SB/home/.models/ModelBeta/weights.bin"
@@ -175,6 +179,11 @@ rm -f "$SB/telemetry-toggled"
 run_csl 't\n1\n' "$SB/telemetry-toggled" >/dev/null
 assert_grep 'telemetry=1' "$(cat "$SB/telemetry-toggled" 2>/dev/null)" \
   'the t toggle reaches the launcher as LA_TELEMETRY=1'
+
+echo "== 10. install choice opens key setup and returns to menu =="
+out="$(run_csl 'i\nq\n' "$SB/setup-no-launch")"
+assert_grep 'i) install / set up remote API keys' "$out" 'key setup is discoverable in the main menu'
+assert_grep 'KEY_SETUP_REACHED' "$out" 'install choice reaches setup without launching a session'
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

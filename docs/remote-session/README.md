@@ -4,6 +4,10 @@ Launch a **full Claude Code session** on Gemini, Groq, NVIDIA, OpenRouter,
 Cloudflare Workers AI, or Cerebras. Usage goes to the selected provider, with
 its own quota and billing, rather than the Anthropic gateway budget.
 
+Add keys with `csl setup-remote` (or press `i` in `csl`). The guided
+[key setup](setup.md) opens official provider pages on request and accepts hidden
+paste input. Existing credentials are kept; no API tests run during setup.
+
 ```bash
 csl                     # then press  r   → the remote roster
 csl remote              # same picker, even without local models installed
