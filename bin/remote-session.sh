@@ -159,17 +159,44 @@ free_port() {
     return 1
 }
 
+# A pid can be REUSED by an unrelated process after ours dies, so never kill on the
+# strength of a stale pid file alone: confirm the process really is the litellm proxy
+# started from OUR config path before signalling it.
+_is_our_proxy() { # _is_our_proxy <pid> <port>
+    local pid="${1:-}" port="${2:-}" cmd
+    [[ -n "$pid" && -n "$port" ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null)" || return 1
+    [[ "$cmd" == *litellm* && "$cmd" == *"proxy-$port.yaml"* ]]
+}
+
+stop_one_proxy() { # stop_one_proxy <port>
+    local port="${1:-}" pf pid
+    [[ -n "$port" ]] || return 0
+    pf="$RUNDIR/proxy-$port.pid"
+    pid="$(cat "$pf" 2>/dev/null)"
+    if _is_our_proxy "$pid" "$port"; then
+        kill "$pid" 2>/dev/null && echo "   proxy    : stopped (pid $pid, port $port)"
+    fi
+    rm -f "$pf"
+    return 0
+}
+
 stop_proxy() {
-    local killed=0 pf
+    local killed=0 pf port pid
+    # A literal unmatched glob would be iterated as a filename, so nullglob guards the
+    # no-proxy-running case instead of relying on the -e test alone.
+    shopt -s nullglob
     for pf in "$RUNDIR"/proxy-*.pid; do
-        [[ -e "$pf" ]] || continue
-        local pid; pid="$(cat "$pf" 2>/dev/null)"
-        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        port="$(basename "$pf")"; port="${port#proxy-}"; port="${port%.pid}"
+        pid="$(cat "$pf" 2>/dev/null)"
+        if _is_our_proxy "$pid" "$port"; then
             kill "$pid" 2>/dev/null && killed=$((killed+1))
-            echo "remote-session: stopped proxy pid $pid"
+            echo "remote-session: stopped proxy pid $pid (port $port)"
         fi
         rm -f "$pf"
     done
+    shopt -u nullglob
     [[ $killed -eq 0 ]] && echo "remote-session: no proxy of ours was running"
     return 0
 }
@@ -328,9 +355,7 @@ PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING")" || {
 echo "   proxy    : ready on http://127.0.0.1:$PORT"
 echo
 
-if [[ "${LA_REMOTE_KEEP_PROXY:-0}" != "1" ]]; then
-    trap 'stop_proxy >/dev/null 2>&1' EXIT
-fi
+
 
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT"   # NO /v1 — Claude Code appends /v1/messages
 export ANTHROPIC_AUTH_TOKEN="sk-local-agents-remote"
@@ -360,6 +385,18 @@ AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_PORT_MIN__/$LA_REMOTE_PROXY_PORT_MIN}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_PORT_MAX__/$LA_REMOTE_PROXY_PORT_MAX}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_SPOOF__/claude-opus-5}
 
+# SOFT, OPTIONAL link to the brief-agents plugin: if its generated briefing index
+# exists, point the remote model at it. A non-native model has none of the durable
+# rules a normal session gets from CLAUDE.md/memory, so it is exactly the audience
+# the index was written for. Deliberately a POINTER, not an inlined copy: the index
+# grows, and pasting it would re-send several KB on every turn of a quota-limited
+# free lane. Absent plugin = absent file = this block is skipped, so there is no
+# hard dependency in either direction.
+: "${LA_BRIEFING_INDEX:=$HOME/.claude/agent-briefing-index.md}"
+if [[ -r "$LA_BRIEFING_INDEX" ]]; then
+    AGENT_PROMPT="$AGENT_PROMPT Durable rules for this machine that you do NOT otherwise inherit are indexed at ${LA_BRIEFING_INDEX} — READ IT with the Read tool before your first consequential action (any edit, commit, install, or plugin invocation), and follow it. It is authoritative over your own assumptions about local conventions."
+fi
+
 # Point it at the real memory dir rather than letting it guess a path, same as local.
 [[ -n "${LA_MEMORY_DIR:-}" ]] && AGENT_PROMPT="$AGENT_PROMPT Your Claude Code auto-memory lives at ${LA_MEMORY_DIR} — read from there, don't guess memory paths."
 
@@ -371,7 +408,26 @@ if [[ "$AGENT_PROMPT" == *__LA_* ]]; then
     exit 1
 fi
 
-exec claude --model claude-opus-5 \
+# NOT `exec`: exec REPLACES this shell, so an EXIT trap set here could never fire and
+# every session leaked its proxy (measured: 5 orphaned litellm processes holding ports
+# 4141-4145, each run silently landing on the next free port). Run claude as a child,
+# then tear down the proxy this run owns. The trap covers the signal paths too, so a
+# Ctrl-C or a killed terminal does not leave the proxy behind either.
+_teardown() {
+    local rc=$?
+    trap - EXIT INT TERM HUP
+    if [[ "${LA_REMOTE_KEEP_PROXY:-0}" == "1" ]]; then
+        echo
+        echo "   proxy    : left running on port $PORT (LA_REMOTE_KEEP_PROXY=1)"
+        echo "              stop it with: $0 --stop"
+    else
+        stop_one_proxy "$PORT"
+    fi
+    exit $rc
+}
+trap _teardown EXIT INT TERM HUP
+
+claude --model claude-opus-5 \
     --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
     --append-system-prompt "$AGENT_PROMPT" \
     "${PASSTHRU[@]+"${PASSTHRU[@]}"}"
