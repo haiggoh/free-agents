@@ -9,6 +9,7 @@ import re
 import secrets
 import stat
 import sys
+import termios
 import warnings
 import webbrowser
 from dataclasses import dataclass
@@ -21,7 +22,8 @@ class Provider:
     url: str
     steps: str
     files: tuple
-    note: str = "key storage only"
+    note: str = "session available; choose model"
+    optional: bool = False
 
 
 # Flat filenames match existing credentials. No secrets or inferred model access here.
@@ -39,9 +41,6 @@ PROVIDERS = (
              "Create Token with Account > Workers AI > Read and Edit for your account.\n"
              "Copy Account ID from the account dashboard (Workers AI > Use REST API).",
              ("cloudflare", "cloudflare-account-id"), "session available"),
-    Provider("github", "GitHub Models", "https://github.com/settings/personal-access-tokens/new",
-             "Create a fine-grained token with Models: Read. Choose an expiry; Generate token.",
-             ("github-models",)),
     Provider("mistral", "Mistral", "https://console.mistral.ai/home?profile_dialog=api-keys",
              "Sign up, open API Keys in your profile, and create a Studio key for your free plan.",
              ("mistral",)),
@@ -62,16 +61,16 @@ PROVIDERS = (
              ("vercel",)),
     Provider("sambanova", "SambaNova", "https://cloud.sambanova.ai/dashboard",
              "Sign up, open API Keys, and create a key. Check current trial/credit eligibility.",
-             ("sambanova",), "optional trial; key storage only"),
+             ("sambanova",), "optional credits; choose model", True),
     Provider("modelscope", "ModelScope", "https://modelscope.cn/my/myaccesstoken",
              "Sign in and create/copy an access token. Check regional and verification requirements.",
-             ("modelscope",), "regional eligibility; key storage only"),
+             ("modelscope",), "regional eligibility; choose model", True),
     Provider("cerebras", "Cerebras", "https://cloud.cerebras.ai/platform/",
              "Open API Keys and create a key. Check current trial or account credits.",
-             ("cerebras",), "optional trial; session available"),
+             ("cerebras",), "optional trial; session available", True),
     Provider("nvidia", "NVIDIA", "https://build.nvidia.com/settings/api-keys",
              "Sign in, then generate an API key. Check the account's available API credits.",
-             ("nvidia",), "account credits; session available"),
+             ("nvidia",), "account credits; session available", True),
 )
 
 
@@ -171,10 +170,119 @@ def hidden_input(label):
             raise StoreError("Hidden input is unavailable; nothing was saved.") from None
 
 
+class TerminalInput:
+    """Receive complete bracketed pastes without echo or a second Enter press."""
+
+    def __enter__(self):
+        if not sys.stdin.isatty() or not sys.stderr.isatty():
+            raise StoreError("Setup needs a terminal with hidden input.")
+        self.fd = sys.stdin.fileno()
+        self.original = termios.tcgetattr(self.fd)
+        settings = termios.tcgetattr(self.fd)
+        settings[3] &= ~(termios.ECHO | termios.ICANON)
+        settings[6][termios.VMIN] = 1
+        settings[6][termios.VTIME] = 0
+        termios.tcsetattr(self.fd, termios.TCSADRAIN, settings)
+        self.last_paste = None
+        sys.stderr.write("\x1b[?2004h")
+        sys.stderr.flush()
+        return self
+
+    def __exit__(self, *args):
+        try:
+            # Queued duplicate pastes must never be delivered to the caller's shell.
+            termios.tcflush(self.fd, termios.TCIFLUSH)
+            sys.stderr.write("\x1b[?2004l")
+            sys.stderr.flush()
+        finally:
+            self.last_paste = None
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.original)
+
+    def byte(self):
+        value = os.read(self.fd, 1)
+        if not value or value == b"\x04":
+            raise EOFError
+        if value == b"\x03":
+            raise KeyboardInterrupt
+        return value
+
+    def paste(self):
+        value = bytearray()
+        tail = bytearray()
+        overflow = False
+        while True:
+            tail.extend(self.byte())
+            if tail.endswith(b"\x1b[201~"):
+                value.extend(tail[:-6])
+                break
+            if len(tail) > 6:
+                if len(value) < 8192:
+                    value.append(tail[0])
+                else:
+                    overflow = True
+                del tail[0]
+        if overflow:
+            raise StoreError("Paste is too long; paste only the raw key.")
+        try:
+            return value.decode("ascii").rstrip("\r\n")
+        except UnicodeDecodeError:
+            raise StoreError("Paste only the raw API key (ASCII characters).") from None
+
+    def read(self, label, secret=False):
+        sys.stderr.write(label)
+        sys.stderr.flush()
+        value = bytearray()
+        while True:
+            char = self.byte()
+            if char == b"\x1b":
+                # CSI is used for both bracketed paste and arrow/navigation keys.
+                if self.byte() != b"[":
+                    continue
+                sequence = bytearray()
+                while len(sequence) < 32:
+                    char = self.byte()
+                    sequence.extend(char)
+                    if 0x40 <= char[0] <= 0x7e:
+                        break
+                if sequence != b"200~":
+                    continue
+                try:
+                    pasted = self.paste()
+                except StoreError as exc:
+                    sys.stderr.write(f"\n{exc}\n{label}")
+                    sys.stderr.flush()
+                    continue
+                # A late second paste may reach a menu or the next field. Never echo it.
+                if not secret or pasted == self.last_paste or value:
+                    sys.stderr.write("\nPaste ignored here; use the requested field or menu choice.\n" + label)
+                    sys.stderr.flush()
+                    continue
+                self.last_paste = pasted
+                termios.tcflush(self.fd, termios.TCIFLUSH)
+                sys.stderr.write("\n")
+                sys.stderr.flush()
+                return pasted
+            if char in (b"\r", b"\n"):
+                sys.stderr.write("\n")
+                sys.stderr.flush()
+                return value.decode("ascii")
+            if char in (b"\x7f", b"\x08"):
+                if value:
+                    value.pop()
+                    if not secret:
+                        sys.stderr.write("\b \b")
+                        sys.stderr.flush()
+            elif 32 <= char[0] <= 126 and len(value) < 8192:
+                value.extend(char)
+                if not secret:
+                    sys.stderr.write(char.decode("ascii"))
+                    sys.stderr.flush()
+
+
 def select(text, store):
     if text.lower() == "missing":
         # Optional trials and regional accounts remain deliberate individual choices.
-        return [p for p in PROVIDERS[:11] if any(store.state(n) == "missing" for n in p.files)]
+        return [p for p in PROVIDERS if not p.optional and any(store.state(n) == "missing" for n in p.files)]
     result = []
     for item in re.split(r"[,\s]+", text.strip().lower()):
         provider = next((p for i, p in enumerate(PROVIDERS, 1)
@@ -190,13 +298,14 @@ def show(store):
     print(f"\nRemote API key setup\nSave to: {store.path}")
     print("Saved means stored, not tested. Account quotas and billing still apply.\n")
     for i, provider in enumerate(PROVIDERS, 1):
-        if i == 12:
+        if provider.optional and not PROVIDERS[i - 2].optional:
             print("\nOptional accounts (select individually):")
         print(f" {i:2}) {provider.name:23} {store.status(provider):21} {provider.note}")
 
 
-def wizard(store, providers):
+def wizard(store, providers, terminal=None):
     added = []
+    ask = terminal.read if terminal else input
     try:
         for i, provider in enumerate(providers, 1):
             missing = [n for n in provider.files if store.state(n) == "missing"]
@@ -206,11 +315,11 @@ def wizard(store, providers):
                 continue
             print(provider.url)
             print(provider.steps)
-            action = input("[o] Open page  [Enter] Paste key  [s] Skip  [q] Finish: ").strip().lower()
+            action = ask("[o] Open page  [Enter] Paste key  [s] Skip  [q] Finish: ").strip().lower()
             while action not in ("", "o", "s", "q"):
-                action = input("Choose o, Enter, s, or q: ").strip().lower()
+                action = ask("Choose o, Enter, s, or q: ").strip().lower()
             if action == "q":
-                break
+                return True
             if action == "s":
                 continue
             if action == "o":
@@ -224,7 +333,8 @@ def wizard(store, providers):
             for name in missing:
                 while True:
                     label = "Account ID" if name == "cloudflare-account-id" else "API key/token"
-                    value = hidden_input(f"{label} (hidden; Enter skips provider): ")
+                    prompt = f"{label} (hidden; paste advances automatically; Enter skips provider): "
+                    value = terminal.read(prompt, secret=True) if terminal else hidden_input(prompt)
                     if not value:
                         break
                     try:
@@ -233,6 +343,8 @@ def wizard(store, providers):
                         print(exc)
                         continue
                     pending[name] = value
+                    print("\033[32m✓ Key received\033[0m" if label == "API key/token"
+                          else "\033[32m✓ Account ID received\033[0m", flush=True)
                     break
                 if not value:
                     pending.clear()
@@ -251,7 +363,7 @@ def wizard(store, providers):
         print(f"\nSaved {len(added)} new file(s). Existing files kept. No API calls made.")
         if added:
             print("Added: " + ", ".join(added))
-        print("Run csl setup-remote again to add more. Session integration is a separate step.")
+        print("Stored keys remain untested; session access depends on the provider and account.")
 
 
 def main(argv=None):
@@ -271,20 +383,26 @@ def main(argv=None):
                 return 0
             if not sys.stdin.isatty() or not sys.stderr.isatty():
                 raise StoreError("Setup needs a terminal. Use --list for a read-only inventory.")
-            if args.providers:
-                providers = select(",".join(args.providers), store)
-            else:
-                print("\nSelect numbers/names, e.g. 5,6,8. 'missing' selects missing keys in rows 1–11.")
+            with TerminalInput() as terminal:
+                providers = select(",".join(args.providers), store) if args.providers else None
                 while True:
-                    answer = input("Providers [Enter to quit]: ").strip()
-                    if not answer or answer.lower() == "q":
+                    if all(all(store.state(n) == "saved" for n in p.files) for p in PROVIDERS):
+                        print("\n✓ All available providers have credentials saved. Setup complete.")
                         return 0
-                    try:
-                        providers = select(answer, store)
-                        break
-                    except StoreError as exc:
-                        print(exc)
-            wizard(store, providers)
+                    if providers is None:
+                        print("\nSelect numbers/names, e.g. 5,6,8. 'missing' selects missing keys in the main group.")
+                        answer = terminal.read("Providers [Enter to quit]: ").strip()
+                        if not answer or answer.lower() == "q":
+                            return 0
+                        try:
+                            providers = select(answer, store)
+                        except StoreError as exc:
+                            print(exc)
+                            continue
+                    if wizard(store, providers, terminal):
+                        return 0
+                    providers = None
+                    show(store)
         return 0
     except (EOFError, KeyboardInterrupt):
         print("\nSetup stopped. Previously saved files remain available.")

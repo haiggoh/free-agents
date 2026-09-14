@@ -1,7 +1,8 @@
 # Remote API sessions
 
 Launch a **full Claude Code session** on Gemini, Groq, NVIDIA, OpenRouter,
-Cloudflare Workers AI, or Cerebras. Usage goes to the selected provider, with
+Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo,
+Vercel AI Gateway, SambaNova, or ModelScope. Usage goes to the selected provider, with
 its own quota and billing, rather than the Anthropic gateway budget.
 
 Add keys with `csl setup-remote` (or press `i` in `csl`). The guided
@@ -14,6 +15,9 @@ csl remote              # same picker, even without local models installed
 csl remote gemini-flash  # retain the Gemini 3.6 Flash lane
 csl remote gemini-3.8-flash # select Gemini 3.8 Flash independently
 csl remote --include-trials # include Cerebras in the picker
+csl remote mistral         # choose a model from the provider catalog
+csl remote --models mistral # inspect IDs/pricing/tool metadata; no generation
+csl remote zai             # enter the exact model ID from the provider's docs
 bin/remote-session.sh                 # the roster directly
 bin/remote-session.sh gemini-flash    # launch a named agent
 bin/remote-session.sh --list          # roster + which credentials are present
@@ -25,11 +29,31 @@ bin/remote-session.sh --stop          # stop a proxy this script started
 Any other arguments pass straight through to `claude`, so
 `remote-session.sh gemini-flash -p '…' --allowedTools Read` works as expected.
 
+The eight new provider aliases are `mistral`, `zai`, `siliconflow`, `llm7`,
+`kilo`, `vercel`, `sambanova`, and `modelscope`. Choose a model interactively,
+or pass `--remote-model MODEL_ID` explicitly. Mistral, SiliconFlow, LLM7,
+Kilo, Vercel, and SambaNova have catalog listing; Z.AI and ModelScope ask for
+an ID from their provider pages. No model is automatically selected from a
+mixed-price catalog. Model overrides are labeled with unverified billing, even
+when the original alias was free. Z.AI uses its general API, not a Coding Plan
+subscription; SiliconFlow uses the international `.com` service.
+
+All eight new routes are **offline-tested integrations**, not live tool-use or
+quota qualification. Their endpoint/model mapping and credential isolation are
+tested with fake providers and a fake Claude process. No hosted generation was
+used to qualify them. Catalog metadata is shown when supplied by the provider;
+missing prices or tool metadata remain unknown.
+
+GitHub Models is removed from both menus because its inference service was
+[retired on July 30, 2026](https://docs.github.com/en/github-models).
+This does not affect ordinary `gh auth` or GitHub Copilot, which is a separate
+service. Existing token files are not removed or repurposed.
+
 ## Why a translating proxy is required
 
-Claude Code speaks **only** Anthropic `/v1/messages`. Every free provider we hold
-a key for speaks **OpenAI `/chat/completions`** — none of them is Anthropic-
-compatible. llama.cpp and Ollama cannot bridge the gap either: they are inference
+Claude Code speaks Anthropic `/v1/messages`. These routes use the providers'
+OpenAI-compatible `/chat/completions` APIs or LiteLLM's native adapters.
+llama.cpp and Ollama cannot bridge the gap: they are inference
 servers, not forwarding proxies.
 
 [LiteLLM](https://github.com/BerriAI/litellm) does expose a real `/v1/messages`

@@ -6,7 +6,8 @@
 #
 # Each entry:  alias|provider|model-id|display|tier|notes
 # provider must have a key mapping and a remote-session.sh proxy route.
-# tier: renewing_free | trial | unknown   (matches remote_provider_core.py)
+# tier: renewing_free | trial | unknown
+# SELECT requires an explicit --remote-model ID or an interactive model choice.
 #
 # Recheck pinned ids with remote-session.sh --verify <alias> (catalog GET only).
 # Launch does not consume a separate generation probe. A catalog listing is not
@@ -46,6 +47,17 @@ LA_REMOTE_AGENTS=(
   # --- Cerebras: retain explicit trial opt-in until this account is requalified.
   "cerebras-oss120|cerebras|gpt-oss-120b|Cerebras gpt-oss-120b|trial|Catalog only. Use --include-trials; account billing not verified."
   "cerebras-qwen38|cerebras|qwen-3.8-27b|Cerebras Qwen 3.8 27B|trial|Catalog only. Use --include-trials; account billing not verified."
+
+  # Provider selections intentionally pin no speculative default model. General
+  # account API endpoints; ZAI Coding Plan is a distinct endpoint, not this route.
+  "mistral|mistral|SELECT|Mistral (choose model)|unknown|Select a catalog model; free experiment and paid plans differ. Tool session untested."
+  "zai|zai|SELECT|ZAI general API (choose model)|unknown|Explicit model required. General API billing; not the GLM Coding Plan endpoint. Tool session untested."
+  "siliconflow|siliconflow|SELECT|SiliconFlow (choose model)|unknown|International .com endpoint. Free and paid models differ; select explicitly. Tool session untested."
+  "llm7|llm7|SELECT|LLM7 (choose model)|unknown|Catalog contains free and paid models; inspect pricing and tools. Tool session untested."
+  "kilo|kilo|SELECT|Kilo Gateway (choose model)|unknown|Free and paid models differ; inspect catalog pricing. Tool session untested."
+  "vercel|vercel|SELECT|Vercel Gateway (choose model)|unknown|Credits and paid account billing apply; select explicitly. Tool session untested."
+  "sambanova|sambanova|SELECT|SambaNova (choose model)|unknown|Account trial, credit and paid billing vary. Tool session untested."
+  "modelscope|modelscope|SELECT|ModelScope (choose model)|unknown|Explicit API-Inference model required; account quota and tool use untested."
 )
 
 # Which spoofed Claude ids the proxy should answer to. Claude Code asks for these

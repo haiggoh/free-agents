@@ -5,12 +5,20 @@ The installer also runs directly: `python3 install/setup-api-keys.py`.
 Python 3.9+ on macOS/Linux is sufficient; no additional packages are required.
 
 1. Select provider numbers or names, separated by commas. `missing` selects
-   missing credentials from the first eleven rows. Optional trial/credit and
+   missing credentials from the main group. Optional trial/credit and
    regional accounts are selected individually.
 2. Follow the short signup/key instructions. Press `o` to open the official page,
    or Enter if you already have it open.
-3. Paste the raw key into the hidden prompt. Nothing appears while typing/pasting.
-   Enter with no key skips that provider; Ctrl-C ends setup.
+3. Paste the raw key into the hidden prompt. A green **✓ Key received** confirms
+   the paste, and setup advances immediately—no Enter needed. The terminal's
+   bracketed-paste protocol marks the end of the paste, so a second paste is not
+   appended to the credential. If typing manually or using a terminal without
+   bracketed paste, press Enter to submit. Enter with no key skips the provider.
+
+After the selected providers, the picker returns with refreshed file status.
+Choose more providers, press `q`/Enter at the picker to finish, or use Ctrl-C.
+Setup exits automatically when all available providers have stored credentials,
+including the optional accounts. A paste at a menu is discarded without echo.
 
 You can also start with `csl setup-remote mistral siliconflow`, or inspect status
 without changing anything using `csl setup-remote --list`.
@@ -27,10 +35,16 @@ the next run displays that state and offers the missing field.
 
 **Saved means stored, not authenticated or tested.** No validation/inference call,
 session launch, shell export, or shell configuration change happens during setup.
-Browser pages open only when requested. New provider session integrations,
-credential rotation/removal, validation and expiry metadata are separate work.
-Existing session integrations still require their normal account/model checks.
+Browser pages open only when requested. All 14 listed providers have session routes;
+run `csl remote` and choose a provider/model after adding the key. Credential
+rotation/removal, validation and expiry metadata are separate work.
+Session integrations still require their normal account/model checks.
 Account quotas and billing apply; the list does not guarantee free access.
+
+GitHub Models was [retired on July 30, 2026](https://docs.github.com/en/github-models)
+and is removed from both setup and the remote session picker. Existing credential
+files and normal GitHub CLI authentication are untouched. Copilot CLI is a separate
+product with separate authentication and plan requirements.
 
 ## Provider key pages and filenames
 
@@ -40,7 +54,6 @@ Google Gemini | [AI Studio](https://aistudio.google.com/apikey) | `gemini`
 Groq | [API Keys](https://console.groq.com/keys) | `groq`
 OpenRouter | [Keys](https://openrouter.ai/settings/keys) | `openrouter`
 Cloudflare | [API Tokens](https://dash.cloudflare.com/profile/api-tokens) | `cloudflare`, `cloudflare-account-id`
-GitHub Models | [Fine-grained token](https://github.com/settings/personal-access-tokens/new) | `github-models`
 Mistral | [Studio profile API Keys](https://console.mistral.ai/home?profile_dialog=api-keys) | `mistral`
 Z.AI | [API Keys](https://z.ai/manage-apikey/apikey-list) | `zai`
 SiliconFlow | [API Keys](https://cloud.siliconflow.com/account/ak) | `siliconflow`

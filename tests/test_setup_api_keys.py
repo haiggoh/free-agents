@@ -120,9 +120,10 @@ class SetupTests(unittest.TestCase):
     def test_selection_deduplicates_and_missing_excludes_optional_accounts(self):
         with setup.Store(self.keys) as store:
             store.save_new("groq", "fixture-value")
-            self.assertEqual([p.slug for p in setup.select("6,mistral 8", store)], ["mistral", "siliconflow"])
+            self.assertEqual([p.slug for p in setup.select("5,mistral 7", store)], ["mistral", "siliconflow"])
             missing = [p.slug for p in setup.select("missing", store)]
             self.assertNotIn("groq", missing)
+            self.assertNotIn("github", missing)
             self.assertNotIn("cerebras", missing)
             self.assertNotIn("modelscope", missing)
             with self.assertRaises(setup.StoreError):
@@ -183,7 +184,8 @@ class SetupTests(unittest.TestCase):
                 if stage == 1 and b"Enter skips provider):" in output:
                     os.write(fd, secret + b"\n")
                     stage = 2
-                if b"Session integration is a separate step." in output:
+                if b"Providers [Enter to quit]:" in output:
+                    os.write(fd, b"q\n")
                     break
             self.assertEqual(stage, 2, output.decode())
             self.assertNotIn(secret, output)
@@ -192,6 +194,158 @@ class SetupTests(unittest.TestCase):
         finally:
             os.close(fd)
             # Close the PTY and reap the bounded fixture process even on failure.
+            try:
+                os.kill(pid, 15)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
+
+    @contextlib.contextmanager
+    def terminal(self, *providers):
+        import pty
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execve(sys.executable, [sys.executable, str(SCRIPT), *providers],
+                      {**os.environ, "HOME": str(self.home), "LA_API_KEYS_DIR": str(self.keys)})
+        output = bytearray()
+        position = 0
+
+        def expect(token, timeout=4):
+            nonlocal position
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                found = output.find(token, position)
+                if found >= 0:
+                    position = found + len(token)
+                    return
+                if select.select([fd], [], [], 0.1)[0]:
+                    try:
+                        chunk = os.read(fd, 8192)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    output.extend(chunk)
+            self.fail("Expected terminal message: " + token.decode())
+
+        try:
+            yield fd, expect, output
+        finally:
+            os.close(fd)
+            try:
+                os.kill(pid, 15)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
+
+    def test_late_duplicate_paste_is_hidden_at_menu_and_next_provider_can_be_added(self):
+        key = b"first-fixture"
+        packet = b"\x1b[200~" + key + b"\x1b[201~"
+        with self.terminal("mistral") as (fd, expect, output):
+            expect(b"Finish:")
+            os.write(fd, b"\n")
+            expect(b"Enter skips provider):")
+            os.write(fd, packet)
+            expect(b"Providers [Enter to quit]:")
+            os.write(fd, packet)
+            expect(b"Paste ignored here")
+            expect(b"Providers [Enter to quit]:")
+            os.write(fd, b"siliconflow\n")
+            expect(b"Finish:")
+            os.write(fd, b"\n")
+            expect(b"Enter skips provider):")
+            os.write(fd, b"\x1b[200~second-fixture\x1b[201~")
+            expect(b"Providers [Enter to quit]:")
+            os.write(fd, b"q\n")
+            expect(b"\x1b[?2004l")
+            self.assertNotIn(key, output)
+            self.assertNotIn(b"second-fixture", output)
+        self.assertEqual((self.keys / "mistral").read_bytes(), key + b"\n")
+        self.assertEqual((self.keys / "siliconflow").read_bytes(), b"second-fixture\n")
+
+    def test_multiline_paste_is_rejected_and_trailing_clipboard_newline_is_accepted(self):
+        with self.terminal("mistral") as (fd, expect, output):
+            expect(b"Finish:")
+            os.write(fd, b"\n")
+            expect(b"Enter skips provider):")
+            os.write(fd, b"\x1b[200~bad-fixture\nsecond-line\x1b[201~")
+            expect(b"no spaces, newlines")
+            self.assertFalse((self.keys / "mistral").exists())
+            expect(b"Enter skips provider):")
+            os.write(fd, b"\x1b[200~good-fixture\n\x1b[201~")
+            expect(b"Providers [Enter to quit]:")
+            os.write(fd, b"q\n")
+            self.assertNotIn(b"bad-fixture", output)
+        self.assertEqual((self.keys / "mistral").read_bytes(), b"good-fixture\n")
+
+    def test_complete_store_exits_without_picker(self):
+        with setup.Store(self.keys) as store:
+            for provider in setup.PROVIDERS:
+                for name in provider.files:
+                    store.save_new(name, "a" * 32 if name.endswith("account-id") else "fixture-value")
+        with self.terminal() as (fd, expect, output):
+            expect(b"All available providers have credentials saved. Setup complete.")
+            expect(b"\x1b[?2004l")
+            self.assertNotIn(b"Providers [Enter to quit]", output)
+
+    def test_cancel_restores_terminal_echo_and_canonical_input(self):
+        import termios
+        with self.terminal("mistral") as (fd, expect, output):
+            expect(b"Finish:")
+            os.write(fd, b"\n")
+            expect(b"Enter skips provider):")
+            os.write(fd, b"partial-fixture\x03")
+            expect(b"Setup stopped.")
+            modes = termios.tcgetattr(fd)[3]
+            self.assertTrue(modes & termios.ECHO)
+            self.assertTrue(modes & termios.ICANON)
+            self.assertNotIn(b"partial-fixture", output)
+            self.assertFalse((self.keys / "mistral").exists())
+
+    def test_retired_github_is_absent_and_cannot_write_a_credential(self):
+        result = self.run_cli("--list")
+        self.assertNotIn("GitHub", result.stdout)
+        with setup.Store(self.keys) as store:
+            with self.assertRaises(setup.StoreError):
+                setup.select("github", store)
+            with self.assertRaises(setup.StoreError):
+                store.save_new("github-models", "fixture-value")
+        self.assertFalse(self.keys.exists())
+
+    def test_bracketed_paste_advances_without_enter_and_returns_to_picker(self):
+        import pty
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execve(sys.executable, [sys.executable, str(SCRIPT), "mistral"],
+                      {**os.environ, "HOME": str(self.home), "LA_API_KEYS_DIR": str(self.keys)})
+        output = b""
+        deadline = time.monotonic() + 5
+        stage = 0
+        secret = b"automatic-fixture-only"
+        try:
+            while time.monotonic() < deadline:
+                if select.select([fd], [], [], 0.1)[0]:
+                    try:
+                        output += os.read(fd, 8192)
+                    except OSError:
+                        break
+                if stage == 0 and b"Finish:" in output:
+                    os.write(fd, b"\n")
+                    stage = 1
+                if stage == 1 and b"API key/token (" in output:
+                    packet = b"\x1b[200~" + secret + b"\x1b[201~"
+                    os.write(fd, packet + packet)
+                    stage = 2
+                if stage == 2 and b"Providers [Enter to quit]:" in output:
+                    os.write(fd, b"q\n")
+                    stage = 3
+                    break
+            self.assertEqual(stage, 3, "Paste must advance without Enter and return to the picker")
+            self.assertIn("✓ Key received".encode(), output)
+            self.assertNotIn(secret, output)
+            self.assertEqual((self.keys / "mistral").read_bytes(), secret + b"\n")
+        finally:
+            os.close(fd)
             try:
                 os.kill(pid, 15)
             except ProcessLookupError:

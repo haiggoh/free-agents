@@ -2,9 +2,9 @@
 # remote-session.sh — launch a full Claude Code session against a REMOTE
 # cloud API (Gemini / Groq / NVIDIA / …) instead of the paid Anthropic gateway.
 #
-# Why a proxy: none of the free providers speak Anthropic's /v1/messages — they
-# are all OpenAI /chat/completions. Claude Code speaks ONLY /v1/messages. So we
-# run LiteLLM as a translating proxy in front of the chosen provider and point
+# Why a proxy: Claude Code speaks Anthropic's /v1/messages; these routes use
+# provider APIs through LiteLLM (OpenAI /chat/completions or native adapters).
+# We run LiteLLM as a translating proxy in front of the chosen provider and point
 # Claude Code at it, exactly as a local MLX session points at Rapid-MLX.
 #
 # Usage:
@@ -15,6 +15,8 @@
 #   remote-session.sh --dry-run <alias>    # print the plan and the env, start nothing
 #   remote-session.sh --stop               # stop any proxy this script started
 #   remote-session.sh --include-trials     # also offer trial-tier (non-free) agents
+#   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
+#   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
 #
 # Environment:
 #   LA_API_KEYS_DIR             credential dir (default ~/.api_keys)
@@ -51,8 +53,48 @@ INCLUDE_TRIALS=0
 DRY_RUN=0
 MODE="launch"
 ALIAS=""
+REMOTE_MODEL=""
 
-usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"; }
+
+_valid_model() {
+    [[ "$1" =~ ^[a-zA-Z0-9@][a-zA-Z0-9_./:@+-]*$ && "$1" != SELECT ]] || {
+        echo 'remote-session: provide a model ID using --remote-model (letters, digits, _ . / : @ + - only).' >&2
+        return 2
+    }
+}
+
+_available() {
+    [[ "$1" != github ]] || {
+        echo 'remote-session: GitHub Models is retired (official docs; catalog HTTP 410 checked 2026-09-14). Select another provider directly; no generation or automatic fallback attempted. https://docs.github.com/en/github-models' >&2
+        return 2
+    }
+}
+
+# Generic OpenAI-compatible routes, verified against official provider docs.
+# Always set api_base explicitly: no OpenAI endpoint or credential fallthrough.
+_openai_base() {
+    case "$1" in
+        mistral) echo 'https://api.mistral.ai/v1' ;;
+        zai) echo 'https://api.z.ai/api/paas/v4' ;;
+        siliconflow) echo 'https://api.siliconflow.com/v1' ;;
+        llm7) echo 'https://api.llm7.io/v1' ;;
+        kilo) echo 'https://api.kilo.ai/api/gateway' ;;
+        vercel) echo 'https://ai-gateway.vercel.sh/v1' ;;
+        sambanova) echo 'https://api.sambanova.ai/v1' ;;
+        modelscope) echo 'https://api-inference.modelscope.cn/v1' ;;
+        *) return 2 ;;
+    esac
+}
+
+_clear_provider_env() {
+    # The user's shell may still globally export keys. Keep only the selected
+    # provider in the proxy; no provider secrets are needed by the Claude child.
+    local name
+    for name in GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GITHUB_MODELS_TOKEN CEREBRAS_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY ZAI_API_KEY SILICONFLOW_API_KEY LLM7_API_KEY KILO_API_KEY AI_GATEWAY_API_KEY SAMBANOVA_API_KEY MODELSCOPE_API_KEY OPENAI_API_KEY; do
+        unset "$name"
+    done
+}
 
 # ---- roster helpers ---------------------------------------------------------
 _field() { # _field <entry> <n>
@@ -60,6 +102,10 @@ _field() { # _field <entry> <n>
 }
 _entry_for() { # _entry_for <alias>  -> the roster line, or empty
     local a="$1" e
+    if [[ "$a" == github-models || "$a" == github ]]; then
+        _available github
+        return 2
+    fi
     if [[ "$a" == "cerebras-legacy" ]]; then
         echo "remote-session: cerebras-legacy now selects cerebras-oss120; the old Llama id is unavailable." >&2
         a="cerebras-oss120"
@@ -120,23 +166,9 @@ _cloudflare_base() {
     printf 'https://api.cloudflare.com/client/v4/accounts/%s/ai/v1' "$account"
 }
 
-verify_alias() { # verify_alias <alias>  (0 = catalog-listed)
-    local entry alias prov model tier
-    entry="$(_entry_for "$1")" || { echo "remote-session: unknown alias: $1" >&2; return 2; }
-    alias="$(_field "$entry" 1)"; prov="$(_field "$entry" 2)"
-    model="$(_field "$entry" 3)"; tier="$(_field "$entry" 5)"
-
-    printf '  provider   : %s\n  model      : %s\n  tier       : %s\n' "$prov" "$model" "$tier"
-    if ! "$KEYS" --check "$prov" >/dev/null 2>&1; then
-        printf '  credential : ✗ MISSING — expected %s/%s\n' "${LA_API_KEYS_DIR:-$HOME/.api_keys}" "$prov"
-        return 1
-    fi
-    printf '  credential : ✓ present\n'
-
-    local envline key base
-    envline="$("$KEYS" --env "$prov")" || return 1
-    envline="${envline%%$'\n'*}"
-    key="${envline#*=}"
+_catalog_request() {
+    local prov="$1" envline key base
+    _available "$prov" || return 2
     case "$prov" in
         gemini)     base="https://generativelanguage.googleapis.com/v1beta/openai/models" ;;
         groq)       base="https://api.groq.com/openai/v1/models" ;;
@@ -145,16 +177,99 @@ verify_alias() { # verify_alias <alias>  (0 = catalog-listed)
         cerebras)   base="https://api.cerebras.ai/v1/models" ;;
         cloudflare) base="$(_cloudflare_base)" || return 1
                     base="${base%/v1}/models/search?per_page=100" ;;
-        *)          printf '  model check : no catalogue endpoint known for %s\n' "$prov"; return 2 ;;
+        mistral|llm7|kilo|vercel|sambanova) base="$(_openai_base "$prov")/models" ;;
+        siliconflow) base="$(_openai_base "$prov")/models?type=text" ;;
+        zai) echo 'remote-session: no documented ZAI catalog route; use --remote-model ID from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.' >&2; return 2 ;;
+        modelscope) echo 'remote-session: no documented ModelScope catalog route; use --remote-model ID from the API-Inference model page: https://modelscope.cn/docs/model-service/API-Inference/intro' >&2; return 2 ;;
+        *) echo "remote-session: no documented catalog route for $prov; choose an API model from its provider docs with --remote-model ID. Catalog verification unavailable." >&2; return 2 ;;
     esac
+    envline="$("$KEYS" --env "$prov")" || return 1
+    envline="${envline%%$'\n'*}"
+    key="${envline#*=}"
     # curl, not python: it uses the system trust store, which survives the
     # corporate TLS-inspecting proxy that breaks python's default bundle.
-    local body
     # Keep the credential out of argv; escape curl-config quotes/backslashes.
     key="${key//\\/\\\\}"; key="${key//\"/\\\"}"
-    body="$(printf 'header = "Authorization: Bearer %s"\n' "$key" |
-        curl --config - --fail --silent --max-time 25 "$base")" || {
-        printf '  model check : ? catalog request failed (network, authorization, or service error)\n'; return 1; }
+    printf 'header = "Authorization: Bearer %s"\n' "$key" |
+        curl --config - --fail --silent --max-time 25 "$base" || {
+        printf '  model check : ? catalog request failed (network, authorization, or service error)\n' >&2; return 1; }
+}
+
+catalog_models() { # tab-separated model ID and metadata; no default selection
+    local body
+    body="$(_catalog_request "$1")" || return $?
+    printf '%s' "$body" | python3 -c '
+import json,re,sys
+try:
+    payload=json.load(sys.stdin)
+    rows=payload.get("data",payload.get("result")) if isinstance(payload,dict) else payload
+    if isinstance(payload,dict) and payload.get("success") is False: raise ValueError()
+    if not isinstance(rows,list): raise ValueError()
+    result=[]
+    for row in rows:
+        if not isinstance(row,dict): raise ValueError()
+        ident=row.get("name",row.get("id")) if isinstance(payload,dict) and "result" in payload else row.get("id")
+        if not isinstance(ident,str): raise ValueError()
+        if ident.startswith("models/"): ident=ident.split("/",1)[1]
+        if not re.fullmatch(r"[a-zA-Z0-9@][a-zA-Z0-9_./:@+-]*",ident): raise ValueError()
+        caps=row.get("capabilities") or {}
+        if not isinstance(caps,dict): caps={}
+        if caps.get("completion_chat") is False or caps.get("function_calling") is False or row.get("tools_calling") is False: continue
+        if row.get("model_type",row.get("type", "chat")) not in ("chat", "language", "text", "model", "chat-completion"): continue
+        params=row.get("supported_parameters")
+        tools=caps.get("function_calling",row.get("tools_calling",("tools" in params) if isinstance(params,list) else "unknown"))
+        if tools is False: continue
+        # JSON serialization escapes terminal control characters in metadata.
+        metadata=json.dumps({"pricing":row.get("pricing","unknown"),"tier":row.get("tier","unknown"),"tools":tools},ensure_ascii=True)
+        result.append(ident+"\t"+metadata)
+    if not result: raise ValueError()
+except (ValueError,TypeError,AttributeError):
+    print("remote-session: empty, malformed, error, or no chat/tool candidates in catalog.",file=sys.stderr); sys.exit(1)
+print("\n".join(result))
+'
+}
+
+choose_model() {
+    local prov="$1" rows line n i=0
+    local -a models=()
+    if [[ "$prov" == zai || "$prov" == modelscope ]]; then
+        if [[ "$prov" == zai ]]; then
+            echo 'Choose an API model from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.' >&2
+        else
+            echo 'Choose an API-Inference model from https://modelscope.cn/docs/model-service/API-Inference/intro .' >&2
+        fi
+        echo 'Model access, tool sessions and account billing are untested. No default model is selected.' >&2
+        read -r -p 'Enter the exact model ID (q to cancel): ' n >&2 || return 2
+        [[ "$n" != q ]] || return 2
+        _valid_model "$n" || return 2
+        printf '%s' "$n"
+        return 0
+    fi
+    rows="$(catalog_models "$prov")" || return $?
+    echo 'Catalog candidates only; tool sessions, account access and billing untested. Pricing units are provider-specific. No model is selected by default.' >&2
+    while IFS= read -r line; do
+        models+=("${line%%$'\t'*}")
+        i=$((i+1)); printf '%3s  %s\n' "$i" "$line" >&2
+    done <<< "$rows"
+    read -r -p "Choose a model [1-${#models[@]}] (q to cancel): " n >&2 || return 2
+    [[ "$n" =~ ^[0-9]+$ && ${#n} -lt 6 ]] || return 2
+    n=$((10#$n))
+    (( n >= 1 && n <= ${#models[@]} )) || return 2
+    printf '%s' "${models[$((n-1))]}"
+}
+
+verify_alias() { # verify_alias <alias>  (0 = catalog-listed)
+    local entry alias prov model tier body
+    entry="$(_entry_for "$1")" || { echo "remote-session: unknown alias: $1" >&2; return 2; }
+    alias="$(_field "$entry" 1)"; prov="$(_field "$entry" 2)"
+    _available "$prov" || return 2
+    model="${REMOTE_MODEL:-$(_field "$entry" 3)}"; tier="$(_field "$entry" 5)"
+    if [[ -n "$REMOTE_MODEL" && "$REMOTE_MODEL" != "$(_field "$entry" 3)" && "$tier" != trial ]]; then
+        tier=unknown
+    fi
+    _valid_model "$model" || return 2
+    printf '  provider   : %s\n  model      : %s\n  tier       : %s\n' "$prov" "$model" "$tier"
+    body="$(_catalog_request "$prov")" || return $?
     printf '%s' "$body" | MODEL_ID="$model" python3 -c '
 import json,os,sys
 want=os.environ["MODEL_ID"]
@@ -176,6 +291,27 @@ else:
 }
 
 # ---- proxy management -------------------------------------------------------
+_prepare_runtime_dir() {
+    if [[ -L "$RUNDIR" || ( -e "$RUNDIR" && ( ! -d "$RUNDIR" || ! -O "$RUNDIR" ) ) ]]; then
+        echo "remote-session: refusing unsafe runtime directory: $RUNDIR" >&2
+        return 1
+    fi
+    mkdir -p "$RUNDIR" && chmod 700 "$RUNDIR"
+}
+
+_prepare_runtime_file() {
+    local path="$1"
+    if [[ -L "$path" || ( -e "$path" && ( ! -f "$path" || ! -O "$path" ) ) ]]; then
+        echo "remote-session: refusing unsafe runtime file: $path" >&2
+        return 1
+    fi
+    # Restrict existing files before truncating; umask only protects new files.
+    if [[ -e "$path" ]]; then
+        chmod 600 "$path" || return 1
+    fi
+    ( umask 077; : > "$path" ) && chmod 600 "$path"
+}
+
 free_port() {
     local p
     for ((p=LA_REMOTE_PROXY_PORT_MIN; p<=LA_REMOTE_PROXY_PORT_MAX; p++)); do
@@ -231,6 +367,8 @@ stop_proxy() {
 # Code can ask for "claude-opus-5" and get the free provider underneath.
 write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking>
     local cfg="$1" prov="$2" model="$3" thinking="$4"
+    _available "$prov" || return 2
+    _valid_model "$model" || return 2
     local litellm_model think_line="" api_base=""
     case "$prov" in
         gemini)     litellm_model="gemini/$model" ;;
@@ -239,6 +377,8 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         openrouter) litellm_model="openrouter/$model" ;;
         cerebras)   litellm_model="cerebras/$model" ;;
         cloudflare) litellm_model="openai/$model"; api_base="$(_cloudflare_base)" || return 1 ;;
+        mistral|zai|siliconflow|llm7|kilo|vercel|sambanova|modelscope)
+                    litellm_model="openai/$model"; api_base="$(_openai_base "$prov")" || return 1 ;;
         *)          echo "remote-session: no LiteLLM prefix for provider $prov" >&2; return 1 ;;
     esac
     # Gemini 3.x spends its whole token budget on thinking unless told not to;
@@ -250,7 +390,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     key_env="$("$KEYS" --names "$prov")" || return 1
     key_env="${key_env%%$'\n'*}"
 
-    : > "$cfg"; chmod 600 "$cfg"
+    _prepare_runtime_file "$cfg" || return 1
     echo "model_list:" >> "$cfg"
     local spoof
     IFS=',' read -r -a _spoofs <<< "$LA_REMOTE_SPOOF_IDS"
@@ -275,17 +415,22 @@ YAML
 
 start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
     local prov="$1" model="$2" thinking="$3"
+    umask 077
     command -v litellm >/dev/null 2>&1 || {
         echo "remote-session: litellm not found. Install with: pipx install litellm[proxy]" >&2; return 1; }
     local port cfg log pidf
+    _prepare_runtime_dir || return 1
     port="$(free_port)" || return 1
     cfg="$RUNDIR/proxy-$port.yaml"; log="$RUNDIR/proxy-$port.log"; pidf="$RUNDIR/proxy-$port.pid"
     write_proxy_config "$cfg" "$prov" "$model" "$thinking" || return 1
+    _prepare_runtime_file "$log" || return 1
+    _prepare_runtime_file "$pidf" || return 1
 
     # Only THIS provider's credential enters the proxy environment.
     local envassign line
     envassign="$("$KEYS" --env "$prov")" || return 1
-    ( while IFS= read -r line; do export "$line"; done <<< "$envassign"
+    ( _clear_provider_env
+      while IFS= read -r line; do export "$line"; done <<< "$envassign"
       exec litellm --config "$cfg" --port "$port" ) > "$log" 2>&1 &
     echo $! > "$pidf"
 
@@ -295,11 +440,10 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
         if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
             echo "$port"; return 0
         fi
-        kill -0 "$(cat "$pidf")" 2>/dev/null || { echo "remote-session: proxy died during startup — last log lines:" >&2; tail -15 "$log" >&2; return 1; }
+        kill -0 "$(cat "$pidf")" 2>/dev/null || { echo "remote-session: proxy died during startup; inspect the private log locally: $log" >&2; return 1; }
         sleep 1
     done
-    echo "remote-session: proxy did not become ready in 60s — last log lines:" >&2
-    tail -15 "$log" >&2
+    echo "remote-session: proxy did not become ready in 60s; inspect the private log locally: $log" >&2
     return 1
 }
 
@@ -314,6 +458,9 @@ while [[ $# -gt 0 ]]; do
         --list)           MODE="list"; shift ;;
         --stop)           MODE="stop"; shift ;;
         --verify)         MODE="verify"; ALIAS="${2:-}"; shift 2 || shift ;;
+        --models)         MODE="models"; ALIAS="${2:-}"; shift 2 || shift ;;
+        --remote-model)   [[ $# -ge 2 ]] || { echo 'remote-session: --remote-model needs an ID' >&2; exit 2; }
+                          REMOTE_MODEL="$2"; _valid_model "$REMOTE_MODEL" || exit 2; shift 2 ;;
         --dry-run)        DRY_RUN=1; shift ;;
         --include-trials) INCLUDE_TRIALS=1; shift ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
@@ -326,9 +473,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ "$ALIAS" == github-models || "$ALIAS" == github ]]; then
+    _available github
+    exit 2
+fi
+
 case "$MODE" in
     list) print_list; exit 0 ;;
     stop) stop_proxy; exit 0 ;;
+    models)
+        ENTRY="$(_entry_for "$ALIAS")" || { echo 'remote-session: --models needs a known alias' >&2; exit 2; }
+        echo 'Catalog candidates only; listed prices/tier/tools are provider metadata. Generation, tool sessions and account billing untested.' >&2
+        catalog_models "$(_field "$ENTRY" 2)"; exit $? ;;
     verify)
         [[ -n "$ALIAS" ]] || { echo "remote-session: --verify needs an alias" >&2; exit 2; }
         printf '\n\033[1mVerifying remote agent: %s\033[0m\n' "$ALIAS"
@@ -348,7 +504,22 @@ ENTRY="$(_entry_for "$ALIAS")" || {
     exit 2
 }
 PROV="$(_field "$ENTRY" 2)"; MODEL="$(_field "$ENTRY" 3)"
+_available "$PROV" || exit 2
+if [[ -n "$REMOTE_MODEL" ]]; then
+    MODEL="$REMOTE_MODEL"
+elif [[ "$MODEL" == SELECT ]]; then
+    if [[ $DRY_RUN -eq 1 || ! -t 0 ]]; then
+        echo "remote-session: '$ALIAS' needs --remote-model ID; use --models $ALIAS to discover catalog candidates." >&2
+        exit 2
+    fi
+    MODEL="$(choose_model "$PROV")" || exit $?
+fi
+_valid_model "$MODEL" || exit 2
 DISP="$(_field "$ENTRY" 4)"; TIER="$(_field "$ENTRY" 5)"
+# An explicit override may be paid even when the original alias has a free pin.
+if [[ -n "$REMOTE_MODEL" && "$REMOTE_MODEL" != "$(_field "$ENTRY" 3)" && "$TIER" != trial ]]; then
+    TIER=unknown
+fi
 THINKING=false
 [[ "$ALIAS" == *-thinking ]] && THINKING=true
 
@@ -388,7 +559,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     exit 0
 fi
 
-mkdir -p "$RUNDIR"
+_prepare_runtime_dir || exit 1
 echo "   proxy    : starting LiteLLM (Anthropic /v1/messages → $PROV)…"
 PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING")" || {
     echo "remote-session: could not start the translating proxy." >&2; exit 1; }
@@ -467,7 +638,8 @@ _teardown() {
 }
 trap _teardown EXIT INT TERM HUP
 
+( _clear_provider_env
 claude --model claude-opus-5 \
     --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
     --append-system-prompt "$AGENT_PROMPT" \
-    "${PASSTHRU[@]+"${PASSTHRU[@]}"}"
+    "${PASSTHRU[@]+"${PASSTHRU[@]}"}" )

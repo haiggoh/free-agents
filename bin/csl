@@ -194,7 +194,7 @@ while :; do
   done
   echo
   echo "  c) choose a listed model × custom effort"
-  echo "  r) ☁️  remote API agents (Gemini/Groq/NVIDIA/OpenRouter/Cloudflare; account quotas apply)"
+  echo "  r) ☁️  remote API agents (choose provider/model; account quotas apply)"
   echo "     Cerebras trial opt-in: csl remote --include-trials"
   echo "  i) install / set up remote API keys"
   if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
