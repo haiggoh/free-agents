@@ -55,6 +55,12 @@ accepts it). Useful mainly when you want zero cloud cost for a block of work, or
 Trade-off: interactive turns on a local model are slower than a cloud model, so most users won't
 want this as their default — reach for it when the cost saving is worth the latency.
 
+**3. Remote cloud API sessions — zero cost via free provider tiers.**
+Run a full Claude Code session against free cloud APIs (NVIDIA, Gemini, Groq, etc.) using
+`remote-session.sh` as a drop-in replacement for Anthropic's paid gateway. Leverages LiteLLM
+proxying to translate Anthropic `/v1/messages` to provider APIs. Ideal for when local MLX models
+aren't sufficient or when you prefer cloud-based instant responsiveness. See [Remote Sessions](docs/remote-fallback/README.md) for details.
+
 ## How it works
 
 Claude Code talks to an Anthropic-compatible endpoint. A local MLX backend exposes one
@@ -794,6 +800,50 @@ PY
 need true live thinking, the non-invasive path is a vllm-mlx **server-side token log** (a fork patch
 that tees streamed tokens/reasoning to a per-request file) — restores the live stream without a
 request-path proxy that would re-break native transcripts.
+
+## Status line: seeing the memory ceiling before it kills the session
+
+`bin/la-statusline-segment.sh` supplies ONE extra segment to a Claude Code status line,
+reporting local-inference memory pressure. It exists because an MLX session dies by OOM
+against a Metal wired-memory ceiling well below installed RAM (~103.9 GB on a 128 GB
+M4 Max) and, before this, there was no live reading of that anywhere — the ceiling was
+invisible until the session was already dead.
+
+- **Measures WIRED memory against the CAP, not installed RAM.** 74 GB is a comfortable 58%
+  of 128 GB but 71% of the ceiling that actually refuses work; the reassuring number is the
+  wrong one. `ps` RSS is not used at all — it understates MLX pressure by roughly 7x,
+  because weights are Metal allocations rather than ordinary resident pages. The derivation
+  is the same one `la-ram-preflight.sh` uses, reused rather than re-invented.
+- **Gated on the ENDPOINT** (`ANTHROPIC_BASE_URL` at loopback), never on `CLAUDE_IS_LOCAL` —
+  that flag is exported by the launcher and leaks into a later gateway `claude` in the same
+  shell, which would report a local instrument for a PAID session.
+- **`level` carries the thresholds** (warn 70%, crit 90% by default), so the consuming
+  renderer selects a colour without re-deriving what "close to the ceiling" means.
+- **Silence is a valid answer.** Prints nothing and still exits 0 when there is nothing
+  meaningful to say — not a local session, not macOS, no reading available. A status line
+  must never be the reason a prompt breaks.
+- Environment: `LA_STATUSLINE_CAP_GB` (machine-specific ceiling), `LA_STATUSLINE_RAM_CMD`
+  (override the reader; exists so tests never depend on real machine memory),
+  `LA_STATUSLINE_WARN_PCT`, `LA_STATUSLINE_CRIT_PCT`.
+
+**Why it is a separate script, and the layering that matters:** a status-line renderer knows
+how to lay out a line; it has no business knowing what a Metal cap is. So `local-agents`
+MEASURES and classifies, and any renderer merely places the result. The `cost-tracker`
+plugin consumes this over a stable contract — no arguments, one line of JSON, exit 0 — and
+owns none of the domain knowledge. Either plugin can be updated independently, and if
+`local-agents` is absent the segment is simply absent.
+
+```console
+$ ANTHROPIC_BASE_URL=http://localhost:8000 bin/la-statusline-segment.sh
+{"label":"ram","text":"74.0/103.9G 71%","level":"warn"}
+```
+
+Rendered, it lands on line 1 beside the context figure, colour escalating as the ceiling
+approaches:
+
+```
+JoyIA · Opus 5 (1M) · ctx 34% · ram 74.0/103.9G 71%
+```
 
 ## The fork patches (required for direct routing)
 

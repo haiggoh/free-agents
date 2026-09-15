@@ -4,6 +4,7 @@
 Usage: python3 tests/test_remote_session.py [-v] [test names]
 Environment: none required; HOME, PATH and credential paths are isolated.
 """
+import itertools
 import json
 import os
 from pathlib import Path
@@ -46,7 +47,13 @@ class RemoteSessionTests(unittest.TestCase):
                         TMPDIR=str(self.root), LA_API_KEYS_DIR=str(self.root / 'keys'),
                         PATH=str(self.root / 'stubs') + ':' + os.environ['PATH'],
                         CATALOG=json.dumps({'data': []}), CURL_CODE='0',
-                        CURL_ARGV=str(self.root / 'curl-argv'))
+                        CURL_ARGV=str(self.root / 'curl-argv'),
+                        # The stubs are /bin/sh scripts, so the launcher's real path
+                        # (resolve the pipx interpreter, re-enter it without -E through
+                        # the trust wrapper) cannot apply to them. Point the launcher at
+                        # the stub as a complete command instead. The trust-wrapper path
+                        # itself is covered by tests/test_litellm_trust_shim.py.
+                        LA_LITELLM_CMD=str(self.root / 'stubs' / 'litellm'))
         self.stub('curl', '''#!/usr/bin/env python3
 import json,os,sys
 if '--help' in sys.argv:
@@ -77,7 +84,21 @@ sys.exit(int(os.environ['CURL_CODE']))
 
     def test_roster_and_all_provider_dry_runs(self):
         rows = self.roster()
-        self.assertEqual(rows[0][0], 'gemini-flash')
+        # ROW 1 IS THE ENTER-DEFAULT in every picker that reads this roster in order, so the
+        # first row is a deliberate product decision and is pinned as such. NVIDIA leads
+        # because its limits are generous with no known DAILY quota (the constraint that
+        # ends a Gemini working session), and because real sessions run on it. Changing
+        # this line should mean changing the preferred lane on purpose -- not drifting into it.
+        self.assertEqual(rows[0][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[0][1], 'nvidia')
+        # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
+        leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
+        self.assertGreaterEqual(len(leading), 12, 'the NVIDIA tier-1 block should lead the roster')
+        self.assertEqual(rows[len(leading)][1], 'gemini', 'Gemini should immediately follow the NVIDIA block')
+        # Kimi K3 was requested by name; assert the id, not merely that some kimi row exists.
+        self.assertEqual({r[0]: r[2] for r in rows}['nvidia-kimi-k3'], 'moonshotai/kimi-k3')
+        # (Reasoning-disabled-for-every-nvidia-row is asserted in
+        # test_proxy_config_all_models_and_thinking, which already walks the whole roster.)
         self.assertNotIn('github-models', [row[0] for row in rows])
         self.assertEqual(len(rows), len({row[0] for row in rows}))
         self.assertEqual({row[1] for row in rows}, {'gemini', 'groq', 'nvidia', 'openrouter', 'cloudflare', 'cerebras', *NEW_ROUTES})
@@ -186,7 +207,11 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 self.assertEqual(text.count('      model: ' + prefixes[provider] + model + '\n'), 4)
                 self.assertEqual(cfg.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn('fixture-not-a-real-key', text)
-                self.assertEqual('thinking:' in text, provider == 'gemini' and thinking == 'false')
+                self.assertEqual('      thinking:' in text, provider == 'gemini' and thinking == 'false')
+                # NVIDIA NIM reasoning models must have reasoning disabled at the
+                # backend, or the Anthropic translation layer 500s the session.
+                self.assertEqual(text.count('        enable_thinking: false\n'),
+                                 4 if provider == 'nvidia' and thinking == 'false' else 0)
                 if provider == 'cloudflare':
                     self.assertIn('/accounts/' + 'a' * 32 + '/ai/v1', text)
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)

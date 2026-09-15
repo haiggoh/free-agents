@@ -55,7 +55,16 @@ MODE="launch"
 ALIAS=""
 REMOTE_MODEL=""
 
-usage() { sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"; }
+usage() {
+    sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
+    echo ""
+    echo "Additional options:"
+    echo "  -i, --install-keys    Install / set up remote API keys"
+    echo "  -w, --watcher         Toggle watcher: OFF — no monitor window"
+    echo "  -a, --auto-mode       Toggle auto-mode: blind-trust → classifier → off"
+    echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
+    echo "  -c, --choose-effort   Choose effort level for the selected model"
+}
 
 _valid_model() {
     [[ "$1" =~ ^[a-zA-Z0-9@][a-zA-Z0-9_./:@+-]*$ && "$1" != SELECT ]] || {
@@ -122,7 +131,7 @@ _visible() { # tier filter: hide trials unless asked
 
 print_list() {
     printf '\n\033[1m☁️  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n'
-    printf '  %-3s %-22s %-34s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
+    printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
     local i=0 e alias prov model disp tier keystate
     for e in "${LA_REMOTE_AGENTS[@]}"; do
         alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
@@ -130,7 +139,7 @@ print_list() {
         _visible "$tier" || continue
         i=$((i+1))
         if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
-        printf '  %-3s %-22s %-34s %-15s %s\n' "$i" "$alias" "$disp" "$tier" "$keystate"
+        printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$tier" "$keystate"
     done
     [[ $INCLUDE_TRIALS -eq 0 ]] && printf '\n  (trial-tier agents hidden — pass --include-trials to show them)\n'
     printf '\n  Local MLX models are a different list: use `csl` / launch-claude-agent.sh.\n\n'
@@ -329,7 +338,9 @@ _is_our_proxy() { # _is_our_proxy <pid> <port>
     [[ -n "$pid" && -n "$port" ]] || return 1
     kill -0 "$pid" 2>/dev/null || return 1
     cmd="$(ps -o command= -p "$pid" 2>/dev/null)" || return 1
-    [[ "$cmd" == *litellm* && "$cmd" == *"proxy-$port.yaml"* ]]
+    # Match either the wrapper or a bare litellm (older running proxies predate the
+    # wrapper). The config path is what actually identifies OUR proxy on THIS port.
+    [[ ( "$cmd" == *litellm* || "$cmd" == *litellm-with-trust* ) && "$cmd" == *"proxy-$port.yaml"* ]]
 }
 
 stop_one_proxy() { # stop_one_proxy <port>
@@ -385,6 +396,14 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     # that truncated real replies during bring-up, so default it OFF.
     [[ "$prov" == "gemini" && "$thinking" != "true" ]] && \
         think_line='      thinking: {"type": "disabled"}'
+    # NVIDIA NIM reasoning models (Nemotron) put their reasoning in
+    # `reasoning_content`, which is NOT an Anthropic thinking block -- the
+    # translation layer then dies with "Content block is not a thinking block"
+    # and takes the whole session's endpoint with it. Turn reasoning off at the
+    # backend unless the caller explicitly asked for thinking.
+    [[ "$prov" == "nvidia" && "$thinking" != "true" ]] && \
+        think_line='      chat_template_kwargs:
+        enable_thinking: false'
 
     local key_env
     key_env="$("$KEYS" --names "$prov")" || return 1
@@ -418,6 +437,18 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
     umask 077
     command -v litellm >/dev/null 2>&1 || {
         echo "remote-session: litellm not found. Install with: pipx install litellm[proxy]" >&2; return 1; }
+    # RESOLVE THE INTERPRETER BEHIND THE CONSOLE SCRIPT, and start the proxy through our
+    # own wrapper instead of the script itself. The pipx console script's shebang carries
+    # `-E`, which makes Python IGNORE PYTHONPATH -- so the Keychain-trust shim this file
+    # exports above never reached the proxy, and on a TLS-inspecting corporate network every
+    # upstream HTTPS call failed with "self-signed certificate in certificate chain" while
+    # LiteLLM reported it as an HTTP 500 (reads like a provider outage; is not).
+    # Re-entering the SAME interpreter without -E fixes it without touching ~/.local/pipx,
+    # without disabling verification, and without any global CA change.
+    # ESCAPE HATCH, deliberately explicit and loud. A caller can supply a complete proxy
+    # command (a differently-installed litellm, or a test stub) via LA_LITELLM_CMD. It
+    # BYPASSES the trust wrapper, so it announces itself: a silent bypass is exactly how the
+    # -E bug stayed hidden, and this must not become a second quiet path to certifi-only TLS.
     local port cfg log pidf
     _prepare_runtime_dir || return 1
     port="$(free_port)" || return 1
@@ -425,13 +456,51 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
     write_proxy_config "$cfg" "$prov" "$model" "$thinking" || return 1
     _prepare_runtime_file "$log" || return 1
     _prepare_runtime_file "$pidf" || return 1
+    if [[ -n "${LA_LITELLM_CMD:-}" ]]; then
+        # shellcheck disable=SC2206
+        local -a _cmd=(${LA_LITELLM_CMD})
+        command -v "${_cmd[0]}" >/dev/null 2>&1 || [[ -x "${_cmd[0]}" ]] || {
+            echo "remote-session: LA_LITELLM_CMD is not executable: ${_cmd[0]}" >&2; return 1; }
+        echo "remote-session: NOTE using LA_LITELLM_CMD (${_cmd[0]}) — the OS-trust wrapper is BYPASSED;" >&2
+        echo "  on a TLS-inspecting network upstream HTTPS may fail with a certificate error." >&2
+        local envassign_o line_o
+        envassign_o="$("$KEYS" --env "$prov")" || return 1
+        ( _clear_provider_env
+          while IFS= read -r line_o; do export "$line_o"; done <<< "$envassign_o"
+          exec "${_cmd[@]}" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
+        echo $! > "$pidf"
+        local j
+        for j in $(seq 1 60); do
+            if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
+                echo "$port"; return 0
+            fi
+            kill -0 "$(cat "$pidf")" 2>/dev/null || { echo "remote-session: proxy died during startup; inspect the private log locally: $log" >&2; return 1; }
+            sleep 1
+        done
+        echo "remote-session: proxy did not become ready in 60s; inspect the private log locally: $log" >&2
+        return 1
+    fi
+
+    local litellm_py litellm_shebang
+    litellm_shebang="$(head -1 "$(command -v litellm)" 2>/dev/null)"
+    litellm_py="${litellm_shebang#\#!}"; litellm_py="${litellm_py%% *}"
+    if [[ ! -x "$litellm_py" ]]; then
+        echo "remote-session: could not resolve the litellm interpreter from: ${litellm_shebang:-<none>}" >&2
+        echo "  reinstall with: pipx install 'litellm[proxy]'" >&2
+        return 1
+    fi
+    local trust_wrapper="$SCRIPT_DIR/litellm-with-trust.py"
+    if [[ ! -r "$trust_wrapper" ]]; then
+        echo "remote-session: missing trust wrapper: $trust_wrapper" >&2
+        return 1
+    fi
 
     # Only THIS provider's credential enters the proxy environment.
     local envassign line
     envassign="$("$KEYS" --env "$prov")" || return 1
     ( _clear_provider_env
       while IFS= read -r line; do export "$line"; done <<< "$envassign"
-      exec litellm --config "$cfg" --port "$port" ) > "$log" 2>&1 &
+      exec "$litellm_py" "$trust_wrapper" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
     echo $! > "$pidf"
 
     # Bounded readiness wait with real diagnostics on failure.
@@ -452,6 +521,13 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
 # untouched (so `remote-session.sh gemini-flash -p "..." --allowedTools Read` works
 # exactly like it does for a normal claude invocation). `--` forces the rest through.
 PASSTHRU=()
+WATCHER_ENABLED=0
+AUTO_MODE_STATE=0  # 0=blind-trust, 1=classifier, 2=off
+TELEMETRY_ENABLED=0  # 0=off (no nonessential traffic), 1=on (stock behavior)
+SELECTED_EFFORT=""
+EFFORT_CHOICE=""
+EFFORT_CHOICE=""
+SELECTED_EFFORT=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)        usage; exit 0 ;;
@@ -463,6 +539,18 @@ while [[ $# -gt 0 ]]; do
                           REMOTE_MODEL="$2"; _valid_model "$REMOTE_MODEL" || exit 2; shift 2 ;;
         --dry-run)        DRY_RUN=1; shift ;;
         --include-trials) INCLUDE_TRIALS=1; shift ;;
+        -i|--install-keys) MODE="install-keys"; shift ;;
+        -w|--watcher)     WATCHER_ENABLED=$((WATCHER_ENABLED ^ 1)); shift ;;
+        -a|--auto-mode)   AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); shift ;;
+        -t|--telemetry)   TELEMETRY_ENABLED=$((TELEMETRY_ENABLED ^ 1)); shift ;;
+        -c|--choose-effort)
+            if [[ -z "$ALIAS" ]]; then
+                MODE="launch"
+                SELECTED_EFFORT="choose-effort"
+            else
+                SELECTED_EFFORT="choose-effort"
+            fi
+            shift ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
         -*)               if [[ -z "$ALIAS" ]]; then
                               echo "remote-session: unknown option: $1; use --help or put Claude options after an alias / --." >&2
@@ -497,6 +585,121 @@ esac
 if [[ -z "$ALIAS" ]]; then
     ALIAS="$(pick_alias)" || { echo "remote-session: nothing selected." >&2; exit 1; }
 fi
+
+# Handle interactive flags for launch mode (similar to CSL)
+if [[ "$MODE" == "launch" ]]; then
+    # Handle watcher toggle
+    if [[ "$WATCHER_ENABLED" -eq 1 ]]; then
+        if [[ "$(uname -s)" = "Darwin" ]]; then
+            # Open watcher window in Terminal (simplified version)
+            echo "👁  watcher: Would open monitoring window (not fully implemented for remote sessions)"
+        else
+            echo "👁  watcher: Enable monitoring (not fully implemented for remote sessions)"
+        fi
+    fi
+
+    # Map auto-mode state to environment variables (similar to CSL)
+    # State 0 (blind-trust)  → LA_AUTO_MODE=1 LA_BLIND_AUTO=1
+    # State 1 (classifier)   → LA_AUTO_MODE=1 LA_BLIND_AUTO=0
+    # State 2 (off)          → LA_AUTO_MODE=0
+    _la_auto_mode_val() { [ "$AUTO_MODE_STATE" = "2" ] && echo 0 || echo 1; }
+    _la_blind_auto_val() { [ "$AUTO_MODE_STATE" = "0" ] && echo 1 || echo 0; }
+
+    # Handle telemetry setting
+    if [[ "$TELEMETRY_ENABLED" -eq 1 ]]; then
+        # Stock Claude Code behavior - allow telemetry
+        unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+    else
+        # No nonessential outbound traffic
+        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+    fi
+
+    fi
+
+# Helper function for picking from a list (similar to CSL)
+_pick_from() {
+    # $1=prompt  $2=default index (1-based)  rest=items -> echoes chosen 1-based index
+    local prompt="$1" def="$2"; shift 2
+    local n=$#
+    local i=1
+    for it in "$@"; do printf "  %d) %s\n" "$i" "$it" >&2; i=$((i+1)); done
+    local c; printf "%s [%s]: " "$prompt" "$def" >&2; read -r c; c="${c:-$def}"
+    if ! [[ "$c" =~ ^[0-9]+$ ]] || [ "$c" -lt 1 ] || [ "$c" -gt "$n" ]; then echo "0"; return; fi
+    echo "$c"
+}
+
+# Launch function for remote sessions (similar to CSL's _launch)
+_launch() {  # $1=alias  $2=effort(optional)
+    local alias="$1" effort="${2:-}"
+    # Apply session profile (simplified for remote)
+    # In a full implementation, this would load config and apply session-specific settings
+
+    # Handle watcher
+    if [[ "$WATCHER_ENABLED" -eq 1 ]]; then
+        if [[ "$(uname -s)" = "Darwin" ]]; then
+            echo "👁  watcher: Would open monitoring window (not fully implemented for remote sessions)"
+        else
+            echo "👁  watcher: Enable monitoring (not fully implemented for remote sessions)"
+        fi
+    fi
+
+    # Map auto-mode state to environment variables
+    _la_auto_mode_val() { [ "$AUTO_MODE_STATE" = "2" ] && echo 0 || echo 1; }
+    _la_blind_auto_val() { [ "$AUTO_MODE_STATE" = "0" ] && echo 1 || echo 0; }
+
+    # Handle telemetry setting
+    if [[ "$TELEMETRY_ENABLED" -eq 1 ]]; then
+        # Stock Claude Code behavior - allow telemetry
+        unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+    else
+        # No nonessential outbound traffic
+        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+    fi
+
+    # Export auto-mode variables
+    export LA_AUTO_MODE="$(_la_auto_mode_val)"
+    export LA_BLIND_AUTO="$(_la_blind_auto_val)"
+
+    # Build the command to launch Claude Code
+    local claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
+
+    # Add effort if specified
+    if [[ -n "$effort" ]]; then
+        claude_cmd+=(--effort "$effort")
+    fi
+
+    # Add any passthrough arguments
+    if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
+        claude_cmd+=("${PASSTHRU[@]}")
+    fi
+
+    # Execute Claude Code
+    echo "Launching Claude Code with remote session..."
+    ( _clear_provider_env
+    "${claude_cmd[@]}" )
+
+    # The trap will handle teardown when Claude exits
+}
+
+# Handle effort selection if requested
+if [[ "$SELECTED_EFFORT" == "choose-effort" ]]; then
+    # Map effort levels to Claude's choices
+    efforts=("min" "low" "medium" "high")
+    effort_index=$(_pick_from "Select effort level" "2" "${efforts[@]}")
+    if [[ "$effort_index" == "0" ]]; then
+        echo "remote-session: effort selection cancelled." >&2
+        exit 1
+    fi
+    EFFORT_CHOICE="${efforts[$((effort_index-1))]}"
+fi
+
+# Special mode handlers
+if [[ "$MODE" == "install-keys" ]]; then
+    echo "Installing remote API keys..."
+    exec python3 "$REPO_ROOT/install/setup-api-keys.py" "$@"
+    exit 0
+fi
+
 
 ENTRY="$(_entry_for "$ALIAS")" || {
     echo "remote-session: unknown remote alias: $ALIAS" >&2
@@ -543,11 +746,11 @@ esac
 cat <<BANNER
 
 ╭──────────────────────────────────────────────────────────────╮
-│  ☁️  REMOTE CLOUD-API SESSION  —  not local, not the gateway  │
+│  ☁️  REMOTE API SESSION — $MODEL ($DISP)                    │
 ╰──────────────────────────────────────────────────────────────╯
-   agent    : $ALIAS  ($DISP)
    provider : $PROV      tier: $TIER
-   model    : $MODEL      thinking: $THINKING
+   agent    : $ALIAS
+   thinking : $THINKING
    cost     : $COST_NOTE
    privacy  : prompts and file contents LEAVE this machine → $PROV
 BANNER
@@ -638,8 +841,14 @@ _teardown() {
 }
 trap _teardown EXIT INT TERM HUP
 
+# Build Claude command with effort selection if specified
+local claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
+if [[ -n "$EFFORT_CHOICE" ]]; then
+    claude_cmd+=(--effort "$EFFORT_CHOICE")
+fi
+if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
+    claude_cmd+=("${PASSTHRU[@]}")
+fi
+
 ( _clear_provider_env
-claude --model claude-opus-5 \
-    --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
-    --append-system-prompt "$AGENT_PROMPT" \
-    "${PASSTHRU[@]+"${PASSTHRU[@]}"}" )
+"${claude_cmd[@]}" )
