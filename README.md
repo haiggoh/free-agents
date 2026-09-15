@@ -205,6 +205,15 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   kill that information is gone, and re-deriving the command from current config would silently
   launch something *else* if the config changed since launch.
 
+  Recovery also preserves the captured working directory and selected non-secret
+  Python/MLX runtime settings. It reports executable failures directly and requires
+  a successful Anthropic completion on the original port before reporting success;
+  a model listing alone is insufficient. Authentication errors do not establish a
+  crash. Old saved argv without runtime context produces an explicit warning and
+  uses the calling shell's context. Fake-server tests cover a continued Anthropic
+  conversation after the restart command exits; a live crash still needs its own
+  outcome check.
+
   ```bash
   ./bin/la-reboot.sh --status            # what would be targeted, and the evidence for it
   ./bin/la-reboot.sh --dry-run           # the plan, including the exact argv

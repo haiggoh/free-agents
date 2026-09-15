@@ -71,7 +71,7 @@ if [[ "${LA_HOTSWAP_FORCE_FRESH:-0}" = "1" ]]; then
 fi
 for p in $(seq "$PLOW" "$PHIGH"); do
   [[ "${LA_HOTSWAP_FORCE_FRESH:-0}" = "1" ]] && break
-  ids=$(curl -s --max-time 2 "http://localhost:$p/v1/models" 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+  ids=$(curl -s --max-time 2 "http://localhost:$p/v1/models" 2>/dev/null | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
   served=0
 
   if [[ -n $ids ]] && grep -qxF "$ALIAS" <<<"$ids"; then
@@ -156,7 +156,7 @@ for p in $(seq "$PLOW" "$PHIGH"); do
   FOUND=1
   rss=$(ps -o rss= -p "$pid" 2>/dev/null | LC_ALL=C awk '{printf "%.1f", $1/1048576}')
   est=$(lsof -nP -iTCP:"$p" -sTCP:ESTABLISHED 2>/dev/null | tail -n +2 | grep -c . || true)
-  ids=$(curl -s --max-time 2 "http://localhost:$p/v1/models" 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ')
+  ids=$(curl -s --max-time 2 "http://localhost:$p/v1/models" 2>/dev/null | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/' | tr '\n' ' ')
   if [[ -n ${PORT_CLIENT[$p]:-} ]]; then
     printf '      :%s  %-6s GB  ATTACHED — local session pid %s is using it. LEAVE ALONE%s\n' \
       "$p" "$rss" "${PORT_CLIENT[$p]}" "$( (( est > 0 )) && echo ' (mid-request)' || echo ' (idle between turns)')"

@@ -87,6 +87,31 @@ LA_MLX_BACKENDS="rapid vllm mlx_lm"
 # The dense classifier identity Auto Mode exposes alongside the session id.
 : "${LA_SPOOF_CLASSIFIER:=claude-sonnet-5}"
 
+# --- parsing the ids a port advertises ----------------------------------------
+# Every consumer decides what a server is serving by reading /v1/models, and the obvious
+# `grep -o '"id":"[^"]*"'` has two independent bugs, both silent:
+#
+#   1. It requires NO whitespace after the colon, so a server that pretty-prints
+#      ("id": "x") yields NOTHING and the caller concludes the port serves nothing.
+#      Measured 2026-09-13: la-reboot.sh reported a working server as "not ready".
+#   2. The tempting fix — sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' —
+#      is whitespace-tolerant but returns only the LAST id on a line, because the leading
+#      .* is greedy. vllm-mlx serves EVERY id in the spoof list on one line, and reuse
+#      matching compares against the whole set, so that fix breaks reuse instead.
+#
+# Both properties are needed at once: tolerate whitespace, and return every id, one per
+# line (callers use `grep -qxF` against the output). Known limits, neither of which occurs
+# in these payloads: a newline BETWEEN the key and its value is not matched (grep is
+# line-based), and an escaped quote inside a value truncates it.
+#
+# Reads stdin, writes one id per line. la-reboot.sh deliberately does NOT source this file —
+# a recovery tool must not depend on the stack it is repairing — so it carries its own copy of
+# the same expression; keep them in step. (la-evict.sh only kills listeners; it never parses
+# /v1/models, so it needs no copy.)
+la_parse_served_ids() {
+  grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/'
+}
+
 # --- model registry storage (populated by la_register in the config file) ----
 # Parallel arrays keyed by insertion; la_lookup fills LA_* vars for a given alias.
 LA_ALIASES=()
@@ -372,8 +397,8 @@ la_load_config() {
   # rapid-cache-profiles-the), NOT on taste. To run a session AND a dispatch concurrently on the
   # same model, a SECOND server instance on another port is still the supported path — 27B 4-bit
   # weights are ~16 GB, so two instances fit where two long contexts do not.
-  : "${LA_RAPID_MAX_NUM_SEQS:=2}"
-  : "${LA_RAPID_MAX_CONCURRENT_REQUESTS:=2}"
+  : "${LA_RAPID_MAX_NUM_SEQS:=3}"
+  : "${LA_RAPID_MAX_CONCURRENT_REQUESTS:=3}"
 
   # Opt-in Rapid Auto Mode qualification runtime. It remains unwired from the
   # default launcher until a real Claude Code smoke test passes. One engine

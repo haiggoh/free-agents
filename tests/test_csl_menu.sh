@@ -48,6 +48,10 @@ mkdir -p \
 
 cp "$REPO/bin/csl" "$SB/bin/csl"
 cp "$REPO/config/config-lib.sh" "$SB/config/config-lib.sh"
+mkdir -p "$SB/install"
+cat > "$SB/install/setup-api-keys.py" <<'SETUP_STUB'
+print("KEY_SETUP_REACHED")
+SETUP_STUB
 
 head -c 2097152 /dev/zero > "$SB/home/.models/ModelAlpha/weights.bin"
 head -c 2097152 /dev/zero > "$SB/home/.models/ModelBeta/weights.bin"
@@ -70,7 +74,7 @@ cat > "$SB/bin/stub-launcher" <<'CSL_STUB_LAUNCHER'
 #!/usr/bin/env bash
 # Record LA_AUTO_MODE too: the menu text is cosmetic, but the value the launcher
 # actually receives is the contract, so assert on that.
-printf '%s|%s|auto=%s|telemetry=%s\n' "${1:-}" "${2:-}" "${LA_AUTO_MODE:-unset}" "${LA_TELEMETRY:-unset}" > "$CSL_TEST_RESULT"
+printf '%s|%s|auto=%s|blind=%s|telemetry=%s\n' "${1:-}" "${2:-}" "${LA_AUTO_MODE:-unset}" "${LA_BLIND_AUTO:-unset}" "${LA_TELEMETRY:-unset}" > "$CSL_TEST_RESULT"
 CSL_STUB_LAUNCHER
 chmod +x "$SB/bin/csl" "$SB/bin/stub-launcher"
 
@@ -101,8 +105,9 @@ assert_no_grep 'Recommended pairings' "$out" \
   'role recommendations no longer replace the model list'
 assert_grep 'watcher: OFF' "$out" 'watcher defaults off'
 assert_no_grep 'watcher: ON' "$out" 'watcher is not enabled implicitly'
-assert_grep 'auto-mode: ON  — cached startup is quick; cold refresh may take several minutes' "$out"   'auto mode default explains cached and cold startup'
-assert_no_grep 'auto-mode: OFF' "$out" 'auto mode is not silently disabled'
+assert_grep 'auto-mode: blind-trust' "$out" 'auto mode defaults to blind-trust (state 0)'
+assert_no_grep 'auto-mode: classifier' "$out" 'classifier state is not the default'
+assert_no_grep 'auto-mode: off' "$out" 'off state is not the default'
 assert_grep 'telemetry: OFF' "$out" 'telemetry defaults off (a local session stays local)'
 assert_no_grep 'telemetry: ON' "$out" 'telemetry is not silently enabled'
 assert_grep 'c) choose a listed model × custom effort' "$out" \
@@ -131,34 +136,63 @@ out="$(
 )"
 assert_grep 'watcher: ON' "$out" 'CSL_WATCH=1 opts in by default'
 
-echo "== 5. auto mode can be opted OUT of by default =="
+echo "== 5. auto mode can be set to classifier or off by default =="
+# State 2 = off
 out="$(
   printf 'q\n' |
     HOME="$SB/home" \
-    CSL_AUTO_MODE=0 \
+    CSL_AUTO_MODE_STATE=2 \
     CSL_LAUNCHER="$SB/bin/stub-launcher" \
     CSL_TEST_RESULT="$SB/auto-off-result" \
       bash "$SB/bin/csl" 2>&1
 )"
-assert_grep 'auto-mode: OFF — acceptEdits; classifier startup skipped' "$out"   'CSL_AUTO_MODE=0 visibly skips classifier startup'
-assert_no_grep 'auto-mode: ON' "$out" 'the opt-out is not overridden by the new default'
+assert_grep 'auto-mode: off' "$out" 'CSL_AUTO_MODE_STATE=2 shows off in the menu'
+assert_no_grep 'auto-mode: blind-trust' "$out" 'the opt-out is not overridden by the new default'
+# State 1 = classifier
+out="$(
+  printf 'q\n' |
+    HOME="$SB/home" \
+    CSL_AUTO_MODE_STATE=1 \
+    CSL_LAUNCHER="$SB/bin/stub-launcher" \
+    CSL_TEST_RESULT="$SB/auto-class-result" \
+      bash "$SB/bin/csl" 2>&1
+)"
+assert_grep 'auto-mode: classifier' "$out" 'CSL_AUTO_MODE_STATE=1 shows classifier in the menu'
 
-echo "== 6. the launcher RECEIVES the auto-mode default, not just the menu text =="
+echo "== 6. the launcher RECEIVES the auto-mode default (blind-trust), not just the menu text =="
 rm -f "$SB/auto-launch-result"
 run_csl '1\n' "$SB/auto-launch-result" >/dev/null
-assert_grep 'alpha|high|auto=1' "$(cat "$SB/auto-launch-result" 2>/dev/null)" \
-  'a default launch hands the launcher LA_AUTO_MODE=1'
+assert_grep 'alpha|high|auto=1|blind=1|' "$(cat "$SB/auto-launch-result" 2>/dev/null)" \
+  'default blind-trust launch hands LA_AUTO_MODE=1 LA_BLIND_AUTO=1'
 
-echo "== 7. pressing a turns the ON default off, all the way to the launcher =="
-rm -f "$SB/auto-toggled-result"
-run_csl 'a\n1\n' "$SB/auto-toggled-result" >/dev/null
-assert_grep 'alpha|high|auto=0' "$(cat "$SB/auto-toggled-result" 2>/dev/null)" \
-  'the a toggle reaches the launcher as LA_AUTO_MODE=0'
+echo "== 7. pressing a cycles blind-trust→classifier, all the way to the launcher =="
+rm -f "$SB/classifier-launch-result"
+run_csl 'a\n1\n' "$SB/classifier-launch-result" >/dev/null
+assert_grep 'alpha|high|auto=1|blind=0|' "$(cat "$SB/classifier-launch-result" 2>/dev/null)" \
+  'a cycles state 0→1: LA_AUTO_MODE=1 LA_BLIND_AUTO=0'
 
-echo "== 8. telemetry suppression reaches the launcher, and can be opted back in =="
+echo "== 7b. pressing a again cycles classifier→off, all the way to the launcher =="
+rm -f "$SB/off-launch-result"
+run_csl 'a\na\n1\n' "$SB/off-launch-result" >/dev/null
+assert_grep 'alpha|high|auto=0' "$(cat "$SB/off-launch-result" 2>/dev/null)" \
+  'a cycles state 1→2: LA_AUTO_MODE=0 (blind flag irrelevant)'
+
+echo "== 7c. pressing a third time cycles off→blind-trust =="
+rm -f "$SB/blind-back-launch-result"
+run_csl 'a\na\na\n1\n' "$SB/blind-back-launch-result" >/dev/null
+assert_grep 'alpha|high|auto=1|blind=1|' "$(cat "$SB/blind-back-launch-result" 2>/dev/null)" \
+  'a cycles state 2→0: back to blind-trust'
+
+echo "== 8. the b shortcut jumps straight to blind-trust, regardless of current state =="
+rm -f "$SB/blind-shortcut-result"
+run_csl 'a\na\nb\n1\n' "$SB/blind-shortcut-result" >/dev/null
+assert_grep 'alpha|high|auto=1|blind=1|' "$(cat "$SB/blind-shortcut-result" 2>/dev/null)" \
+  'b shortcut from state 2 reaches launcher as LA_AUTO_MODE=1 LA_BLIND_AUTO=1'
+
+echo "== 11. telemetry suppression reaches the launcher, and can be opted back in =="
 rm -f "$SB/telemetry-result"
 run_csl '1\n' "$SB/telemetry-result" >/dev/null
-assert_grep 'telemetry=0' "$(cat "$SB/telemetry-result" 2>/dev/null)" \
+assert_grep '|telemetry=0' "$(cat "$SB/telemetry-result" 2>/dev/null)" \
   'a default launch hands the launcher LA_TELEMETRY=0'
 out="$(
   printf 'q\n' |
@@ -170,11 +204,16 @@ out="$(
 )"
 assert_grep 'telemetry: ON' "$out" 'CSL_TELEMETRY=1 opts back in by default'
 
-echo "== 9. pressing t flips telemetry, all the way to the launcher =="
+echo "== 12. pressing t flips telemetry, all the way to the launcher =="
 rm -f "$SB/telemetry-toggled"
 run_csl 't\n1\n' "$SB/telemetry-toggled" >/dev/null
-assert_grep 'telemetry=1' "$(cat "$SB/telemetry-toggled" 2>/dev/null)" \
+assert_grep '|telemetry=1' "$(cat "$SB/telemetry-toggled" 2>/dev/null)" \
   'the t toggle reaches the launcher as LA_TELEMETRY=1'
+
+echo "== 10. install choice opens key setup and returns to menu =="
+out="$(run_csl 'i\nq\n' "$SB/setup-no-launch")"
+assert_grep 'i) install / set up remote API keys' "$out" 'key setup is discoverable in the main menu'
+assert_grep 'KEY_SETUP_REACHED' "$out" 'install choice reaches setup without launching a session'
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

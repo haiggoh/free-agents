@@ -3,6 +3,7 @@
 #
 #   csl              -> interactive picker (all available models, effort override, watcher toggle)
 #   csl roles        -> disk-aware role resolver (which on-disk model fills each role)
+#   csl remote [args...] -> remote picker, alias, --list, --verify, or --include-trials
 #   csl <args...>    -> passed straight through to the launcher, unchanged (no picker, no watcher)
 #
 # WHY the picker offers free model×effort and not just presets: dispatching local models as
@@ -22,6 +23,24 @@ LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 WATCHER="$CSL_DIR/local-watch.sh"
 
 if [ "${1:-}" = "roles" ]; then shift; exec "$CSL_DIR/la-roles.sh" "$@"; fi
+if [ "${1:-}" = "setup-remote" ]; then
+  shift
+  exec python3 "$CSL_DIR/../install/setup-api-keys.py" "$@"
+fi
+if [ "${1:-}" = "remote" ]; then
+  shift
+  exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" "$@"
+fi
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  printf '%s\n' 'csl: choose a local or remote Claude Code session.' \
+    'Usage: csl | csl roles [args] | csl remote [alias/options] | csl <local-launcher args>' \
+    'Remote help: csl remote --help; include Cerebras: csl remote --include-trials' \
+    'Key setup: csl setup-remote [providers] | csl setup-remote --list (no API calls)' \
+    'Environment: CSL_LAUNCHER, CSL_REMOTE_LAUNCHER override launchers; CSL_WATCH,' \
+    'CSL_AUTO_MODE_STATE (0=blind-trust,1=classifier,2=off), CSL_TELEMETRY control local picker defaults.' \
+    'For local launcher details: launch-claude-agent.sh --help'
+  exit 0
+fi
 # shellcheck source=/dev/null
 . "$CSL_DIR/../config/config-lib.sh"
 la_load_config || exit 1
@@ -43,24 +62,23 @@ _apply_session_profile() {
   fi
 }
 
-# Auto-mode toggle state. When ON, the launcher runs `claude --permission-mode auto` instead of
-# `acceptEdits`, so every consequential Bash call is judged by the separate safety-classifier
-# routed to the selected local Auto Mode runtime. A verified cached
-# classifier fixture normally starts quickly; a first, expired, changed, or
-# unhealthy fixture requires a transparent cold refresh before Claude opens.
-# The toggle is inherited via LA_AUTO_MODE=1.
+# Auto-mode triple-toggle state. Three mutually exclusive states cycle with `a`:
 #
-# Defaults ON since local classifier routing was verified end-to-end (2026-09-05): the local server
-# logged the classifier arriving as `model='claude-sonnet-5' ... served by loaded engine`, with no
-# request to the cloud gateway, and the judged action then ran. Auto mode is the better default
-# BECAUSE the classifier is local — it costs $0 and cannot be taken away by a cloud 429 or a spent
-# budget, which is the whole reason a local session exists. Turn it off with `a`, or set
-# CSL_AUTO_MODE=0 to opt out by default.
+#   0 = blind-trust   → --permission-mode auto, NO classifier in the loop. Every consequential
+#                       call is routed directly to auto. This is the DEFAULT because the genuine
+#                       classifier emulation path is not yet working reliably; blind-trust gives
+#                       auto-mode behaviour immediately without waiting for a classifier server.
+#   1 = classifier    → --permission-mode auto, boots a second local model to judge auto-mode
+#                       calls. The real auto mode — requires the classifier warm-up path.
+#   2 = off           → --permission-mode acceptEdits. No auto-mode behaviour at all.
 #
-# Startup behavior is explicit: cached classifier readiness is fast; a
-# genuine cold refresh can take several minutes and shows elapsed progress.
-# Auto Mode OFF skips classifier loading, capture, replay, and verification.
-AUTO_MODE="${CSL_AUTO_MODE:-1}"
+# Defaults to 0 (blind-trust). Cycle: blind-trust → classifier → off → blind-trust.
+# The launcher maps these to LA_AUTO_MODE and LA_BLIND_AUTO:
+#   state=0 → LA_AUTO_MODE=1 LA_BLIND_AUTO=1
+#   state=1 → LA_AUTO_MODE=1 LA_BLIND_AUTO=0
+#   state=2 → LA_AUTO_MODE=0 (LA_BLIND_AUTO is irrelevant)
+# Environment overrides: CSL_AUTO_MODE_STATE=<0|1|2> sets the initial state directly.
+AUTO_MODE_STATE="${CSL_AUTO_MODE_STATE:-0}"
 
 # Telemetry state. OFF by default: the point of a local session is that the work stays on this
 # machine, and a session that still reports to Statsig/Sentry and polls for updates is not that.
@@ -128,6 +146,29 @@ _pick_from() {   # $1=prompt  $2=default index (1-based)  rest=items -> echoes c
   echo "$c"
 }
 
+# ☁️  REMOTE cloud-API agents are a DELIBERATELY SEPARATE list from the local models
+# above: a remote agent runs on a third party's hardware over the network, with a
+# different cost model (free-tier quota, not free compute) and a different privacy
+# posture (prompts leave this machine). Mixing them into one menu would make those
+# two very different choices look interchangeable, so `r` opens its own roster.
+_remote_launcher() { echo "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}"; }
+
+_launch_remote() {  # opens the remote roster and hands off; never returns on success
+  local rl; rl="$(_remote_launcher)"
+  if [ ! -x "$rl" ]; then
+    echo "csl: remote session launcher not found or not executable: $rl" >&2
+    return 1
+  fi
+  exec "$rl"
+}
+
+# Map the triple-toggle state to the env vars launch-claude-agent.sh expects.
+# State 0 (blind-trust)  → LA_AUTO_MODE=1 LA_BLIND_AUTO=1
+# State 1 (classifier)   → LA_AUTO_MODE=1 LA_BLIND_AUTO=0
+# State 2 (off)          → LA_AUTO_MODE=0
+_la_auto_mode_val() { [ "$AUTO_MODE_STATE" = "2" ] && echo 0 || echo 1; }
+_la_blind_auto_val() { [ "$AUTO_MODE_STATE" = "0" ] && echo 1 || echo 0; }
+
 _launch() {  # $1=alias  $2=effort(optional)
   local alias="$1" effort="${2:-}"
   _apply_session_profile "$alias"
@@ -146,7 +187,14 @@ OSA
       echo "👁  watcher (run in another terminal): $WATCHER --attach $$"
     fi
   fi
-  if [ -n "$effort" ]; then exec env LA_AUTO_MODE="$AUTO_MODE" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias" "$effort"; else exec env LA_AUTO_MODE="$AUTO_MODE" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias"; fi
+  local _am _ba
+  _am="$(_la_auto_mode_val)"
+  _ba="$(_la_blind_auto_val)"
+  if [ -n "$effort" ]; then
+    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias" "$effort"
+  else
+    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias"
+  fi
 }
 
 while :; do
@@ -159,10 +207,16 @@ while :; do
   done
   echo
   echo "  c) choose a listed model × custom effort"
+  echo "  r) ☁️  remote API agents (choose provider/model; account quotas apply)"
+  echo "     Cerebras trial opt-in: csl remote --include-trials"
+  echo "  i) install / set up remote API keys"
   if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
-  if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — cached startup is quick; cold refresh may take several minutes (toggle)"
-  else                           echo "  a) auto-mode: OFF — acceptEdits; classifier startup skipped (toggle)"; fi
+  case "$AUTO_MODE_STATE" in
+    0) echo "  a) auto-mode: blind-trust — auto with no classifier (cycle: blind→classifier→off)" ;;
+    1) echo "  a) auto-mode: classifier  — auto with local classifier (cycle: blind→classifier→off)" ;;
+    2) echo "  a) auto-mode: off         — acceptEdits; no classifier (cycle: blind→classifier→off)" ;;
+  esac
   if [ "$TELEMETRY" = "1" ]; then echo "  t) telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
   else                            echo "  t) telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
   echo "  q) quit"
@@ -170,8 +224,11 @@ while :; do
   printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
   case "$sel" in
     q|Q) exit 0 ;;
+    i|I) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
+    r|R) _launch_remote || continue ;;
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
-    a|A) if [ "$AUTO_MODE" = "1" ]; then AUTO_MODE=0; else AUTO_MODE=1; fi; continue ;;
+    a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
+    b|B) AUTO_MODE_STATE=0; continue ;;  # b shortcut: jump straight to blind-trust
     t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
     c|C)
       echo >&2
