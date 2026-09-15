@@ -17,7 +17,45 @@ LA_REMOTE_AGENTS=(
   # Catalogs checked 2026-09-14. Newly added rows are CATALOG ONLY: no generation
   # probes were spent. Historical tool checks are identified individually below.
 
-  # --- Gemini: primary free lane; largest renewing quota, best tool-calling
+  # ════════════════════════════════════════════════════════════════════════════════
+  # ★ TIER 1 — NVIDIA NIM: THE PREFERRED REMOTE LANE. Listed first, and first is the
+  # Enter-default in every picker that reads this roster in order.
+  #
+  # WHY IT LEADS, and why this is evidence and not enthusiasm: the rate limits are very
+  # generous and there is no known DAILY quota — the constraint other providers hit first
+  # and hardest. The operator has run several successful sessions here across different
+  # models (reported 2026-09-15).
+  #
+  # The one real downside was NIM reasoning models returning `reasoning_content`, which is
+  # not an Anthropic thinking block — the translation layer died with "Content block is not
+  # a thinking block" and took the session's endpoint with it. FIXED: write_proxy_config now
+  # sends chat_template_kwargs.enable_thinking=false for nvidia unless thinking is asked for.
+  # That fix is a PREREQUISITE of this promotion; without it the default lane breaks sessions.
+  #
+  # ⚠️ Tier stays `unknown` deliberately — NVIDIA throttles unpredictably and publishes no
+  # per-account quota, so `renewing_free` would be a promise the provider does not make.
+  # Leading the roster is about PREFERENCE ORDER, not about a billing guarantee.
+  # ⚠️ NVIDIA's catalog reports tools:"unknown" for EVERY row, so tool capability cannot be
+  # read from the catalog — a new row here is catalog-only until a real tool session proves it.
+  # ════════════════════════════════════════════════════════════════════════════════
+  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|★ PREFERRED DEFAULT. VERIFIED chat+tools, and sessions run successfully on this lane. Reasoning disabled at the backend so the thinking-block failure cannot recur."
+  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|Largest NIM model. Catalog-listed; reasoning disabled like its Super sibling."
+  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|Catalog-listed 2026-09-15. Strong coding/agentic reputation; tool use unproven on this route."
+  "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|Catalog-listed 2026-09-15. Predecessor to K3, kept for A/B."
+  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4-flash-0731|NVIDIA DeepSeek V4 Flash|unknown|Catalog-listed 2026-09-15. Fast DeepSeek lane; tool use unproven."
+  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|Catalog-listed 2026-09-15. GLM via NIM — distinct from the direct z.ai route and its billing."
+  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|Catalog-listed 2026-09-15. Small/fast MoE for utility work."
+  "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|Catalog-listed 2026-09-15. Cheapest Nemotron tier."
+  "nvidia-gemma4|nvidia|google/gemma-4-31b-it|NVIDIA Gemma 4 31B|unknown|Catalog-listed 2026-09-15. Gemma weights without a Gemini daily quota."
+  "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|Catalog-listed 2026-09-15. Tool use unproven."
+  "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|Catalog-listed 2026-09-15. Code-oriented; tool use unproven."
+  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|Second NIM lane when Nemotron is throttled."
+
+  # --- TIER 2 — Gemini: still VERIFIED for tool-calling, but DEMOTED from the default.
+  # The free quota is reached annoyingly fast, leaving little headroom to get real work
+  # done in one sitting (operator, 2026-09-15) — a lane you cannot finish a task on is not
+  # the right Enter-default however good its tool-calling is. Kept high because when it has
+  # quota it is the best-behaved of the free lanes.
   "gemini-flash|gemini|gemini-3.6-flash|Gemini 3.6 Flash|renewing_free|VERIFIED. Primary free lane, fast, solid tool use. Thinking off for latency."
   "gemini-flash-thinking|gemini|gemini-3.6-flash|Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning."
   "gemini-3.8-flash|gemini|gemini-3.8-flash|Gemini 3.8 Flash|renewing_free|Catalog only. Separate selection from 3.6; account quotas apply. Thinking off."
@@ -29,11 +67,6 @@ LA_REMOTE_AGENTS=(
   "groq-oss20|groq|openai/gpt-oss-20b|Groq gpt-oss-20b|renewing_free|Smaller/faster sibling for utility work."
   "groq-qwen36|groq|qwen/qwen3.6-27b|Groq Qwen 3.6 27B|renewing_free|Catalog only; account quotas apply."
   "groq-qwen38|groq|qwen/qwen3.8-27b|Groq Qwen 3.8 27B|renewing_free|Catalog only; account quotas apply."
-
-  # --- NVIDIA hosted NIM: broad catalogue, limits dynamic
-  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|VERIFIED chat+tools. Largest verified free lane; NVIDIA throttles unpredictably."
-  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|Second NIM lane when Nemotron is throttled."
-  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra|unknown|Catalog only; account quota and billing not verified."
 
   # --- OpenRouter: explicit free router or zero-priced, tool-capable catalog rows
   "openrouter-free|openrouter|openrouter/free|OpenRouter free router|renewing_free|Catalog only. Routes among free models; account limits still apply."

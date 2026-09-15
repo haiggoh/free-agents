@@ -4,6 +4,7 @@
 Usage: python3 tests/test_remote_session.py [-v] [test names]
 Environment: none required; HOME, PATH and credential paths are isolated.
 """
+import itertools
 import json
 import os
 from pathlib import Path
@@ -77,7 +78,21 @@ sys.exit(int(os.environ['CURL_CODE']))
 
     def test_roster_and_all_provider_dry_runs(self):
         rows = self.roster()
-        self.assertEqual(rows[0][0], 'gemini-flash')
+        # ROW 1 IS THE ENTER-DEFAULT in every picker that reads this roster in order, so the
+        # first row is a deliberate product decision and is pinned as such. NVIDIA leads
+        # because its limits are generous with no known DAILY quota (the constraint that
+        # ends a Gemini working session), and because real sessions run on it. Changing
+        # this line should mean changing the preferred lane on purpose -- not drifting into it.
+        self.assertEqual(rows[0][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[0][1], 'nvidia')
+        # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
+        leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
+        self.assertGreaterEqual(len(leading), 12, 'the NVIDIA tier-1 block should lead the roster')
+        self.assertEqual(rows[len(leading)][1], 'gemini', 'Gemini should immediately follow the NVIDIA block')
+        # Kimi K3 was requested by name; assert the id, not merely that some kimi row exists.
+        self.assertEqual({r[0]: r[2] for r in rows}['nvidia-kimi-k3'], 'moonshotai/kimi-k3')
+        # (Reasoning-disabled-for-every-nvidia-row is asserted in
+        # test_proxy_config_all_models_and_thinking, which already walks the whole roster.)
         self.assertNotIn('github-models', [row[0] for row in rows])
         self.assertEqual(len(rows), len({row[0] for row in rows}))
         self.assertEqual({row[1] for row in rows}, {'gemini', 'groq', 'nvidia', 'openrouter', 'cloudflare', 'cerebras', *NEW_ROUTES})

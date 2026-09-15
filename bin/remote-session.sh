@@ -122,7 +122,7 @@ _visible() { # tier filter: hide trials unless asked
 
 print_list() {
     printf '\n\033[1m☁️  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n'
-    printf '  %-3s %-22s %-34s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
+    printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
     local i=0 e alias prov model disp tier keystate
     for e in "${LA_REMOTE_AGENTS[@]}"; do
         alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
@@ -130,7 +130,7 @@ print_list() {
         _visible "$tier" || continue
         i=$((i+1))
         if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
-        printf '  %-3s %-22s %-34s %-15s %s\n' "$i" "$alias" "$disp" "$tier" "$keystate"
+        printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$tier" "$keystate"
     done
     [[ $INCLUDE_TRIALS -eq 0 ]] && printf '\n  (trial-tier agents hidden — pass --include-trials to show them)\n'
     printf '\n  Local MLX models are a different list: use `csl` / launch-claude-agent.sh.\n\n'
