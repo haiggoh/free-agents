@@ -385,6 +385,14 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     # that truncated real replies during bring-up, so default it OFF.
     [[ "$prov" == "gemini" && "$thinking" != "true" ]] && \
         think_line='      thinking: {"type": "disabled"}'
+    # NVIDIA NIM reasoning models (Nemotron) put their reasoning in
+    # `reasoning_content`, which is NOT an Anthropic thinking block -- the
+    # translation layer then dies with "Content block is not a thinking block"
+    # and takes the whole session's endpoint with it. Turn reasoning off at the
+    # backend unless the caller explicitly asked for thinking.
+    [[ "$prov" == "nvidia" && "$thinking" != "true" ]] && \
+        think_line='      chat_template_kwargs:
+        enable_thinking: false'
 
     local key_env
     key_env="$("$KEYS" --names "$prov")" || return 1

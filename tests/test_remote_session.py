@@ -186,7 +186,11 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 self.assertEqual(text.count('      model: ' + prefixes[provider] + model + '\n'), 4)
                 self.assertEqual(cfg.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn('fixture-not-a-real-key', text)
-                self.assertEqual('thinking:' in text, provider == 'gemini' and thinking == 'false')
+                self.assertEqual('      thinking:' in text, provider == 'gemini' and thinking == 'false')
+                # NVIDIA NIM reasoning models must have reasoning disabled at the
+                # backend, or the Anthropic translation layer 500s the session.
+                self.assertEqual(text.count('        enable_thinking: false\n'),
+                                 4 if provider == 'nvidia' and thinking == 'false' else 0)
                 if provider == 'cloudflare':
                     self.assertIn('/accounts/' + 'a' * 32 + '/ai/v1', text)
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)
