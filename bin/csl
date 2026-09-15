@@ -159,7 +159,30 @@ _launch_remote() {  # opens the remote roster and hands off; never returns on su
     echo "csl: remote session launcher not found or not executable: $rl" >&2
     return 1
   fi
-  exec "$rl"
+
+  # Build arguments to pass through to remote-session.sh to match current CSL state
+  local remote_args=()
+
+  # Pass through watcher state
+  if [ "$WATCH" = "1" ]; then
+    remote_args+=("-w")
+  fi
+
+  # Pass through auto-mode state (cycle to match current state)
+  # We need to set the remote session's AUTO_MODE_STATE to match ours
+  # Since remote-session.sh cycles with -a, we apply the current state
+  local i=0
+  while [ $i -lt "$AUTO_MODE_STATE" ]; do
+    remote_args+=("-a")
+    i=$((i + 1))
+  done
+
+  # Pass through telemetry state
+  if [ "$TELEMETRY" = "1" ]; then
+    remote_args+=("-t")
+  fi
+
+  exec "$rl" "${remote_args[@]}"
 }
 
 # Map the triple-toggle state to the env vars launch-claude-agent.sh expects.

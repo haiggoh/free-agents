@@ -6,6 +6,12 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.13.13] — 2026-09-15
+
+Added CSL picker parity: remote session launcher now synchronizes watcher, auto-mode, and telemetry
+toggles with the CSL interactive menu state, providing identical interactive experience for local and
+remote sessions.
+
 ## [0.13.12] — 2026-09-14
 
 Blind-trust auto mode as the default, a full remote session lane on 14+ free cloud APIs, guided
