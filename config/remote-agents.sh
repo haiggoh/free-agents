@@ -56,10 +56,12 @@ LA_REMOTE_AGENTS=(
   # done in one sitting (operator, 2026-09-15) — a lane you cannot finish a task on is not
   # the right Enter-default however good its tool-calling is. Kept high because when it has
   # quota it is the best-behaved of the free lanes.
-  "gemini-flash|gemini|gemini-3.6-flash|Gemini 3.6 Flash|renewing_free|VERIFIED. Primary free lane, fast, solid tool use. Thinking off for latency."
+  # ★ 3.8 FIRST, preferred over 3.6 for as long as it stays available (operator, 2026-09-15).
+  # If 3.8 is withdrawn or starts erroring, 3.6 below is the fallback and is still VERIFIED.
+  "gemini-3.8-flash|gemini|gemini-3.8-flash|Gemini 3.8 Flash|renewing_free|★ PREFERRED Gemini. Catalog-listed; newer than 3.6. Thinking off for latency."
+  "gemini-3.8-flash-thinking|gemini|gemini-3.8-flash|Gemini 3.8 Flash (thinking)|renewing_free|Preferred Gemini, thinking ON — slower, stronger reasoning."
+  "gemini-flash|gemini|gemini-3.6-flash|Gemini 3.6 Flash|renewing_free|FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable."
   "gemini-flash-thinking|gemini|gemini-3.6-flash|Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning."
-  "gemini-3.8-flash|gemini|gemini-3.8-flash|Gemini 3.8 Flash|renewing_free|Catalog only. Separate selection from 3.6; account quotas apply. Thinking off."
-  "gemini-3.8-flash-thinking|gemini|gemini-3.8-flash|Gemini 3.8 Flash (thinking)|renewing_free|Catalog only. Provider default thinking enabled."
   "gemini-flash-lite|gemini|gemini-3.1-flash-lite|Gemini 3.1 Flash-Lite|renewing_free|VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use."
 
   # --- Groq: fastest tokens/sec of any free lane
