@@ -6,7 +6,142 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.13.12] — 2026-09-14
+
+Blind-trust auto mode as the default, a full remote session lane on 14+ free cloud APIs, guided
+API key setup, and a crash-recovery launcher for local servers.
+
+⚠️ **CAVEAT — remote APIs are EXPERIMENTAL.** So far Gemini is the only remote agent API that is
+properly tested and proven to work. The other remote APIs (Groq, NVIDIA, OpenRouter free tier,
+Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova,
+ModelScope) are still in the experimental stage — both for running their own session and for being
+used as agents for offloading work. They have offline fixture coverage and provider-key isolation
+tests, but no live quota-qualification or real-tool-use smoke tests. Use them at your own risk and
+report failures.
+
+⚠️ **CAVEAT — blind-trust auto mode.** Blind-trust is the NEW DEFAULT (state 0). It gives
+auto-mode behaviour immediately without waiting for a classifier server — every consequential
+call is routed directly to auto. This is the default because the genuine classifier emulation path
+is not yet reliable. If you want the classifier in the loop, toggle to state 1 (`classifier`) in
+the `csl` picker or set `CSL_AUTO_MODE_STATE=1`. State 2 turns auto mode off entirely
+(`acceptEdits`). The `b` key remains as a shortcut to jump straight to blind-trust from any state.
+
+### Added
+
+- **Blind-trust auto mode as the default.** The `csl` picker now uses a triple-toggle for auto
+  mode state, cycling through three mutually exclusive options with `a`:
+  - **0 = blind-trust** (DEFAULT): `--permission-mode auto`, NO classifier in the loop. Every
+    consequential call is routed directly to auto. This is the default because the genuine
+    classifier emulation path is not yet working reliably; blind-trust gives auto-mode behaviour
+    immediately without waiting for a classifier server.
+  - **1 = classifier**: `--permission-mode auto`, boots a second local model to judge auto-mode
+    calls. The real auto mode — requires the classifier warm-up path.
+  - **2 = off**: `--permission-mode acceptEdits`. No auto-mode behaviour at all.
+  - **`b` shortcut**: jumps straight to blind-trust from any state.
+  - Environment override: `CSL_AUTO_MODE_STATE=0|1|2` sets the initial state directly.
+  - The launcher maps state→env: `0` → `LA_AUTO_MODE=1 LA_BLIND_AUTO=1`, `1` →
+    `LA_AUTO_MODE=1 LA_BLIND_AUTO=0`, `2` → `LA_AUTO_MODE=0`. A guard refuses
+    `LA_BLIND_AUTO=1` without `LA_AUTO_MODE=1` (that would silently pick acceptEdits,
+    contradicting the user's intent).
+  - Covered by `tests/test_csl_menu.sh` (8 new assertions including cycle verification and
+    launcher receipt).
+
+- **Remote session lane.** Launch a full Claude Code session on 14+ free cloud APIs: Gemini 3.8
+  Flash (standard/thinking), Groq Qwen 3.6/3.8, NVIDIA Nemotron 3 Ultra, explicit free OpenRouter
+  models, Cloudflare Workers AI routing, Cerebras GPT-OSS/Qwen (trial opt-in via
+  `csl remote --include-trials`), Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel AI Gateway,
+  SambaNova, and ModelScope. `csl remote` opens the picker directly, including on machines without
+  local models. Add keys with `csl setup-remote` (or press `i` in `csl`).
+  - **Caveat**: So far Gemini is the only remote agent API that is properly tested and proven to
+    work. The other APIs are still experimental — both for running their own session and for being
+    used as agents for offloading work. See above.
+  - Session routes for Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, and ModelScope
+    with explicit model selection and catalog metadata where supported. Only the selected credential
+    enters the proxy; provider keys are cleared from the Claude child. No hosted generation
+    qualification was run. Retired GitHub Models is removed from setup and the session picker.
+  - Catalog-only checks and offline fixture tests preserve provider generation quota. Cost labels
+    distinguish free allocations, trial access, and unverified account billing.
+  - `bin/remote-session.sh` — the session launcher; `bin/remote-keys.sh` — credential store;
+    `bin/remote_provider_core.py` — single source of provider truth;
+    `bin/remote_http.py` — OpenAI-compatible SSE transport;
+    `bin/remote-agent-dispatch.py` — remote lane dispatcher;
+    `bin/remote-provider-doctor.py` — read-only key/connectivity check.
+  - Docs: [`docs/remote-session/README.md`](docs/remote-session/README.md) and
+    [`docs/remote-session/setup.md`](docs/remote-session/setup.md).
+
+- **Remote emergency-fallback lane.** Keeps agent work moving after the daily Claude Code budget is
+  exhausted, using explicitly-approved free allowances as an emergency lane BEHIND the local MLX
+  stack — not as a replacement for it. Additive by construction: the existing local dispatch path
+  is untouched. With no remote key configured — the default — the whole lane is inert and the
+  router behaves as pure local-only.
+  - `bin/remote_provider_core.py` — provider truth (7 providers, tiers, Result record, classify)
+  - `bin/remote_http.py` — transport (OpenAI-compatible SSE on stdlib http.client)
+  - `bin/remote-agent-dispatch.py` — remote lane CLI
+  - `bin/remote-provider-doctor.py` — read-only key/connectivity check
+  - `bin/agent-fallback.py` — the router
+  - `bin/agent-handoff.py` — handoff between lanes
+  - `config/remote-providers.example.json` — env-var key name documentation
+  - `docs/remote-fallback/README.md`, `skills/continue-on-fallback/SKILL.md`
+  - `tests/remote/test_remote_fallback.py`
+
+- **Guided remote API key setup.** `install/setup-api-keys.py`, also available as `csl setup-remote`
+  or `i` in the main picker. Choose among 14 active providers, open official key pages, and paste
+  credentials into hidden terminal prompts. New keys use private flat files in `~/.api_keys`;
+  existing files are kept. A complete bracketed paste shows a green confirmation and advances
+  without Enter; duplicate pastes are not appended. Setup returns to the provider picker until
+  finished or all providers have credentials. This add-only wizard makes no API calls.
+  - Covered by `tests/test_setup_api_keys.py` (203 assertions).
+
+- **`bin/la-reboot.sh`** — restarts a CRASHED local model server in place: same port, same argv,
+  so a still-open Claude Code session reconnects on its next request with no exit, no `/resume`
+  and no context replay. Recovery previously meant exit → `la-evict` → new session → `/resume`,
+  paying for a full model reload *and* a context replay. This is the bandaid half of the recurring
+  Rapid D-METAL-CAP OOM; the climbing-residency root cause is tracked separately, and needing this
+  often is data for that investigation rather than a reason to automate it.
+  - It is the only script in this repo permitted to stop a server on the session port range, so
+    the guards are strict and tested: it acts on exactly one port, never a range; it requires
+    positive crash evidence (a failed completion probe, a dead listener, or a Metal/OOM log
+    signature) because liveness is not the test — an OOM-refusing Rapid server answers
+    `/v1/models` while failing every real request; a server that still completes a request is
+    refused unless `--force` is passed; and the argv is captured from the live process via
+    `KERN_PROCARGS2` *before* anything is stopped, rather than from `ps` (whose space-joined
+    output corrupts any argument containing a space) or from current config (which may have
+    changed since launch). Ships `--status`, `--dry-run`, `--force`, `--port`, `--wait` and
+    `--help`, with documented exit codes 0/1/2/3.
+  - Covered by `tests/test_la_reboot.sh` (25 checks) including an end-to-end stop-and-relaunch
+    against a fixture server that refuses completions, argv fidelity for an argument containing a
+    space, and mutation-tested: disabling the healthy-server refusal lets a working server be
+    rebooted.
+
+### Fixed
+
+- `la-reboot.sh`: fix the unterminated model-list quote that failed after relaunch; preserve
+  captured working directory/runtime settings, report exec failures, and require an actual
+  Anthropic completion before declaring recovery. Preserve metadata permissions and refuse
+  authentication failures as crash evidence.
+
+- `la-reboot` readiness parsed `"id":"…"` without tolerating whitespace after the colon, so a
+  server that pretty-prints its `/v1/models` payload was reported "not ready" while actually
+  serving. Found by running the script against a real server. The same tight pattern exists in
+  `local-llm-hotswap.sh`, `la-ram-preflight.sh` and `launch-claude-agent.sh`; those are not
+  changed here because Rapid emits compact JSON, but they carry the same latent brittleness.
+
+- **Remote session proxy leak fixed.** The EXIT trap could never fire: `exec` REPLACES the shell,
+  so the trap set immediately before it was discarded with the process. Measured consequence —
+  orphaned litellm proxies holding ports, each new run silently landing on the next free port until
+  the band would have been exhausted. Fix: run `claude` as a child instead of exec'ing it, then
+  tear down the proxy this run owns. The trap now covers INT/TERM/HUP too.
+  - Hardened: `_is_our_proxy` confirms the process is really litellm started from our own config
+    path before signalling it; `stop_proxy` declares its parameters defensively; `nullglob` in
+    stop_proxy prevents unmatched globs from being iterated as literal filenames.
+  - Also adds a SOFT, optional link to the brief-agents plugin: when
+    `~/.claude/agent-briefing-index.md` exists, the remote model is told to read it before its
+    first consequential action. Kept as a POINTER rather than an inlined copy — the index is
+    ~11KB and re-sending it every turn would waste a quota-limited free lane.
+
 ## [Unreleased]
+
+Nothing awaiting a number.
 
 ### Added
 

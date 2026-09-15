@@ -20,14 +20,34 @@ and with wrapped launchers.
 ## Project documentation
 
 - [Changelog](CHANGELOG.md) — release history and current unreleased work
+- [Remote API sessions](docs/remote-session/README.md) — launch full Claude Code sessions on 14+ free cloud APIs (Gemini, Groq, NVIDIA, etc.)
+- [Remote API key setup](docs/remote-session/setup.md) — guided credential installation
+- [Remote emergency fallback](docs/remote-fallback/README.md) — keep working when the daily budget is exhausted
+- [Roadmap](docs/ROADMAP.md) — specced but not shipped; release gates; deliberately deferred
 
-## Two ways to use it
+## Three ways to use it
 
 **1. Offload sub-tasks from your cloud session — recommended, what most people want.**
 Keep driving with your cloud model (Opus/Sonnet). Dispatch bounded sub-tasks to a local model via
 `curl` / `librarian-dispatch.py` / `hotswap` — fast (sub-second to seconds), free, private. Nothing
 about your main session changes; you're just sending the delegatable parts to local compute. This
 saves cost for **anyone**, whether or not you have a spending cap.
+
+**2. Run a full local Claude Code session — for cost/budget-constrained stretches or offline work.**
+Run an entire Claude Code session on a local model (served under a spoofed Claude id so the client
+accepts it). Useful when you want zero cloud cost for a block of work, or you're offline. Trade-off:
+interactive turns on a local model are slower than a cloud model, so most users won't want this as
+their default — reach for it when the cost saving is worth the latency.
+
+**3. Run a full remote Claude Code session — when local compute is unavailable or you want a
+different model.** Launch on Gemini, Groq, NVIDIA, OpenRouter free tier, Cloudflare Workers AI,
+Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, or ModelScope. Usage goes to
+the selected provider, with its own quota and billing. Add keys with `csl setup-remote` or press
+`i` in `csl`. Use `csl remote` to open the picker. See [Remote API sessions](docs/remote-session/README.md).
+
+> ⚠️ **Remote APIs are EXPERIMENTAL.** So far Gemini is the only remote agent API that is properly
+> tested and proven to work. The other APIs are still in the experimental stage — both for running
+> their own session and for being used as agents for offloading work.
 
 **2. Full local mode — niche, for cost/budget-constrained stretches.**
 Run an *entire* Claude Code session on a local model (served under a spoofed Claude id so the client
@@ -193,7 +213,8 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   **already crashed**. It restarts the *same* model on the *same* port with the *same* arguments, so
   a still-open Claude Code session reconnects on its next request — no exit, no `/resume`, no context
   replay. Recovery used to be exit → `la-evict` → new session → `/resume`, which pays for a full
-  model reload *and* a context replay.
+  model reload *and* a context replay. This is the bandaid half of the recurring Rapid D-METAL-CAP
+  OOM; the climbing-residency root cause is tracked separately.
 
   It is the **only** script here allowed to stop a server on the session port range, so the guards
   are strict. It acts on exactly one port (never a range). It requires positive evidence of a crash —
@@ -556,7 +577,7 @@ next section for what that actually buys and what it costs.
 Telemetry is **off by default** — toggle it with `t`, or set `CSL_TELEMETRY=1` to keep stock
 behaviour. See [A local session that is actually local](#a-local-session-that-is-actually-local).
 
-### Auto Mode with a local classifier
+### Auto Mode with a local classifier (triple-toggle)
 
 Claude Code's Auto Mode judges each consequential tool call with a **separate safety classifier**,
 independent of the model you picked for the session. On a cloud-routed session that classifier is a
@@ -564,8 +585,22 @@ cloud request, which is why a rate-limit or a spent budget used to take Auto Mod
 you had fallen back to local work. Because a local session points `ANTHROPIC_BASE_URL` at your own
 server, the classifier request follows it and is answered locally, for free.
 
-`csl` therefore launches with `--permission-mode auto` by default. Turn it off with `a` in the picker
-(or `CSL_AUTO_MODE=0`) and the launcher uses `acceptEdits` as before.
+`csl` launches with a **triple-toggle** for auto mode state (press `a` to cycle):
+
+| State | Key | Behavior | Use case |
+|---|---|---|---|
+| **0 = blind-trust** (DEFAULT) | `a` cycles here, or `b` jumps here | `--permission-mode auto`, NO classifier in the loop. Every consequential call is routed directly to auto. | Default — gives auto-mode behaviour immediately without waiting for a classifier server. The genuine classifier path is not yet reliable. |
+| **1 = classifier** | `a` cycles here | `--permission-mode auto`, boots a second local model to judge auto-mode calls. | The real auto mode — requires the classifier warm-up path. |
+| **2 = off** | `a` cycles here | `--permission-mode acceptEdits`. No auto-mode behaviour. | Turn auto mode off entirely. |
+
+Environment override: `CSL_AUTO_MODE_STATE=0|1|2` sets the initial state directly.
+The launcher maps state→env: `0` → `LA_AUTO_MODE=1 LA_BLIND_AUTO=1`, `1` →
+`LA_AUTO_MODE=1 LA_BLIND_AUTO=0`, `2` → `LA_AUTO_MODE=0`.
+
+⚠️ **Blind-trust is the NEW DEFAULT.** It gives auto-mode behaviour immediately without waiting
+for a classifier server — every consequential call is routed directly to auto. This is the default
+because the genuine classifier emulation path is not yet reliable. If you want the classifier in
+the loop, toggle to state 1 (`classifier`) in the `csl` picker or set `CSL_AUTO_MODE_STATE=1`.
 
 **Verified 2026-09-05**, on `kat-coder-optiq` served by Rapid-MLX: the local server logged the
 classifier arriving under its own model identity and being answered by the loaded engine —
