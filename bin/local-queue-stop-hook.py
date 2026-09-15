@@ -20,7 +20,8 @@ WHAT IT DOES
   Fires on the `Stop` event (the model just finished a turn). Resolves THIS session's
   own transcript (deterministically, via CLAUDE_CODE_SESSION_ID + cwd-slug — the same
   mechanism budget-tally.py uses) and scans it for an UNCONSUMED queue-operation.
-  Own-transcript only: this is a global hook, so it must not sweep the project dir's
+  Own-transcript only: this is a plugin-scoped hook (local-agents), so it only fires
+  for sessions using the local-agents plugin. It must not sweep the project dir's
   sibling sessions (their dead queue history is not this session's queue — see
   session_transcripts).
 
@@ -57,8 +58,9 @@ WHAT IT DOES
       it blocks and tells the model to respond to the queued prompt.
 
 GATING — local only (the user's requirement)
-  A global `~/.claude/settings.json` hook fires for EVERY session, including paid cloud
-  ones, so this must be a no-op on cloud. We gate on the ENDPOINT, not CLAUDE_IS_LOCAL:
+  This is a PLUGIN-SCOPED Stop hook (local-agents). It only fires for sessions using
+  the local-agents plugin (local/remote sessions), not for regular cloud/gateway
+  sessions. We still gate on the ENDPOINT as defense-in-depth:
     * `CLAUDE_IS_LOCAL` LEAKS — it is exported by the launcher and can persist into a
       later `claude` launched from the same shell that is actually a gateway session,
       so it is a false-positive source. (Memory: local-session-self-identification.)
@@ -102,12 +104,13 @@ TRANSCRIPT RESOLUTION — prefer the payload, fall back to the slug
   decide. The loop guard is what keeps that race from compounding — a stale read can cost
   one spurious block, never a spin.
 
-  Own transcript only — this is a global hook, so it must NOT sweep the project dir's
-  sibling sessions (their dead queue history is not this session's queue; see
-  session_transcripts()).
+  Own transcript only — this is a plugin-scoped hook (local-agents), so it only fires
+  for sessions using the local-agents plugin (local/remote sessions). It must NOT sweep
+  the project dir's sibling sessions (their dead queue history is not this session's
+  queue; see session_transcripts()).
 
-This file is machine-local: it ships in ~/.claude/scripts/ and is referenced from
-~/.claude/settings.json `hooks.Stop`. It is NOT part of a published plugin.
+This file is part of the local-agents plugin. It is installed via the plugin system
+and referenced from hooks/hooks.json using ${CLAUDE_PLUGIN_ROOT}/bin/local-queue-stop-hook.py.
 """
 import hashlib
 import json
@@ -159,8 +162,8 @@ def session_transcripts(payload=None):
     re-deriving it is a chance to be wrong. The slug derivation below is the fallback for
     a bare invocation with no stdin.
 
-    OWN transcript ONLY. This hook is a GLOBAL ~/.claude/settings.json Stop hook, so it
-    fires in every local session regardless of project dir. Resolving to the session's
+    OWN transcript ONLY. This hook is a PLUGIN-SCOPED Stop hook (local-agents), so it
+    fires only for sessions using the local-agents plugin. Resolving to the session's
     own <session-id>.jsonl is therefore the only correct scope: a queued prompt in this
     session's queue is this session's state.
 
@@ -172,7 +175,7 @@ def session_transcripts(payload=None):
     but 9 other finished sessions carried 17 undrained net, and the global Stop hook
     reported a false "17 prompts queued" — waking a session that had nothing pending.
     (The sibling glob was originally meant for a resumed/compacted session whose on-disk
-    id differs from CLAUDE_CODE_SESSION_ID, but for a global hook that benefit is
+    id differs from CLAUDE_CODE_SESSION_ID, but for a plugin-scoped hook that benefit is
     outweighed many times over by the false-positive blast radius.)
     """
     tp = (payload or {}).get("transcript_path")

@@ -12,6 +12,16 @@ Added CSL picker parity: remote session launcher now synchronizes watcher, auto-
 toggles with the CSL interactive menu state, providing identical interactive experience for local and
 remote sessions.
 
+### Added
+
+- **Plugin-scoped Stop hook for queued prompt handling** (`local-queue-stop-hook.py`). Fires on
+  `Stop` for local/remote sessions (via local-agents plugin), detects both stale queues (prompts
+  never drained) and drained-but-unaddressed queues (zero response, tool-use only, coincidental
+  text). Uses deterministic `[[QUEUE_ANSWERED:<8-char-hash>]]` markers to track addressed prompts.
+  Includes `queue-marker-helper.py` for generating markers.
+
+## [0.13.12] — 2026-09-14
+
 ## [0.13.12] — 2026-09-14
 
 Blind-trust auto mode as the default, a full remote session lane on 14+ free cloud APIs, guided
