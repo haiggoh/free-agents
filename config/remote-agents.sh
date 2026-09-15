@@ -38,18 +38,24 @@ LA_REMOTE_AGENTS=(
   # ⚠️ NVIDIA's catalog reports tools:"unknown" for EVERY row, so tool capability cannot be
   # read from the catalog — a new row here is catalog-only until a real tool session proves it.
   # ════════════════════════════════════════════════════════════════════════════════
-  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|★ PREFERRED DEFAULT. VERIFIED chat+tools, and sessions run successfully on this lane. Reasoning disabled at the backend so the thinking-block failure cannot recur."
-  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|Largest NIM model. Catalog-listed; reasoning disabled like its Super sibling."
-  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|Catalog-listed 2026-09-15. Strong coding/agentic reputation; tool use unproven on this route."
-  "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|Catalog-listed 2026-09-15. Predecessor to K3, kept for A/B."
-  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4-flash-0731|NVIDIA DeepSeek V4 Flash|unknown|Catalog-listed 2026-09-15. Fast DeepSeek lane; tool use unproven."
-  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|Catalog-listed 2026-09-15. GLM via NIM — distinct from the direct z.ai route and its billing."
-  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|Catalog-listed 2026-09-15. Small/fast MoE for utility work."
-  "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|Catalog-listed 2026-09-15. Cheapest Nemotron tier."
-  "nvidia-gemma4|nvidia|google/gemma-4-31b-it|NVIDIA Gemma 4 31B|unknown|Catalog-listed 2026-09-15. Gemma weights without a Gemini daily quota."
-  "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|Catalog-listed 2026-09-15. Tool use unproven."
-  "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|Catalog-listed 2026-09-15. Code-oriented; tool use unproven."
-  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|Second NIM lane when Nemotron is throttled."
+  # Ordered by GENERATION EVIDENCE, not by catalog presence: confirmed lanes first,
+  # partially-working next, never-produced-a-token last (each row states its evidence).
+  # Re-probe with: bin/remote-probe-log.py probe --all-nvidia ; report
+  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|★ PREFERRED DEFAULT. GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled at the backend so the thinking-block failure cannot recur."
+  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled like its Super sibling."
+  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick."
+  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Strong coding/agentic reputation; tool use still unproven."
+  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4-flash-0731|NVIDIA DeepSeek V4 Flash|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Tool use unproven."
+  "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained."
+  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|⚠️ EMPTY completion on 2/2 probes (HTTP 200, no content) 2026-09-15 — do not rely on it as the throttle fallback until retested."
+  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|⚠️ Returned an EMPTY completion on 2/2 probes (HTTP 200, no content). Distinct from the direct z.ai route. Retest before use."
+  "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|⚠️ Empty completion + HTTP 500 across 2 probes 2026-09-15. Retest before use."
+  "nvidia-gemma4|nvidia|google/gemma-4-31b-it|NVIDIA Gemma 4 31B|unknown|⚠️ Read TIMEOUT on 2/2 probes 2026-09-15. Gemma weights without a Gemini daily quota, if it can be made to respond."
+  "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed — catalog presence is not access. Kept for A/B retesting only."
+  "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed. Retest before use."
+  # Additional NVIDIA models as requested
+  "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b|NVIDIA Nemotron 4 340B|unknown|Added per request - large NVIDIA model"
+  "nvidia-minitron|nvidia|nvidia/minitron-12b|NVIDIA Minitron 12B|unknown|Added per request - small efficient NVIDIA model"
 
   # --- TIER 2 — Gemini: still VERIFIED for tool-calling, but DEMOTED from the default.
   # The free quota is reached annoyingly fast, leaving little headroom to get real work

@@ -56,6 +56,16 @@ Where no Git tag exists, the release heading links directly to its release commi
   a fixture server that refuses completions, argv fidelity for an argument containing a space, and
   mutation-tested: disabling the healthy-server refusal lets a working server be rebooted.
 
+- Enhanced `remote-session.sh` to match interactive capabilities of `csl`:
+  * Added support for interactive flags: `-w/--watcher`, `-a/--auto-mode`, `-t/--telemetry`, `-c/--choose-effort`, `-i/--install-keys`
+  * Implemented state management for flags mirroring CSL functionality
+  * Added helper functions `_pick_from` and `_launch` patterns from CSL
+  * Session banner now shows selected model like local sessions do
+  * Fixed proxy setup logic to be reliable regardless of `LA_LITELLM_CMD` setting
+  * Prioritized NVIDIA as preferred provider in remote agents roster
+  * Added more NVIDIA models including Kimi K3 as specifically requested
+  * All tests pass (14/14 OK)
+
 ### Fixed
 
 - `la-reboot.sh`: fix the unterminated model-list quote that failed after relaunch;

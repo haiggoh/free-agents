@@ -20,8 +20,9 @@ and with wrapped launchers.
 ## Project documentation
 
 - [Changelog](CHANGELOG.md) — release history and current unreleased work
+- [Remote Sessions](docs/remote-fallback/README.md) — using remote cloud APIs (NVIDIA, Gemini, Groq) as free alternatives to Anthropic
 
-## Two ways to use it
+## Three ways to use it
 
 **1. Offload sub-tasks from your cloud session — recommended, what most people want.**
 Keep driving with your cloud model (Opus/Sonnet). Dispatch bounded sub-tasks to a local model via
@@ -34,6 +35,12 @@ Run an *entire* Claude Code session on a local model (served under a spoofed Cla
 accepts it). Useful mainly when you want zero cloud cost for a block of work, or you're offline.
 Trade-off: interactive turns on a local model are slower than a cloud model, so most users won't
 want this as their default — reach for it when the cost saving is worth the latency.
+
+**3. Remote cloud API sessions — zero cost via free provider tiers.**
+Run a full Claude Code session against free cloud APIs (NVIDIA, Gemini, Groq, etc.) using
+`remote-session.sh` as a drop-in replacement for Anthropic's paid gateway. Leverages LiteLLM
+proxying to translate Anthropic `/v1/messages` to provider APIs. Ideal for when local MLX models
+aren't sufficient or when you prefer cloud-based instant responsiveness. See [Remote Sessions](docs/remote-fallback/README.md) for details.
 
 ## How it works
 

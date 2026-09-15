@@ -47,7 +47,13 @@ class RemoteSessionTests(unittest.TestCase):
                         TMPDIR=str(self.root), LA_API_KEYS_DIR=str(self.root / 'keys'),
                         PATH=str(self.root / 'stubs') + ':' + os.environ['PATH'],
                         CATALOG=json.dumps({'data': []}), CURL_CODE='0',
-                        CURL_ARGV=str(self.root / 'curl-argv'))
+                        CURL_ARGV=str(self.root / 'curl-argv'),
+                        # The stubs are /bin/sh scripts, so the launcher's real path
+                        # (resolve the pipx interpreter, re-enter it without -E through
+                        # the trust wrapper) cannot apply to them. Point the launcher at
+                        # the stub as a complete command instead. The trust-wrapper path
+                        # itself is covered by tests/test_litellm_trust_shim.py.
+                        LA_LITELLM_CMD=str(self.root / 'stubs' / 'litellm'))
         self.stub('curl', '''#!/usr/bin/env python3
 import json,os,sys
 if '--help' in sys.argv:

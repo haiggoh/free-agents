@@ -103,3 +103,19 @@ The plan deliberately does **not** refactor `local-agent-dispatch.py` or
 `librarian-dispatch.py` — they are composed, not rewritten. Nothing here commits,
 pushes, publishes, or enables a provider on its own: enabling is a separate,
 explicit step.
+
+## The remote-session.sh alternative
+
+For a full interactive Claude Code session using remote free APIs (as opposed to
+dispatch-only sub-tasks), see the `bin/remote-session.sh` script. This provides
+a drop-in replacement for Anthropic's paid gateway with:
+
+- Interactive session support with full tool use
+- Provider selection including NVIDIA (preferred), Gemini, Groq, and others
+- Interactive flags matching `csl` (`-w` watcher, `-a` auto-mode, `-t` telemetry,
+  `-c` choose-effort, `-i` install-keys)
+- Session banner showing selected model like local sessions
+- NVIDIA prioritization due to generous rate limits and no known daily quota
+- Support for models like NVIDIA Nemotron 3 Super, Kimi K3, and more
+
+See `bin/remote-session.sh --help` for usage details.
