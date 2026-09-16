@@ -60,7 +60,6 @@ usage() {
     echo ""
     echo "Additional options:"
     echo "  -i, --install-keys    Install / set up remote API keys"
-    echo "  -w, --watcher         Toggle watcher: OFF — no monitor window"
     echo "  -a, --auto-mode       Toggle auto-mode: blind-trust → classifier → off"
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
@@ -521,13 +520,11 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
 # untouched (so `remote-session.sh gemini-flash -p "..." --allowedTools Read` works
 # exactly like it does for a normal claude invocation). `--` forces the rest through.
 PASSTHRU=()
-WATCHER_ENABLED=0
 AUTO_MODE_STATE=0  # 0=blind-trust, 1=classifier, 2=off
 TELEMETRY_ENABLED=0  # 0=off (no nonessential traffic), 1=on (stock behavior)
 SELECTED_EFFORT=""
 EFFORT_CHOICE=""
-EFFORT_CHOICE=""
-SELECTED_EFFORT=""
+PERMISSION_MODE="auto"   # resolved from AUTO_MODE_STATE below
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)        usage; exit 0 ;;
@@ -540,7 +537,15 @@ while [[ $# -gt 0 ]]; do
         --dry-run)        DRY_RUN=1; shift ;;
         --include-trials) INCLUDE_TRIALS=1; shift ;;
         -i|--install-keys) MODE="install-keys"; shift ;;
-        -w|--watcher)     WATCHER_ENABLED=$((WATCHER_ENABLED ^ 1)); shift ;;
+        -w|--watcher)
+            # Deliberately NOT a silent no-op. The remote watcher is deferred (it cannot
+            # stream live reasoning, which is the part that would make it useful — see
+            # ROADMAP / waypoint real-time-thinking-visibility). Accepting the flag and
+            # doing nothing is exactly the dead-switch class of bug this release removes.
+            echo "remote-session: -w/--watcher is not available for remote sessions yet" >&2
+            echo "  (deferred: a watcher without live reasoning output is not worth the window;" >&2
+            echo "   tracked in docs/ROADMAP.md). Local sessions still support it via csl." >&2
+            exit 2 ;;
         -a|--auto-mode)   AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); shift ;;
         -t|--telemetry)   TELEMETRY_ENABLED=$((TELEMETRY_ENABLED ^ 1)); shift ;;
         -c|--choose-effort)
@@ -586,35 +591,46 @@ if [[ -z "$ALIAS" ]]; then
     ALIAS="$(pick_alias)" || { echo "remote-session: nothing selected." >&2; exit 1; }
 fi
 
-# Handle interactive flags for launch mode (similar to CSL)
+# ---- interactive toggle resolution (launch mode) ---------------------------
+# These map the parsed toggles onto what `claude` and the environment actually read.
+# NOTE the history here: an earlier version of this file mapped the toggles inside a
+# `_launch()` helper that was NEVER CALLED, so `-a` and `-t` silently did nothing while
+# the picker advertised them. Anything that resolves a toggle must therefore sit on the
+# live path (the exec near the bottom of this file), not in a helper.
 if [[ "$MODE" == "launch" ]]; then
-    # Handle watcher toggle
-    if [[ "$WATCHER_ENABLED" -eq 1 ]]; then
-        if [[ "$(uname -s)" = "Darwin" ]]; then
-            # Open watcher window in Terminal (simplified version)
-            echo "👁  watcher: Would open monitoring window (not fully implemented for remote sessions)"
-        else
-            echo "👁  watcher: Enable monitoring (not fully implemented for remote sessions)"
-        fi
+    # Auto-mode state -> the flag `claude` actually reads.
+    #   0 = blind-trust  -> --permission-mode auto   (DEFAULT; no classifier in the loop)
+    #   1 = classifier   -> --permission-mode auto   (+ classifier, see below)
+    #   2 = off          -> --permission-mode acceptEdits
+    # Unlike a LOCAL session, remote-session.sh execs `claude` directly rather than going
+    # through launch-claude-agent.sh, so LA_AUTO_MODE/LA_BLIND_AUTO are NOT read by anyone
+    # here. We must pass --permission-mode ourselves; exporting those vars alone was the
+    # original bug. They are still exported for any child that inspects them.
+    case "$AUTO_MODE_STATE" in
+        0) PERMISSION_MODE="auto";        LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
+        1) PERMISSION_MODE="auto";        LA_AUTO_MODE=1; LA_BLIND_AUTO=0 ;;
+        2) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=0; LA_BLIND_AUTO=0 ;;
+    esac
+    export LA_AUTO_MODE LA_BLIND_AUTO
+
+    # The genuine classifier lane is not wired for remote yet. Say so rather than
+    # silently behaving like blind-trust, which is the failure mode this release fixes.
+    if [[ "$AUTO_MODE_STATE" -eq 1 ]]; then
+        echo "⚠️  auto-mode: classifier requested, but the remote classifier lane is not"
+        echo "    implemented yet — running blind-trust (auto) for this session. See ROADMAP."
     fi
 
-    # Map auto-mode state to environment variables (similar to CSL)
-    # State 0 (blind-trust)  → LA_AUTO_MODE=1 LA_BLIND_AUTO=1
-    # State 1 (classifier)   → LA_AUTO_MODE=1 LA_BLIND_AUTO=0
-    # State 2 (off)          → LA_AUTO_MODE=0
-    _la_auto_mode_val() { [ "$AUTO_MODE_STATE" = "2" ] && echo 0 || echo 1; }
-    _la_blind_auto_val() { [ "$AUTO_MODE_STATE" = "0" ] && echo 1 || echo 0; }
-
-    # Handle telemetry setting
+    # Telemetry must work in BOTH directions. The live path used to hardcode the
+    # suppression, so `-t` could never restore stock behaviour.
     if [[ "$TELEMETRY_ENABLED" -eq 1 ]]; then
-        # Stock Claude Code behavior - allow telemetry
         unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+        LA_REMOTE_TELEMETRY=1
     else
-        # No nonessential outbound traffic
         export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+        LA_REMOTE_TELEMETRY=0
     fi
-
-    fi
+    export LA_REMOTE_TELEMETRY
+fi
 
 # Helper function for picking from a list (similar to CSL)
 _pick_from() {
@@ -628,58 +644,6 @@ _pick_from() {
     echo "$c"
 }
 
-# Launch function for remote sessions (similar to CSL's _launch)
-_launch() {  # $1=alias  $2=effort(optional)
-    local alias="$1" effort="${2:-}"
-    # Apply session profile (simplified for remote)
-    # In a full implementation, this would load config and apply session-specific settings
-
-    # Handle watcher
-    if [[ "$WATCHER_ENABLED" -eq 1 ]]; then
-        if [[ "$(uname -s)" = "Darwin" ]]; then
-            echo "👁  watcher: Would open monitoring window (not fully implemented for remote sessions)"
-        else
-            echo "👁  watcher: Enable monitoring (not fully implemented for remote sessions)"
-        fi
-    fi
-
-    # Map auto-mode state to environment variables
-    _la_auto_mode_val() { [ "$AUTO_MODE_STATE" = "2" ] && echo 0 || echo 1; }
-    _la_blind_auto_val() { [ "$AUTO_MODE_STATE" = "0" ] && echo 1 || echo 0; }
-
-    # Handle telemetry setting
-    if [[ "$TELEMETRY_ENABLED" -eq 1 ]]; then
-        # Stock Claude Code behavior - allow telemetry
-        unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
-    else
-        # No nonessential outbound traffic
-        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-    fi
-
-    # Export auto-mode variables
-    export LA_AUTO_MODE="$(_la_auto_mode_val)"
-    export LA_BLIND_AUTO="$(_la_blind_auto_val)"
-
-    # Build the command to launch Claude Code
-    local claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
-
-    # Add effort if specified
-    if [[ -n "$effort" ]]; then
-        claude_cmd+=(--effort "$effort")
-    fi
-
-    # Add any passthrough arguments
-    if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
-        claude_cmd+=("${PASSTHRU[@]}")
-    fi
-
-    # Execute Claude Code
-    echo "Launching Claude Code with remote session..."
-    ( _clear_provider_env
-    "${claude_cmd[@]}" )
-
-    # The trap will handle teardown when Claude exits
-}
 
 # Handle effort selection if requested
 if [[ "$SELECTED_EFFORT" == "choose-effort" ]]; then
@@ -758,6 +722,25 @@ BANNER
 if [[ $DRY_RUN -eq 1 ]]; then
     echo "   DRY RUN  : would start a LiteLLM proxy and exec claude against it."
     echo "              nothing started, no network call made."
+    # Print the RESOLVED toggle state and the flags claude would actually receive.
+    # A dry run that stops before this point is how the dead-switch bugs stayed hidden:
+    # the toggles parsed, printed nothing, and were never applied. Showing the resolved
+    # values makes each switch verifiable by OUTCOME without launching anything.
+    case "$AUTO_MODE_STATE" in
+        0) _am_label="blind-trust (auto, no classifier)" ;;
+        1) _am_label="classifier requested → falls back to auto (lane not implemented)" ;;
+        2) _am_label="off (acceptEdits)" ;;
+    esac
+    echo
+    echo "   resolved toggles:"
+    echo "     auto-mode      : $_am_label"
+    echo "     permission-mode: --permission-mode $PERMISSION_MODE"
+    if [[ "${LA_REMOTE_TELEMETRY:-0}" -eq 1 ]]; then
+        echo "     telemetry      : ON  (stock Claude Code reporting)"
+    else
+        echo "     telemetry      : OFF (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1)"
+    fi
+    echo "     effort         : ${EFFORT_CHOICE:-<provider default>}"
     echo
     exit 0
 fi
@@ -841,8 +824,12 @@ _teardown() {
 }
 trap _teardown EXIT INT TERM HUP
 
-# Build Claude command with effort selection if specified
-local claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
+# Build Claude command with effort selection if specified.
+# NOT `local` — this is top-level scope. `local` outside a function makes bash print
+# "local: can only be used in a function" and return 1, yet STILL assign the array, so the
+# bug was invisible: the session launched correctly while emitting an error line.
+claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
+claude_cmd+=(--permission-mode "$PERMISSION_MODE")
 if [[ -n "$EFFORT_CHOICE" ]]; then
     claude_cmd+=(--effort "$EFFORT_CHOICE")
 fi

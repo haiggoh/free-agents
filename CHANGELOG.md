@@ -6,21 +6,46 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
-## [0.13.13] — 2026-09-15
+## [0.13.13] — 2026-09-16
 
-Added CSL picker parity: remote session launcher now synchronizes watcher, auto-mode, and telemetry
-toggles with the CSL interactive menu state, providing identical interactive experience for local and
-remote sessions.
+Fixes the remote-session interactive toggles, which were advertised in the picker but largely did
+not work. **No toggle in this project is allowed to be a dead switch**: it either changes the
+session's behaviour or it is removed and says so.
 
-### Added
+### Fixed
 
-- **Plugin-scoped Stop hook for queued prompt handling** (`local-queue-stop-hook.py`). Fires on
-  `Stop` for local/remote sessions (via local-agents plugin), detects both stale queues (prompts
-  never drained) and drained-but-unaddressed queues (zero response, tool-use only, coincidental
-  text). Uses deterministic `[[QUEUE_ANSWERED:<8-char-hash>]]` markers to track addressed prompts.
-  Includes `queue-marker-helper.py` for generating markers.
+- **`-a/--auto-mode` had no effect on remote sessions.** The toggle cycled its state and mapped it
+  onto `LA_AUTO_MODE`/`LA_BLIND_AUTO`, but those variables are read by `launch-claude-agent.sh`,
+  which a remote session never calls — and the mapping itself lived inside a `_launch()` helper that
+  was never invoked. `remote-session.sh` execs `claude` directly, so it now passes
+  `--permission-mode` itself. **Blind-trust (`auto`) remains the default**; two `-a` presses reach
+  `acceptEdits`. Requesting the classifier lane now prints that it is not implemented for remote and
+  falls back to `auto`, instead of silently behaving like blind-trust.
+- **`-t/--telemetry` could not restore stock behaviour.** The live launch path hardcoded
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, so remote telemetry was always suppressed and the
+  toggle only appeared to work. It is now honoured in both directions.
+- **A whole unreachable code path removed.** `_launch()` and a duplicated toggle-mapping block were
+  dead code; the live launch sits at the bottom of the script. Duplicated `EFFORT_CHOICE` /
+  `SELECTED_EFFORT` declarations removed.
+- **`local` at top-level scope.** `local claude_cmd=(...)` sat outside any function: bash prints
+  `local: can only be used in a function` and returns 1, yet still assigns the array — so sessions
+  launched correctly while emitting an error line, and `bash -n` never complained.
 
-## [0.13.12] — 2026-09-14
+### Changed
+
+- **`-w/--watcher` is no longer accepted for remote sessions.** It printed "not fully implemented"
+  and then launched anyway. Deferring the feature is fine; advertising it is not — it now exits 2
+  with an explanation, and `csl` no longer forwards it. The remote watcher is deferred because a
+  watcher that cannot stream live reasoning is not worth the window (see `docs/ROADMAP.md`).
+- **`--dry-run` now prints the resolved toggle state** (auto-mode, permission-mode, telemetry,
+  effort). A dry run that stopped before the command was built is how these bugs stayed invisible.
+
+### Testing
+
+- Three regression tests in `tests/test_remote_session.py` assert each toggle **by outcome** —
+  including the argv the real `claude` child receives, not merely the dry-run summary. That
+  distinction is load-bearing: a first version of the test asserted only on the printed summary and
+  **passed** when the `--permission-mode` line was mutated away. All three were mutation-tested.
 
 ## [0.13.12] — 2026-09-14
 
