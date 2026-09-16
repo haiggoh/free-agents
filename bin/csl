@@ -163,9 +163,10 @@ _launch_remote() {  # opens the remote roster and hands off; never returns on su
   # Build arguments to pass through to remote-session.sh to match current CSL state
   local remote_args=()
 
-  # Pass through watcher state
+  # Watcher is deliberately NOT passed through: remote-session.sh does not support it
+  # (deferred — see docs/ROADMAP.md). Forwarding it would make the remote launch exit 2.
   if [ "$WATCH" = "1" ]; then
-    remote_args+=("-w")
+    echo "note: watcher stays off for remote sessions (not supported yet); local sessions keep it." >&2
   fi
 
   # Pass through auto-mode state (cycle to match current state)

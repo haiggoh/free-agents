@@ -388,6 +388,117 @@ with open(os.environ['CLAUDE_RESULT'],'w') as f:
                 self.assertNotIn(secret, cfg + result.stdout + result.stderr)
         self.assertFalse(marker.exists())
 
+    def test_interactive_toggles_are_applied_not_merely_parsed(self):
+        """Every advertised toggle must change the RESOLVED launch state.
+
+        REGRESSION GUARD (the bug this replaces). `feat: enhance remote-session.sh to match
+        csl interactive capabilities` mapped the toggles inside a `_launch()` helper that was
+        NEVER CALLED, and the live path hardcoded its own values. So `-a` and `-t` parsed
+        cleanly, printed nothing, and did nothing: 4 of 6 advertised switches were dead.
+        A test that only asserted "the flag is accepted" passed throughout.
+
+        Therefore assert on the RESOLVED OUTCOME (the permission-mode/telemetry the session
+        would actually run with), never on parse success. Each case below fails if the
+        mapping is removed, which is what makes it a guard rather than decoration.
+        """
+        # THE STRONG ASSERTION: capture what the real `claude` process is invoked with.
+        # A dry-run print is NOT sufficient evidence -- verified by mutation: deleting the
+        # `claude_cmd+=(--permission-mode ...)` line left every dry-run assertion passing,
+        # because the summary and the command are built separately. Only the child's argv
+        # proves the flag reaches the session. Stubs mirror
+        # test_new_routes_reach_claude_with_literal_scoped_proxy_keys: lsof reports every
+        # port free and litellm exits immediately, otherwise the launch waits on a proxy
+        # that never becomes ready and the test hangs instead of failing.
+        self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture: all ports free"; exit 0; fi\nexit 1\n')
+        self.stub('litellm', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture proxy"; exit 0; fi\nsleep 2\n')
+        self.env['CLAUDE_ARGV'] = str(self.root / 'claude-argv')
+        self.stub('claude', """#!/usr/bin/env python3
+import json,os,sys
+if '--help' in sys.argv:
+    print('Fixture Claude; CLAUDE_ARGV captures argv.'); sys.exit(0)
+json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
+""")
+
+        def launched_argv(*args):
+            capture = self.root / 'claude-argv'
+            capture.unlink(missing_ok=True)
+            result = self.run_cli(*args)
+            self.assertTrue(capture.exists(),
+                            'claude was never launched: ' + result.stdout + result.stderr)
+            return json.loads(capture.read_text())
+
+        argv = launched_argv('gemini-flash')
+        self.assertIn('--permission-mode', argv)
+        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'auto',
+                         'blind-trust must be the DEFAULT permission mode for remote')
+
+        argv = launched_argv('-a', '-a', 'gemini-flash')
+        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits',
+                         'two `-a` presses must reach the OFF state on the REAL command')
+
+        # Default: blind-trust. The user's stated requirement -- acceptEdits is too
+        # cumbersome to use -- so a regression to acceptEdits-by-default must fail here.
+        default = self.run_cli('--dry-run', 'gemini-flash')
+        self.assertEqual(default.returncode, 0, default.stderr)
+        self.assertIn('--permission-mode auto', default.stdout)
+        self.assertIn('blind-trust', default.stdout)
+        self.assertIn('telemetry      : OFF', default.stdout)
+
+        # `-a` once = classifier. The lane is not implemented for remote, so it must SAY so
+        # and fall back to auto -- silently behaving like blind-trust is the dead-switch bug.
+        once = self.run_cli('--dry-run', '-a', 'gemini-flash')
+        self.assertEqual(once.returncode, 0, once.stderr)
+        self.assertIn('--permission-mode auto', once.stdout)
+        self.assertIn('not', once.stdout + once.stderr)
+        self.assertIn('classifier', once.stdout + once.stderr)
+
+        # `-a` twice = off -> acceptEdits. Distinct from the other two states.
+        twice = self.run_cli('--dry-run', '-a', '-a', 'gemini-flash')
+        self.assertEqual(twice.returncode, 0, twice.stderr)
+        self.assertIn('--permission-mode acceptEdits', twice.stdout)
+
+        # `-a` three times wraps back to blind-trust (the cycle must be a cycle).
+        thrice = self.run_cli('--dry-run', '-a', '-a', '-a', 'gemini-flash')
+        self.assertEqual(thrice.returncode, 0, thrice.stderr)
+        self.assertIn('--permission-mode auto', thrice.stdout)
+        self.assertIn('blind-trust', thrice.stdout)
+
+        # Telemetry must work in BOTH directions. The live path used to hardcode the
+        # suppression, so `-t` could never restore stock behaviour -- assert the ON state.
+        tel = self.run_cli('--dry-run', '-t', 'gemini-flash')
+        self.assertEqual(tel.returncode, 0, tel.stderr)
+        self.assertIn('telemetry      : ON', tel.stdout)
+
+    def test_watcher_flag_refuses_instead_of_silently_doing_nothing(self):
+        """`-w` is deferred for remote, so it must FAIL LOUDLY rather than no-op.
+
+        The old code accepted `-w` and printed "not fully implemented", then launched
+        normally -- an advertised switch that did nothing. Deferring a feature is fine;
+        pretending to have it is not. csl must also stop forwarding it.
+        """
+        result = self.run_cli('-w', 'gemini-flash')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('watcher', result.stderr)
+        self.assertNotIn('-w, --watcher', self.run_cli('--help').stdout)
+        # csl must not forward -w into remote (that would make the launch exit 2).
+        self.assertNotIn('remote_args+=("-w")', (self.root / 'bin/csl').read_text())
+
+    def test_no_bash_scope_errors_on_the_live_launch_path(self):
+        """No `local` outside a function anywhere in the script.
+
+        `local claude_cmd=(...)` sat at top level: bash prints "local: can only be used in
+        a function" and returns 1, but STILL assigns the array -- so the session launched
+        while emitting an error line, and `bash -n` stayed clean. Assert on both the source
+        and a real run, because a syntax check cannot see this class of defect.
+        """
+        source = (self.root / 'bin/remote-session.sh').read_text()
+        for lineno, line in enumerate(source.splitlines(), 1):
+            self.assertFalse(line.startswith('local '),
+                             'top-level `local` at line %d: %s' % (lineno, line))
+        result = self.run_cli('--dry-run', 'gemini-flash')
+        self.assertNotIn('can only be used in a function', result.stdout + result.stderr)
+
+
 
 if __name__ == '__main__':
     if '--help' in sys.argv or '-h' in sys.argv:
