@@ -760,6 +760,8 @@ export ANTHROPIC_API_KEY="sk-local-agents-remote"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$MAX_OUT"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1    # no telemetry through a third party
 export CLAUDE_IS_REMOTE_API="true"                   # distinct from CLAUDE_IS_LOCAL
+export LA_SESSION_LAUNCHER="remote-session.sh"       # names the launcher for plugin hooks (stop-hook gate)
+export LA_QUEUE_STOP_HOOK="${LA_QUEUE_STOP_HOOK:-1}" # queued-prompt Stop hook; ON unless turned off
 export LA_REMOTE_AGENT="$ALIAS"
 export LA_REMOTE_PROVIDER="$PROV"
 

@@ -6,6 +6,39 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.13.15] — 2026-09-16
+
+Makes the queued-prompt Stop hook **optional and correctly scoped**. It is a safety net, so it stays
+ON by default — but it is now a real switch, and it can no longer touch a session this project did
+not launch.
+
+### Added
+
+- **`s` toggles the queued-prompt hook in the `csl` picker** (ON by default; `CSL_STOP_HOOK=0`
+  defaults it off). The state travels to every launcher as `LA_QUEUE_STOP_HOOK`, so the switch works
+  for any caller of `launch-claude-agent.sh` / `remote-session.sh`, not only the picker.
+- **`--help` for `local-queue-stop-hook.py`.** It previously exited 0 printing **nothing** while
+  still running the hook — a probe that silently executed. An unknown flag now exits 2.
+
+### Changed
+
+- **The gate now tests the launcher, not the endpoint.** The hook engages only when
+  `LA_SESSION_LAUNCHER` names one of `csl`, `launch-claude-agent.sh`, or `remote-session.sh` — which
+  is the actual requirement. The old check asked "is `ANTHROPIC_BASE_URL` loopback?", a *proxy* for
+  that question, and it was wrong in both directions: it read a remote session's LiteLLM proxy on
+  `127.0.0.1` as local (correct only by accident), and it would have enabled the hook for any
+  unrelated tool pointing Claude Code at localhost.
+- An **inherited-but-empty** marker does not open the gate. Exported markers leak into a later
+  gateway `claude` from the same shell, so the value must match a known launcher name.
+
+### Testing
+
+- `tests/test_stop_hook_gate.py` asserts the gate in **both** directions — engages for each known
+  launcher, stays silent for a plain `claude`, an empty marker, an unknown launcher, and a bare
+  loopback endpoint. Verified by outcome (does the hook emit a `block` payload?), not by inspecting
+  a return value. Mutation-tested against four regressions, including a revert to the old endpoint
+  predicate; all four were caught.
+
 ## [0.13.14] — 2026-09-16
 
 Fixes the remote-session interactive toggles, which were advertised in the picker but largely did
