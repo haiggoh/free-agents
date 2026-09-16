@@ -1,4 +1,4 @@
-# local-agents
+# free-agents
 
 **Save cost (and work offline/privately) by offloading Claude Code work to free local MLX models on Apple Silicon.**
 
@@ -45,15 +45,24 @@ Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, or ModelSco
 the selected provider, with its own quota and billing. Add keys with `csl setup-remote` or press
 `i` in `csl`. Use `csl remote` to open the picker. See [Remote API sessions](docs/remote-session/README.md).
 
-> ⚠️ **Remote APIs are EXPERIMENTAL.** So far Gemini is the only remote agent API that is properly
-> tested and proven to work. The other APIs are still in the experimental stage — both for running
-> their own session and for being used as agents for offloading work.
+> **Provider status — proven vs untested.** Remote sessions themselves are **no longer experimental**:
+> they work, and they are *faster* than local sessions. What varies is the individual provider.
+>
+> | Status | Providers | What it means |
+> |---|---|---|
+> | **Proven** | Gemini, NVIDIA | Real working sessions have run on these, including tool use. NVIDIA leads the roster: generous limits, no known daily quota. |
+> | **Untested** | Groq, OpenRouter free tier, Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, ModelScope | Offline fixture coverage and provider-key isolation tests, but no live quota-qualification or real tool-use smoke test yet. |
+>
+> A weak *model* is not a broken *lane*: NVIDIA's Nemotron takes shortcuts and makes mistakes on
+> long tasks, which is a model limitation (try `max` effort), not a defect in the remote path.
 
-**2. Full local mode — niche, for cost/budget-constrained stretches.**
+**2. Full local mode — for offline work and long unattended runs.**
 Run an *entire* Claude Code session on a local model (served under a spoofed Claude id so the client
 accepts it). Useful mainly when you want zero cloud cost for a block of work, or you're offline.
-Trade-off: interactive turns on a local model are slower than a cloud model, so most users won't
-want this as their default — reach for it when the cost saving is worth the latency.
+Trade-off: interactive turns on a local model are slower than a free remote API, so for most
+interactive work **the remote lane below is now the better default**. Local still wins when you are
+offline, when the work must not leave the machine, or for a long unattended run where hours of
+throughput matter more than per-turn latency.
 
 **3. Remote cloud API sessions — zero cost via free provider tiers.**
 Run a full Claude Code session against free cloud APIs (NVIDIA, Gemini, Groq, etc.) using
@@ -267,7 +276,7 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   in `config/model-catalog.local.psv`.
 - **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
 - **skills (7)** — two entry points plus five that each own one phase of a delegation:
-  - `local-agents` — drive local sessions & dispatch.
+  - `free-agents` — drive local and remote free sessions & dispatch.
   - `offload-to-local` — the habit-forming trigger to delegate bulk/mechanical work to a local model to
     save cost. The plugin's main idea.
   - `compose-the-payload` — build the dispatch **material** from files on disk, so the corpus never
@@ -287,13 +296,13 @@ The plugin itself (skills, hooks, the offload nudge):
 
 ```
 /plugin marketplace add haiggoh/get-haiggoh
-/plugin install local-agents@haiggoh
+/plugin install free-agents@haiggoh
 ```
 
 Then the local inference backend, which is what actually serves the models:
 
 ```bash
-git clone https://github.com/haiggoh/local-agents && cd local-agents
+git clone https://github.com/haiggoh/free-agents && cd free-agents
 ./install/install-backend.sh                       # venv + vllm-mlx + apply fork patches
 cp config/config.example.sh config/config.local.sh # your private overlay (gitignored)
 $EDITOR config/config.local.sh                     # set model dir, ports, and your model registry
@@ -827,11 +836,11 @@ invisible until the session was already dead.
   `LA_STATUSLINE_WARN_PCT`, `LA_STATUSLINE_CRIT_PCT`.
 
 **Why it is a separate script, and the layering that matters:** a status-line renderer knows
-how to lay out a line; it has no business knowing what a Metal cap is. So `local-agents`
+how to lay out a line; it has no business knowing what a Metal cap is. So `free-agents`
 MEASURES and classifies, and any renderer merely places the result. The `cost-tracker`
 plugin consumes this over a stable contract — no arguments, one line of JSON, exit 0 — and
 owns none of the domain knowledge. Either plugin can be updated independently, and if
-`local-agents` is absent the segment is simply absent.
+`free-agents` is absent the segment is simply absent.
 
 ```console
 $ ANTHROPIC_BASE_URL=http://localhost:8000 bin/la-statusline-segment.sh
@@ -1049,18 +1058,18 @@ installs name **roles**, not models:
 
 ```zsh
 # Sessions — <role> resolves to whichever model fills it on disk right now.
-alias local-operator="/path/to/local-agents/bin/launch-claude-agent.sh operator"
-alias local-fast="/path/to/local-agents/bin/launch-claude-agent.sh operator medium"
-alias local-xhigh="/path/to/local-agents/bin/launch-claude-agent.sh operator xhigh"
-alias local-thinking="/path/to/local-agents/bin/launch-claude-agent.sh reasoner"
-alias local-validator="/path/to/local-agents/bin/launch-claude-agent.sh validator"
-alias local-menu="/path/to/local-agents/bin/csl"        # numbered picker, incl. effort
-alias local-window="/path/to/local-agents/bin/new-local-window.sh"
+alias local-operator="/path/to/free-agents/bin/launch-claude-agent.sh operator"
+alias local-fast="/path/to/free-agents/bin/launch-claude-agent.sh operator medium"
+alias local-xhigh="/path/to/free-agents/bin/launch-claude-agent.sh operator xhigh"
+alias local-thinking="/path/to/free-agents/bin/launch-claude-agent.sh reasoner"
+alias local-validator="/path/to/free-agents/bin/launch-claude-agent.sh validator"
+alias local-menu="/path/to/free-agents/bin/csl"        # numbered picker, incl. effort
+alias local-window="/path/to/free-agents/bin/new-local-window.sh"
 # Dispatch — one alias, any role or model.
-alias local-dispatch="/path/to/local-agents/bin/local-agent-dispatch.py"
+alias local-dispatch="/path/to/free-agents/bin/local-agent-dispatch.py"
 # Inspect.
-alias local-roles="/path/to/local-agents/bin/la-roles.sh"
-alias local-disk="/path/to/local-agents/bin/la-disk-inventory.sh"
+alias local-roles="/path/to/free-agents/bin/la-roles.sh"
+alias local-disk="/path/to/free-agents/bin/la-disk-inventory.sh"
 alias local-logs="tail -f $HOME/.claude/logs/*_[0-9][0-9][0-9][0-9].log"
 ```
 
@@ -1074,7 +1083,7 @@ role, and `local-roles` shows which model currently answers to each.
 Or create a symlink for shell-agnostic access:
 
 ```bash
-ln -sf /path/to/local-agents/bin/local-agent-dispatch.py ~/.local/bin/local-agent
+ln -sf /path/to/free-agents/bin/local-agent-dispatch.py ~/.local/bin/local-agent
 ```
 
 ### Conversation mode

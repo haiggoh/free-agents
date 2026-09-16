@@ -6,6 +6,50 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.14.0] — 2026-09-16
+
+**The project is now `free-agents`.** Local MLX inference and free-API inference are two *equal*
+lanes it offers and uses — not "local, with remote bolted on."
+
+### Why the rename, and why this number
+
+Remote sessions on free cloud APIs have proven themselves in real work and are **faster** than local
+sessions, so for most interactive work remote is now the preferred lane. Local remains preferred for
+offline work, for anything that must not leave the machine, and for long unattended runs where hours
+of throughput matter more than per-turn latency. A project called `local-agents` no longer described
+what it does.
+
+`0.14.0` was reserved for *portable manifests and artifact identity*. That scope **slid up to
+`0.15.0`** with its gate list intact (runtime profiles → `0.16.0`, oMLX lanes → `0.17.0`).
+`docs/ROADMAP.md` records the shift and the softened reservation rule that permits it: priorities
+legitimately change, and a reserved number is not a queue position. What remains forbidden is
+*overwriting* a reserved scope's meaning, or shipping a reserved number whose gates are half-met.
+
+### Changed
+
+- **Repository renamed** `haiggoh/local-agents` → `haiggoh/free-agents`. GitHub keeps a redirect, so
+  existing clones, the marketplace URL, and `git fetch` continue to work.
+- **Plugin renamed** `local-agents` → `free-agents`, with a description built around the two lanes.
+- **Remote APIs are no longer labelled blanket-EXPERIMENTAL.** Replaced with a per-provider status
+  table: Gemini and NVIDIA are *proven*; the other twelve have offline fixture coverage but no live
+  qualification yet. A weak model (Nemotron's shortcuts on long tasks) is a model limitation, not a
+  defect in the remote lane.
+- **Runtime paths, env vars, and log filenames are deliberately UNCHANGED** — `~/.claude/local-agents/`,
+  `$LOCAL_AGENTS_LEDGER_DIR`, `local-agents-session-*.transcript`, `local-agent-dispatch`. Renaming
+  them would break live state on existing installs for no benefit. Historical `CHANGELOG` entries are
+  likewise left alone: they accurately describe what shipped under the old name.
+
+### Deferred, with reasons recorded in `docs/ROADMAP.md`
+
+- **Remote session watcher** — removed in `0.13.14` rather than left as a dead switch. Its value
+  depends on streaming live reasoning, which is separate work; a watcher that cannot show the model
+  thinking is not worth the window.
+- **Genuine classifier emulation for remote auto mode** — blind-trust stays the default. Remote
+  changes the premise (a fast provider may afford a real classifier round-trip), and the interesting
+  case is a **hybrid**: a local session whose classifier is a remote NVIDIA call, which would give a
+  local session real auto mode without a second local model competing for RAM. To be measured, not
+  assumed.
+
 ## [0.13.15] — 2026-09-16
 
 Makes the queued-prompt Stop hook **optional and correctly scoped**. It is a safety net, so it stays

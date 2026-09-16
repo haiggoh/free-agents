@@ -1,9 +1,9 @@
 ---
-name: local-agents
-description: 'Use when the user wants to offload Claude Code work to a LOCAL MLX model to save cost — PRIMARILY dispatching a delegatable sub-task from their normal cloud session (Opus/Sonnet), and secondarily running a full local session. Triggers: "dispatch this to a local model", "offload this locally to save cost", "run this on qwen locally", "start a local session / local mode", "run the local model tournament", or working offline. Explains how to drive the local-agents overlay: dispatch focused prompts (main use), launch a full local session (niche), and run the diagnostic harnesses. Do NOT use for ordinary cloud work that isn''t being offloaded.'
+name: free-agents
+description: 'Use when the user wants to run Claude Code work on FREE inference instead of the paid gateway — either a LOCAL MLX model or a free cloud API. PRIMARILY dispatching a delegatable sub-task from their normal paid session (Opus/Sonnet); also running a full free session. Triggers: "dispatch this to a local model", "offload this to save cost", "run this on qwen locally", "start a local session / local mode", "run a remote session", "use a free API for this", "run the model tournament", or working offline. Explains how to drive the free-agents overlay: dispatch focused prompts (main use), launch a full session on either lane (remote is faster; local is for offline and long unattended runs), and run the diagnostic harnesses. Do NOT use for ordinary paid-gateway work that is not being offloaded.'
 ---
 
-# local-agents — driving local MLX inference
+# free-agents — driving local MLX inference
 
 This overlay routes Claude Code directly to a local `vllm-mlx` server on Apple Silicon. Models,
 ports, and paths come from `config/config.local.sh` (your private overlay). First-time setup and

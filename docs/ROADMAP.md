@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.13.15`. See `CHANGELOG.md`.
+`0.14.0`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -25,11 +25,33 @@ Versions `0.13.1`–`0.13.5` consolidated four outstanding feature branches into
 so `0.14.0` Phase A reconciles one base rather than five divergent branches. `0.13.6` then applied a
 skill fix on top — and correctly declined to take `0.14.0` for it, which is this file working.
 
-`0.13.x` is deliberately being used for feature work that would conventionally earn a minor bump.
-**The version number is a release gate:** a reserved number must not be spent on anything else,
-because a premature bump would make its gate list unverifiable — a released version that meets only
-half its gates cannot be un-released. Patch-level bumps below it are the cost of keeping that
-guarantee.
+`0.13.x` was deliberately used for feature work that would conventionally earn a minor bump.
+**The version number is a release gate:** a reserved number must not be spent *casually*, because a
+premature bump would make its gate list unverifiable — a released version that meets only half its
+gates cannot be un-released.
+
+**Softened 2026-09-16, deliberately.** That rule was being read as "a reserved number can never
+move", which turned out to be its own failure mode: it pushed genuine feature releases into an
+ever-longer `0.13.x` tail, and the resulting pressure produced a *mis-tagged* `v0.14.0` on an
+unrelated commit — the exact unverifiable-gate outcome the rule exists to prevent, arrived at from
+the other direction. Priorities legitimately shift: work that did not exist when a number was
+reserved can become more urgent than the reserved scope. So the rule is now:
+
+- A reserved scope may be **renumbered upward** when something more urgent has earned the bump.
+  Renumbering keeps every gate list intact — nothing is dropped, dates move, and this file records
+  the shift with its reason.
+- What is still forbidden is **overwriting** a reserved number's *meaning* in place, or shipping a
+  reserved number whose gates are half-met. Those are the cases that cannot be un-released.
+- A reserved number is not a queue position. If a release is genuinely a milestone — a rename, an
+  identity change, a feature set users will look for — it may take the next minor number even if a
+  reserved scope was sitting there, provided that scope slides up rather than disappearing.
+
+**Reassigned again 2026-09-16.** `0.14.0` now belongs to the **free-agents identity release** (the
+project rename plus the remote-session parity fixes that made it justified). Portable manifests moved
+to `0.15.0`, runtime profiles to `0.16.0`, oMLX lanes to `0.17.0` — the whole chain slid one notch
+with its gate lists intact. Reason: remote sessions on free APIs stopped being experimental and
+became the *preferred* lane for most interactive work, which is an identity change the version number
+should show. See the softened reservation rule above.
 
 **Reassigned 2026-09-06.** `0.14.0` was previously reserved for the *runtime profiles* architecture.
 It now belongs to **portable manifests and artifact identity**, and runtime profiles move to
@@ -72,9 +94,10 @@ waiting on an architecture it does not read. So the split is:
 | Version | Scope | Gates on |
 |---|---|---|
 | `0.13.9` | **Operational unblocks.** Rapid-MLX upgrade to the current release; locally routed Auto Mode correctness. No schema changes, no new architecture. | nothing |
-| `0.14.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. | `0.13.9` only for convenience |
-| `0.15.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (The former `0.14.0` Phases B–D, F, G.) | `0.14.0` |
-| `0.16.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. | `0.15.0` — a runtime profile is the clean way to select a backend |
+| `0.14.0` | **Free-agents identity release.** Project rename (local inference and free-API inference as two equal lanes), remote-session parity actually working, documentation overhaul. | `0.13.15` |
+| `0.15.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`; slid up 2026-09-16.) | nothing hard |
+| `0.16.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`.) | `0.15.0` |
+| `0.17.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`.) | `0.16.0` — a runtime profile is the clean way to select a backend |
 
 **Not release-gated at all.** These run continuously against whatever is current, and must not be
 parked behind a version number: model acquisition waves, the tournament, retirement and disk
@@ -215,7 +238,39 @@ prompt is tiny" comments in `launch-local-auto-mode.sh` and `config-lib.sh` just
 
 ---
 
-## `0.14.0` — Portable manifests and artifact identity
+## `0.14.0` — Free-agents identity release
+
+**Shipped 2026-09-16** (see `CHANGELOG.md`). Recorded here because it took a number this file had
+reserved for something else, and that decision should be legible.
+
+The project is renamed **free-agents**: local MLX inference and free-API remote inference are two
+equal lanes it offers and uses, rather than "local, with remote bolted on." Remote sessions on free
+APIs are faster than local ones and have proven themselves in real work, so for most interactive
+sessions remote is now the preferred lane — local remains preferred for long unattended runs where
+hours of throughput matter more than latency.
+
+### Deferred out of this release, with reasons
+
+- **Remote session watcher.** `-w/--watcher` was removed from `remote-session.sh` in `0.13.14`
+  rather than left as a switch that printed "not fully implemented" and launched anyway. It is
+  deferred rather than abandoned: the watcher's value depends on streaming live reasoning, which is
+  its own piece of work (waypoint `real-time-thinking-visibility`). A watcher window that cannot
+  show the model thinking is not worth opening. Revisit once the live-reasoning tee exists.
+- **Genuine classifier emulation for remote auto mode.** Blind-trust remains the default because the
+  same-model classifier path has never worked reliably *locally* — the classifier competes with the
+  session for the same weights and the warm-up is slow. **Remote changes the premise:** a remote
+  provider answers fast enough that a real classifier round-trip may be affordable, and NVIDIA's
+  lane in particular has generous limits with no known daily quota. Two things to test, in order:
+  1. a fully-remote session with a remote classifier on the same provider;
+  2. **a hybrid** — a LOCAL session whose *classifier* is a remote NVIDIA call. This is the
+     interesting one: it would give a local session genuine auto mode without a second local model
+     competing for RAM, which is the constraint that has blocked it all along.
+  Until measured, `-a`'s classifier state announces that the lane is unimplemented and falls back to
+  `auto` rather than silently behaving like blind-trust. Tracked as a waypoint.
+
+---
+
+## `0.15.0` — Portable manifests and artifact identity
 
 **Status: NOT STARTED on `main`.** The specification and partial work live on
 `feature/portable-model-manifests`, which is not merged.
@@ -296,7 +351,7 @@ Both found 2026-09-06; fix the plans, not just the code.
 
 ---
 
-## `0.15.0` — Runtime profiles and Rapid-first model management
+## `0.16.0` — Runtime profiles and Rapid-first model management
 
 > **Renumbered 2026-09-06** from `0.14.0`. Scope is unchanged; only its place in the sequence moved,
 > because the manifest foundation below is what other workstreams actually read. Phase **A**
@@ -396,7 +451,7 @@ Additionally, **only if** standalone packaging ships in the same release: clean-
 passes; archive is deterministic; release manifest contains only approved files; installer avoids
 silent dotfile mutation; published assets are immutable and checksummed.
 
-### Do not confuse these with `0.15.0`
+### Do not confuse these with `0.16.0`
 
 - **`0.13.3` launcher profile controls** are per-**launch** environment variables
   (`LA_CLAUDE_SETTINGS`, `LA_CLAUDE_TOOLS`, …). `0.15.0` runtime **profiles** are a resolver over
@@ -409,7 +464,7 @@ silent dotfile mutation; published assets are immutable and checksummed.
 
 ---
 
-## `0.16.0` — Backend lanes — oMLX
+## `0.17.0` — Backend lanes — oMLX
 
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.
