@@ -6,7 +6,7 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
-## [0.13.13] — 2026-09-16
+## [0.13.14] — 2026-09-16
 
 Fixes the remote-session interactive toggles, which were advertised in the picker but largely did
 not work. **No toggle in this project is allowed to be a dead switch**: it either changes the
@@ -46,6 +46,14 @@ session's behaviour or it is removed and says so.
   including the argv the real `claude` child receives, not merely the dry-run summary. That
   distinction is load-bearing: a first version of the test asserted only on the printed summary and
   **passed** when the `--permission-mode` line was mutated away. All three were mutation-tested.
+
+## [0.13.13] — 2026-09-15
+
+Tagged on `a460e8e`. Kept as released: CSL picker state synchronization for remote sessions, plus the
+plugin-scoped Stop hook for queued prompts (`local-queue-stop-hook.py`, `queue-marker-helper.py`).
+
+⚠️ The remote-session interactive toggles shipped here were largely non-functional — see `0.13.14`,
+which fixes them. This entry is left in place because the tag is published and reached consumers.
 
 ## [0.13.12] — 2026-09-14
 
