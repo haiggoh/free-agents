@@ -6,6 +6,33 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.14.1] — 2026-09-16
+
+Documentation half of the rename. `0.14.0` renamed the project; this makes the docs actually say what
+the project now is, rather than leading with "offload to local MLX" and treating the API lane as a
+bolt-on.
+
+### Added
+
+- **`## API keys` — a section for the free-tier setup helper** (`csl setup-remote`, `i` in the
+  picker, `install/setup-api-keys.py`). **Every provider it offers has a free tier — that is the
+  selection criterion.** Paid API use works if your account has credits, but nothing here requires it
+  and no provider is listed *because* it is paid. Documents the three properties that are easy to
+  miss: it makes **no API calls** (so running it cannot burn quota, and `saved / not tested` means
+  stored, not proven), it takes keys only in **hidden prompts** so they stay out of shell history, and
+  it **never overwrites** an existing key file.
+
+### Changed
+
+- **README leads with two equal lanes.** Neither is the sidekick: remote is faster and the usual
+  default for interactive work; local wins offline, when work must not leave the machine, and for
+  long unattended runs.
+- **The hardware note no longer over-claims.** It implied Apple Silicon was required for everything.
+  Only the *local* lane needs it — `csl remote` works on any machine, with no local models at all.
+- **GitHub About and topics** updated: the vllm-only framing is gone; `free-tier`, `llm-api`,
+  `gemini`, `nvidia-nim`, `groq`, `litellm` added.
+- **Marketplace entry** renamed to `free-agents` with the two-lane description.
+
 ## [0.14.0] — 2026-09-16
 
 **The project is now `free-agents`.** Local MLX inference and free-API inference are two *equal*
