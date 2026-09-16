@@ -1,19 +1,32 @@
 # free-agents
 
-**Save cost (and work offline/privately) by offloading Claude Code work to free local MLX models on Apple Silicon.**
+**Run Claude Code work on free inference — two equal lanes: local MLX models on Apple Silicon, and
+free-tier cloud APIs.**
 
-The main use: from your normal Claude Code session — running a capable cloud model like Opus or
-Sonnet, whether you connect to Anthropic directly or through a gateway — **dispatch delegatable
-sub-tasks to a free local model**. You keep your cloud model driving the hard reasoning and hand
-off bulk/mechanical work (searches, summaries, bounded transforms, first-pass reviews) to local
-compute — saving cost without changing your workflow or your main model.
+Neither lane is the sidekick. **Local** keeps everything on your machine and works offline.
+**Remote** runs against a free provider tier (Gemini, NVIDIA, Groq, and a dozen more) and is
+*faster* — for most interactive work it is now the better default. Local wins when you are offline,
+when the work must not leave the machine, or for a long unattended run where hours of throughput
+matter more than per-turn latency.
+
+The main use of either: from your normal Claude Code session — running a capable paid model like
+Opus or Sonnet, whether you connect to Anthropic directly or through a gateway — **dispatch
+delegatable sub-tasks to a free model**. You keep your capable model driving the hard reasoning and
+hand off bulk/mechanical work (searches, summaries, bounded transforms, first-pass reviews) — saving
+cost without changing your workflow or your main model.
+
+Every provider in the key-setup helper has a **free tier**; that is why it is on the list. Paid API
+use works too if your account has credits, but nothing here requires it. See
+[API keys](#api-keys--the-free-tier-setup-helper).
 
 It's an **additive overlay**: your private paths, keys, and model layout live in a gitignored
 `config.local.sh`, and your `~/.claude/settings.json` is never touched. Works with plain `claude`
 and with wrapped launchers.
 
-> Requires an Apple-Silicon Mac with enough unified memory for your models (the reference stack
-> targets a 128 GB M4 Max). This is power-user tooling, not a one-click app.
+> The **local** lane requires an Apple-Silicon Mac with enough unified memory for your models (the
+> reference stack targets a 128 GB M4 Max). The **remote** lane has no such requirement — it needs
+> only a provider key, so `csl remote` works on any machine, including one with no local models at
+> all. This is power-user tooling, not a one-click app.
 
 ---
 
@@ -33,14 +46,14 @@ Keep driving with your cloud model (Opus/Sonnet). Dispatch bounded sub-tasks to 
 about your main session changes; you're just sending the delegatable parts to local compute. This
 saves cost for **anyone**, whether or not you have a spending cap.
 
-**2. Run a full local Claude Code session — for cost/budget-constrained stretches or offline work.**
+**2. Run a full local Claude Code session — offline, private, or for long unattended runs.**
 Run an entire Claude Code session on a local model (served under a spoofed Claude id so the client
-accepts it). Useful when you want zero cloud cost for a block of work, or you're offline. Trade-off:
-interactive turns on a local model are slower than a cloud model, so most users won't want this as
-their default — reach for it when the cost saving is worth the latency.
+accepts it). Zero cloud cost and nothing leaves the machine. Trade-off: interactive turns are slower
+than a free remote API, so reach for this when you are offline, when privacy is the point, or when a
+long unattended run makes throughput matter more than latency.
 
-**3. Run a full remote Claude Code session — when local compute is unavailable or you want a
-different model.** Launch on Gemini, Groq, NVIDIA, OpenRouter free tier, Cloudflare Workers AI,
+**3. Run a full remote Claude Code session — the fastest free lane, and the usual default.**
+No local model or Apple-Silicon hardware needed. Launch on Gemini, Groq, NVIDIA, OpenRouter free tier, Cloudflare Workers AI,
 Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, or ModelScope. Usage goes to
 the selected provider, with its own quota and billing. Add keys with `csl setup-remote` or press
 `i` in `csl`. Use `csl remote` to open the picker. See [Remote API sessions](docs/remote-session/README.md).
@@ -312,6 +325,45 @@ $EDITOR config/config.local.sh                     # set model dir, ports, and y
 You choose which weights to fetch — large models aren't the right fit for every machine, and a
 **partial roster is fine**: whatever you download fills the roles it's tagged with; the rest of the
 work stays on the cloud model.
+
+## API keys — the free-tier setup helper
+
+The remote lane needs a provider key. `csl setup-remote` (or press **`i`** in the `csl` picker, or
+run `install/setup-api-keys.py`) walks you through it.
+
+**Every provider it offers has a free tier.** That is the selection criterion for the list — the
+point of this project is inference that costs nothing. Paid use is *technically* supported (a key is
+a key, and if your account has credits or a paid plan the same lane works and simply bills you), but
+nothing here requires it and no provider is listed *because* it is paid.
+
+```
+csl setup-remote            # interactive picker
+csl setup-remote --list     # show providers and key status; makes NO API calls
+csl setup-remote gemini 4   # set up specific providers, by name or number
+```
+
+What it does, and deliberately does not do:
+
+- **Guides signup, then stores the key.** It points you at each provider's key page (`BROWSER`
+  controls the opener) and takes the value in a **hidden terminal prompt** — never a command
+  argument, so keys stay out of your shell history.
+- **Makes no API calls at all.** Nothing is validated and no inference request is sent, so running it
+  cannot consume quota. The status column says `saved / not tested` for exactly that reason: *saved
+  means stored, not proven to work*.
+- **Never overwrites an existing key file.** Re-running it is safe.
+- **Stores keys as individual files** under `~/.api_keys` (override with `LA_API_KEYS_DIR`), one per
+  provider, so a session can be handed only the key it needs — see
+  [Safety](#safety) for the per-provider scoping.
+
+The picker groups providers by what you can expect:
+
+| Group | Providers | Note |
+|---|---|---|
+| **Free tier, session-ready** | Google Gemini, Groq, OpenRouter, Cloudflare Workers AI, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel AI Gateway | Sign up and go. Some ask you to pick a model. |
+| **Optional / conditional** | SambaNova (promo credits), ModelScope (regional eligibility), Cerebras (trial — opt in with `csl remote --include-trials`), NVIDIA (account credits) | Still free to start, but gated on credits, region, or a trial. |
+
+Quotas and rate limits are the provider's, not this project's — a key that stops working usually
+means a daily allowance was reached, not a bug here.
 
 ## Downloading models
 
