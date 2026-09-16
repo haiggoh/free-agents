@@ -291,6 +291,10 @@ fi
 export ANTHROPIC_BASE_URL="http://localhost:${VLLM_PORT}"    # NO /v1 — Claude Code appends /v1/messages
 export ANTHROPIC_AUTH_TOKEN="local"                           # backend ignores auth; avoids the API-key prompt
 export CLAUDE_IS_LOCAL="true"                                 # generic signal that this session is local
+export LA_SESSION_LAUNCHER="launch-claude-agent.sh"            # names the launcher for plugin hooks (stop-hook gate)
+# Queued-prompt Stop hook. ON unless the caller (csl `s`, or the env) turned it off.
+# Exported explicitly so the hook sees an unambiguous value rather than inheriting one.
+export LA_QUEUE_STOP_HOOK="${LA_QUEUE_STOP_HOOK:-1}"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$LA_MAX_OUTPUT_TOKENS"   # bound worst-case turn time + stay under max_model_len
 # Timeouts: Claude Code's defaults assume a fast cloud endpoint. A local 27B doing a big prefill over
 # many tools routinely exceeds them, causing a "Request timed out" + retry-loop mid-session. Relax both

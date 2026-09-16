@@ -37,7 +37,8 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
     'Remote help: csl remote --help; include Cerebras: csl remote --include-trials' \
     'Key setup: csl setup-remote [providers] | csl setup-remote --list (no API calls)' \
     'Environment: CSL_LAUNCHER, CSL_REMOTE_LAUNCHER override launchers; CSL_WATCH,' \
-    'CSL_AUTO_MODE_STATE (0=blind-trust,1=classifier,2=off), CSL_TELEMETRY control local picker defaults.' \
+    'CSL_AUTO_MODE_STATE (0=blind-trust,1=classifier,2=off), CSL_TELEMETRY, CSL_STOP_HOOK' \
+    '  control local picker defaults.' \
     'For local launcher details: launch-claude-agent.sh --help'
   exit 0
 fi
@@ -91,6 +92,19 @@ AUTO_MODE_STATE="${CSL_AUTO_MODE_STATE:-0}"
 # to leave the stock behaviour in place. The launcher turns this into the actual env vars, so the
 # same switch works for any caller of launch-claude-agent.sh, not just this picker.
 TELEMETRY="${CSL_TELEMETRY:-0}"
+
+# Queued-prompt Stop hook (bin/local-queue-stop-hook.py). ON by default: it is a safety net for
+# prompts you queue while the model is mid-run, and the failure it catches is silent — the model
+# stops, your prompt is never answered, and nothing says so. Defaulting it OFF would mean the net
+# is missing exactly when you forgot about it.
+#
+# Toggle with `s`, or set CSL_STOP_HOOK=0 to default it off. The launcher turns this into
+# LA_QUEUE_STOP_HOOK, which the hook reads as an explicit override — so the switch works for any
+# caller of launch-claude-agent.sh / remote-session.sh, not just this picker.
+#
+# The hook only ever engages for sessions started by one of this project's launchers (they stamp
+# LA_SESSION_LAUNCHER); an ordinary cloud/gateway `claude` never runs it regardless of this setting.
+STOP_HOOK="${CSL_STOP_HOOK:-1}"
 
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
@@ -183,7 +197,9 @@ _launch_remote() {  # opens the remote roster and hands off; never returns on su
     remote_args+=("-t")
   fi
 
-  exec "$rl" "${remote_args[@]}"
+  # The stop-hook state travels as an env var, not a flag: remote-session.sh exports it for the
+  # claude child, and the hook reads it as an explicit override.
+  exec env LA_QUEUE_STOP_HOOK="$STOP_HOOK" "$rl" "${remote_args[@]}"
 }
 
 # Map the triple-toggle state to the env vars launch-claude-agent.sh expects.
@@ -215,9 +231,9 @@ OSA
   _am="$(_la_auto_mode_val)"
   _ba="$(_la_blind_auto_val)"
   if [ -n "$effort" ]; then
-    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias" "$effort"
+    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" LA_QUEUE_STOP_HOOK="$STOP_HOOK" "$LAUNCHER" "$alias" "$effort"
   else
-    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias"
+    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" LA_QUEUE_STOP_HOOK="$STOP_HOOK" "$LAUNCHER" "$alias"
   fi
 }
 
@@ -243,6 +259,8 @@ while :; do
   esac
   if [ "$TELEMETRY" = "1" ]; then echo "  t) telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
   else                            echo "  t) telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
+  if [ "$STOP_HOOK" = "1" ]; then echo "  s) queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
+  else                            echo "  s) queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
   echo "  q) quit"
   echo
   printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
@@ -254,6 +272,7 @@ while :; do
     a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
     b|B) AUTO_MODE_STATE=0; continue ;;  # b shortcut: jump straight to blind-trust
     t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
+    s|S) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; continue ;;
     c|C)
       echo >&2
       echo "Models (on disk, session-capable):" >&2

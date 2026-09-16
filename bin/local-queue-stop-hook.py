@@ -57,7 +57,7 @@ WHAT IT DOES
       or if text exists but does not semantically address the queued content (category 3),
       it blocks and tells the model to respond to the queued prompt.
 
-GATING — local only (the user's requirement)
+GATING — launcher-started sessions only (the user's requirement)
   This is a PLUGIN-SCOPED Stop hook (local-agents). It only fires for sessions using
   the local-agents plugin (local/remote sessions), not for regular cloud/gateway
   sessions. We still gate on the ENDPOINT as defense-in-depth:
@@ -140,19 +140,53 @@ def read_hook_input():
     return payload if isinstance(payload, dict) else {}
 
 
-def is_local_endpoint() -> bool:
-    """True iff this session is talking to a LOCAL model, not the paid gateway."""
+def is_launcher_session() -> bool:
+    """True iff this session was launched by one of THIS PROJECT'S launchers.
+
+    WHY A LAUNCHER MARKER RATHER THAN THE ENDPOINT (the user's requirement, 2026-09-16).
+      The requirement is that the hook fires ONLY for sessions started through `csl`,
+      `launch-claude-agent.sh`, or `remote-session.sh` — never in an ordinary cloud/gateway
+      or direct-Anthropic session. The endpoint sniff this replaces could not express that:
+
+        * it MISSED remote sessions. `remote-session.sh` points Claude Code at a LiteLLM
+          proxy on http://127.0.0.1:<port>, which the old check read as "local" — correct by
+          accident — while a future non-loopback proxy would have silently disabled the hook.
+        * it could FIRE for a session this project did not launch. Any other tool pointing
+          Claude Code at localhost inherited the hook.
+        * it answers the wrong question. "Is the endpoint loopback?" is a proxy for "did one
+          of our launchers start this?", and a proxy for the real predicate is exactly how
+          the gate drifts from the requirement.
+
+      Each launcher stamps LA_SESSION_LAUNCHER with its own name, so the gate now tests the
+      thing it actually cares about. A plain `claude` never sets it and exits at branch one.
+
+    THE LEAK CAVEAT STILL APPLIES, and is why the marker is not merely "is it set".
+      `CLAUDE_IS_LOCAL` leaks: a launcher exports it, and a LATER gateway `claude` started
+      from the same shell inherits it (memory: local-session-self-identification). The same
+      hazard applies to any exported marker. It is mitigated, not ignored: the launchers set
+      LA_SESSION_LAUNCHER on the `claude` process itself (env prefix / export immediately
+      before exec), and the value must match a KNOWN launcher name — an inherited empty or
+      unrecognised value does not open the gate.
+
+    TOGGLE PRECEDENCE (highest first):
+      1. LA_QUEUE_STOP_HOOK=0|1 — explicit override, wins over everything (debugging, and
+         the csl `s` toggle sets it to 0 when the user turns the hook off).
+      2. LA_SESSION_LAUNCHER in KNOWN_LAUNCHERS — the normal path.
+      3. anything else -> False. Fail CLOSED for the gate (never fire where unwanted),
+         which is the opposite of the transcript-read failure mode below (fail OPEN to
+         ending the turn, never to an infinite re-block).
+    """
     override = os.environ.get("LA_QUEUE_STOP_HOOK")
     if override == "0":
         return False
     if override == "1":
         return True
-    base = os.environ.get("ANTHROPIC_BASE_URL", "")
-    if not base:
-        return False  # unset -> inherits the org gateway -> cloud
-    # http://localhost:8000, http://127.0.0.1:8010, https://[::1]:8000 ...
-    host = base.split("//", 1)[-1].split(":", 1)[0].strip("[]").lower()
-    return host in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+    return os.environ.get("LA_SESSION_LAUNCHER", "").strip() in KNOWN_LAUNCHERS
+
+
+# The launchers permitted to enable this hook. A value outside this set — including the
+# empty string an inherited-but-unset variable produces — does NOT enable it.
+KNOWN_LAUNCHERS = frozenset({"csl", "launch-claude-agent.sh", "remote-session.sh"})
 
 
 def session_transcripts(payload=None):
@@ -477,8 +511,9 @@ def _text_addresses_prompt(texts, queued_content, answered_hashes=None):
 
 
 def main() -> int:
-    # First branch: cloud sessions never engage. (Also: a disabled hook.)
-    if not is_local_endpoint():
+    # First branch: only sessions started by one of this project's launchers engage.
+    # A plain cloud/gateway `claude` returns here having done nothing. (Also: a disabled hook.)
+    if not is_launcher_session():
         return 0
 
     payload = read_hook_input()
@@ -558,7 +593,48 @@ def scan_final_pending(path):
     return pending
 
 
+USAGE = """local-queue-stop-hook.py — Stop hook: notice prompts you queued that the model
+never answered.
+
+Reads the Stop-hook JSON payload on stdin and, if this session left a queued prompt
+un-drained or drained-but-unanswered, prints {"decision":"block","reason":...} so the
+harness feeds the prompt back to the model instead of ending the turn.
+
+Usage:
+  local-queue-stop-hook.py            # normal operation (Stop hook; reads stdin)
+  local-queue-stop-hook.py --help     # this message
+
+Gating — it engages ONLY for sessions started by this project's launchers:
+  csl · launch-claude-agent.sh · remote-session.sh
+A plain cloud/gateway `claude` exits immediately having done nothing.
+
+Environment:
+  LA_SESSION_LAUNCHER   set by the launcher; must name a known launcher to enable the
+                        hook. Anything else (including empty) leaves it off.
+  LA_QUEUE_STOP_HOOK    0 = force OFF, 1 = force ON. Overrides the launcher marker;
+                        the csl `s` toggle sets 0 when you switch the hook off.
+  CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR
+                        fallback transcript resolution when stdin carries no
+                        transcript_path.
+
+Exit status is always 0: a hook that fails must end the turn, never loop.
+"""
+
+
 if __name__ == "__main__":
+    # Parse arguments BEFORE doing any work. A script that ignores --help and just RUNS is
+    # worse than one with no help at all: the probe becomes an unintended execution whose
+    # output looks like help. (This script previously exited 0 printing NOTHING for --help,
+    # while still running the hook.)
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ("--help", "-h"):
+            print(USAGE)
+            sys.exit(0)
+        print("local-queue-stop-hook.py: unrecognised argument %r" % sys.argv[1],
+              file=sys.stderr)
+        print("Usage: local-queue-stop-hook.py [--help]   (normally invoked as a Stop hook)",
+              file=sys.stderr)
+        sys.exit(2)
     try:
         sys.exit(main())
     except Exception:
