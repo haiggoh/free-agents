@@ -1,6 +1,6 @@
 ---
 name: offload-to-local
-description: 'Use when PLANNING or decomposing ANY multi-step task, and whenever your plan involves reading, searching, summarizing, transforming, drafting, extracting, or editing across files — regardless of whether cost is mentioned. Also when you''re about to do delegatable/bulk/mechanical work on a paid cloud model, or you notice you''re about to burn cloud tokens on work a smaller model could do. It routes delegatable work to a free local model — by DEFAULT to the broad `operator` role, escalating to a specialist role only when needed — instead of spending cloud tokens. Explicit triggers: starting a multi-step plan (especially under a budget constraint / Credit Efficient Mode), "save cost/tokens", "do this locally", "offload this", "use the local model for this". Do NOT use it to offload frontier-reasoning, architecture, security-critical, or final-review work.'
+description: 'Use when PLANNING or decomposing ANY multi-step task, and whenever your plan involves reading, searching, summarizing, transforming, drafting, extracting, or editing across files — regardless of whether cost is mentioned. Also when you''re about to do delegatable/bulk/mechanical work on a paid cloud model, or you notice you''re about to burn cloud tokens on work a smaller model could do. It routes delegatable work to a free local model — by DEFAULT to the broad `operator` role, escalating to a specialist role only when needed — instead of spending cloud tokens. Explicit triggers: starting a multi-step plan (especially under a budget constraint / Credit Efficient Mode), "save cost/tokens", "do this locally", "offload this", "use the local model for this". ALSO use before ANY delegation once cost or free/local agents have been mentioned, and whenever you are about to call the Agent/Task tool hoping it will be cheap — it cannot reach a free model and defaults to a full-price subagent, so read this for the routes that are genuinely $0. Note free REMOTE APIs reach far larger models than local, so difficulty alone is not a reason to stay on the paid gateway. Do NOT use it to offload architecture, security-critical, or final-review work.'
 ---
 
 # offload-to-local — send the legwork to a free local model
@@ -9,6 +9,106 @@ The biggest cost saving in Claude Code is not a cheaper cloud model — it's **$
 When your main session runs a capable cloud model (Opus/Sonnet), keep that model for judgment and
 **delegate the bulk/mechanical legwork to a local model** via dispatch. This applies to anyone who
 wants to save cost, with or without a spending cap.
+
+## ⛔ READ THIS FIRST — the built-in `Agent` tool CANNOT reach a free model
+
+This is the single most common way this skill gets "used" without saving a cent, so it is
+stated before anything else.
+
+**Claude Code's `Agent` (Task) tool cannot dispatch to a free agent. Ever.** Its `model`
+parameter accepts only first-party paid tiers — `sonnet`, `opus`, `haiku`, `fable`. There is no
+value that routes to a local MLX model or to a free cloud API, and the org allowlist blocks
+adding one. So:
+
+| What you do | What actually runs | Cost |
+|---|---|---|
+| `Agent(...)` with **no** `model` | the **default subagent model** (usually the same tier as you) | **full price** |
+| `Agent(..., model="haiku")` | Haiku, on the paid gateway | **cheaper, still paid** |
+| `Agent(..., model="qwen…"/"local"/"free")` | rejected — not a valid enum value | n/a |
+| **`curl` / the dispatch scripts below** | a free local or free-API model | **$0** |
+
+**Omitting `model` is the trap.** It reads like "let the harness pick something cheap"; it
+actually means "run a full-price subagent." A dispatch that went through the `Agent` tool has
+saved **nothing** — it is the *illusion* of delegation. If you have been asked to use free
+agents and you reached for the `Agent` tool, you have not complied yet.
+
+**The only free routes are HTTP dispatch or a free session:**
+
+```bash
+bin/local-agent-dispatch.py   # or plain curl to localhost   → free LOCAL model
+bin/librarian-dispatch.py     # long/streaming local generations
+bin/remote-agent-dispatch.py  # → free REMOTE API model (bigger + smarter, see the map below)
+bin/agent-fallback.py         # picks a lane for you, with a privacy/cost posture
+bin/csl                       # a full interactive session on either free lane
+```
+
+Self-check before you claim you offloaded anything: **name the process that ran the tokens.**
+If the answer is not "a localhost port" or "a free provider's API", it was not free.
+
+## Which free agent? — remote is SMARTER, local is PRIVATE
+
+The two free lanes are **not** a quality ladder with local at the bottom and paid at the top.
+The free *remote* lane reaches models far larger than anything that fits on this machine, so for
+hard thinking the free remote lane often beats the free local one outright — and costs the same
+($0). Choose on the axes that actually differ:
+
+| | **REMOTE free API** (`remote-agent-dispatch.py`) | **LOCAL MLX** (`local-agent-dispatch.py`) |
+|---|---|---|
+| **Size / smarts** | up to **hundreds of B** params — genuinely frontier-adjacent | ~27–35B, 4-bit — capable but visibly smaller |
+| **Reach for it when** | the work needs *reasoning*: analysis, review, planning, tricky code, long synthesis | the work needs *volume*: extraction, classification, reformatting, mechanical edits, first drafts |
+| **Latency** | fast (provider GPUs); no model load | fast once warm; first call pays a model load |
+| **Limits** | a **daily quota per provider** — and quotas are **independent**, so exhausting one leaves the others untouched | none — unlimited, offline, runs all night |
+| **Privacy** | ⚠️ the prompt **leaves the machine**; `--files` needs explicit `--allow-remote-files` | never leaves the box; the privacy default |
+| **Reliability** | a provider can 404/timeout/return empty; ids rot | fully under your control |
+
+**Default heuristic:** *hard thinking → remote; bulk grind → local; anything sensitive → local,
+regardless of difficulty.* When a remote quota is spent, fall back to local rather than to paid
+(`agent-fallback.py --mode local-first-free` encodes exactly this).
+
+**⚠️ Remote does NOT mean big.** A remote roster lists small models too — several NVIDIA entries
+are 20–35B, i.e. the *same class as (or smaller than) what you already have locally*. Dispatching
+one of those remotely buys you **nothing**: no extra capability, but it spends a finite daily quota
+and sends your prompt off the machine. **"It is remote" is not evidence that it is smarter — check
+the parameter count.**
+
+So filter by SIZE, not by lane:
+- **Remote is only the right call when the model is genuinely bigger than local** — the
+  hundreds-of-billions tier (e.g. Nemotron Ultra 550B, Kimi K3, DeepSeek V4, Gemini Flash).
+- **If a remote entry has a local-capable equivalent, prefer the LOCAL one.** Same capability,
+  unlimited, private, no quota burned. The repo tracks this classification for the picker
+  (a local-capable filter over the remote roster, hidden by default); apply the *same* judgement
+  when choosing a dispatch target, not just when browsing a menu. If that data is available, treat
+  a remote entry marked local-capable as "run it locally instead."
+- **Never spend a big-model quota on utility work.** Bulk classification goes local even when a
+  550B is sitting there idle — save the quota for work that actually needs the brains.
+
+Concrete current picks — **verify with `bin/remote-session.sh --list` and `bin/la-roles.sh`
+before using a name; rosters and model ids rot:**
+
+- **Remote, big/smart:** Gemini 3.8 Flash and Gemini 3.6 Flash (note: **separate** daily
+  quotas — treat them as two budgets, not one), NVIDIA Nemotron 3 Ultra 550B-A55B, Kimi K3,
+  DeepSeek V4 Flash. For utility-tier remote work, Nemotron 3.5 Lightning 30B or Groq
+  gpt-oss-120b (very fast).
+- **Local, simpler work:** the KAT-Coder 2.5 and Qwen 3.8 class aliases — resolve the live names
+  with `bin/la-roles.sh`.
+
+A concrete remote dispatch:
+
+```bash
+bin/remote-agent-dispatch.py --provider gemini --prompt '<role + task + inputs + output spec>' \
+  --max-tokens 2048 --outdir /tmp/fa-out
+# ⚠️ --help lists gemini|nvidia|groq|openrouter|cerebras|cloudflare|github, but only some are
+#    IMPLEMENTED — the rest fail fast with "declared but not implemented". Verified 2026-09-17:
+#    gemini works; nvidia does NOT (yet). Check before planning a lane around a provider.
+# ⚠️ ALWAYS pass --model. The built-in default can be a RETIRED id (measured: it defaulted to
+#    gemini-2.0-flash and got HTTP 404 "no longer available"). Model ids rot; pin one explicitly.
+# ⚠️ Give it enough --max-tokens. A big model may spend tokens thinking and return a TRUNCATED
+#    answer that looks like a terse one (measured: a 700-token cap cut the reply off mid-word).
+# --dry-run shows the REMOTE banner and sends nothing; --files needs --allow-remote-files.
+```
+
+Both lanes are **stateless per dispatch** — resend the full briefing every call — and both need
+their output verified against ground truth before you trust it.
 
 ## Decide UPFRONT, at decomposition — not mid-work
 The habit is not "notice you're already grinding through files and stop." It's: **when you first
@@ -30,8 +130,12 @@ second use, and it costs nothing.
 later" reliably becomes "I did it all on cloud"). For any multi-step task that touches files or has
 bulk/mechanical steps — and *always* under a budget constraint — annotate **every** step:
 
-- `local:<role>` — delegated to a local model (default `operator`; see below), or
-- `cloud:<reason>` — kept on the cloud model, with the reason named.
+- `local:<role>` — delegated to a free LOCAL model (default `operator`; see below),
+- `remote:<provider>` — delegated to a free REMOTE API model (also $0; reach for it when the
+  step needs more brains than local has, and nothing sensitive leaves the machine), or
+- `cloud:<reason>` — kept on the PAID model, with the reason named.
+
+Two of these three cost nothing, so `cloud:` should be the minority annotation in any plan.
 
 **Default to `operator`.** Under a budget constraint the burden flips: a step is `local:operator`
 unless you can name why it's `cloud:`. Valid `cloud:` reasons:
@@ -120,10 +224,16 @@ that most delegatable work maps to *some* role, so offload gets reached for ofte
 work on cloud or download a model (`install/download-models.sh`, interactive). Several ● under one
 role = your A/B choice — pick one or try both.
 
-## Keep on the cloud model (quality-critical)
+## Keep on the PAID model (quality-critical)
 Architecture / design decisions, tricky debugging, security-sensitive logic, the FINAL
 review / verification, and the orchestration & judgment itself. Offload the legwork; keep the
-judgment. **Verify local output before trusting it** — it's a smaller model, so a plausible-but-wrong
+judgment.
+
+**But check the free REMOTE lane before you conclude "this needs the paid model."** "Too hard for
+a 27B local model" is an argument for a 550B *free* one, not for spending. A step is only truly
+`cloud:` when it needs frontier judgment, this session's live tool state, or must not leave the
+machine — so prefer the annotation `remote:<provider>` over `cloud:` whenever the blocker was
+size rather than trust or coupling. **Verify local output before trusting it** — it's a smaller model, so a plausible-but-wrong
 answer is the risk; the point is that the legwork cost nothing.
 
 **Tool use is NOT a reason to avoid local.** A local *session* (the operator via
@@ -140,7 +250,7 @@ run the tests) — not for small or tightly-coupled tool-work. Launch a local se
 session continues. To make it pay off and stay safe:
 - **Isolate** — give it its own git worktree/branch or a disjoint file set, so the two agents can't clobber each other.
 - **Watch + verify** — local models hallucinate paths and botch tool schemas; supervise the session (tail its log / a monitor) and review its diff before trusting it. Never merge unsupervised local edits blind.
-- **Mind the infra** — vllm-mlx is single-slot and minutes-per-turn: this suits a long *background* chunk, not latency-sensitive or interactive-with-you work, and a busy session queues your own dispatches.
+- **Mind the infra** — check the live concurrency setting rather than assuming; a local session can be slower per turn than a dispatch, so this suits a long *background* chunk over latency-sensitive work. A free *remote* session is the faster option when the work may leave the machine.
 - **Amortize** — launching a session costs more than a curl dispatch; reach for it only when the chunk is substantial. Smaller → dispatch it, or keep it on cloud.
 
 The supervision + review is real cloud-attention cost, so the win is cheap *compute*, not zero effort.

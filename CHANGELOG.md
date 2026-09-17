@@ -6,7 +6,11 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
-## [0.14.2] — 2026-09-17
+## [0.14.3] — 2026-09-17
+
+This release combines two important improvements made in parallel workstreams:
+
+### CSL Lane Navigation Improvements (from feat/csl-lane-navigation-remote-parity)
 
 `csl` previously opened straight into the local-model picker; the remote picker (`csl remote`)
 was a separate, one-shot invocation you could only reach by exiting the local picker's `r` option
@@ -14,7 +18,7 @@ and re-launching. This release makes `csl` a single process with a top-level hom
 back-and-forth navigation between lanes, and adds a filter so the remote picker doesn't drown you
 in remote models you could just as well run locally.
 
-### Added
+#### Added
 
 - **A home lane selector.** `csl` (no args) now opens on a screen offering `1) Local`,
   `2) Remote`, `i) Install / set up remote API keys`, and `q) Quit`, instead of landing directly
@@ -61,7 +65,7 @@ in remote models you could just as well run locally.
   installed copy.") rather than silently showing generic example config as if it were the user's
   own roster.
 
-### Fixed
+#### Fixed
 
 - The local-capable policy loader called two of its own helper functions before either was
   defined, so every invocation of `remote-session.sh` — including plain `--list` — silently failed
@@ -72,7 +76,7 @@ in remote models you could just as well run locally.
 - `--list` never applied the local-capable filter (only the interactive menu did), so a scripted
   caller saw every remote model regardless of the filter's hidden/shown state.
 
-### Notes on scope
+#### Notes on scope
 
 - The **PSV catalog generator** (any tool that would auto-populate or regenerate
   `local-capable-remote-models.psv` from a live scan of the local model catalog) is **out of
@@ -88,7 +92,44 @@ in remote models you could just as well run locally.
   (`_pick_from`, the auto-mode state machine) that `csl` and `remote-session.sh` currently
   duplicate independently.
 
-## [0.14.1] — 2026-09-16
+### Agent Tool Constraint Documentation (from docs/free-agents-agent-tool-trap)
+
+Teaches the skills the one thing that made a real session save $0 while believing it had delegated.
+
+**The incident.** A Sonnet-run session was asked repeatedly to use free agents. It eventually
+"delegated" by calling Claude Code's built-in `Agent` tool with no `model` parameter — which runs
+the default subagent model at full price. In its own words: *"only the illusion of delegation."*
+Nothing in the skills said the `Agent` tool cannot reach a free model, so the session had to
+re-derive it, and got it wrong first.
+
+- **`⛔ READ THIS FIRST` section, inline at the top of `free-agents` and `offload-to-local`** — states
+  that the `Agent`/Task tool's `model` enum accepts only paid tiers, that omitting `model` is the
+  trap (not a cheap default), and lists the only genuinely free routes. Includes a self-check:
+  name the process that ran the tokens; if it is not a localhost port or a free provider, it was
+  not free. Placed inline rather than in a reference file, because a reference file is not loaded.
+- **A capability map of the two free lanes** — remote free APIs reach far larger models than local,
+  so "too hard for local" is an argument for a bigger *free* model, not for spending. Axes that
+  actually differ: size, latency, quota, privacy, reliability.
+- **Remote does NOT mean big** — a remote roster also lists 20–35B models that are the same class as
+  the local ones. Dispatching those remotely buys no capability while burning a finite quota and
+  sending the prompt off-machine. Filter by parameter count, not by lane; prefer the local
+  equivalent where one exists.
+- **`remote:<provider>` is now a first-class plan annotation** alongside `local:` and `cloud:`, and
+  "Keep on the cloud model" is retitled **"Keep on the PAID model"** — two of the three lanes cost
+  nothing, so `cloud:` should be the minority annotation.
+- **Both descriptions now trigger on the failure mode itself** — reaching for the Agent/Task tool
+  hoping it will be cheap.
+- **Measured caveats on `remote-agent-dispatch.py`**, found while dogfooding this change: only some
+  advertised providers are implemented (gemini works, nvidia does not yet); the built-in default
+  model id can be RETIRED (defaulted to `gemini-2.0-flash` → HTTP 404), so always pass `--model`;
+  and too small a `--max-tokens` yields a truncated answer that reads as a terse one.
+- **Corrected a stale claim** that the local backend is single-slot/minutes-per-turn.
+
+Verified by dispatching the incident scenario, plus the rewritten skill, to a free remote model:
+it named `local-agent-dispatch.py`, answered that the Agent tool without `model` saves nothing and
+runs the default subagent at full price, and picked the remote lane for reasoning work.
+
+## [0.14.2] — 2026-09-17
 
 Documentation half of the rename. `0.14.0` renamed the project; this makes the docs actually say what
 the project now is, rather than leading with "offload to local MLX" and treating the API lane as a
