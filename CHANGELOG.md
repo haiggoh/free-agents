@@ -6,7 +6,7 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
-## [0.15.0] — 2026-09-17
+## [0.14.2] — 2026-09-17
 
 `csl` previously opened straight into the local-model picker; the remote picker (`csl remote`)
 was a separate, one-shot invocation you could only reach by exiting the local picker's `r` option
