@@ -483,6 +483,75 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
         # csl must not forward -w into remote (that would make the launch exit 2).
         self.assertNotIn('remote_args+=("-w")', (self.root / 'bin/csl').read_text())
 
+    def test_local_capable_shown_flag_reaches_the_filter(self):
+        """`--local-capable-shown` must actually change what the roster table shows.
+
+        REGRESSION GUARD for the same class of bug as the auto-mode/telemetry dead-switch
+        test above: a flag that parses cleanly but never reaches the code that acts on it.
+        Copies the real bin/local-capable-filter.sh and a small fixture policy/roster into
+        the sandbox (setUp's fixture doesn't include either, since most tests never touch
+        the filter), then asserts on the OUTCOME -- which alias names are printed -- not on
+        whether the flag was accepted.
+        """
+        shutil.copy2(ROOT / 'bin/local-capable-filter.sh', self.root / 'bin/local-capable-filter.sh')
+        (self.root / 'config/remote-agents.sh').write_text(
+            'LA_REMOTE_AGENTS=(\n'
+            '  "visibleone|gemini|gemini-3.8-flash|Visible One|renewing_free|note"\n'
+            '  "hiddenone|nvidia|nvidia/local-capable-model|Hidden One|renewing_free|note"\n'
+            ')\n'
+        )
+        (self.root / 'config/local-capable-remote-models.psv').write_text(
+            'nvidia|nvidia/local-capable-model|local-capable|SomeLocalModel|rapid|20|has a local MLX artifact\n'
+        )
+
+        default = self.run_cli('--list')
+        self.assertIn('visibleone', default.stdout)
+        self.assertNotIn('hiddenone', default.stdout,
+                         'a model classified local-capable must be absent from --list by default')
+
+        shown = self.run_cli('--local-capable-shown', '--list')
+        self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
+        self.assertIn('visibleone', shown.stdout)
+        self.assertIn('hiddenone', shown.stdout,
+                      '--local-capable-shown must make the classified-hidden model appear in --list too, '
+                      'not just in the interactive menu')
+
+    def test_csl_owner_returns_via_nav_file_instead_of_exiting(self):
+        """`--csl-owner` must hand navigation back through CSL_NAV_FILE, never exit(1).
+
+        REGRESSION GUARD: a direct invocation (no --csl-owner) treats quitting the picker
+        with nothing selected as `exit 1` ("nothing selected") -- correct for a standalone
+        run. But when csl owns the process (--csl-owner), the SAME quit must write a
+        navigation token to CSL_NAV_FILE and exit 0, so csl's own loop can read it and keep
+        the process alive instead of csl's shell seeing a failure from its child. This was
+        fixed in this branch after a PID mismatch (the writer used its own $$, the reader
+        used a DIFFERENT process's $$) made every navigation silently fail to hand off,
+        which a bare returncode-only test would not have caught.
+        """
+        (self.root / 'config/local-capable-remote-models.psv').write_text('# empty, no rows\n')
+        shutil.copy2(ROOT / 'bin/local-capable-filter.sh', self.root / 'bin/local-capable-filter.sh')
+        navfile = self.root / 'nav-token'
+        env = dict(self.env, CSL_NAV_FILE=str(navfile))
+        result = subprocess.run(
+            ['bash', str(self.root / 'bin/remote-session.sh'), '--csl-owner'],
+            input='q\n', env=env, text=True, capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0,
+                         '--csl-owner must exit 0 on quit, not treat it as an error: ' + result.stderr)
+        self.assertTrue(navfile.exists(), 'quitting under --csl-owner must write CSL_NAV_FILE')
+        self.assertEqual(navfile.read_text().strip(), 'quit')
+        self.assertNotIn('unknown remote alias', result.stdout + result.stderr,
+                         'an empty selection on navigation must never fall through to alias resolution')
+
+        navfile.unlink()
+        result = subprocess.run(
+            ['bash', str(self.root / 'bin/remote-session.sh'), '--csl-owner'],
+            input='h\n', env=env, text=True, capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(navfile.read_text().strip(), 'home',
+                         'h) must write "home" to CSL_NAV_FILE, not "quit" or nothing')
+
     def test_no_bash_scope_errors_on_the_live_launch_path(self):
         """No `local` outside a function anywhere in the script.
 

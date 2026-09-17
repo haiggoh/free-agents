@@ -77,7 +77,9 @@ run_csl() {
 }
 
 echo "== interactive Ornith selection applies 200k =="
-run_csl '2\n' "$SB/ornith-interactive" >/dev/null
+# csl now shows a home lane selector before the local model list; '1' enters
+# the local lane, then '2' selects the second listed model (ornith).
+run_csl '1\n2\n' "$SB/ornith-interactive" >/dev/null
 assert_eq \
   'ornith-1.5-35b|high|200k' \
   "$(cat "$SB/ornith-interactive")" \
@@ -91,14 +93,14 @@ assert_eq \
   'direct csl Ornith receives 200k'
 
 echo "== unprofiled model receives no override =="
-run_csl '1\n' "$SB/alpha" >/dev/null
+run_csl '1\n1\n' "$SB/alpha" >/dev/null
 assert_eq \
   'alpha|high|' \
   "$(cat "$SB/alpha")" \
   'non-Ornith model receives no auto-compaction override'
 
 echo "== custom effort retains selected-model profile =="
-run_csl 'c\n2\n5\n' "$SB/ornith-custom" >/dev/null
+run_csl '1\nc\n2\n5\n' "$SB/ornith-custom" >/dev/null
 assert_eq \
   'ornith-1.5-35b|max|200k' \
   "$(cat "$SB/ornith-custom")" \

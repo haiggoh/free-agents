@@ -72,6 +72,25 @@ quota rather than free local compute, and sends your prompts off the machine.
 Those are different decisions from picking a local model, so they get their own
 menu instead of being interleaved.
 
+## Local-capable filter — hiding remote models you could run locally instead
+
+Some remote entries are models judged to have a viable local MLX equivalent that fits this
+machine's memory budget — running them remotely spends quota for no reason when the same
+capability is available for free on-disk. Those are classified `local-capable` in
+`config/local-capable-remote-models.psv` and **hidden by default**, in both the interactive
+picker and non-interactive `--list` output.
+
+- **`f`** toggles the filter shown/hidden, live — the roster and the visible/hidden counts in
+  the menu header re-render on every keypress.
+- **`R`** prints the full hidden-model report, grouped by provider, with each entry's
+  classification and the reason it was hidden.
+- Non-interactively, `remote-session.sh --local-capable-shown` sets the same state without
+  entering the menu.
+
+Classification fails open: an entry with no policy row, or a provider that lets you choose the
+model at runtime, stays **visible** — uncertainty is never a reason to hide something. The
+policy file is hand-curated; there is no automated generator behind it yet.
+
 ## Model ids rot — always verify
 
 Pinned ids go stale silently and the failure looks like a broken lane:

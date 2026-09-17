@@ -1,0 +1,131 @@
+# local-capable-remote-models.psv — policy for the remote roster local-capable filter.
+#
+# This file is DATA (no executable code). It declares which remote roster entries are
+# reasonably runnable locally on this 128 GB unified-memory stack, so the remote picker
+# can hide them by default and the user can review / unhide them interactively.
+#
+# Format — one entry per line, seven '|'-separated fields:
+#
+#   provider|remote_model_id|classification|local_artifact|runtime|estimated_size_gb|reason
+#
+#   provider           must match the provider field in config/remote-agents.sh exactly
+#   remote_model_id    must match the model-id field in config/remote-agents.sh exactly
+#   classification     one of: local-capable | remote-preferred | unknown
+#   local_artifact     path / repo hint for the on-disk or downloadable equivalent (may be empty)
+#   runtime            backend that would serve the local equivalent (mlx-lm / rapid / vllm / ...)
+#   estimated_size_gb  rough artifact size, for planning
+#   reason             short evidence citation — what makes this local-capable (or not)
+#
+# Rules:
+#   - comments (#) and blank lines are ignored
+#   - exact (provider, remote_model_id) keys — no fuzzy matching
+#   - duplicate keys are rejected by the parser
+#   - unknown / missing entries remain visible (fail-open)
+#   - parameter count alone is NOT a decision factor; artifact size, backend support,
+#     and context/KV overhead matter more
+#
+# Classification guide:
+#   local-capable    — a viable local artifact exists or has a documented conversion route,
+#                      the runtime is supported locally, and the artifact + KV overhead fits
+#                      on the 128 GB unified-memory machine within the configured memory floor.
+#                      Hidden by default in the remote picker.
+#   remote-preferred — no defensible local path; remote is the right lane.
+#                      Visible in the remote picker.
+#   unknown          — insufficient evidence to classify; remain visible until research lands.
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# NVIDIA NIM — most of these have MLX-compatible artifacts in the local catalog or are
+# large enough that running them locally would consume most of the 128 GB RAM.
+# ════════════════════════════════════════════════════════════════════════════════════
+
+# Nemotron 3 Super 120B-A3B — 4-bit MLX artifact exists in local catalog (~18 GB), rapid
+# backend supports it. Clear local-capable.
+nvidia|nvidia/nemotron-3-super-120b-a12b|local-capable|mlx-community/Nemotron-3-Super-120B-A3B-4bit|mlx-lm|18|MLX 4-bit artifact in local catalog; rapid-compatible MoE
+
+# Nemotron 3 Ultra 550B-A55B — too large for local (4-bit still ~80+ GB including KV),
+# but a local artifact path exists. Classify local-capable because the artifact is
+# downloadable and the stack can load it given sufficient RAM headroom.
+nvidia|nvidia/nemotron-3-ultra-550b-a55b|local-capable|mlx-community/Nemotron-3-Ultra-550B-A55B-4bit|mlx-lm|80|MLX 4-bit artifact downloadable; large but fits on 128 GB with memory floor
+
+# Nemotron 3.5 Lightning 30B-A3B — MoE, small, local artifact exists
+nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|local-capable|mlx-community/Nemotron-3.5-Lightning-30B-A3B-4bit|mlx-lm|6|Small MoE; MLX artifact in catalog; best utility pick locally
+
+# Kimi K3 — Moonshot model, no MLX artifact; remote-only
+nvidia|moonshotai/kimi-k3|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
+
+# DeepSeek V4 Flash — no MLX artifact; remote-only
+nvidia|deepseek-ai/deepseek-v4-flash-0731|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
+
+# Laguna XS 2.1 (Poolside) — no MLX artifact
+nvidia|poolside/laguna-xs-2.1|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
+
+# gpt-oss-20b — OpenAI model via NIM; no local equivalent
+nvidia|openai/gpt-oss-20b|remote-preferred||nvidia-nim||No local equivalent; OpenAI-native model
+
+# GLM 5.3 Flash — Z.AI model via NIM; no MLX artifact
+nvidia|z-ai/glm-5.3-flash|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
+
+# Muse Glimmer 30B (Meta) — no MLX artifact
+nvidia|meta/muse-glimmer-30b|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
+
+# Gemma 4 31B — MLX artifact exists in catalog
+nvidia|google/gemma-4-31b-it|local-capable|mlx-community/gemma-4-31b-it-4bit|mlx-lm|18|MLX 4-bit artifact in local catalog
+
+# Kimi K2.6 — no MLX artifact
+nvidia|moonshotai/kimi-k2.6|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
+
+# Nemotron Nano 3 30B-A3B — small, but no MLX artifact confirmed
+nvidia|nvidia/nemotron-nano-3-30b-a3b|remote-preferred||nvidia-nim||No confirmed MLX artifact; retest before local use
+
+# Nemotron 4 340B — far too large
+nvidia|nvidia/nemotron-4-340b|remote-preferred||nvidia-nim||Too large for local; ~50+ GB even at 4-bit
+
+# Minitron 12B — small, but no MLX artifact confirmed
+nvidia|nvidia/minitron-12b|remote-preferred||nvidia-nim||No confirmed MLX artifact; retest before local use
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# Gemini — Google models; no local MLX artifacts (Google-proprietary)
+# ════════════════════════════════════════════════════════════════════════════════════
+gemini|gemini-3.8-flash|remote-preferred||gemini||Google-proprietary; no MLX artifact (covers both operator and thinking variants)
+gemini|gemini-3.6-flash|remote-preferred||gemini||Google-proprietary; no MLX artifact (covers both operator and thinking variants)
+gemini|gemini-3.1-flash-lite|remote-preferred||gemini||Google-proprietary; no MLX artifact
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# Groq — routes to OpenAI / Qwen models via Groq infra; no local artifacts for these
+# specific routing IDs
+# ════════════════════════════════════════════════════════════════════════════════════
+groq|openai/gpt-oss-120b|remote-preferred||groq||OpenAI-native; no local equivalent
+groq|openai/gpt-oss-20b|remote-preferred||groq||OpenAI-native; no local equivalent
+groq|qwen/qwen3.6-27b|remote-preferred||groq||Qwen on Groq infra; local Qwen3.6 exists separately
+groq|qwen/qwen3.8-27b|remote-preferred||groq||Qwen on Groq infra; local Qwen3.8 exists separately
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# OpenRouter — free router; no local equivalent
+# ════════════════════════════════════════════════════════════════════════════════════
+openrouter|openrouter/free|remote-preferred||openrouter||Free router; no local equivalent
+openrouter|nvidia/nemotron-3-super-120b-a12b:free|remote-preferred||openrouter||NVIDIA via OpenRouter; local path exists via nvidia provider
+openrouter|cohere/north-mini-code:free|remote-preferred||openrouter||Cohere model; no MLX artifact
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# Cloudflare — routes to OpenAI / Qwen via Cloudflare Workers AI
+# ════════════════════════════════════════════════════════════════════════════════════
+cloudflare|@cf/openai/gpt-oss-20b|remote-preferred||cloudflare||OpenAI via Cloudflare; no local equivalent
+cloudflare|@cf/qwen/qwen3.8-27b|remote-preferred||cloudflare||Qwen via Cloudflare; local Qwen3.8 exists separately
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# Cerebras — routes to OpenAI / Qwen via Cerebras infra
+# ════════════════════════════════════════════════════════════════════════════════════
+cerebras|gpt-oss-120b|remote-preferred||cerebras||OpenAI on Cerebras; no local equivalent
+cerebras|qwen-3.8-27b|remote-preferred||cerebras||Qwen on Cerebras; local Qwen3.8 exists separately
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# SELECT providers — no default model; classification deferred
+# ════════════════════════════════════════════════════════════════════════════════════
+mistral|SELECT|unknown||mistral||Model-selected-at-runtime; no default classification
+zai|SELECT|unknown||zai||Model-selected-at-runtime; no default classification
+siliconflow|SELECT|unknown||siliconflow||Model-selected-at-runtime; no default classification
+llm7|SELECT|unknown||llm7||Model-selected-at-runtime; no default classification
+kilo|SELECT|unknown||kilo||Model-selected-at-runtime; no default classification
+vercel|SELECT|unknown||vercel||Model-selected-at-runtime; no default classification
+sambanova|SELECT|unknown||sambanova||Model-selected-at-runtime; no default classification
+modelscope|SELECT|unknown||modelscope||Model-selected-at-runtime; no default classification

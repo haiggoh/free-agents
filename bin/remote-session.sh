@@ -44,8 +44,8 @@ if [[ -f "$LA_TRUST_SHIM/sitecustomize.py" ]]; then
     export PYTHONPATH="${LA_TRUST_SHIM}${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
-# shellcheck source=/dev/null
 [[ -r "$ROSTER" ]] || { echo "remote-session: missing roster: $ROSTER" >&2; exit 2; }
+# shellcheck source=/dev/null
 source "$ROSTER"
 
 MAX_OUT="${LA_REMOTE_MAX_OUTPUT_TOKENS:-8192}"
@@ -54,6 +54,11 @@ DRY_RUN=0
 MODE="launch"
 ALIAS=""
 REMOTE_MODEL=""
+# Local-capable filter: 0=hidden (default), 1=shown.
+LOCAL_CAPABLE_SHOWN=0
+# When true, remote-session.sh runs as a submenu of csl and returns
+# via a navigation token on stdout instead of exec'ing claude.
+CSL_OWNER=0
 
 usage() {
     sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
@@ -128,19 +133,97 @@ _visible() { # tier filter: hide trials unless asked
     [[ "$tier" != "trial" ]] || [[ $INCLUDE_TRIALS -eq 1 ]]
 }
 
-print_list() {
-    printf '\n\033[1m☁️  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n'
-    printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
-    local i=0 e alias prov model disp tier keystate
+# ---- local-capable filter helpers -------------------------------------------
+# Build a bash associative array from _POLICY_JSON for fast lookup.
+declare -A _LC_VISIBLE
+_lc_load_policy() {
+    _LC_VISIBLE=()
+    if [[ -z "${_POLICY_JSON:-}" ]]; then return; fi
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local v alias prov mid
+        v="$(printf '%s' "$line" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());print("true" if d.get("visible",True) else "false")')"
+        alias="$(printf '%s' "$line" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());print(d.get("alias",""))')"
+        prov="$(printf '%s' "$line" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());print(d.get("provider",""))')"
+        mid="$(printf '%s' "$line" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());print(d.get("remote_model_id",""))')"
+        _LC_VISIBLE["${prov}|${mid}"]="${v:-true}"
+    done <<< "$(printf '%s' "$_POLICY_JSON" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());[print(json.dumps(r)) for r in d.get("rows",[])]' 2>/dev/null)"
+}
+_lc_is_hidden() {
+    # $1=provider $2=model_id -> 0 if hidden, 1 if visible
+    local key="${1}|${2}"
+    local v="${_LC_VISIBLE[$key]:-true}"
+    [[ "$v" == "false" ]]
+}
+
+# _filtered_aliases -> prints alias names, one per line, filtered by tier + local-capable.
+_filtered_aliases() {
+    local e alias prov model disp tier
     for e in "${LA_REMOTE_AGENTS[@]}"; do
         alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
         disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
         _visible "$tier" || continue
+        if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
+            _lc_is_hidden "$prov" "$model" && continue
+        fi
+        echo "$alias"
+    done
+}
+
+# _nav -> writes a navigation token for the csl parent to read back. csl runs this
+# script as a child process (`bash "$rl" ...`), so `$$` here is the CHILD's pid, not
+# csl's — a file keyed on this script's own $$ can never be found by the parent's
+# read using ITS $$. csl passes the exact path via CSL_NAV_FILE; fall back to $$ only
+# for a standalone --csl-owner invocation with no parent to hand a path to.
+_nav() { echo "$1" > "${CSL_NAV_FILE:-/tmp/_csl_nav.$$}"; }
+
+# ---- local-capable filter ---------------------------------------------------
+# Load the policy file if it exists, so the interactive picker can filter
+# the roster. The filter is re-applied every render so toggle state is live.
+# MUST run after _field/_lc_load_policy are defined above — this was originally
+# a top-level call issued before either function existed (bash has no forward
+# declarations), which made every remote-session.sh invocation print
+# "_lc_load_policy: command not found" and silently skip the filter entirely.
+POLICY_FILE="$REPO_ROOT/config/local-capable-remote-models.psv"
+if [[ -r "$POLICY_FILE" ]]; then
+  _POLICY_JSON="$(bash "$SCRIPT_DIR/local-capable-filter.sh" --parse "$POLICY_FILE" --roster - 2>/dev/null <<< "$(
+    for e in "${LA_REMOTE_AGENTS[@]}"; do
+      printf '%s\n' "$e"
+    done | while IFS= read -r line; do
+      alias="$(_field "$line" 1)"; prov="$(_field "$line" 2)"; model="$(_field "$line" 3)"
+      disp="$(_field "$line" 4)"; tier="$(_field "$line" 5)"
+      printf '%s|%s|%s|%s|%s\n' "$alias" "$prov" "$model" "$disp" "$tier"
+    done
+  )")" || _POLICY_JSON='{"visible_count":0,"hidden_count":0,"rows":[]}'
+else
+  _POLICY_JSON='{"visible_count":0,"hidden_count":0,"rows":[]}'
+fi
+_lc_load_policy
+
+print_list() {
+    printf '\n\033[1m☁️  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n'
+    printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
+    local i=0 e alias prov model disp tier keystate
+    local hidden_count=0
+    for e in "${LA_REMOTE_AGENTS[@]}"; do
+        alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
+        disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
+        _visible "$tier" || continue
+        # This is the same presentation-only filter the interactive menu applies (see
+        # _run_remote_menu) — --list is a display surface too, so it must not show a
+        # local-capable model by default just because it bypasses the interactive picker.
+        if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]] && _lc_is_hidden "$prov" "$model"; then
+            hidden_count=$((hidden_count+1))
+            continue
+        fi
         i=$((i+1))
         if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
         printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$tier" "$keystate"
     done
     [[ $INCLUDE_TRIALS -eq 0 ]] && printf '\n  (trial-tier agents hidden — pass --include-trials to show them)\n'
+    if [[ $hidden_count -gt 0 ]]; then
+        printf '  (%d local-capable model(s) hidden — pass --local-capable-shown to show them)\n' "$hidden_count"
+    fi
     printf '\n  Local MLX models are a different list: use `csl` / launch-claude-agent.sh.\n\n'
 }
 
@@ -157,6 +240,155 @@ pick_alias() { # interactive numbered picker -> echoes the chosen alias
     [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#choices[@]} )) || {
         echo "remote-session: not a valid choice: $n" >&2; return 1; }
     printf '%s' "${choices[$((n-1))]}"
+}
+
+# ---- interactive remote picker menu loop ------------------------------------
+# Replaces the one-shot pick_alias with a full menu that supports:
+#   - switching back to the home lane / local picker
+#   - toggling local-capable hidden/visible
+#   - viewing the hidden-model report grouped by provider
+# When --csl-owner is set, navigation returns via /tmp/_csl_nav.$$ instead
+# of exiting. In that case the function returns 0 and the caller reads the
+# nav token.
+_run_remote_menu() {
+    # ALIAS may be pre-set from CLI args; if so skip the picker.
+    if [[ -n "$ALIAS" ]]; then return 0; fi
+
+    local -a choices=() e alias tier
+    local selection=""
+    local -a current_choices=()
+
+    # The whole interactive loop (menu box, prompts, reports) is redirected to stderr as
+    # a group. This function's ONLY stdout output is the final `printf '%s' "$selection"`
+    # after the loop — callers capture it via `ALIAS="$(_run_remote_menu)"`. Without this,
+    # every echo/printf that draws the menu went to stdout too, so the entire visible menu
+    # was silently swallowed into $ALIAS instead of shown to the user, and $ALIAS ended up
+    # holding menu text (or, on quit/navigate, nothing at all) rather than a real selection.
+    # `{ ... } >&2` is a redirected group, not a subshell, so variable assignments made
+    # inside (selection=, AUTO_MODE_STATE=, etc.) still reach the rest of the function.
+    {
+    while [[ -z "$selection" ]]; do
+        # Rebuild the visible roster each render.
+        choices=()
+        for e in "${LA_REMOTE_AGENTS[@]}"; do
+            tier="$(_field "$e" 5)"; _visible "$tier" || continue
+            if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
+                alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
+                _lc_is_hidden "$prov" "$model" && continue
+            fi
+            choices+=("$(_field "$e" 1)")
+        done
+
+        current_choices=("${choices[@]}")
+
+        echo
+        echo "╔══════════════════════════════════════════════════════════╗"
+        echo "║              ☁️  Remote API Session Picker               ║"
+        echo "╠══════════════════════════════════════════════════════════╣"
+        printf '║  Auto-mode: '
+        case "$AUTO_MODE_STATE" in
+            0) printf "blind-trust%-26s" "" ;;
+            1) printf "classifier%-29s" "" ;;
+            2) printf "off%-33s" "" ;;
+        esac
+        printf '║\n'
+        printf '║  Telemetry: %-28s ' "$([ "$TELEMETRY_ENABLED" = "1" ] && echo "ON" || echo "OFF")"
+        printf '║\n'
+        printf '║  Local-cap: %-28s ' "$([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+        printf '║\n'
+        [[ $INCLUDE_TRIALS -eq 1 ]] && printf '║  Trials:    %-28s ' "VISIBLE" || printf '║  Trials:    %-28s ' "HIDDEN"
+        printf '║\n'
+        echo "╠══════════════════════════════════════════════════════════╣"
+        printf '║  %d model(s) visible' "${#choices[@]}"
+        local hidden_count=0
+        for e in "${LA_REMOTE_AGENTS[@]}"; do
+            tier="$(_field "$e" 5)"; _visible "$tier" || continue
+            if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
+                alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
+                _lc_is_hidden "$prov" "$model" && hidden_count=$((hidden_count+1))
+            fi
+        done
+        printf '  (hidden: %d)' "$hidden_count"
+        # Pad to fit
+        local label_len=$((18 + ${#choices[@]} + ${#hidden_count}))
+        local pad=$((52 - label_len))
+        [[ $pad -gt 0 ]] && printf '%*s' "$pad" ""
+        printf '║\n'
+        echo "╠══════════════════════════════════════════════════════════╣"
+        printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
+        local i=0 keystate
+        for e in "${LA_REMOTE_AGENTS[@]}"; do
+            alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
+            disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
+            _visible "$tier" || continue
+            if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
+                _lc_is_hidden "$prov" "$model" && continue
+            fi
+            i=$((i+1))
+            if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
+            printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$tier" "$keystate"
+        done
+        [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
+        echo
+        echo "  h) back to lane selector"
+        echo "  l) switch to local models"
+        echo "  f) toggle local-capable: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "HIDE" || echo "SHOW")"
+        echo "  R) show hidden-model report"
+        echo "  i) install / set up remote API keys"
+        case "$AUTO_MODE_STATE" in
+            0) echo "  a) auto-mode: blind-trust — auto with no classifier (cycle)" ;;
+            1) echo "  a) auto-mode: classifier  — auto with local classifier (cycle)" ;;
+            2) echo "  a) auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
+        esac
+        echo "  t) telemetry: $([ "$TELEMETRY_ENABLED" = "1" ] && echo "OFF (toggle)" || echo "ON (toggle)")"
+        echo "  T) include trial-tier agents: $([ "$INCLUDE_TRIALS" = "1" ] && echo "OFF" || echo "ON")"
+        echo "  q) quit"
+        echo
+        printf "Select [1-%d] (h/l/f/R/i/a/t/T/q): " "${#choices[@]}" >&2
+        read -r -p "" sel >&2 || { _nav "quit"; return 0; }
+        case "$sel" in
+            h|H) _nav "home"; return 0 ;;
+            l|L) _nav "local"; return 0 ;;
+            f|F)
+                LOCAL_CAPABLE_SHOWN=$(( 1 - LOCAL_CAPABLE_SHOWN ))
+                _lc_load_policy
+                continue ;;
+            R|r)
+                # Show hidden-model report
+                echo
+                bash "$SCRIPT_DIR/local-capable-filter.sh" --report "$POLICY_FILE" --roster - 2>/dev/null <<< "$(
+                    for e in "${LA_REMOTE_AGENTS[@]}"; do
+                        printf '%s\n' "$e"
+                    done | while IFS= read -r line; do
+                        printf '%s\n' "$line"
+                    done
+                )" || echo "  (report unavailable)"
+                echo
+                echo "  (press enter to return to menu)" >&2
+                read -r -p "" _ >&2 || { _nav "quit"; return 0; }
+                continue ;;
+            i|I) python3 "$REPO_ROOT/install/setup-api-keys.py"; continue ;;
+            a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
+            t|T)
+                if [[ "$sel" == "t" ]]; then
+                    TELEMETRY_ENABLED=$(( 1 - TELEMETRY_ENABLED ))
+                else
+                    INCLUDE_TRIALS=$(( 1 - INCLUDE_TRIALS ))
+                fi
+                continue ;;
+            q|Q) _nav "quit"; return 0 ;;
+            *)
+                if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#choices[@]}" ]; then
+                    echo "  Invalid selection." >&2
+                    continue
+                fi
+                selection="${current_choices[$((sel-1))]}"
+                ;;
+        esac
+    done
+    } >&2
+    # Return the selected alias via stdout (compatible with existing callers).
+    printf '%s' "$selection"
 }
 
 # ---- live verification ------------------------------------------------------
@@ -465,10 +697,12 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
         local envassign_o line_o
         envassign_o="$("$KEYS" --env "$prov")" || return 1
         ( _clear_provider_env
+          # shellcheck disable=SC2163 # line_o is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
           while IFS= read -r line_o; do export "$line_o"; done <<< "$envassign_o"
           exec "${_cmd[@]}" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
         echo $! > "$pidf"
         local j
+        # shellcheck disable=SC2034  # retry counter, not read
         for j in $(seq 1 60); do
             if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
                 echo "$port"; return 0
@@ -498,6 +732,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
     local envassign line
     envassign="$("$KEYS" --env "$prov")" || return 1
     ( _clear_provider_env
+      # shellcheck disable=SC2163 # line is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
       while IFS= read -r line; do export "$line"; done <<< "$envassign"
       exec "$litellm_py" "$trust_wrapper" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
     echo $! > "$pidf"
@@ -536,6 +771,10 @@ while [[ $# -gt 0 ]]; do
                           REMOTE_MODEL="$2"; _valid_model "$REMOTE_MODEL" || exit 2; shift 2 ;;
         --dry-run)        DRY_RUN=1; shift ;;
         --include-trials) INCLUDE_TRIALS=1; shift ;;
+        --local-capable-shown) LOCAL_CAPABLE_SHOWN=1; shift ;;
+        --csl-owner)
+            # shellcheck disable=SC2034  # accepted for forward-compat / documentation of the --csl-owner contract; not currently read (see report)
+            CSL_OWNER=1; shift ;;
         -i|--install-keys) MODE="install-keys"; shift ;;
         -w|--watcher)
             # Deliberately NOT a silent no-op. The remote watcher is deferred (it cannot
@@ -588,7 +827,17 @@ esac
 
 # ---- launch ----------------------------------------------------------------
 if [[ -z "$ALIAS" ]]; then
-    ALIAS="$(pick_alias)" || { echo "remote-session: nothing selected." >&2; exit 1; }
+    # _run_remote_menu returns 0 (not an error) on navigation (h/l/q) — it wrote a
+    # nav token via _nav() and printed nothing on stdout. `ALIAS="$(...)" || ...` only
+    # catches a NON-ZERO exit, so an empty-but-successful return used to fall straight
+    # through into alias resolution below with ALIAS="", producing a bogus
+    # "unknown remote alias: " error instead of a clean exit. Check emptiness explicitly.
+    ALIAS="$(_run_remote_menu)" || { echo "remote-session: nothing selected." >&2; exit 1; }
+    if [[ -z "$ALIAS" ]]; then
+        # Navigated away (home/local) or quit — csl reads the nav token itself when
+        # CSL_OWNER=1; a direct invocation with nothing selected just exits cleanly.
+        exit 0
+    fi
 fi
 
 # ---- interactive toggle resolution (launch mode) ---------------------------

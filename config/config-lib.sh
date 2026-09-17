@@ -286,10 +286,14 @@ la_load_config() {
     # shellcheck source=/dev/null
     . "$LA_CONFIG_DIR/config.local.sh"
     LA_CONFIG_SOURCE="config.local.sh"
+    LA_FALLBACK_CONFIG=0
   elif [ -f "$LA_CONFIG_DIR/config.example.sh" ]; then
     # shellcheck source=/dev/null
     . "$LA_CONFIG_DIR/config.example.sh"
     LA_CONFIG_SOURCE="config.example.sh (defaults — copy to config.local.sh and edit)"
+    # Structured predicate for callers (e.g. csl's home screen) that need to show a
+    # fallback notice without parsing the human-facing LA_CONFIG_SOURCE string.
+    LA_FALLBACK_CONFIG=1
   else
     echo "❌ local-agents: no config found in $LA_CONFIG_DIR" >&2
     return 1

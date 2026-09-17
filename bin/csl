@@ -106,6 +106,11 @@ TELEMETRY="${CSL_TELEMETRY:-0}"
 # LA_SESSION_LAUNCHER); an ordinary cloud/gateway `claude` never runs it regardless of this setting.
 STOP_HOOK="${CSL_STOP_HOOK:-1}"
 
+# Local-capable filter state for the remote roster.
+# 0 = HIDDEN (default): local-capable models are hidden in the remote picker.
+# 1 = SHOWN: local-capable models are visible and selectable.
+LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
+
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
 if [ "$#" -gt 0 ]; then
@@ -184,8 +189,6 @@ _launch_remote() {  # opens the remote roster and hands off; never returns on su
   fi
 
   # Pass through auto-mode state (cycle to match current state)
-  # We need to set the remote session's AUTO_MODE_STATE to match ours
-  # Since remote-session.sh cycles with -a, we apply the current state
   local i=0
   while [ $i -lt "$AUTO_MODE_STATE" ]; do
     remote_args+=("-a")
@@ -195,6 +198,11 @@ _launch_remote() {  # opens the remote roster and hands off; never returns on su
   # Pass through telemetry state
   if [ "$TELEMETRY" = "1" ]; then
     remote_args+=("-t")
+  fi
+
+  # Pass through local-capable filter state
+  if [ "$LOCAL_CAPABLE" = "1" ]; then
+    remote_args+=("--local-capable-shown")
   fi
 
   # The stop-hook state travels as an env var, not a flag: remote-session.sh exports it for the
@@ -237,60 +245,170 @@ OSA
   fi
 }
 
-while :; do
+# ---------------------------------------------------------------------------
+# Home lane selector — the top-level screen that appears before either picker.
+# The user picks local, remote, or quits. Shared state (auto-mode, telemetry,
+# watcher, stop-hook, local-capable) is preserved across lane switches.
+# ---------------------------------------------------------------------------
+_pick_home_lane() {
+  NEXT_LANE=""
   echo
-  echo "Local agents — launch a local session (config: ${LA_CONFIG_SOURCE})"
-  echo
-  echo "Available models (on disk, session-capable; numbered rows use the configured effort):"
-  for ((i=0; i<${#MODEL_LABELS[@]}; i++)); do
-    printf "  %d) %s\n" "$((i+1))" "${MODEL_LABELS[$i]}"
-  done
-  echo
-  echo "  c) choose a listed model × custom effort"
-  echo "  r) ☁️  remote API agents (choose provider/model; account quotas apply)"
-  echo "     Cerebras trial opt-in: csl remote --include-trials"
-  echo "  i) install / set up remote API keys"
-  if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
-  else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
+  echo "╔══════════════════════════════════════════════════════════╗"
+  echo "║              Claude Code Session Launcher                ║"
+  echo "╠══════════════════════════════════════════════════════════╣"
+  printf '║  Config: %-48s ║\n' "$LA_CONFIG_SOURCE"
+  if [ -n "${LA_FALLBACK_CONFIG:-}" ] && [ "$LA_FALLBACK_CONFIG" = "1" ]; then
+    printf '║  ⚠  Using public fallback defaults. Private models      ║\n'
+    printf '║     are not present in this installed copy.             ║\n'
+  fi
+  echo "╠══════════════════════════════════════════════════════════╣"
+  printf '║  Auto-mode: '
   case "$AUTO_MODE_STATE" in
-    0) echo "  a) auto-mode: blind-trust — auto with no classifier (cycle: blind→classifier→off)" ;;
-    1) echo "  a) auto-mode: classifier  — auto with local classifier (cycle: blind→classifier→off)" ;;
-    2) echo "  a) auto-mode: off         — acceptEdits; no classifier (cycle: blind→classifier→off)" ;;
+    0) printf "blind-trust%-26s" "" ;;
+    1) printf "classifier%-29s" "" ;;
+    2) printf "off%-33s" "" ;;
   esac
-  if [ "$TELEMETRY" = "1" ]; then echo "  t) telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
-  else                            echo "  t) telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
-  if [ "$STOP_HOOK" = "1" ]; then echo "  s) queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
-  else                            echo "  s) queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
-  echo "  q) quit"
-  echo
-  printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
+  printf '║\n'
+  printf '║  Telemetry: %-28s ' "$([ "$TELEMETRY" = "1" ] && echo "ON" || echo "OFF")"
+  printf '║\n'
+  printf '║  Watcher:   %-28s ' "$([ "$WATCH" = "1" ] && echo "ON" || echo "OFF")"
+  printf '║\n'
+  printf '║  Stop hook: %-28s ' "$([ "$STOP_HOOK" = "1" ] && echo "ON" || echo "OFF")"
+  printf '║\n'
+  printf '║  Local-cap: %-28s ' "$([ "$LOCAL_CAPABLE" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+  printf '║\n'
+  echo "╠══════════════════════════════════════════════════════════╣"
+  echo "║  1) Local  — MLX models on this machine (${#SESSION_ALIASES[@]} on disk)           ║"
+  echo "║  2) Remote — Free/paid cloud API (provider quotas apply) ║"
+  echo "║  i) Install / set up remote API keys                     ║"
+  echo "║  q) Quit                                                 ║"
+  echo "╚══════════════════════════════════════════════════════════╝"
+  printf "Select lane [1]: " >&2
+  read -r sel; sel="${sel:-1}"
   case "$sel" in
-    q|Q) exit 0 ;;
-    i|I) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
-    r|R) _launch_remote || continue ;;
-    w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
-    a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
-    b|B) AUTO_MODE_STATE=0; continue ;;  # b shortcut: jump straight to blind-trust
-    t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
-    s|S) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; continue ;;
-    c|C)
-      echo >&2
-      echo "Models (on disk, session-capable):" >&2
-      mi=$(_pick_from "Model" 1 "${MODEL_LABELS[@]}")
-      [ "$mi" = "0" ] && { echo "Invalid selection."; continue; }
-      chosen="${SESSION_ALIASES[$((mi-1))]}"
-      echo >&2
-      echo "Effort — higher reasons more and takes longer; lower answers sooner:" >&2
-      ei=$(_pick_from "Effort" 3 "${EFFORTS[@]}")
-      [ "$ei" = "0" ] && { echo "Invalid selection."; continue; }
-      _launch "$chosen" "${EFFORTS[$((ei-1))]}"
-      ;;
-    *)
-      if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#SESSION_ALIASES[@]}" ]; then
-        echo "Invalid selection."; continue
+    1|local|LOCAL) NEXT_LANE="local" ;;
+    2|remote|REMOTE) NEXT_LANE="remote" ;;
+    i|I) NEXT_LANE="install" ;;
+    q|Q) NEXT_LANE="quit" ;;
+    *) NEXT_LANE="home"; echo "Invalid selection." >&2 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Local picker — returns via NEXT_LANE when the user navigates away or quits.
+# ---------------------------------------------------------------------------
+_run_local_picker() {
+  NEXT_LANE="home"
+  while :; do
+    echo
+    echo "Local agents — launch a local session (config: ${LA_CONFIG_SOURCE})"
+    echo
+    echo "Available models (on disk, session-capable; numbered rows use the configured effort):"
+    for ((i=0; i<${#MODEL_LABELS[@]}; i++)); do
+      printf "  %d) %s\n" "$((i+1))" "${MODEL_LABELS[$i]}"
+    done
+    echo
+    echo "  h) back to lane selector"
+    echo "  c) choose a listed model × custom effort"
+    echo "  r) ☁️  remote API agents (choose provider/model; account quotas apply)"
+    echo "     Cerebras trial opt-in: csl remote --include-trials"
+    echo "  i) install / set up remote API keys"
+    if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
+    else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
+    case "$AUTO_MODE_STATE" in
+      0) echo "  a) auto-mode: blind-trust — auto with no classifier (cycle: blind→classifier→off)" ;;
+      1) echo "  a) auto-mode: classifier  — auto with local classifier (cycle: blind→classifier→off)" ;;
+      2) echo "  a) auto-mode: off         — acceptEdits; no classifier (cycle: blind→classifier→off)" ;;
+    esac
+    if [ "$TELEMETRY" = "1" ]; then echo "  t) telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
+    else                            echo "  t) telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
+    if [ "$STOP_HOOK" = "1" ]; then echo "  s) queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
+    else                            echo "  s) queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
+    echo "  q) quit"
+    echo
+    printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
+    case "$sel" in
+      q|Q) NEXT_LANE="quit"; return ;;
+      h|H) NEXT_LANE="home"; return ;;
+      i|I) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
+      r|R) NEXT_LANE="remote"; return ;;
+      w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
+      a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
+      b|B) AUTO_MODE_STATE=0; continue ;;  # b shortcut: jump straight to blind-trust
+      t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
+      s|S) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; continue ;;
+      c|C)
+        echo >&2
+        echo "Models (on disk, session-capable):" >&2
+        mi=$(_pick_from "Model" 1 "${MODEL_LABELS[@]}")
+        [ "$mi" = "0" ] && { echo "Invalid selection."; continue; }
+        chosen="${SESSION_ALIASES[$((mi-1))]}"
+        echo >&2
+        echo "Effort — higher reasons more and takes longer; lower answers sooner:" >&2
+        ei=$(_pick_from "Effort" 3 "${EFFORTS[@]}")
+        [ "$ei" = "0" ] && { echo "Invalid selection."; continue; }
+        _launch "$chosen" "${EFFORTS[$((ei-1))]}"
+        ;;
+      *)
+        if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#SESSION_ALIASES[@]}" ]; then
+          echo "Invalid selection."; continue
+        fi
+        chosen="${SESSION_ALIASES[$((sel-1))]}"
+        _launch "$chosen" "${LA_EFFORT[$chosen]:-}"
+        ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Main loop — owns the interactive state. Each lane runs as a function in this
+# shell so state (AUTO_MODE_STATE, TELEMETRY, WATCH, STOP_HOOK, LOCAL_CAPABLE)
+# is preserved across lane switches without subshell isolation.
+# ---------------------------------------------------------------------------
+NEXT_LANE="home"
+while [ "$NEXT_LANE" != "quit" ]; do
+  case "$NEXT_LANE" in
+    home)   _pick_home_lane ;;
+    local)  _run_local_picker ;;
+    remote)
+      # Delegate to remote-session.sh which now has its own interactive loop.
+      # It returns (does not exec) when the user navigates back or quits.
+      rl="$(_remote_launcher)"
+      if [ ! -x "$rl" ]; then
+        echo "csl: remote session launcher not found or not executable: $rl" >&2
+        NEXT_LANE="home"
+        continue
       fi
-      chosen="${SESSION_ALIASES[$((sel-1))]}"
-      _launch "$chosen" "${LA_EFFORT[$chosen]:-}"
+      # Build args matching current state
+      remote_args=()
+      if [ "$WATCH" = "1" ]; then
+        echo "note: watcher stays off for remote sessions (not supported yet); local sessions keep it." >&2
+      fi
+      i=0
+      while [ $i -lt "$AUTO_MODE_STATE" ]; do
+        remote_args+=("-a")
+        i=$((i + 1))
+      done
+      [ "$TELEMETRY" = "1" ] && remote_args+=("-t")
+      [ "$LOCAL_CAPABLE" = "1" ] && remote_args+=("--local-capable-shown")
+      remote_args+=("--csl-owner")
+      # Run remote picker in current shell (not exec) so we can return here.
+      # remote-session.sh must support --csl-owner to not exec on selection.
+      # CSL_NAV_FILE is keyed on THIS shell's $$, since remote-session.sh runs as a
+      # child process with its own, different $$ — it cannot discover our pid on its own.
+      navfile="/tmp/_csl_nav.$$"
+      rm -f "$navfile"
+      env LA_QUEUE_STOP_HOOK="$STOP_HOOK" CSL_NAV_FILE="$navfile" bash "$rl" "${remote_args[@]}"
+      nav="$(cat "$navfile" 2>/dev/null)"
+      rm -f "$navfile"
+      if [ -n "$nav" ]; then
+        NEXT_LANE="$nav"
+      else
+        NEXT_LANE="home"
+      fi
       ;;
+    install) python3 "$CSL_DIR/../install/setup-api-keys.py"; NEXT_LANE="home" ;;
+    *) echo "internal error: invalid lane '$NEXT_LANE'" >&2; NEXT_LANE="home" ;;
   esac
 done
+exit 0

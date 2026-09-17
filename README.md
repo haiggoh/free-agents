@@ -617,6 +617,21 @@ These controls do not change the permission-mode boundary, which is owned by the
 never by argument forwarding. Enabling the `Agent` tool does not by itself change how Auto Mode's
 classifier is routed or how good its verdicts are — those stay separate questions.
 
+### The home lane selector: local or remote, with navigation back and forth
+
+`csl` (no args) no longer opens straight into the local-model list. It opens on a **home screen**
+offering `1) Local`, `2) Remote`, `i) Install / set up remote API keys`, and `q) Quit`, and shows the
+current state of every session-wide toggle (auto-mode, telemetry, watcher, stop hook, local-capable
+filter) and the resolved config source.
+
+From inside either picker you can return to this home screen (`h`) or jump straight across to the
+other lane (`r` from local, `l` from remote) — all in one process, with no restart and no state loss.
+Auto-mode, telemetry, the watcher, the stop hook, and the local-capable filter all carry over across
+every switch.
+
+If this installed copy has no `config.local.sh` and fell back to the public `config.example.sh`, the
+home screen also prints a warning that private models are not present in this installed copy.
+
 ### The picker: why a session is chosen differently from a dispatch
 
 `csl` lists every on-disk model whose backend can drive an interactive Claude session. Selecting

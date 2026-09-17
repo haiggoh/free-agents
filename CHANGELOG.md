@@ -6,6 +6,88 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.15.0] — 2026-09-17
+
+`csl` previously opened straight into the local-model picker; the remote picker (`csl remote`)
+was a separate, one-shot invocation you could only reach by exiting the local picker's `r` option
+and re-launching. This release makes `csl` a single process with a top-level home screen and real
+back-and-forth navigation between lanes, and adds a filter so the remote picker doesn't drown you
+in remote models you could just as well run locally.
+
+### Added
+
+- **A home lane selector.** `csl` (no args) now opens on a screen offering `1) Local`,
+  `2) Remote`, `i) Install / set up remote API keys`, and `q) Quit`, instead of landing directly
+  in the local-model list. It shows the resolved config source, and the current state of
+  auto-mode, telemetry, the watcher, the queued-prompt stop hook, and the local-capable filter.
+- **Bidirectional lane navigation, in one process.** From the home screen you can enter the local
+  picker (`1`) or the remote picker (`2`); from *inside* either picker you can return to the home
+  screen (`h`) or jump straight across to the other lane (`r` from local, `l` from remote) without
+  restarting `csl` or losing state. `remote-session.sh` gained a `--csl-owner` mode for this: when
+  owned by `csl`, it returns a navigation token (via a `CSL_NAV_FILE` handoff file) instead of
+  `exec`'ing `claude` directly, so `csl`'s main loop can read it back and switch lanes.
+- **Shared state persists across every lane switch.** Auto-mode state (blind-trust / classifier /
+  off), telemetry on/off, the watcher toggle, the queued-prompt stop hook, and the local-capable
+  filter's shown/hidden state are all held in the single `csl` shell process and carried into
+  whichever picker or launcher you land in next — going home → remote → back to local does not
+  reset any of them.
+- **A local-capable filter for the remote picker**, with a genuinely new policy file and script:
+  - `config/local-capable-remote-models.psv` — a pipe-separated policy table classifying each
+    remote-roster entry (by provider + exact remote model id) as `local-capable`,
+    `remote-preferred`, or `unknown`. `local-capable` entries are models judged to have a viable
+    on-disk (or documented-conversion) MLX equivalent that fits this machine's memory budget;
+    `remote-preferred` entries have no defensible local path; `unknown` entries (including every
+    "choose the model at runtime" provider) stay visible — the filter fails open on uncertainty,
+    never hides on doubt.
+  - `bin/local-capable-filter.sh` — a standalone script (`--parse` for machine-readable JSON,
+    `--report` for a human-readable grouping by provider, plus `--help`) that joins the policy
+    file against the live remote roster.
+  - **Hidden by default**, on both the interactive picker AND the non-interactive `--list` output —
+    a scripted caller sees the same filtered view as the interactive menu, with a footer line
+    naming how many local-capable entries are hidden.
+  - **`f` toggles the filter** shown/hidden live, re-rendering the roster and the visible/hidden
+    counts in the menu header on every keypress — no restart needed.
+  - **`R` shows the hidden-model report**: the full local-capable list grouped by provider, with
+    each entry's classification and the recorded reason (e.g. "MLX 4-bit artifact in local
+    catalog; rapid-compatible MoE"), so you can see exactly what the filter kept out of view and
+    why before deciding whether to unhide it.
+  - `remote-session.sh` also grew a plain `--local-capable-shown` flag so the filter state can be
+    passed through non-interactively (e.g. when `csl` hands off lane args), not only toggled in
+    the interactive menu.
+- **An installed-copy fallback-config notice.** `config/config-lib.sh`'s `la_load_config` now sets
+  a structured `LA_FALLBACK_CONFIG` flag (`0` when `config.local.sh` is present, `1` when it falls
+  back to `config.example.sh`). The `csl` home screen checks this flag and, when set, prints an
+  explicit warning banner ("Using public fallback defaults. Private models are not present in this
+  installed copy.") rather than silently showing generic example config as if it were the user's
+  own roster.
+
+### Fixed
+
+- The local-capable policy loader called two of its own helper functions before either was
+  defined, so every invocation of `remote-session.sh` — including plain `--list` — silently failed
+  to load the filter at all (`_lc_load_policy: command not found` on stderr).
+- A JSON boolean printed through Python's default `str()` reads as `"False"` (capitalized), while
+  the bash-side comparison checked for lowercase `"false"` — the filter loaded without error but
+  never actually classified anything as hidden.
+- `--list` never applied the local-capable filter (only the interactive menu did), so a scripted
+  caller saw every remote model regardless of the filter's hidden/shown state.
+
+### Notes on scope
+
+- The **PSV catalog generator** (any tool that would auto-populate or regenerate
+  `local-capable-remote-models.psv` from a live scan of the local model catalog) is **out of
+  scope for this release** — the policy file shipped here is hand-curated. Deferred to a later
+  release.
+- **Automatic local-model discovery** (detecting new on-disk MLX artifacts and updating the
+  local-capable classification without a manual PSV edit) is likewise **out of scope / deferred**.
+  Nothing in this diff implements either; do not read the PSV policy file's existence as evidence
+  that classification is automated — it is a static, manually maintained table.
+- Two smaller follow-ups were identified but deliberately not folded into this release (each is
+  its own waypoint): wiring `sandbox.enabled:true` into blind-trust auto mode so it actually
+  bypasses the permission classifier, and extending `config-lib.sh` with shared helpers
+  (`_pick_from`, the auto-mode state machine) that `csl` and `remote-session.sh` currently
+  duplicate independently.
+
 ## [0.14.1] — 2026-09-16
 
 Documentation half of the rename. `0.14.0` renamed the project; this makes the docs actually say what
