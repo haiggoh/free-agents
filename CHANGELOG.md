@@ -121,7 +121,7 @@ re-derive it, and got it wrong first.
   hoping it will be cheap.
 - **Measured caveats on `remote-agent-dispatch.py`**, found while dogfooding this change: only some
   advertised providers are implemented (gemini works, nvidia does not yet); the built-in default
-  model id can be RETIRED (defaulted to `gemini-2.0-flash` → HTTP 404), so always pass `--model`;
+  model id was updated to avoid retired models (now defaults to `gemini-3.6-flash` for Gemini);
   and too small a `--max-tokens` yields a truncated answer that reads as a terse one.
 - **Corrected a stale claim** that the local backend is single-slot/minutes-per-turn.
 

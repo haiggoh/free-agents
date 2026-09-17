@@ -98,7 +98,7 @@ PROVIDERS = {
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         chat_path="/chat/completions", models_path="/models",
         key_env="GEMINI_API_KEY",
-        default_models=("gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"),
+        default_models=("gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"),
         notes="OpenAI-compatible. Free tier with a resetting per-day quota — the "
               "primary emergency lane.",
     ),
