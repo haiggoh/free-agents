@@ -393,6 +393,23 @@ if printf '%s' "$AGENT_PROMPT" | grep -Eq '__LA_[A-Z0-9_]+__'; then
     exit 1
 fi
 
+# SHARED shipping/verification rules, appended from ONE file that the remote launcher reads
+# too. These are lane-independent (they are about how to verify and ship work, not about
+# local vs remote), so keeping them in a single file is what stops the two prompts drifting.
+# Deliberately INLINED rather than pointed at: a weaker model reliably ignores a "go read
+# this file" instruction, and these rules exist because such models skipped exactly these
+# steps. Hard-fail rather than continue silently: a session launched WITHOUT them looks
+# identical to one with them until it ships something broken.
+: "${LA_SHARED_RULES_FILE:=$LAUNCH_DIR/../config/shared-agent-shipping-rules.txt}"
+if [ -r "$LA_SHARED_RULES_FILE" ]; then
+    AGENT_PROMPT="$AGENT_PROMPT
+
+$(cat "$LA_SHARED_RULES_FILE")"
+else
+    echo "❌ Shared agent rules file is not readable: $LA_SHARED_RULES_FILE"
+    exit 1
+fi
+
 echo "🧾 Local agent prompt: $LA_AGENT_PROMPT_FILE ($(printf '%s' "$AGENT_PROMPT" | wc -c | tr -d ' ') bytes)"
 
 # Optional per-machine additions from config (only if set):

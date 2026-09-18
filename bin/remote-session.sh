@@ -1036,6 +1036,23 @@ AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_PORT_MIN__/$LA_REMOTE_PROXY_PORT_MIN}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_PORT_MAX__/$LA_REMOTE_PROXY_PORT_MAX}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_SPOOF__/claude-opus-5}
 
+# SHARED shipping/verification rules, from the SAME file the local launcher appends. They are
+# lane-independent — about how to verify and ship, not about where inference runs — so one file
+# serves both and neither copy can drift. Inlined rather than pointed at, unlike the briefing
+# index below: the index is reference material that grows, whereas these are the specific steps
+# free sessions were measured SKIPPING, and a pointer to them gets ignored by exactly the models
+# that need them. Hard-fail: a session missing them is indistinguishable from one that has them
+# right up until it ships something broken.
+: "${LA_SHARED_RULES_FILE:=$SCRIPT_DIR/../config/shared-agent-shipping-rules.txt}"
+if [ -r "$LA_SHARED_RULES_FILE" ]; then
+    AGENT_PROMPT="$AGENT_PROMPT
+
+$(cat "$LA_SHARED_RULES_FILE")"
+else
+    printf 'ERROR: shared agent rules file is not readable: %s\n' "$LA_SHARED_RULES_FILE" >&2
+    exit 1
+fi
+
 # SOFT, OPTIONAL link to the brief-agents plugin: if its generated briefing index
 # exists, point the remote model at it. A non-native model has none of the durable
 # rules a normal session gets from CLAUDE.md/memory, so it is exactly the audience
