@@ -5,12 +5,12 @@ Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo,
 Vercel AI Gateway, SambaNova, or ModelScope. Usage goes to the selected provider, with
 its own quota and billing, rather than the Anthropic gateway budget.
 
-Add keys with `csl setup-remote` (or press `i` in `csl`). The guided
+Add keys with `csl setup-remote` (or press `k` in `csl`). The guided
 [key setup](setup.md) opens official provider pages on request and accepts hidden
 paste input. Existing credentials are kept; no API tests run during setup.
 
 ```bash
-csl                     # then press  r   → the remote roster
+csl                     # then press  s   → the remote roster
 csl remote              # same picker, even without local models installed
 csl remote gemini-flash  # retain the Gemini 3.6 Flash lane
 csl remote gemini-3.8-flash # select Gemini 3.8 Flash independently

@@ -328,7 +328,7 @@ work stays on the cloud model.
 
 ## API keys — the free-tier setup helper
 
-The remote lane needs a provider key. `csl setup-remote` (or press **`i`** in the `csl` picker, or
+The remote lane needs a provider key. `csl setup-remote` (or press **`k`** in the `csl` picker, or
 run `install/setup-api-keys.py`) walks you through it.
 
 **Every provider it offers has a free tier.** That is the selection criterion for the list — the
@@ -620,12 +620,12 @@ classifier is routed or how good its verdicts are — those stay separate questi
 ### The home lane selector: local or remote, with navigation back and forth
 
 `csl` (no args) no longer opens straight into the local-model list. It opens on a **home screen**
-offering `1) Local`, `2) Remote`, `i) Install / set up remote API keys`, and `q) Quit`, and shows the
-current state of every session-wide toggle (auto-mode, telemetry, watcher, stop hook, local-capable
-filter) and the resolved config source.
+offering `1) 🦾 Local`, `2) ☁️ Remote`, `k) Install / set up remote API keys`, and `q) Quit`, and
+shows the current state of every session-wide toggle (auto-mode, telemetry, watcher, stop hook,
+local-capable filter) and the resolved config source.
 
 From inside either picker you can return to this home screen (`h`) or jump straight across to the
-other lane (`r` from local, `l` from remote) — all in one process, with no restart and no state loss.
+other lane (`s` — switch) — all in one process, with no restart and no state loss.
 Auto-mode, telemetry, the watcher, the stop hook, and the local-capable filter all carry over across
 every switch.
 
