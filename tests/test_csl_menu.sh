@@ -125,7 +125,7 @@ out="$(run_csl 'q\n' "$SB/no-launch")"
 assert_grep 'Claude Code Session Launcher' "$out" 'home lane selector is the first screen'
 assert_grep '1) 🦾 Local' "$out" 'home screen offers the local lane'
 assert_grep '2) ☁️  Remote' "$out" 'home screen offers the remote lane'
-assert_grep 'k) Install / set up remote API keys' "$out" 'home screen offers key setup'
+assert_grep 'k) 🔑  Install / set up remote API keys' "$out" 'home screen offers key setup'
 assert_grep 'q) Quit' "$out" 'home screen offers quit'
 assert_no_grep '1) alpha' "$out" 'the model list is NOT shown before a lane is chosen'
 assert_grep 'Auto-mode: blind-trust' "$out" 'home screen displays auto-mode state'
@@ -286,11 +286,11 @@ assert_grep '|telemetry=1' "$(cat "$SB/telemetry-toggled" 2>/dev/null)" \
 
 echo "== 10. install choice opens key setup and returns to menu =="
 out="$(run_csl '1\nk\nq\n' "$SB/setup-no-launch")"
-assert_grep 'k) Install / set up remote API keys' "$out" 'key setup is discoverable in the local menu'
+assert_grep 'k) 🔑  Install / set up remote API keys' "$out" 'key setup is discoverable in the local menu'
 assert_grep 'KEY_SETUP_REACHED' "$out" 'install choice reaches setup without launching a session'
 
 out="$(run_csl 'k\nq\n' "$SB/setup-no-launch-home")"
-assert_grep 'k) Install / set up remote API keys' "$out" 'key setup is also discoverable in the home menu'
+assert_grep 'k) 🔑  Install / set up remote API keys' "$out" 'key setup is also discoverable in the home menu'
 assert_grep 'KEY_SETUP_REACHED' "$out" 'home install choice reaches setup without launching a session'
 
 echo "== 13. bidirectional navigation: home -> remote -> home -> local works in one process =="

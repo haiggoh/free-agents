@@ -35,7 +35,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   printf '%s\n' 'csl: choose a local or remote Claude Code session.' \
     'Usage: csl | csl roles [args] | csl remote [alias/options] | csl <local-launcher args>' \
     'Remote help: csl remote --help; include Cerebras: csl remote --include-trials' \
-    'Key setup: csl setup-remote [providers] | csl setup-remote --list (no API calls)' \
+    'Key setup: 🔑  csl setup-remote [providers] | csl setup-remote --list (no API calls)' \
     'Environment: CSL_LAUNCHER, CSL_REMOTE_LAUNCHER override launchers; CSL_WATCH,' \
     'CSL_AUTO_MODE_STATE (0=blind-trust,1=classifier,2=off), CSL_TELEMETRY, CSL_STOP_HOOK' \
     '  control local picker defaults.' \
@@ -280,7 +280,7 @@ _pick_home_lane() {
   echo "╠══════════════════════════════════════════════════════════╣"
   echo "║  1) 🦾 Local  — MLX models on this machine (${#SESSION_ALIASES[@]} on disk)       ║"
   echo "║  2) ☁️  Remote — Free/paid cloud API (provider quotas apply) ║"
-  echo "║  k) Install / set up remote API keys                     ║"
+  echo "║  k) 🔑  Install / set up remote API keys                ║"
   echo "║  q) Quit                                                 ║"
   echo "╚══════════════════════════════════════════════════════════╝"
   printf "Select lane [1]: " >&2
@@ -312,7 +312,7 @@ _run_local_picker() {
     echo "  c) choose a listed model × custom effort"
     echo "  s) 🦾  switch to remote API agents (choose provider/model; account quotas apply)"
     echo "     Cerebras trial opt-in: csl remote --include-trials"
-    echo "  k) set up remote API keys"
+    echo "  k) 🔑  set up remote API keys"
     if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
     else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
     case "$AUTO_MODE_STATE" in

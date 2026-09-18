@@ -68,7 +68,7 @@ usage() {
     sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
     echo ""
     echo "Additional options:"
-    echo "  -i, --install-keys    Install / set up remote API keys"
+    echo "  -i, --install-keys    🔑  Install / set up remote API keys"
     echo "  -a, --auto-mode       Toggle auto-mode: blind-trust → classifier → off"
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
@@ -338,7 +338,7 @@ _run_remote_menu() {
         echo "  s) switch to local models"
         echo "  f) local-capable: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  R) show hidden-model report"
-        echo "  k) set up remote API keys"
+        echo "  k) 🔑  set up remote API keys"
         case "$AUTO_MODE_STATE" in
             0) echo "  a) auto-mode: blind-trust — auto with no classifier (cycle)" ;;
             1) echo "  a) auto-mode: classifier  — auto with local classifier (cycle)" ;;
