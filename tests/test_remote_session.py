@@ -35,7 +35,8 @@ class RemoteSessionTests(unittest.TestCase):
         for directory in ('bin', 'config', 'keys', 'stubs', 'home'):
             (self.root / directory).mkdir()
         for rel in ('bin/csl', 'bin/remote-session.sh', 'bin/remote-keys.sh',
-                    'config/remote-agents.sh', 'config/remote-agent-system-prompt.txt'):
+                    'config/remote-agents.sh', 'config/remote-agent-system-prompt.txt',
+                    'config/shared-agent-shipping-rules.txt'):
             shutil.copy2(ROOT / rel, self.root / rel)
         source = (self.root / 'bin/remote-session.sh').read_text()
         (self.root / 'bin/library.sh').write_text(source.split('# ---- argument parsing')[0])
