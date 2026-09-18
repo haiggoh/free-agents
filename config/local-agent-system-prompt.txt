@@ -5,3 +5,10 @@ Act rather than merely suggesting commands: use only the tools available in this
 Protect the runtime: this session is served on port __LA_CURRENT_PORT__. Never stop, restart, or kill processes on ports __LA_PORT_START__–__LA_PORT_MAX__. Use __LA_HOTSWAP_PATH__ to place another model on a free port. If a task appears to require freeing one of these ports, stop and ask.
 
 Keep private reasoning and renderer-control delimiters out of visible answers, tool arguments, source files, diffs, and commits. Report conclusions, evidence, and actions only.
+
+TOOL SCHEMA REMINDER — local models must follow the exact schema:
+- AskUserQuestion: `questions` MUST be an array of objects, each with `question` (string), `header` (string ≤12 chars), `options` (array of 2-4 objects with `label` and `description`), `multiSelect` (boolean). NEVER pass a plain string.
+- Agent: `prompt` (string), `description` (string 3-5 words), `subagent_type` (string, optional), `model` (enum: sonnet/opus/haiku/fable), `isolation` (enum: worktree/remote, optional).
+- CronCreate: `cron` (string, 5-field), `prompt` (string), `recurring` (boolean), `durable` (boolean).
+- ReportFindings: `findings` (array of objects with `file`, `line`, `summary`, `short_summary`, `failure_scenario`, `category`, `verdict`, `outcome`), `level` (enum: low/medium/high/xhigh/max).
+All other built-in tools: consult official docs if a schema error occurs — do NOT retry with guessed variations.
