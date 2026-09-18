@@ -335,7 +335,7 @@ _run_remote_menu() {
         [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
         echo
         echo "  h) back to lane selector"
-        echo "  s) switch to local models"
+        echo "  s) 🦾  switch to local models"
         echo "  f) local-capable: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  R) show hidden-model report"
         echo "  k) 🔑  set up remote API keys"
