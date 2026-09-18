@@ -437,6 +437,8 @@ def check_unanswered_queues(transcript_path, queue_groups):
             f"To prevent this notification from reappearing, embed the agreed marker "
             f"`[[QUEUE_ANSWERED:<8-char-hash>]]` in your response, where <8-char-hash> "
             f"is the SHA256 hash of the queued prompt content (first 8 hex chars). "
+            f"Use the helper script to generate the correct marker deterministically:\n"
+            f"  python3 bin/queue-marker-helper.py '<queued prompt content>'\n"
             f"Read the queued prompts listed below and respond to each one now, "
             f"then stop. If you believe you addressed them already, confirm that you did so "
             f"by including the appropriate marker(s) in your response.\n\n"
