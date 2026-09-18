@@ -179,7 +179,21 @@ _filtered_aliases() {
 # csl's — a file keyed on this script's own $$ can never be found by the parent's
 # read using ITS $$. csl passes the exact path via CSL_NAV_FILE; fall back to $$ only
 # for a standalone --csl-owner invocation with no parent to hand a path to.
-_nav() { echo "$1" > "${CSL_NAV_FILE:-/tmp/_csl_nav.$$}"; }
+# Format: first line = navigation target (home/local/quit), subsequent lines = KEY=VALUE state sync
+_nav() {
+    local target="$1"
+    shift
+    local navfile="${CSL_NAV_FILE:-/tmp/_csl_nav.$$}"
+    {
+        echo "$target"
+        # Sync state variables that the parent (csl) needs to know about
+        [[ -n "${AUTO_MODE_STATE:-}" ]] && echo "AUTO_MODE_STATE=$AUTO_MODE_STATE"
+        [[ -n "${LOCAL_CAPABLE_SHOWN:-}" ]] && echo "LOCAL_CAPABLE=$LOCAL_CAPABLE_SHOWN"
+        [[ -n "${TELEMETRY_ENABLED:-}" ]] && echo "TELEMETRY=$TELEMETRY_ENABLED"
+        [[ -n "${INCLUDE_TRIALS:-}" ]] && echo "INCLUDE_TRIALS=$INCLUDE_TRIALS"
+        [[ -n "${EFFORT_CHOICE:-}" ]] && echo "EFFORT_CHOICE=$EFFORT_CHOICE"
+    } > "$navfile"
+}
 
 # ---- local-capable filter ---------------------------------------------------
 # Load the policy file if it exists, so the interactive picker can filter
@@ -288,21 +302,6 @@ _run_remote_menu() {
         echo
         echo "╔══════════════════════════════════════════════════════════╗"
         echo "║              ☁️  Remote API Session Picker               ║"
-        echo "╠══════════════════════════════════════════════════════════╣"
-        printf '║  Auto-mode: '
-        case "$AUTO_MODE_STATE" in
-            0) printf "blind-trust%-26s" "" ;;
-            1) printf "classifier%-29s" "" ;;
-            2) printf "off%-33s" "" ;;
-        esac
-        printf '║\n'
-        printf '║  Telemetry: %-28s ' "$([ "$TELEMETRY_ENABLED" = "1" ] && echo "ON" || echo "OFF")"
-        printf '║\n'
-        printf '║  Local-cap: %-28s ' "$([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-        printf '║\n'
-        [[ $INCLUDE_TRIALS -eq 1 ]] && printf '║  Trials:    %-28s ' "VISIBLE" || printf '║  Trials:    %-28s ' "HIDDEN"
-        printf '║\n'
-        echo "╠══════════════════════════════════════════════════════════╣"
         printf '║  %d model(s) visible' "${#choices[@]}"
         local hidden_count=0
         for e in "${LA_REMOTE_AGENTS[@]}"; do
@@ -346,9 +345,10 @@ _run_remote_menu() {
         esac
         echo "  t) telemetry: $([ "$TELEMETRY_ENABLED" = "1" ] && echo "ON" || echo "OFF")"
         echo "  l) limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+        echo "  e) effort: ${EFFORT_CHOICE:-<provider default>}"
         echo "  q) quit"
         echo
-        printf "Select [1-%d] (h/s/f/R/k/a/t/l/q): " "${#choices[@]}" >&2
+        printf "Select [1-%d] (h/s/f/R/k/a/t/l/e/q): " "${#choices[@]}" >&2
         read -r -p "" sel >&2 || { _nav "quit"; return 0; }
         case "$sel" in
             h|H) _nav "home"; return 0 ;;
@@ -382,6 +382,29 @@ _run_remote_menu() {
                 continue ;;
             l|L)
                 INCLUDE_TRIALS=$(( 1 - INCLUDE_TRIALS ))
+                continue ;;
+            e|E)
+                # Select effort level (compatible with Claude's --effort flag)
+                local efforts=("low" "medium" "high" "xhigh" "max")
+                local def=2  # medium
+                if [[ -n "$EFFORT_CHOICE" ]]; then
+                    for idx in "${!efforts[@]}"; do
+                        [[ "${efforts[$idx]}" == "$EFFORT_CHOICE" ]] && def=$((idx + 1)) && break
+                    done
+                fi
+                local i=1
+                echo "  Effort levels (higher = more thinking, slower):"
+                for eff in "${efforts[@]}"; do
+                    printf "    %d) %s\n" "$i" "$eff" >&2
+                    i=$((i+1))
+                done
+                local c; printf "  Select effort [%d]: " "$def" >&2; read -r c >&2; c="${c:-$def}"
+                if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le ${#efforts[@]} ]; then
+                    EFFORT_CHOICE="${efforts[$((c-1))]}"
+                    echo "  Effort set to: $EFFORT_CHOICE" >&2
+                else
+                    echo "  Invalid selection, keeping: ${EFFORT_CHOICE:-<provider default>}" >&2
+                fi
                 continue ;;
             q|Q) _nav "quit"; return 0 ;;
             *)
@@ -978,8 +1001,8 @@ _pick_from() {
 
 # Handle effort selection if requested
 if [[ "$SELECTED_EFFORT" == "choose-effort" ]]; then
-    # Map effort levels to Claude's choices
-    efforts=("min" "low" "medium" "high")
+    # Map effort levels to Claude's choices (must match --effort flag values)
+    efforts=("low" "medium" "high" "xhigh" "max")
     effort_index=$(_pick_from "Select effort level" "2" "${efforts[@]}")
     if [[ "$effort_index" == "0" ]]; then
         echo "remote-session: effort selection cancelled." >&2

@@ -41,6 +41,22 @@ assert_no_grep() {
   fi
 }
 
+# Flexible grep for cosmetic/menu text that may change (emojis, wording).
+# Uses regex matching; pattern should match the essential text without
+# depending on specific emojis or exact phrasing.
+assert_grep_flexible() {
+  printf '%s' "$2" | grep -qE -- "$1"
+  check $? "$3"
+}
+
+assert_no_grep_flexible() {
+  if printf '%s' "$2" | grep -qE -- "$1"; then
+    check 1 "$3"
+  else
+    check 0 "$3"
+  fi
+}
+
 SB="$(mktemp -d "${TMPDIR:-/tmp}/la-csl-menu-test.XXXXXX")"
 trap 'rm -rf "$SB"' EXIT INT TERM HUP
 
@@ -123,9 +139,9 @@ run_csl() {
 echo "== 0. home screen appears before any model list =="
 out="$(run_csl 'q\n' "$SB/no-launch")"
 assert_grep 'Claude Code Session Launcher' "$out" 'home lane selector is the first screen'
-assert_grep '1) 🦾 Local' "$out" 'home screen offers the local lane'
-assert_grep '2) ☁️  Remote' "$out" 'home screen offers the remote lane'
-assert_grep 'k) 🔑  Install / set up remote API keys' "$out" 'home screen offers key setup'
+assert_grep_flexible '1\).*Local' "$out" 'home screen offers the local lane'
+assert_grep_flexible '2\).*Remote' "$out" 'home screen offers the remote lane'
+assert_grep_flexible 'k\).*Install.*set up remote API keys' "$out" 'home screen offers key setup'
 assert_grep 'q) Quit' "$out" 'home screen offers quit'
 assert_no_grep '1) alpha' "$out" 'the model list is NOT shown before a lane is chosen'
 assert_grep 'Auto-mode: blind-trust' "$out" 'home screen displays auto-mode state'
@@ -286,16 +302,16 @@ assert_grep '|telemetry=1' "$(cat "$SB/telemetry-toggled" 2>/dev/null)" \
 
 echo "== 10. install choice opens key setup and returns to menu =="
 out="$(run_csl '1\nk\nq\n' "$SB/setup-no-launch")"
-assert_grep 'k) 🔑  Install / set up remote API keys' "$out" 'key setup is discoverable in the local menu'
+assert_grep_flexible 'k\).*Install.*set up remote API keys' "$out" 'key setup is discoverable in the local menu'
 assert_grep 'KEY_SETUP_REACHED' "$out" 'install choice reaches setup without launching a session'
 
 out="$(run_csl 'k\nq\n' "$SB/setup-no-launch-home")"
-assert_grep 'k) 🔑  Install / set up remote API keys' "$out" 'key setup is also discoverable in the home menu'
+assert_grep_flexible 'k\).*Install.*set up remote API keys' "$out" 'key setup is also discoverable in the home menu'
 assert_grep 'KEY_SETUP_REACHED' "$out" 'home install choice reaches setup without launching a session'
 
 echo "== 13. bidirectional navigation: home -> remote -> home -> local works in one process =="
 out="$(run_csl '2\nh\n1\nq\n' "$SB/remote-roundtrip")"
-assert_grep '☁️  Remote API Session Picker' "$out" 'entering 2 at home reaches the remote picker'
+assert_grep_flexible 'Remote API Session Picker' "$out" 'entering 2 at home reaches the remote picker'
 occurrences="$(printf '%s' "$out" | grep -c 'Claude Code Session Launcher')"
 [ "$occurrences" -eq 2 ]
 check $? 'h) from the remote picker returns to home (2 home renders: initial + after h)'
@@ -329,8 +345,8 @@ assert_grep 'remoteone' "$out" 'an unclassified model stays visible (fail-open)'
 assert_grep '2 model(s) visible  (hidden: 1)' "$out" \
   'the visible/hidden counts in the header reflect the one classified-hidden entry, not zero'
 
-out="$(run_csl '2\nf\nq\n' "$SB/remote-toggled-shown")"
-assert_grep 'Local-cap: SHOWN' "$out" 'pressing f in the remote picker flips the filter to SHOWN'
+out="$(run_csl '2\nf\nh\nq\n' "$SB/remote-toggled-shown")"
+assert_grep 'Local-cap: SHOWN' "$out" 'pressing f in the remote picker flips the filter to SHOWN (visible on home after h)'
 assert_grep 'f) local-capable: SHOWN' "$out" \
   'after toggling, the action label flips to the reverse action'
 assert_grep 'remotehidden' "$out" \
@@ -363,7 +379,7 @@ assert_grep 'nvidia' "$out" \
   'R) the report actually names the hidden entry, grouped under its provider'
 assert_grep 'press enter to return to menu' "$out" \
   'R) the report screen tells the user how to get back, and does (same menu redraws after)'
-occurrences="$(printf '%s' "$out" | grep -c '☁️  Remote API Session Picker')"
+occurrences="$(printf '%s' "$out" | grep -c -E 'Remote API Session Picker')"
 [ "$occurrences" -ge 2 ]
 check $? 'R) after viewing the report, the remote picker itself redraws (does not exit or lose state)'
 

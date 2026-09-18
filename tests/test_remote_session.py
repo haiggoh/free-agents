@@ -540,7 +540,8 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
         self.assertEqual(result.returncode, 0,
                          '--csl-owner must exit 0 on quit, not treat it as an error: ' + result.stderr)
         self.assertTrue(navfile.exists(), 'quitting under --csl-owner must write CSL_NAV_FILE')
-        self.assertEqual(navfile.read_text().strip(), 'quit')
+        nav_content = navfile.read_text().strip().splitlines()
+        self.assertEqual(nav_content[0], 'quit', 'first line of nav file must be navigation target')
         self.assertNotIn('unknown remote alias', result.stdout + result.stderr,
                          'an empty selection on navigation must never fall through to alias resolution')
 
@@ -550,8 +551,9 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
             input='h\n', env=env, text=True, capture_output=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(navfile.read_text().strip(), 'home',
-                         'h) must write "home" to CSL_NAV_FILE, not "quit" or nothing')
+        nav_content = navfile.read_text().strip().splitlines()
+        self.assertEqual(nav_content[0], 'home',
+                         'h) must write "home" as first line of CSL_NAV_FILE, not "quit" or nothing')
 
     def test_no_bash_scope_errors_on_the_live_launch_path(self):
         """No `local` outside a function anywhere in the script.

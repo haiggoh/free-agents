@@ -422,6 +422,12 @@ if [ "${LA_BLIND_AUTO:-0}" = "1" ] && [ "$LA_AUTO_MODE" = "1" ]; then _LA_MODE="
 elif [ "$LA_AUTO_MODE" = "1" ]; then _LA_MODE="auto (classifier)"
 else _LA_MODE="direct"; fi
 echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  declared=$BACKEND_DECLARED  vllm_port=$VLLM_PORT  mode=$_LA_MODE" >> "$HOME/.claude/logs/local-agents-sessions.log"
+
+# Boxed headline — matches the remote picker's style
+echo "╔══════════════════════════════════════════════════════════╗"
+printf '║  🧭 Local Session: %-42s ║\n' "$MODEL_ALIAS"
+printf '║  backend=%-20s effort=%-6s mode=%-10s  ║\n' "$BACKEND" "$EFFORT" "$_LA_MODE"
+echo "╠══════════════════════════════════════════════════════════╣"
 echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
 # State the traffic posture out loud. A suppression the user cannot see is indistinguishable from one
 # that silently stopped working, and this one has no other visible symptom.

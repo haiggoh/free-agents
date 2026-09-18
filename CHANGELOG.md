@@ -6,6 +6,21 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.15.0] — 2026-09-20
+
+### Fixed
+
+- **State persistence between remote picker and home screen** — auto-mode, local-capable filter, and telemetry state changes made in the remote picker (`remote-session.sh`) now propagate back to `csl`'s home screen via the navigation file. Previously, toggling 'a' (auto-mode) or 'f' (local-capable) in the remote picker and returning via 'h' would not update the home screen display.
+
+### Added
+
+- **Boxed headline for local session launch** (`bin/launch-claude-agent.sh`) — mirrors the remote picker's headline box, showing model alias, backend, effort, and mode in a consistent format.
+- **Flexible test assertions** (`tests/test_csl_menu.sh`) — new `assert_grep_flexible` function uses regex patterns for cosmetic/menu text, making tests resilient to emoji changes and wording rephrasing while keeping exact matching for internal state contracts.
+
+### Changed
+
+- **Nav file format** — `remote-session.sh` now writes state sync lines (AUTO_MODE_STATE, LOCAL_CAPABLE, TELEMETRY, INCLUDE_TRIALS, EFFORT_CHOICE) after the navigation target in CSL_NAV_FILE. `csl` reads and applies these on return.
+
 ## [0.14.9] — 2026-09-19
 
 ### Fixed
