@@ -6,6 +6,19 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.14.8] — 2026-09-19
+
+### Added
+
+- **Blind-trust auto mode for remote free-API sessions** (`bin/remote-session.sh`) — automatically creates and passes a settings file with `sandbox.enabled: true` to bypass the cloud classifier for too-complex commands. Mirrors the working local session implementation (88/88 permission-probe tests passed).
+- **`LA_REMOTE_CLAUDE_SETTINGS` environment variable** — allows users to provide their own settings file for blind-trust mode.
+- **Fallback behavior** — if user-provided settings file doesn't exist, warns and falls back to generated settings.
+- **Banner and dry-run visibility** — shows "sandbox: enabled" in session banner and details the settings file being used in `--dry-run` output.
+
+### Fixed
+
+- **Pre-existing test failure** (`tests/test_remote_session.py`) — the test setup was missing `config/shared-agent-shipping-rules.txt` which is required by the launcher, causing all launch tests to fail with "shared agent rules file is not readable". Added the file to the test setup's copy list.
+
 ## [0.14.7] — 2026-09-18
 
 Adds shared shipping/verification rules that both free lanes (local and remote) receive in their system prompts from a single source file, preventing drift between lane-specific briefings.
