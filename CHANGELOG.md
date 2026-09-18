@@ -6,6 +6,16 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.14.9] — 2026-09-19
+
+### Fixed
+
+- **Stop hook queue marker detection** (`bin/local-queue-stop-hook.py`) — the hook now correctly detects `[[QUEUE_ANSWERED:<hash>]]` markers in the model's response AFTER the queue drain (previously only checked between enqueue and drain). The model's response to a queued prompt always comes in the turn AFTER the drain, so this fixes false "unaddressed prompt" blocks when the marker was present.
+
+- **Seam-based nudging** — instead of hardcoding a turn count, the hook now piggybacks on the harness's natural pause detection (text turns = natural pauses). First text turn after drain = benefit of doubt; second text turn without marker = pattern of ignoring → nudge. Emergency safeguard: 10+ tool-only turns without text forces a nudge.
+
+- **Per-prompt tracking** — each queued prompt (including popAll batches) is tracked independently with its own counters. Markers reset only the relevant prompt's counter.
+
 ## [0.14.8] — 2026-09-19
 
 ### Added
