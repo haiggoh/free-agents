@@ -385,38 +385,88 @@ def check_unanswered_queues(transcript_path, queue_groups):
         if not content or enq >= drain:
             continue
 
-        # Find assistant entries between enqueue and drain
+        # Find assistant entries between enqueue and drain, AND after drain (all subsequent turns)
+        # The queue is delivered at a turn boundary, so the model's response comes
+        # in the turn AFTER the drain. We check ALL assistant entries after drain
+        # because the model might not include the marker in the immediate response
+        # but add it in a subsequent turn after being prompted by the hook.
         g_texts = []
         g_tools = []
         for a_ln, a_has_text, a_text, a_tools in assistant_entries:
             if a_ln > enq and a_ln <= drain:
+                # Between enqueue and drain (original logic)
                 if a_has_text:
                     g_texts.append(a_text)
                 g_tools.extend(a_tools)
+            elif a_ln > drain:
+                # After drain - check ALL assistant entries (model may add marker later)
+                if a_has_text:
+                    g_texts.append(a_text)
+                g_tools.extend(a_tools)
+                # No break - check all subsequent turns for the marker
 
         # Extract explicit answer markers from all texts in this group
         answered_hashes = _extract_answered_markers(g_texts)
 
-        # Determine issue category
-        if not g_texts and not g_tools:
+        # Check if ANY text in the group addresses the prompt (via marker or semantic overlap)
+        prompt_addressed = _text_addresses_prompt(g_texts, content, answered_hashes)
+
+        if prompt_addressed:
+            # Prompt was addressed - nothing to do for this group
+            continue
+
+        # Prompt NOT addressed. Analyze post-drain turns to find the natural "seam" for nudging.
+        # The harness drains queues at turn boundaries (natural pauses). We piggyback on this:
+        # nudge at the SECOND text-only turn after drain. The first text turn is the
+        # harness's natural pause detection (benefit of doubt - might be coincidental).
+        # The second text turn without addressing = pattern of ignoring.
+        post_drain_entries = [
+            (a_ln, a_has_text, a_text, a_tools)
+            for a_ln, a_has_text, a_text, a_tools in assistant_entries
+            if a_ln > drain
+        ]
+
+        if not post_drain_entries:
+            # Zero response - no turns at all after drain
             unaddressed.append((content, "zero response (popAll or remove with no assistant entry)"))
-        elif g_texts and not g_tools:
-            # Has text, no tools — check if explicitly marked as answered
-            if not _text_addresses_prompt(g_texts, content, answered_hashes):
-                # If no explicit marker and no semantic overlap, it's coincidental
-                unaddressed.append((content, "coincidental text (assistant produced text but did not address the queued prompt's content)"))
-        elif g_texts and g_tools:
-            # Has both text and tools — check if text actually addresses the queued content
-            # Heuristic: if the text contains ANY semantic overlap with the queued content,
-            # it counts as addressed. Otherwise it's coincidental.
-            if not _text_addresses_prompt(g_texts, content, answered_hashes):
-                unaddressed.append((content, "coincidental text (assistant produced text but did not address the queued prompt's content)"))
-        elif g_tools and not g_texts:
-            # Tool-use only, no text — not a response
-            unaddressed.append((
-                content,
-                f"tool-use only, no text (used {g_tools} but never spoke back about the queued prompt)"
-            ))
+            continue
+
+        # Count text turns after drain (turns with text content)
+        # A text turn that addresses the prompt resets the count.
+        # Emergency safeguard: if 10+ tool-only turns with no text turns, force nudge.
+        text_turns_since_drain = 0
+        tool_turns_since_drain = 0
+        MAX_TOOL_TURNS_WITHOUT_TEXT = 10
+        for a_ln, a_has_text, a_text, a_tools in post_drain_entries:
+            if not a_has_text:
+                # Tool-only turn - doesn't count as a "pause"
+                tool_turns_since_drain += 1
+                if tool_turns_since_drain >= MAX_TOOL_TURNS_WITHOUT_TEXT:
+                    # Emergency: model has been tooling for too long without a natural pause
+                    unaddressed.append((
+                        content,
+                        f"prompt unaddressed after {tool_turns_since_drain} tool turns with no natural pause (assistant used tools but never produced text to address the queued prompt)"
+                    ))
+                    break
+                continue
+
+            # Reset tool turn counter on text turn (natural pause occurred)
+            tool_turns_since_drain = 0
+
+            turn_hashes = _extract_answered_markers([a_text])
+            if _text_addresses_prompt([a_text], content, turn_hashes):
+                # This text turn addressed the prompt - reset counter
+                text_turns_since_drain = 0
+            else:
+                # Text turn that didn't address the prompt
+                text_turns_since_drain += 1
+                if text_turns_since_drain >= 2:
+                    # Second text turn ignoring the prompt - this is the natural seam to nudge
+                    unaddressed.append((
+                        content,
+                        f"prompt ignored across {text_turns_since_drain} natural pauses (assistant produced text but did not address the queued prompt's content)"
+                    ))
+                    break  # Stop checking this group - we've found the nudge point
 
     if unaddressed:
         count = len(unaddressed)
