@@ -6,6 +6,20 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.14.5] — 2026-09-18
+
+Fixes the local-capable filter classifications and menu UX from 0.14.2/0.14.4:
+
+- **Corrected policy classifications** — large Nemotrons (120B, 550B) are now `remote-preferred`
+  (too large for local), small models (Nemotron 30B-A3B, Muse Glimmer 30B, Gemma 4 31B, Qwen 27B
+  across providers) are `local-capable` (local equivalents exist), and GPT-OSS models remain
+  `remote-preferred` (OpenAI-native, no local equivalent).
+- **Menu UX improvements** — added 🦾 emoji for local models, changed 'l'/'r' navigation to 's'
+  (switch) for clearer intent, changed 'i' to 'k' for key setup (🔑 association), changed 'T'
+  (trial) to 'l' (limited) to avoid telemetry conflict, and fixed toggle labels to show current
+  state (e.g., 'local-capable: HIDDEN') instead of the opposite action.
+- **Updated tests** to match new behavior. Filter now hides 7 models by default, shows 93.
+
 ## [0.14.3] — 2026-09-17
 
 This release combines two important improvements made in parallel workstreams:
