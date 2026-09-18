@@ -59,6 +59,10 @@ LOCAL_CAPABLE_SHOWN=0
 # When true, remote-session.sh runs as a submenu of csl and returns
 # via a navigation token on stdout instead of exec'ing claude.
 CSL_OWNER=0
+# Blind-trust settings file (set when AUTO_MODE_STATE=0)
+BLIND_TRUST_SETTINGS_FILE=""
+# Whether the blind-trust settings file was user-provided (vs generated)
+BLIND_TRUST_SETTINGS_USER_PROVIDED=0
 
 usage() {
     sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
@@ -872,6 +876,81 @@ if [[ "$MODE" == "launch" ]]; then
         echo "    implemented yet — running blind-trust (auto) for this session. See ROADMAP."
     fi
 
+    # Blind-trust auto mode (AUTO_MODE_STATE=0) needs sandbox.enabled=true to bypass
+    # the cloud classifier for too-complex commands. Create/use a settings file.
+    if [[ "$AUTO_MODE_STATE" -eq 0 ]]; then
+        # Support user-provided settings file via LA_REMOTE_CLAUDE_SETTINGS
+        if [[ -n "${LA_REMOTE_CLAUDE_SETTINGS:-}" ]]; then
+            if [[ -f "$LA_REMOTE_CLAUDE_SETTINGS" ]]; then
+                BLIND_TRUST_SETTINGS_FILE="$LA_REMOTE_CLAUDE_SETTINGS"
+                BLIND_TRUST_SETTINGS_USER_PROVIDED=1
+            else
+                echo "⚠️  LA_REMOTE_CLAUDE_SETTINGS file not found: $LA_REMOTE_CLAUDE_SETTINGS; falling back to generated settings" >&2
+                # Create default blind-trust settings with sandbox.enabled=true
+                BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings.json"
+                cat > "$BLIND_TRUST_SETTINGS_FILE" <<'SETTINGS_EOF'
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(echo:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(printf:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(cd:*)",
+      "Bash(pwd:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true
+  }
+}
+SETTINGS_EOF
+            fi
+        else
+            # Create default blind-trust settings with sandbox.enabled=true
+            BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings.json"
+            cat > "$BLIND_TRUST_SETTINGS_FILE" <<'SETTINGS_EOF'
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(echo:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(printf:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(cd:*)",
+      "Bash(pwd:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true
+  }
+}
+SETTINGS_EOF
+        fi
+    fi
+
     # Telemetry must work in BOTH directions. The live path used to hardcode the
     # suppression, so `-t` could never restore stock behaviour.
     if [[ "$TELEMETRY_ENABLED" -eq 1 ]]; then
@@ -959,6 +1038,12 @@ case "$TIER" in
     *) COST_NOTE='account quota and billing unverified; do not assume free' ;;
 esac
 
+# Add blind-trust sandbox info to banner if applicable
+    BLIND_TRUST_BANNER=""
+    if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
+        BLIND_TRUST_BANNER="   sandbox  : enabled (bypasses cloud classifier for too-complex commands)"
+    fi
+
 cat <<BANNER
 
 ╭──────────────────────────────────────────────────────────────╮
@@ -969,6 +1054,7 @@ cat <<BANNER
    thinking : $THINKING
    cost     : $COST_NOTE
    privacy  : prompts and file contents LEAVE this machine → $PROV
+$BLIND_TRUST_BANNER
 BANNER
 
 if [[ $DRY_RUN -eq 1 ]]; then
@@ -987,6 +1073,13 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "   resolved toggles:"
     echo "     auto-mode      : $_am_label"
     echo "     permission-mode: --permission-mode $PERMISSION_MODE"
+    if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
+        if [[ "$BLIND_TRUST_SETTINGS_USER_PROVIDED" -eq 1 ]]; then
+            echo "     settings       : --settings $BLIND_TRUST_SETTINGS_FILE (user-provided via LA_REMOTE_CLAUDE_SETTINGS)"
+        else
+            echo "     settings       : --settings $BLIND_TRUST_SETTINGS_FILE (generated blind-trust with sandbox.enabled=true)"
+        fi
+    fi
     if [[ "${LA_REMOTE_TELEMETRY:-0}" -eq 1 ]]; then
         echo "     telemetry      : ON  (stock Claude Code reporting)"
     else
@@ -1101,6 +1194,12 @@ trap _teardown EXIT INT TERM HUP
 # bug was invisible: the session launched correctly while emitting an error line.
 claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
 claude_cmd+=(--permission-mode "$PERMISSION_MODE")
+
+# Add blind-trust settings file if in blind-trust mode (AUTO_MODE_STATE=0)
+if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
+    claude_cmd+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
+fi
+
 if [[ -n "$EFFORT_CHOICE" ]]; then
     claude_cmd+=(--effort "$EFFORT_CHOICE")
 fi
