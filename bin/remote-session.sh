@@ -331,24 +331,24 @@ _run_remote_menu() {
         [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
         echo
         echo "  h) back to lane selector"
-        echo "  l) switch to local models"
-        echo "  f) toggle local-capable: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "HIDE" || echo "SHOW")"
+        echo "  s) switch to local models"
+        echo "  f) local-capable: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  R) show hidden-model report"
-        echo "  i) install / set up remote API keys"
+        echo "  k) set up remote API keys"
         case "$AUTO_MODE_STATE" in
             0) echo "  a) auto-mode: blind-trust — auto with no classifier (cycle)" ;;
             1) echo "  a) auto-mode: classifier  — auto with local classifier (cycle)" ;;
             2) echo "  a) auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
         esac
-        echo "  t) telemetry: $([ "$TELEMETRY_ENABLED" = "1" ] && echo "OFF (toggle)" || echo "ON (toggle)")"
-        echo "  T) include trial-tier agents: $([ "$INCLUDE_TRIALS" = "1" ] && echo "OFF" || echo "ON")"
+        echo "  t) telemetry: $([ "$TELEMETRY_ENABLED" = "1" ] && echo "ON" || echo "OFF")"
+        echo "  l) limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  q) quit"
         echo
-        printf "Select [1-%d] (h/l/f/R/i/a/t/T/q): " "${#choices[@]}" >&2
+        printf "Select [1-%d] (h/s/f/R/k/a/t/l/q): " "${#choices[@]}" >&2
         read -r -p "" sel >&2 || { _nav "quit"; return 0; }
         case "$sel" in
             h|H) _nav "home"; return 0 ;;
-            l|L) _nav "local"; return 0 ;;
+            s|S) _nav "local"; return 0 ;;
             f|F)
                 LOCAL_CAPABLE_SHOWN=$(( 1 - LOCAL_CAPABLE_SHOWN ))
                 _lc_load_policy
@@ -367,7 +367,7 @@ _run_remote_menu() {
                 echo "  (press enter to return to menu)" >&2
                 read -r -p "" _ >&2 || { _nav "quit"; return 0; }
                 continue ;;
-            i|I) python3 "$REPO_ROOT/install/setup-api-keys.py"; continue ;;
+            k|K) python3 "$REPO_ROOT/install/setup-api-keys.py"; continue ;;
             a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
             t|T)
                 if [[ "$sel" == "t" ]]; then
@@ -375,6 +375,9 @@ _run_remote_menu() {
                 else
                     INCLUDE_TRIALS=$(( 1 - INCLUDE_TRIALS ))
                 fi
+                continue ;;
+            l|L)
+                INCLUDE_TRIALS=$(( 1 - INCLUDE_TRIALS ))
                 continue ;;
             q|Q) _nav "quit"; return 0 ;;
             *)

@@ -278,9 +278,9 @@ _pick_home_lane() {
   printf '║  Local-cap: %-28s ' "$([ "$LOCAL_CAPABLE" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
   printf '║\n'
   echo "╠══════════════════════════════════════════════════════════╣"
-  echo "║  1) Local  — MLX models on this machine (${#SESSION_ALIASES[@]} on disk)           ║"
-  echo "║  2) Remote — Free/paid cloud API (provider quotas apply) ║"
-  echo "║  i) Install / set up remote API keys                     ║"
+  echo "║  1) 🦾 Local  — MLX models on this machine (${#SESSION_ALIASES[@]} on disk)       ║"
+  echo "║  2) ☁️  Remote — Free/paid cloud API (provider quotas apply) ║"
+  echo "║  k) Install / set up remote API keys                     ║"
   echo "║  q) Quit                                                 ║"
   echo "╚══════════════════════════════════════════════════════════╝"
   printf "Select lane [1]: " >&2
@@ -288,7 +288,7 @@ _pick_home_lane() {
   case "$sel" in
     1|local|LOCAL) NEXT_LANE="local" ;;
     2|remote|REMOTE) NEXT_LANE="remote" ;;
-    i|I) NEXT_LANE="install" ;;
+    k|K) NEXT_LANE="install" ;;
     q|Q) NEXT_LANE="quit" ;;
     *) NEXT_LANE="home"; echo "Invalid selection." >&2 ;;
   esac
@@ -310,9 +310,9 @@ _run_local_picker() {
     echo
     echo "  h) back to lane selector"
     echo "  c) choose a listed model × custom effort"
-    echo "  r) ☁️  remote API agents (choose provider/model; account quotas apply)"
+    echo "  s) 🦾  switch to remote API agents (choose provider/model; account quotas apply)"
     echo "     Cerebras trial opt-in: csl remote --include-trials"
-    echo "  i) install / set up remote API keys"
+    echo "  k) set up remote API keys"
     if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
     else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
     case "$AUTO_MODE_STATE" in
@@ -330,8 +330,8 @@ _run_local_picker() {
     case "$sel" in
       q|Q) NEXT_LANE="quit"; return ;;
       h|H) NEXT_LANE="home"; return ;;
-      i|I) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
-      r|R) NEXT_LANE="remote"; return ;;
+      k|K) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
+      s|S) NEXT_LANE="remote"; return ;;
       w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
       a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
       b|B) AUTO_MODE_STATE=0; continue ;;  # b shortcut: jump straight to blind-trust

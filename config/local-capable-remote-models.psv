@@ -38,14 +38,12 @@
 # large enough that running them locally would consume most of the 128 GB RAM.
 # ════════════════════════════════════════════════════════════════════════════════════
 
-# Nemotron 3 Super 120B-A3B — 4-bit MLX artifact exists in local catalog (~18 GB), rapid
-# backend supports it. Clear local-capable.
-nvidia|nvidia/nemotron-3-super-120b-a12b|local-capable|mlx-community/Nemotron-3-Super-120B-A3B-4bit|mlx-lm|18|MLX 4-bit artifact in local catalog; rapid-compatible MoE
+# Nemotron 3 Super 120B-A3B — large MoE; even at 4-bit plus KV overhead it consumes
+# most of the 128 GB RAM. Remote is the right lane.
+nvidia|nvidia/nemotron-3-super-120b-a12b|remote-preferred||nvidia-nim||Too large for local; ~80+ GB at 4-bit including KV overhead
 
-# Nemotron 3 Ultra 550B-A55B — too large for local (4-bit still ~80+ GB including KV),
-# but a local artifact path exists. Classify local-capable because the artifact is
-# downloadable and the stack can load it given sufficient RAM headroom.
-nvidia|nvidia/nemotron-3-ultra-550b-a55b|local-capable|mlx-community/Nemotron-3-Ultra-550B-A55B-4bit|mlx-lm|80|MLX 4-bit artifact downloadable; large but fits on 128 GB with memory floor
+# Nemotron 3 Ultra 550B-A55B — far too large for local (4-bit still ~80+ GB including KV).
+nvidia|nvidia/nemotron-3-ultra-550b-a55b|remote-preferred||nvidia-nim||Too large for local; ~80+ GB at 4-bit including KV overhead
 
 # Nemotron 3.5 Lightning 30B-A3B — MoE, small, local artifact exists
 nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|local-capable|mlx-community/Nemotron-3.5-Lightning-30B-A3B-4bit|mlx-lm|6|Small MoE; MLX artifact in catalog; best utility pick locally
@@ -65,8 +63,8 @@ nvidia|openai/gpt-oss-20b|remote-preferred||nvidia-nim||No local equivalent; Ope
 # GLM 5.3 Flash — Z.AI model via NIM; no MLX artifact
 nvidia|z-ai/glm-5.3-flash|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
 
-# Muse Glimmer 30B (Meta) — no MLX artifact
-nvidia|meta/muse-glimmer-30b|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
+# Muse Glimmer 30B (Meta) — MLX artifact exists in local catalog
+nvidia|meta/muse-glimmer-30b|local-capable|mlx-community/Muse-Glimmer-30B-4bit|mlx-lm|18|MLX 4-bit artifact in local catalog
 
 # Gemma 4 31B — MLX artifact exists in catalog
 nvidia|google/gemma-4-31b-it|local-capable|mlx-community/gemma-4-31b-it-4bit|mlx-lm|18|MLX 4-bit artifact in local catalog
@@ -96,8 +94,8 @@ gemini|gemini-3.1-flash-lite|remote-preferred||gemini||Google-proprietary; no ML
 # ════════════════════════════════════════════════════════════════════════════════════
 groq|openai/gpt-oss-120b|remote-preferred||groq||OpenAI-native; no local equivalent
 groq|openai/gpt-oss-20b|remote-preferred||groq||OpenAI-native; no local equivalent
-groq|qwen/qwen3.6-27b|remote-preferred||groq||Qwen on Groq infra; local Qwen3.6 exists separately
-groq|qwen/qwen3.8-27b|remote-preferred||groq||Qwen on Groq infra; local Qwen3.8 exists separately
+groq|qwen/qwen3.6-27b|local-capable|local-catalog/Qwen3.6-27B|mlx-lm|16|Qwen3.6 available locally; same model via Groq infra is redundant
+groq|qwen/qwen3.8-27b|local-capable|local-catalog/Qwen3.8-27B|mlx-lm|16|Qwen3.8 available locally; same model via Groq infra is redundant
 
 # ════════════════════════════════════════════════════════════════════════════════════
 # OpenRouter — free router; no local equivalent
@@ -110,13 +108,13 @@ openrouter|cohere/north-mini-code:free|remote-preferred||openrouter||Cohere mode
 # Cloudflare — routes to OpenAI / Qwen via Cloudflare Workers AI
 # ════════════════════════════════════════════════════════════════════════════════════
 cloudflare|@cf/openai/gpt-oss-20b|remote-preferred||cloudflare||OpenAI via Cloudflare; no local equivalent
-cloudflare|@cf/qwen/qwen3.8-27b|remote-preferred||cloudflare||Qwen via Cloudflare; local Qwen3.8 exists separately
+cloudflare|@cf/qwen/qwen3.8-27b|local-capable|local-catalog/Qwen3.8-27B|mlx-lm|16|Qwen3.8 available locally; same model via Cloudflare is redundant
 
 # ════════════════════════════════════════════════════════════════════════════════════
 # Cerebras — routes to OpenAI / Qwen via Cerebras infra
 # ════════════════════════════════════════════════════════════════════════════════════
 cerebras|gpt-oss-120b|remote-preferred||cerebras||OpenAI on Cerebras; no local equivalent
-cerebras|qwen-3.8-27b|remote-preferred||cerebras||Qwen on Cerebras; local Qwen3.8 exists separately
+cerebras|qwen-3.8-27b|local-capable|local-catalog/Qwen3.8-27B|mlx-lm|16|Qwen3.8 available locally; same model via Cerebras is redundant
 
 # ════════════════════════════════════════════════════════════════════════════════════
 # SELECT providers — no default model; classification deferred

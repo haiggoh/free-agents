@@ -123,9 +123,9 @@ run_csl() {
 echo "== 0. home screen appears before any model list =="
 out="$(run_csl 'q\n' "$SB/no-launch")"
 assert_grep 'Claude Code Session Launcher' "$out" 'home lane selector is the first screen'
-assert_grep '1) Local' "$out" 'home screen offers the local lane'
-assert_grep '2) Remote' "$out" 'home screen offers the remote lane'
-assert_grep 'i) Install / set up remote API keys' "$out" 'home screen offers key setup'
+assert_grep '1) 🦾 Local' "$out" 'home screen offers the local lane'
+assert_grep '2) ☁️  Remote' "$out" 'home screen offers the remote lane'
+assert_grep 'k) Install / set up remote API keys' "$out" 'home screen offers key setup'
 assert_grep 'q) Quit' "$out" 'home screen offers quit'
 assert_no_grep '1) alpha' "$out" 'the model list is NOT shown before a lane is chosen'
 assert_grep 'Auto-mode: blind-trust' "$out" 'home screen displays auto-mode state'
@@ -285,12 +285,12 @@ assert_grep '|telemetry=1' "$(cat "$SB/telemetry-toggled" 2>/dev/null)" \
   'the t toggle reaches the launcher as LA_TELEMETRY=1'
 
 echo "== 10. install choice opens key setup and returns to menu =="
-out="$(run_csl '1\ni\nq\n' "$SB/setup-no-launch")"
-assert_grep 'i) install / set up remote API keys' "$out" 'key setup is discoverable in the local menu'
+out="$(run_csl '1\nk\nq\n' "$SB/setup-no-launch")"
+assert_grep 'k) Install / set up remote API keys' "$out" 'key setup is discoverable in the local menu'
 assert_grep 'KEY_SETUP_REACHED' "$out" 'install choice reaches setup without launching a session'
 
-out="$(run_csl 'i\nq\n' "$SB/setup-no-launch-home")"
-assert_grep 'i) Install / set up remote API keys' "$out" 'key setup is also discoverable in the home menu'
+out="$(run_csl 'k\nq\n' "$SB/setup-no-launch-home")"
+assert_grep 'k) Install / set up remote API keys' "$out" 'key setup is also discoverable in the home menu'
 assert_grep 'KEY_SETUP_REACHED' "$out" 'home install choice reaches setup without launching a session'
 
 echo "== 13. bidirectional navigation: home -> remote -> home -> local works in one process =="
@@ -305,9 +305,9 @@ assert_no_grep 'unknown remote alias' "$out" \
   'navigating away from the remote picker never falls through to alias resolution (regression: PID-mismatch nav file)'
 
 echo "== 13b. bidirectional navigation: home -> remote -> local (via l) works =="
-out="$(run_csl '2\nl\nq\n' "$SB/remote-to-local")"
+out="$(run_csl '2\ns\nq\n' "$SB/remote-to-local")"
 assert_grep 'Available models (on disk, session-capable' "$out" \
-  'l) from the remote picker jumps directly to the local picker'
+  's) from the remote picker jumps directly to the local picker'
 assert_no_grep 'unknown remote alias' "$out" \
   'l) navigation never falls through to alias resolution'
 
@@ -319,7 +319,7 @@ assert_grep 'Auto-mode: classifier' "$out" \
 echo "== 14. local-capable filter is HIDDEN by default in the remote picker, f) toggles it, R) reports it =="
 out="$(run_csl '2\nq\n' "$SB/remote-default-hidden")"
 assert_grep 'Local-cap: HIDDEN' "$out" 'remote picker shows the local-capable filter as HIDDEN by default'
-assert_grep 'f) toggle local-capable: SHOW' "$out" \
+assert_grep 'f) local-capable: HIDDEN' "$out" \
   'remote picker offers the toggle action, labeled by what pressing it will do next'
 assert_no_grep 'remotehidden' "$out" \
   'the model classified local-capable is actually absent from the roster table by default'
@@ -331,7 +331,7 @@ assert_grep '2 model(s) visible  (hidden: 1)' "$out" \
 
 out="$(run_csl '2\nf\nq\n' "$SB/remote-toggled-shown")"
 assert_grep 'Local-cap: SHOWN' "$out" 'pressing f in the remote picker flips the filter to SHOWN'
-assert_grep 'f) toggle local-capable: HIDE' "$out" \
+assert_grep 'f) local-capable: SHOWN' "$out" \
   'after toggling, the action label flips to the reverse action'
 assert_grep 'remotehidden' "$out" \
   'after toggling to SHOWN, the previously-hidden model actually appears in the roster table'
