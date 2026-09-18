@@ -6,6 +6,20 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.14.7] — 2026-09-18
+
+Adds shared shipping/verification rules that both free lanes (local and remote) receive in their system prompts from a single source file, preventing drift between lane-specific briefings.
+
+### Added
+
+- **`config/shared-agent-shipping-rules.txt`** — one canonical rules file covering the shipping and verification discipline both lanes must follow: run it don't just read it; planted positive for negative results; suspect the check first; feature with no test is not done; version everywhere; never hardcode personal paths; parse arguments before work; finish the ship loop; published tags are immutable; derive don't duplicate; edit source not cache; feature branch not dirty on main; stage by path; never force-push; backup before editing; report what happened.
+- **`tests/test_shared_agent_rules.sh`** — verifies the single-source wiring: both `launch-claude-agent.sh` and `remote-session.sh` read the same file; neither lane-specific prompt duplicates the rules; the assembled prompt actually carries every rule; an empty rules file drops them (proving the check can fail); a missing rules file is a hard error not a silent omission.
+- **Both launchers** (`bin/launch-claude-agent.sh`, `bin/remote-session.sh`) now append the shared rules via `LA_SHARED_RULES_FILE` env var (defaulting to the canonical path).
+
+### Fixed
+
+- **Version drift** — the v0.14.6 tag was created on a commit whose `.claude-plugin/plugin.json` still declared 0.14.5, so the version-consistency test passed while the tag disagreed. This release aligns the manifest, CHANGELOG, and tag.
+
 ## [0.14.5] — 2026-09-18
 
 Fixes the local-capable filter classifications and menu UX from 0.14.2/0.14.4:
