@@ -316,6 +316,22 @@ export API_FORCE_IDLE_TIMEOUT=0
 # bounded. On a local model a silent multi-minute prefill is normal, not a hang.
 export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 
+# SESSION IDENTITY RESOLUTION — emit deterministic identity for consumers
+# (statusline, transcript marker, hooks). Must run AFTER endpoint is known.
+if [ -x "$LAUNCH_DIR/la-session-identity.sh" ]; then
+    SESSION_IDENTITY=$("$LAUNCH_DIR/la-session-identity.sh" 2>/dev/null || true)
+    if [ -n "$SESSION_IDENTITY" ]; then
+        export LA_SESSION_IDENTITY="$SESSION_IDENTITY"
+        # Export individual fields for easy consumption by hooks/statusline
+        export LA_SESSION_KIND=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_kind":"[^"]*"' | cut -d'"' -f4)
+        export LA_ACTUAL_MODEL=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_id":"[^"]*"' | cut -d'"' -f4)
+        export LA_PROVIDER_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"provider_display":"[^"]*"' | cut -d'"' -f4)
+        export LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4)
+        export LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4)
+        export LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2)
+    fi
+fi
+
 # STARTUP BANNER — deliberately loud. A local session's identity used to be a couple of plain
 # lines that the long waypoints banner buried, leaving no way to tell at a glance which model is
 # actually driving the session. Box-drawing + emoji survive that noise.
@@ -334,6 +350,15 @@ cat <<BANNER
    ⚠️  NOT the cloud model. Budget/cap warnings from hooks do not apply here.
 ──────────────────────────────────────────────────────────────────────────────
 BANNER
+
+# TRANSCRIPT MARKER — write a distinctive, greppable sentinel into the session transcript
+# so local sessions can be distinguished from cloud sessions and from prose discussing the
+# local stack. Format: FREE_AGENTS_SESSION_IDENTITY_V1|<json>
+if [ -n "${LA_TRANSCRIPT_MARKER_VERSION:-}" ]; then
+  _marker="FREE_AGENTS_SESSION_IDENTITY_V${LA_TRANSCRIPT_MARKER_VERSION}|${LA_SESSION_IDENTITY}"
+  # Emit via --append-system-prompt so it lands in the transcript as a system message
+  CLAUDE_EXTRA_ARGS+=(--append-system-prompt "$_marker")
+fi
 
 # --- prompt weight: keep the tool surface off the local model's prefill path -------------------
 # The dominant cost of a local interactive turn is PREFILL, and tool definitions dominate the
@@ -424,11 +449,12 @@ else _LA_MODE="direct"; fi
 echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  declared=$BACKEND_DECLARED  vllm_port=$VLLM_PORT  mode=$_LA_MODE" >> "$HOME/.claude/logs/local-agents-sessions.log"
 
 # Boxed headline — matches the remote picker's style
+_session_emoji="${LA_SESSION_KIND_EMOJI:-🧭}"
 echo "╔══════════════════════════════════════════════════════════╗"
-printf '║  🧭 Local Session: %-42s ║\n' "$MODEL_ALIAS"
+printf '║  %s Local Session: %-41s ║\n' "$_session_emoji" "$MODEL_ALIAS"
 printf '║  backend=%-20s effort=%-6s mode=%-10s  ║\n' "$BACKEND" "$EFFORT" "$_LA_MODE"
 echo "╠══════════════════════════════════════════════════════════╣"
-echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
+echo "$_session_emoji Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
 # State the traffic posture out loud. A suppression the user cannot see is indistinguishable from one
 # that silently stopped working, and this one has no other visible symptom.
 if [ "$LA_TELEMETRY" = "0" ]; then
