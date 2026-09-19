@@ -63,7 +63,7 @@ Live remote model catalog discovery and local-capable classification for the fre
 
 ### Testing
 
-- Added `tests/test_acquisition_catalog.sh` validating the PSV format, field counts, and cross-referencing against the remote roster.
+- Validation tests for the PSV format, field counts, and cross-referencing against the remote roster are integrated into the existing test suites.
 
 ## [0.15.2] — 2026-09-19
 
