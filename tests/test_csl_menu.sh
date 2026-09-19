@@ -147,7 +147,9 @@ assert_no_grep '1) alpha' "$out" 'the model list is NOT shown before a lane is c
 assert_grep 'Auto-mode: blind-trust' "$out" 'home screen displays auto-mode state'
 assert_grep 'Telemetry: OFF' "$out" 'home screen displays telemetry state'
 assert_grep 'Watcher:   OFF' "$out" 'home screen displays watcher state'
-assert_grep 'Local-cap: HIDDEN' "$out" 'home screen displays local-capable filter state'
+assert_no_grep 'Local-cap' "$out" \
+  'the home screen does NOT carry the local-capable row: the filter only affects the REMOTE roster, and an abbreviated "Local-cap" read ambiguously beside the Local LANE (removed 0.15.1)'
+assert_no_grep '/l]' "$out" 'the home key prompt no longer advertises the removed l) key'
 assert_grep '(2 on disk)' "$out" 'home screen shows the correct on-disk session-model count'
 
 echo "== 1. entering the local lane lists every available session model =="
@@ -171,9 +173,55 @@ assert_no_grep 'auto-mode: classifier' "$out" 'classifier state is not the defau
 assert_no_grep 'auto-mode: off' "$out" 'off state is not the default'
 assert_grep 'telemetry: OFF' "$out" 'telemetry defaults off (a local session stays local)'
 assert_no_grep 'telemetry: ON' "$out" 'telemetry is not silently enabled'
-assert_grep 'c) choose a listed model × custom effort' "$out" \
+assert_grep_flexible 'c\).*choose a listed model × custom effort' "$out" \
   'custom effort composition remains available'
-assert_grep 'h) back to lane selector' "$out" 'local picker offers a way back to the home lane'
+assert_grep_flexible 'h\).*back to lane selector' "$out" 'local picker offers a way back to the home lane'
+
+echo "== 1c. the queued-prompt hook toggle in the LOCAL picker is REACHABLE =="
+# Regression: the toggle was advertised on 's', but 's' was already bound to
+# switch-to-remote EARLIER in the same case statement, so the first arm won and
+# the toggle was dead code -- pressing it left the picker instead of toggling.
+# It now lives on 'p'. These assertions fail against the shadowed binding.
+out="$(run_csl '1\np\nq\n' "$SB/stophook-toggle")"
+assert_grep_flexible 'p\).*queued-prompt hook: OFF' "$out" \
+  'pressing p in the local picker actually flips the queued-prompt hook OFF (default is ON, so OFF proves the keypress was HANDLED -- asserting ON would also pass for an ignored key)'
+assert_no_grep 'Invalid selection' "$out" \
+  'p is a recognised key in the local picker, not falling through to the numeric branch'
+assert_no_grep 'Remote Session' "$out" \
+  'pressing the queued-prompt key does NOT navigate to the remote lane (the shadowing bug)'
+
+out="$(run_csl '1\nq\n' "$SB/stophook-default")"
+assert_grep_flexible 'p\).*queued-prompt hook: ON' "$out" \
+  'the queued-prompt hook renders on p and defaults ON (CSL_STOP_HOOK:-1)'
+out="$(CSL_STOP_HOOK=0 run_csl '1\nq\n' "$SB/stophook-envoff")"
+assert_grep_flexible 'p\).*queued-prompt hook: OFF' "$out" \
+  'CSL_STOP_HOOK=0 defaults the hook OFF, and it still renders on p'
+
+echo "== 0c. every framed box row is exactly the same display width =="
+# Alignment cannot be asserted with grep: the rows differ in CHARACTER count on purpose,
+# and it is their DISPLAY width that must match. Emoji count two columns, and U+FE0F
+# variation selectors count zero -- the two facts that broke the hand-counted padding.
+out="$(run_csl 'q\n' "$SB/box-align")"
+box_widths="$(printf '%s' "$out" | LC_ALL=en_US.UTF-8 python3 -c '
+import sys, unicodedata
+def width(text):
+    total = 0
+    for char in text:
+        if char == "\ufe0f" or unicodedata.combining(char):
+            continue
+        total += 2 if (unicodedata.east_asian_width(char) in ("W", "F")
+                       or ord(char) >= 0x1F300) else 1
+    return total
+seen = {width(line.rstrip("\n")) for line in sys.stdin
+        if line.startswith(("\u2551", "\u2554", "\u2560", "\u255a"))}
+print(len(seen), sorted(seen))
+')"
+[ "${box_widths%% *}" = "1" ]
+check $? "all framed rows share ONE display width (got: $box_widths)"
+
+echo "== 0d. no framed row overflows the frame =="
+# Truncation matters as much as padding: content wider than the box breaks the border too.
+assert_no_grep '║.*║.*║' "$out" 'no row renders a stray frame character mid-line'
 
 echo "== 1b. h from the local picker returns to the home lane, still in one process =="
 out="$(run_csl '1\nh\nq\n' "$SB/no-launch3")"
@@ -334,9 +382,10 @@ assert_grep 'Auto-mode: classifier' "$out" \
 
 echo "== 14. local-capable filter is HIDDEN by default in the remote picker, f) toggles it, R) reports it =="
 out="$(run_csl '2\nq\n' "$SB/remote-default-hidden")"
-assert_grep 'Local-cap: HIDDEN' "$out" 'remote picker shows the local-capable filter as HIDDEN by default'
-assert_grep 'f) local-capable: HIDDEN' "$out" \
-  'remote picker offers the toggle action, labeled by what pressing it will do next'
+assert_grep_flexible 'f\).*locally-runnable models: HIDDEN' "$out" \
+  'remote picker shows the filter HIDDEN by default, spelled out rather than abbreviated'
+assert_no_grep 'local-cap:' "$out" \
+  'the ambiguous abbreviation is gone from the remote picker too'
 assert_no_grep 'remotehidden' "$out" \
   'the model classified local-capable is actually absent from the roster table by default'
 assert_no_grep 'Remote Hidden' "$out" \
@@ -346,16 +395,16 @@ assert_grep '2 model(s) visible  (hidden: 1)' "$out" \
   'the visible/hidden counts in the header reflect the one classified-hidden entry, not zero'
 
 out="$(run_csl '2\nf\nh\nq\n' "$SB/remote-toggled-shown")"
-assert_grep 'Local-cap: SHOWN' "$out" 'pressing f in the remote picker flips the filter to SHOWN (visible on home after h)'
-assert_grep 'f) local-capable: SHOWN' "$out" \
-  'after toggling, the action label flips to the reverse action'
+assert_grep_flexible 'f\).*locally-runnable models: SHOWN' "$out" \
+  'pressing f in the remote picker flips the filter to SHOWN'
+assert_grep 'remoteone' "$out" 'the roster still renders after the toggle'
 assert_grep 'remotehidden' "$out" \
   'after toggling to SHOWN, the previously-hidden model actually appears in the roster table'
 assert_grep '3 model(s) visible  (hidden: 0)' "$out" \
   'after toggling to SHOWN, the header counts reflect all three entries visible, none hidden'
 
 out="$(run_csl '2\nf\nh\n2\nq\n' "$SB/remote-toggle-persists")"
-occurrences="$(printf '%s' "$out" | grep -c 'Local-cap: SHOWN')"
+occurrences="$(printf '%s' "$out" | grep -cE 'locally-runnable models: SHOWN')"
 [ "$occurrences" -ge 1 ]
 check $? 'local-capable SHOWN state set inside the remote picker survives a trip home and back'
 
@@ -367,8 +416,8 @@ out="$(
     CSL_TEST_RESULT="$SB/home-to-remote-lc" \
       bash "$SB/bin/csl" 2>&1
 )"
-assert_grep 'Local-cap: SHOWN' "$out" \
-  'the local-capable filter set at HOME (before entering any lane) is not dropped when csl enters the remote picker'
+assert_grep_flexible 'locally-runnable models: SHOWN' "$out" \
+  'CSL_LOCAL_CAPABLE=1 set before any lane is still honoured by the remote picker, even though the home screen no longer displays it'
 assert_grep 'remotehidden' "$out" \
   'that home-set SHOWN state actually made the classified-hidden model selectable in the remote picker (not just cosmetic)'
 

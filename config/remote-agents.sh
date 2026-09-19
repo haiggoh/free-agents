@@ -38,11 +38,11 @@ LA_REMOTE_AGENTS=(
   # ⚠️ NVIDIA's catalog reports tools:"unknown" for EVERY row, so tool capability cannot be
   # read from the catalog — a new row here is catalog-only until a real tool session proves it.
   # ════════════════════════════════════════════════════════════════════════════════
-  # Ordered by GENERATION EVIDENCE, not by catalog presence: confirmed lanes first,
+  # Ordered by USER PREFERENCE first, then GENERATION EVIDENCE: confirmed lanes first,
   # partially-working next, never-produced-a-token last (each row states its evidence).
   # Re-probe with: bin/remote-probe-log.py probe --all-nvidia ; report
-  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|★ PREFERRED DEFAULT. GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled at the backend so the thinking-block failure cannot recur."
-  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled like its Super sibling."
+  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled like its Super sibling."
+  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled at the backend so the thinking-block failure cannot recur."
   "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick."
   "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Strong coding/agentic reputation; tool use still unproven."
   "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4-flash-0731|NVIDIA DeepSeek V4 Flash|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Tool use unproven."

@@ -40,7 +40,7 @@
 
 # Nemotron 3 Super 120B-A3B — large MoE; even at 4-bit plus KV overhead it consumes
 # most of the 128 GB RAM. Remote is the right lane.
-nvidia|nvidia/nemotron-3-super-120b-a12b|remote-preferred||nvidia-nim||Too large for local; ~80+ GB at 4-bit including KV overhead
+nvidia|nvidia/nemotron-3-super-120b-a12b|potentially-local-capable||nvidia-nim|60.0|auto-estimated 68 GB at 4bit: ~68 GB against a 96 GB budget (28 GB spare) — over half the budget, where KV growth and quantization choices the model id cannot reveal could decide it, so it needs real evidence before being hidden (stays visible) [prior note, size math does not refute it: Too large for local; ~80+ GB at 4-bit including KV overhead]
 
 # Nemotron 3 Ultra 550B-A55B — far too large for local (4-bit still ~80+ GB including KV).
 nvidia|nvidia/nemotron-3-ultra-550b-a55b|remote-preferred||nvidia-nim||Too large for local; ~80+ GB at 4-bit including KV overhead
@@ -58,7 +58,7 @@ nvidia|deepseek-ai/deepseek-v4-flash-0731|remote-preferred||nvidia-nim||No MLX a
 nvidia|poolside/laguna-xs-2.1|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
 
 # gpt-oss-20b — OpenAI model via NIM; no local equivalent
-nvidia|openai/gpt-oss-20b|remote-preferred||nvidia-nim||No local equivalent; OpenAI-native model
+nvidia|openai/gpt-oss-20b|local-capable||nvidia-nim|10.0|auto-estimated 18 GB at 4bit: ~18 GB (weights 10 + 8 overhead) fits the 96 GB budget with room to spare — comfortably local, no further math needed [prior note, size math does not refute it: No local equivalent; OpenAI-native model]
 
 # GLM 5.3 Flash — Z.AI model via NIM; no MLX artifact
 nvidia|z-ai/glm-5.3-flash|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
@@ -73,13 +73,13 @@ nvidia|google/gemma-4-31b-it|local-capable|mlx-community/gemma-4-31b-it-4bit|mlx
 nvidia|moonshotai/kimi-k2.6|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
 
 # Nemotron Nano 3 30B-A3B — small, but no MLX artifact confirmed
-nvidia|nvidia/nemotron-nano-3-30b-a3b|remote-preferred||nvidia-nim||No confirmed MLX artifact; retest before local use
+nvidia|nvidia/nemotron-nano-3-30b-a3b|local-capable||nvidia-nim|15.0|auto-estimated 23 GB at 4bit: ~23 GB (weights 15 + 8 overhead) fits the 96 GB budget with room to spare — comfortably local, no further math needed [prior note, size math does not refute it: No confirmed MLX artifact; retest before local use]
 
 # Nemotron 4 340B — far too large
 nvidia|nvidia/nemotron-4-340b|remote-preferred||nvidia-nim||Too large for local; ~50+ GB even at 4-bit
 
 # Minitron 12B — small, but no MLX artifact confirmed
-nvidia|nvidia/minitron-12b|remote-preferred||nvidia-nim||No confirmed MLX artifact; retest before local use
+nvidia|nvidia/minitron-12b|local-capable||nvidia-nim|6.0|auto-estimated 14 GB at 4bit: ~14 GB (weights 6 + 8 overhead) fits the 96 GB budget with room to spare — comfortably local, no further math needed [prior note, size math does not refute it: No confirmed MLX artifact; retest before local use]
 
 # ════════════════════════════════════════════════════════════════════════════════════
 # Gemini — Google models; no local MLX artifacts (Google-proprietary)
@@ -92,8 +92,8 @@ gemini|gemini-3.1-flash-lite|remote-preferred||gemini||Google-proprietary; no ML
 # Groq — routes to OpenAI / Qwen models via Groq infra; no local artifacts for these
 # specific routing IDs
 # ════════════════════════════════════════════════════════════════════════════════════
-groq|openai/gpt-oss-120b|remote-preferred||groq||OpenAI-native; no local equivalent
-groq|openai/gpt-oss-20b|remote-preferred||groq||OpenAI-native; no local equivalent
+groq|openai/gpt-oss-120b|potentially-local-capable||groq|60.0|auto-estimated 68 GB at 4bit: ~68 GB against a 96 GB budget (28 GB spare) — over half the budget, where KV growth and quantization choices the model id cannot reveal could decide it, so it needs real evidence before being hidden (stays visible) [prior note, size math does not refute it: OpenAI-native; no local equivalent]
+groq|openai/gpt-oss-20b|local-capable||groq|10.0|auto-estimated 18 GB at 4bit: ~18 GB (weights 10 + 8 overhead) fits the 96 GB budget with room to spare — comfortably local, no further math needed [prior note, size math does not refute it: OpenAI-native; no local equivalent]
 groq|qwen/qwen3.6-27b|local-capable|local-catalog/Qwen3.6-27B|mlx-lm|16|Qwen3.6 available locally; same model via Groq infra is redundant
 groq|qwen/qwen3.8-27b|local-capable|local-catalog/Qwen3.8-27B|mlx-lm|16|Qwen3.8 available locally; same model via Groq infra is redundant
 
@@ -101,19 +101,19 @@ groq|qwen/qwen3.8-27b|local-capable|local-catalog/Qwen3.8-27B|mlx-lm|16|Qwen3.8 
 # OpenRouter — free router; no local equivalent
 # ════════════════════════════════════════════════════════════════════════════════════
 openrouter|openrouter/free|remote-preferred||openrouter||Free router; no local equivalent
-openrouter|nvidia/nemotron-3-super-120b-a12b:free|remote-preferred||openrouter||NVIDIA via OpenRouter; local path exists via nvidia provider
+openrouter|nvidia/nemotron-3-super-120b-a12b:free|potentially-local-capable||openrouter|60.0|auto-estimated 68 GB at 4bit: ~68 GB against a 96 GB budget (28 GB spare) — over half the budget, where KV growth and quantization choices the model id cannot reveal could decide it, so it needs real evidence before being hidden (stays visible) [prior note, size math does not refute it: NVIDIA via OpenRouter; local path exists via nvidia provider]
 openrouter|cohere/north-mini-code:free|remote-preferred||openrouter||Cohere model; no MLX artifact
 
 # ════════════════════════════════════════════════════════════════════════════════════
 # Cloudflare — routes to OpenAI / Qwen via Cloudflare Workers AI
 # ════════════════════════════════════════════════════════════════════════════════════
-cloudflare|@cf/openai/gpt-oss-20b|remote-preferred||cloudflare||OpenAI via Cloudflare; no local equivalent
+cloudflare|@cf/openai/gpt-oss-20b|local-capable||cloudflare|10.0|auto-estimated 18 GB at 4bit: ~18 GB (weights 10 + 8 overhead) fits the 96 GB budget with room to spare — comfortably local, no further math needed [prior note, size math does not refute it: OpenAI via Cloudflare; no local equivalent]
 cloudflare|@cf/qwen/qwen3.8-27b|local-capable|local-catalog/Qwen3.8-27B|mlx-lm|16|Qwen3.8 available locally; same model via Cloudflare is redundant
 
 # ════════════════════════════════════════════════════════════════════════════════════
 # Cerebras — routes to OpenAI / Qwen via Cerebras infra
 # ════════════════════════════════════════════════════════════════════════════════════
-cerebras|gpt-oss-120b|remote-preferred||cerebras||OpenAI on Cerebras; no local equivalent
+cerebras|gpt-oss-120b|potentially-local-capable||cerebras|60.0|auto-estimated 68 GB at 4bit: ~68 GB against a 96 GB budget (28 GB spare) — over half the budget, where KV growth and quantization choices the model id cannot reveal could decide it, so it needs real evidence before being hidden (stays visible) [prior note, size math does not refute it: OpenAI on Cerebras; no local equivalent]
 cerebras|qwen-3.8-27b|local-capable|local-catalog/Qwen3.8-27B|mlx-lm|16|Qwen3.8 available locally; same model via Cerebras is redundant
 
 # ════════════════════════════════════════════════════════════════════════════════════

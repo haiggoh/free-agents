@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.15.0`. See `CHANGELOG.md`.
+`0.15.1`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -45,6 +45,21 @@ reserved can become more urgent than the reserved scope. So the rule is now:
 - A reserved number is not a queue position. If a release is genuinely a milestone — a rename, an
   identity change, a feature set users will look for — it may take the next minor number even if a
   reserved scope was sitting there, provided that scope slides up rather than disappearing.
+
+**Renumbered again 2026-09-19, and this file caused the catch.** `0.15.0` shipped as a
+state-persistence fix plus the headline box, while this file still reserved `0.15.0` for portable
+manifests — a collision between a spent number and a reserved scope, which is precisely the
+condition the "Current released version" line exists to expose. Resolved by the documented
+**renumber upward** path, not by moving the published `v0.15.0` tag (published tags are immutable,
+and rewriting one would not un-release it):
+
+- Portable manifests `0.15.0` → `0.17.0`, runtime profiles `0.16.0` → `0.18.0`, oMLX lanes
+  `0.17.0` → `0.19.0`. Every gate list travels intact; nothing is dropped.
+- `0.16.0` is a **new** scope: live remote catalog discovery with automatic local-capable
+  classification. It takes the freed number rather than queueing behind the slid chain, because
+  it gates only on `0.15.1`'s estimator and the user asked for it directly.
+- `0.15.1` itself is a patch release (three defect fixes plus the estimator), so it spends no
+  reserved number.
 
 **Reassigned again 2026-09-16.** `0.14.0` now belongs to the **free-agents identity release** (the
 project rename plus the remote-session parity fixes that made it justified). Portable manifests moved
@@ -95,9 +110,10 @@ waiting on an architecture it does not read. So the split is:
 |---|---|---|
 | `0.13.9` | **Operational unblocks.** Rapid-MLX upgrade to the current release; locally routed Auto Mode correctness. No schema changes, no new architecture. | nothing |
 | `0.14.0` | **Free-agents identity release.** Project rename (local inference and free-API inference as two equal lanes), remote-session parity actually working, documentation overhaul. | `0.13.15` |
-| `0.15.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`; slid up 2026-09-16.) | nothing hard |
-| `0.16.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`.) | `0.15.0` |
-| `0.17.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`.) | `0.16.0` — a runtime profile is the clean way to select a backend |
+| `0.16.0` | **Live remote catalog discovery and auto-classification.** On connecting to a provider, enumerate its served models, merge them into the roster, and classify each through the footprint estimator so `csl` opens on a list that is already filtered. (New, 2026-09-19.) | `0.15.1` — the estimator it drives |
+| `0.17.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`; slid up again 2026-09-19.) | nothing hard |
+| `0.18.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`.) | `0.17.0` |
+| `0.19.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`.) | `0.18.0` — a runtime profile is the clean way to select a backend |
 
 **Not release-gated at all.** These run continuously against whatever is current, and must not be
 parked behind a version number: model acquisition waves, the tournament, retirement and disk
@@ -270,7 +286,62 @@ hours of throughput matter more than latency.
 
 ---
 
-## `0.15.0` — Portable manifests and artifact identity
+## `0.16.0` — Live remote catalog discovery and auto-classification
+
+**Requested 2026-09-19.** Today the remote roster is a hand-written list in
+`config/remote-agents.sh` and the local-capable filter is a hand-written policy in
+`config/local-capable-remote-models.psv`. Both rot independently of what a provider actually
+serves: a model can be retired upstream and still occupy a menu row, and a newly served model
+never appears at all. The goal: on connecting to a provider, enumerate what it serves now,
+merge that into the roster, classify each entry through `0.15.1`'s footprint estimator, and open
+`csl` on a list that is already filtered.
+
+**Why it gates on `0.15.1` and not the reverse.** The estimator is the classification mechanism;
+without it, discovery would just produce a longer unclassified list. `0.15.1` also established
+the safety shape this release must keep: an estimate is advisory, and only a high-confidence
+verdict may be written.
+
+### What exists to build on
+
+- `catalog_models()` in `bin/remote-session.sh` already queries provider catalogs, and
+  `--models` already lists them — so discovery is partly built and should be extended, not
+  reinvented.
+- `bin/estimate-model-footprint.py` classifies an id and can write high-confidence rows.
+- `bin/local-capable-filter.sh` already applies a policy to a roster and fails open.
+
+### Phases
+
+1. **Cache the discovered catalog.** Persist each provider's served-model list with a fetch
+   timestamp, so `csl` renders from cache instead of blocking on a network call at menu-draw
+   time, and so an offline session still shows the last known roster.
+2. **Merge, never overwrite.** Discovered entries join hand-curated ones; a curated row's
+   display name, evidence note and tier win. Treat a curated row absent from the live catalog as
+   *possibly retired* and mark it — do not delete it, because a catalog omission is not proof
+   (measured on `nvidia-nano3`: catalog-listed yet 404 on generation, so the two disagree in
+   both directions).
+3. **Classify on merge** via the estimator, high-confidence only, leaving the rest visible.
+4. **Refresh policy rows** with `--apply`, backing the file up, on an explicit user action —
+   never silently on session start.
+5. **Tests**, including: a provider returning an empty catalog must not empty the roster; a
+   provider returning a 500 must fall back to cache; and a discovered model with no parameter
+   count in its id must stay visible.
+
+### Release gates
+
+- No network call on the `csl` render path; a cold cache degrades to the curated roster.
+- A provider outage cannot reduce the visible roster to nothing.
+- No discovered model is hidden on an `unknown` verdict (fail-open preserved).
+- The policy file is only ever written by an explicit user action, with a backup.
+
+### Known premise risk
+
+Parameter-count estimation is a first approximation, accepted deliberately (see
+`CHANGELOG.md` 0.15.1). Its weak spot is a model whose id states no count — common with
+vendor-branded names (`kimi-k3`, `glm-5.3-flash`). Those stay visible, so the filter's value
+degrades gracefully rather than misclassifying. If a provider exposes parameter or size metadata
+in its catalog response, prefer that over parsing the id.
+
+## `0.17.0` — Portable manifests and artifact identity
 
 **Status: NOT STARTED on `main`.** The specification and partial work live on
 `feature/portable-model-manifests`, which is not merged.
@@ -351,7 +422,7 @@ Both found 2026-09-06; fix the plans, not just the code.
 
 ---
 
-## `0.16.0` — Runtime profiles and Rapid-first model management
+## `0.18.0` — Runtime profiles and Rapid-first model management
 
 > **Renumbered 2026-09-06** from `0.14.0`. Scope is unchanged; only its place in the sequence moved,
 > because the manifest foundation below is what other workstreams actually read. Phase **A**
@@ -464,7 +535,7 @@ silent dotfile mutation; published assets are immutable and checksummed.
 
 ---
 
-## `0.17.0` — Backend lanes — oMLX
+## `0.19.0` — Backend lanes — oMLX
 
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.

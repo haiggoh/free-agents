@@ -90,7 +90,9 @@ sys.exit(int(os.environ['CURL_CODE']))
         # because its limits are generous with no known DAILY quota (the constraint that
         # ends a Gemini working session), and because real sessions run on it. Changing
         # this line should mean changing the preferred lane on purpose -- not drifting into it.
-        self.assertEqual(rows[0][0], 'nvidia-nemotron3')
+        # Ultra 550B is row 1 by user preference (0.15.1); Super 120B follows it.
+        self.assertEqual(rows[0][0], 'nvidia-nemotron-ultra')
+        self.assertEqual(rows[1][0], 'nvidia-nemotron3')
         self.assertEqual(rows[0][1], 'nvidia')
         # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
         leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
@@ -220,6 +222,62 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                     key_env, base = NEW_ROUTES[provider]
                     self.assertIn('api_base: ' + base, text)
                     self.assertIn('os.environ/' + key_env, text)
+
+    def test_effort_reaches_the_request_body_per_model_family(self):
+        """An effort choice must land in the PROXY CONFIG, not only on the claude CLI.
+
+        REGRESSION GUARD. The effort picker passed `--effort` to `claude`, which is an
+        Anthropic-side flag: the request was proxied to a third-party provider that never
+        saw it, so every level behaved identically. Effort has to travel in the request
+        body, and the field is per-family (NVIDIA Nemotron gates on enable_thinking; the
+        OpenAI-compatible spelling is reasoning_effort, which takes only low/medium/high).
+        """
+        def write(provider, model, effort, thinking='false'):
+            cfg = self.root / 'proxy.yaml'
+            cfg.unlink(missing_ok=True)
+            result = subprocess.run(
+                ['bash', '-c', 'source "$1"; write_proxy_config "$2" "$3" "$4" "$5" "$6"',
+                 'config', str(self.root / 'bin/library.sh'), str(cfg),
+                 provider, model, thinking, effort],
+                env=self.env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return cfg.read_text()
+
+        # Nemotron: effort means "reason", expressed as enable_thinking -- NOT reasoning_effort.
+        ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
+        text = write('nvidia', ultra, 'high')
+        self.assertEqual(text.count('        enable_thinking: true\n'), 4)
+        self.assertNotIn('reasoning_effort', text,
+                         'Nemotron does not accept reasoning_effort; sending it is the bug')
+        # With no effort the crash-avoiding default must survive.
+        text = write('nvidia', ultra, '')
+        self.assertEqual(text.count('        enable_thinking: false\n'), 4)
+
+        # A non-Nemotron NVIDIA model DOES take the OpenAI-compatible field.
+        text = write('nvidia', 'nvidia/gpt-oss-20b', 'high')
+        self.assertEqual(text.count('      reasoning_effort: high\n'), 4)
+
+        # Claude Code offers five levels; the OpenAI field accepts three.
+        for level, expected in (('low', 'low'), ('medium', 'medium'),
+                                ('high', 'high'), ('xhigh', 'high'), ('max', 'high')):
+            with self.subTest(level=level):
+                text = write('groq', 'some/model', level)
+                self.assertEqual(text.count('      reasoning_effort: ' + expected + '\n'), 4,
+                                 level + ' must map to ' + expected)
+
+        # No effort chosen => no reasoning_effort at all (provider default stands).
+        self.assertNotIn('reasoning_effort', write('groq', 'some/model', ''))
+
+        # An unknown level is refused loudly, not silently written into the config.
+        cfg = self.root / 'proxy.yaml'
+        cfg.unlink(missing_ok=True)
+        result = subprocess.run(
+            ['bash', '-c', 'source "$1"; write_proxy_config "$2" "$3" "$4" "$5" "$6"',
+             'config', str(self.root / 'bin/library.sh'), str(cfg),
+             'groq', 'some/model', 'false', 'bogus'],
+            env=self.env, text=True, capture_output=True)
+        self.assertIn('unknown effort', result.stderr)
+        self.assertNotIn('reasoning_effort', cfg.read_text())
 
     def test_dynamic_models_validation_and_retired_github(self):
         for provider in NEW_ROUTES:
@@ -388,6 +446,51 @@ with open(os.environ['CLAUDE_RESULT'],'w') as f:
                 self.assertIn('model: openai/fixture/model:free', cfg)
                 self.assertNotIn(secret, cfg + result.stdout + result.stderr)
         self.assertFalse(marker.exists())
+
+    def test_streaming_timeout_guards_reach_the_claude_process(self):
+        """The three streaming guards must be EXPORTED into the real `claude` environment.
+
+        REGRESSION GUARD. This lane shipped without them while the local launcher had carried
+        them since 2026-08-19, so Claude Code's cloud-tuned ceilings stayed in force. A big
+        reasoning model (Nemotron 3 Ultra 550B) or a queued free tier emits no stream events
+        during first-token latency, which CLAUDE_ENABLE_STREAM_WATCHDOG cannot tell apart from
+        a hung connection: it aborted and retried with "Streaming response ended before any
+        complete data was received", reproducibly right after the first prompt of a session
+        (largest uncached prefill, no warm cache).
+
+        Asserting the variables are merely SET would be too weak -- they must reach the child,
+        which is the only thing that changes behaviour.
+        """
+        self.env['CLAUDE_STREAM_ENV'] = str(self.root / 'stream-env')
+        self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture all ports free"; exit 0; fi\nexit 1\n')
+        self.stub('claude', """#!/usr/bin/env python3
+import json,os,sys
+if '--help' in sys.argv:
+    print('Fixture Claude; CLAUDE_STREAM_ENV captures streaming-timeout environment.'); sys.exit(0)
+keys = ('API_TIMEOUT_MS','API_FORCE_IDLE_TIMEOUT','CLAUDE_ENABLE_STREAM_WATCHDOG')
+with open(os.environ['CLAUDE_STREAM_ENV'],'w') as f:
+    json.dump({k:os.environ.get(k) for k in keys},f)
+""")
+        capture = self.root / 'stream-env'
+
+        capture.unlink(missing_ok=True)
+        result = self.run_cli('nvidia-nemotron-ultra', '-p', 'fixture prompt')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(capture.exists(), 'claude was never launched')
+        self.assertEqual(json.loads(capture.read_text()), {
+            'API_TIMEOUT_MS': '600000',
+            'API_FORCE_IDLE_TIMEOUT': '0',
+            'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
+        })
+
+        # The cap is overridable for a model slower than the default allows.
+        capture.unlink(missing_ok=True)
+        self.env['LA_REMOTE_API_TIMEOUT_MS'] = '1800000'
+        self.addCleanup(self.env.pop, 'LA_REMOTE_API_TIMEOUT_MS', None)
+        result = self.run_cli('nvidia-nemotron-ultra', '-p', 'fixture prompt')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(capture.read_text())['API_TIMEOUT_MS'], '1800000',
+                         'LA_REMOTE_API_TIMEOUT_MS must override the default cap')
 
     def test_interactive_toggles_are_applied_not_merely_parsed(self):
         """Every advertised toggle must change the RESOLVED launch state.

@@ -98,7 +98,7 @@ TELEMETRY="${CSL_TELEMETRY:-0}"
 # stops, your prompt is never answered, and nothing says so. Defaulting it OFF would mean the net
 # is missing exactly when you forgot about it.
 #
-# Toggle with `s`, or set CSL_STOP_HOOK=0 to default it off. The launcher turns this into
+# Toggle with `s` (home) or `p` (local picker), or set CSL_STOP_HOOK=0 to default it off. The launcher turns this into
 # LA_QUEUE_STOP_HOOK, which the hook reads as an explicit override — so the switch works for any
 # caller of launch-claude-agent.sh / remote-session.sh, not just this picker.
 #
@@ -109,6 +109,10 @@ STOP_HOOK="${CSL_STOP_HOOK:-1}"
 # Local-capable filter state for the remote roster.
 # 0 = HIDDEN (default): local-capable models are hidden in the remote picker.
 # 1 = SHOWN: local-capable models are visible and selectable.
+# Deliberately NOT shown on the home screen (removed 0.15.1): the filter only ever affects the
+# REMOTE roster, so it is remote-lane state, and an abbreviated "Local-cap" sat confusingly next
+# to the Local LANE on the same menu. The variable still lives here because it is owned by this
+# shell and synced both ways with remote-session.sh -- it is state, not a home-screen control.
 LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
 
 # Argument passthrough still skips the picker and watcher. It now receives the
@@ -165,7 +169,7 @@ _pick_from() {   # $1=prompt  $2=default index (1-based)  rest=items -> echoes c
   echo "$c"
 }
 
-# ☁️  REMOTE cloud-API agents are a DELIBERATELY SEPARATE list from the local models
+# 🌐  REMOTE cloud-API agents are a DELIBERATELY SEPARATE list from the local models
 # above: a remote agent runs on a third party's hardware over the network, with a
 # different cost model (free-tier quota, not free compute) and a different privacy
 # posture (prompts leave this machine). Mixing them into one menu would make those
@@ -230,9 +234,9 @@ tell application "Terminal"
   do script "'$WATCHER' --attach $$"
 end tell
 OSA
-      echo "👁  watcher window opened (following pid $$; engine health now, mutations from turn 1)"
+      echo "🔭 watcher window opened (following pid $$; engine health now, mutations from turn 1)"
     else
-      echo "👁  watcher (run in another terminal): $WATCHER --attach $$"
+      echo "🔭 watcher (run in another terminal): $WATCHER --attach $$"
     fi
   fi
   local _am _ba
@@ -246,6 +250,80 @@ OSA
 }
 
 # ---------------------------------------------------------------------------
+# Box drawing. The menus are framed with box characters, and every row used to be
+# padded by a HAND-COUNTED printf width ("%-25s" plus literal trailing spaces).
+# That cannot stay aligned once emoji are in the text, for two reasons:
+#
+#   1. an emoji occupies TWO terminal columns but is ONE character, so any
+#      character-count padding is short by one column per emoji;
+#   2. several of these emoji are TWO codepoints -- a base glyph plus U+FE0F
+#      VARIATION SELECTOR-16 (🔭 🌐 🔆). Those report East-Asian-width "NA",
+#      so even a width-aware routine misjudges them unless VS16 is handled
+#      explicitly. This is why some rows were off by one and others by two.
+#
+# So rows are padded by measured DISPLAY WIDTH instead of by character count.
+# BOX_INNER is the printable width between the two frame characters; change it
+# once and every row, rule and header follows.
+# ---------------------------------------------------------------------------
+BOX_INNER=62
+
+# _box <kind> [text...] — render framed menu rows in ONE python3 call.
+# Per-row shelling out would put a process launch on every menu repaint; the whole
+# box is cheap to build at once. Each argument is one row; the kind selects the
+# frame pieces. Rows are padded by MEASURED DISPLAY WIDTH, never by character count.
+#   top | mid | bottom          — a horizontal rule
+#   row  <text>...              — left-aligned rows
+#   center <text>...            — centered rows
+_box() {
+  LC_ALL=en_US.UTF-8 python3 -c '
+import sys, unicodedata
+
+INNER = int(sys.argv[1])
+kind = sys.argv[2]
+rows = sys.argv[3:]
+
+
+def width(text):
+    """Display columns. Two traps, both of which bit the hand-counted version:
+    an emoji is one character but two columns, and several of these emoji are a
+    base glyph plus U+FE0F VARIATION SELECTOR-16, which adds no width at all."""
+    total = 0
+    for char in text:
+        if char == "\ufe0f" or unicodedata.combining(char):
+            continue
+        if unicodedata.east_asian_width(char) in ("W", "F") or ord(char) >= 0x1F300:
+            total += 2
+        else:
+            total += 1
+    return total
+
+
+if kind in ("top", "mid", "bottom"):
+    left, right = {"top": "╔╗", "mid": "╠╣", "bottom": "╚╝"}[kind]
+    print(left + "═" * INNER + right)
+else:
+    def truncate(text):
+        """Clip to INNER columns, ellipsis included. Padding cannot rescue a row that is
+        WIDER than the frame, and an overflowing row breaks the box as visibly as a
+        short one -- the Config path and the Remote lane line both did."""
+        if width(text) <= INNER:
+            return text
+        out = ""
+        for char in text:
+            if width(out + char) > INNER - 1:
+                break
+            out += char
+        return out + "…"
+
+    for text in rows:
+        if kind == "center":
+            text = " " * max(0, (INNER - width(text)) // 2) + text
+        text = truncate(text)
+        print("║" + text + " " * max(0, INNER - width(text)) + "║")
+' "$BOX_INNER" "$@"
+}
+
+# ---------------------------------------------------------------------------
 # Home lane selector — the top-level screen that appears before either picker.
 # The user picks local, remote, or quits. Shared state (auto-mode, telemetry,
 # watcher, stop-hook, local-capable) is preserved across lane switches.
@@ -253,38 +331,36 @@ OSA
 _pick_home_lane() {
   NEXT_LANE=""
   echo
-  echo "╔══════════════════════════════════════════════════════════╗"
-  echo "║              Claude Code Session Launcher                ║"
-  echo "╠══════════════════════════════════════════════════════════╣"
-  printf '║  Config: %-48s ║\n' "$LA_CONFIG_SOURCE"
+  _box top
+  _box center "Claude Code Session Launcher"
+  _box mid
+  _box row "$(printf '  Config: %s' "$LA_CONFIG_SOURCE")"
   if [ -n "${LA_FALLBACK_CONFIG:-}" ] && [ "$LA_FALLBACK_CONFIG" = "1" ]; then
-    printf '║  ⚠  Using public fallback defaults. Private models      ║\n'
-    printf '║     are not present in this installed copy.             ║\n'
+    _box row "  ⚠ Using public fallback defaults. Private models" \
+             "    are not present in this installed copy."
   fi
-  echo "╠══════════════════════════════════════════════════════════╣"
-  printf '║  a) 🤖 Auto-mode: '
+  _box mid
+  # One space after every emoji, and the same label:value shape on each toggle row,
+  # so the column of values lines up down the menu.
   case "$AUTO_MODE_STATE" in
-    0) printf "blind-trust%-23s" "" ;;
-    1) printf "classifier%-26s" "" ;;
-    2) printf "off%-30s" "" ;;
+    0) _am_label="blind-trust" ;;
+    1) _am_label="classifier" ;;
+    2) _am_label="off" ;;
   esac
-  printf '║\n'
-  printf '║  t) 📡 Telemetry: %-25s ' "$([ "$TELEMETRY" = "1" ] && echo "ON" || echo "OFF")"
-  printf '║\n'
-  printf '║  w) 👁️ Watcher:   %-25s ' "$([ "$WATCH" = "1" ] && echo "ON" || echo "OFF")"
-  printf '║\n'
-  printf '║  s) 🪝 Stop hook: %-25s ' "$([ "$STOP_HOOK" = "1" ] && echo "ON" || echo "OFF")"
-  printf '║\n'
-  printf '║  l) 🔍 Local-cap: %-25s ' "$([ "$LOCAL_CAPABLE" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-  printf '║\n'
-  echo "╠══════════════════════════════════════════════════════════╣"
-  echo "║  1) 🦾 Local  — MLX models on this machine (${#SESSION_ALIASES[@]} on disk)       ║"
-  echo "║  2) ☁️  Remote — Free/paid cloud API (provider quotas apply) ║"
-  echo "║  k) 🔑  Install / set up remote API keys                ║"
-  echo "║  m) 🔧  Manage Rapid-MLX runtime (install/update/inspect) ║"
-  echo "║  q) Quit                                                 ║"
-  echo "╚══════════════════════════════════════════════════════════╝"
-  printf "Select [1/2/k/m/q/a/t/w/s/l]: " >&2
+  _box row \
+    "$(printf '  a) 🤖 Auto-mode: %s' "$_am_label")" \
+    "$(printf '  t) 📡 Telemetry: %s' "$([ "$TELEMETRY" = "1" ] && echo ON || echo OFF)")" \
+    "$(printf '  w) 🔭 Watcher:   %s' "$([ "$WATCH" = "1" ] && echo ON || echo OFF)")" \
+    "$(printf '  s) 🪝 Stop hook: %s' "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)")"
+  _box mid
+  _box row \
+    "$(printf '  1) 🦾 Local  — MLX models on this machine (%d on disk)' "${#SESSION_ALIASES[@]}")" \
+    "  2) 🌐 Remote — Free/paid cloud API (provider quotas apply)" \
+    "  k) 🔑 Install / set up remote API keys" \
+    "  m) 🔧 Manage Rapid-MLX runtime (install/update/inspect)" \
+    "  q) Quit"
+  _box bottom
+  printf "Select [1/2/k/m/q/a/t/w/s]: " >&2
   read -r sel; sel="${sel:-1}"
   case "$sel" in
     1|local|LOCAL) NEXT_LANE="local" ;;
@@ -296,7 +372,6 @@ _pick_home_lane() {
     t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; NEXT_LANE="home" ;;
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; NEXT_LANE="home" ;;
     s|S) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; NEXT_LANE="home" ;;
-    l|L) if [ "$LOCAL_CAPABLE" = "1" ]; then LOCAL_CAPABLE=0; else LOCAL_CAPABLE=1; fi; NEXT_LANE="home" ;;
     *) NEXT_LANE="home"; echo "Invalid selection." >&2 ;;
   esac
 }
@@ -308,35 +383,35 @@ _run_local_picker() {
   NEXT_LANE="home"
   while :; do
     echo
-    echo "╔══════════════════════════════════════════════════════════╗"
-    echo "║              🦾  Local Session Picker                   ║"
-    local model_count="${#SESSION_ALIASES[@]}"
-    local count_str="${model_count} model(s) on disk (session-capable)"
-    local pad=$((52 - ${#count_str}))
-    printf '║  %s%*s║\n' "$count_str" "$pad" ""
-    echo "╠══════════════════════════════════════════════════════════╣"
+    _box top
+    _box center "🦾 Local Session Picker"
+    _box mid
+    _box row "$(printf '  %d model(s) on disk (session-capable)' "${#SESSION_ALIASES[@]}")"
+    _box mid
     echo "Available models (on disk, session-capable; numbered rows use the configured effort):"
     for ((i=0; i<${#MODEL_LABELS[@]}; i++)); do
       printf "  %d) %s\n" "$((i+1))" "${MODEL_LABELS[$i]}"
     done
     echo
-    echo "  h) back to lane selector"
-    echo "  c) ⚙️ choose a listed model × custom effort"
-    echo "  s) ☁️  switch to remote API agents (choose provider/model; account quotas apply)"
+    # Navigation first, then lane switching, then settings, then quit — the same
+    # order the remote picker uses, so the two lanes read as one interface.
+    echo "  h) 🏠 back to lane selector"
+    echo "  c) 🔆 choose a listed model × custom effort"
+    echo "  s) 🌐 switch to remote API agents (provider/model; account quotas apply)"
     echo "     Cerebras trial opt-in: csl remote --include-trials"
-    echo "  k) 🔑  set up remote API keys"
-    echo "  m) 🔧  Manage Rapid-MLX runtime (install/update/inspect)"
-    if [ "$WATCH" = "1" ]; then echo "  w) 👁️ watcher: ON  — opens a window following this session (toggle)"
-    else                        echo "  w) 👁️ watcher: OFF — no monitor window (toggle)"; fi
+    echo "  k) 🔑 set up remote API keys"
+    echo "  m) 🔧 manage Rapid-MLX runtime (install/update/inspect)"
     case "$AUTO_MODE_STATE" in
-      0) echo "  a) 🤖 auto-mode: blind-trust — auto with no classifier (cycle: blind→classifier→off)" ;;
-      1) echo "  a) 🤖 auto-mode: classifier  — auto with local classifier (cycle: blind→classifier→off)" ;;
-      2) echo "  a) 🤖 auto-mode: off         — acceptEdits; no classifier (cycle: blind→classifier→off)" ;;
+      0) echo "  a) 🤖 auto-mode: blind-trust — auto with no classifier (cycle)" ;;
+      1) echo "  a) 🤖 auto-mode: classifier  — auto with local classifier (cycle)" ;;
+      2) echo "  a) 🤖 auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
     esac
     if [ "$TELEMETRY" = "1" ]; then echo "  t) 📡 telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
     else                            echo "  t) 📡 telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
-    if [ "$STOP_HOOK" = "1" ]; then echo "  s) 🪝 queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
-    else                            echo "  s) 🪝 queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
+    if [ "$WATCH" = "1" ]; then echo "  w) 🔭 watcher: ON  — opens a window following this session (toggle)"
+    else                        echo "  w) 🔭 watcher: OFF — no monitor window (toggle)"; fi
+    if [ "$STOP_HOOK" = "1" ]; then echo "  p) 🪝 queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
+    else                            echo "  p) 🪝 queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
     echo "  q) quit"
     echo
     printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
@@ -350,7 +425,7 @@ _run_local_picker() {
       a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
       b|B) AUTO_MODE_STATE=0; continue ;;  # b shortcut: jump straight to blind-trust
       t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
-      s|S) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; continue ;;
+      p|P) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; continue ;;
       c|C)
         echo >&2
         echo "Models (on disk, session-capable):" >&2

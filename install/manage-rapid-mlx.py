@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import unicodedata
 import sys
 import tempfile
 import urllib.error
@@ -674,7 +675,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--home", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--repo", type=Path, help="local-agents repository (default: script repository)")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without writing, installing, promoting, snapshotting, or deleting")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
     releases = sub.add_parser("releases", help="list installable PyPI releases")
     releases.add_argument("--pre", action="store_true", help="include prereleases")
     releases.add_argument("--limit", type=int, default=20)
@@ -709,9 +710,164 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+BOX_INNER = 62
+
+
+def _display_width(text: str) -> int:
+    """Display columns, counting emoji as two and skipping variation selectors.
+
+    Same rule as the box helpers in bin/csl and bin/remote-session.sh, so all three
+    surfaces frame their menus identically.
+    """
+    total = 0
+    for char in text:
+        if char == "\ufe0f" or unicodedata.combining(char):
+            continue
+        if unicodedata.east_asian_width(char) in ("W", "F") or ord(char) >= 0x1F300:
+            total += 2
+        else:
+            total += 1
+    return total
+
+
+def _box(kind: str, *rows: str) -> None:
+    if kind in ("top", "mid", "bottom"):
+        left, right = {"top": "╔╗", "mid": "╠╣", "bottom": "╚╝"}[kind]
+        print(left + "═" * BOX_INNER + right)
+        return
+    for text in rows:
+        if kind == "center":
+            text = " " * max(0, (BOX_INNER - _display_width(text)) // 2) + text
+        if _display_width(text) > BOX_INNER:
+            clipped = ""
+            for char in text:
+                if _display_width(clipped + char) > BOX_INNER - 1:
+                    break
+                clipped += char
+            text = clipped + "…"
+        print("║" + text + " " * max(0, BOX_INNER - _display_width(text)) + "║")
+
+
+def interactive_menu(home: Path | None, repo_arg: Path | None) -> int:
+    """Interactive runtime manager, reached by pressing `m` in csl.
+
+    csl offers this tool as a menu action, but the CLI required a subcommand, so the
+    keypress printed an argparse usage error and returned — the tool was advertised in
+    the menu and unusable from it. This loop is that missing surface, framed like the
+    csl menus so the two do not look like different programs.
+    """
+    if not sys.stdin.isatty():
+        print("manage-rapid-mlx: interactive menu needs a TTY; pass a subcommand instead "
+              "(see --help)", file=sys.stderr)
+        return 2
+
+    while True:
+        try:
+            entries = installed_versions(home)
+        except (ManagerError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+
+        # Derive the active pin from the existing planner rather than adding a second
+        # source of truth: plan_pin_update returns NO changes exactly when the repo is
+        # already pinned to that version. Display-only, so any failure is non-fatal.
+        active = ""
+        try:
+            repo = repository_root(repo_arg)
+            for version, _path, _state in entries:
+                if not plan_pin_update(repo, version).changes:
+                    active = version
+                    break
+        except (ManagerError, OSError):
+            repo = None
+
+        print()
+        _box("top")
+        _box("center", "🔧 Rapid-MLX Runtime Manager")
+        _box("mid")
+        if entries:
+            for version, path, state in entries:
+                mark = " ← active pin" if version == active else ""
+                _box("row", f"  {version:14} {state:10}{mark}")
+        else:
+            _box("row", "  no versioned environments installed yet")
+        _box("mid")
+        _box("row",
+             "  r) 📦 list installable releases from PyPI",
+             "  i) 📥 install a release (validates, then promotes pins)",
+             "  p) 📌 promote pins to an installed version (rollback path)",
+             "  s) 🔬 smoke-test an installed version (no server started)",
+             "  n) 📄 snapshot an exact recreation receipt",
+             "  x) 🧹 remove an inactive, unpinned version",
+             "  q) 🏠 back")
+        _box("bottom")
+
+        try:
+            choice = input("Selection [q]: ").strip().lower() or "q"
+        except EOFError:
+            return 0
+
+        installed_set = {entry[0] for entry in entries}
+        try:
+            if choice == "q":
+                return 0
+            if choice == "r":
+                for version in fetch_releases()[:30]:
+                    mark = "installed" if version in installed_set else ""
+                    print(f"  {version:14} {mark}")
+            elif choice == "i":
+                version = choose_version(fetch_releases()[:30], installed_set)
+                receipt = install_and_maybe_promote(
+                    require_version(version), python_arg=None, refresh_deps=False,
+                    home=home, repo=repository_root(repo_arg), skip_pin_update=False,
+                    dry_run=False)
+                print(json.dumps(receipt, indent=2, sort_keys=True))
+            elif choice in ("p", "s", "n", "x"):
+                if not entries:
+                    print("  nothing installed yet — install a release first (i)")
+                    continue
+                version = _choose_installed(entries)
+                if version is None:
+                    continue
+                if choice == "p":
+                    print(json.dumps(promote_pins(version, repository_root(repo_arg)),
+                                     indent=2, sort_keys=True))
+                elif choice == "s":
+                    print(json.dumps(smoke_environment(version, home), indent=2, sort_keys=True))
+                elif choice == "n":
+                    print(snapshot_environment(version, home))
+                else:
+                    # remove() keeps its own typed confirmation and safety gates; this
+                    # menu deliberately does not pass --yes on the user's behalf.
+                    remove_environment(version, yes=False, repo=repository_root(repo_arg),
+                                       home=home)
+                    print(f"removed {target_for(version, home)}")
+            else:
+                print("  invalid selection")
+        except (ManagerError, subprocess.CalledProcessError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+
+
+def _choose_installed(entries: list) -> str | None:
+    print("Installed versions:")
+    for index, (version, _path, state) in enumerate(entries, 1):
+        print(f"  {index:2}. {version:14} {state}")
+    raw = input("Choose number (blank to cancel): ").strip()
+    if not raw:
+        return None
+    if not raw.isdigit() or not 1 <= int(raw) <= len(entries):
+        print("  invalid selection")
+        return None
+    return entries[int(raw) - 1][0]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     home = args.home.expanduser() if args.home else None
+    if not args.command:
+        # No subcommand: open the interactive menu rather than printing a usage error.
+        # This is what csl's `m` action invokes.
+        return interactive_menu(home, getattr(args, "repo", None))
     try:
         repo = repository_root(args.repo) if args.command in {"install", "promote", "remove"} else None
         if args.command == "releases":

@@ -162,6 +162,14 @@ releases and only *notifies* — it never installs.
 existed, the notify half had no counterpart: you were told a release was out and then hand-rolled
 the venv. It closes that loop without ever starting a model server:
 
+Run it with **no arguments** for an interactive menu — this is also what `m` in `csl` opens:
+
+```bash
+./install/manage-rapid-mlx.py                       # interactive menu (needs a TTY)
+```
+
+Or drive it by subcommand:
+
 ```bash
 ./install/manage-rapid-mlx.py releases              # what PyPI offers
 ./install/manage-rapid-mlx.py installed             # what this machine has, and which pin is active
@@ -367,33 +375,34 @@ means a daily allowance was reached, not a bug here.
 
 ## Downloading models
 
-### Recommended full local-session model: Ornith 1.5 35B-A3B
+### Recommended full local-session model: KAT-Coder V2.5 OptiQ
 
 The current recommendation for a **full local Claude Code session** is the
-non-thinking `ornith-1.5-35b` alias, backed by:
+`kat-coder-optiq` alias, backed by:
 
 - Hugging Face repository:
-  `ornith-ai/Ornith-1.5-35B-A3B-MLX-4bit`
-- pinned revision:
-  `19504d912fa8fc7622bf6b1de3db5d5d890b1f02`
-- approximate download size: 19.5 GB
-- backend: Rapid-MLX
+  `mlx-community/KAT-Coder-V2.5-Dev-OptiQ-4bit`
+- approximate download size: 20 GB
+- backend: Rapid-MLX (`--tool-call-parser qwen`, no reasoning parser)
 - mode: non-thinking
 
-Download the pinned artifact through the normal downloader:
+Download it through the normal downloader:
 
-    ./install/download-models.sh --select ornith-1.5-35b
+    ./install/download-models.sh --select kat-coder-optiq
 
 On a machine that needs the native operating-system TLS trust store, use:
 
-    ./install/download-models-system-trust.sh --select ornith-1.5-35b
+    ./install/download-models-system-trust.sh --select kat-coder-optiq
 
-Then launch it directly or select it from `csl`:
+Then launch it directly or select it from `csl`, where it is the first row and the
+Enter-default:
 
-    ./bin/launch-claude-agent.sh ornith-1.5-35b
+    ./bin/launch-claude-agent.sh kat-coder-optiq
     ./bin/csl
 
-This recommendation is based on successful use in a real Claude Code session.
+This recommendation comes from lived use rather than benchmarks: Qwen 3.8 was too slow to
+drive a session, and `ornith-1.5-35b` — the previous recommendation here — degrades over a long
+one, with its reasoning drifting. Both remain registered and selectable.
 In that early operational use, non-thinking Ornith was noticeably faster than
 Qwen 3.8 and was the best-performing full-session model tried so far. This is
 not yet a controlled benchmark or complete qualification result.
@@ -544,9 +553,9 @@ the change afterwards is ordinary shipping discipline, so this plugin deliberate
 
 **Way 2 — full local session** (a local model as the session engine):
 
-The current tested recommendation is `ornith-1.5-35b` in non-thinking mode.
-It has completed a real Claude Code session successfully and, in early use,
-was noticeably faster than Qwen 3.8. Ornith thinking remains untested.
+The current recommendation is `kat-coder-optiq` (see
+[Recommended full local-session model](#recommended-full-local-session-model-kat-coder-v25-optiq)).
+It is the first row in `csl` and the Enter-default.
 
 ```bash
 ./bin/launch-claude-agent.sh my-operator                  # interactive local session
@@ -577,7 +586,7 @@ Example lean local session:
 LA_CLAUDE_SETTINGS="$HOME/.claude/launch-profiles/lean-local-general.json" \
 LA_CLAUDE_TOOLS="Bash,Read,Grep,Glob,Edit,Write,Skill,AskUserQuestion" \
 LA_AUTO_COMPACT_WINDOW="100k" \
-  ./bin/launch-claude-agent.sh ornith-1.5-35b high
+  ./bin/launch-claude-agent.sh kat-coder-optiq high
 ```
 
 The settings file in that example is user-managed and is not shipped by this repository. It can
@@ -620,14 +629,17 @@ classifier is routed or how good its verdicts are — those stay separate questi
 ### The home lane selector: local or remote, with navigation back and forth
 
 `csl` (no args) no longer opens straight into the local-model list. It opens on a **home screen**
-offering `1) 🦾 Local`, `2) ☁️ Remote`, `k) Install / set up remote API keys`, and `q) Quit`, and
-shows the current state of every session-wide toggle (auto-mode, telemetry, watcher, stop hook,
-local-capable filter) and the resolved config source.
+offering `1) 🦾 Local`, `2) 🌐 Remote`, `k) Install / set up remote API keys`,
+`m) Manage Rapid-MLX runtime`, and `q) Quit`, and shows the current state of every session-wide
+toggle (auto-mode, telemetry, watcher, stop hook) and the resolved config source.
+
+The locally-runnable filter is deliberately **not** on the home screen: it only ever affects the
+*remote* roster, so it lives in the remote picker as `f) 🔍 locally-runnable models`.
 
 From inside either picker you can return to this home screen (`h`) or jump straight across to the
 other lane (`s` — switch) — all in one process, with no restart and no state loss.
-Auto-mode, telemetry, the watcher, the stop hook, and the local-capable filter all carry over across
-every switch.
+Auto-mode, telemetry, the watcher, the stop hook, and the locally-runnable filter all carry over
+across every switch — the filter included, even though only the remote picker displays it.
 
 If this installed copy has no `config.local.sh` and fell back to the public `config.example.sh`, the
 home screen also prints a warning that private models are not present in this installed copy.

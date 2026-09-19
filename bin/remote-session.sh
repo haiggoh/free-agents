@@ -114,6 +114,62 @@ _clear_provider_env() {
 }
 
 # ---- roster helpers ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Box drawing — kept deliberately identical to bin/csl's copy so both lanes frame
+# their menus the same way. Rows are padded by MEASURED DISPLAY WIDTH, not by
+# character count, because an emoji is one character but two terminal columns and
+# several of these emoji carry a U+FE0F variation selector that adds no width at
+# all. The previous code guessed a width from digit counts (`52 - label_len`),
+# which is why this header drifted out of alignment whenever a count changed.
+# BOX_INNER matches csl's value; change both together.
+# ---------------------------------------------------------------------------
+BOX_INNER=62
+
+_box() { # _box top|mid|bottom|row|center [text...]
+  LC_ALL=en_US.UTF-8 python3 -c '
+import sys, unicodedata
+
+INNER = int(sys.argv[1])
+kind = sys.argv[2]
+rows = sys.argv[3:]
+
+
+def width(text):
+    total = 0
+    for char in text:
+        if char == "\ufe0f" or unicodedata.combining(char):
+            continue
+        if unicodedata.east_asian_width(char) in ("W", "F") or ord(char) >= 0x1F300:
+            total += 2
+        else:
+            total += 1
+    return total
+
+
+def truncate(text):
+    if width(text) <= INNER:
+        return text
+    out = ""
+    for char in text:
+        if width(out + char) > INNER - 1:
+            break
+        out += char
+    return out + "\u2026"
+
+
+if kind in ("top", "mid", "bottom"):
+    left, right = {"top": "\u2554\u2557", "mid": "\u2560\u2563",
+                   "bottom": "\u255a\u255d"}[kind]
+    print(left + "\u2550" * INNER + right)
+else:
+    for text in rows:
+        if kind == "center":
+            text = " " * max(0, (INNER - width(text)) // 2) + text
+        text = truncate(text)
+        print("\u2551" + text + " " * max(0, INNER - width(text)) + "\u2551")
+' "$BOX_INNER" "$@"
+}
+
 _field() { # _field <entry> <n>
     printf '%s' "$1" | cut -d'|' -f"$2"
 }
@@ -219,7 +275,7 @@ fi
 _lc_load_policy
 
 print_list() {
-    printf '\n\033[1m☁️  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n'
+    printf '\n\033[1m🌐  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n'
     printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
     local i=0 e alias prov model disp tier keystate
     local hidden_count=0
@@ -300,9 +356,6 @@ _run_remote_menu() {
         current_choices=("${choices[@]}")
 
         echo
-        echo "╔══════════════════════════════════════════════════════════╗"
-        echo "║              ☁️  Remote API Session Picker               ║"
-        printf '║  %d model(s) visible' "${#choices[@]}"
         local hidden_count=0
         for e in "${LA_REMOTE_AGENTS[@]}"; do
             tier="$(_field "$e" 5)"; _visible "$tier" || continue
@@ -311,13 +364,12 @@ _run_remote_menu() {
                 _lc_is_hidden "$prov" "$model" && hidden_count=$((hidden_count+1))
             fi
         done
-        printf '  (hidden: %d)' "$hidden_count"
-        # Pad to fit
-        local label_len=$((18 + ${#choices[@]} + ${#hidden_count}))
-        local pad=$((52 - label_len))
-        [[ $pad -gt 0 ]] && printf '%*s' "$pad" ""
-        printf '║\n'
-        echo "╠══════════════════════════════════════════════════════════╣"
+        _box top
+        _box center "🌐 Remote API Session Picker"
+        _box mid
+        _box row "$(printf '  %d model(s) visible  (hidden: %d)' \
+                    "${#choices[@]}" "$hidden_count")"
+        _box mid
         printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
         local i=0 keystate
         for e in "${LA_REMOTE_AGENTS[@]}"; do
@@ -334,18 +386,22 @@ _run_remote_menu() {
         [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
         echo
         echo "  h) 🏠 back to lane selector"
-        echo "  s) 🦾  switch to local models"
-        echo "  f) 🔍 local-capable: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+        echo "  s) 🦾 switch to local models"
+        echo "  f) 🔍 locally-runnable models: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  R) 📋 show hidden-model report"
-        echo "  k) 🔑  set up remote API keys"
+        echo "  k) 🔑 set up remote API keys"
         case "$AUTO_MODE_STATE" in
             0) echo "  a) 🤖 auto-mode: blind-trust — auto with no classifier (cycle)" ;;
             1) echo "  a) 🤖 auto-mode: classifier  — auto with local classifier (cycle)" ;;
             2) echo "  a) 🤖 auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
         esac
-        echo "  t) 📡 telemetry: $([ "$TELEMETRY_ENABLED" = "1" ] && echo "ON" || echo "OFF")"
+        if [ "$TELEMETRY_ENABLED" = "1" ]; then
+            echo "  t) 📡 telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
+        else
+            echo "  t) 📡 telemetry: OFF — no nonessential outbound traffic (toggle)"
+        fi
         echo "  l) ⏳ limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-        echo "  e) ⚙️ effort: ${EFFORT_CHOICE:-<provider default>}"
+        echo "  e) 🔆 effort: ${EFFORT_CHOICE:-<provider default>}"
         echo "  q) quit"
         echo
         printf "Select [1-%d] (h/s/f/R/k/a/t/l/e/q): " "${#choices[@]}" >&2
@@ -637,8 +693,8 @@ stop_proxy() {
 
 # LiteLLM maps each spoofed Claude id onto the chosen remote model, so Claude
 # Code can ask for "claude-opus-5" and get the free provider underneath.
-write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking>
-    local cfg="$1" prov="$2" model="$3" thinking="$4"
+write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking> [effort]
+    local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}"
     _available "$prov" || return 2
     _valid_model "$model" || return 2
     local litellm_model think_line="" api_base=""
@@ -666,6 +722,46 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         think_line='      chat_template_kwargs:
         enable_thinking: false'
 
+    # EFFORT. Claude Code's own --effort flag is meaningless to a third-party provider: it is
+    # interpreted by Anthropic's models, so passing it to `claude` while the request is proxied
+    # to NVIDIA/Gemini/Groq changed nothing. Effort has to travel IN THE REQUEST BODY, which is
+    # what this proxy config controls. The field differs per model family, so map it:
+    #   * reasoning_effort (low|medium|high) -- the OpenAI-compatible spelling. LiteLLM
+    #     translates it per provider, so it is the right default for OpenAI-shaped routes.
+    #   * NVIDIA Nemotron does NOT take reasoning_effort; it gates reasoning with
+    #     enable_thinking inside chat_template_kwargs. So on Nemotron an explicit effort means
+    #     "turn thinking ON" (the default above turns it off to avoid the thinking-block crash).
+    # Claude Code offers five levels; the OpenAI field accepts three, so xhigh/max fold to high.
+    local mapped_effort=""
+    case "$effort" in
+        low)              mapped_effort="low" ;;
+        medium)           mapped_effort="medium" ;;
+        high|xhigh|max)   mapped_effort="high" ;;
+        "")               mapped_effort="" ;;
+        *)                echo "remote-session: unknown effort '\''$effort'\'', ignoring" >&2 ;;
+    esac
+    local effort_line=""
+    if [[ -n "$mapped_effort" ]]; then
+        case "$prov" in
+            nvidia)
+                # Nemotron reads enable_thinking, not reasoning_effort. An explicit effort is a
+                # request TO reason, so enable it and state the budget the family understands.
+                if [[ "$model" == *nemotron* ]]; then
+                    think_line='      chat_template_kwargs:
+        enable_thinking: true'
+                else
+                    effort_line="      reasoning_effort: $mapped_effort"
+                fi
+                ;;
+            gemini)
+                # Gemini thinking is disabled above unless asked for; an explicit effort asks.
+                [[ "$thinking" != "true" ]] && think_line=""
+                effort_line="      reasoning_effort: $mapped_effort"
+                ;;
+            *)  effort_line="      reasoning_effort: $mapped_effort" ;;
+        esac
+    fi
+
     local key_env
     key_env="$("$KEYS" --names "$prov")" || return 1
     key_env="${key_env%%$'\n'*}"
@@ -682,6 +778,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             echo "      api_key: os.environ/$key_env"
             [[ -n "$api_base" ]] && echo "      api_base: $api_base"
             [[ -n "$think_line" ]] && echo "$think_line"
+            [[ -n "$effort_line" ]] && echo "$effort_line"
         } >> "$cfg"
     done
     cat >> "$cfg" <<'YAML'
@@ -693,8 +790,8 @@ general_settings:
 YAML
 }
 
-start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
-    local prov="$1" model="$2" thinking="$3"
+start_proxy() { # start_proxy <provider> <model> <thinking> [effort] -> echoes port
+    local prov="$1" model="$2" thinking="$3" effort="${4:-}"
     umask 077
     command -v litellm >/dev/null 2>&1 || {
         echo "remote-session: litellm not found. Install with: pipx install litellm[proxy]" >&2; return 1; }
@@ -714,7 +811,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> -> echoes port
     _prepare_runtime_dir || return 1
     port="$(free_port)" || return 1
     cfg="$RUNDIR/proxy-$port.yaml"; log="$RUNDIR/proxy-$port.log"; pidf="$RUNDIR/proxy-$port.pid"
-    write_proxy_config "$cfg" "$prov" "$model" "$thinking" || return 1
+    write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" || return 1
     _prepare_runtime_file "$log" || return 1
     _prepare_runtime_file "$pidf" || return 1
     if [[ -n "${LA_LITELLM_CMD:-}" ]]; then
@@ -1070,7 +1167,7 @@ esac
 cat <<BANNER
 
 ╭──────────────────────────────────────────────────────────────╮
-│  ☁️  REMOTE API SESSION — $MODEL ($DISP)                    │
+│  🌐  REMOTE API SESSION — $MODEL ($DISP)                    │
 ╰──────────────────────────────────────────────────────────────╯
    provider : $PROV      tier: $TIER
    agent    : $ALIAS
@@ -1115,7 +1212,7 @@ fi
 
 _prepare_runtime_dir || exit 1
 echo "   proxy    : starting LiteLLM (Anthropic /v1/messages → $PROV)…"
-PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING")" || {
+PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING" "$EFFORT_CHOICE")" || {
     echo "remote-session: could not start the translating proxy." >&2; exit 1; }
 echo "   proxy    : ready on http://127.0.0.1:$PORT"
 echo
@@ -1126,6 +1223,24 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT"   # NO /v1 — Claude Code ap
 export ANTHROPIC_AUTH_TOKEN="sk-local-agents-remote"
 export ANTHROPIC_API_KEY="sk-local-agents-remote"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$MAX_OUT"
+
+# Streaming timeouts. The LOCAL launcher has carried these three since 2026-08-19; this lane
+# shipped without them and so silently kept Claude Code's cloud-tuned ceilings. That is wrong
+# for a free API in two ways: a big reasoning model (Nemotron 3 Ultra 550B) can spend well over
+# a minute on first-token latency, and a free tier queues requests behind paying traffic. Either
+# way the stream emits NOTHING while it waits, which the watchdog cannot distinguish from a hung
+# connection -- it aborts and retries, surfacing as:
+#   "Streaming response ended before any complete data was received. Retrying without streaming."
+# It reproduces right after the FIRST prompt of a session because that turn carries the largest
+# uncached prefill (full system prompt + tool definitions) and has no warm cache to answer from.
+#   API_TIMEOUT_MS           overall per-request cap.
+#   API_FORCE_IDLE_TIMEOUT=0 disables the "no bytes arrived yet" abort on a slow first token.
+#   CLAUDE_ENABLE_STREAM_WATCHDOG=0  the separate CLI 2.1.196 idle watchdog, on by default for
+#     ALL providers, which the other two do NOT cover. This is the one that actually bites.
+# Bounded, not unbounded: API_TIMEOUT_MS still caps the request, so a genuinely dead stream ends.
+export API_TIMEOUT_MS="${LA_REMOTE_API_TIMEOUT_MS:-600000}"
+export API_FORCE_IDLE_TIMEOUT=0
+export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1    # no telemetry through a third party
 export CLAUDE_IS_REMOTE_API="true"                   # distinct from CLAUDE_IS_LOCAL
 export LA_SESSION_LAUNCHER="remote-session.sh"       # names the launcher for plugin hooks (stop-hook gate)
@@ -1223,6 +1338,10 @@ if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
     claude_cmd+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
 fi
 
+# NOTE: --effort is Anthropic-side only; it does NOT reach a third-party provider. The
+# mechanism that actually changes remote reasoning is the proxy config written by
+# write_proxy_config (reasoning_effort / enable_thinking, per model family). This flag is
+# kept so the CLI's own displayed state matches what the user picked.
 if [[ -n "$EFFORT_CHOICE" ]]; then
     claude_cmd+=(--effort "$EFFORT_CHOICE")
 fi

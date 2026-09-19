@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -202,6 +203,76 @@ help_text = parser.format_help()
 check("--dry-run" in help_text and "install" in help_text and "promote" in help_text and "smoke" in help_text, "root help advertises manager controls")
 install_parser = next(action for action in parser._actions if hasattr(action, "choices") and action.choices).choices["install"]
 check("--skip-pin-update" in install_parser.format_help(), "install help advertises skip-pin option")
+
+# ---------------------------------------------------------------------------
+# Interactive menu (0.15.1). csl advertises this tool under `m`, but the CLI
+# required a subcommand, so the keypress printed an argparse usage error and
+# returned: advertised in the menu, unusable from it.
+# ---------------------------------------------------------------------------
+import pty
+import unicodedata
+
+
+def _drive_menu(keys: bytes, extra_env=None):
+    """Run the manager on a REAL pty and return its output.
+
+    A pty is required, not a nicety: the menu refuses to run without a TTY, so piping
+    stdin would exercise the refusal path instead of the menu.
+    """
+    env = dict(os.environ, **(extra_env or {}))
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ.update(env)
+        os.execv(sys.executable, [sys.executable, str(MODULE_PATH)])
+    os.write(fd, keys)
+    out = b""
+    try:
+        while True:
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            out += chunk
+    except OSError:
+        pass
+    os.waitpid(pid, 0)
+    return out.decode(errors="replace")
+
+
+def _display_width(text):
+    total = 0
+    for char in text:
+        if char == "\ufe0f" or unicodedata.combining(char):
+            continue
+        total += 2 if (unicodedata.east_asian_width(char) in ("W", "F")
+                       or ord(char) >= 0x1F300) else 1
+    return total
+
+
+out = _drive_menu(b"q\n")
+check("Rapid-MLX Runtime Manager" in out, "a bare invocation opens the menu (not a usage error)")
+check("usage:" not in out, "a bare invocation does NOT print an argparse usage error")
+for key, label in (("r)", "releases"), ("i)", "install"), ("p)", "promote"),
+                   ("s)", "smoke"), ("n)", "snapshot"), ("x)", "remove"), ("q)", "back")):
+    check(key in out, f"menu offers {key} ({label})")
+
+widths = {_display_width(line) for line in out.splitlines()
+          if line.startswith(("\u2551", "\u2554", "\u2560", "\u255a"))}
+check(len(widths) == 1, f"every framed row shares one display width (got {sorted(widths)})")
+
+check("invalid selection" in _drive_menu(b"zz\nq\n"),
+      "an unrecognized key is rejected without leaving the menu")
+
+# Without a TTY the menu must refuse rather than hang waiting on stdin forever.
+piped = subprocess.run([sys.executable, str(MODULE_PATH)], stdin=subprocess.DEVNULL,
+                       text=True, capture_output=True)
+check(piped.returncode == 2 and "needs a TTY" in piped.stderr,
+      "without a TTY the menu refuses with a diagnostic instead of hanging")
+
+# The subcommand CLI must keep working unchanged.
+helped = subprocess.run([sys.executable, str(MODULE_PATH), "--help"], text=True, capture_output=True)
+check(helped.returncode == 0 and "releases" in helped.stdout,
+      "--help still documents the subcommands")
+
 
 print(f"\n{passed} passed, {len(failed)} failed")
 for label in failed:

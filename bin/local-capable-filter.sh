@@ -12,7 +12,8 @@
 # Policy file format (PSV, comments and blank lines allowed):
 #   provider|remote_model_id|classification|local_artifact|runtime|estimated_size_gb|reason
 #
-#   classification must be one of: local-capable | remote-preferred | unknown
+#   classification must be one of:
+#     local-capable | potentially-local-capable | remote-preferred | unknown
 #   Rows with an unrecognized classification are treated as unknown (visible).
 #   Duplicate (provider, remote_model_id) keys are rejected deterministically.
 #   Missing/unknown classifications remain visible (fail-open).
@@ -42,9 +43,11 @@ Roster input: pipe-separated lines from a file, or '-' to read stdin.
   alias|provider|model_id|display|tier|notes
 
 Classifications:
-  local-capable    — hidden by default in the remote picker
-  remote-preferred — visible
-  unknown          — visible (fail-open: uncertainty must never silently hide)
+  local-capable              — hidden by default in the remote picker
+  potentially-local-capable  — visible, but marked: the footprint estimate lands near the
+                               memory ceiling, so it needs real evidence before it is hidden
+  remote-preferred           — visible
+  unknown                    — visible (fail-open: uncertainty must never silently hide)
 
 Exit codes:
   0 success
@@ -120,9 +123,9 @@ _parse_policy() {
     [[ -n "$provider" && -n "$model_id" && -n "$classification" ]] \
       || { echo "$file:$lineno: malformed row (need at least provider|model_id|classification): $row" >&2; return 1; }
     case "$classification" in
-      local-capable|remote-preferred|unknown) ;;
+      local-capable|potentially-local-capable|remote-preferred|unknown) ;;
       *)
-        echo "$file:$lineno: unrecognized classification '$classification'; must be local-capable|remote-preferred|unknown" >&2
+        echo "$file:$lineno: unrecognized classification '$classification'; must be local-capable|potentially-local-capable|remote-preferred|unknown" >&2
         return 1
         ;;
     esac
@@ -230,6 +233,8 @@ else
   rm -f "$_rows_tmp"
   echo ""
   echo "Visible: $VISIBLE_COUNT  Hidden: $HIDDEN_COUNT  (toggle with the local-capable switch in the remote menu)"
+  echo "Entries marked potentially-local-capable stay VISIBLE: the estimate is near the memory"
+  echo "ceiling, where its own error exceeds the headroom, so hiding them needs real evidence."
 fi
 
 # Clean up temp roster file if we created one.
