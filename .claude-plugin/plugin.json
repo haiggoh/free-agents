@@ -1,7 +1,7 @@
 {
   "name": "free-agents",
-  "version": "0.16.0",
-  "description": "Run Claude Code on FREE inference \u2014 two equal lanes: local MLX models on Apple Silicon, and free cloud APIs (Gemini, Groq, NVIDIA, and a dozen more). MAIN use: dispatch delegatable sub-tasks from your paid session to a free model, keeping your capable model driving. ALSO: full free sessions via `csl` (local) or `csl remote` (free APIs) \u2014 remote is faster and is the preferred lane for most interactive work; local wins for long unattended runs. Blind-trust auto mode by default with sandbox.enabled bypass. Additive overlay: private paths/keys in a gitignored config.local, settings.json untouched. Works whether Claude Code connects to Anthropic directly or via a gateway.",
+  "version": "0.17.0",
+  "description": "Run Claude Code on FREE inference — two equal lanes: local MLX models on Apple Silicon, and free cloud APIs (Gemini, Groq, NVIDIA, and a dozen more). MAIN use: dispatch delegatable sub-tasks from your paid session to a free model, keeping your capable model driving. ALSO: full free sessions via `csl` (local) or `csl remote` (free APIs) — remote is faster and is the preferred lane for most interactive work; local wins for long unattended runs. Blind-trust auto mode by default with sandbox.enabled bypass. Additive overlay: private paths/keys in a gitignored config.local, settings.json untouched. Works whether Claude Code connects to Anthropic directly or via a gateway.",
   "author": {
     "name": "Heiko Brantsch"
   },
