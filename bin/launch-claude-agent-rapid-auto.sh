@@ -727,6 +727,26 @@ if [ -n "$SESSION_IDENTITY" ]; then
     export LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4)
 fi
 
+# PER-SESSION SETTINGS — generate theme + spinner overlay for local sessions only.
+# This creates a transient settings file passed via --settings, NOT written to user's
+# persistent ~/.claude/settings.json. Only applied for local sessions (session_kind=local).
+if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-settings.py" ]; then
+    SETTINGS_FILE="$(
+        mktemp "${TMPDIR:-/tmp}/local-agents-settings.XXXXXX.json"
+    )"
+    chmod 600 "$SETTINGS_FILE"
+    LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
+        --identity-json "$LA_SESSION_IDENTITY" \
+        --output "$SETTINGS_FILE" 2>/dev/null || true
+    if [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
+        claude_args+=(--settings "$SETTINGS_FILE")
+    fi
+fi
+
+# SESSION NAME — use model alias + emoji for terminal title and /resume picker.
+# Requires CLI 2.1.270+ (verified). Set via -n/--name flag.
+SESSION_NAME="${LA_SESSION_KIND_EMOJI:-🦾} ${MODEL_ALIAS}"
+
 AGENT_PROMPT=$(cat "$LA_AGENT_PROMPT_FILE")
 AGENT_PROMPT=${AGENT_PROMPT//__LA_MODEL_ALIAS__/$MODEL_ALIAS}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_MODEL_SPOOF__/$SESSION_MODEL_ID}
@@ -777,6 +797,16 @@ fi
 if [ -n "${LA_DENY_TOOLS:-}" ]; then
     claude_args+=(--disallowedTools "$LA_DENY_TOOLS")
 fi
+
+# Startup announcement for local sessions — shows route and real model at a glance.
+# This is a bounded experiment; if placement is unreliable, status line and session
+# title remain the authoritative surfaces.
+if [ "${LA_SESSION_KIND:-}" = "local" ]; then
+    printf '🦾 Local inference session — %s (via %s)\n' "${MODEL_ALIAS}" "${BACKEND_DISPLAY}"
+fi
+
+# Add session name to claude args
+claude_args+=(-n "$SESSION_NAME")
 
 printf '%s\n' \
     "⚠️  OPT-IN QUALIFICATION LAUNCHER — not yet wired into the default Auto Mode route" \
