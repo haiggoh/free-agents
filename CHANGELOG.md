@@ -6,6 +6,30 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.15.2] — 2026-09-19
+
+Test fix for `test_launcher_profiles.sh` — resumes and completes the work from the
+interrupted session (limit-kill 2026-09-19) that requested: *"fix test_launcher_profiles.sh
+too and add the live catalog scan"*.
+
+### Fixed
+
+- **Prompt size limit** — increased from 1600 to 2048 bytes to match the current
+  `config/local-agent-system-prompt.txt` template (1914 bytes). The test was failing
+  with "prompt unexpectedly large: 1914 bytes".
+
+### Added
+
+- **Live catalog scan test** — new test section in `tests/test_launcher_profiles.sh`
+  that validates the shipped `config/model-catalog.psv`:
+  - Verifies each entry has exactly 10 pipe-separated fields
+  - Checks required fields (alias, repo, subdir) are present and non-empty
+  - Validates `size_gb` is numeric
+  - Ensures the catalog has at least one valid entry
+  - Cross-checks catalog aliases against registry aliases (`la_register` in
+    `config.example.sh`) for namespace collisions (warns but does not fail —
+    download aliases and launch aliases are different namespaces)
+
 ## [0.15.1] — 2026-09-19
 
 Fixes three defects found by auditing the repo against its own tests, and adds a footprint
