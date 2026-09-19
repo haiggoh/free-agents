@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.15.1`. See `CHANGELOG.md`.
+`0.16.0`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -60,6 +60,8 @@ and rewriting one would not un-release it):
   it gates only on `0.15.1`'s estimator and the user asked for it directly.
 - `0.15.1` itself is a patch release (three defect fixes plus the estimator), so it spends no
   reserved number.
+
+**Shipped 2026-09-20:** `0.16.0` — Live remote catalog discovery and auto-classification (see `CHANGELOG.md`).
 
 **Reassigned again 2026-09-16.** `0.14.0` now belongs to the **free-agents identity release** (the
 project rename plus the remote-session parity fixes that made it justified). Portable manifests moved
@@ -110,10 +112,14 @@ waiting on an architecture it does not read. So the split is:
 |---|---|---|
 | `0.13.9` | **Operational unblocks.** Rapid-MLX upgrade to the current release; locally routed Auto Mode correctness. No schema changes, no new architecture. | nothing |
 | `0.14.0` | **Free-agents identity release.** Project rename (local inference and free-API inference as two equal lanes), remote-session parity actually working, documentation overhaul. | `0.13.15` |
-| `0.16.0` | **Live remote catalog discovery and auto-classification.** On connecting to a provider, enumerate its served models, merge them into the roster, and classify each through the footprint estimator so `csl` opens on a list that is already filtered. (New, 2026-09-19.) | `0.15.1` — the estimator it drives |
-| `0.17.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`; slid up again 2026-09-19.) | nothing hard |
-| `0.18.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`.) | `0.17.0` |
-| `0.19.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`.) | `0.18.0` — a runtime profile is the clean way to select a backend |
+| `0.15.1` | **Patch release.** Three defect fixes + footprint estimator. | `0.14.0` |
+| `0.16.0` | **Live remote catalog discovery and auto-classification.** On connecting to a provider, enumerate its served models, merge them into the roster, and classify each through the footprint estimator so `csl` opens on a list that is already filtered. (Shipped 2026-09-20.) | `0.15.1` — the estimator it drives |
+| `0.17.0` | **Local session identity Milestone 1.** Deterministic session identity resolver, transcript marker, per-session settings overlay, sky-blue theme, model-aware spinner verbs. | `0.16.0` |
+| `0.17.1` | **Local session identity Milestone 2.** Visual identity (theme + spinner verbs wired), session banner integration, startup announcement. | `0.17.0` |
+| `0.17.2` | **Local session identity Milestone 3.** Session transcript identity (stable session id in transcripts, correlation with launch metadata). | `0.17.1` |
+| `0.18.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`; slid up again 2026-09-19.) | nothing hard |
+| `0.19.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`.) | `0.18.0` |
+| `0.20.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`.) | `0.19.0` — a runtime profile is the clean way to select a backend |
 
 **Not release-gated at all.** These run continuously against whatever is current, and must not be
 parked behind a version number: model acquisition waves, the tournament, retirement and disk
@@ -287,6 +293,8 @@ hours of throughput matter more than latency.
 ---
 
 ## `0.16.0` — Live remote catalog discovery and auto-classification
+
+**Shipped 2026-09-20.** (See `CHANGELOG.md`.)
 
 **Requested 2026-09-19.** Today the remote roster is a hand-written list in
 `config/remote-agents.sh` and the local-capable filter is a hand-written policy in
@@ -535,7 +543,7 @@ silent dotfile mutation; published assets are immutable and checksummed.
 
 ---
 
-## `0.19.0` — Backend lanes — oMLX
+## `0.20.0` — Backend lanes — oMLX
 
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.
