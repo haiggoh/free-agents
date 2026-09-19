@@ -329,8 +329,29 @@ if [ -x "$LAUNCH_DIR/la-session-identity.sh" ]; then
         export LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4)
         export LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4)
         export LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2)
+        export LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4)
     fi
 fi
+
+# PER-SESSION SETTINGS — generate theme + spinner overlay for local sessions only.
+# This creates a transient settings file passed via --settings, NOT written to user's
+# persistent ~/.claude/settings.json. Only applied for local sessions (session_kind=local).
+if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-settings.py" ]; then
+    SETTINGS_FILE="$(
+        mktemp "${TMPDIR:-/tmp}/local-agents-settings.XXXXXX.json"
+    )"
+    chmod 600 "$SETTINGS_FILE"
+    LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
+        --identity-json "$LA_SESSION_IDENTITY" \
+        --output "$SETTINGS_FILE" 2>/dev/null || true
+    if [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
+        CLAUDE_EXTRA_ARGS+=(--settings "$SETTINGS_FILE")
+    fi
+fi
+
+# SESSION NAME — use model alias + emoji for terminal title and /resume picker.
+# Requires CLI 2.1.270+ (verified). Set via -n/--name flag.
+SESSION_NAME="${LA_SESSION_KIND_EMOJI:-🦾} ${MODEL_ALIAS}"
 
 # STARTUP BANNER — deliberately loud. A local session's identity used to be a couple of plain
 # lines that the long waypoints banner buried, leaving no way to tell at a glance which model is
@@ -545,4 +566,12 @@ fi
 if [ -n "$_AUTO_MODE_APPEND" ]; then
     CLAUDE_EXTRA_ARGS+=(--append-system-prompt "$_AUTO_MODE_APPEND")
 fi
-claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode "$_PERM_MODE" --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"
+
+# Startup announcement for local sessions — shows route and real model at a glance.
+# This is a bounded experiment; if placement is unreliable, status line and session
+# title remain the authoritative surfaces.
+if [ "${LA_SESSION_KIND:-}" = "local" ]; then
+    printf '🦾 Local inference session — %s (via %s)\n' "${MODEL_ALIAS}" "${BACKEND_DISPLAY}"
+fi
+
+claude -n "$SESSION_NAME" --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode "$_PERM_MODE" --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"

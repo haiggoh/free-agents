@@ -6,6 +6,25 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.17.1] — 2026-09-22
+
+### Added
+
+- **Local visual identity (Milestone 2)** — per-session theme and spinner vocabulary for local sessions
+  - Sky-blue theme (`#87CEEB`) via per-session settings overlay (never mutates persistent `~/.claude/settings.json`)
+  - Model-aware spinner verbs: Qwening, Deepseeking, Devstralling, etc. with neutral fallbacks
+  - Startup announcement: `🦾 Local inference session — <model> (via <backend>)`
+  - Session name with emoji for terminal title and `/resume` picker (`-n` flag)
+- **Settings generator** (`bin/generate-local-settings.py`) — builds transient per-session settings from identity resolver
+- **Local theme data** (`config/local-theme.json`) — theme definition with accent color, emoji, identity label
+- **Local spinner verbs** (`config/local-spinner-verbs.json`) — curated model-family puns with deterministic deduplication
+
+### Changed
+
+- Both launchers (`launch-claude-agent.sh`, `launch-claude-agent-rapid-auto.sh`) now generate and apply per-session settings
+- Session identity resolver exports `session_emoji` and `spinner_profile_id` fields
+- Local sessions visually distinct at a glance without altering persistent user preferences
+
 ## [0.17.0] — 2026-09-21
 
 ### Added
