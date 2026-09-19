@@ -333,19 +333,19 @@ _run_remote_menu() {
         done
         [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
         echo
-        echo "  h) back to lane selector"
+        echo "  h) 🏠 back to lane selector"
         echo "  s) 🦾  switch to local models"
-        echo "  f) local-capable: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-        echo "  R) show hidden-model report"
+        echo "  f) 🔍 local-capable: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+        echo "  R) 📋 show hidden-model report"
         echo "  k) 🔑  set up remote API keys"
         case "$AUTO_MODE_STATE" in
-            0) echo "  a) auto-mode: blind-trust — auto with no classifier (cycle)" ;;
-            1) echo "  a) auto-mode: classifier  — auto with local classifier (cycle)" ;;
-            2) echo "  a) auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
+            0) echo "  a) 🤖 auto-mode: blind-trust — auto with no classifier (cycle)" ;;
+            1) echo "  a) 🤖 auto-mode: classifier  — auto with local classifier (cycle)" ;;
+            2) echo "  a) 🤖 auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
         esac
-        echo "  t) telemetry: $([ "$TELEMETRY_ENABLED" = "1" ] && echo "ON" || echo "OFF")"
-        echo "  l) limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-        echo "  e) effort: ${EFFORT_CHOICE:-<provider default>}"
+        echo "  t) 📡 telemetry: $([ "$TELEMETRY_ENABLED" = "1" ] && echo "ON" || echo "OFF")"
+        echo "  l) ⏳ limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+        echo "  e) ⚙️ effort: ${EFFORT_CHOICE:-<provider default>}"
         echo "  q) quit"
         echo
         printf "Select [1-%d] (h/s/f/R/k/a/t/l/e/q): " "${#choices[@]}" >&2

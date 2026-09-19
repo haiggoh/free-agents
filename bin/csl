@@ -262,33 +262,35 @@ _pick_home_lane() {
     printf '║     are not present in this installed copy.             ║\n'
   fi
   echo "╠══════════════════════════════════════════════════════════╣"
-  printf '║  a) Auto-mode: '
+  printf '║  a) 🤖 Auto-mode: '
   case "$AUTO_MODE_STATE" in
-    0) printf "blind-trust%-25s" "" ;;
-    1) printf "classifier%-28s" "" ;;
-    2) printf "off%-32s" "" ;;
+    0) printf "blind-trust%-23s" "" ;;
+    1) printf "classifier%-26s" "" ;;
+    2) printf "off%-30s" "" ;;
   esac
   printf '║\n'
-  printf '║  t) Telemetry: %-27s ' "$([ "$TELEMETRY" = "1" ] && echo "ON" || echo "OFF")"
+  printf '║  t) 📡 Telemetry: %-25s ' "$([ "$TELEMETRY" = "1" ] && echo "ON" || echo "OFF")"
   printf '║\n'
-  printf '║  w) Watcher:   %-27s ' "$([ "$WATCH" = "1" ] && echo "ON" || echo "OFF")"
+  printf '║  w) 👁️ Watcher:   %-25s ' "$([ "$WATCH" = "1" ] && echo "ON" || echo "OFF")"
   printf '║\n'
-  printf '║  s) Stop hook: %-27s ' "$([ "$STOP_HOOK" = "1" ] && echo "ON" || echo "OFF")"
+  printf '║  s) 🪝 Stop hook: %-25s ' "$([ "$STOP_HOOK" = "1" ] && echo "ON" || echo "OFF")"
   printf '║\n'
-  printf '║  l) Local-cap: %-27s ' "$([ "$LOCAL_CAPABLE" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+  printf '║  l) 🔍 Local-cap: %-25s ' "$([ "$LOCAL_CAPABLE" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
   printf '║\n'
   echo "╠══════════════════════════════════════════════════════════╣"
   echo "║  1) 🦾 Local  — MLX models on this machine (${#SESSION_ALIASES[@]} on disk)       ║"
   echo "║  2) ☁️  Remote — Free/paid cloud API (provider quotas apply) ║"
   echo "║  k) 🔑  Install / set up remote API keys                ║"
+  echo "║  m) 🔧  Manage Rapid-MLX runtime (install/update/inspect) ║"
   echo "║  q) Quit                                                 ║"
   echo "╚══════════════════════════════════════════════════════════╝"
-  printf "Select [1/2/k/q/a/t/w/s/l]: " >&2
+  printf "Select [1/2/k/m/q/a/t/w/s/l]: " >&2
   read -r sel; sel="${sel:-1}"
   case "$sel" in
     1|local|LOCAL) NEXT_LANE="local" ;;
     2|remote|REMOTE) NEXT_LANE="remote" ;;
     k|K) NEXT_LANE="install" ;;
+    m|M) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; NEXT_LANE="home" ;;
     q|Q) NEXT_LANE="quit" ;;
     a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); NEXT_LANE="home" ;;
     t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; NEXT_LANE="home" ;;
@@ -306,29 +308,35 @@ _run_local_picker() {
   NEXT_LANE="home"
   while :; do
     echo
-    echo "Local agents — launch a local session (config: ${LA_CONFIG_SOURCE})"
-    echo
+    echo "╔══════════════════════════════════════════════════════════╗"
+    echo "║              🦾  Local Session Picker                   ║"
+    local model_count="${#SESSION_ALIASES[@]}"
+    local count_str="${model_count} model(s) on disk (session-capable)"
+    local pad=$((52 - ${#count_str}))
+    printf '║  %s%*s║\n' "$count_str" "$pad" ""
+    echo "╠══════════════════════════════════════════════════════════╣"
     echo "Available models (on disk, session-capable; numbered rows use the configured effort):"
     for ((i=0; i<${#MODEL_LABELS[@]}; i++)); do
       printf "  %d) %s\n" "$((i+1))" "${MODEL_LABELS[$i]}"
     done
     echo
     echo "  h) back to lane selector"
-    echo "  c) choose a listed model × custom effort"
-    echo "  s) 🦾  switch to remote API agents (choose provider/model; account quotas apply)"
+    echo "  c) ⚙️ choose a listed model × custom effort"
+    echo "  s) ☁️  switch to remote API agents (choose provider/model; account quotas apply)"
     echo "     Cerebras trial opt-in: csl remote --include-trials"
     echo "  k) 🔑  set up remote API keys"
-    if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
-    else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
+    echo "  m) 🔧  Manage Rapid-MLX runtime (install/update/inspect)"
+    if [ "$WATCH" = "1" ]; then echo "  w) 👁️ watcher: ON  — opens a window following this session (toggle)"
+    else                        echo "  w) 👁️ watcher: OFF — no monitor window (toggle)"; fi
     case "$AUTO_MODE_STATE" in
-      0) echo "  a) auto-mode: blind-trust — auto with no classifier (cycle: blind→classifier→off)" ;;
-      1) echo "  a) auto-mode: classifier  — auto with local classifier (cycle: blind→classifier→off)" ;;
-      2) echo "  a) auto-mode: off         — acceptEdits; no classifier (cycle: blind→classifier→off)" ;;
+      0) echo "  a) 🤖 auto-mode: blind-trust — auto with no classifier (cycle: blind→classifier→off)" ;;
+      1) echo "  a) 🤖 auto-mode: classifier  — auto with local classifier (cycle: blind→classifier→off)" ;;
+      2) echo "  a) 🤖 auto-mode: off         — acceptEdits; no classifier (cycle: blind→classifier→off)" ;;
     esac
-    if [ "$TELEMETRY" = "1" ]; then echo "  t) telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
-    else                            echo "  t) telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
-    if [ "$STOP_HOOK" = "1" ]; then echo "  s) queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
-    else                            echo "  s) queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
+    if [ "$TELEMETRY" = "1" ]; then echo "  t) 📡 telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
+    else                            echo "  t) 📡 telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
+    if [ "$STOP_HOOK" = "1" ]; then echo "  s) 🪝 queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
+    else                            echo "  s) 🪝 queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
     echo "  q) quit"
     echo
     printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
@@ -336,6 +344,7 @@ _run_local_picker() {
       q|Q) NEXT_LANE="quit"; return ;;
       h|H) NEXT_LANE="home"; return ;;
       k|K) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
+      m|M) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; continue ;;
       s|S) NEXT_LANE="remote"; return ;;
       w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
       a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;

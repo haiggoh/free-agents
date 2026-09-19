@@ -470,31 +470,39 @@ def check_unanswered_queues(transcript_path, queue_groups):
 
     if unaddressed:
         count = len(unaddressed)
-        # Show the first 2 unaddressed prompts in the reason (don't blow up context)
-        samples = []
-        for ct, reason in unaddressed[:2]:
-            display_ct = ct[:200].replace("\n", " ")
-            samples.append(f'"{display_ct}"')
+        # Build detailed list with FULL prompt content so the model can run the helper script
+        prompt_details = []
+        for ct, reason in unaddressed:
+            display_ct = ct[:300].replace("\n", " ")
+            prompt_details.append({
+                "content": ct,  # FULL content for helper script input
+                "display": display_ct,
+                "reason": reason
+            })
 
         reason_str = "; ".join(
-            f'"{ct[:120].replace(chr(10), " ")}" — {r}'
-            for ct, r in unaddressed[:3]
+            f'"{p["display"][:120]}" — {p["reason"]}'
+            for p in prompt_details[:3]
         )
+
+        # Build the explicit prompt list with FULL CONTENT for the helper script
+        prompt_list = "\n".join(
+            f'  - Full content for helper script: """{p["content"]}"""\n'
+            f'    Run: python3 bin/queue-marker-helper.py """{p["content"]}"""'
+            for p in prompt_details
+        )
+
         reason = (
             f"<system-reminder>You just finished a turn, but your transcript shows "
             f"that {count} of your queued prompts were delivered while you were running "
             f"and were not meaningfully addressed. {reason_str}. "
             f"To prevent this notification from reappearing, embed the agreed marker "
-            f"`[[QUEUE_ANSWERED:<8-char-hash>]]` in your response, where <8-char-hash> "
-            f"is the SHA256 hash of the queued prompt content (first 8 hex chars). "
-            f"Use the helper script to generate the correct marker deterministically:\n"
-            f"  python3 bin/queue-marker-helper.py '<queued prompt content>'\n"
-            f"Read the queued prompts listed below and respond to each one now, "
-            f"then stop. If you believe you addressed them already, confirm that you did so "
-            f"by including the appropriate marker(s) in your response.\n\n"
-            f"Queued prompts not addressed:\n" +
-            "\n".join(f'  - "{s}"' for s in samples)
-            + "</system-reminder>"
+            f"`[[QUEUE_ANSWERED:<8-char-hash>]]` in your response for EACH queued prompt.\n\n"
+            f"UN addressed queued prompts (use the helper script with the EXACT content below):\n"
+            f"{prompt_list}\n\n"
+            f"Respond to each queued prompt now, then include the marker the helper script "
+            f"outputs in your response, then stop. If you believe you already addressed a prompt, "
+            f"confirm by including its marker in your response.</system-reminder>"
         )
         return True, reason
 
@@ -577,24 +585,42 @@ def main() -> int:
         return 0
 
     best_path = None
-    stale_pending = 0  # un-drained enqueues (old check)
+    stale_pending_contents = []  # un-drained enqueue contents (old check)
     all_queue_groups = []  # all groups for the new check
     for path in session_transcripts(payload):
         best_path = path  # take the last one (most likely the only one)
         # 1. Old check: final pending > 0 (un-drained enqueues)
-        stale_pending += scan_final_pending(path)
+        stale_pending_contents.extend(scan_final_pending_contents(path))
         # 2. New check: all queue groups for unaddressed detection
         all_queue_groups.extend(build_queue_groups(path))
 
     # Check 1: stale queue (prompts never drained by the harness)
-    if stale_pending > 0:
+    if stale_pending_contents:
+        count = len(stale_pending_contents)
+        prompt_details = []
+        for ct in stale_pending_contents:
+            display_ct = ct[:300].replace("\n", " ")
+            prompt_details.append({
+                "content": ct,  # FULL content for helper script
+                "display": display_ct
+            })
+
+        prompt_list = "\n".join(
+            f'  - Full content for helper script: """{p["content"]}"""\n'
+            f'    Run: python3 bin/queue-marker-helper.py """{p["content"]}"""'
+            for p in prompt_details
+        )
+
         reason = (
-            f"<system-reminder>You just finished a turn, but {stale_pending} prompt(s) are still "
+            f"<system-reminder>You just finished a turn, but {count} prompt(s) are still "
             f"queued from the user (submitted while you were running, not yet delivered to "
-            f"you). Read the queued prompt(s) that follow and act on them now, "
-            f"then stop. If you see no such prompt in your context, treat the queued "
-            f"instruction as: acknowledge that you stopped with a pending request and ask "
-            f"the user to resend it.</system-reminder>"
+            f"you). Read the queued prompt(s) below and act on them now, "
+            f"then stop. If you see no such prompt in your context, acknowledge that you "
+            f"stopped with a pending request and ask the user to resend it.\n\n"
+            f"Queued prompts not yet delivered (use the helper script with the EXACT content below):\n"
+            f"{prompt_list}\n\n"
+            f"Respond to each queued prompt now, then include the marker the helper script "
+            f"outputs in your response, then stop.</system-reminder>"
         )
         print(json.dumps({"decision": "block", "reason": reason}))
         return 0
@@ -613,17 +639,18 @@ def main() -> int:
     return 0
 
 
-def scan_final_pending(path):
-    """Return final pending count for one transcript (old-style check).
+def scan_final_pending_contents(path):
+    """Return list of un-drained enqueue contents for one transcript.
 
     Used alongside the new queue-groups check.  If the queue has not yet been
     drained (stale pending > 0), that takes priority.
     """
-    pending = 0
+    # Track pending enqueues with their content
+    pending = []  # list of enqueue contents
     try:
         fh = open(path, "r", encoding="utf-8", errors="replace")
     except OSError:
-        return 0
+        return []
     with fh:
         for line in fh:
             line = line.strip()
@@ -637,11 +664,14 @@ def scan_final_pending(path):
                 continue
             op = o.get("operation")
             if op == "enqueue":
-                pending += 1
+                content = o.get("content", "")
+                if content:
+                    pending.append(content)
             elif op in ("remove", "dequeue"):
-                pending = max(0, pending - 1)
+                if pending:
+                    pending.pop(0)  # FIFO: remove oldest
             elif op == "popAll":
-                pending = 0
+                pending = []
     return pending
 
 
