@@ -112,6 +112,7 @@ waiting on an architecture it does not read. So the split is:
 |---|---|---|
 | `0.13.9` | **Operational unblocks.** Rapid-MLX upgrade to the current release; locally routed Auto Mode correctness. No schema changes, no new architecture. | nothing |
 | `0.14.0` | **Free-agents identity release.** Project rename (local inference and free-API inference as two equal lanes), remote-session parity actually working, documentation overhaul. | `0.13.15` |
+<<<<<<< HEAD
 | `0.15.1` | **Patch release.** Three defect fixes + footprint estimator. | `0.14.0` |
 | `0.16.0` | **Live remote catalog discovery and auto-classification.** On connecting to a provider, enumerate its served models, merge them into the roster, and classify each through the footprint estimator so `csl` opens on a list that is already filtered. (Shipped 2026-09-20.) | `0.15.1` — the estimator it drives |
 | `0.17.0` | **Local session identity Milestone 1.** Deterministic session identity resolver, transcript marker, per-session settings overlay, sky-blue theme, model-aware spinner verbs. | `0.16.0` |
@@ -120,6 +121,13 @@ waiting on an architecture it does not read. So the split is:
 | `0.18.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`; slid up again 2026-09-19.) | nothing hard |
 | `0.19.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`.) | `0.18.0` |
 | `0.20.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`.) | `0.19.0` — a runtime profile is the clean way to select a backend |
+=======
+| `0.16.0` | **Live remote catalog discovery and auto-classification.** On connecting to a provider, enumerate its served models, merge them into the roster, and classify each through the footprint estimator so `csl` opens on a list that is already filtered. (New, 2026-09-19.) **MERGED via `feat/0.16.0-catalog-scan`.** | `0.15.1` — the estimator it drives |
+| `0.17.0` | **Local session identity and observability.** Spinner words, live tok/s, statusline theming, banner rendering inside session, recognizable transcript marker, $0 cost display, live reasoning visibility. Work from `feature/local-session-identity` + waypoints `add-local-only-metrics-claude`, `banner-must-render-inside-the`, `local-sessions-need-a`, `local-sessions-must-show-0`, `real-time-thinking-visibility`, `local-agents-system-trust`. (New, 2026-09-19.) | nothing hard |
+| `0.18.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`, then `0.17.0`; slid up 2026-09-19 for local-session-identity.) | nothing hard |
+| `0.19.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`, then `0.18.0`.) | `0.18.0` |
+| `0.20.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`.) | `0.19.0` — a runtime profile is the clean way to select a backend |
+>>>>>>> b8a1082 (docs: update ROADMAP.md for 0.17.0 local session identity and version reassignment)
 
 **Not release-gated at all.** These run continuously against whatever is current, and must not be
 parked behind a version number: model acquisition waves, the tournament, retirement and disk
@@ -349,7 +357,33 @@ vendor-branded names (`kimi-k3`, `glm-5.3-flash`). Those stay visible, so the fi
 degrades gracefully rather than misclassifying. If a provider exposes parameter or size metadata
 in its catalog response, prefer that over parsing the id.
 
-## `0.17.0` — Portable manifests and artifact identity
+## `0.17.0` — Local session identity and observability
+
+**Status: NOT STARTED on `main`.** The work is tracked in `feature/local-session-identity`
+and the pinned waypoint `add-local-only-metrics-claude` plus related waypoints.
+
+**Scope:** Visual and observability improvements for local sessions:
+- **Model-aware spinner words + live tok/s** (`add-local-only-metrics-claude`) — replace the
+  generic spinner with model-specific words and show live tokens/second
+- **Statusline theming** — local sessions visually distinct with themed statusline
+- **Banner rendering inside session** (`banner-must-render-inside-the`) — the local-session
+  banner should render inside the session transcript, not only before launch
+- **Recognizable transcript marker** (`local-sessions-need-a`) — local sessions need a
+  transcript marker so they can be found later
+- **$0 cost display** (`local-sessions-must-show-0`) — local sessions display $0 and no cap
+  instead of a cloud budget segment
+- **Live reasoning visibility** (`real-time-thinking-visibility`) — tee reasoning stream
+  for interactive observation
+- **System trust downloader** (`local-agents-system-trust`) — review and push launcher,
+  add native LA_HF_CLI
+
+**Waypoints:** `add-local-only-metrics-claude` (PINNED), `banner-must-render-inside-the`,
+`local-sessions-need-a`, `local-sessions-must-show-0`, `real-time-thinking-visibility`,
+`local-agents-system-trust`, `qwen-thinking-block-leakage`, `thinking-model-runaway-fix-a`.
+
+**Branch:** `feature/local-session-identity` (not merged).
+
+## `0.18.0` — Portable manifests and artifact identity
 
 **Status: NOT STARTED on `main`.** The specification and partial work live on
 `feature/portable-model-manifests`, which is not merged.
@@ -430,12 +464,14 @@ Both found 2026-09-06; fix the plans, not just the code.
 
 ---
 
-## `0.18.0` — Runtime profiles and Rapid-first model management
+## `0.19.0` — Runtime profiles and Rapid-first model management
 
 > **Renumbered 2026-09-06** from `0.14.0`. Scope is unchanged; only its place in the sequence moved,
 > because the manifest foundation below is what other workstreams actually read. Phase **A**
 > (reconcile the live base) is no longer part of this release — it moved to `0.14.0`, which needs the
 > same reconciliation first and would otherwise duplicate it.
+
+> **Renumbered 2026-09-19** from `0.18.0` to `0.19.0` to make room for `0.17.0` (local session identity).
 
 **Status: NOT STARTED.** No gate here is implemented. Nothing in `0.13.1`–`0.13.8` advances one.
 
@@ -541,12 +577,16 @@ silent dotfile mutation; published assets are immutable and checksummed.
   effective* at the smallest scale. Phase C should **absorb and extend** these names rather than
   build a parallel mechanism — see the waypoint for the full list.
 
+> **Renumbered 2026-09-19** from `0.18.0` to `0.19.0` to make room for `0.17.0` (local session identity).
+
 ---
 
 ## `0.20.0` — Backend lanes — oMLX
 
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.
+
+> **Renumbered 2026-09-19** from `0.19.0` to `0.20.0` to make room for `0.17.0` (local session identity).
 
 | Fact | Value |
 |---|---|
