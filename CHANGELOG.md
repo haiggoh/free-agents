@@ -6,6 +6,27 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.17.0] — 2026-09-21
+
+### Added
+
+- **Session identity resolver** (`bin/la-session-identity.sh`) — deterministic canonical resolver emitting JSON with schema_version=1 for session kind, actual model, provider, backend, role/profile, effort, thinking mode, theme, spinner profile, transcript marker version, evidence, and fallback state
+- **Integration in launchers** — both `launch-claude-agent.sh` and `launch-claude-agent-rapid-auto.sh` now call the resolver and export identity fields (`LA_SESSION_IDENTITY`, `LA_SESSION_KIND`, `LA_ACTUAL_MODEL`, `LA_PROVIDER_DISPLAY`, `LA_THEME_IDENTIFIER`, `LA_SPINNER_PROFILE`, `LA_TRANSCRIPT_MARKER_VERSION`, `LA_SESSION_KIND_EMOJI`)
+- **Transcript marker** — `FREE_AGENTS_SESSION_IDENTITY_V1|{json}` emitted via `--append-system-prompt` so local sessions are distinguishable in transcripts
+- **Statusline integration** — cost-tracker's `statusline-render.sh` consumes resolver output for truthful actual model display and correct spend formatting per session kind
+
+### Changed
+
+- Local sessions now display actual model identity (e.g., Qwen alias) instead of compatibility spoof (Opus)
+- Cloud sessions remain unchanged (still show JoyIA mark)
+- Free API sessions distinguishable from local sessions via session_kind
+
+### Technical
+
+- Session kind determined authoritatively from `ANTHROPIC_BASE_URL` (never from `CLAUDE_IS_LOCAL` which leaks)
+- Resolver supports local (ports 8000-8010), free_api (port 4141), cloud (anthropic.com), and unknown
+- Dry-run/inspection mode (`--help`, `--dry-run`, `--inspect`) per script standards
+
 ## [0.15.2] — 2026-09-19
 
 Test fix for `test_launcher_profiles.sh` — resumes and completes the work from the
