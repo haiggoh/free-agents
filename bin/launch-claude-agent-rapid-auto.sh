@@ -91,7 +91,7 @@ selected_model_dir="$(
 SESSION_MODEL_ID="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 
-: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.14.0/bin/rapid-mlx}"
+: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.14.3/bin/rapid-mlx}"
 : "${LA_RAPID_AUTO_MODEL_DIR:=$HOME/.models/Qwen3.6-35B-A3B-4bit}"
 : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
 : "${LA_RAPID_AUTO_PORT:=8002}"
@@ -109,8 +109,8 @@ EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 }
 
 rapid_auto_version="$("$LA_RAPID_AUTO_BIN" --version 2>/dev/null || true)"
-[ "$rapid_auto_version" = "rapid-mlx 0.14.0" ] || {
-    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 0.14.0, got %s\n' \
+[ "$rapid_auto_version" = "rapid-mlx 0.14.3" ] || {
+    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 0.14.3, got %s\n' \
         "${rapid_auto_version:-<unavailable>}" >&2
     exit 2
 }
@@ -700,6 +700,33 @@ fi
 
 la_progress_success "Local Rapid Auto Mode ready — opening Claude Code"
 
+# SESSION IDENTITY RESOLUTION — emit deterministic identity for consumers
+MODEL_ALIAS="$MODEL_ALIAS" \
+MODEL_SPOOF="$SESSION_MODEL_ID" \
+BACKEND="rapid" \
+BACKEND_DECLARED="rapid" \
+LA_CUR_THINK="false" \
+LA_CUR_EFFORT="$EFFORT" \
+LA_CUR_ROLES="" \
+LA_CUR_REPO="" \
+LA_CUR_SIZE="" \
+LA_CUR_RAPID_SPEC_CONFIG="" \
+LA_SESSION_LAUNCHER="launch-claude-agent-rapid-auto.sh" \
+LA_AUTO_MODE=1 \
+LA_BLIND_AUTO=1 \
+ANTHROPIC_BASE_URL="http://127.0.0.1:$LA_RAPID_AUTO_PORT" \
+SESSION_IDENTITY=$("$LAUNCH_DIR/la-session-identity.sh" 2>/dev/null || true)
+if [ -n "$SESSION_IDENTITY" ]; then
+    export LA_SESSION_IDENTITY="$SESSION_IDENTITY"
+    export LA_SESSION_KIND=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_kind":"[^"]*"' | cut -d'"' -f4)
+    export LA_ACTUAL_MODEL=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_id":"[^"]*"' | cut -d'"' -f4)
+    export LA_PROVIDER_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"provider_display":"[^"]*"' | cut -d'"' -f4)
+    export LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4)
+    export LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4)
+    export LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2)
+    export LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4)
+fi
+
 AGENT_PROMPT=$(cat "$LA_AGENT_PROMPT_FILE")
 AGENT_PROMPT=${AGENT_PROMPT//__LA_MODEL_ALIAS__/$MODEL_ALIAS}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_MODEL_SPOOF__/$SESSION_MODEL_ID}
@@ -715,6 +742,13 @@ if printf '%s' "$AGENT_PROMPT" | grep -Eq '__LA_[A-Z0-9_]+__'; then
 fi
 
 AGENT_PROMPT="$AGENT_PROMPT LOCAL Rapid Auto Mode: classifier=$LA_RAPID_AUTO_CLASSIFIER_MODEL_ID; inference is local."
+
+# TRANSCRIPT MARKER — write a distinctive, greppable sentinel into the session transcript
+if [ -n "${LA_TRANSCRIPT_MARKER_VERSION:-}" ]; then
+  _marker="FREE_AGENTS_SESSION_IDENTITY_V${LA_TRANSCRIPT_MARKER_VERSION}|${LA_SESSION_IDENTITY}"
+  AGENT_PROMPT="${AGENT_PROMPT}
+${_marker}"
+fi
 
 claude_args=(
     --model "$SESSION_MODEL_ID"
