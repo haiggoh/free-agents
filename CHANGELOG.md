@@ -6,6 +6,22 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.17.5] — 2026-09-20
+
+### Fixed
+
+- **Stop hook attributed the wrong content to each drained queued prompt.** `build_queue_groups()` paired every drain with the most RECENT enqueue (LIFO) and discarded the `content` field the drain operation carries. With two or more queued prompts the pairing came out reversed, so the hook hashed the wrong prompt and a correct `[[QUEUE_ANSWERED:…]]` marker from `queue-marker-helper.py` could never match — the marker mechanism looked broken when the hash on the hook's side was simply computed over a different string. Drains are now matched by the content they name, falling back to FIFO order; `popAll` yields groups oldest-first. The defect was invisible with a single queued prompt, where LIFO and FIFO coincide.
+
+### Changed
+
+- **The QUEUE_ANSWERED contract now lives in one module** (`bin/queue_marker.py`): the hash, the marker syntax, and the regex that parses it. `local-queue-stop-hook.py` and `queue-marker-helper.py` both import it instead of restating all three independently — they agreed only by coincidence, and a change to the digest length on one side would have silently produced markers the other side rejects.
+- `queue-marker-helper.py` now answers `--help` with its usage block instead of hashing the flag as if it were prompt content.
+
+### Testing
+
+- Added `tests/test_queue_marker_contract.sh` — 16 assertions covering FIFO drain pairing, content-matched drains, the no-content fallback, `popAll` ordering, and the helper/hook seam (the helper's output must parse under the hook's own regex and round-trip to the same hash). Ordering cases use THREE queued prompts on purpose: a one- or two-prompt fixture cannot catch the LIFO defect.
+- Mutation-tested, all three caught: restoring LIFO fails the four ordering assertions; changing `HASH_LEN` fails the marker-format assertion; breaking the parse regex fails the four seam assertions. Both files restored to their exact pre-mutation shasums.
+
 ## [0.17.4] — 2026-09-23
 
 ### Added — Dynamic operational telemetry (Milestone 5)
