@@ -127,7 +127,28 @@ case "${ANTHROPIC_BASE_URL:-}" in
     session_kind="free_api"
     session_emoji="🌐"
     evidence="endpoint=localhost:4141 (free API proxy)"
-    provider_display="Free API (NVIDIA Nemotron)"
+    # Use LA_REMOTE_PROVIDER if available, otherwise fall back to generic
+    if [ -n "${LA_REMOTE_PROVIDER:-}" ]; then
+      case "${LA_REMOTE_PROVIDER}" in
+        nvidia) provider_display="Free API (NVIDIA)" ;;
+        gemini) provider_display="Free API (Google Gemini)" ;;
+        groq) provider_display="Free API (Groq)" ;;
+        openrouter) provider_display="Free API (OpenRouter)" ;;
+        cerebras) provider_display="Free API (Cerebras)" ;;
+        cloudflare) provider_display="Free API (Cloudflare Workers AI)" ;;
+        mistral) provider_display="Free API (Mistral)" ;;
+        zai) provider_display="Free API (Z.ai)" ;;
+        siliconflow) provider_display="Free API (SiliconFlow)" ;;
+        llm7) provider_display="Free API (LLM7)" ;;
+        kilo) provider_display="Free API (Kilo)" ;;
+        vercel) provider_display="Free API (Vercel AI)" ;;
+        sambanova) provider_display="Free API (SambaNova)" ;;
+        modelscope) provider_display="Free API (ModelScope)" ;;
+        *) provider_display="Free API (${LA_REMOTE_PROVIDER})" ;;
+      esac
+    else
+      provider_display="Free API (unknown provider)"
+    fi
     theme_identifier="free-lime"
     spinner_profile_id="free-api"
     ;;
@@ -151,8 +172,16 @@ esac
 
 # --- Build actual model display name ---------------------------------------
 actual_model_display="${MODEL_ALIAS:-unknown}"
+actual_model_id="${MODEL_ALIAS:-unknown}"
 if [ -n "${LA_CUR_REPO:-}" ] && [ "${LA_CUR_REPO}" != "" ]; then
   actual_model_display="${actual_model_display} (${LA_CUR_REPO})"
+fi
+# For free_api sessions, append the actual provider model if available
+if [ "$session_kind" = "free_api" ] && [ -n "${LA_REMOTE_MODEL:-}" ]; then
+  # Clean up the LiteLLM model prefix (e.g., nvidia_nim/nemotron-3-ultra -> nemotron-3-ultra)
+  _remote_model_clean="${LA_REMOTE_MODEL#*/}"
+  actual_model_display="${actual_model_display} → ${_remote_model_clean}"
+  actual_model_id="${_remote_model_clean}"
 fi
 
 # --- Determine role profile ------------------------------------------------
@@ -239,6 +268,7 @@ schema_version=1
 
 MODEL_ALIAS_ESC=$(json_escape "${MODEL_ALIAS:-unknown}")
 MODEL_SPOOF_ESC=$(json_escape "${MODEL_SPOOF:-unknown}")
+ACTUAL_MODEL_ID_ESC=$(json_escape "$actual_model_id")
 ACTUAL_MODEL_DISPLAY_ESC=$(json_escape "$actual_model_display")
 PROVIDER_DISPLAY_ESC=$(json_escape "$provider_display")
 BACKEND_DISPLAY_ESC=$(json_escape "${BACKEND:-unknown}")
@@ -260,7 +290,7 @@ printf '{"schema_version":%d,"session_kind":"%s","session_emoji":"%s","compatibi
   "$SESSION_KIND_ESC" \
   "$SESSION_EMOJI_ESC" \
   "$MODEL_SPOOF_ESC" \
-  "$MODEL_ALIAS_ESC" \
+  "$ACTUAL_MODEL_ID_ESC" \
   "$ACTUAL_MODEL_DISPLAY_ESC" \
   "$PROVIDER_DISPLAY_ESC" \
   "$BACKEND_DISPLAY_ESC" \

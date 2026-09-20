@@ -1158,6 +1158,7 @@ case "$TIER" in
     trial) COST_NOTE='trial/paid access explicitly selected; check provider balance' ;;
     *) COST_NOTE='account quota and billing unverified; do not assume free' ;;
 esac
+if [[ $DRY_RUN -eq 1 ]]; then
     echo "   DRY RUN  : would start a LiteLLM proxy and exec claude against it."
     echo "              nothing started, no network call made."
     # Print the RESOLVED toggle state and the flags claude would actually receive.
@@ -1227,6 +1228,18 @@ export LA_SESSION_LAUNCHER="remote-session.sh"       # names the launcher for pl
 export LA_QUEUE_STOP_HOOK="${LA_QUEUE_STOP_HOOK:-1}" # queued-prompt Stop hook; ON unless turned off
 export LA_REMOTE_AGENT="$ALIAS"
 export LA_REMOTE_PROVIDER="$PROV"
+
+# Provide resolver inputs so it can emit truthful identity for remote sessions
+export MODEL_ALIAS="$ALIAS"                          # the remote agent alias (e.g. nvidia-nemotron-3-ultra)
+export LA_CUR_EFFORT="${EFFORT_CHOICE:-medium}"      # effort level from launcher
+export LA_CUR_THINK="$THINKING"                      # thinking mode (true/false)
+export LA_CUR_ROLES="operator"                       # default role for remote sessions
+export LA_CUR_REPO=""                                # no HF repo for remote models
+export LA_CUR_SIZE=""                                # unknown size
+export LA_CUR_SERVE="litellm"                        # backend is LiteLLM proxy
+export LA_CUR_TOOLP=""                               # no tool parser for remote
+export LA_CUR_REASONP=""                             # no reasoning parser for remote
+export LA_REMOTE_MODEL="$MODEL"                      # actual provider model ID (e.g. nvidia_nim/nemotron-3-ultra)
 
 # SESSION ID GENERATION — create stable session ID before identity resolution.
 # This ID persists across the transcript lifecycle and enables transition detection.

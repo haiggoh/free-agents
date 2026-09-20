@@ -6,6 +6,24 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.17.4] — 2026-09-23
+
+### Added — Dynamic operational telemetry (Milestone 5)
+
+- **Token rate telemetry** (`bin/la-telemetry-token-rate.sh`) — live token generation rate from vllm/Rapid-MLX logs with freshness indicator (ok/stale/unknown), session-aware via sidecar
+- **RAM telemetry integration** — `la-statusline-segment.sh` now consumed by cost-tracker statusline renderer for wired memory pressure vs Metal ceiling
+- **Statusline renderer integration** (cost-tracker 0.7.0) — telemetry appears on line 1, color-coded by level:
+  - RAM: green (ok) / yellow (warn ≥70%) / red (crit ≥90%)
+  - Token rate: cyan (ok) / yellow (stale) / dim (unknown)
+- **Resolver fallback fix** — when `la-session-identity.sh` returns valid session_kind but unknown_fallback=true, trust session_kind and fall back to payload for model name
+- **Cloud session effort preservation** — cloud sessions use payload effort level, not resolver default
+
+### Changed
+
+- Telemetry scripts follow local-agents contract: print JSON or nothing, never block, exit 0
+- Renderer gracefully handles missing scripts or missing data — telemetry is optional
+- Test added: `tests/test_telemetry_token_rate.sh`
+
 ## [0.17.3] — 2026-09-23
 
 ### Added
