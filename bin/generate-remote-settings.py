@@ -29,23 +29,31 @@ def load_json_file(path: Path) -> dict:
         return {}
 
 
+# Known provider families, matched as SUBSTRINGS of the resolver's display string.
+# The resolver hands us a display name like "Free API (NVIDIA)", never a bare "nvidia",
+# so an equality test against these names can never match — every provider fell through
+# to 'general', which is not a key in remote-spinner-verbs.json, so the verb list came
+# back EMPTY and the spinner silently kept Claude Code's defaults.
+PROVIDER_FAMILIES = ('gemini', 'groq', 'nvidia', 'openrouter', 'cerebras',
+                     'cloudflare', 'mistral', 'zai', 'siliconflow',
+                     'sambanova', 'vercel', 'modelscope', 'llm7', 'kilo')
+
+
 def get_provider_family(provider: str) -> str:
-    """Extract provider family from provider name."""
-    provider = provider.lower()
-    # Map known providers
-    if provider in ('gemini', 'groq', 'nvidia', 'openrouter', 'cerebras',
-                    'cloudflare', 'mistral', 'zai', 'siliconflow',
-                    'sambanova', 'vercel', 'modelscope', 'llm7', 'kilo'):
-        return provider
-    # Handle model-based providers (e.g., nemotron, kimi, qwen, deepseek)
-    if 'nemotron' in provider:
-        return 'nemotron'
-    if 'kimi' in provider:
-        return 'kimi'
-    if 'qwen' in provider:
-        return 'qwen'
-    if 'deepseek' in provider:
-        return 'deepseek'
+    """Extract provider family from a provider display name.
+
+    Matches on substring because the input is a display string, not an identifier.
+    Model-family names are checked FIRST: a Nemotron served by NVIDIA should pun on the
+    model the user actually picked.
+    """
+    provider = (provider or '').lower()
+    # Model-based families take precedence over the serving provider.
+    for model_family in ('nemotron', 'kimi', 'qwen', 'deepseek'):
+        if model_family in provider:
+            return model_family
+    for family in PROVIDER_FAMILIES:
+        if family in provider:
+            return family
     return 'general'
 
 
@@ -107,16 +115,45 @@ def main():
         provider_family = get_provider_family(provider_display)
         spinner_verbs = select_spinner_verbs(provider_family, spinner_data)
 
-        # Build theme from data
+        # Build the settings overlay from the theme DATA. Previously `theme` and
+        # `fallback` were read into locals here and then never used, so the lime accent
+        # in remote-theme.json reached nothing — the overlay carried spinner verbs only.
         theme = theme_data.get('theme', {})
         fallback = theme_data.get('fallback', {})
 
-        settings = {
-            "spinnerVerbs": {
-                "mode": "replace",
-                "verbs": spinner_verbs
-            }
-        }
+        accent = theme.get('accent_color') or fallback.get('accent_color')
+        emoji = session_emoji or theme.get('session_emoji') or fallback.get('session_emoji')
+        label = theme.get('identity_label') or fallback.get('identity_label')
+
+        settings = {}
+
+        # Spinner verbs stay STATIC per the plan — flavor only, never live metrics. An
+        # empty list is omitted entirely: sending mode=replace with no verbs would strip
+        # Claude Code's own vocabulary and leave the spinner blank.
+        if spinner_verbs:
+            settings["spinnerVerbs"] = {"mode": "replace", "verbs": spinner_verbs}
+
+        # DELIBERATELY NOT EMITTED: a `themes` map / `accentColor` overlay.
+        #
+        # Probed 2026-09-20 against CLI 2.1.278 and NOT CONFIRMED as a supported setting.
+        # The probe that mattered was the CALIBRATION: a deliberately bogus key
+        # (`totallyFakeKeyXYZ`) passed via --settings produced exactly the same silent
+        # success as a `themes` map, and `claude doctor` reports neither. So "the CLI
+        # accepted it" is not evidence of support — unknown keys are ignored without a
+        # warning, which is indistinguishable from working until you look at the screen.
+        # The live `theme` setting on this machine is the string "auto", i.e. a NAMED
+        # theme, with no evidence that a session can define a new named theme at all.
+        #
+        # The plan's Milestone 2 "Theme caveat" anticipates exactly this and instructs:
+        # document an upstream limitation rather than patch Claude Code. So the accent
+        # colour in remote-theme.json stays DATA for surfaces we control (the launcher's
+        # own banner and the statusline), and is not smuggled into a settings key that
+        # may do nothing. Revisit if/when a supported custom-theme key is documented.
+        #
+        # What IS verified to work is spinnerVerbs (present in CLI 2.1.270+, per
+        # remote-spinner-verbs.json's own contract note) — emitted above.
+        _ = (accent, emoji, label, theme_identifier, provider_display,
+             actual_model_id, spinner_profile_id)  # retained for the banner/statusline path
 
     # Output
     output_json = json.dumps(settings, separators=(',', ':'))

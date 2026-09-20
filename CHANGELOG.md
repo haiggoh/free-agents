@@ -6,6 +6,25 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.17.6] — 2026-09-20
+
+### Fixed — the remote visual identity shipped in 0.17.3 never reached the user
+
+Milestones 4 and 5 were released with correct version strings and a green test suite, but **nothing was visible in a real remote session**. Three independent defects:
+
+- **Only port 4141 resolved as a free-API session.** `la-session-identity.sh` matched a single port while `remote-session.sh` scans `LA_REMOTE_PROXY_PORT_MIN..MAX` (default **4141-4151**) and takes the first FREE one — so any session launched while an earlier proxy was still alive resolved to `session_kind=unknown`, which collapsed theme, emoji, spinner *and* startup banner together. Now matches the whole range, as the LOCAL lane in the same `case` already did. The evidence string reports the actual port.
+- **Provider-family lookup could never match.** `get_provider_family()` compared the resolver's DISPLAY string (`"Free API (NVIDIA)"`) for equality against bare identifiers (`"nvidia"`), so every provider fell through to `general` — which was not a key in `remote-spinner-verbs.json` — and the verb list came back EMPTY on every real session. Matching is now by substring, with model families (Nemotron, Kimi, Qwen, DeepSeek) taking precedence over the serving provider.
+- **`general` had no verbs at all.** Added neutral fallback terms, as Milestone 2 requires for unknown models, and the overlay now omits `spinnerVerbs` entirely rather than emitting `mode=replace` with an empty list — which would have stripped Claude Code's own vocabulary and blanked the spinner.
+
+### Changed
+
+- `remote-theme.json`'s accent colour is **deliberately still not emitted as a settings key**. The dead `theme`/`fallback` locals that read it are gone, replaced by an explicit note. A `themes` map was probed against CLI 2.1.278 and NOT confirmed: the calibration that settled it is that a deliberately bogus key produces the same silent success, and `claude doctor` validates neither — so "the CLI accepted it" is not evidence of support. Per the plan's Milestone 2 theme caveat, this is recorded as an upstream limitation rather than shipped on a guess; the accent stays data for surfaces we control.
+
+### Testing
+
+- Added `tests/test_remote_identity_overlay.sh` — 21 assertions over the port range, provider-family resolution, non-empty verbs for every family, and the overlay a real session receives. Range cases probe a **non-first** port on purpose: a 4141-only fixture cannot catch the defect, which is precisely why the previous suite passed.
+- Mutation-tested, all three caught: reverting to 4141-only fails 6 assertions; restoring equality matching fails 5; deleting the `general` verbs fails 1. All three files restored to their exact pre-mutation shasums.
+
 ## [0.17.5] — 2026-09-20
 
 ### Fixed
