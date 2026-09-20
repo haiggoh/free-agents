@@ -700,6 +700,14 @@ fi
 
 la_progress_success "Local Rapid Auto Mode ready — opening Claude Code"
 
+# SESSION ID GENERATION — create stable session ID before identity resolution.
+# This ID persists across the transcript lifecycle and enables transition detection.
+_ts=$(date -u +"%Y%m%d-%H%M%S")
+_pid=$$
+_alias_hash=$(printf '%s' "${MODEL_ALIAS:-unknown}" | cksum | cut -d' ' -f1 | cut -c1-6)
+LA_SESSION_ID="${_ts}-${_pid}-${_alias_hash}"
+export LA_SESSION_ID
+
 # SESSION IDENTITY RESOLUTION — emit deterministic identity for consumers
 MODEL_ALIAS="$MODEL_ALIAS" \
 MODEL_SPOOF="$SESSION_MODEL_ID" \
@@ -725,6 +733,7 @@ if [ -n "$SESSION_IDENTITY" ]; then
     export LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4)
     export LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2)
     export LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4)
+    export LA_SESSION_ID=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
 fi
 
 # PER-SESSION SETTINGS — generate theme + spinner overlay for local sessions only.
@@ -763,12 +772,9 @@ fi
 
 AGENT_PROMPT="$AGENT_PROMPT LOCAL Rapid Auto Mode: classifier=$LA_RAPID_AUTO_CLASSIFIER_MODEL_ID; inference is local."
 
-# TRANSCRIPT MARKER — write a distinctive, greppable sentinel into the session transcript
-if [ -n "${LA_TRANSCRIPT_MARKER_VERSION:-}" ]; then
-  _marker="FREE_AGENTS_SESSION_IDENTITY_V${LA_TRANSCRIPT_MARKER_VERSION}|${LA_SESSION_IDENTITY}"
-  AGENT_PROMPT="${AGENT_PROMPT}
-${_marker}"
-fi
+# TRANSCRIPT MARKER — now handled by SessionStart hook (hooks/transcript-identity.py)
+# which appends FREE_AGENTS_SESSION_IDENTITY_V{version}|<json> to the transcript file.
+# This ensures transition markers on resume and idempotent SessionStart handling.
 
 claude_args=(
     --model "$SESSION_MODEL_ID"

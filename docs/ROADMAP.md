@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.17.1`. See `CHANGELOG.md`.
+`0.17.2`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -62,6 +62,8 @@ and rewriting one would not un-release it):
   reserved number.
 
 **Shipped 2026-09-20:** `0.16.0` — Live remote catalog discovery and auto-classification (see `CHANGELOG.md`).
+
+**Shipped 2026-09-23:** `0.17.2` — Local session identity Milestone 3: Session transcript identity (stable session id in transcripts, correlation with launch metadata, transition markers on resume, idempotent SessionStart handling) (see `CHANGELOG.md`).
 
 **Reassigned again 2026-09-16.** `0.14.0` now belongs to the **free-agents identity release** (the
 project rename plus the remote-session parity fixes that made it justified). Portable manifests moved
