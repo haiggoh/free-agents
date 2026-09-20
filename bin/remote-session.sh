@@ -1426,9 +1426,7 @@ if [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -x "$SCRIPT_DIR/generate-remote-
     LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
         --identity-json "$LA_SESSION_IDENTITY" \
         --output "$SETTINGS_FILE" 2>/dev/null || true
-    if [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
-        CLAUDE_EXTRA_ARGS+=(--settings "$SETTINGS_FILE")
-    fi
+    # Don't add to CLAUDE_EXTRA_ARGS yet — we may need to merge with blind-trust settings
 fi
 
 # STARTUP BANNER — after identity resolution so we have the theme emoji
@@ -1536,9 +1534,32 @@ trap _teardown EXIT INT TERM HUP
 claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
 claude_cmd+=(--permission-mode "$PERMISSION_MODE")
 
-# Add blind-trust settings file if in blind-trust mode (AUTO_MODE_STATE=0)
-if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
+# Handle settings merge: if both blind-trust and per-session settings exist, merge them.
+# Claude Code only accepts ONE --settings file (last wins), so we must merge.
+FINAL_SETTINGS_FILE=""
+if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" && -f "$BLIND_TRUST_SETTINGS_FILE" ]] && \
+   [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -n "${SETTINGS_FILE:-}" ] && [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
+    # Both exist — merge them
+    FINAL_SETTINGS_FILE="$(
+        mktemp "${TMPDIR:-/tmp}/free-agents-merged-settings.XXXXXX.json"
+    )"
+    chmod 600 "$FINAL_SETTINGS_FILE"
+    LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/merge-settings.py" \
+        --base "$BLIND_TRUST_SETTINGS_FILE" \
+        --overlay "$SETTINGS_FILE" \
+        --output "$FINAL_SETTINGS_FILE" 2>/dev/null || true
+    if [ -f "$FINAL_SETTINGS_FILE" ] && [ -s "$FINAL_SETTINGS_FILE" ]; then
+        claude_cmd+=(--settings "$FINAL_SETTINGS_FILE")
+    else
+        # Fallback: use blind-trust only
+        claude_cmd+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
+    fi
+elif [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" && -f "$BLIND_TRUST_SETTINGS_FILE" ]]; then
+    # Only blind-trust settings
     claude_cmd+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
+elif [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -n "${SETTINGS_FILE:-}" ] && [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
+    # Only per-session settings
+    claude_cmd+=(--settings "$SETTINGS_FILE")
 fi
 
 # NOTE: --effort is Anthropic-side only; it does NOT reach a third-party provider. The
@@ -1550,11 +1571,6 @@ if [[ -n "$EFFORT_CHOICE" ]]; then
 fi
 if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
     claude_cmd+=("${PASSTHRU[@]}")
-fi
-
-# Add per-session settings (theme + spinner) for free_api sessions
-if [[ ${#CLAUDE_EXTRA_ARGS[@]} -gt 0 ]]; then
-    claude_cmd+=("${CLAUDE_EXTRA_ARGS[@]}")
 fi
 
 # SESSION NAME — use provider/model + emoji for terminal title and /resume picker.
