@@ -123,10 +123,10 @@ case "${ANTHROPIC_BASE_URL:-}" in
       *) provider_display="Local (unknown backend)"; spinner_profile_id="local-unknown" ;;
     esac
     ;;
-  http://localhost:4141|http://127.0.0.1:4141)
+  http://localhost:414[1-9]|http://localhost:415[01]|http://127.0.0.1:414[1-9]|http://127.0.0.1:415[01])
     session_kind="free_api"
     session_emoji="🌐"
-    evidence="endpoint=localhost:4141 (free API proxy)"
+    evidence="endpoint=${ANTHROPIC_BASE_URL##*/} (free API proxy, range 4141-4151)"
     # Use LA_REMOTE_PROVIDER if available, otherwise fall back to generic
     if [ -n "${LA_REMOTE_PROVIDER:-}" ]; then
       case "${LA_REMOTE_PROVIDER}" in
