@@ -47,6 +47,9 @@ fi
 [[ -r "$ROSTER" ]] || { echo "remote-session: missing roster: $ROSTER" >&2; exit 2; }
 # shellcheck source=/dev/null
 source "$ROSTER"
+# Load shared emoji constants (single source of truth)
+# shellcheck source=../config/emoji.sh
+source "$SCRIPT_DIR/../config/emoji.sh"
 
 MAX_OUT="${LA_REMOTE_MAX_OUTPUT_TOKENS:-8192}"
 INCLUDE_TRIALS=0
@@ -275,7 +278,7 @@ fi
 _lc_load_policy
 
 print_list() {
-    printf '\n\033[1m🌐  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n'
+    printf '\n\033[1m%s  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n' "$SESSION_EMOJI_FREE_API"
     printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
     local i=0 e alias prov model disp tier keystate
     local hidden_count=0
@@ -365,7 +368,7 @@ _run_remote_menu() {
             fi
         done
         _box top
-        _box center "🌐 Remote API Session Picker"
+        _box center "$SESSION_EMOJI_FREE_API Remote API Session Picker"
         _box mid
         _box row "$(printf '  %d model(s) visible  (hidden: %d)' \
                     "${#choices[@]}" "$hidden_count")"
@@ -385,23 +388,23 @@ _run_remote_menu() {
         done
         [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
         echo
-        echo "  h) 🏠 back to lane selector"
-        echo "  s) 🦾 switch to local models"
+        echo "  h) $EMOJI_HOME back to lane selector"
+        echo "  s) $SESSION_EMOJI_LOCAL switch to local models"
         echo "  f) 🔍 locally-runnable models: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  R) 📋 show hidden-model report"
-        echo "  k) 🔑 set up remote API keys"
+        echo "  k) $EMOJI_KEY set up remote API keys"
         case "$AUTO_MODE_STATE" in
-            0) echo "  a) 🤖 auto-mode: blind-trust — auto with no classifier (cycle)" ;;
-            1) echo "  a) 🤖 auto-mode: classifier  — auto with local classifier (cycle)" ;;
-            2) echo "  a) 🤖 auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
+            0) echo "  a) $EMOJI_AUTO_MODE auto-mode: blind-trust — auto with no classifier (cycle)" ;;
+            1) echo "  a) $EMOJI_AUTO_MODE auto-mode: classifier  — auto with local classifier (cycle)" ;;
+            2) echo "  a) $EMOJI_AUTO_MODE auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
         esac
         if [ "$TELEMETRY_ENABLED" = "1" ]; then
-            echo "  t) 📡 telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
+            echo "  t) $EMOJI_TELEMETRY_ON telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
         else
-            echo "  t) 📡 telemetry: OFF — no nonessential outbound traffic (toggle)"
+            echo "  t) $EMOJI_TELEMETRY_ON telemetry: OFF — no nonessential outbound traffic (toggle)"
         fi
         echo "  l) ⏳ limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-        echo "  e) 🔆 effort: ${EFFORT_CHOICE:-<provider default>}"
+        echo "  e) $EMOJI_EFFORT effort: ${EFFORT_CHOICE:-<provider default>}"
         echo "  q) quit"
         echo
         printf "Select [1-%d] (h/s/f/R/k/a/t/l/e/q): " "${#choices[@]}" >&2
@@ -1439,7 +1442,7 @@ fi
 cat <<BANNER
 
 ╭──────────────────────────────────────────────────────────────╮
-│  ${LA_SESSION_KIND_EMOJI:-🌐}  REMOTE API SESSION — $MODEL ($DISP)                    │
+│  ${LA_SESSION_KIND_EMOJI:-$SESSION_EMOJI_FREE_API}  REMOTE API SESSION — $MODEL ($DISP)                    │
 ╰──────────────────────────────────────────────────────────────╯
    provider : $PROV      tier: $TIER
    agent    : $ALIAS
@@ -1575,7 +1578,7 @@ fi
 
 # SESSION NAME — use provider/model + emoji for terminal title and /resume picker.
 # Requires CLI 2.1.270+ (verified). Set via -n/--name flag.
-SESSION_NAME="${LA_SESSION_KIND_EMOJI:-🌐} ${MODEL}"
+SESSION_NAME="${LA_SESSION_KIND_EMOJI:-$SESSION_EMOJI_FREE_API} ${MODEL}"
 
 # Add session name flag (same as local launcher) - insert after 'claude' (index 0)
 claude_cmd=( "${claude_cmd[0]}" -n "$SESSION_NAME" "${claude_cmd[@]:1}" )

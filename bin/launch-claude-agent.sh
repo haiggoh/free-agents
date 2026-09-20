@@ -16,6 +16,9 @@ _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" &&
 LAUNCH_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/../config/config-lib.sh"
+# Load shared emoji constants (single source of truth)
+# shellcheck source=../config/emoji.sh
+. "$LAUNCH_DIR/../config/emoji.sh"
 la_load_config || exit 1
 
 MODEL_ALIAS="${1:-}"
@@ -364,7 +367,7 @@ fi
 
 # SESSION NAME — use model alias + emoji for terminal title and /resume picker.
 # Requires CLI 2.1.270+ (verified). Set via -n/--name flag.
-SESSION_NAME="${LA_SESSION_KIND_EMOJI:-🦾} ${MODEL_ALIAS}"
+SESSION_NAME="${LA_SESSION_KIND_EMOJI:-$SESSION_EMOJI_LOCAL} ${MODEL_ALIAS}"
 
 # STARTUP BANNER — deliberately loud. A local session's identity used to be a couple of plain
 # lines that the long waypoints banner buried, leaving no way to tell at a glance which model is
@@ -479,7 +482,7 @@ else _LA_MODE="direct"; fi
 echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  declared=$BACKEND_DECLARED  vllm_port=$VLLM_PORT  mode=$_LA_MODE" >> "$HOME/.claude/logs/local-agents-sessions.log"
 
 # Boxed headline — matches the remote picker's style
-_session_emoji="${LA_SESSION_KIND_EMOJI:-🧭}"
+_session_emoji="${LA_SESSION_KIND_EMOJI:-$SESSION_EMOJI_LOCAL}"
 echo "╔══════════════════════════════════════════════════════════╗"
 printf '║  %s Local Session: %-41s ║\n' "$_session_emoji" "$MODEL_ALIAS"
 printf '║  backend=%-20s effort=%-6s mode=%-10s  ║\n' "$BACKEND" "$EFFORT" "$_LA_MODE"
@@ -488,9 +491,9 @@ echo "$_session_emoji Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude
 # State the traffic posture out loud. A suppression the user cannot see is indistinguishable from one
 # that silently stopped working, and this one has no other visible symptom.
 if [ "$LA_TELEMETRY" = "0" ]; then
-    echo "🔇 Telemetry: OFF — no nonessential outbound traffic (LA_TELEMETRY=1 restores stock behaviour)"
+    echo "$EMOJI_TELEMETRY_OFF Telemetry: OFF — no nonessential outbound traffic (LA_TELEMETRY=1 restores stock behaviour)"
 else
-    echo "📡 Telemetry: ON — stock Claude Code reporting and update checks are active"
+    echo "$EMOJI_TELEMETRY_ON Telemetry: ON — stock Claude Code reporting and update checks are active"
 fi
 
 # Record WHICH transcript this session writes, so watchers never have to guess it.
@@ -580,7 +583,7 @@ fi
 # This is a bounded experiment; if placement is unreliable, status line and session
 # title remain the authoritative surfaces.
 if [ "${LA_SESSION_KIND:-}" = "local" ]; then
-    printf '🦾 Local inference session — %s (via %s)\n' "${MODEL_ALIAS}" "${BACKEND_DISPLAY}"
+    printf '%s Local inference session — %s (via %s)\n' "$SESSION_EMOJI_LOCAL" "${MODEL_ALIAS}" "${BACKEND_DISPLAY}"
 fi
 
 claude -n "$SESSION_NAME" --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode "$_PERM_MODE" --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"

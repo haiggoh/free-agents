@@ -26,6 +26,9 @@ fi
 
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/../config/config-lib.sh"
+# Load shared emoji constants (single source of truth)
+# shellcheck source=../config/emoji.sh
+. "$LAUNCH_DIR/../config/emoji.sh"
 la_load_config || exit 1
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/omlx-progress.sh"
@@ -319,7 +322,7 @@ if [ -n "${LA_DENY_TOOLS:-}" ]; then
 fi
 
 printf '%s\n' \
-    "🧭 oMLX Auto Mode" \
+    "$SESSION_EMOJI_LOCAL oMLX Auto Mode" \
     "   session:    $MODEL_ALIAS as $SESSION_MODEL_ID" \
     "   classifier: $LA_OMLX_CLASSIFIER_MODEL_ID" \
     "   endpoint:   $ANTHROPIC_BASE_URL" \

@@ -54,6 +54,9 @@ fi
 
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/../config/config-lib.sh"
+# Load shared emoji constants (single source of truth)
+# shellcheck source=../config/emoji.sh
+. "$LAUNCH_DIR/../config/emoji.sh"
 la_load_config || exit 1
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/omlx-progress.sh"
@@ -754,7 +757,7 @@ fi
 
 # SESSION NAME — use model alias + emoji for terminal title and /resume picker.
 # Requires CLI 2.1.270+ (verified). Set via -n/--name flag.
-SESSION_NAME="${LA_SESSION_KIND_EMOJI:-🦾} ${MODEL_ALIAS}"
+SESSION_NAME="${LA_SESSION_KIND_EMOJI:-$SESSION_EMOJI_LOCAL} ${MODEL_ALIAS}"
 
 AGENT_PROMPT=$(cat "$LA_AGENT_PROMPT_FILE")
 AGENT_PROMPT=${AGENT_PROMPT//__LA_MODEL_ALIAS__/$MODEL_ALIAS}
@@ -808,7 +811,7 @@ fi
 # This is a bounded experiment; if placement is unreliable, status line and session
 # title remain the authoritative surfaces.
 if [ "${LA_SESSION_KIND:-}" = "local" ]; then
-    printf '🦾 Local inference session — %s (via %s)\n' "${MODEL_ALIAS}" "${BACKEND_DISPLAY}"
+    printf '%s Local inference session — %s (via %s)\n' "$SESSION_EMOJI_LOCAL" "${MODEL_ALIAS}" "${BACKEND_DISPLAY}"
 fi
 
 # Add session name to claude args
@@ -816,7 +819,7 @@ claude_args+=(-n "$SESSION_NAME")
 
 printf '%s\n' \
     "⚠️  OPT-IN QUALIFICATION LAUNCHER — not yet wired into the default Auto Mode route" \
-    "🧭 Rapid Auto Mode" \
+    "$SESSION_EMOJI_LOCAL Rapid Auto Mode" \
     "   session:    $MODEL_ALIAS as $SESSION_MODEL_ID" \
     "   classifier: $LA_RAPID_AUTO_CLASSIFIER_MODEL_ID" \
     "   endpoint:   $ANTHROPIC_BASE_URL" \

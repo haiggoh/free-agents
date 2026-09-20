@@ -44,6 +44,9 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 # shellcheck source=/dev/null
 . "$CSL_DIR/../config/config-lib.sh"
+# Load shared emoji constants (single source of truth)
+# shellcheck source=../config/emoji.sh
+. "$CSL_DIR/../config/emoji.sh"
 la_load_config || exit 1
 
 EFFORTS=(low medium high xhigh max)     # claude --effort <level>
@@ -169,7 +172,7 @@ _pick_from() {   # $1=prompt  $2=default index (1-based)  rest=items -> echoes c
   echo "$c"
 }
 
-# 🌐  REMOTE cloud-API agents are a DELIBERATELY SEPARATE list from the local models
+# 🛰️  REMOTE cloud-API agents are a DELIBERATELY SEPARATE list from the local models
 # above: a remote agent runs on a third party's hardware over the network, with a
 # different cost model (free-tier quota, not free compute) and a different privacy
 # posture (prompts leave this machine). Mixing them into one menu would make those
@@ -257,7 +260,7 @@ OSA
 #   1. an emoji occupies TWO terminal columns but is ONE character, so any
 #      character-count padding is short by one column per emoji;
 #   2. several of these emoji are TWO codepoints -- a base glyph plus U+FE0F
-#      VARIATION SELECTOR-16 (🔭 🌐 🔆). Those report East-Asian-width "NA",
+#      VARIATION SELECTOR-16 (🔭 🛰️ 🔆). Those report East-Asian-width "NA",
 #      so even a width-aware routine misjudges them unless VS16 is handled
 #      explicitly. This is why some rows were off by one and others by two.
 #
@@ -348,16 +351,16 @@ _pick_home_lane() {
     2) _am_label="off" ;;
   esac
   _box row \
-    "$(printf '  a) 🤖 Auto-mode: %s' "$_am_label")" \
-    "$(printf '  t) 📡 Telemetry: %s' "$([ "$TELEMETRY" = "1" ] && echo ON || echo OFF)")" \
-    "$(printf '  w) 🔭 Watcher:   %s' "$([ "$WATCH" = "1" ] && echo ON || echo OFF)")" \
-    "$(printf '  s) 🪝 Stop hook: %s' "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)")"
+    "$(printf '  a) %s Auto-mode: %s' "$EMOJI_AUTO_MODE" "$_am_label")" \
+    "$(printf '  t) %s Telemetry: %s' "$EMOJI_TELEMETRY_ON" "$([ "$TELEMETRY" = "1" ] && echo ON || echo OFF)")" \
+    "$(printf '  w) %s Watcher:   %s' "$EMOJI_WATCHER" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)")" \
+    "$(printf '  s) %s Stop hook: %s' "$EMOJI_STOP_HOOK" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)")"
   _box mid
   _box row \
-    "$(printf '  1) 🦾 Local  — MLX models on this machine (%d on disk)' "${#SESSION_ALIASES[@]}")" \
-    "  2) 🌐 Remote — Free/paid cloud API (provider quotas apply)" \
-    "  k) 🔑 Install / set up remote API keys" \
-    "  m) 🔧 Manage Rapid-MLX runtime (install/update/inspect)" \
+    "$(printf '  1) %s Local  — MLX models on this machine (%d on disk)' "$SESSION_EMOJI_LOCAL" "${#SESSION_ALIASES[@]}")" \
+    "$(printf '  2) %s Remote — Free/paid cloud API (provider quotas apply)' "$SESSION_EMOJI_FREE_API")" \
+    "  k) $EMOJI_KEY Install / set up remote API keys" \
+    "  m) $EMOJI_TOOLS Manage Rapid-MLX runtime (install/update/inspect)" \
     "  q) Quit"
   _box bottom
   printf "Select [1/2/k/m/q/a/t/w/s]: " >&2
@@ -384,7 +387,7 @@ _run_local_picker() {
   while :; do
     echo
     _box top
-    _box center "🦾 Local Session Picker"
+    _box center "$SESSION_EMOJI_LOCAL Local Session Picker"
     _box mid
     _box row "$(printf '  %d model(s) on disk (session-capable)' "${#SESSION_ALIASES[@]}")"
     _box mid
@@ -395,23 +398,23 @@ _run_local_picker() {
     echo
     # Navigation first, then lane switching, then settings, then quit — the same
     # order the remote picker uses, so the two lanes read as one interface.
-    echo "  h) 🏠 back to lane selector"
-    echo "  c) 🔆 choose a listed model × custom effort"
-    echo "  s) 🌐 switch to remote API agents (provider/model; account quotas apply)"
+    echo "  h) $EMOJI_HOME back to lane selector"
+    echo "  c) $EMOJI_EFFORT choose a listed model × custom effort"
+    echo "  s) $SESSION_EMOJI_FREE_API switch to remote API agents (provider/model; account quotas apply)"
     echo "     Cerebras trial opt-in: csl remote --include-trials"
-    echo "  k) 🔑 set up remote API keys"
-    echo "  m) 🔧 manage Rapid-MLX runtime (install/update/inspect)"
+    echo "  k) $EMOJI_KEY set up remote API keys"
+    echo "  m) $EMOJI_TOOLS manage Rapid-MLX runtime (install/update/inspect)"
     case "$AUTO_MODE_STATE" in
-      0) echo "  a) 🤖 auto-mode: blind-trust — auto with no classifier (cycle)" ;;
-      1) echo "  a) 🤖 auto-mode: classifier  — auto with local classifier (cycle)" ;;
-      2) echo "  a) 🤖 auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
+      0) echo "  a) $EMOJI_AUTO_MODE auto-mode: blind-trust — auto with no classifier (cycle)" ;;
+      1) echo "  a) $EMOJI_AUTO_MODE auto-mode: classifier  — auto with local classifier (cycle)" ;;
+      2) echo "  a) $EMOJI_AUTO_MODE auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
     esac
-    if [ "$TELEMETRY" = "1" ]; then echo "  t) 📡 telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
-    else                            echo "  t) 📡 telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
-    if [ "$WATCH" = "1" ]; then echo "  w) 🔭 watcher: ON  — opens a window following this session (toggle)"
-    else                        echo "  w) 🔭 watcher: OFF — no monitor window (toggle)"; fi
-    if [ "$STOP_HOOK" = "1" ]; then echo "  p) 🪝 queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
-    else                            echo "  p) 🪝 queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
+    if [ "$TELEMETRY" = "1" ]; then echo "  t) $EMOJI_TELEMETRY_ON telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
+    else                            echo "  t) $EMOJI_TELEMETRY_ON telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
+    if [ "$WATCH" = "1" ]; then echo "  w) $EMOJI_WATCHER watcher: ON  — opens a window following this session (toggle)"
+    else                        echo "  w) $EMOJI_WATCHER watcher: OFF — no monitor window (toggle)"; fi
+    if [ "$STOP_HOOK" = "1" ]; then echo "  p) $EMOJI_STOP_HOOK queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
+    else                            echo "  p) $EMOJI_STOP_HOOK queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
     echo "  q) quit"
     echo
     printf "Selection [1]: "; read -r sel; sel="${sel:-1}"

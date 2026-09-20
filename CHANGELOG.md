@@ -2,6 +2,27 @@
 
 All notable changes to `local-agents` are documented in this file.
 
+## [0.17.9] — 2026-09-21
+
+### Added — single source of truth for session emojis
+
+New `config/emoji.sh` defines canonical emoji constants for all session kinds and UI features, replacing hardcoded emojis scattered across 7 launcher scripts. The resolver (`la-session-identity.sh`), picker (`csl`), and all launchers now source this file, so future emoji changes only need one edit.
+
+### Changed — emoji assignments
+
+- **Remote / free-API sessions**: 🌐 (globe) → 📡 (satellite dish)
+- **Telemetry/reporting**: 📡 (satellite dish) → 🛰️ (satellite) — no longer duplicates the remote session icon
+- **Unknown session kind**: 🧭 (compass) → ❓ (question mark) — compass reserved for waypoints plugin
+- **Effort/model-choice**: 🔆 (sun) → ⚙️ (gear) — more intuitive for "configuration/effort"
+
+### Files modified
+
+- `config/emoji.sh` (new)
+- `bin/csl`, `bin/la-session-identity.sh`, `bin/launch-claude-agent.sh`, `bin/remote-session.sh`
+- `bin/launch-local-auto-mode.sh`, `bin/launch-claude-agent-rapid-auto.sh`, `bin/launch-claude-agent-omlx.sh`
+
+All scripts syntax-checked and mutation-verified.
+
 The project began using Git tags after development was already underway and did not tag every later release consistently. Historical entries through `0.12.0` were reconstructed from the complete public Git commit history, full commit messages, plugin-manifest version transitions, README history, and available tags.
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.

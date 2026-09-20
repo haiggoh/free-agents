@@ -182,8 +182,12 @@ _pick_spoof() {
 MAIN_SPOOF=$(_pick_spoof "$MAIN_PORT" "$MAIN_SPOOF")
 if [ "$STRATEGY" = "b" ]; then CLS_SPOOF=$(_pick_spoof "$CLS_PORT" "${LA_CUR_SPOOF:-claude-opus-5}"); fi
 
+# Load shared emoji constants (single source of truth)
+# shellcheck source=../config/emoji.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../config" && pwd)/emoji.sh"
+
 # --- tell the user what we wired up ----------------------------------------
-echo "🧭 Local auto-mode classifier session (strategy $STRATEGY):"
+echo "$SESSION_EMOJI_LOCAL Local auto-mode classifier session (strategy $STRATEGY):"
 if [ "$STRATEGY" = "a" ]; then
     echo "   main      : $MAIN_ALIAS  presenting as $MAIN_SPOOF  →  http://localhost:$MAIN_PORT"
     echo "   classifier: same server, --max-num-seqs=2 (2nd concurrent sequence, same weights)"

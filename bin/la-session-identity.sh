@@ -48,6 +48,10 @@
 #   thinking_mode          — "on" | "off" | "unknown"
 #   context_policy         — autocompaction setting or "default"
 #   theme_identifier       — "local-sky" | "free-lime" | "cloud-default" | "unknown"
+
+# Load shared emoji constants (single source of truth)
+# shellcheck source=../config/emoji.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../config" && pwd)/emoji.sh"
 #   spinner_profile_id     — identifier for spinner vocabulary
 #   transcript_marker_version — version of the transcript marker format
 #   evidence               — how session_kind was determined
@@ -102,7 +106,7 @@ fi
 # NEVER use CLAUDE_IS_LOCAL — it leaks into later cloud sessions.
 # ANTHROPIC_BASE_URL is per-process and honest.
 session_kind="unknown"
-session_emoji="❓"
+session_emoji="$SESSION_EMOJI_UNKNOWN"
 evidence="endpoint=unset"
 provider_display="Unknown"
 theme_identifier="unknown"
@@ -111,7 +115,7 @@ spinner_profile_id="unknown"
 case "${ANTHROPIC_BASE_URL:-}" in
   http://localhost:800[0-9]|http://localhost:8010|http://127.0.0.1:800[0-9]|http://127.0.0.1:8010)
     session_kind="local"
-    session_emoji="🦾"
+    session_emoji="$SESSION_EMOJI_LOCAL"
     evidence="endpoint=localhost:8000-8010 (local MLX)"
     theme_identifier="local-sky"
     # Determine provider/backing from backend
@@ -125,7 +129,7 @@ case "${ANTHROPIC_BASE_URL:-}" in
     ;;
   http://localhost:414[1-9]|http://localhost:415[01]|http://127.0.0.1:414[1-9]|http://127.0.0.1:415[01])
     session_kind="free_api"
-    session_emoji="🌐"
+    session_emoji="$SESSION_EMOJI_FREE_API"
     evidence="endpoint=${ANTHROPIC_BASE_URL##*/} (free API proxy, range 4141-4151)"
     # Use LA_REMOTE_PROVIDER if available, otherwise fall back to generic
     if [ -n "${LA_REMOTE_PROVIDER:-}" ]; then
@@ -162,7 +166,7 @@ case "${ANTHROPIC_BASE_URL:-}" in
     ;;
   *)
     session_kind="unknown"
-    session_emoji="❓"
+    session_emoji="$SESSION_EMOJI_UNKNOWN"
     evidence="endpoint=unrecognized (${ANTHROPIC_BASE_URL:-unset})"
     provider_display="Unknown"
     theme_identifier="unknown"
