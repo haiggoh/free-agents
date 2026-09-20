@@ -137,6 +137,9 @@ fi
 MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 
+# Export MODEL_ALIAS so la-session-identity.sh can resolve the actual model name
+export MODEL_ALIAS
+
 EFFORT_FLAG="--effort $EFFORT"
 
 # Optional, validated per-launch Claude Code controls. These deliberately avoid
