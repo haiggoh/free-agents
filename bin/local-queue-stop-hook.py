@@ -112,10 +112,17 @@ TRANSCRIPT RESOLUTION — prefer the payload, fall back to the slug
 This file is part of the local-agents plugin. It is installed via the plugin system
 and referenced from hooks/hooks.json using ${CLAUDE_PLUGIN_ROOT}/bin/local-queue-stop-hook.py.
 """
-import hashlib
 import json
 import os
 import sys
+
+# The marker contract (hash, format, parse regex) lives in ONE module both this hook and
+# queue-marker-helper.py import, so the two can never drift apart. The hook is invoked by
+# absolute path from hooks.json, and in the installed plugin cache the CWD is the user's
+# project, not here — so make this file's own directory importable rather than relying on
+# sys.path happening to contain it.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import queue_marker  # noqa: E402
 
 
 def read_hook_input():
@@ -267,15 +274,31 @@ def build_queue_groups(transcript_path):
         return []
 
     # 2. Build groups: match each enqueue to its drain (remove or popAll)
+    #
+    # PENDING IS FIFO, NOT A STACK. A drain op also CARRIES the content it drained, so
+    # prefer that ground truth and fall back to FIFO order only when it is absent or
+    # names something not pending. The previous implementation popped the most RECENT
+    # enqueue (LIFO) and ignored the content field entirely, so with two or more queued
+    # prompts every drain was attributed the wrong content — and since the marker hash is
+    # computed from that content, a correct [[QUEUE_ANSWERED:...]] could never match. The
+    # bug was invisible with a single queued prompt, where LIFO and FIFO coincide.
     groups = []
-    stack = []  # [(enqueue_line, content)]
+    pending = []  # [(enqueue_line, content)] — oldest first
+
+    def _take(drained_content):
+        """Remove and return the pending entry this drain refers to."""
+        if drained_content:
+            for i, (_, ct) in enumerate(pending):
+                if ct == drained_content:
+                    return pending.pop(i)
+        return pending.pop(0)
 
     for ln, op, ct in queue_ops:
         if op == "enqueue":
-            stack.append((ln, ct))
+            pending.append((ln, ct))
         elif op in ("remove", "dequeue"):
-            if stack:
-                enq_ln, enq_ct = stack.pop()
+            if pending:
+                enq_ln, enq_ct = _take(ct)
                 groups.append({
                     "enqueue_line": enq_ln,
                     "content": enq_ct,
@@ -285,9 +308,10 @@ def build_queue_groups(transcript_path):
                     "assistant_tools": [],
                 })
         elif op == "popAll":
-            # popAll clears all currently-pending enqueues
-            while stack:
-                enq_ln, enq_ct = stack.pop()
+            # popAll clears all currently-pending enqueues, oldest first so the groups
+            # come out in the order the prompts were queued.
+            while pending:
+                enq_ln, enq_ct = pending.pop(0)
                 groups.append({
                     "enqueue_line": enq_ln,
                     "content": enq_ct,
@@ -511,7 +535,7 @@ def check_unanswered_queues(transcript_path, queue_groups):
 
 def _content_hash(content):
     """Return a short hash of the queued content for marker matching."""
-    return hashlib.sha256(content.encode()).hexdigest()[:8]
+    return queue_marker.content_hash(content)
 
 
 def _extract_answered_markers(texts):
@@ -519,16 +543,9 @@ def _extract_answered_markers(texts):
 
     Returns a set of content hashes that have been explicitly marked as answered.
     """
-    answered = set()
     if not texts:
-        return answered
-
-    import re
-    pattern = r'\[\[QUEUE_ANSWERED:([a-f0-9]{8})\]\]'
-    for text in texts:
-        matches = re.findall(pattern, text)
-        answered.update(matches)
-    return answered
+        return set()
+    return queue_marker.extract_hashes(texts)
 
 
 def _text_addresses_prompt(texts, queued_content, answered_hashes=None):

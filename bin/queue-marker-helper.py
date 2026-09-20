@@ -10,42 +10,43 @@ EXAMPLE:
     [[QUEUE_ANSWERED:ae414ae0]]
 
 DESCRIPTION:
-    This helper script generates the agreed marker format that satisfies
-    the local-queue-stop-hook.py for preventing re-notification of 
-    already-addressed queued prompts.
+    This helper prints the marker that satisfies local-queue-stop-hook.py, so an
+    already-addressed queued prompt is not re-notified.
 
-    The stop hook considers a queued prompt addressed when the assistant's
-    response contains a marker of the form:
+    The stop hook considers a queued prompt addressed when the assistant's response
+    contains a marker of the form:
         [[QUEUE_ANSWERED:<8-char-hex>]]
-    
-    where <8-char-hex> is the first 8 hexadecimal characters of the SHA256
-    hash of the queued prompt's exact content.
 
-    Rather than requiring manual hash calculation and formatting (which is
-    error-prone), this script provides a deterministic way to generate
-    the correct marker.
+    The hash, the marker syntax and the pattern that parses it are NOT defined here.
+    They live in bin/queue_marker.py, which this script and the stop hook both import —
+    previously each file restated the contract independently, so a change on one side
+    could silently produce markers the other side rejects.
 
 OUTPUT:
     Prints exactly: [[QUEUE_ANSWERED:<8-char-hex>]]
-    where <8-char-hex> = first 8 chars of SHA256(input content)
 
 EXIT CODES:
     0  - Success
     1  - Usage error (wrong number of arguments)
 """
-import hashlib
+import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import queue_marker  # noqa: E402
+
+
 def main():
-    if len(sys.argv) != 2:
+    args = [a for a in sys.argv[1:]]
+    if len(args) == 1 and args[0] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+    if len(args) != 1:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
-    
-    content = sys.argv[1]
-    # Calculate SHA256 hash and take first 8 hex characters
-    hash_8char = hashlib.sha256(content.encode()).hexdigest()[:8]
-    # Output the agreed marker format
-    print(f"[[QUEUE_ANSWERED:{hash_8char}]]")
+
+    print(queue_marker.format_marker(args[0]))
+
 
 if __name__ == "__main__":
     main()
