@@ -1577,5 +1577,8 @@ fi
 # Requires CLI 2.1.270+ (verified). Set via -n/--name flag.
 SESSION_NAME="${LA_SESSION_KIND_EMOJI:-🌐} ${MODEL}"
 
+# Add session name flag (same as local launcher) - insert after 'claude' (index 0)
+claude_cmd=( "${claude_cmd[0]}" -n "$SESSION_NAME" "${claude_cmd[@]:1}" )
+
 ( _clear_provider_env
 "${claude_cmd[@]}" )
