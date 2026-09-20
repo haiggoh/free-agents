@@ -6,6 +6,30 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.17.3] — 2026-09-23
+
+### Added
+
+- **Remote Free API identity (Milestone 4)** — truthful remote session identity with lime-green theme and provider-aware spinner verbs
+  - Lime-green theme (`#7CFC00`) via per-session settings overlay for remote sessions (never mutates persistent `~/.claude/settings.json`)
+  - Provider-aware spinner verbs: Nemotronning, Gemining, Groqqing, etc. with fallback to generic remote terms
+  - Startup banner with `🌐 Free API session` identity
+  - Session name with emoji for terminal title and `/resume` picker (`-n` flag)
+- **Remote settings generator** (`bin/generate-remote-settings.py`) — builds transient per-session settings from identity resolver
+- **Remote theme data** (`config/remote-theme.json`) — theme definition with accent color, emoji, identity label
+- **Remote session identity integration** (`bin/remote-session.sh`)
+  - Generates stable `LA_SESSION_ID` before identity resolution
+  - Calls `la-session-identity.sh` after proxy endpoint is known
+  - Generates and applies per-session settings for free_api sessions
+  - Exports identity fields for hooks and statusline consumption
+- **Session identity resolver** (`bin/la-session-identity.sh`) already supports `free_api` session kind with proper provider display and theme/spinner IDs
+
+### Changed
+
+- Remote sessions now have visually distinct identity matching local sessions
+- Transcript markers for remote sessions use the same schema with `session_kind: "free_api"`
+- Remote sessions emit transition markers on resume (cloud-to-free-api, local-to-free-api, etc.)
+
 ## [0.17.2] — 2026-09-22
 
 ### Added
