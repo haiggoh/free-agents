@@ -882,6 +882,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] -> echoes p
 # untouched (so `remote-session.sh gemini-flash -p "..." --allowedTools Read` works
 # exactly like it does for a normal claude invocation). `--` forces the rest through.
 PASSTHRU=()
+CLAUDE_EXTRA_ARGS=()
 AUTO_MODE_STATE=0  # 0=blind-trust, 1=classifier, 2=off
 TELEMETRY_ENABLED=0  # 0=off (no nonessential traffic), 1=on (stock behavior)
 SELECTED_EFFORT=""
@@ -1157,27 +1158,6 @@ case "$TIER" in
     trial) COST_NOTE='trial/paid access explicitly selected; check provider balance' ;;
     *) COST_NOTE='account quota and billing unverified; do not assume free' ;;
 esac
-
-# Add blind-trust sandbox info to banner if applicable
-    BLIND_TRUST_BANNER=""
-    if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
-        BLIND_TRUST_BANNER="   sandbox  : enabled (bypasses cloud classifier for too-complex commands)"
-    fi
-
-cat <<BANNER
-
-╭──────────────────────────────────────────────────────────────╮
-│  🌐  REMOTE API SESSION — $MODEL ($DISP)                    │
-╰──────────────────────────────────────────────────────────────╯
-   provider : $PROV      tier: $TIER
-   agent    : $ALIAS
-   thinking : $THINKING
-   cost     : $COST_NOTE
-   privacy  : prompts and file contents LEAVE this machine → $PROV
-$BLIND_TRUST_BANNER
-BANNER
-
-if [[ $DRY_RUN -eq 1 ]]; then
     echo "   DRY RUN  : would start a LiteLLM proxy and exec claude against it."
     echo "              nothing started, no network call made."
     # Print the RESOLVED toggle state and the flags claude would actually receive.
@@ -1232,11 +1212,11 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$MAX_OUT"
 # connection -- it aborts and retries, surfacing as:
 #   "Streaming response ended before any complete data was received. Retrying without streaming."
 # It reproduces right after the FIRST prompt of a session because that turn carries the largest
-# uncached prefill (full system prompt + tool definitions) and has no warm cache to answer from.
+# uncached prefill (full system prompt + tool definitions) and no warm cache to answer from.
 #   API_TIMEOUT_MS           overall per-request cap.
 #   API_FORCE_IDLE_TIMEOUT=0 disables the "no bytes arrived yet" abort on a slow first token.
 #   CLAUDE_ENABLE_STREAM_WATCHDOG=0  the separate CLI 2.1.196 idle watchdog, on by default for
-#     ALL providers, which the other two do NOT cover. This is the one that actually bites.
+#     ALL providers, which the other two DO NOT cover. This is the one that actually bites.
 # Bounded, not unbounded: API_TIMEOUT_MS still caps the request, so a genuinely dead stream ends.
 export API_TIMEOUT_MS="${LA_REMOTE_API_TIMEOUT_MS:-600000}"
 export API_FORCE_IDLE_TIMEOUT=0
@@ -1247,6 +1227,69 @@ export LA_SESSION_LAUNCHER="remote-session.sh"       # names the launcher for pl
 export LA_QUEUE_STOP_HOOK="${LA_QUEUE_STOP_HOOK:-1}" # queued-prompt Stop hook; ON unless turned off
 export LA_REMOTE_AGENT="$ALIAS"
 export LA_REMOTE_PROVIDER="$PROV"
+
+# SESSION ID GENERATION — create stable session ID before identity resolution.
+# This ID persists across the transcript lifecycle and enables transition detection.
+# Format: YYYYMMDD-HHMMSS-PID-alias-hash
+_ts=$(date -u +"%Y%m%d-%H%M%S")
+_pid=$$
+_alias_hash=$(printf '%s' "${ALIAS:-unknown}" | cksum | cut -d' ' -f1 | cut -c1-6)
+LA_SESSION_ID="${_ts}-${_pid}-${_alias_hash}"
+export LA_SESSION_ID
+
+# SESSION IDENTITY RESOLUTION — emit deterministic identity for consumers
+# (statusline, transcript marker, hooks). Must run AFTER endpoint is known.
+if [ -x "$SCRIPT_DIR/la-session-identity.sh" ]; then
+    SESSION_IDENTITY=$("$SCRIPT_DIR/la-session-identity.sh" 2>/dev/null || true)
+    if [ -n "$SESSION_IDENTITY" ]; then
+        export LA_SESSION_IDENTITY="$SESSION_IDENTITY"
+        # Export individual fields for easy consumption by hooks/statusline
+        export LA_SESSION_KIND=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_kind":"[^"]*"' | cut -d'"' -f4)
+        export LA_ACTUAL_MODEL=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_id":"[^"]*"' | cut -d'"' -f4)
+        export LA_PROVIDER_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"provider_display":"[^"]*"' | cut -d'"' -f4)
+        export LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4)
+        export LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4)
+        export LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2)
+        export LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4)
+        export LA_SESSION_ID=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
+    fi
+fi
+
+# PER-SESSION SETTINGS — generate theme + spinner overlay for remote sessions only.
+# This creates a transient settings file passed via --settings, NOT written to user's
+# persistent ~/.claude/settings.json. Only applied for free_api sessions (session_kind=free_api).
+if [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -x "$SCRIPT_DIR/generate-remote-settings.py" ]; then
+    SETTINGS_FILE="$(
+        mktemp "${TMPDIR:-/tmp}/free-agents-settings.XXXXXX.json"
+    )"
+    chmod 600 "$SETTINGS_FILE"
+    LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
+        --identity-json "$LA_SESSION_IDENTITY" \
+        --output "$SETTINGS_FILE" 2>/dev/null || true
+    if [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
+        CLAUDE_EXTRA_ARGS+=(--settings "$SETTINGS_FILE")
+    fi
+fi
+
+# STARTUP BANNER — after identity resolution so we have the theme emoji
+# Add blind-trust sandbox info to banner if applicable
+BLIND_TRUST_BANNER=""
+if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
+    BLIND_TRUST_BANNER="   sandbox  : enabled (bypasses cloud classifier for too-complex commands)"
+fi
+
+cat <<BANNER
+
+╭──────────────────────────────────────────────────────────────╮
+│  ${LA_SESSION_KIND_EMOJI:-🌐}  REMOTE API SESSION — $MODEL ($DISP)                    │
+╰──────────────────────────────────────────────────────────────╯
+   provider : $PROV      tier: $TIER
+   agent    : $ALIAS
+   thinking : $THINKING
+   cost     : $COST_NOTE
+   privacy  : prompts and file contents LEAVE this machine → $PROV
+$BLIND_TRUST_BANNER
+BANNER
 
 # The remote models are NOT native Claude Code models: without an explicit briefing
 # they default to shelling out (cat/sed instead of Read/Edit) and will hand-edit a
@@ -1348,6 +1391,15 @@ fi
 if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
     claude_cmd+=("${PASSTHRU[@]}")
 fi
+
+# Add per-session settings (theme + spinner) for free_api sessions
+if [[ ${#CLAUDE_EXTRA_ARGS[@]} -gt 0 ]]; then
+    claude_cmd+=("${CLAUDE_EXTRA_ARGS[@]}")
+fi
+
+# SESSION NAME — use provider/model + emoji for terminal title and /resume picker.
+# Requires CLI 2.1.270+ (verified). Set via -n/--name flag.
+SESSION_NAME="${LA_SESSION_KIND_EMOJI:-🌐} ${MODEL}"
 
 ( _clear_provider_env
 "${claude_cmd[@]}" )
