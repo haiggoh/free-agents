@@ -316,6 +316,15 @@ export API_FORCE_IDLE_TIMEOUT=0
 # bounded. On a local model a silent multi-minute prefill is normal, not a hang.
 export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 
+# SESSION ID GENERATION — create stable session ID before identity resolution.
+# This ID persists across the transcript lifecycle and enables transition detection.
+# Format: YYYYMMDD-HHMMSS-PID-alias-hash
+_ts=$(date -u +"%Y%m%d-%H%M%S")
+_pid=$$
+_alias_hash=$(printf '%s' "${MODEL_ALIAS:-unknown}" | cksum | cut -d' ' -f1 | cut -c1-6)
+LA_SESSION_ID="${_ts}-${_pid}-${_alias_hash}"
+export LA_SESSION_ID
+
 # SESSION IDENTITY RESOLUTION — emit deterministic identity for consumers
 # (statusline, transcript marker, hooks). Must run AFTER endpoint is known.
 if [ -x "$LAUNCH_DIR/la-session-identity.sh" ]; then
@@ -330,6 +339,7 @@ if [ -x "$LAUNCH_DIR/la-session-identity.sh" ]; then
         export LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4)
         export LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2)
         export LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4)
+        export LA_SESSION_ID=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
     fi
 fi
 
@@ -372,14 +382,10 @@ cat <<BANNER
 ──────────────────────────────────────────────────────────────────────────────
 BANNER
 
-# TRANSCRIPT MARKER — write a distinctive, greppable sentinel into the session transcript
-# so local sessions can be distinguished from cloud sessions and from prose discussing the
-# local stack. Format: FREE_AGENTS_SESSION_IDENTITY_V1|<json>
-if [ -n "${LA_TRANSCRIPT_MARKER_VERSION:-}" ]; then
-  _marker="FREE_AGENTS_SESSION_IDENTITY_V${LA_TRANSCRIPT_MARKER_VERSION}|${LA_SESSION_IDENTITY}"
-  # Emit via --append-system-prompt so it lands in the transcript as a system message
-  CLAUDE_EXTRA_ARGS+=(--append-system-prompt "$_marker")
-fi
+# TRANSCRIPT MARKER — now handled by SessionStart hook (hooks/transcript-identity.py)
+# which appends FREE_AGENTS_SESSION_IDENTITY_V{version}|<json> to the transcript file.
+# This ensures transition markers on resume and idempotent SessionStart handling.
+# The hook receives the transcript path via stdin and LA_SESSION_IDENTITY via env.
 
 # --- prompt weight: keep the tool surface off the local model's prefill path -------------------
 # The dominant cost of a local interactive turn is PREFILL, and tool definitions dominate the

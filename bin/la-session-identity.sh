@@ -31,6 +31,8 @@
 #   LA_SESSION_LAUNCHER  — which launcher initiated the session
 #   LA_AUTO_MODE         — auto mode state (0|1)
 #   LA_BLIND_AUTO        — blind trust auto mode (0|1)
+#   LA_SESSION_ID        — stable session ID (optional, for transition tracking)
+#   LA_PREV_SESSION_KIND — previous session kind for transition detection (optional)
 #
 # Output fields (schema version 1):
 #   schema_version         — integer, increment on breaking changes
@@ -50,6 +52,9 @@
 #   transcript_marker_version — version of the transcript marker format
 #   evidence               — how session_kind was determined
 #   unknown_fallback       — true if identity had to fall back to unknown
+#   session_id             — stable unique session identifier
+#   transition             — null or object with from_kind, to_kind, transition_type, timestamp
+#   launcher               — which launcher initiated the session
 
 set -uo pipefail
 
@@ -178,9 +183,20 @@ if [ -z "${MODEL_ALIAS:-}" ]; then
   unknown_fallback=true
 fi
 
-# --- Emit JSON -------------------------------------------------------------
-# Use printf for deterministic output; avoid jq dependency for this simple structure.
-# Escape function for JSON strings
+# --- Generate stable session ID ----------------------------------------------
+# Use a deterministic ID based on launch time, PID, and model alias.
+# If LA_SESSION_ID is provided (e.g., on resume), use it instead.
+if [ -n "${LA_SESSION_ID:-}" ]; then
+  session_id="${LA_SESSION_ID}"
+else
+  # Generate: YYYYMMDD-HHMMSS-PID-alias-hash
+  _ts=$(date -u +"%Y%m%d-%H%M%S")
+  _pid=$$
+  _alias_hash=$(printf '%s' "${MODEL_ALIAS:-unknown}" | cksum | cut -d' ' -f1 | cut -c1-6)
+  session_id="${_ts}-${_pid}-${_alias_hash}"
+fi
+
+# Escape function for JSON strings (defined early for use in transition detection)
 json_escape() {
   local s="$1"
   s="${s//\\/\\\\}"
@@ -190,6 +206,34 @@ json_escape() {
   s="${s//$'\t'/\\t}"
   printf '%s' "$s"
 }
+
+# --- Detect transition -------------------------------------------------------
+# If LA_PREV_SESSION_KIND is set and differs from current session_kind,
+# emit a transition object. This handles resume from cloud->local, local->free_api, etc.
+transition_json="null"
+if [ -n "${LA_PREV_SESSION_KIND:-}" ] && [ "${LA_PREV_SESSION_KIND}" != "${session_kind}" ]; then
+  _transition_type="resume"
+  _from="${LA_PREV_SESSION_KIND}"
+  _to="${session_kind}"
+  case "${_from}:${_to}" in
+    cloud:local) _transition_type="cloud-to-local" ;;
+    local:cloud) _transition_type="local-to-cloud" ;;
+    cloud:free_api) _transition_type="cloud-to-free-api" ;;
+    free_api:cloud) _transition_type="free-api-to-cloud" ;;
+    local:free_api) _transition_type="local-to-free-api" ;;
+    free_api:local) _transition_type="free-api-to-local" ;;
+    unknown:*) _transition_type="unknown-to-${_to}" ;;
+    *:unknown) _transition_type="${_from}-to-unknown" ;;
+  esac
+  _transition_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  transition_json=$(printf '{"from_kind":"%s","to_kind":"%s","transition_type":"%s","timestamp":"%s"}' \
+    "$(json_escape "${_from}")" \
+    "$(json_escape "${_to}")" \
+    "$(json_escape "${_transition_type}")" \
+    "$(json_escape "${_transition_ts}")")
+fi
+
+# --- Emit JSON -------------------------------------------------------------
 
 schema_version=1
 
@@ -208,8 +252,10 @@ SESSION_KIND_ESC=$(json_escape "$session_kind")
 SESSION_EMOJI_ESC=$(json_escape "$session_emoji")
 EVIDENCE_ESC=$(json_escape "$evidence")
 LAUNCHER_ESC=$(json_escape "${LA_SESSION_LAUNCHER:-unknown}")
+SESSION_ID_ESC=$(json_escape "$session_id")
+# transition_json is already a valid JSON string (null or object), don't escape it
 
-printf '{"schema_version":%d,"session_kind":"%s","session_emoji":"%s","compatibility_model_id":"%s","actual_model_id":"%s","actual_model_display":"%s","provider_display":"%s","backend_display":"%s","role_profile":"%s","effort":"%s","thinking_mode":"%s","context_policy":"%s","theme_identifier":"%s","spinner_profile_id":"%s","transcript_marker_version":%d,"evidence":"%s","unknown_fallback":%s,"launcher":"%s"}\n' \
+printf '{"schema_version":%d,"session_kind":"%s","session_emoji":"%s","compatibility_model_id":"%s","actual_model_id":"%s","actual_model_display":"%s","provider_display":"%s","backend_display":"%s","role_profile":"%s","effort":"%s","thinking_mode":"%s","context_policy":"%s","theme_identifier":"%s","spinner_profile_id":"%s","transcript_marker_version":%d,"evidence":"%s","unknown_fallback":%s,"launcher":"%s","session_id":"%s","transition":%s}\n' \
   "$schema_version" \
   "$SESSION_KIND_ESC" \
   "$SESSION_EMOJI_ESC" \
@@ -227,6 +273,8 @@ printf '{"schema_version":%d,"session_kind":"%s","session_emoji":"%s","compatibi
   "$transcript_marker_version" \
   "$EVIDENCE_ESC" \
   "$unknown_fallback" \
-  "$LAUNCHER_ESC"
+  "$LAUNCHER_ESC" \
+  "$SESSION_ID_ESC" \
+  "$transition_json"
 
 exit 0

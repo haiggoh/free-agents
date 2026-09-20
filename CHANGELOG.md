@@ -6,6 +6,37 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.17.2] — 2026-09-22
+
+### Added
+
+- **Session transcript identity (Milestone 3)** — durable session identity in transcripts with transition tracking
+  - Stable session ID (`session_id`) generated at launch, persists across transcript lifecycle
+  - Transcript marker `FREE_AGENTS_SESSION_IDENTITY_V1|{json}` with session kind, actual model, provider, backend, compatibility model, role/profile, and transition source
+  - Transition markers on resume (e.g., cloud-to-local, local-to-free-api) instead of relabeling entire history
+  - SessionStart hook (`hooks/transcript-identity.py`) appends markers to transcript file with file locking
+  - Idempotent SessionStart handling — no duplicate markers for same session ID
+  - `/resume-interrupted`, `/clear`, and compaction do not create false route transitions
+- **Session identity resolver enhancements** (`bin/la-session-identity.sh`)
+  - `session_id` field — stable unique identifier (timestamp-PID-alias-hash)
+  - `transition` field — null or object with from_kind, to_kind, transition_type, timestamp
+  - Transition detection from `LA_PREV_SESSION_KIND` environment variable
+  - Deterministic output with `--help`, `--dry-run`, `--inspect` flags
+- **Launchers updated** (`launch-claude-agent.sh`, `launch-claude-agent-rapid-auto.sh`)
+  - Generate and export `LA_SESSION_ID` before identity resolution
+  - Pass session ID to resolver for transcript marker consistency
+  - Removed direct `--append-system-prompt` marker emission (now handled by SessionStart hook)
+- **Hooks** (`hooks/hooks.json`, `hooks/transcript-identity.py`)
+  - SessionStart hook for transcript identity and transition detection
+  - File-locked append to transcript for thread safety
+  - Extracts existing markers from JSONL system message content
+
+### Changed
+
+- Transcript markers now written by SessionStart hook (not launcher) for proper transition handling
+- Resolver emits proper JSON transition object (not escaped string)
+- Session ID exported as `LA_SESSION_ID` for hook consumption
+
 ## [0.17.1] — 2026-09-22
 
 ### Added
