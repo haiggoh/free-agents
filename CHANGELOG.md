@@ -6,6 +6,22 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.17.7] — 2026-09-20
+
+### Fixed — blind-trust auto mode allowlist + dry-run output
+
+The blind-trust auto mode (AUTO_MODE_STATE=0) for remote free-API sessions was too restrictive — only 12 commands were allowlisted, causing every other verb to prompt even with `sandbox.enabled=true`. Expanded the allowlist to ~90 read-only and common tool commands (ls, cat, grep, find, git read-only verbs, python3, jq, etc.) while **deliberately excluding destructive verbs** (rm, sudo, kill, git push, gh release create). Also fixed the dry-run output to include the resolved model, provider, and cost note — this was missing and caused test failures in `test_roster_and_all_provider_dry_runs`, `test_dynamic_models_validation_and_retired_github`, and `test_trial_opt_in_and_legacy_alias`.
+
+### Changed
+
+- Added explanatory comment to blind-trust settings: `sandbox.enabled=true` changes the WRITE BOUNDARY only; it does NOT stop the classifier from being consulted, so every verb a session needs must be explicitly allowlisted.
+- Dry-run now prints: model, provider, cost note (e.g., "renewing free allocation", "trial/paid access explicitly selected", "account quota and billing unverified; do not assume free"), plus all resolved toggles.
+
+### Testing
+
+- All 21 tests in `tests/test_remote_session.py` pass.
+- Mutation-verified: reverting the allowlist to 12 commands fails the dry-run tests; removing the model/provider/cost output from dry-run fails the same tests.
+
 ## [0.17.6] — 2026-09-20
 
 ### Fixed — the remote visual identity shipped in 0.17.3 never reached the user
