@@ -1633,5 +1633,13 @@ SESSION_NAME="${LA_SESSION_KIND_EMOJI:-$SESSION_EMOJI_FREE_API} ${MODEL}"
 # Add session name flag (same as local launcher) - insert after 'claude' (index 0)
 claude_cmd=( "${claude_cmd[0]}" -n "$SESSION_NAME" "${claude_cmd[@]:1}" )
 
-( _clear_provider_env
-"${claude_cmd[@]}" )
+# For free_api sessions, wrap claude with telemetry wrapper to capture streaming token rate
+if [[ "${LA_SESSION_KIND:-}" == "free_api" && -x "$SCRIPT_DIR/la-remote-telemetry-wrapper.sh" ]]; then
+    # The wrapper expects: session_id followed by claude args
+    wrapped_cmd=("$SCRIPT_DIR/la-remote-telemetry-wrapper.sh" "$LA_SESSION_ID" "${claude_cmd[@]}")
+    ( _clear_provider_env
+    "${wrapped_cmd[@]}" )
+else
+    ( _clear_provider_env
+    "${claude_cmd[@]}" )
+fi
