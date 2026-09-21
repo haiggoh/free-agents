@@ -410,6 +410,7 @@ _run_remote_menu() {
         [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
         echo
         echo "  h) $EMOJI_HOME back to lane selector"
+        echo "  e) $EMOJI_EFFORT effort: ${EFFORT_CHOICE:-<provider default>}"
         echo "  s) $SESSION_EMOJI_LOCAL switch to local models"
         echo "  f) 🔍 locally-runnable models: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  R) 📋 show hidden-model report"
@@ -425,10 +426,9 @@ _run_remote_menu() {
             echo "  t) $EMOJI_TELEMETRY_ON telemetry: OFF — no nonessential outbound traffic (toggle)"
         fi
         echo "  l) ⏳ limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-        echo "  e) $EMOJI_EFFORT effort: ${EFFORT_CHOICE:-<provider default>}"
         echo "  q) quit"
         echo
-        printf "Select [1-%d] (h/s/f/R/k/a/t/l/e/q): " "${#choices[@]}" >&2
+        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/q): " "${#choices[@]}" >&2
         read -r -p "" sel >&2 || { _nav "quit"; return 0; }
         case "$sel" in
             h|H) _nav "home"; return 0 ;;

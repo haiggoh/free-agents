@@ -138,7 +138,27 @@ fi
 # spoof_id may be a comma-separated preference list (newest Claude model first). The SERVER
 # answers to all of them; the CLIENT must be handed exactly one, so use the preferred (first).
 MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
+# If no effort override was passed and the alias's configured effort is the default (medium),
+# prompt interactively so the user can pick — mirroring what remote-session.sh's e) picker does.
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
+if [ -z "$EFFORT_OVERRIDE" ] && [ "$EFFORT" = "medium" ]; then
+    _efforts=("low" "medium" "high" "xhigh" "max")
+    _def=2
+    _i=1
+    echo "  Effort levels (higher = more thinking, slower):" >&2
+    for _eff in "${_efforts[@]}"; do
+        printf "    %d) %s\n" "$_i" "$_eff" >&2
+        _i=$((_i + 1))
+    done
+    read -r -p "  Select effort [$_def]: " _sel >&2
+    _sel="${_sel:-$_def}"
+    if [[ "$_sel" =~ ^[0-9]+$ ]] && [ "$_sel" -ge 1 ] && [ "$_sel" -le ${#_efforts[@]} ]; then
+        EFFORT="${_efforts[$((_sel - 1))]}"
+        echo "  Effort set to: $EFFORT" >&2
+    else
+        echo "  Invalid selection, keeping: $EFFORT" >&2
+    fi
+fi
 
 # Export MODEL_ALIAS so la-session-identity.sh can resolve the actual model name
 export MODEL_ALIAS

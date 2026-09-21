@@ -17,16 +17,16 @@ SESSION_EMOJI_REMOTE_API="📡"   # alias for free_api
 SESSION_EMOJI_UNKNOWN="❓"      # was 🧭 (compass) — reserved for waypoints plugin
 
 # Telemetry / feature emojis (not session kinds, but shared across scripts)
-EMOJI_TELEMETRY_ON="🛰️"
+EMOJI_TELEMETRY_ON="🛰️ "
 EMOJI_TELEMETRY_OFF="🔇"
 EMOJI_WATCHER="🔭"
 EMOJI_AUTO_MODE="🤖"
 EMOJI_STOP_HOOK="🪝"
 EMOJI_HOME="🏠"
-EMOJI_EFFORT="⚙️"       # was 🔆 (sun) — changed to gear
+EMOJI_EFFORT="⚙️ "      # was 🔆 (sun) — changed to gear
 EMOJI_KEY="🔑"
 EMOJI_TOOLS="🔧"
-EMOJI_MODEL_CHOICE="⚙️" # was 🔆 (sun) — changed to gear
+EMOJI_MODEL_CHOICE="⚙️ " # was 🔆 (sun) — changed to gear
 
 # Backwards-compat: scripts that used to hardcode these can now source this file
 # and use the variables. Old hardcoded values:
