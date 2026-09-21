@@ -2,6 +2,44 @@
 
 All notable changes to `local-agents` are documented in this file.
 
+## [0.17.11] — 2026-09-21
+
+### Fixed — the resolver died silently on every REGISTERED alias (missing braces)
+
+`la-session-identity.sh:99` read `"$LA_SERVE_DECLARED[$MODEL_ALIAS]"` **without braces**.
+Bash parses that as the scalar `$LA_SERVE_DECLARED` (unset) followed by a literal
+`[alias]`, so under `set -u` the script died *immediately after deciding the lookup had
+succeeded* — emitting **no JSON while exiting 0**. A silent fail-open: `statusline-render.sh`
+saw empty output, took its legacy fallback, and displayed the **spoofed** model name.
+
+Note the irony in the previous release: 0.17.10 hardened the resolver for *unregistered*
+aliases, while the **registered** path — the normal case — was the broken one.
+
+- correct form `${LA_SERVE_DECLARED[$MODEL_ALIAS]:-$BACKEND}`, defaulting so a registry
+  without the declared map still emits valid JSON
+
+### Fixed — the resolver produced nothing when started under macOS bash 3.2
+
+`config-lib.sh` needs bash 4+ (`declare -A`, process substitution). macOS ships
+`/bin/bash` 3.2 and `#!/usr/bin/env bash` picks **that** whenever Homebrew is not on PATH —
+exactly what happens when a status line or hook is spawned with a minimal environment. The
+result was a wall of `declare: -A: invalid option` followed by an unbound-variable death:
+again no JSON, exit 0, spoofed name downstream.
+
+- re-exec under `/opt/homebrew/bin/bash` (or `/usr/local/bin/bash`) when started on bash < 4
+- if no bash 4+ exists, skip the registry **deliberately** and continue with endpoint-only
+  detection, reporting it once on stderr, rather than sourcing a library that cannot work
+
+### Testing
+
+- 5 new assertions exercise a genuinely REGISTERED alias (`qwen-3.6-operator`) and assert
+  JSON is actually **produced** — exit status alone cannot see a fail-open. Every pre-existing
+  test passed an *unregistered* alias, so all 45 exercised only the fallback path and the
+  success branch had **zero** coverage; that blind spot is how this survived a green suite
+- mutation-verified: restoring the unbraced subscript fails 5 assertions (50 → 45)
+- verified end to end with cost-tracker 0.7.4: a local session now renders
+  `qwen-3.6-operator high · ctx … · 4.5/103.9G 4% · ~17.1 tok/s`
+
 ## [0.17.10] — 2026-09-21
 
 ### Fixed — NVIDIA quota reads "unknown" in the launcher when the real limit is known
