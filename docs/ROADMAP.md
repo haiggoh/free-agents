@@ -55,6 +55,9 @@ and rewriting one would not un-release it):
 
 - Portable manifests `0.15.0` → `0.17.0`, runtime profiles `0.16.0` → `0.18.0`, oMLX lanes
   `0.17.0` → `0.19.0`. Every gate list travels intact; nothing is dropped.
+- **2026-09-21 renumber:** `0.18.0` spent on lime-theme (not portable manifests);
+  portable manifests → `0.19.0`, runtime profiles → `0.20.0`, oMLX lanes → `0.21.0`.
+  `0.18.1` is a cosmetic patch on top. Every gate list travels intact; nothing is dropped.
 - `0.16.0` is a **new** scope: live remote catalog discovery with automatic local-capable
   classification. It takes the freed number rather than queueing behind the slid chain, because
   it gates only on `0.15.1`'s estimator and the user asked for it directly.
@@ -63,9 +66,9 @@ and rewriting one would not un-release it):
 
 **Shipped 2026-09-20:** `0.16.0` — Live remote catalog discovery and auto-classification (see `CHANGELOG.md`).
 
-**Shipped 2026-09-23:** `0.17.2` — Local session identity Milestone 3: Session transcript identity (stable session id in transcripts, correlation with launch metadata, transition markers on resume, idempotent SessionStart handling) (see `CHANGELOG.md`).
+**Shipped 2026-09-22:** `0.17.2` — Local session identity Milestone 3: Session transcript identity (stable session id in transcripts, correlation with launch metadata, transition markers on resume, idempotent SessionStart handling) (see `CHANGELOG.md`).
 
-**Shipped 2026-09-23:** `0.17.3` — Remote Free API identity Milestone 4: lime-green theme, provider-aware spinner verbs, per-session settings overlay, session name with emoji, transcript marker/transition integration (see `CHANGELOG.md`).
+**Shipped 2026-09-21:** `0.18.0` — Remote Free API identity Milestone 4: lime-green theme, provider-aware spinner verbs, per-session settings overlay, session name with emoji, transcript marker/transition integration (see `CHANGELOG.md`).
 
 **Reassigned again 2026-09-16.** `0.14.0` now belongs to the **free-agents identity release** (the
 project rename plus the remote-session parity fixes that made it justified). Portable manifests moved
@@ -116,22 +119,16 @@ waiting on an architecture it does not read. So the split is:
 |---|---|---|
 | `0.13.9` | **Operational unblocks.** Rapid-MLX upgrade to the current release; locally routed Auto Mode correctness. No schema changes, no new architecture. | nothing |
 | `0.14.0` | **Free-agents identity release.** Project rename (local inference and free-API inference as two equal lanes), remote-session parity actually working, documentation overhaul. | `0.13.15` |
-<<<<<<< HEAD
 | `0.15.1` | **Patch release.** Three defect fixes + footprint estimator. | `0.14.0` |
 | `0.16.0` | **Live remote catalog discovery and auto-classification.** On connecting to a provider, enumerate its served models, merge them into the roster, and classify each through the footprint estimator so `csl` opens on a list that is already filtered. (Shipped 2026-09-20.) | `0.15.1` — the estimator it drives |
 | `0.17.0` | **Local session identity Milestone 1.** Deterministic session identity resolver, transcript marker, per-session settings overlay, sky-blue theme, model-aware spinner verbs. | `0.16.0` |
 | `0.17.1` | **Local session identity Milestone 2.** Visual identity (theme + spinner verbs wired), session banner integration, startup announcement. | `0.17.0` |
 | `0.17.2` | **Local session identity Milestone 3.** Session transcript identity (stable session id in transcripts, correlation with launch metadata). | `0.17.1` |
-| `0.18.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`; slid up again 2026-09-19.) | nothing hard |
-| `0.19.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`.) | `0.18.0` |
-| `0.20.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`.) | `0.19.0` — a runtime profile is the clean way to select a backend |
-=======
-| `0.16.0` | **Live remote catalog discovery and auto-classification.** On connecting to a provider, enumerate its served models, merge them into the roster, and classify each through the footprint estimator so `csl` opens on a list that is already filtered. (New, 2026-09-19.) **MERGED via `feat/0.16.0-catalog-scan`.** | `0.15.1` — the estimator it drives |
-| `0.17.0` | **Local session identity and observability.** Spinner words, live tok/s, statusline theming, banner rendering inside session, recognizable transcript marker, $0 cost display, live reasoning visibility. Work from `feature/local-session-identity` + waypoints `add-local-only-metrics-claude`, `banner-must-render-inside-the`, `local-sessions-need-a`, `local-sessions-must-show-0`, `real-time-thinking-visibility`, `local-agents-system-trust`. (New, 2026-09-19.) | nothing hard |
-| `0.18.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`, then `0.17.0`; slid up 2026-09-19 for local-session-identity.) | nothing hard |
-| `0.19.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`, then `0.18.0`.) | `0.18.0` |
-| `0.20.0` | **Backend lanes.** [oMLX](#0160--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`.) | `0.19.0` — a runtime profile is the clean way to select a backend |
->>>>>>> b8a1082 (docs: update ROADMAP.md for 0.17.0 local session identity and version reassignment)
+| `0.18.0` | **Remote identity polish.** Lime-green theme, spinner verbs, per-session settings overlay, session name with emoji, transcript marker/transition integration. (Was `0.14.0`, then `0.15.0`; slid up 2026-09-19 for local-session-identity. Spent 2026-09-21 — lime theme shipped as `0.18.0`.) | nothing hard |
+| `0.18.1` | **Cosmetic fixes.** Emoji spacing, remote effort menu reorder, interactive effort prompt in launcher. (Patch, 2026-09-21.) | `0.18.0` |
+| `0.19.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`, then `0.17.0`; slid up 2026-09-19 for local-session-identity, pushed past 0.18.0 when lime theme took that slot.) | nothing hard |
+| `0.20.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`.) | `0.19.0` |
+| `0.21.0` | **Backend lanes.** [oMLX](#0210--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`.) | `0.20.0` — a runtime profile is the clean way to select a backend |
 
 **Not release-gated at all.** These run continuously against whatever is current, and must not be
 parked behind a version number: model acquisition waves, the tournament, retirement and disk
@@ -387,7 +384,7 @@ and the pinned waypoint `add-local-only-metrics-claude` plus related waypoints.
 
 **Branch:** `feature/local-session-identity` (not merged).
 
-## `0.18.0` — Portable manifests and artifact identity
+## `0.21.0` — Portable manifests and artifact identity
 
 **Status: NOT STARTED on `main`.** The specification and partial work live on
 `feature/portable-model-manifests`, which is not merged.
@@ -476,6 +473,9 @@ Both found 2026-09-06; fix the plans, not just the code.
 > same reconciliation first and would otherwise duplicate it.
 
 > **Renumbered 2026-09-19** from `0.18.0` to `0.19.0` to make room for `0.17.0` (local session identity).
+> **Renumbered 2026-09-21** from `0.19.0` to `0.20.0` because `0.18.0` was spent on the lime
+> theme (remote identity polish); portable manifests was already at `0.19.0` and had to slide one
+> further. Runtime profiles slides with it. Every gate list travels intact; nothing is dropped.
 
 **Status: NOT STARTED.** No gate here is implemented. Nothing in `0.13.1`–`0.13.8` advances one.
 
@@ -581,7 +581,9 @@ silent dotfile mutation; published assets are immutable and checksummed.
   effective* at the smallest scale. Phase C should **absorb and extend** these names rather than
   build a parallel mechanism — see the waypoint for the full list.
 
-> **Renumbered 2026-09-19** from `0.18.0` to `0.19.0` to make room for `0.17.0` (local session identity).
+> **Renumbered 2026-09-21** from `0.20.0` to `0.21.0` because `0.18.0` was spent on the lime
+> theme; portable manifests → `0.19.0` → `0.21.0`, runtime profiles → `0.20.0`, oMLX lanes
+> → `0.21.0` (pushed one past manifests). Every gate list travels intact; nothing is dropped.
 
 ---
 
@@ -590,7 +592,9 @@ silent dotfile mutation; published assets are immutable and checksummed.
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.
 
-> **Renumbered 2026-09-19** from `0.19.0` to `0.20.0` to make room for `0.17.0` (local session identity).
+> **Renumbered 2026-09-21** from `0.20.0` to `0.21.0` because `0.18.0` was spent on the lime
+> theme; portable manifests → `0.19.0` → `0.21.0`, runtime profiles → `0.20.0`, oMLX lanes
+> → `0.21.0` (pushed one past manifests). Every gate list travels intact; nothing is dropped.
 
 | Fact | Value |
 |---|---|

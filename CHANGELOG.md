@@ -2,6 +2,35 @@
 
 All notable changes to `local-agents` are documented in this file.
 
+## [0.18.2] — 2026-09-21
+
+### Added — remote API token rate telemetry for free_api sessions
+
+- `la-telemetry-remote-tokrate.sh`: new telemetry script that reads streaming
+  token rate from session-specific log files (`~/.claude/logs/remote-streaming-<SESSION_ID>.log`)
+  and outputs JSON matching the `la-telemetry-token-rate.sh` contract
+- `la-remote-telemetry-wrapper.sh`: wrapper for `claude` that captures streaming
+  response metrics via `--debug-file` and writes token rate to session log file
+- `remote-session.sh`: uses wrapper for `free_api` sessions to generate streaming
+  metrics log; gated on `LA_SESSION_KIND=free_api`
+- Log format: `timestamp(ms) tok/s cumulative_tokens`
+- Integrates with statusline renderer (cost-tracker 0.7.6+) for live token rate display
+
+### Fixed — emoji spacing after wide glyphs in menu and banner text
+
+`EMOJI_TELEMETRY_ON` (`🛰️`) and `EMOJI_EFFORT` / `EMOJI_MODEL_CHOICE` (`⚙️`) are
+two-codepoint wide glyphs (base + VARIATION SELECTOR-16) that occupy two terminal
+columns, but the single ASCII space after them occupies only one. The result was a
+visually tight join — "⚙️choose" and "🛰️telemetry" read as stuck together.
+
+- trailing space now baked into the emoji constants in `config/emoji.sh`, so every
+  consumer (csl, remote-session.sh, launch-claude-agent.sh) gets the gap for free
+- `remote-session.sh`: moved the `e) effort` menu line from after telemetry/trials
+  to right after `h) back to lane selector`, matching csl's local picker ordering
+- `launch-claude-agent.sh`: when invoked without an effort override and the alias
+  default is medium, prompts interactively for effort (mirrors remote-session.sh's
+  `e)` picker)
+
 ## [0.18.1] — 2026-09-21
 
 ### Fixed — emoji spacing after wide glyphs in menu and banner text
