@@ -2,6 +2,23 @@
 
 All notable changes to `local-agents` are documented in this file.
 
+## [0.18.1] — 2026-09-21
+
+### Fixed — emoji spacing after wide glyphs in menu and banner text
+
+`EMOJI_TELEMETRY_ON` (`🛰️`) and `EMOJI_EFFORT` / `EMOJI_MODEL_CHOICE` (`⚙️`) are
+two-codepoint wide glyphs (base + VARIATION SELECTOR-16) that occupy two terminal
+columns, but the single ASCII space after them occupies only one. The result was a
+visually tight join — "⚙️choose" and "🛰️telemetry" read as stuck together.
+
+- trailing space now baked into the emoji constants in `config/emoji.sh`, so every
+  consumer (csl, remote-session.sh, launch-claude-agent.sh) gets the gap for free
+- `remote-session.sh`: moved the `e) effort` menu line from after telemetry/trials
+  to right after `h) back to lane selector`, matching csl's local picker ordering
+- `launch-claude-agent.sh`: when invoked without an effort override and the alias
+  default is medium, prompts interactively for effort (mirrors remote-session.sh's
+  `e)` picker)
+
 ## [0.18.0] — 2026-09-21
 
 ### Added — the lime accent for remote sessions is REAL and now shipped
