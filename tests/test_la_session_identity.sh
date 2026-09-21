@@ -25,6 +25,8 @@ _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" &&
 TEST_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # shellcheck source=/dev/null
 . "$TEST_DIR/../config/config-lib.sh"
+# shellcheck source=/dev/null
+. "$TEST_DIR/../config/emoji.sh"
 
 # Test counter
 TESTS_RUN=0
@@ -94,8 +96,8 @@ if [ $result -eq 0 ]; then
     check $? "provider_display is 'Local (Rapid-MLX)' for rapid backend"
 
     emoji=$(get_field "$TEST_WORKDIR/identity_local.json" "session_emoji")
-    [ "$emoji" = "🦾" ]
-    check $? "session_emoji is 🦾 for local"
+    [ "$emoji" = "$SESSION_EMOJI_LOCAL" ]
+    check $? "session_emoji is $SESSION_EMOJI_LOCAL for local"
 
     theme=$(get_field "$TEST_WORKDIR/identity_local.json" "theme_identifier")
     [ "$theme" = "local-sky" ]
@@ -130,8 +132,8 @@ if [ $result -eq 0 ]; then
     check $? "provider_display is 'Free API (NVIDIA)'"
 
     emoji=$(get_field "$TEST_WORKDIR/identity_free_api.json" "session_emoji")
-    [ "$emoji" = "🌐" ]
-    check $? "session_emoji is 🌐 for free API"
+    [ "$emoji" = "$SESSION_EMOJI_FREE_API" ]
+    check $? "session_emoji is $SESSION_EMOJI_FREE_API for free API"
 
     theme=$(get_field "$TEST_WORKDIR/identity_free_api.json" "theme_identifier")
     [ "$theme" = "free-lime" ]
@@ -164,8 +166,8 @@ if [ $result -eq 0 ]; then
     check $? "provider_display is 'Anthropic (cloud)'"
 
     emoji=$(get_field "$TEST_WORKDIR/identity_cloud.json" "session_emoji")
-    [ "$emoji" = "☁️" ]
-    check $? "session_emoji is ☁️ for cloud"
+    [ "$emoji" = "$SESSION_EMOJI_CLOUD" ]
+    check $? "session_emoji is $SESSION_EMOJI_CLOUD for cloud"
 
     theme=$(get_field "$TEST_WORKDIR/identity_cloud.json" "theme_identifier")
     [ "$theme" = "cloud-default" ]

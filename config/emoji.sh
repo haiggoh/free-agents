@@ -12,6 +12,7 @@
 # These are the canonical mappings used by la-session-identity.sh
 SESSION_EMOJI_LOCAL="🦾"
 SESSION_EMOJI_FREE_API="📡"     # was 🌐 (globe) — changed to satellite dish
+SESSION_EMOJI_CLOUD="☁️"        # cloud/gateway sessions
 SESSION_EMOJI_REMOTE_API="📡"   # alias for free_api
 SESSION_EMOJI_UNKNOWN="❓"      # was 🧭 (compass) — reserved for waypoints plugin
 
@@ -41,6 +42,7 @@ session_emoji_for() {
   case "$kind" in
     local)      printf '%s' "$SESSION_EMOJI_LOCAL" ;;
     free_api)   printf '%s' "$SESSION_EMOJI_FREE_API" ;;
+    cloud)      printf '%s' "$SESSION_EMOJI_CLOUD" ;;
     *)          printf '%s' "$SESSION_EMOJI_UNKNOWN" ;;
   esac
 }

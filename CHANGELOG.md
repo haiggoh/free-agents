@@ -2,6 +2,33 @@
 
 All notable changes to `local-agents` are documented in this file.
 
+## [0.17.10] — 2026-09-21
+
+### Fixed — statusline shows cloud format for free_api/local sessions (resolver returns empty)
+
+The `la-session-identity.sh` resolver returned **empty output** when `MODEL_ALIAS` (e.g. `nvidia-nemotron-ultra`) was not registered in `config.example.sh` (which only contains local models). The resolver's `set -uo pipefail` caused a silent exit on the unset array lookup. The cost-tracker's `statusline-render.sh` only fell back to legacy endpoint detection when the resolver returned `"unknown"` session_kind, **NOT when it returned empty** — so free_api and local sessions fell through to the cloud branch, rendering `today: $X/$40 gw` on free sessions.
+
+**Root cause:** Plugin cache lacks `config.local.sh` (gitignored), so resolver falls back to example config with no remote model registrations. When `la_lookup` fails for a remote alias, the strict mode exits without JSON output.
+
+**Fix:** Two-part:
+1. `cost-tracker 0.7.2` (separate plugin): `statusline-render.sh` now triggers legacy fallback when resolver returns empty output, not just `"unknown"`.
+2. `free-agents 0.17.10`: `la-session-identity.sh` hardened to emit valid JSON even when `la_lookup` fails — logs the unresolved alias to stderr and continues with endpoint-only detection.
+
+**Result:** Free-API and local sessions now correctly show savings format:
+- Remote: `free api session saved $74.21 · today: $1101.73 saved with free agents`
+- Local: `local session saved $45.85 · today: $1102.30 saved with free agents`
+
+**Remaining known issues (tracked for next release):**
+- Model name shows spoofed "Opus 5" instead of actual model (Nemotron/Qwen) — resolver returns `compatibility_model_id` for display
+- Token rate telemetry (`~0.5 tok/s`) works in manual tests but not live statusline — `la-telemetry-token-rate.sh` parsing needs fix
+- Effort display missing for free_api sessions (local shows `xhigh`, free_api doesn't)
+
+### Testing
+
+- Manual verification across remote free-API (Nemotron on 4141/4142), local (Rapid-MLX on 8003), and gateway sessions
+- Mutation-tested: reverting the else clause in cost-tracker's statusline-render.sh reverts to cloud format
+- All existing free-agents tests pass (no new tests added for this fix; existing test_la_session_identity.sh covers resolver behavior)
+
 ## [0.17.9] — 2026-09-21
 
 ### Added — single source of truth for session emojis

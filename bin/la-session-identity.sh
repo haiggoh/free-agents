@@ -75,6 +75,10 @@ case "${1:-}" in
     exit 2 ;;
 esac
 
+# unknown_fallback tracks whether model identity could not be fully resolved.
+# Initialized early so it can be set during alias resolution.
+unknown_fallback=false
+
 # --- Source config-lib for role/alias resolution --------------------------
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 IDENTITY_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
@@ -99,6 +103,11 @@ if [ -n "${MODEL_ALIAS:-}" ]; then
     LA_CUR_REPO="${LA_CUR_REPO:-}"
     LA_CUR_SIZE="${LA_CUR_SIZE:-}"
     LA_CUR_RAPID_SPEC_CONFIG="${LA_CUR_RAPID_SPEC_CONFIG:-}"
+  else
+    # MODEL_ALIAS provided but not found in registry (e.g., remote alias not in config.example.sh).
+    # Log for diagnostics and mark unknown_fallback so downstream consumers know model name is unresolved.
+    printf 'la-session-identity.sh: MODEL_ALIAS "%s" not found in registry (config source: %s), falling back to endpoint-only detection\n' "$MODEL_ALIAS" "${LA_CONFIG_SOURCE:-unknown}" >&2
+    unknown_fallback=true
   fi
 fi
 
@@ -158,7 +167,7 @@ case "${ANTHROPIC_BASE_URL:-}" in
     ;;
   https://api.anthropic.com*|*anthropic.com*|*llmgw*)
     session_kind="cloud"
-    session_emoji="☁️"
+    session_emoji="$SESSION_EMOJI_CLOUD"
     evidence="endpoint=Anthropic/gateway"
     provider_display="Anthropic (cloud)"
     theme_identifier="cloud-default"
@@ -208,7 +217,7 @@ fi
 transcript_marker_version=1
 
 # --- Determine unknown fallback --------------------------------------------
-unknown_fallback=false
+# unknown_fallback initialized early; update based on session_kind and MODEL_ALIAS
 if [ "$session_kind" = "unknown" ]; then
   unknown_fallback=true
 fi
