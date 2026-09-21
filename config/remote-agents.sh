@@ -32,9 +32,15 @@ LA_REMOTE_AGENTS=(
   # sends chat_template_kwargs.enable_thinking=false for nvidia unless thinking is asked for.
   # That fix is a PREREQUISITE of this promotion; without it the default lane breaks sessions.
   #
-  # ⚠️ Tier stays `unknown` deliberately — NVIDIA throttles unpredictably and publishes no
-  # per-account quota, so `renewing_free` would be a promise the provider does not make.
+  # ⚠️ Tier stays `unknown` deliberately — NVIDIA publishes no per-account quota, so
+  # `renewing_free` would be a promise the provider does not make.
   # Leading the roster is about PREFERENCE ORDER, not about a billing guarantee.
+  # ★ MEASURED 2026-09-19 (operator): there is no known DAILY quota at all, and the one
+  # real ceiling is ~40 requests per MINUTE. So `unknown` is the honest ENUM value but an
+  # understatement as a LABEL — _tier_label() in bin/remote-session.sh renders these rows
+  # as "no daily cap/40/min" for the user while this field stays a valid enum member.
+  # Because the limit is per-MINUTE, bursty/parallel probing is what trips it: a 429 here
+  # is evidence about OUR request rate, never about the model.
   # ⚠️ NVIDIA's catalog reports tools:"unknown" for EVERY row, so tool capability cannot be
   # read from the catalog — a new row here is catalog-only until a real tool session proves it.
   # ════════════════════════════════════════════════════════════════════════════════

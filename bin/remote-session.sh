@@ -196,6 +196,27 @@ _visible() { # tier filter: hide trials unless asked
     [[ "$tier" != "trial" ]] || [[ $INCLUDE_TRIALS -eq 1 ]]
 }
 
+# _tier_label <tier> <provider> -> what the USER READS in a picker/listing.
+#
+# The roster `tier` field is a constrained enum (remote_provider_core.TIER_CHOICES), and
+# NVIDIA deliberately stays `unknown` there: it publishes no per-account quota, so
+# `renewing_free` would be a promise the provider does not make. But `unknown` UNDERSTATES
+# what we have actually measured -- the operator established 2026-09-19 that there is no
+# daily quota at all, and that the one real ceiling is ~40 requests per MINUTE. A bare
+# "unknown" therefore hides a known fact. This function keeps the enum honest and the
+# DISPLAY informative, rather than corrupting the enum to fix a label.
+#
+# Scoped to NVIDIA on purpose: the measurement is about NVIDIA only and must not be
+# generalised to Gemini/Groq/others, which have their own (smaller) quotas.
+_tier_label() {
+    local tier="$1" prov="$2"
+    if [[ "$prov" == nvidia && "$tier" == unknown ]]; then
+        printf 'no daily cap/40/min'
+    else
+        printf '%s' "$tier"
+    fi
+}
+
 # ---- local-capable filter helpers -------------------------------------------
 # Build a bash associative array from _POLICY_JSON for fast lookup.
 declare -A _LC_VISIBLE
@@ -295,7 +316,7 @@ print_list() {
         fi
         i=$((i+1))
         if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
-        printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$tier" "$keystate"
+        printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$(_tier_label "$tier" "$prov")" "$keystate"
     done
     [[ $INCLUDE_TRIALS -eq 0 ]] && printf '\n  (trial-tier agents hidden — pass --include-trials to show them)\n'
     if [[ $hidden_count -gt 0 ]]; then
@@ -384,7 +405,7 @@ _run_remote_menu() {
             fi
             i=$((i+1))
             if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
-            printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$tier" "$keystate"
+            printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$(_tier_label "$tier" "$prov")" "$keystate"
         done
         [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
         echo
@@ -597,7 +618,7 @@ verify_alias() { # verify_alias <alias>  (0 = catalog-listed)
         tier=unknown
     fi
     _valid_model "$model" || return 2
-    printf '  provider   : %s\n  model      : %s\n  tier       : %s\n' "$prov" "$model" "$tier"
+    printf '  provider   : %s\n  model      : %s\n  tier       : %s\n' "$prov" "$model" "$(_tier_label "$tier" "$prov")"
     body="$(_catalog_request "$prov")" || return $?
     printf '%s' "$body" | MODEL_ID="$model" python3 -c '
 import json,os,sys
@@ -1303,7 +1324,15 @@ fi
 case "$TIER" in
     renewing_free) COST_NOTE='renewing free allocation; account limits/billing still apply' ;;
     trial) COST_NOTE='trial/paid access explicitly selected; check provider balance' ;;
-    *) COST_NOTE='account quota and billing unverified; do not assume free' ;;
+    # NVIDIA is not "unverified" -- it is MEASURED (operator, 2026-09-19): no known daily
+    # quota, but ~40 requests per minute is the ceiling, so bursts are what trip it rather
+    # than cumulative use. Dated on purpose: this is an observation, not a provider promise,
+    # and it says nothing about token cost (never claim $0/token for a free tier).
+    *) if [[ "$PROV" == nvidia ]]; then
+           COST_NOTE='no known daily quota (measured 2026-09-19); ceiling is 40 requests per minute -- pace bursts'
+       else
+           COST_NOTE='account quota and billing unverified; do not assume free'
+       fi ;;
 esac
 if [[ $DRY_RUN -eq 1 ]]; then
     echo "   DRY RUN  : would start a LiteLLM proxy and exec claude against it."
@@ -1444,7 +1473,7 @@ cat <<BANNER
 ╭──────────────────────────────────────────────────────────────╮
 │  ${LA_SESSION_KIND_EMOJI:-$SESSION_EMOJI_FREE_API}  REMOTE API SESSION — $MODEL ($DISP)                    │
 ╰──────────────────────────────────────────────────────────────╯
-   provider : $PROV      tier: $TIER
+   provider : $PROV      tier: $(_tier_label "$TIER" "$PROV")
    agent    : $ALIAS
    thinking : $THINKING
    cost     : $COST_NOTE

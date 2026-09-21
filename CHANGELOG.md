@@ -4,6 +4,35 @@ All notable changes to `local-agents` are documented in this file.
 
 ## [0.17.10] — 2026-09-21
 
+### Fixed — NVIDIA quota reads "unknown" in the launcher when the real limit is known
+
+Every NVIDIA row in the remote roster displayed `tier: unknown`, and the launch banner and
+cost note fell to the generic `account quota and billing unverified; do not assume free`.
+That UNDERSTATED a measured fact: NVIDIA publishes no per-account **daily** quota (operator
+measurement, 2026-09-19) and the one real ceiling is ~40 requests per **minute**.
+
+The roster `tier` field stays the enum value `unknown` on purpose — `renewing_free` would be
+a promise NVIDIA does not make, and the enum is validated in `remote_provider_core`. Instead a
+new `_tier_label()` keeps the enum honest while the **display** tells the truth:
+
+- pickers/listings and the launch banner render NVIDIA rows as `no daily cap/40/min`
+- the NVIDIA cost note now reads `no known daily quota (measured 2026-09-19); ceiling is 40
+  requests per minute -- pace bursts`
+- **provider-scoped**: Gemini/Groq/others keep their own notes and never inherit the rpm claim
+- machine-readable `--dump` output keeps emitting the raw enum, so parsers are unaffected
+
+Because the ceiling is per-MINUTE, bursty or parallel probing is what trips it: a 429 here is
+evidence about *our* request rate, not about the model. (A deterministic interactive pacer is
+still open — `bin/remote-probe-log.py` implements one for probes only.)
+
+### Fixed — the remote test suite could not run at all (13 of 21 failing)
+
+`tests/test_remote_session.py` never copied `config/emoji.sh` into its fixture. Since
+`remote-session.sh:52` sources it unconditionally and reads `SESSION_EMOJI_*` under `set -u`,
+every launch path aborted before doing anything, so 13 tests failed for a missing fixture file
+rather than for any real defect. Adding the file to the fixture list restores the suite to
+22/22 (the 22nd is the new NVIDIA label test, mutation-verified two ways).
+
 ### Fixed — statusline shows cloud format for free_api/local sessions (resolver returns empty)
 
 The `la-session-identity.sh` resolver returned **empty output** when `MODEL_ALIAS` (e.g. `nvidia-nemotron-ultra`) was not registered in `config.example.sh` (which only contains local models). The resolver's `set -uo pipefail` caused a silent exit on the unset array lookup. The cost-tracker's `statusline-render.sh` only fell back to legacy endpoint detection when the resolver returned `"unknown"` session_kind, **NOT when it returned empty** — so free_api and local sessions fell through to the cloud branch, rendering `today: $X/$40 gw` on free sessions.
