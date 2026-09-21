@@ -2,6 +2,50 @@
 
 All notable changes to `local-agents` are documented in this file.
 
+## [0.18.0] — 2026-09-21
+
+### Added — the lime accent for remote sessions is REAL and now shipped
+
+0.17.6 withheld this as an "upstream limitation", having probed a `themes` **settings map** and
+found it unconfirmable: a deliberately bogus key succeeded just as silently, so acceptance was
+not evidence. That calibration was correct — and it was pointed at the **wrong mechanism**.
+
+Custom themes are **files**. The CLI reads `~/.claude/themes/<slug>.json` (shape
+`{name, base, overrides}`, ≤256KB) and a session selects one with the ordinary `theme` setting.
+Confirmed three ways against CLI 2.1.278: the loader path `userConfigDir("themes",[slug])` in
+the binary, a `[theme] watcher` that hot-reloads changes, and `claude --help`, which lists
+"custom themes" among the customizations `--safe-mode` disables. So: a documented feature, not
+a guess.
+
+- `generate-remote-settings.py --emit-theme-file` prints the theme file; the accent is read
+  from `config/remote-theme.json`, which stays the single source of truth for the colour
+- the per-session overlay now carries `"theme": "free-lime"`, still **cloud-scoped out** — a
+  cloud session is never themed
+- `remote-session.sh` installs the theme file openly to `~/.claude/themes/`, written only when
+  absent or changed, so a hand-edited colour survives and repeat launches are a no-op
+- only IDENTITY roles are recoloured (`claude`, `permission`, `planMode`, `bashBorder`,
+  `suggestion`, `thinking`). `success`/`error`/`warning` are deliberately untouched —
+  recolouring a semantic signal makes a session harder to read, not more distinctive
+
+### Fixed — the watcher window stole focus and covered the session
+
+User-confirmed still broken: "the watcher steals focus rather than opening unfocused and it
+covers the session instead of opening off to the side or slightly behind the main window." Two
+distinct defects; the earlier attempt addressed only the first.
+
+- **focus**: `set frontmost of window` is *accepted* by Terminal but does not reliably raise it.
+  `set index to 1` is the property that actually reorders windows, so both are used, each
+  guarded independently
+- **geometry**: no focus trick helps if the window lands on top of the session. The watcher is
+  now positioned relative to the previous window's bounds, offset down-right. Tunable via
+  `LA_WATCH_OFFSET_X`/`_Y`; `LA_WATCH_NO_PLACE=1` opts out
+
+### Fixed — `local-watch.sh --help` OPENED WINDOWS instead of printing help
+
+`--help` was not parsed at all: it fell through the mode resolution into the `--open` path, so
+probing an unfamiliar script with `--help` triggered its real work. Now prints usage (including
+the new env vars) and exits 0; an unrecognised flag exits 2 with a usage line on stderr.
+
 ## [0.17.11] — 2026-09-21
 
 ### Fixed — the resolver died silently on every REGISTERED alias (missing braces)

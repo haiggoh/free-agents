@@ -1,6 +1,6 @@
 {
   "_comment": "Lime-green theme for REMOTE cloud-API sessions. Applied via per-session settings overlay — never written to user's persistent ~/.claude/settings.json.",
-  "_contract": "Theme accent color #7CFC00 (lime green). Provides session-scoped identity markers for launcher to inject via --settings.",
+  "_contract": "Theme accent #7CFC00 (lime). SHIPPED 2026-09-21 via a CUSTOM THEME FILE at ~/.claude/themes/free-lime.json (shape {name,base,overrides}) selected by the ordinary `theme` setting in the per-session overlay. The earlier verdict that this was an unconfirmable upstream limitation probed a `themes` SETTINGS MAP — the wrong mechanism. Verified against CLI 2.1.278: loader path userConfigDir(\"themes\",[slug]), a [theme] watcher for hot reload, and `claude --help` listing \"custom themes\". generate-remote-settings.py is the single source of truth for both halves.",
   "theme": {
     "name": "free-lime",
     "accent_color": "#7CFC00",
@@ -9,11 +9,29 @@
     "supported_surfaces": [
       "session_title",
       "startup_announcement",
-      "statusline"
+      "statusline",
+      "custom_theme_file"
     ],
     "unsupported_surfaces": [
       "native_ascii_artwork",
       "managed_announcements"
+    ],
+    "_roles_overridden": [
+      "claude",
+      "permission",
+      "planMode",
+      "bashBorder",
+      "suggestion",
+      "thinking"
+    ],
+    "_roles_deliberately_untouched": [
+      "success",
+      "error",
+      "warning",
+      "text",
+      "inverseText",
+      "diffAdded",
+      "diffRemoved"
     ]
   },
   "fallback": {

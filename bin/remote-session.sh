@@ -1459,6 +1459,27 @@ if [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -x "$SCRIPT_DIR/generate-remote-
         --identity-json "$LA_SESSION_IDENTITY" \
         --output "$SETTINGS_FILE" 2>/dev/null || true
     # Don't add to CLAUDE_EXTRA_ARGS yet — we may need to merge with blind-trust settings
+
+    # THE THEME FILE must exist before the `theme` setting above can resolve to anything.
+    # Custom themes are FILES: the CLI reads ~/.claude/themes/<slug>.json (verified against
+    # 2.1.278; `claude --help` lists "custom themes" among what --safe-mode disables). Unlike
+    # the settings overlay this is a PERSISTENT, user-visible file, so it is installed openly
+    # rather than hidden in a temp dir -- a user opening ~/.claude/themes sees exactly what we
+    # added, and a `[theme] watcher` picks up changes without a restart.
+    #
+    # Written only when ABSENT or CHANGED, so a user who hand-edits the colour keeps their
+    # edit until our content genuinely differs, and repeated launches are a no-op.
+    LA_THEME_DIR="$HOME/.claude/themes"
+    LA_THEME_FILE="$LA_THEME_DIR/free-lime.json"
+    if mkdir -p "$LA_THEME_DIR" 2>/dev/null; then
+        LA_THEME_NEW="$(LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
+            --emit-theme-file 2>/dev/null || true)"
+        if [ -n "$LA_THEME_NEW" ]; then
+            if [ ! -f "$LA_THEME_FILE" ] || [ "$LA_THEME_NEW" != "$(cat "$LA_THEME_FILE" 2>/dev/null)" ]; then
+                printf '%s' "$LA_THEME_NEW" > "$LA_THEME_FILE" || true
+            fi
+        fi
+    fi
 fi
 
 # STARTUP BANNER — after identity resolution so we have the theme emoji

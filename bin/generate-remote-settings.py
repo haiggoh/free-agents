@@ -72,12 +72,68 @@ def select_spinner_verbs(family: str, spinner_data: dict) -> list:
     return unique
 
 
+def build_theme_file(config_dir):
+    """Build the custom THEME FILE content for ~/.claude/themes/<slug>.json.
+
+    Shape required by the CLI: {"name": ..., "base": "dark"|"light", "overrides": {role: hex}}.
+    The role names below are the CLI's own colour vocabulary (extracted from the 2.1.278
+    bundle): claude, permission, planMode, bashBorder, autoAccept, diffAdded/diffRemoved
+    (+Dimmed), success, error, warning, suggestion, text, inverseText, thinking, remember.
+
+    Only the IDENTITY roles are overridden, deliberately. Repainting success/error/warning
+    would make a remote session harder to read, not more distinctive -- and recolouring a
+    semantic signal like `error` is actively harmful. The accent is read from
+    remote-theme.json so that file stays the single source of truth for the colour.
+    """
+    theme_data = load_json_file(config_dir / 'remote-theme.json')
+    theme = theme_data.get('theme', {})
+    fallback = theme_data.get('fallback', {})
+    accent = theme.get('accent_color') or fallback.get('accent_color') or '#7CFC00'
+    return {
+        "name": theme.get('identity_label') or 'Free API session',
+        "base": "dark",
+        "overrides": {
+            "claude": accent,
+            "permission": accent,
+            "planMode": accent,
+            "bashBorder": accent,
+            "suggestion": accent,
+            "thinking": accent,
+        },
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description='Generate per-session settings for remote sessions')
-    parser.add_argument('--identity-json', required=True, help='Session identity JSON from la-session-identity.sh')
+    parser.add_argument('--identity-json', help='Session identity JSON from la-session-identity.sh')
     parser.add_argument('--output', help='Output file (default: stdout)')
     parser.add_argument('--launch-dir', help='Launch directory (auto-detected)')
+    parser.add_argument('--emit-theme-file', action='store_true',
+                        help='Print the custom THEME FILE (for ~/.claude/themes/<slug>.json) '
+                             'instead of a session settings overlay, and exit')
     args = parser.parse_args()
+
+    # Determine launch directory (needed by both modes)
+    if args.launch_dir:
+        launch_dir = Path(args.launch_dir)
+    else:
+        launch_dir = Path(os.environ.get('LAUNCH_DIR', Path(__file__).parent))
+
+    config_dir = launch_dir.parent / 'config'
+
+    # --emit-theme-file is a standalone mode: it describes the THEME, which is a property of
+    # the lane rather than of any one session, so it needs no identity.
+    if args.emit_theme_file:
+        out = json.dumps(build_theme_file(config_dir), indent=2) + "\n"
+        if args.output:
+            Path(args.output).write_text(out)
+        else:
+            sys.stdout.write(out)
+        return 0
+
+    if not args.identity_json:
+        print("ERROR: --identity-json is required unless --emit-theme-file is given", file=sys.stderr)
+        return 2
 
     # Parse identity JSON
     try:
@@ -85,14 +141,6 @@ def main():
     except json.JSONDecodeError as e:
         print(f"ERROR: Invalid identity JSON: {e}", file=sys.stderr)
         return 1
-
-    # Determine launch directory
-    if args.launch_dir:
-        launch_dir = Path(args.launch_dir)
-    else:
-        launch_dir = Path(os.environ.get('LAUNCH_DIR', Path(__file__).parent))
-
-    config_dir = launch_dir.parent / 'config'
 
     # Load theme and spinner data
     theme_data = load_json_file(config_dir / 'remote-theme.json')
@@ -133,25 +181,22 @@ def main():
         if spinner_verbs:
             settings["spinnerVerbs"] = {"mode": "replace", "verbs": spinner_verbs}
 
-        # DELIBERATELY NOT EMITTED: a `themes` map / `accentColor` overlay.
+        # ★ THE LIME ACCENT IS NOW REALLY EMITTED (2026-09-21).
         #
-        # Probed 2026-09-20 against CLI 2.1.278 and NOT CONFIRMED as a supported setting.
-        # The probe that mattered was the CALIBRATION: a deliberately bogus key
-        # (`totallyFakeKeyXYZ`) passed via --settings produced exactly the same silent
-        # success as a `themes` map, and `claude doctor` reports neither. So "the CLI
-        # accepted it" is not evidence of support — unknown keys are ignored without a
-        # warning, which is indistinguishable from working until you look at the screen.
-        # The live `theme` setting on this machine is the string "auto", i.e. a NAMED
-        # theme, with no evidence that a session can define a new named theme at all.
+        # 0.17.6 deliberately withheld this, having probed a `themes` SETTINGS MAP and found
+        # it unconfirmable: a bogus key succeeded just as silently, so acceptance was not
+        # evidence of support. That reasoning was correct about the KEY and wrong about the
+        # MECHANISM. Custom themes are FILES, not a settings map: the CLI reads
+        # ~/.claude/themes/<slug>.json and a session selects one with the ordinary `theme`
+        # setting. Confirmed three ways against CLI 2.1.278 -- the loader path
+        # userConfigDir("themes",[slug]) in the binary, a "[theme] watcher" for hot reload,
+        # and `claude --help`, which lists "custom themes" among the customizations that
+        # --safe-mode disables. So this is a documented feature, not a guess.
         #
-        # The plan's Milestone 2 "Theme caveat" anticipates exactly this and instructs:
-        # document an upstream limitation rather than patch Claude Code. So the accent
-        # colour in remote-theme.json stays DATA for surfaces we control (the launcher's
-        # own banner and the statusline), and is not smuggled into a settings key that
-        # may do nothing. Revisit if/when a supported custom-theme key is documented.
-        #
-        # What IS verified to work is spinnerVerbs (present in CLI 2.1.270+, per
-        # remote-spinner-verbs.json's own contract note) — emitted above.
+        # Per-session via --settings, so the user's persistent theme is never touched.
+        theme_slug = theme.get('name') or 'free-lime'
+        settings["theme"] = theme_slug
+
         _ = (accent, emoji, label, theme_identifier, provider_display,
              actual_model_id, spinner_profile_id)  # retained for the banner/statusline path
 
