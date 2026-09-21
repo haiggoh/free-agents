@@ -55,6 +55,43 @@ if [ -z "$MODE" ]; then
 fi
 [ "$MODE" = "--list" ] && MODE="list"
 
+# --help must TELL, never DO. Before this guard `--help` fell through the MODE resolution and
+# hit the --open path, so probing an unfamiliar script with --help OPENED TERMINAL WINDOWS --
+# an unintended execution dressed up as help. Parse it before doing any work, and reject an
+# unrecognised flag instead of silently treating it as the default.
+case "$MODE" in
+  --help|-h|help)
+    cat <<'USAGE'
+local-watch.sh — discover running LOCAL sessions and watch them.
+
+Opens one watcher window per running local session (engine health for its port +
+mutations for its transcript). With nothing running it prints the listing instead.
+
+Usage:
+  local-watch.sh              watch what is running (falls back to --list if nothing is)
+  local-watch.sh --open       force the open behaviour (explicit form of the default)
+  local-watch.sh --list       print-only: sessions, ports, transcripts + monitor commands
+  local-watch.sh --attach ID  attach to one session by pid/id
+  local-watch.sh --diagnostic raw stream instead of the readable render (combinable)
+  local-watch.sh --help       this text
+
+Environment:
+  LA_WATCH_OFFSET_X / LA_WATCH_OFFSET_Y  watcher window offset from the session window
+                                         (default 60/60) so it does not cover the session
+  LA_WATCH_NO_PLACE=1                    do not position the watcher window at all
+  LA_WATCH_DIAGNOSTIC=1                  same as --diagnostic
+  LA_PORT_START                          first port to assume when none is recorded
+USAGE
+    exit 0
+    ;;
+  -*)
+    case "$MODE" in
+      --open|--list|--attach) ;;
+      *) printf 'local-watch.sh: unknown option %s (try --help)\n' "$MODE" >&2; exit 2 ;;
+    esac
+    ;;
+esac
+
 _health_cmd() {  # $1=port
   # --diagnostic deliberately bypasses the readable renderer, so it must also bypass the dedupe
   # filter -- otherwise "raw stream" would still be collapsed and the flag would lie.
@@ -206,19 +243,58 @@ if [ "$MODE" = "--open" ]; then
     [ -z "$_port" ] && _port="$LA_PORT_START"
     _cmd="echo '=== local-watch: $_alias (pid $_pid, port $_port) ==='; $(_health_cmd "$_port")"
     [ -n "$_tr" ] && _cmd="$_cmd & $(_mut_cmd "$_tr"); wait"
-    # Spawn the watcher WITHOUT stealing focus: the user types into the SESSION, not the
-    # watcher. `do script` creates a window on its own -- `activate` was the only reason
-    # Terminal came forward. The session is usually another Terminal window, so restoring
-    # focus has to be window-level, not app-level: remember the front window id and put it
-    # back. Guarded because there may be no existing window on the very first spawn.
+    # Spawn the watcher WITHOUT stealing focus AND without covering the session.
+    #
+    # USER-CONFIRMED STILL BROKEN 2026-09-21: "the watcher steals focus rather than opening
+    # unfocused and it covers the session instead of opening off to the side or slightly
+    # behind the main window." Two DISTINCT defects, and the previous attempt only aimed at
+    # the first:
+    #
+    #  1. FOCUS. Dropping `activate` and restoring the remembered front window was the right
+    #     idea, but `set frontmost of window` is accepted by Terminal and does not reliably
+    #     raise it -- and "AppleScript accepted it" is not evidence it worked. `set index to 1`
+    #     is the property that actually reorders windows, so do BOTH: index first (ordering),
+    #     then frontmost (activation), each guarded independently so one failing still lets the
+    #     other run.
+    #  2. GEOMETRY. No focus trick can help if the new window lands on top of the session:
+    #     Terminal places a new window at its default position, which is roughly where the
+    #     session already is. So POSITION it explicitly -- offset down-right of the previous
+    #     window so it sits visibly "off to the side / slightly behind" rather than covering
+    #     it. Read the previous bounds first so the offset is relative to the real session
+    #     window instead of a hardcoded screen coordinate.
+    #
+    # LA_WATCH_OFFSET_X / LA_WATCH_OFFSET_Y override the offset; LA_WATCH_NO_PLACE=1 disables
+    # placement entirely for anyone who prefers Terminal's own window management.
+    _off_x="${LA_WATCH_OFFSET_X:-60}"
+    _off_y="${LA_WATCH_OFFSET_Y:-60}"
+    _place=1
+    [ "${LA_WATCH_NO_PLACE:-0}" = "1" ] && _place=0
     osascript >/dev/null 2>&1 <<OSA
 tell application "Terminal"
   set _prev to missing value
+  set _pb to missing value
   try
     set _prev to id of front window
+    set _pb to bounds of front window
   end try
-  do script "$(printf '%s' "$_cmd" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  set _new to do script "$(printf '%s' "$_cmd" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  -- Move the watcher off the session. Offsetting from the PREVIOUS window's bounds keeps the
+  -- two visibly separate on any screen size or display arrangement.
+  if $_place is 1 and _pb is not missing value then
+    try
+      set _w to window of _new
+      set _l to (item 1 of _pb) + $_off_x
+      set _t to (item 2 of _pb) + $_off_y
+      set _r to (item 3 of _pb) + $_off_x
+      set _b to (item 4 of _pb) + $_off_y
+      set bounds of _w to {_l, _t, _r, _b}
+    end try
+  end if
+  -- Put the SESSION back in front. `index` is what actually reorders; `frontmost` activates.
   if _prev is not missing value then
+    try
+      set index of window id _prev to 1
+    end try
     try
       set frontmost of window id _prev to true
     end try
