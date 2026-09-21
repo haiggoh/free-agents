@@ -82,12 +82,40 @@ unknown_fallback=false
 # --- Source config-lib for role/alias resolution --------------------------
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 IDENTITY_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
-# shellcheck source=/dev/null
-. "$IDENTITY_DIR/../config/config-lib.sh"
-la_load_config || exit 1
+
+# config-lib.sh needs bash 4+: it uses `declare -A` and process substitution. macOS ships
+# /bin/bash 3.2, and `#!/usr/bin/env bash` picks THAT whenever Homebrew is not on PATH --
+# which is exactly what happens when a statusline or hook is spawned with a minimal
+# environment. Sourcing it under 3.2 printed a wall of `declare: -A: invalid option` and
+# then died on an unbound variable, emitting NO JSON while exiting 0: a silent fail-open
+# that made every consumer fall back to the SPOOFED model name.
+#
+# So re-exec under a real bash 4+ if one is reachable, and if none is, skip the registry
+# deliberately instead of crashing -- endpoint-only detection still yields a usable object.
+if [ -z "${LA_IDENTITY_REEXECED:-}" ] && [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  for _cand in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [ -x "$_cand" ]; then
+      export LA_IDENTITY_REEXECED=1
+      exec "$_cand" "$_s" "$@"
+    fi
+  done
+fi
+
+LA_REGISTRY_AVAILABLE=1
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  # No bash 4+ on this machine: say so ONCE on stderr and continue without the registry,
+  # rather than sourcing a library that cannot work here.
+  printf 'la-session-identity.sh: bash %s cannot load config-lib.sh (needs 4+); using endpoint-only detection\n' "${BASH_VERSINFO[0]:-?}" >&2
+  LA_REGISTRY_AVAILABLE=0
+  unknown_fallback=true
+else
+  # shellcheck source=/dev/null
+  . "$IDENTITY_DIR/../config/config-lib.sh"
+  la_load_config || exit 1
+fi
 
 # --- Resolve model alias if provided ---------------------------------------
-if [ -n "${MODEL_ALIAS:-}" ]; then
+if [ -n "${MODEL_ALIAS:-}" ] && [ "$LA_REGISTRY_AVAILABLE" = "1" ]; then
   _resolved="$(la_resolve_target "$MODEL_ALIAS" 2>/dev/null || true)"
   if [ -n "$_resolved" ] && [ "$_resolved" != "$MODEL_ALIAS" ]; then
     MODEL_ALIAS="$_resolved"
@@ -96,7 +124,12 @@ if [ -n "${MODEL_ALIAS:-}" ]; then
     # Override with registry values
     MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
     BACKEND="$LA_CUR_SERVE"
-    BACKEND_DECLARED="$LA_SERVE_DECLARED[$MODEL_ALIAS]"
+    # Braces are REQUIRED on an associative-array subscript: "$LA_SERVE_DECLARED[$alias]"
+    # parses as the SCALAR $LA_SERVE_DECLARED (unset) plus a literal "[alias]", so under
+    # `set -u` this line killed the script right after the lookup SUCCEEDED -- no JSON, exit
+    # 0, a silent fail-open that made every consumer show the spoofed model name. Default to
+    # the resolved backend so a registry without the declared map still emits valid JSON.
+    BACKEND_DECLARED="${LA_SERVE_DECLARED[$MODEL_ALIAS]:-$BACKEND}"
     LA_CUR_THINK="${LA_CUR_THINK:-false}"
     LA_CUR_EFFORT="${LA_CUR_EFFORT:-medium}"
     LA_CUR_ROLES="${LA_CUR_ROLES:-}"

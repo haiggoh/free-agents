@@ -572,6 +572,49 @@ else
     check 1 "Mutation test: wrong actual_model_id is caught by Test 1"
 fi
 
+# Test: a REGISTERED alias must actually resolve (the success branch of la_lookup).
+#
+# REGRESSION GUARD for a silent fail-open that 45 green tests missed: every other test in
+# this file passes an alias that is NOT in the registry (qwen38-27b-4bit, claude-opus-5,
+# unknown-model-xyz), so they all exercise the endpoint-only FALLBACK and the success branch
+# had zero coverage. Inside it, line 99 read "$LA_SERVE_DECLARED[$MODEL_ALIAS]" without
+# braces: bash parsed a scalar (unset) plus a literal [alias], so under `set -u` the script
+# DIED right after deciding the lookup succeeded -- emitting NO JSON while exiting 0. The
+# statusline then saw empty output, fell back, and displayed the spoofed model name.
+#
+# So assert on a genuinely registered alias, and assert JSON is actually PRODUCED -- an
+# exit status alone cannot see this class of defect.
+echo ""
+echo "--- Test: registered alias resolves and emits JSON (no silent fail-open) ---"
+registered_out="$TEST_WORKDIR/identity_registered.json"
+ANTHROPIC_BASE_URL="http://localhost:8003" \
+MODEL_ALIAS="qwen-3.6-operator" \
+LA_SESSION_LAUNCHER="launch-claude-agent.sh" \
+run_resolver "" "$registered_out"
+reg_result=$?
+check $reg_result "Resolver exits 0 for a registered alias"
+
+if [ -s "$registered_out" ] && python3 -c "import json,sys; json.load(open('$registered_out'))" 2>/dev/null; then
+    check 0 "Registered alias produces parseable JSON (not an empty silent exit)"
+    reg_kind=$(get_field "$registered_out" "session_kind")
+    reg_model=$(get_field "$registered_out" "actual_model_id")
+    reg_fallback=$(get_field "$registered_out" "unknown_fallback")
+    [ "$reg_kind" = "local" ] && check 0 "Registered alias on a loopback endpoint is session_kind=local" \
+        || { echo "  got session_kind=$reg_kind"; check 1 "Registered alias on a loopback endpoint is session_kind=local"; }
+    [ "$reg_model" = "qwen-3.6-operator" ] && check 0 "Registered alias reports its real model id" \
+        || { echo "  got actual_model_id=$reg_model"; check 1 "Registered alias reports its real model id"; }
+    # The whole point of resolving from the registry: it must NOT claim an unknown fallback.
+    [ "$reg_fallback" = "False" ] || [ "$reg_fallback" = "false" ] \
+        && check 0 "Registered alias does not set unknown_fallback" \
+        || { echo "  got unknown_fallback=$reg_fallback"; check 1 "Registered alias does not set unknown_fallback"; }
+else
+    echo "ERROR: registered alias produced NO parseable JSON (the fail-open bug)"
+    check 1 "Registered alias produces parseable JSON (not an empty silent exit)"
+    check 1 "Registered alias on a loopback endpoint is session_kind=local"
+    check 1 "Registered alias reports its real model id"
+    check 1 "Registered alias does not set unknown_fallback"
+fi
+
 # Summary
 echo ""
 echo "=== Test Summary ==="

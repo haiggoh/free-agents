@@ -36,7 +36,11 @@ class RemoteSessionTests(unittest.TestCase):
             (self.root / directory).mkdir()
         for rel in ('bin/csl', 'bin/remote-session.sh', 'bin/remote-keys.sh',
                     'config/remote-agents.sh', 'config/remote-agent-system-prompt.txt',
-                    'config/shared-agent-shipping-rules.txt'):
+                    'config/shared-agent-shipping-rules.txt',
+                    # emoji.sh is sourced unconditionally at remote-session.sh:52 and its
+                    # SESSION_EMOJI_* vars are read under `set -u`; without it in the
+                    # fixture every launch path aborts before doing anything.
+                    'config/emoji.sh'):
             shutil.copy2(ROOT / rel, self.root / rel)
         source = (self.root / 'bin/remote-session.sh').read_text()
         (self.root / 'bin/library.sh').write_text(source.split('# ---- argument parsing')[0])
@@ -672,6 +676,34 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
                              'top-level `local` at line %d: %s' % (lineno, line))
         result = self.run_cli('--dry-run', 'gemini-flash')
         self.assertNotIn('can only be used in a function', result.stdout + result.stderr)
+
+    def test_nvidia_quota_truth_replaces_unknown_in_launcher_output(self):
+        """NVIDIA's real constraint is stated, instead of a bare "unknown".
+
+        The provider publishes no per-account daily quota -- measured by the operator
+        2026-09-19 -- and the one real ceiling is ~40 requests per MINUTE. The roster
+        `tier` field stays `unknown` on purpose (an enum value in remote_provider_core;
+        `renewing_free` would be a promise NVIDIA does not make), so this asserts on
+        what the USER READS: the launcher's tier label and its cost note. Scoped to
+        NVIDIA -- Gemini must keep saying renewing_free and must NOT gain an rpm claim.
+        """
+        listing = self.run_cli('remote', '--list', '--include-trials', csl=True)
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertIn('40/min', listing.stdout,
+                      'the NVIDIA rows should state the rpm ceiling, not a bare unknown')
+
+        nvidia = self.run_cli('--dry-run', 'nvidia-nemotron-ultra')
+        self.assertEqual(nvidia.returncode, 0, nvidia.stderr)
+        self.assertIn('no known daily quota', nvidia.stdout)
+        self.assertIn('40 requests per minute', nvidia.stdout)
+        self.assertNotIn('do not assume free', nvidia.stdout,
+                         'NVIDIA should no longer fall to the generic unverified note')
+
+        # Provider-scoped: the measured NVIDIA fact must not leak onto other providers.
+        gemini = self.run_cli('--dry-run', 'gemini-flash')
+        self.assertEqual(gemini.returncode, 0, gemini.stderr)
+        self.assertIn('renewing free allocation', gemini.stdout)
+        self.assertNotIn('40 requests per minute', gemini.stdout)
 
 
 
