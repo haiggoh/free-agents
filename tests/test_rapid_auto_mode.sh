@@ -149,6 +149,7 @@ cp "$PROGRESS" "$SB/bin/omlx-progress.sh"
 cp "$HELPER" "$SB/bin/omlx-auto-prewarm.py"
 cp "$CONFIG_LIB" "$SB/config/config-lib.sh"
 cp "$PROMPT" "$SB/config/local-agent-system-prompt.txt"
+cp "$REPO/config/emoji.sh" "$SB/config/emoji.sh"
 printf '{}\n' >"$SB/home/.models/Qwen3.6-35B-A3B-4bit/config.json"
 
 cat >"$SB/bin/rapid-mlx" <<'RAPID_STUB'

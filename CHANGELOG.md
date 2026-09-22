@@ -2,6 +2,20 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.18.8] — 2026-09-23
+
+### Added — Devstral Small 2 qualification candidate, runbook & test sandbox fixture
+
+- `config/config.example.sh`: Added candidate configuration for Devstral Small 2 24B as leading local Auto Mode classifier candidate (dense/non-hybrid, trimmable cache with 98.86% reuse).
+- `docs/CLASSIFIER_QUALIFICATION_RUNBOOK.md`: Added qualification runbook for local model Auto Mode classifier testing against captured requests.
+- `tests/test_rapid_auto_mode.sh`: Ensure `emoji.sh` is copied into the test sandbox config directory during Rapid Auto Mode test runs.
+
+## [0.18.7] — 2026-09-22
+
+### Changed — Release metadata and version source of truth alignment
+
+- Synchronized release metadata and canonical version references across the repository.
+
 ## [0.18.6] — 2026-09-23
 
 ### Added — lowkey CLI dispatcher (v0.10.3) — automated test suite (Stage 3)

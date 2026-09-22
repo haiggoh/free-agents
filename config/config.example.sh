@@ -129,6 +129,13 @@ la_register qwen-3.8-thinking      Qwen3.8-27B-4bit                   mlx    qwe
 la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  mlx    qwen  deepseek_r1 true  ""           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
 la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false "$LA_SPOOF_UTILITY"      low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
 
+# --- Classifier qualification candidate (Auto Mode) --------------------------
+# Devstral Small 2 24B — leading candidate for local Auto Mode classifier.
+# Dense/non-hybrid → trimmable cache (98.86% reuse, LCP 37,808, 436 re-prefilled).
+# Needs Mistral alternation adapter (adjacent user messages merge).
+# UNCOMMENT when model is downloaded and you want to run qualification:
+# la_register devstral-small2        Devstral-Small-2-24B-4bit          rapid  mistral ""      false ""           high  ""  mlx-community/mistralai_Devstral-Small-2-24B-Instruct-2512-MLX-4Bit 15.1
+
 
 # Pinned acquisition revision for the recommended Ornith artifact.
 # config-lib loads this file inside la_load_config; -g keeps the optional
@@ -148,6 +155,7 @@ la_role reasoner  qwen-3.8-thinking     high   both      # MTP-backed thinking f
 la_role reasoner  deepseek-r1-architect max    both      # A/B reasoner — strongest local reasoner
 la_role validator deepseek-r1-architect max    dispatch  # independent review — dispatch (no tool_calls)
 la_role utility   llama-scout           low    dispatch  # cheap classification — dispatch-only
+# la_role utility   devstral-small2       medium dispatch  # Auto Mode classifier — dispatch-only (enable after qualification)
 # Optional per-launch Claude Code profile controls. Environment variables passed
 # to one launch override these defaults. Leave empty for existing behavior.
 LA_AGENT_PROMPT_FILE=""    # default: config/local-agent-system-prompt.txt

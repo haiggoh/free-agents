@@ -6,7 +6,7 @@ config/config.local.sh
 
 # runtime / backups / caches
 *.bak
-*.bak-*
+*.bak*
 __pycache__/
 *.pyc
 *.log
