@@ -4,17 +4,11 @@
 
 The dispatcher is included alongside the main `free-agents` tooling as a useful alternative launch surface. It is not required for the primary plugin workflow, but users who prefer terminal-based interaction can invoke it directly.
 
-## Requirements
+## Two interfaces
 
-The dispatcher expects these sibling components in the same `bin/` directory:
+`lowkey` provides both a **command-line interface** (for scripting, one-shot, and conversation) and an **interactive picker menu** (for visual model selection and settings).
 
-- `lowkey-cli.py`
-- `local-llm-hotswap.sh`
-- `librarian-dispatch.py`
-
-It also relies on the repository's model registry and local server configuration.
-
-## Quick start
+### Command-line interface
 
 One-shot prompt:
 
@@ -39,6 +33,24 @@ Choose a model:
 ```zsh
 lowkey --model qwen-3.8-operator --prompt "Summarize this change."
 ```
+
+### Interactive picker menu
+
+Launch without arguments to open the interactive picker:
+
+```zsh
+lowkey
+```
+
+The picker provides:
+- **Model selection** with roles, backend, thinking mode, and effort displayed
+- **Effort override** (low/medium/high/xhigh/max)
+- **Advanced settings submenu** (`+`) for progress mode, token limits, history/file size limits, session continuity
+- **Session management** — named session creation/resume
+- **Launch modes**: Conversation (`c`) or One-shot (`o`)
+- **CSL-style emoji labels** for each option
+
+The picker shows only **modified settings** in the main view (settings that deviate from defaults). Each advanced setting appears individually when changed.
 
 ## Conversation features
 

@@ -28,6 +28,17 @@ EMOJI_KEY="🔑"
 EMOJI_TOOLS="🔧"
 EMOJI_MODEL_CHOICE="⚙️ " # was 🔆 (sun) — changed to gear
 
+# Lowkey picker emojis (shared with csl for consistency) — LK_ prefix for lowkey namespace
+LK_EMOJI_MODEL="${SESSION_EMOJI_LOCAL}"        # links to SESSION_EMOJI_LOCAL (single source of truth)
+LK_EMOJI_EFFORT="⚙️ "
+LK_EMOJI_SESSION="💾"
+LK_EMOJI_CONVO="💬"
+LK_EMOJI_ONESHOT="🎯"                          # target/direct for single shot (was ⚡)
+LK_EMOJI_MORE="🔧"
+LK_EMOJI_TOGGLE_ON="✅"
+LK_EMOJI_TOGGLE_OFF="🚫"
+LK_EMOJI_BACK="🏠"
+
 # Backwards-compat: scripts that used to hardcode these can now source this file
 # and use the variables. Old hardcoded values:
 #   🌐  -> SESSION_EMOJI_FREE_API (now 📡)

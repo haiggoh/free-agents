@@ -306,6 +306,9 @@ if [ "$SERVE" = "rapid" ]; then
     wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$RAPID_PID" "$SPOOF_PRIMARY"
     tail -n 12 "$LOG_FILE"
     _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+    # For Rapid, only the spoof ID is served; alias/model_dir are NOT in /v1/models.
+    # Clients MUST use the spoof ID for dispatch. Emit DISPATCH_MODEL so callers know.
+    echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
     echo "SUCCESS_PORT=$TARGET_PORT"
     exit 0
 fi
@@ -318,6 +321,7 @@ if [ "$SERVE" = "mlx_lm" ]; then
     wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$MODEL_DIR"
     echo "ℹ️  $MODEL_NAME model id = $MODEL_DIR  (use as the 'model' field when dispatching)"
     _preflight_warmup "$TARGET_PORT" "$MODEL_DIR"
+    echo "DISPATCH_MODEL=$MODEL_DIR"
     echo "SUCCESS_PORT=$TARGET_PORT"; exit 0
 fi
 
@@ -382,4 +386,7 @@ nohup "$LA_VENV/vllm-mlx" serve --models-config "$TMP_CONFIG" --port "$TARGET_PO
 wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$SPOOF_PRIMARY"
 tail -n 8 "$LOG_FILE"
 _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+# For vllm-mlx, the alias is served alongside spoof IDs. Prefer alias for dispatch
+# so the model identity is visible in logs/metrics. Emit DISPATCH_MODEL for callers.
+echo "DISPATCH_MODEL=$MODEL_NAME"
 echo "SUCCESS_PORT=$TARGET_PORT"

@@ -2,6 +2,40 @@
 
 All entries below are planned or reconstructed milestones. They are not claims that the corresponding versions were formally released at the historical dates.
 
+## 0.10.1 — 2026-09-23 — Model alias resolution fix + picker refinements
+
+### Fixed — Model alias resolution for dispatch
+
+- **Root cause**: The dispatcher sent the model alias (e.g., `qwen-3.8-operator`) as the `model`
+  field in the payload, but backends serve different IDs:
+  - Rapid-MLX serves ONLY the spoofed Claude ID (`claude-opus-5`)
+  - vllm-mlx serves the alias, model dir, AND spoof IDs
+  - mlx_lm serves the model directory path
+  This caused `{"error": "The model \`qwen-3.8-operator\` does not exist. Available: claude-opus-5"}`.
+
+- **Solution**: `local-llm-hotswap.sh` now emits `DISPATCH_MODEL=<id>` telling callers which
+  ID to use for dispatch. `lowkey-cli.py` parses this (with `/v1/models` fallback for older
+  hotswap versions) and uses it for all dispatch calls. Session save/load still uses the
+  alias for validation.
+
+### Added — Interactive picker (`bin/lowkey`) UX improvements
+
+- Emoji placement: CSL-style — emoji after letter with proper spacing (e.g., `m) 🦾 Model`)
+- One-shot emoji changed from `⚡` to `🎯` (target/direct)
+- Advanced settings moved to submenu (`+`); only modified settings shown in main menu
+- Each advanced setting appears individually in main menu when modified (not as a batch)
+- Session continuity toggle (was "model mismatch") with clear label and state emojis:
+  - `✅ ALLOWED` — resume named session with different model
+  - `🚫 BLOCKED` — resume requires same model
+- Empty line between settings table and menu items for visual separation
+- All lowkey emojis centralized in `config/emoji.sh` with `LK_` prefix
+- `LK_EMOJI_MODEL` links to `SESSION_EMOJI_LOCAL` (single source of truth)
+
+### Changed
+
+- `config/emoji.sh`: Added `LK_` prefixed emoji constants for lowkey namespace
+- `bin/lowkey`: Uses shared emoji constants; improved menu rendering
+
 ## 0.10.0 — Rename to lowkey + default to qwen-3.8-operator (MTP-backed)
 
 Published as part of plugin release `0.17.0`. The rename reflects the single-model session use case

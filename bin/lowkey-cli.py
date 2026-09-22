@@ -32,6 +32,8 @@ import subprocess
 import tempfile
 import time
 import re
+import urllib.request
+import urllib.error
 
 # realpath, NOT abspath: this script is meant to be reached through a symlink on
 # PATH (e.g. ~/.local/bin/local-agent). abspath leaves the symlink unresolved, so
@@ -54,8 +56,8 @@ SESSION_DIR = os.path.expanduser(
 )
 
 
-def hotswap_get_port(model_alias: str) -> int:
-    """Run local-llm-hotswap.sh to ensure model server is active and get port."""
+def hotswap_get_port(model_alias: str) -> tuple[int, str]:
+    """Run local-llm-hotswap.sh to ensure model server is active and get port + dispatch model ID."""
     if not os.path.isfile(HOTSWAP_SCRIPT):
         raise FileNotFoundError(f"Hotswap script not found: {HOTSWAP_SCRIPT}")
 
@@ -70,24 +72,58 @@ def hotswap_get_port(model_alias: str) -> int:
     # The hotswap script's contract is a line reading `SUCCESS_PORT=<port>`; it is
     # the LAST such line that reflects the port actually landed on. Accept either
     # `=` or whitespace so a future format change does not break this silently.
-    matches = re.findall(r"SUCCESS_PORT\s*[=:]?\s*(\d+)", res.stdout)
-    if matches:
-        return int(matches[-1])
+    port_matches = re.findall(r"SUCCESS_PORT\s*[=:]?\s*(\d+)", res.stdout)
+    if not port_matches:
+        # No contract line means the port is unknown. Guessing is worse than failing:
+        # the model may have landed on any free port in the scanned range, and
+        # defaulting to 8000 dispatches to whatever unrelated model is sitting there
+        # — a wrong answer that looks like a right one. Fail loudly instead.
+        print(
+            f"[-] Could not determine the port for '{model_alias}': no SUCCESS_PORT "
+            "line in the hotswap output. Refusing to guess, because dispatching to "
+            "the wrong port silently returns another model's answer.",
+            file=sys.stderr,
+        )
+        if res.stdout.strip():
+            print("--- hotswap output ---", file=sys.stderr)
+            print(res.stdout.strip(), file=sys.stderr)
+        sys.exit(1)
 
-    # No contract line means the port is unknown. Guessing is worse than failing:
-    # the model may have landed on any free port in the scanned range, and
-    # defaulting to 8000 dispatches to whatever unrelated model is sitting there
-    # — a wrong answer that looks like a right one. Fail loudly instead.
-    print(
-        f"[-] Could not determine the port for '{model_alias}': no SUCCESS_PORT "
-        "line in the hotswap output. Refusing to guess, because dispatching to "
-        "the wrong port silently returns another model's answer.",
-        file=sys.stderr,
-    )
-    if res.stdout.strip():
-        print("--- hotswap output ---", file=sys.stderr)
-        print(res.stdout.strip(), file=sys.stderr)
-    sys.exit(1)
+    port = int(port_matches[-1])
+
+    # Parse DISPATCH_MODEL from hotswap output (new contract: tells caller which model
+    # ID to use for dispatch — alias for vllm-mlx, spoof ID for Rapid, model_dir for mlx_lm)
+    dispatch_matches = re.findall(r"DISPATCH_MODEL\s*[=:]?\s*(\S+)", res.stdout)
+    if dispatch_matches:
+        dispatch_model = dispatch_matches[-1]
+        print(f"[i] Hotswap reports dispatch model: {dispatch_model}", file=sys.stderr)
+        return port, dispatch_model
+
+    # Fallback for older hotswap versions without DISPATCH_MODEL: query /v1/models
+    print(f"[!] Hotswap output lacks DISPATCH_MODEL; querying /v1/models as fallback", file=sys.stderr)
+    served_model_id = get_served_model_id(port, model_alias)
+    return port, served_model_id
+
+
+def get_served_model_id(port: int, model_alias: str) -> str:
+    """Query /v1/models to get the actual model ID the server is serving (fallback)."""
+    url = f"http://localhost:{port}/v1/models"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "lowkey-cli"})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.load(response)
+            models = data.get("data", [])
+            if models:
+                model_id = models[0].get("id", "")
+                if model_id:
+                    print(f"[i] Server on port {port} serves model (via /v1/models): {model_id}", file=sys.stderr)
+                    return model_id
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
+        print(f"[!] Could not query /v1/models on port {port}: {exc}", file=sys.stderr)
+
+    # Final fallback: use the alias
+    print(f"[!] Could not determine served model ID, falling back to alias: {model_alias}", file=sys.stderr)
+    return model_alias
 
 
 def read_files_context(file_paths: list, max_file_chars: int = 48000) -> str:
@@ -772,6 +808,17 @@ def main():
     PROGRESS_MODE = args.progress
     PROGRESS_LABEL = assistant_label
 
+    # Default to conversation mode if no arguments provided (no --prompt, no --convo, no other action flags)
+    # This allows `lowkey` with no args to launch directly into convo mode
+    no_args_provided = (
+        not args.prompt
+        and not args.convo
+        and not args.files
+        and not args.session
+    )
+    if no_args_provided:
+        args.convo = True
+
     # Validate arguments
     if not args.convo and not args.prompt:
         parser.error("--prompt is required unless --convo is specified.")
@@ -789,8 +836,8 @@ def main():
             parser.error(str(exc))
 
     print(f"[*] Hotswapping local model '{args.model}'...", file=sys.stderr)
-    port = hotswap_get_port(args.model)
-    print(f"[✓] Local model ready on port {port}", file=sys.stderr)
+    port, served_model_id = hotswap_get_port(args.model)
+    print(f"[✓] Local model ready on port {port} (serves: {served_model_id})", file=sys.stderr)
 
     # --- CONVOLUTION MODE ---
     if args.convo:
@@ -870,7 +917,7 @@ def main():
 
             response = dispatch_messages(
                 port,
-                args.model,
+                served_model_id,
                 initial_messages,
                 args.max_tokens,
             )
@@ -1016,7 +1063,7 @@ def main():
                 rolling_summary,
                 args.max_history_chars,
                 port,
-                args.model,
+                served_model_id,
                 args.max_tokens,
             )
 
@@ -1053,7 +1100,7 @@ def main():
 
             response = dispatch_messages(
                 port,
-                args.model,
+                served_model_id,
                 current_messages,
                 args.max_tokens,
             )
@@ -1095,7 +1142,7 @@ def main():
                 file=sys.stderr,
             )
         
-        output_text = run_single_prompt(port, args.model, prompt_text, args.max_tokens)
+        output_text = run_single_prompt(port, served_model_id, prompt_text, args.max_tokens)
         
         if output_text:
             print(output_text)

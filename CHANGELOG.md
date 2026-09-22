@@ -2,22 +2,40 @@
 
 All notable changes to `free-agents` are documented in this file.
 
-## [0.18.3] — 2026-09-22
+## [0.18.4] — 2026-09-23
 
-### Added — lowkey CLI dispatcher (v0.10.0)
+### Fixed — lowkey CLI dispatcher (v0.10.1) — model alias resolution and dispatch model ID contract
 
-- `bin/lowkey-cli.py` (renamed from `local-agent-dispatch.py`): universal local model dispatcher with `lk`/`lowkey` aliases
-- Default model: `qwen-3.8-operator` (MTP-backed, served via Rapid-MLX)
-- Removed `--role` abstraction (irrelevant for single-model sessions)
-- Interactive conversation mode, multiline `:paste`/`:end`, rolling summaries, named sessions
-- Compact/verbose/quiet progress modes, file attachments with size limits
-- All 92 tests passing (47 framework-free unit + 45 state tests)
+- `bin/lowkey-cli.py`: Fixed dispatch to use the correct model ID for each backend.
+  Previously sent the alias (e.g., `qwen-3.8-operator`) as the `model` field, but Rapid-MLX
+  only serves the spoofed Claude ID (`claude-opus-5`), while vllm-mlx serves the alias.
+  Now queries `DISPATCH_MODEL` from hotswap output (new contract) with `/v1/models` fallback.
+- `bin/local-llm-hotswap.sh`: Added `DISPATCH_MODEL` output contract.
+  - Rapid-MLX: emits `DISPATCH_MODEL=claude-opus-5` (spoof ID, only served model)
+  - vllm-mlx: emits `DISPATCH_MODEL=qwen-3.8-operator` (alias, served alongside spoof IDs)
+  - mlx_lm: emits `DISPATCH_MODEL=<model_dir>` (model directory path)
+  This allows callers to dispatch correctly without guessing which ID the backend serves.
+
+### Added — lowkey interactive picker (bin/lowkey) refinements
+
+- Emoji placement: CSL-style emojis after the letter with proper spacing (e.g., `m) 🦾 Model`)
+- One-shot emoji changed from `⚡` to `🎯` (target/direct)
+- Advanced settings in submenu; only modified (non-default) settings shown in main menu
+- Each advanced setting (Progress, Max tokens, Max history, Max file, Session continuity)
+  now appears individually in main menu only when modified
+- Session continuity toggle (was "model mismatch") with state emojis (✅ ALLOWED / 🚫 BLOCKED)
+- Empty line between settings table and menu items for visual separation
+- All lowkey emojis centralized in `config/emoji.sh` with `LK_` prefix
+- `LK_EMOJI_MODEL` links to `SESSION_EMOJI_LOCAL` (single source of truth)
 
 ### Changed
 
-- `install/setup-shortcuts.sh`: installs `lk`/`lowkey` aliases instead of `local-dispatch`
-- `bin/agent-fallback.py`, `bin/copilot_local_proxy.py`: updated to use `lowkey-cli.py`
-- Documentation moved to `docs/lowkey-cli/` (README, CHANGELOG, RELEASE-PLAN)
+- `config/emoji.sh`: Added `LK_` prefixed emoji constants for lowkey namespace
+- `bin/lowkey`: Updated to use shared emoji constants; improved menu rendering
+
+## [0.18.3] — 2026-09-22
+
+### Added — lowkey CLI dispatcher (v0.10.0)
 
 ## [0.18.2] — 2026-09-21
 

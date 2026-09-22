@@ -1,0 +1,427 @@
+#!/usr/bin/env bash
+# lowkey — CSL-style front-end for lowkey-cli.py (local MLX model dispatcher)
+#
+#   lowkey                          -> interactive conversation mode (no args = convo)
+#   lowkey <model>                  -> conversation mode with specific model
+#   lowkey --convo [model]          -> explicit conversation mode
+#   lowkey --prompt "text" [opts]   -> single-shot dispatch
+#   lowkey picker                   -> interactive model picker menu
+#   lowkey roles                    -> show registered model roles
+#   lowkey --help                   -> show help
+#
+# This wrapper provides a CSL-style interface over lowkey-cli.py.
+# Models, roles, and defaults come from the local-agents config overlay.
+
+set -uo pipefail
+
+# Resolve symlinks so `lowkey` on PATH (a symlink into this repo) finds config/scripts
+_s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
+LOWKEY_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
+LOWKEY_CLI="${LOWKEY_DIR}/lowkey-cli.py"
+HOTSWAP="${LOWKEY_DIR}/local-llm-hotswap.sh"
+
+# shellcheck source=/dev/null
+. "${LOWKEY_DIR}/../config/config-lib.sh"
+# Load shared emoji constants (single source of truth)
+# shellcheck source=../config/emoji.sh
+. "${LOWKEY_DIR}/../config/emoji.sh"
+
+# Use LK_ prefixed emojis from shared config (emoji.sh)
+# LK_EMOJI_MODEL links back to SESSION_EMOJI_LOCAL (single source of truth)
+la_load_config || exit 1
+
+__version__="0.10.0"
+
+# Default model (from config or fallback)
+DEFAULT_MODEL="${LA_DEFAULT_MODEL:-qwen-3.8-operator}"
+
+# Session-capable models only — dispatch-only tiers have no Anthropic /v1/messages surface
+SESSION_ALIASES=()
+for a in "${LA_ALIASES[@]}"; do
+  case "${LA_SERVE[$a]:-}" in
+    rapid|vllm)
+      la_on_disk "$a" && SESSION_ALIASES+=("$a")
+      ;;
+    *) ;;
+  esac
+done
+
+# Build model labels for picker
+MODEL_LABELS=()
+for a in "${SESSION_ALIASES[@]}"; do
+  roles="$(la_roles_for_alias "$a")"
+  [ -n "$roles" ] || roles="untagged"
+  MODEL_LABELS+=("$(
+    printf '%-30s backend=%-20s thinking=%-5s effort=%-6s roles=%s' \
+      "$a" \
+      "$(la_serve_display "$a")" \
+      "${LA_THINK[$a]:-?}" \
+      "${LA_EFFORT[$a]:-?}" \
+      "$roles"
+  )")
+done
+
+# Box drawing constants (same as CSL)
+BOX_INNER=62
+
+_box() {
+  LC_ALL=en_US.UTF-8 python3 -c '
+import sys, unicodedata
+
+INNER = int(sys.argv[1])
+kind = sys.argv[2]
+rows = sys.argv[3:]
+
+
+def width(text):
+    """Display columns. An emoji is one character but two columns.
+    Several emoji are base glyph + U+FE0F VARIATION SELECTOR-16 (no width)."""
+    total = 0
+    for char in text:
+        if char == "️" or unicodedata.combining(char):
+            continue
+        if unicodedata.east_asian_width(char) in ("W", "F") or ord(char) >= 0x1F300:
+            total += 2
+        else:
+            total += 1
+    return total
+
+
+if kind in ("top", "mid", "bottom"):
+    left, right = {"top": "╔╗", "mid": "╠╣", "bottom": "╚╝"}[kind]
+    print(left + "═" * INNER + right)
+else:
+    def truncate(text):
+        if width(text) <= INNER:
+            return text
+        out = ""
+        for char in text:
+            if width(out + char) > INNER - 1:
+                break
+            out += char
+        return out + "…"
+
+    for text in rows:
+        if kind == "center":
+            text = " " * max(0, (INNER - width(text)) // 2) + text
+        text = truncate(text)
+        print("║" + text + " " * max(0, INNER - width(text)) + "║")
+' "$BOX_INNER" "$@"
+}
+
+_pick_from() {
+  local prompt="$1" def="$2"; shift 2
+  local n=$#
+  local i=1
+  for it in "$@"; do printf "  %d) %s\n" "$i" "$it" >&2; i=$((i+1)); done
+  local c; printf "%s [%s]: " "$prompt" "$def" >&2; read -r c; c="${c:-$def}"
+  if ! [[ "$c" =~ ^[0-9]+$ ]] || [ "$c" -lt 1 ] || [ "$c" -gt "$n" ]; then echo "0"; return; fi
+  echo "$c"
+}
+
+# Show help
+_show_help() {
+  cat <<EOF
+lowkey — local MLX model dispatcher (CSL-style wrapper)
+
+Usage:
+    lowkey                          Start interactive conversation with default model
+    lowkey <model-alias>            Start interactive conversation with specific model
+    lowkey --convo [model]          Explicit conversation mode
+    lowkey --prompt "TEXT" [opts]   Single-shot dispatch
+    lowkey picker                   Interactive model picker menu
+    lowkey roles                    Show registered model roles
+    lowkey --help                   Show this help
+
+Conversation Mode Commands (inside lowkey):
+    :paste                          Multiline input mode (end with :end)
+    :file PATH                      Attach a text file as context
+    :context                        Show context usage statistics
+    :summary                        Show rolling summary of compacted history
+    :session                        Show session save status
+    :save                           Explicitly save named session
+    exit, quit, q                   End conversation
+
+Single-Shot Options (passed through to lowkey-cli.py):
+    --model ALIAS                   Model alias (default: qwen-3.8-operator)
+    --prompt TEXT                   Task prompt (required for single-shot)
+    --files PATH...                 Optional file paths to include as context
+    --max-tokens N                  Max tokens to generate (default: 4096)
+    --max-history-chars N           History compaction threshold (default: 48000, 0=unlimited)
+    --max-file-chars N              Max chars per attached file (default: 48000, 0=unlimited)
+    --session NAME                  Create/resume named conversation session
+    --allow-session-model-mismatch  Resume session with different model
+    --progress MODE                 Progress display: compact|verbose|quiet (default: compact)
+
+Examples:
+    lowkey                                      # Start convo with default model
+    lowkey qwen-3.8-operator                    # Start convo with specific model
+    lowkey --prompt "Explain this" --files a.py # Single shot
+    lowkey --model deepseek-r1-architect --prompt "Review this plan"
+    lowkey picker                               # Interactive model picker
+    lowkey roles                                # Show model roles
+EOF
+}
+
+# Show model roles
+_show_roles() {
+  echo
+  _box top
+  _box center "${SESSION_EMOJI_LOCAL} Lowkey Model Roles"
+  _box mid
+  for a in "${SESSION_ALIASES[@]}"; do
+    roles="$(la_roles_for_alias "$a")"
+    [ -n "$roles" ] || roles="untagged"
+    _box row "$(printf '  %-30s → %s' "$a" "$roles")"
+  done
+  _box bottom
+  echo
+}
+
+# Interactive model picker — minimalist UI, full model list only on demand
+# Advanced settings in a submenu; customized non-defaults shown in main view
+_run_picker() {
+  local selected_model=""
+  local selected_effort="xhigh"
+  local progress_mode="compact"
+  local max_tokens=4096
+  local max_history_chars=48000
+  local max_file_chars=48000
+  local session_name=""
+  local allow_model_mismatch=true   # DEFAULT: ALLOWED
+  local extra_args=()
+  local in_submenu=false
+
+  # Helper: check if a specific setting deviates from default
+  _setting_changed_progress() { [ "$progress_mode" != "compact" ]; }
+  _setting_changed_tokens() { [ "$max_tokens" -ne 4096 ]; }
+  _setting_changed_history() { [ "$max_history_chars" -ne 48000 ]; }
+  _setting_changed_file() { [ "$max_file_chars" -ne 48000 ]; }
+  _setting_changed_mismatch() { [ "$allow_model_mismatch" = false ]; }
+
+  # Helper: render main menu
+  _render_main() {
+    echo
+    _box top
+    _box center "lowkey cli - the minimalist local LLM chat"
+    _box mid
+    _box row "$(printf '  %d local inference models on disk %s' "${#SESSION_ALIASES[@]}" "$LK_EMOJI_MODEL")"
+    _box mid
+    # Show current settings (compact view)
+    local model_display="${selected_model:-${DEFAULT_MODEL} (default)}"
+    _box row "$(printf '  Model:      %s' "$model_display")"
+    _box row "$(printf '  Effort:     %s' "${selected_effort}")"
+    # Show customized advanced settings individually if modified
+    _setting_changed_progress && _box row "$(printf '  Progress:   %s' "$progress_mode")"
+    _setting_changed_tokens && _box row "$(printf '  Max tokens: %d' "$max_tokens")"
+    _setting_changed_history && _box row "$(printf '  Max hist:   %s' "$([ $max_history_chars -eq 0 ] && echo unlimited || echo $max_history_chars)")"
+    _setting_changed_file && _box row "$(printf '  Max file:   %s' "$([ $max_file_chars -eq 0 ] && echo unlimited || echo $max_file_chars)")"
+    _setting_changed_mismatch && _box row "$(printf '  Session continuity: model swap %s %s' "blocked" "$LK_EMOJI_TOGGLE_OFF")"
+    if [ -n "$session_name" ]; then
+      _box row "$(printf '  Session:    %s' "$session_name")"
+    fi
+    _box mid
+    echo
+    echo "  m) ${LK_EMOJI_MODEL} Model              — choose from list (${#SESSION_ALIASES[@]} models)"
+    echo "  e) ${LK_EMOJI_EFFORT} Effort              — set reasoning effort (low/medium/high/xhigh/max)"
+    echo "  +) ${LK_EMOJI_MORE} More                — progress, tokens, history, file size, session continuity"
+    echo "  s) ${LK_EMOJI_SESSION} Session            — set session name (enables save/resume)"
+    echo "  c) ${LK_EMOJI_CONVO} Convo               — launch conversation mode with current settings"
+    echo "  o) ${LK_EMOJI_ONESHOT} One-shot            — run single prompt with current settings"
+    echo "  b) ${LK_EMOJI_BACK} Back                — return to previous menu"
+    echo "  q) Quit"
+    echo
+  }
+
+  # Helper: render submenu
+  _render_submenu() {
+    echo
+    _box top
+    _box center "Advanced Options"
+    _box mid
+    _box row "$(printf '  Progress:   %s' "$progress_mode")"
+    _box row "$(printf '  Max tokens: %d' "$max_tokens")"
+    _box row "$(printf '  Max hist:   %s' "$([ $max_history_chars -eq 0 ] && echo unlimited || echo $max_history_chars)")"
+    _box row "$(printf '  Max file:   %s' "$([ $max_file_chars -eq 0 ] && echo unlimited || echo $max_file_chars)")"
+    # Session continuity toggle with current state
+    if [ "$allow_model_mismatch" = true ]; then
+      _box row "$(printf '  Session continuity: model swap %s %s' "ALLOWED" "$LK_EMOJI_TOGGLE_ON")"
+    else
+      _box row "$(printf '  Session continuity: model swap %s %s' "BLOCKED" "$LK_EMOJI_TOGGLE_OFF")"
+    fi
+    _box mid
+    echo
+    echo "  p) Progress           — compact/verbose/quiet"
+    echo "  t) Tokens             — set max tokens"
+    echo "  h) History            — set max history chars (0=unlimited)"
+    echo "  f) File size          — set max file chars (0=unlimited)"
+    echo "  a) Session continuity — toggle model swap blocked/allowed"
+    echo "  b) ${LK_EMOJI_BACK} Back                  — return to main menu (settings preserved)"
+    echo "  q) Quit"
+    echo
+  }
+
+  while :; do
+    if [ "$in_submenu" = true ]; then
+      _render_submenu
+      printf "Selection [b]: "; read -r sel; sel="${sel:-b}"
+      case "$sel" in
+        q|Q) return 1 ;;
+        b|B) in_submenu=false; continue ;;
+        p|P)
+          echo >&2
+          PROGRESS_OPTS=(compact verbose quiet)
+          pi=$(_pick_from "Progress" 1 "${PROGRESS_OPTS[@]}")
+          [ "$pi" = "0" ] && { echo "Invalid selection."; continue; }
+          progress_mode="${PROGRESS_OPTS[$((pi-1))]}"
+          continue ;;
+        t|T)
+          echo >&2
+          read -r -p "Max tokens [${max_tokens}]: " mt
+          mt="${mt:-$max_tokens}"
+          if [[ "$mt" =~ ^[0-9]+$ ]]; then
+            max_tokens=$mt
+          else
+            echo "Invalid number."
+          fi
+          continue ;;
+        h|H)
+          echo >&2
+          read -r -p "Max history chars (0=unlimited) [${max_history_chars}]: " mh
+          mh="${mh:-$max_history_chars}"
+          if [[ "$mh" =~ ^[0-9]+$ ]]; then
+            max_history_chars=$mh
+          else
+            echo "Invalid number."
+          fi
+          continue ;;
+        f|F)
+          echo >&2
+          read -r -p "Max file chars (0=unlimited) [${max_file_chars}]: " mf
+          mf="${mf:-$max_file_chars}"
+          if [[ "$mf" =~ ^[0-9]+$ ]]; then
+            max_file_chars=$mf
+          else
+            echo "Invalid number."
+          fi
+          continue ;;
+        a|A)
+          if [ "$allow_model_mismatch" = true ]; then
+            allow_model_mismatch=false
+            echo "[i] Session continuity: model swap now BLOCKED — resume named session requires same model"
+          else
+            allow_model_mismatch=true
+            echo "[i] Session continuity: model swap now ALLOWED — resume named session with different model"
+          fi
+          continue ;;
+        *) echo "Invalid selection."; continue ;;
+      esac
+    else
+      _render_main
+      printf "Selection [c]: "; read -r sel; sel="${sel:-c}"
+      case "$sel" in
+        q|Q) return 1 ;;
+        b|B) return 0 ;;
+        m|M)
+          echo >&2
+          echo "Models (on disk, local inference):" >&2
+          mi=$(_pick_from "Model" 1 "${MODEL_LABELS[@]}")
+          [ "$mi" = "0" ] && { echo "Invalid selection."; continue; }
+          selected_model="${SESSION_ALIASES[$((mi-1))]}"
+          continue ;;
+        e|E)
+          echo >&2
+          EFFORTS=(low medium high xhigh max)
+          echo "Effort — higher reasons more and takes longer; lower answers sooner:" >&2
+          ei=$(_pick_from "Effort" 4 "${EFFORTS[@]}")  # default to xhigh (index 4)
+          [ "$ei" = "0" ] && { echo "Invalid selection."; continue; }
+          selected_effort="${EFFORTS[$((ei-1))]}"
+          continue ;;
+        "+"|"=")
+          in_submenu=true
+          continue ;;
+        s|S)
+          echo >&2
+          read -r -p "Session name (empty to disable) [${session_name:-}]: " sn
+          session_name="$sn"
+          continue ;;
+        c|C)
+          # Launch conversation mode
+          model="${selected_model:-$DEFAULT_MODEL}"
+          extra_args=(--convo --model "$model" --max-tokens "$max_tokens" --progress "$progress_mode" --max-history-chars "$max_history_chars" --max-file-chars "$max_file_chars")
+          [ -n "$session_name" ] && extra_args+=(--session "$session_name")
+          [ "$allow_model_mismatch" = true ] && extra_args+=(--allow-session-model-mismatch)
+          exec python3 "$LOWKEY_CLI" "${extra_args[@]}"
+          ;;
+        o|O)
+          # One-shot mode - need prompt
+          echo >&2
+          read -r -p "Prompt: " prompt
+          [ -z "$prompt" ] && { echo "Prompt required."; continue; }
+          model="${selected_model:-$DEFAULT_MODEL}"
+          extra_args=(--model "$model" --prompt "$prompt" --max-tokens "$max_tokens" --progress "$progress_mode" --max-file-chars "$max_file_chars")
+          exec python3 "$LOWKEY_CLI" "${extra_args[@]}"
+          ;;
+        *)
+          if [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le "${#SESSION_ALIASES[@]}" ]; then
+            selected_model="${SESSION_ALIASES[$((sel-1))]}"
+            continue
+          fi
+          echo "Invalid selection."
+          continue ;;
+      esac
+    fi
+  done
+}
+
+# Main entry point
+main() {
+  # No arguments = show interactive picker menu (CSL-style)
+  if [ $# -eq 0 ]; then
+    _run_picker
+    exit $?
+  fi
+
+  # Handle special subcommands first
+  case "${1:-}" in
+    --help|-h)
+      _show_help
+      exit 0
+      ;;
+    roles)
+      _show_roles
+      exit 0
+      ;;
+    picker)
+      _run_picker
+      exit $?
+      ;;
+    --version)
+      echo "lowkey ${__version__} (lowkey-cli.py $(python3 "$LOWKEY_CLI" --version 2>/dev/null || echo "unknown"))"
+      exit 0
+      ;;
+  esac
+
+  # If first arg looks like a model alias (known model), treat as --convo --model
+  if [[ " ${SESSION_ALIASES[*]} " =~ " ${1} " ]]; then
+    model="$1"
+    shift
+    exec python3 "$LOWKEY_CLI" --convo --model "$model" "$@"
+  fi
+
+  # If first arg is --convo, pass through (allow optional model as next arg)
+  if [ "${1:-}" = "--convo" ]; then
+    shift
+    model="${DEFAULT_MODEL}"
+    if [ $# -gt 0 ] && [[ " ${SESSION_ALIASES[*]} " =~ " ${1} " ]]; then
+      model="$1"
+      shift
+    fi
+    exec python3 "$LOWKEY_CLI" --convo --model "$model" "$@"
+  fi
+
+  # Otherwise pass all arguments through to lowkey-cli.py
+  exec python3 "$LOWKEY_CLI" "$@"
+}
+
+main "$@"
