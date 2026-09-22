@@ -44,7 +44,7 @@ BIN_DIR = os.path.dirname(os.path.realpath(__file__))
 HOTSWAP_SCRIPT = os.path.join(BIN_DIR, "local-llm-hotswap.sh")
 LIBRARIAN_SCRIPT = os.path.join(BIN_DIR, "librarian-dispatch.py")
 
-__version__ = "0.10.0"
+__version__ = "0.10.2"
 
 PROGRESS_MODE = "compact"
 PROGRESS_LABEL = "lowkey"
@@ -366,38 +366,99 @@ def read_conversation_input() -> str:
 
     Normal input is submitted when Enter is pressed.
     Enter :paste to collect multiline input. End it with :end.
+
+    Paste mode uses raw stdin (when on a TTY) to prevent terminal echo
+    interleaving with any concurrent model output. A clear visual marker
+    indicates paste mode. Falls back to line-buffered mode for non-TTY
+    (e.g., tests, pipes).
     """
     first_line = input("You> ")
 
     if first_line.strip() != ":paste":
         return first_line
 
-    print(
-        "Paste multiline text now. Finish with :end on its own line "
-        "(or append :end to the final pasted line)."
-    )
+    # --- PASTE MODE ---
+    # Check if stdin is a TTY (interactive terminal) for raw mode
+    is_tty = sys.stdin.isatty()
+
+    # Print a clear mode banner so the user knows we're in paste collection
+    print("\n" + "─" * 60, file=sys.stderr)
+    print("📋 PASTE MODE — type/paste content, end with :end on its own line", file=sys.stderr)
+    print("─" * 60, file=sys.stderr)
+
     lines = []
+    paste_ended = False
 
-    while True:
-        line = sys.stdin.readline()
+    if is_tty:
+        # Use raw stdin reading to avoid terminal echo during paste
+        import termios
+        import tty
 
-        if line == "":
-            raise EOFError
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            # Set raw mode: no echo, no canonical processing
+            tty.setraw(fd)
 
-        line = line.rstrip("\r\n")
+            while True:
+                line = sys.stdin.readline()
 
-        if line == ":end":
-            break
+                if line == "":
+                    raise EOFError
 
-        # Handle a clipboard whose final line has no trailing newline,
-        # causing the user-entered terminator to arrive as "last line:end".
-        if line.endswith(":end"):
-            final_line = line[:-len(":end")]
-            if final_line:
-                lines.append(final_line)
-            break
+                line = line.rstrip("\r\n")
 
-        lines.append(line)
+                if line == ":end":
+                    paste_ended = True
+                    break
+
+                # Handle a clipboard whose final line has no trailing newline,
+                # causing the user-entered terminator to arrive as "last line:end".
+                if line.endswith(":end"):
+                    final_line = line[:-len(":end")]
+                    if final_line:
+                        lines.append(final_line)
+                    paste_ended = True
+                    break
+
+                lines.append(line)
+
+        finally:
+            # Always restore terminal settings
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    else:
+        # Non-TTY fallback (tests, pipes): use line-buffered reading
+        while True:
+            line = sys.stdin.readline()
+
+            if line == "":
+                raise EOFError
+
+            line = line.rstrip("\r\n")
+
+            if line == ":end":
+                paste_ended = True
+                break
+
+            # Handle a clipboard whose final line has no trailing newline
+            if line.endswith(":end"):
+                final_line = line[:-len(":end")]
+                if final_line:
+                    lines.append(final_line)
+                paste_ended = True
+                break
+
+            lines.append(line)
+
+    # Clear visual confirmation that paste mode ended
+    if paste_ended:
+        print("─" * 60, file=sys.stderr)
+        print("✅ Paste collected ({} lines). Dispatching...".format(len(lines)), file=sys.stderr)
+        print("─" * 60 + "\n", file=sys.stderr)
+    else:
+        print("─" * 60, file=sys.stderr)
+        print("⚠️  Paste ended without :end terminator", file=sys.stderr)
+        print("─" * 60 + "\n", file=sys.stderr)
 
     return "\n".join(lines)
 

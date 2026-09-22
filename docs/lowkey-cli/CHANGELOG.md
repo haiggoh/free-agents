@@ -2,9 +2,30 @@
 
 All entries below are planned or reconstructed milestones. They are not claims that the corresponding versions were formally released at the historical dates.
 
-## 0.10.1 — 2026-09-23 — Model alias resolution fix + picker refinements
+## 0.10.2 — 2026-09-23 — Paste-burst UX fix + picker refinements
 
-### Fixed — Model alias resolution for dispatch
+### Fixed — Paste-burst terminal presentation (Stage 2)
+
+- **Root cause**: During `:paste` mode, terminal echoed each pasted line while model output
+  from the previous turn could still be streaming, creating visually interleaved input/output
+  that was confusing even though collection worked correctly.
+
+- **Solution**: `read_conversation_input()` now uses raw stdin (`termios`/`tty`) on TTY to
+  suppress terminal echo during paste collection, with a clear visual mode banner:
+  ```
+  ────────────────────────────────────────────────────────────
+  📋 PASTE MODE — type/paste content, end with :end on its own line
+  ────────────────────────────────────────────────────────────
+  ```
+  On `:end`, a confirmation banner shows line count before dispatch:
+  ```
+  ────────────────────────────────────────────────────────────
+  ✅ Paste collected (N lines). Dispatching...
+  ────────────────────────────────────────────────────────────
+  ```
+  Non-TTY (tests, pipes) falls back to line-buffered mode automatically.
+
+### Fixed — Model alias resolution for dispatch (from 0.10.1)
 
 - **Root cause**: The dispatcher sent the model alias (e.g., `qwen-3.8-operator`) as the `model`
   field in the payload, but backends serve different IDs:
@@ -18,7 +39,7 @@ All entries below are planned or reconstructed milestones. They are not claims t
   hotswap versions) and uses it for all dispatch calls. Session save/load still uses the
   alias for validation.
 
-### Added — Interactive picker (`bin/lowkey`) UX improvements
+### Added — Interactive picker (`bin/lowkey`) UX improvements (from 0.10.1)
 
 - Emoji placement: CSL-style — emoji after letter with proper spacing (e.g., `m) 🦾 Model`)
 - One-shot emoji changed from `⚡` to `🎯` (target/direct)
@@ -35,6 +56,7 @@ All entries below are planned or reconstructed milestones. They are not claims t
 
 - `config/emoji.sh`: Added `LK_` prefixed emoji constants for lowkey namespace
 - `bin/lowkey`: Uses shared emoji constants; improved menu rendering
+- `bin/lowkey-cli.py`: Paste mode now uses raw TTY mode with visual banners
 
 ## 0.10.0 — Rename to lowkey + default to qwen-3.8-operator (MTP-backed)
 

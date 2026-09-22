@@ -2,7 +2,16 @@
 
 All notable changes to `free-agents` are documented in this file.
 
-## [0.18.4] — 2026-09-23
+## [0.18.5] — 2026-09-23
+
+### Fixed — lowkey CLI dispatcher (v0.10.2) — paste-burst UX + model alias resolution
+
+- `bin/lowkey-cli.py`: Fixed paste-burst terminal presentation (Stage 2).
+  During `:paste` mode, terminal echoed each pasted line while model output from the
+  previous turn could still be streaming, creating visually interleaved input/output.
+  Now uses raw stdin (`termios`/`tty`) on TTY to suppress terminal echo during paste
+  collection, with clear visual mode banners on entry and confirmation on `:end`.
+  Non-TTY (tests, pipes) falls back to line-buffered mode automatically.
 
 ### Fixed — lowkey CLI dispatcher (v0.10.1) — model alias resolution and dispatch model ID contract
 

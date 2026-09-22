@@ -30,7 +30,7 @@ HOTSWAP="${LOWKEY_DIR}/local-llm-hotswap.sh"
 # LK_EMOJI_MODEL links back to SESSION_EMOJI_LOCAL (single source of truth)
 la_load_config || exit 1
 
-__version__="0.10.0"
+__version__="0.10.2"
 
 # Default model (from config or fallback)
 DEFAULT_MODEL="${LA_DEFAULT_MODEL:-qwen-3.8-operator}"
