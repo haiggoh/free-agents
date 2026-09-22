@@ -44,7 +44,13 @@ BIN_DIR = os.path.dirname(os.path.realpath(__file__))
 HOTSWAP_SCRIPT = os.path.join(BIN_DIR, "local-llm-hotswap.sh")
 LIBRARIAN_SCRIPT = os.path.join(BIN_DIR, "librarian-dispatch.py")
 
-__version__ = "0.10.3"
+# Version source of truth: ../VERSION (single canonical location)
+_VERSION_PATH = os.path.join(os.path.dirname(BIN_DIR), "VERSION")
+try:
+    with open(_VERSION_PATH, encoding="utf-8") as _vf:
+        __version__ = _vf.read().strip()
+except OSError:
+    __version__ = "0.10.3-dev"  # fallback if VERSION file missing
 
 PROGRESS_MODE = "compact"
 PROGRESS_LABEL = "lowkey"

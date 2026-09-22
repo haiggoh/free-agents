@@ -164,11 +164,30 @@ The dispatcher is an actively developed pre-1.0 terminal companion.
 Current development version:
 
 ```text
-0.10.0
+0.10.3
 ```
 
-The principal workflows have been tested manually against the local model infrastructure and are committed locally for review. This is a development checkpoint, not a public dispatcher release or Git tag.
+### Completed milestones
 
-A known follow-up concerns rapid clipboard pastes: isolated `:paste` collection works, but terminal input echoes and model output can sometimes appear visually interleaved. Automated regression tests, paste-burst UX refinement, and final release review remain before the first formal dispatcher release.
+- ✅ **Model alias resolution** (v0.10.1): `DISPATCH_MODEL` contract ensures correct model ID per backend
+- ✅ **Paste-burst UX fix** (v0.10.2): Raw TTY mode with visual banners prevents echo interleaving
+- ✅ **Automated test suite** (v0.10.3): 140 tests mocking hotswap/librarian boundaries
 
-See the project release plan and changelog for the reconstructed feature history and pending work.
+### Verified workflows
+
+All principal workflows tested and covered by automated tests:
+- One-shot dispatch
+- Interactive conversation mode
+- Multiline paste (`:paste`/`:end`)
+- Named sessions (create, resume, autosave)
+- File attachments with size limits
+- Rolling summaries and compaction
+- Progress modes (compact/verbose/quiet)
+- Interactive picker menu (`bin/lowkey`)
+
+Run the full test suite with:
+```bash
+./scripts/test-lowkey.sh
+```
+
+See the project release plan, changelog, and release checklist for the complete feature history and release readiness.
