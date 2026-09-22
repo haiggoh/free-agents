@@ -1,6 +1,23 @@
 # Changelog
 
-All notable changes to `local-agents` are documented in this file.
+All notable changes to `free-agents` are documented in this file.
+
+## [0.18.3] — 2026-09-22
+
+### Added — lowkey CLI dispatcher (v0.10.0)
+
+- `bin/lowkey-cli.py` (renamed from `local-agent-dispatch.py`): universal local model dispatcher with `lk`/`lowkey` aliases
+- Default model: `qwen-3.8-operator` (MTP-backed, served via Rapid-MLX)
+- Removed `--role` abstraction (irrelevant for single-model sessions)
+- Interactive conversation mode, multiline `:paste`/`:end`, rolling summaries, named sessions
+- Compact/verbose/quiet progress modes, file attachments with size limits
+- All 92 tests passing (47 framework-free unit + 45 state tests)
+
+### Changed
+
+- `install/setup-shortcuts.sh`: installs `lk`/`lowkey` aliases instead of `local-dispatch`
+- `bin/agent-fallback.py`, `bin/copilot_local_proxy.py`: updated to use `lowkey-cli.py`
+- Documentation moved to `docs/lowkey-cli/` (README, CHANGELOG, RELEASE-PLAN)
 
 ## [0.18.2] — 2026-09-21
 
