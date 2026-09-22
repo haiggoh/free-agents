@@ -2,7 +2,15 @@
 
 All notable changes to `free-agents` are documented in this file.
 
-## [0.18.5] — 2026-09-23
+## [0.18.6] — 2026-09-23
+
+### Added — lowkey CLI dispatcher (v0.10.3) — automated test suite (Stage 3)
+
+- `tests/test_lowkey_cli_dispatch.py`: New test module mocking hotswap/librarian boundaries.
+  Covers argument validation, structured messages, progress modes, rolling summaries,
+  compact history, session autosave, one-shot compatibility, file parsing, model mismatch,
+  model labels, conversation commands, compaction threshold, context status, EOF handling.
+- Total test coverage: 140 tests (47 pure + 45 stateful + 48 dispatch) — all passing.
 
 ### Fixed — lowkey CLI dispatcher (v0.10.2) — paste-burst UX + model alias resolution
 

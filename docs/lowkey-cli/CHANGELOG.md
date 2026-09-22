@@ -2,9 +2,28 @@
 
 All entries below are planned or reconstructed milestones. They are not claims that the corresponding versions were formally released at the historical dates.
 
-## 0.10.2 — 2026-09-23 — Paste-burst UX fix + picker refinements
+## 0.10.3 — 2026-09-23 — Automated test suite (Stage 3) + paste-burst UX + picker refinements
 
-### Fixed — Paste-burst terminal presentation (Stage 2)
+### Added — Automated regression tests (Stage 3)
+
+- New test module `tests/test_lowkey_cli_dispatch.py` mocking hotswap/librarian boundaries:
+  - Argument validation and help output
+  - Structured message construction (role/content dicts)
+  - Progress mode routing (compact/verbose/quiet)
+  - Rolling summary injection format and failure safety
+  - Compact history integration (signature, early returns)
+  - Session autosave behavior (file creation, content, permissions)
+  - One-shot compatibility (`run_single_prompt` wrapper)
+  - File attachment parsing (`:file` with quoted paths)
+  - Model mismatch validation (alias for session, DISPATCH_MODEL for dispatch)
+  - Model label derivation (used in conversation)
+  - Conversation command handling (`:file`, `:session`, `:save`, `:context`, `:summary`, exit)
+  - History compaction threshold (0 = unlimited)
+  - Context status reporting format
+  - EOF/Interrupt handling triggers autosave
+- Combined test suite: 140 tests (47 pure + 45 stateful + 48 dispatch) — all passing
+
+### Fixed — Paste-burst terminal presentation (Stage 2, from 0.10.2)
 
 - **Root cause**: During `:paste` mode, terminal echoed each pasted line while model output
   from the previous turn could still be streaming, creating visually interleaved input/output
@@ -57,6 +76,7 @@ All entries below are planned or reconstructed milestones. They are not claims t
 - `config/emoji.sh`: Added `LK_` prefixed emoji constants for lowkey namespace
 - `bin/lowkey`: Uses shared emoji constants; improved menu rendering
 - `bin/lowkey-cli.py`: Paste mode now uses raw TTY mode with visual banners
+- `tests/`: Added `test_lowkey_cli_dispatch.py` for mocked dispatch/conversation logic
 
 ## 0.10.0 — Rename to lowkey + default to qwen-3.8-operator (MTP-backed)
 

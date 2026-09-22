@@ -44,7 +44,7 @@ BIN_DIR = os.path.dirname(os.path.realpath(__file__))
 HOTSWAP_SCRIPT = os.path.join(BIN_DIR, "local-llm-hotswap.sh")
 LIBRARIAN_SCRIPT = os.path.join(BIN_DIR, "librarian-dispatch.py")
 
-__version__ = "0.10.2"
+__version__ = "0.10.3"
 
 PROGRESS_MODE = "compact"
 PROGRESS_LABEL = "lowkey"
