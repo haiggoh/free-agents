@@ -37,7 +37,8 @@ alias local-thinking=\"$BIN/launch-claude-agent.sh reasoner\"
 alias local-validator=\"$BIN/launch-claude-agent.sh validator\"
 alias local-window=\"$BIN/new-local-window.sh\"             # independent Terminal window
 # Dispatch — stateless one-shot prompts (the cheap, preferred path).
-alias local-dispatch=\"$BIN/local-agent-dispatch.py\"
+alias lk="$BIN/lowkey-cli.py"
+alias lowkey="$BIN/lowkey-cli.py"
 # Introspection — what fills each role, what is on disk, what is running.
 alias local-roles=\"$BIN/la-roles.sh\"
 alias local-disk=\"$BIN/la-disk-inventory.sh\"
@@ -56,7 +57,7 @@ echo "✓ local-* aliases written to $RCFILE (fenced, idempotent)."
 echo "  open a new shell or: source $RCFILE"
 echo
 echo "Sessions:  local-menu (picker) · local-operator / local-fast / local-xhigh · local-thinking · local-validator · local-window <target>"
-echo "Dispatch:  local-dispatch --model <role|alias> --prompt ..."
+echo "Dispatch:  lk/lowkey --model <role|alias> --prompt ..."
 echo "Inspect:   local-roles (who fills each role) · local-disk · local-logs"
 echo
 echo "The session aliases name ROLES, not models: they resolve to whatever is on disk now, so they"

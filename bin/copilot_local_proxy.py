@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 BIN_DIR = os.path.dirname(os.path.abspath(__file__))
 HOTSWAP = os.path.join(BIN_DIR, "local-llm-hotswap.sh")
-DISPATCH = os.path.join(BIN_DIR, "local-agent-dispatch.py")
+DISPATCH = os.path.join(BIN_DIR, "lowkey-cli.py")
 LOG_DIR = os.path.abspath(os.path.join(BIN_DIR, '..', 'logs'))
 os.makedirs(LOG_DIR, exist_ok=True)
 PROXY_LOG_PATH = os.path.join(LOG_DIR, 'proxy_requests.log')

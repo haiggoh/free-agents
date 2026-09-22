@@ -29,7 +29,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(HERE, "..", "bin", "local-agent-dispatch.py")
+SCRIPT = os.path.join(HERE, "..", "bin", "lowkey-cli.py")
 
 TMP_ROOT = tempfile.mkdtemp(prefix="lad-state-tests-")
 os.environ["LOCAL_AGENT_SESSION_DIR"] = os.path.join(TMP_ROOT, "sessions")

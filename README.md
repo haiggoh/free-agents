@@ -220,10 +220,10 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   everyday use the `csl` toggle covers the same ground.
 - **`bin/local-llm-hotswap.sh`** — land a registered model on the first free port; safe (never kills
   a healthy model on another port); bounded readiness with diagnostics.
-- **`bin/local-agent-dispatch.py`** — universal local model dispatcher, independent of any AI client
+- **`bin/lowkey-cli.py`** — universal local model dispatcher, independent of any AI client
   (Claude Code, another agent CLI, or none). Shells out to `local-llm-hotswap.sh` + `librarian-dispatch.py` and
-  streams live tokens back to stdout. Install the shell aliases and symlink with `install/setup-shortcuts.sh`
-  (or add them manually — see [Local Agent Dispatch](#local-agent-dispatch) below).
+  streams live tokens back to stdout. Install the shell aliases with `install/setup-shortcuts.sh`
+  (or add them manually — see [Lowkey CLI](#lowkey-cli) below).
 - **`bin/csl`** — menu front-end built from your configured aliases.
 - **`config/`** — the overlay: `config.example.sh`, the shipped `local-agent-system-prompt.txt` template, and your gitignored `config.local.sh`.
 - **`install/`** — `install-backend.sh` (venv + vllm-mlx + fork patches), `download-models.sh`
@@ -1118,16 +1118,16 @@ MIT © Heiko Brantsch
 
 ---
 
-## Local Agent Dispatch
+## Lowkey CLI
 
-`bin/local-agent-dispatch.py` is a universal local model dispatcher that works independently of any AI
+`bin/lowkey-cli.py` is a universal local model dispatcher that works independently of any AI
 client — use it from a plain terminal, a shell script, a Claude Code session, another agent CLI, or a
 CI pipeline. No cloud account or API key is needed for the dispatched work.
 
 It is also a terminal-native companion interface for interactive local-agent work outside Claude Code.
 It reuses the same model registry, hotswap layer, and librarian dispatcher as the rest of this repository.
-The current dispatcher version is `0.9.0`. It is functional and in daily use, with known rough edges
-tracked in `docs/local-agent-dispatch/CHANGELOG.md` — expect fixes in subsequent releases rather than
+The current dispatcher version is `0.10.0`. It is functional and in daily use, with known rough edges
+tracked in `docs/lowkey-cli/CHANGELOG.md` — expect fixes in subsequent releases rather than
 a frozen surface.
 
 ### Shell aliases
@@ -1145,7 +1145,8 @@ alias local-validator="/path/to/free-agents/bin/launch-claude-agent.sh validator
 alias local-menu="/path/to/free-agents/bin/csl"        # numbered picker, incl. effort
 alias local-window="/path/to/free-agents/bin/new-local-window.sh"
 # Dispatch — one alias, any role or model.
-alias local-dispatch="/path/to/free-agents/bin/local-agent-dispatch.py"
+alias lk="/path/to/free-agents/bin/lowkey-cli.py"
+alias lowkey="/path/to/free-agents/bin/lowkey-cli.py"
 # Inspect.
 alias local-roles="/path/to/free-agents/bin/la-roles.sh"
 alias local-disk="/path/to/free-agents/bin/la-disk-inventory.sh"
@@ -1162,7 +1163,7 @@ role, and `local-roles` shows which model currently answers to each.
 Or create a symlink for shell-agnostic access:
 
 ```bash
-ln -sf /path/to/free-agents/bin/local-agent-dispatch.py ~/.local/bin/local-agent
+ln -sf /path/to/free-agents/bin/lowkey-cli.py ~/.local/bin/lowkey
 ```
 
 ### Conversation mode
@@ -1170,41 +1171,41 @@ ln -sf /path/to/free-agents/bin/local-agent-dispatch.py ~/.local/bin/local-agent
 Start an interactive terminal conversation:
 
 ```bash
-local-agent --convo
+lowkey --convo
 ```
 
 Conversation mode supports structured history, model-specific labels,
 compact/verbose/quiet progress, multiline `:paste` / `:end` input, rolling
 summaries, `:file PATH` attachments, and resumable named sessions.
 
-See [`docs/local-agent-dispatch/README.md`](docs/local-agent-dispatch/README.md)
+See [`docs/lowkey-cli/README.md`](docs/lowkey-cli/README.md)
 for the complete dispatcher reference and development notes.
 
 ### Usage
 
 ```bash
 # By ROLE — whichever model fills it on disk right now:
-local-dispatch --model operator --prompt "What does this module do?" --files src/main.py
+lk --model operator --prompt "What does this module do?" --files src/main.py
 
 # The reasoner, for planning and architectural review:
-local-dispatch --model reasoner --prompt "Review this plan and identify architectural risks"
+lk --model reasoner --prompt "Review this plan and identify architectural risks"
 
 # A specific model by alias, when you want exactly that one:
-local-dispatch --model devstral-2-123b --prompt "Refactor the following into clean functions" \
+lk --model devstral-2-123b --prompt "Refactor the following into clean functions" \
   --files utils.py helpers.py --max-tokens 2048
 
 # Piping output to a file:
-local-dispatch --model operator --prompt "Summarize test coverage gaps" --files tests/ > summary.txt
+lk --model operator --prompt "Summarize test coverage gaps" --files tests/ > summary.txt
 
 # Inside any agent CLI or Claude Code session (prefix ! to run locally, zero cloud quota):
-! local-dispatch --model validator --prompt "First-pass review of this diff" --files my_changes.patch
+! lk --model validator --prompt "First-pass review of this diff" --files my_changes.patch
 ```
 
 ### Options
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| `--model` | `qwen-3.6-operator` | Role name (`operator`/`reasoner`/`validator`/`utility`) or model alias from your `config.local.sh` registry |
+| `--model` | `qwen-3.8-operator` | Role name (`operator`/`reasoner`/`validator`/`utility`) or model alias from your `config.local.sh` registry |
 | `--prompt` | *(required)* | Task prompt text |
 | `--files` | *(none)* | One or more file paths to inline as context |
 | `--max-tokens` | `4096` | Max tokens the model should generate |

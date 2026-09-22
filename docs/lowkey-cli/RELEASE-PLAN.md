@@ -1,18 +1,16 @@
-# Release Plan — `local-agent-dispatch.py`
+# Release Plan — `lowkey-cli.py`
 
 ## Objective
 
-Prepare `local-agent-dispatch.py` for inclusion in a future `local-agents` release as a positively advertised terminal companion interface for the repository’s local-agent infrastructure.
+Prepare `lowkey-cli.py` for inclusion in a future `free-agents` release as a positively advertised terminal companion interface for the repository's local-agent infrastructure.
 
 The dispatcher provides an independent terminal launch surface outside Claude Code while reusing the existing model registry, hotswap layer, librarian dispatcher, and launcher conventions.
 
 ## Current position
 
-The dispatcher implementation and its primary documentation are committed
-locally but have not been pushed or tagged as a public release.
+The dispatcher implementation and its primary documentation are committed locally but have not been pushed or tagged as a public release.
 
-The current local development version is `0.9.0.dev0`. Manual validation has
-covered:
+The current local development version is `0.10.0`. Manual validation has covered:
 
 - syntax and CLI options;
 - one-shot mode;
@@ -25,14 +23,9 @@ covered:
 - named-session creation, autosave, resume, and JSON permissions;
 - version output through `--version`.
 
-The rapid-clipboard-paste display behavior remains the next usability
-refinement: input and output can appear visually interleaved even though the
-isolated `:paste` workflow succeeds.
+The rapid-clipboard-paste display behavior remains the next usability refinement: input and output can appear visually interleaved even though the isolated `:paste` workflow succeeds.
 
-The repository remains ahead of `origin/main` with local Copilot and
-dispatcher commits. No push or release tag has been created. Remaining
-untracked or ignored runtime material must stay outside the release scope
-unless explicitly reviewed.
+The repository remains ahead of `origin/main` with local Copilot and dispatcher commits. No push or release tag has been created. Remaining untracked or ignored runtime material must stay outside the release scope unless explicitly reviewed.
 
 ## Release principles
 
@@ -41,26 +34,27 @@ unless explicitly reviewed.
 3. Separate dispatcher work from unrelated Copilot files, logs, and other experiments.
 4. Add documentation and tests now if useful, but keep them clearly marked as unreleased until the repository release is approved.
 5. Do not claim a version is released until the final tree, tests, changelog, and tag are reviewed together.
-6. Keep the dispatcher in `local-agents` for now because it depends on sibling scripts and shared infrastructure.
+6. Keep the dispatcher in `free-agents` for now because it depends on sibling scripts and shared infrastructure.
 
 ## Proposed repository files
 
 ```text
-bin/local-agent-dispatch.py
-docs/planning/Local Agent Dispatcher — Retroactive Version History and Release Plan.md
-docs/local-agent-dispatch/README.md
-docs/local-agent-dispatch/CHANGELOG.md
-docs/local-agent-dispatch/RELEASE-PLAN.md
-tests/local-agent-dispatch/
+bin/lowkey-cli.py
+docs/planning/Lowkey CLI — Retroactive Version History and Release Plan.md
+docs/lowkey-cli/README.md
+docs/lowkey-cli/CHANGELOG.md
+docs/lowkey-cli/RELEASE-PLAN.md
+tests/test_local_agent_dispatch.py
+tests/test_local_agent_dispatch_state.py
 ```
 
-The exact placement may follow the repository’s existing documentation conventions. If the project prefers a top-level README or changelog, move the content accordingly before commit.
+The exact placement may follow the repository's existing documentation conventions. If the project prefers a top-level README or changelog, move the content accordingly before commit.
 
 ## Stage 0 — Freeze and inventory current WIP
 
 - Keep the current WIP backup untouched.
 - Record the current script hash and repository status.
-- Review Claude Code’s pending changes before adding or publishing anything.
+- Review Claude Code's pending changes before adding or publishing anything.
 - Keep Copilot-related untracked files and logs out of the dispatcher release unless separately approved.
 - Review whether the current script has a final newline and trailing whitespace; fix only in a deliberate cleanup revision with a new backup.
 
@@ -117,7 +111,7 @@ Keep a small separate live-model smoke suite for end-to-end verification.
 
 The dispatcher development metadata is now present:
 
-- `__version__ = "0.9.0.dev0"`;
+- `__version__ = "0.10.0"`;
 - `--version`;
 - development-version wording in the dispatcher documentation.
 
@@ -129,9 +123,7 @@ The remaining work in this stage is verification and release preparation:
 - update the changelog for the first public terminal-companion release;
 - ensure the README, changelog, and release plan match actual behavior.
 
-These are development checkpoints, not public releases. The next version
-number should be chosen only after the paste UX work, automated tests, and
-release scope have been reviewed.
+These are development checkpoints, not public releases. The next version number should be chosen only after the paste UX work, automated tests, and release scope have been reviewed.
 
 ## Stage 5 — Repository review
 
@@ -160,7 +152,7 @@ Only after the previous stages pass:
 
 ## Suggested release announcement
 
-> `local-agent` is now included as a terminal-native companion interface for the local models registered in `local-agents`. It provides one-shot prompts and interactive conversations outside Claude Code while reusing the project’s existing model registry, hotswap layer, and librarian infrastructure. It includes multiline paste, structured history, progress modes, file attachments, rolling summaries, and resumable named sessions.
+> `lowkey` is now included as a terminal-native companion interface for the local models registered in `free-agents`. It provides one-shot prompts and interactive conversations outside Claude Code while reusing the project's existing model registry, hotswap layer, and librarian infrastructure. It includes multiline paste, structured history, progress modes, file attachments, rolling summaries, and resumable named sessions.
 
 ## Explicit non-actions for the current checkpoint
 
@@ -170,7 +162,7 @@ Only after the previous stages pass:
 - Do not include `logs/`, backups, generated bytecode, or local configuration.
 - Do not conflate Copilot work with dispatcher release work without explicit approval.
 - Do not apply the paste UX patch until its scope and backup are confirmed.
-- Do not describe `0.9.0.dev0` as a public release.
+- Do not describe `0.10.0` as a public release.
 
 ## Release readiness checklist
 

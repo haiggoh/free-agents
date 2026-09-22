@@ -59,7 +59,7 @@ from remote_provider_core import (PROVIDERS, IMPLEMENTED, RENEWING_FREE, TRIAL,
 import remote_http  # noqa: E402
 
 BIN_DIR = os.path.dirname(os.path.realpath(__file__))
-LOCAL_DISPATCH = os.path.join(BIN_DIR, "local-agent-dispatch.py")
+LOCAL_DISPATCH = os.path.join(BIN_DIR, "lowkey-cli.py")
 REMOTE_DISPATCH = os.path.join(BIN_DIR, "remote-agent-dispatch.py")
 
 # Which tiers each mode may touch, in preference order (most-renewing-free first).

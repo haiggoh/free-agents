@@ -18,7 +18,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(HERE, "..", "bin", "local-agent-dispatch.py")
+SCRIPT = os.path.join(HERE, "..", "bin", "lowkey-cli.py")
 spec = importlib.util.spec_from_file_location("lad", SCRIPT)
 lad = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lad)

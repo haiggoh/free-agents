@@ -1,33 +1,26 @@
-# Changelog — `local-agent-dispatch.py`
+# Changelog — `lowkey-cli.py`
 
 All entries below are planned or reconstructed milestones. They are not claims that the corresponding versions were formally released at the historical dates.
 
-## 0.9.0 — first published release of the terminal dispatcher
+## 0.10.0 — Rename to lowkey + default to qwen-3.8-operator (MTP-backed)
 
-Published as part of plugin release `0.5.0`. The `.dev0` suffix was dropped because
-the code is being released rather than held back; it is functional and in daily use,
-not feature-complete. Known rough edges below are expected to be fixed in later
-releases rather than blocking this one.
+Published as part of plugin release `0.17.0`. The rename reflects the single-model session use case
+where role-based dispatch abstraction is unnecessary — a standalone terminal dispatch tool should
+have a simple, lowkey name.
 
 ### Added in this release
 
-- `tests/test_local_agent_dispatch.py` — framework-free unit tests (47 assertions) for
-  `normalize_user_input`, `validate_session_name` and `model_display_label`, matching the
-  existing `tests/test_savings_ledger.py` style. Mutation-tested: seven injected defects
-  were each caught, so the suite is known to be capable of failing.
+- Renamed `local-agent-dispatch.py` → `lowkey-cli.py` (the `lk` alias is the primary short form).
+- Default model changed from `qwen-3.6-operator` to `qwen-3.8-operator` (MTP-backed, served via Rapid-MLX).
+- Removed `--role` abstraction (was irrelevant for single-model sessions).
+- Updated all internal references, test files, and dependent scripts (`agent-fallback.py`, `copilot_local_proxy.py`).
+- Updated shell aliases in `install/setup-shortcuts.sh` to install `lk`/`lowkey` instead of `local-dispatch`.
+- Updated documentation in `README.md` and `docs/lowkey-cli/`.
 
-### Known rough edges (not fixed in 0.9.0)
+### Known rough edges (not fixed in 0.10.0)
 
-- Visual interleaving during rapid clipboard pastes. Isolated `:paste` / `:end`
-  collection has passed manual functional testing; the presentation issue is deliberately
-  left for a separate focused patch.
-- Test coverage reaches three of seventeen top-level functions. Session save/load,
-  `read_files_context` file-size limits, the `:paste` / `:end` conversation collector,
-  history compaction and the model-mismatch refusal are not yet covered.
-- Model aliases are still hardcoded per model rather than routed by role, and the
-  `local-*` / `local-agent-*` command namespaces differ by one infix while doing
-  completely different things (launch a session vs. one-shot dispatch). Both are queued
-  for a naming pass.
+- Visual interleaving during rapid clipboard pastes. Isolated `:paste` / `:end` collection has passed manual functional testing; the presentation issue is deliberately left for a separate focused patch.
+- Test coverage reaches three of seventeen top-level functions. Session save/load, `read_files_context` file-size limits, the `:paste` / `:end` conversation collector, history compaction and the model-mismatch refusal are not yet covered.
 
 ### Implemented and tested
 
@@ -43,8 +36,7 @@ releases rather than blocking this one.
 
 ### Known follow-up
 
-Rapid clipboard pastes can make terminal input echoes and model output appear
-visually interleaved even though isolated multiline collection succeeds.
+Rapid clipboard pastes can make terminal input echoes and model output appear visually interleaved even though isolated multiline collection succeeds.
 
 ### Planned
 

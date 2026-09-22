@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""local-agent-dispatch — universal local MLX model dispatcher
+"""lowkey — universal local MLX model dispatcher
 
 Dispatch a prompt to any registered local MLX model in your local-agents
 stack (vllm-mlx / local-llm-hotswap.sh) from ANY context: terminal, script,
@@ -7,20 +7,20 @@ editor or agent session, Claude Code session, or CI pipeline. No cloud model
 or API key required for the dispatched work.
 
 Usage:
-    local-agent [--model ALIAS] --prompt "TEXT" [--files F1 F2 ...] [--max-tokens N]
-    local-agent --convo [--model ALIAS] [--max-tokens N]
+    lowkey [--model ALIAS] --prompt "TEXT" [--files F1 F2 ...] [--max-tokens N]
+    lowkey --convo [--model ALIAS] [--max-tokens N]
 
-Defaults to qwen-3.6-operator. Registered aliases are driven by your
+Defaults to qwen-3.8-operator (MTP-backed). Registered aliases are driven by your
 config/config.local.sh model registry.
 
 Examples:
-    local-agent --prompt "What does this module do?" --files src/main.py
-    local-agent-r1 --prompt "Review this plan and find risks"
-    local-agent-qwen --prompt "Summarize key changes" --files diff.txt
-    local-agent-devstral --prompt "Refactor this function" --files utils.py --max-tokens 2048
-    
+    lowkey --prompt "What does this module do?" --files src/main.py
+    lowkey --model deepseek-r1-architect --prompt "Review this plan and find risks"
+    lowkey --model qwen-3.6-thinking --prompt "Summarize key changes" --files diff.txt
+    lowkey --model devstral-2-123b --prompt "Refactor this function" --files utils.py --max-tokens 2048
+
     # Continuous Conversation Mode:
-    local-agent --convo --prompt "Let's discuss Python"
+    lowkey --convo --prompt "Let's discuss Python"
     (Type 'exit' or 'quit' to end the session)
 """
 
@@ -42,10 +42,10 @@ BIN_DIR = os.path.dirname(os.path.realpath(__file__))
 HOTSWAP_SCRIPT = os.path.join(BIN_DIR, "local-llm-hotswap.sh")
 LIBRARIAN_SCRIPT = os.path.join(BIN_DIR, "librarian-dispatch.py")
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 PROGRESS_MODE = "compact"
-PROGRESS_LABEL = "model"
+PROGRESS_LABEL = "lowkey"
 SESSION_DIR = os.path.expanduser(
     os.environ.get(
         "LOCAL_AGENT_SESSION_DIR",
@@ -716,7 +716,7 @@ def main():
     global PROGRESS_MODE, PROGRESS_LABEL
 
     parser = argparse.ArgumentParser(
-        description="local-agent-dispatch — dispatch a prompt to a local MLX model"
+        description="lowkey — dispatch a prompt to a local MLX model"
     )
     parser.add_argument(
         "--version",
@@ -726,8 +726,8 @@ def main():
 
     parser.add_argument(
         "--model",
-        default="qwen-3.6-operator",
-        help="Local model alias (e.g. qwen-3.6-operator, deepseek-r1-architect, gemma-4-26b)",
+        default="qwen-3.8-operator",
+        help="Local model alias (e.g. qwen-3.8-operator, deepseek-r1-architect, gemma-4-26b)",
     )
     parser.add_argument("--prompt", required=False, help="Task prompt for the local model")
     parser.add_argument("--files", nargs="*", help="Optional file paths to include as context")
