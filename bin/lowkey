@@ -350,7 +350,7 @@ _run_picker() {
           model="${selected_model:-$DEFAULT_MODEL}"
           extra_args=(--convo --model "$model" --max-tokens "$max_tokens" --progress "$progress_mode" --max-history-chars "$max_history_chars" --max-file-chars "$max_file_chars")
           [ -n "$session_name" ] && extra_args+=(--session "$session_name")
-          [ "$allow_model_mismatch" = true ] && extra_args+=(--allow-session-model-mismatch)
+          [ "$allow_model_mismatch" = true ] && [ -n "$session_name" ] && extra_args+=(--allow-session-model-mismatch)
           exec python3 "$LOWKEY_CLI" "${extra_args[@]}"
           ;;
         o|O)

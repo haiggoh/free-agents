@@ -285,6 +285,13 @@ LAUNCH_OUTPUT=$("$LAUNCH_DIR/local-llm-hotswap.sh" "$MODEL_ALIAS"); echo "$LAUNC
 VLLM_PORT=$(echo "$LAUNCH_OUTPUT" | grep -o "SUCCESS_PORT=[0-9]*" | cut -d'=' -f2)
 [ -z "$VLLM_PORT" ] && { echo "❌ Could not determine the server port."; exit 1; }
 
+# Parse DISPATCH_MODEL from hotswap output (new contract: tells caller which model ID
+# the server actually serves for dispatch). This is the primary source of truth.
+# For Rapid-MLX: DISPATCH_MODEL=spoof_id (claude-opus-5)
+# For vllm-mlx: DISPATCH_MODEL=alias (qwen-3.8-operator)
+# For mlx_lm: DISPATCH_MODEL=model_dir
+DISPATCH_MODEL=$(echo "$LAUNCH_OUTPUT" | grep -o "DISPATCH_MODEL=[^[:space:]]*" | cut -d'=' -f2 | tail -1)
+
 # Pick a spoof id THIS PORT ACTUALLY SERVES. hotswap REUSES an already-healthy server rather
 # than relaunching, so the resolved port may be hosting a process started from an older config
 # that predates a spoof_id change — handing it our newest preferred id would just 404:
@@ -294,15 +301,25 @@ VLLM_PORT=$(echo "$LAUNCH_OUTPUT" | grep -o "SUCCESS_PORT=[0-9]*" | cut -d'=' -f
 _served=$(curl -s --max-time 5 "http://localhost:$VLLM_PORT/v1/models" 2>/dev/null \
           | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/' | tr '\n' ' ')
 MODEL_SPOOF=""
-for _cand in $(printf '%s' "$LA_CUR_SPOOF" | tr ',' ' '); do
-    case " $_served " in *" $_cand "*) MODEL_SPOOF="$_cand"; break ;; esac
-done
-if [ -z "$MODEL_SPOOF" ]; then
-    MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
-    echo "⚠️  Port $VLLM_PORT advertises none of the configured spoof ids ($LA_CUR_SPOOF)."
-    echo "    Served: ${_served:-<none>}"
-    echo "    Falling back to '$MODEL_SPOOF'. If the session 404s, restart that server so it"
-    echo "    picks up the current config (its ids are fixed at launch time)."
+
+# For Rapid-MLX, DISPATCH_MODEL is the spoof ID (only served model). Use it directly.
+# For vllm-mlx, DISPATCH_MODEL is the alias; we still need a spoof ID for Claude Code.
+# For mlx_lm, DISPATCH_MODEL is model_dir; not used for interactive sessions.
+if [ "$LA_CUR_SERVE" = "rapid" ] && [ -n "$DISPATCH_MODEL" ]; then
+    MODEL_SPOOF="$DISPATCH_MODEL"
+    echo "[i] Rapid-MLX: using DISPATCH_MODEL as spoof ID: $MODEL_SPOOF"
+else
+    # vllm-mlx or fallback: find a spoof ID from /v1/models
+    for _cand in $(printf '%s' "$LA_CUR_SPOOF" | tr ',' ' '); do
+        case " $_served " in *" $_cand "*) MODEL_SPOOF="$_cand"; break ;; esac
+    done
+    if [ -z "$MODEL_SPOOF" ]; then
+        MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
+        echo "⚠️  Port $VLLM_PORT advertises none of the configured spoof ids ($LA_CUR_SPOOF)."
+        echo "    Served: ${_served:-<none>}"
+        echo "    Falling back to '$MODEL_SPOOF'. If the session 404s, restart that server so it"
+        echo "    picks up the current config (its ids are fixed at launch time)."
+    fi
 fi
 
 # mlx_lm.server tiers (e.g. Llama-4) serve OpenAI-only under a path id — no Anthropic /v1/messages,
