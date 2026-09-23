@@ -2,6 +2,16 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.0] — 2026-09-23
+
+### Changed — rapid-mlx upgraded to 0.15.0
+
+- `launch-claude-agent-rapid-auto.sh`: pins rapid-mlx 0.15.0 for Auto Mode classifier
+- `config/config-lib.sh` & `config/config.example.sh`: default rapid-mlx version updated
+- `local-inference-readonly-inventory.zsh`: checks 0.15.0 venv
+- `install/manage-rapid-mlx.py`: explicit dry_run=False in remove path
+- `tests/test_rapid_auto_mode.sh`: expectations updated to 0.15.0
+
 ## [0.18.9] — 2026-09-23
 
 ### Fixed — effort level persists to statusline for remote free API sessions
