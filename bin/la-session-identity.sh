@@ -319,7 +319,19 @@ ACTUAL_MODEL_DISPLAY_ESC=$(json_escape "$actual_model_display")
 PROVIDER_DISPLAY_ESC=$(json_escape "$provider_display")
 BACKEND_DISPLAY_ESC=$(json_escape "${BACKEND:-unknown}")
 ROLE_PROFILE_ESC=$(json_escape "$role_profile")
-EFFORT_ESC=$(json_escape "${LA_CUR_EFFORT:-medium}")
+# Resolve effort: per-session file (launcher's explicit choice) > LA_CUR_EFFORT > medium
+_effort_val=""
+if [ -n "${LA_SESSION_ID:-}" ]; then
+    _effort_file="/tmp/claude-effort-${LA_SESSION_ID}"
+    if [ -r "$_effort_file" ]; then
+        _effort_val="$(cat "$_effort_file" 2>/dev/null || echo "")"
+    fi
+fi
+if [ -z "$_effort_val" ]; then
+    _effort_val="${LA_CUR_EFFORT:-medium}"
+fi
+_effort_val="${_effort_val:-medium}"
+EFFORT_ESC=$(json_escape "$_effort_val")
 THINKING_MODE_ESC=$(json_escape "$thinking_mode")
 CONTEXT_POLICY_ESC=$(json_escape "$context_policy")
 THEME_IDENTIFIER_ESC=$(json_escape "$theme_identifier")

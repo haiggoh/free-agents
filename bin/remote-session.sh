@@ -1411,6 +1411,10 @@ export LA_REMOTE_PROVIDER="$PROV"
 # Provide resolver inputs so it can emit truthful identity for remote sessions
 export MODEL_ALIAS="$ALIAS"                          # the remote agent alias (e.g. nvidia-nemotron-3-ultra)
 export LA_CUR_EFFORT="${EFFORT_CHOICE:-medium}"      # effort level from launcher
+# Also write to per-session file for statusline/resolver to read (since they run in a different process tree)
+# Use fixed /tmp to avoid TMPDIR differences between launcher and resolver processes
+LA_EFFORT_FILE="/tmp/claude-effort-${LA_SESSION_ID}"
+printf '%s' "${EFFORT_CHOICE:-medium}" > "$LA_EFFORT_FILE" 2>/dev/null || true
 export LA_CUR_THINK="$THINKING"                      # thinking mode (true/false)
 export LA_CUR_ROLES="operator"                       # default role for remote sessions
 export LA_CUR_REPO=""                                # no HF repo for remote models
