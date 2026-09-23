@@ -94,7 +94,7 @@ selected_model_dir="$(
 SESSION_MODEL_ID="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 
-: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.14.3/bin/rapid-mlx}"
+: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.15.0/bin/rapid-mlx}"
 : "${LA_RAPID_AUTO_MODEL_DIR:=$HOME/.models/Qwen3.6-35B-A3B-4bit}"
 : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
 : "${LA_RAPID_AUTO_PORT:=8002}"
@@ -112,8 +112,8 @@ EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 }
 
 rapid_auto_version="$("$LA_RAPID_AUTO_BIN" --version 2>/dev/null || true)"
-[ "$rapid_auto_version" = "rapid-mlx 0.14.3" ] || {
-    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 0.14.3, got %s\n' \
+[ "$rapid_auto_version" = "rapid-mlx 0.15.0" ] || {
+    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 0.15.0, got %s\n' \
         "${rapid_auto_version:-<unavailable>}" >&2
     exit 2
 }

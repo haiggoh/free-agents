@@ -840,7 +840,7 @@ def interactive_menu(home: Path | None, repo_arg: Path | None) -> int:
                     # remove() keeps its own typed confirmation and safety gates; this
                     # menu deliberately does not pass --yes on the user's behalf.
                     remove_environment(version, yes=False, repo=repository_root(repo_arg),
-                                       home=home)
+                                       home=home, dry_run=False)
                     print(f"removed {target_for(version, home)}")
             else:
                 print("  invalid selection")
