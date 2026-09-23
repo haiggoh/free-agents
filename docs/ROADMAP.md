@@ -8,6 +8,10 @@ documentation" and only the changelog appeared. The `0.14.0` specification lived
 repository, in a plan file on one machine, while `CHANGELOG.md`'s `[Unreleased]` section sat empty —
 so "did we skip a specced feature?" was not answerable from the repo at all. It is now.
 
+## Current released version
+
+`0.18.9`
+
 **How to use this file:** an item leaves this file only by moving into `CHANGELOG.md` under a real
 version. Nothing is deleted for being inconvenient. If an item is abandoned, it moves to
 [Deliberately deferred](#deliberately-deferred) with a reason — never silently removed.

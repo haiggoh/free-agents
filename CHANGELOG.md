@@ -2,6 +2,15 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.18.9] — 2026-09-23
+
+### Fixed — effort level persists to statusline for remote free API sessions
+
+- `remote-session.sh` writes chosen effort to `/tmp/claude-effort-<SESSION_ID>` at launch
+- `la-session-identity.sh` reads session file first (priority over `LA_CUR_EFFORT` env var)
+- Statusline renderer passes `SID` as `LA_SESSION_ID` to resolver
+- Fixes free_api sessions always showing "medium" effort regardless of launcher selection
+
 ## [0.18.8] — 2026-09-23
 
 ### Added — Devstral Small 2 qualification candidate, runbook & test sandbox fixture
