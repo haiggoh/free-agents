@@ -16,14 +16,17 @@ import re
 import shlex
 import shutil
 import subprocess
-import unicodedata
 import sys
 import tempfile
+import threading
+import time
+import unicodedata
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 PACKAGE = "rapid-mlx"
 PYPI_URL = "https://pypi.org/pypi/rapid-mlx/json"
@@ -205,6 +208,42 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+# Spinner / loading animation for long-running operations
+SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+SPINNER_INTERVAL = 0.08
+
+
+@contextmanager
+def spinner(message: str) -> Iterator[None]:
+    """Show a spinner animation with the given message while the context is active.
+
+    The spinner runs in a background thread and stops when the context exits.
+    Usage:
+        with spinner("Installing Rapid-MLX..."):
+            run_long_operation()
+    """
+    stop_event = threading.Event()
+    frame_index = 0
+
+    def _spin() -> None:
+        nonlocal frame_index
+        while not stop_event.is_set():
+            frame = SPINNER_FRAMES[frame_index % len(SPINNER_FRAMES)]
+            print(f"\r  {frame} {message}", end="", flush=True)
+            frame_index += 1
+            time.sleep(SPINNER_INTERVAL)
+        # Clear the spinner line on exit
+        print(f"\r  {' ' * (len(message) + 4)}\r", end="", flush=True)
+
+    spinner_thread = threading.Thread(target=_spin, daemon=True)
+    spinner_thread.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        spinner_thread.join(timeout=0.5)
 
 
 def choose_python(explicit: str | None) -> Path:
@@ -513,19 +552,23 @@ def install_environment(
     try:
         # Venv entry points contain absolute interpreter paths. Build at the
         # final absent target; moving a completed venv would leave stale shebangs.
-        run([str(base_python), "-m", "venv", str(target)], log=log)
+        with spinner(f"Creating virtual environment for rapid-mlx-{version}..."):
+            run([str(base_python), "-m", "venv", str(target)], log=log)
         child = target / "bin" / "python"
         lock = None if refresh_deps else locked_requirements(version, home)
         if lock:
             lock_path = target / ".rapid-runtime-lock.txt"
             lock_path.write_text("\n".join(lock) + "\n", encoding="utf-8")
-            run([str(child), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(lock_path)], log=log)
+            with spinner(f"Installing locked dependencies for rapid-mlx-{version}..."):
+                run([str(child), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(lock_path)], log=log)
             lock_path.unlink()
             mode = "locked_recreation"
         else:
-            run([str(child), "-m", "pip", "install", "--disable-pip-version-check", f"{PACKAGE}=={version}"], log=log)
+            with spinner(f"Installing rapid-mlx-{version} from PyPI..."):
+                run([str(child), "-m", "pip", "install", "--disable-pip-version-check", f"{PACKAGE}=={version}"], log=log)
             mode = "fresh_resolution"
-        receipt = validate_environment(version, target)
+        with spinner(f"Validating rapid-mlx-{version} environment..."):
+            receipt = validate_environment(version, target)
         receipt.update({
             "result": "installed", "installation_mode": mode,
             "base_python": str(base_python), "install_log": str(log),
