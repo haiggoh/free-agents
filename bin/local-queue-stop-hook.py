@@ -349,7 +349,7 @@ def _extract_assistant_entry(line_idx, line_str):
     return bool(texts), " ".join(texts), tools
 
 
-def check_unanswered_queues(transcript_path, queue_groups):
+def check_unanswered_queues(transcript_path, queue_groups, stdin_payload=None):
     """Check whether each queue group was actually addressed by the assistant.
 
     For each queue group, examine the assistant entries that appear between
@@ -368,6 +368,13 @@ def check_unanswered_queues(transcript_path, queue_groups):
        it was going to say anyway; the queued prompt was delivered by the harness
        at a turn boundary, and the model continued processing regular turns.
        Coincidence in time is not a response.
+
+    RACE FIX: The transcript file is written ASYNCHRONOUSLY and may lag the
+    in-memory conversation. The Stop hook receives the current turn's data on
+    stdin (payload["message"]). Check THAT for QUEUE_ANSWERED markers FIRST,
+    before falling back to the transcript read. This eliminates the race where
+    a correctly-marked response triggers re-notification because the transcript
+    hasn't caught up yet.
 
     Returns (has_issue, message) where message is a human-readable block reason
     (or None if no issue was detected).
@@ -396,6 +403,21 @@ def check_unanswered_queues(transcript_path, queue_groups):
         has_text, text, tools = _extract_assistant_entry(i, line)
         if has_text or tools:
             assistant_entries.append((i, has_text, text, tools))
+
+    # RACE FIX: Extract marker hashes from stdin payload (current turn) FIRST.
+    # The transcript lags; the stdin payload has the just-completed turn.
+    stdin_hashes = set()
+    if stdin_payload:
+        # payload["message"] is the current assistant message (dict with "content": [...])
+        msg = stdin_payload.get("message")
+        if isinstance(msg, dict):
+            content_blocks = msg.get("content", [])
+            if isinstance(content_blocks, list):
+                for block in content_blocks:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            stdin_hashes.update(queue_marker.extract_hashes([text]))
 
     if not queue_groups:
         return False, None
@@ -432,8 +454,11 @@ def check_unanswered_queues(transcript_path, queue_groups):
         # Extract explicit answer markers from all texts in this group
         answered_hashes = _extract_answered_markers(g_texts)
 
+        # Combine transcript markers with stdin (current turn) markers for race fix
+        combined_hashes = answered_hashes | stdin_hashes
+
         # Check if ANY text in the group addresses the prompt (via marker or semantic overlap)
-        prompt_addressed = _text_addresses_prompt(g_texts, content, answered_hashes)
+        prompt_addressed = _text_addresses_prompt(g_texts, content, combined_hashes)
 
         if prompt_addressed:
             # Prompt was addressed - nothing to do for this group
@@ -648,6 +673,7 @@ def main() -> int:
     if all_queue_groups:
         answered, warning = check_unanswered_queues(
             best_path, all_queue_groups,
+            stdin_payload=payload,
         )
         if warning:
             print(json.dumps({"decision": "block", "reason": warning}))
