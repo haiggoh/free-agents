@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# csl — "claude session local": front-end for launch-claude-agent.sh.
+# csl — "Claude Code Free-Agents: Session Launcher"
 #
-#   csl              -> interactive picker (all available models, effort override, watcher toggle)
+#   csl              -> interactive picker (local models, remote API, effort, toggles)
 #   csl roles        -> disk-aware role resolver (which on-disk model fills each role)
 #   csl remote [args...] -> remote picker, alias, --list, --verify, or --include-trials
-#   csl <args...>    -> passed straight through to the launcher, unchanged (no picker, no watcher)
+#   csl <args...>    -> passed straight through to the local launcher, unchanged (no picker, no watcher)
 #
 # WHY the picker offers free model×effort and not just presets: dispatching local models as
 # SUBAGENTS and running a local model as the SESSION ENGINE are different decisions. For dispatch,
@@ -22,6 +22,58 @@ CSL_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 WATCHER="$CSL_DIR/local-watch.sh"
 
+# Argument parsing BEFORE any work (must support --help/--dry-run without side effects)
+case "${1:-}" in
+  -h|--help)
+    cat <<'HELP'
+csl — Claude Code Free-Agents: Session Launcher
+
+Usage: csl [--help] [--dry-run] | csl roles [args] | csl remote [args] | csl <launcher-args>
+
+Modes:
+  csl                    Interactive session launcher (local + remote)
+  csl roles [args]       Disk-aware role resolver (la-roles.sh)
+  csl remote [args]      Remote free/paid API session launcher
+  csl <alias> [effort]   Direct passthrough to local launcher (no picker)
+
+Flags:
+  --help       Show this help and exit
+  --dry-run    Validate config and show what would be available, without launching
+
+Subcommands:
+  roles              Show which on-disk model fills each role (operator, reasoner, etc.)
+  setup-remote       Install / set up remote API keys (csl setup-remote [providers])
+  remote             Delegate to remote-session.sh (see 'csl remote --help')
+
+Environment:
+  CSL_LAUNCHER           Override local launcher (default: launch-claude-agent.sh)
+  CSL_REMOTE_LAUNCHER    Override remote launcher (default: remote-session.sh)
+  CSL_WATCH=1            Default watcher ON
+  CSL_AUTO_MODE_STATE=0|1|2  Initial auto-mode: 0=blind-trust, 1=classifier, 2=off
+  CSL_TELEMETRY=1        Default telemetry ON (default OFF)
+  CSL_STOP_HOOK=0        Default stop hook OFF (default ON)
+  CSL_LOCAL_CAPABLE=1    Show local-capable models in remote picker (default hidden)
+
+Examples:
+  csl                                    # Interactive picker
+  csl --dry-run                          # Show available models/toggles without launching
+  csl roles                              # Show role bindings
+  csl remote --list                      # List remote agents
+  csl qwen-3.8-operator high             # Direct launch (no picker)
+HELP
+    exit 0
+    ;;
+  --dry-run)
+    DRY_RUN=1
+    shift
+    ;;
+  -?*)
+    printf 'csl: unrecognised option: %s\n' "$1" >&2
+    printf "Try 'csl --help'.\n" >&2
+    exit 2
+    ;;
+esac
+
 if [ "${1:-}" = "roles" ]; then shift; exec "$CSL_DIR/la-roles.sh" "$@"; fi
 if [ "${1:-}" = "setup-remote" ]; then
   shift
@@ -30,17 +82,6 @@ fi
 if [ "${1:-}" = "remote" ]; then
   shift
   exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" "$@"
-fi
-if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-  printf '%s\n' 'csl: choose a local or remote Claude Code session.' \
-    'Usage: csl | csl roles [args] | csl remote [alias/options] | csl <local-launcher args>' \
-    'Remote help: csl remote --help; include Cerebras: csl remote --include-trials' \
-    'Key setup: 🔑  csl setup-remote [providers] | csl setup-remote --list (no API calls)' \
-    'Environment: CSL_LAUNCHER, CSL_REMOTE_LAUNCHER override launchers; CSL_WATCH,' \
-    'CSL_AUTO_MODE_STATE (0=blind-trust,1=classifier,2=off), CSL_TELEMETRY, CSL_STOP_HOOK' \
-    '  control local picker defaults.' \
-    'For local launcher details: launch-claude-agent.sh --help'
-  exit 0
 fi
 # shellcheck source=/dev/null
 . "$CSL_DIR/../config/config-lib.sh"
@@ -123,6 +164,56 @@ LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
 if [ "$#" -gt 0 ]; then
   _apply_session_profile "$1"
   exec "$LAUNCHER" "$@"
+fi
+
+# DRY-RUN: show available models and toggles without launching
+if [ "${DRY_RUN:-0}" = "1" ]; then
+  echo "=== DRY RUN — csl configuration ==="
+  echo "Config source: $LA_CONFIG_SOURCE"
+  if [ -n "${LA_FALLBACK_CONFIG:-}" ] && [ "$LA_FALLBACK_CONFIG" = "1" ]; then
+    echo "  ⚠ Using public fallback defaults (private models not present)"
+  fi
+  echo
+  echo "Local session models (on disk, session-capable):"
+  for a in "${LA_ALIASES[@]}"; do
+    case "${LA_SERVE[$a]:-}" in
+      rapid|vllm)
+        if la_on_disk "$a"; then
+          roles="$(la_roles_for_alias "$a")"
+          [ -n "$roles" ] || roles="untagged"
+          printf "  %-30s backend=%-20s thinking=%-5s effort=%-6s roles=%s\n" \
+            "$a" \
+            "$(la_serve_display "$a")" \
+            "${LA_THINK[$a]:-?}" \
+            "${LA_EFFORT[$a]:-?}" \
+            "$roles"
+        fi
+        ;;
+      *) ;;
+    esac
+  done
+  echo
+  echo "Remote session agents: (run 'csl remote --list' for full roster)"
+  echo "  Provider roster loaded from config"
+  echo "  Local-capable filter: $([ "$LOCAL_CAPABLE" = "1" ] && echo "SHOWN" || echo "HIDDEN (default)")"
+  echo "  Trial inclusion: $([ "${INCLUDE_TRIALS:-0}" = "1" ] && echo "INCLUDED" || echo "EXCLUDED (default)")"
+  echo
+  echo "Toggles (persist across lane switches):"
+  case "$AUTO_MODE_STATE" in
+    0) _am_label="blind-trust" ;;
+    1) _am_label="classifier" ;;
+    2) _am_label="off" ;;
+  esac
+  printf "  Auto-mode: %s (cycle with 'a')\n" "$_am_label"
+  printf "  Telemetry: %s (toggle with 't')\n" "$([ "$TELEMETRY" = "1" ] && echo ON || echo OFF)"
+  printf "  Watcher:   %s (toggle with 'w')\n" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)"
+  printf "  Stop hook: %s (toggle with 's')\n" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)"
+  echo
+  echo "Launcher paths:"
+  printf "  Local  : %s\n" "$LAUNCHER"
+  printf "  Remote : %s\n" "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}"
+  echo "Watcher  : $WATCHER"
+  exit 0
 fi
 
 # Session-capable models only — dispatch-only tiers have no Anthropic /v1/messages surface, so
@@ -335,7 +426,7 @@ _pick_home_lane() {
   NEXT_LANE=""
   echo
   _box top
-  _box center "Claude Code Session Launcher"
+  _box center "Claude Code Free-Agents: Session Launcher"
   _box mid
   _box row "$(printf '  Config: %s' "$LA_CONFIG_SOURCE")"
   if [ -n "${LA_FALLBACK_CONFIG:-}" ] && [ "$LA_FALLBACK_CONFIG" = "1" ]; then
@@ -343,8 +434,19 @@ _pick_home_lane() {
              "    are not present in this installed copy."
   fi
   _box mid
-  # One space after every emoji, and the same label:value shape on each toggle row,
-  # so the column of values lines up down the menu.
+  # Main session type selection — equal options, no numbered preference
+  # Primary: < = local (points to this machine), # = remote (web/telephone symbol)
+  # Full words 'local'/'remote' accepted but not advertised
+  _box row \
+    "$(printf '  <) %s Local  — MLX models on this machine (%d on disk)' "$SESSION_EMOJI_LOCAL" "${#SESSION_ALIASES[@]}")" \
+    "$(printf '  #) %s Remote — Free/paid cloud API (provider quotas apply)' "$SESSION_EMOJI_FREE_API")"
+  _box mid
+  _box row \
+    "  k) $EMOJI_KEY Install / set up remote API keys" \
+    "  m) $EMOJI_TOOLS Manage Rapid-MLX runtime (install/update/inspect)" \
+    "  q) Quit"
+  _box mid
+  # Toggles — come AFTER main options, same label:value alignment
   case "$AUTO_MODE_STATE" in
     0) _am_label="blind-trust" ;;
     1) _am_label="classifier" ;;
@@ -355,19 +457,12 @@ _pick_home_lane() {
     "$(printf '  t) %s Telemetry: %s' "$EMOJI_TELEMETRY_ON" "$([ "$TELEMETRY" = "1" ] && echo ON || echo OFF)")" \
     "$(printf '  w) %s Watcher:   %s' "$EMOJI_WATCHER" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)")" \
     "$(printf '  s) %s Stop hook: %s' "$EMOJI_STOP_HOOK" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)")"
-  _box mid
-  _box row \
-    "$(printf '  1) %s Local  — MLX models on this machine (%d on disk)' "$SESSION_EMOJI_LOCAL" "${#SESSION_ALIASES[@]}")" \
-    "$(printf '  2) %s Remote — Free/paid cloud API (provider quotas apply)' "$SESSION_EMOJI_FREE_API")" \
-    "  k) $EMOJI_KEY Install / set up remote API keys" \
-    "  m) $EMOJI_TOOLS Manage Rapid-MLX runtime (install/update/inspect)" \
-    "  q) Quit"
   _box bottom
-  printf "Select [1/2/k/m/q/a/t/w/s]: " >&2
-  read -r sel; sel="${sel:-1}"
+  printf "Select [</#/k/m/q/a/t/w/s]: " >&2
+  read -r sel; sel="${sel:-<}"
   case "$sel" in
-    1|local|LOCAL) NEXT_LANE="local" ;;
-    2|remote|REMOTE) NEXT_LANE="remote" ;;
+    '<'|local|LOCAL) NEXT_LANE="local" ;;
+    '#'|remote|REMOTE) NEXT_LANE="remote" ;;
     k|K) NEXT_LANE="install" ;;
     m|M) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; NEXT_LANE="home" ;;
     q|Q) NEXT_LANE="quit" ;;
@@ -514,6 +609,10 @@ while [ "$NEXT_LANE" != "quit" ]; do
       rm -f "$navfile"
       # Default if nav file was empty or missing
       [[ -z "${NEXT_LANE:-}" ]] && NEXT_LANE="home"
+      # Handle "stay" - remain in remote lane with updated state
+      if [[ "$NEXT_LANE" == "stay" ]]; then
+        NEXT_LANE="remote"
+      fi
       ;;
     install) python3 "$CSL_DIR/../install/setup-api-keys.py"; NEXT_LANE="home" ;;
     *) echo "internal error: invalid lane '$NEXT_LANE'" >&2; NEXT_LANE="home" ;;

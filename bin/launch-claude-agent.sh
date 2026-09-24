@@ -8,7 +8,55 @@
 # Usage:  launch-claude-agent.sh <alias> [effort-override]
 #   <alias>          a model registered in your config (see config.example.sh)
 #   [effort-override] optional: low|medium|high|xhigh|max (overrides the alias's default effort)
+#
+# Flags:
+#   --help       Show this help and exit
+#   --dry-run    Validate configuration and show what would launch, without starting a session
 set -uo pipefail
+
+# Argument parsing BEFORE any work (must support --help without side effects)
+case "${1:-}" in
+  -h|--help)
+    cat <<'HELP'
+launch-claude-agent.sh — start a LOCAL Claude Code session (MLX inference on this machine)
+
+Usage: launch-claude-agent.sh <alias> [effort-override]
+       launch-claude-agent.sh --help
+       launch-claude-agent.sh --dry-run <alias> [effort-override]
+
+  <alias>           Model alias from config (e.g., qwen-3.8-operator, deepseek-r1-architect)
+                    Role names also accepted: operator, reasoner, validator, utility
+  [effort-override] Optional: low | medium | high | xhigh | max (overrides config default)
+
+Flags:
+  --help       Show this help and exit
+  --dry-run    Validate config, show resolved model/backend/effort/port, do NOT launch
+
+Environment (set by csl or caller):
+  LA_AUTO_MODE=1           Enable auto mode (permission-mode=auto)
+  LA_BLIND_AUTO=1          Blind-trust auto mode (no classifier)
+  LA_TELEMETRY=0|1         Disable/enable nonessential outbound traffic (default 0)
+  LA_QUEUE_STOP_HOOK=0|1   Queued-prompt stop hook (default 1)
+  LA_STRICT_MCP=true|false Exclude MCP servers from prompt (default true)
+  LA_SKIP_RAM_PREFLIGHT=1  Bypass RAM check (not recommended)
+
+Examples:
+  launch-claude-agent.sh qwen-3.8-operator
+  launch-claude-agent.sh operator high
+  launch-claude-agent.sh --dry-run deepseek-r1-architect max
+HELP
+    exit 0
+    ;;
+  --dry-run)
+    DRY_RUN=1
+    shift
+    ;;
+  -?*)
+    printf 'launch-claude-agent.sh: unrecognised option: %s\n' "$1" >&2
+    printf "Try 'launch-claude-agent.sh --help'.\n" >&2
+    exit 2
+    ;;
+esac
 
 # Resolve symlinks so invocation via a symlink (e.g. ~/.claude/scripts/local-inference/…) still
 # finds this repo's config. Portable (no readlink -f, works on macOS bash 3.2).
@@ -24,16 +72,16 @@ la_load_config || exit 1
 MODEL_ALIAS="${1:-}"
 EFFORT_OVERRIDE="${2:-}"
 
-# No alias at all -> hand off to the numbered picker rather than dead-ending on a usage message.
-# Running the launcher bare is how you say "I want a local session" without having decided which;
-# printing a list of aliases and exiting 1 made the user re-type a command to answer that. csl IS
-# the answer, so go there. (A WRONG alias still gets usage + the registered list — that's a typo,
-# and naming the valid aliases is the useful reply.)
-# LA_MENU_REDIRECT breaks the cycle: csl execs back into this script, so without a one-shot guard a
-# csl that ever handed back an empty alias would fork-bomb between the two.
-if [ -z "$MODEL_ALIAS" ] && [ -z "${LA_MENU_REDIRECT:-}" ] && [ -x "$LAUNCH_DIR/csl" ]; then
-    export LA_MENU_REDIRECT=1
-    exec "$LAUNCH_DIR/csl"
+# No alias provided -> show usage with registered aliases, do NOT redirect to csl.
+# csl is the interactive front-end; this script is the direct launcher.
+# A missing alias is a usage error here — the caller (or user) should invoke csl for the menu.
+if [ -z "$MODEL_ALIAS" ]; then
+    echo "Usage: $0 <alias> [effort-override]" >&2
+    echo "Registered aliases:" >&2
+    la_aliases_help >&2
+    echo >&2
+    echo "Tip: run '$LAUNCH_DIR/csl' with no arguments to pick from a numbered menu instead." >&2
+    exit 1
 fi
 # --auto: hand off to the local auto-mode launcher (Phase 8). Instead of accepting edits, this
 # launches a session in `auto` permission mode whose SEPARATE safety-classifier is pointed at a
@@ -278,6 +326,35 @@ if [ -x "$LAUNCH_DIR/la-ram-preflight.sh" ]; then
         [ "${LA_SKIP_RAM_PREFLIGHT:-0}" = "1" ] || exit 1
         echo "   LA_SKIP_RAM_PREFLIGHT=1 set — continuing at your own risk."
     fi
+fi
+
+# DRY-RUN: show resolved configuration and exit without launching
+if [ "${DRY_RUN:-0}" = "1" ]; then
+    # Try to determine what port would be used (without starting server)
+    # For dry-run we can't know the exact port, but we can show the range
+    echo "=== DRY RUN — Configuration validated, would launch: ==="
+    echo "  Model alias   : $MODEL_ALIAS"
+    echo "  Spoof ID      : ${LA_CUR_SPOOF%%,*}"
+    echo "  Backend       : $LA_CUR_SERVE (declared: ${LA_SERVE_DECLARED[$MODEL_ALIAS]:-$LA_CUR_SERVE})"
+    echo "  Backend display: $(la_serve_display "$MODEL_ALIAS")"
+    echo "  Effort        : $EFFORT"
+    echo "  Thinking      : $([ "$LA_CUR_THINK" = "true" ] && echo "ON" || echo "OFF")"
+    echo "  Auto mode     : $([ "$LA_AUTO_MODE" = "1" ] && echo "ON ($([ "$LA_BLIND_AUTO" = "1" ] && echo "blind-trust" || echo "classifier"))" || echo "OFF")"
+    echo "  Telemetry     : $([ "$LA_TELEMETRY" = "0" ] && echo "OFF" || echo "ON")"
+    echo "  Stop hook     : $([ "$LA_QUEUE_STOP_HOOK" = "1" ] && echo "ON" || echo "OFF")"
+    echo "  Strict MCP    : $([ "${LA_STRICT_MCP:-true}" = "true" ] && echo "ON (excluded)" || echo "OFF (included)")"
+    echo "  Port range    : $LA_PORT_START - $LA_PORT_MAX"
+    echo "  Endpoint      : http://localhost:<port> (NO /v1 — Claude Code appends /v1/messages)"
+    echo "  Auth token    : local (backend ignores)"
+    echo "  Max output    : $LA_MAX_OUTPUT_TOKENS tokens"
+    echo "  Timeouts      : API_TIMEOUT_MS=$LA_API_TIMEOUT_MS, FORCE_IDLE_TIMEOUT=0, STREAM_WATCHDOG=0"
+    echo "  Session name  : ${SESSION_EMOJI_LOCAL} $MODEL_ALIAS"
+    echo "  Prompt file   : $LA_AGENT_PROMPT_FILE"
+    [ -n "${LA_CLAUDE_SETTINGS:-}" ] && echo "  Settings      : $LA_CLAUDE_SETTINGS"
+    [ -n "${LA_CLAUDE_TOOLS:-}" ] && echo "  Tools         : $LA_CLAUDE_TOOLS"
+    [ -n "${LA_AUTO_COMPACT_WINDOW:-}" ] && echo "  Autocompact   : $LA_AUTO_COMPACT_WINDOW"
+    [ -n "${LA_MCP_CONFIG:-}" ] && echo "  MCP config    : $LA_MCP_CONFIG"
+    exit 0
 fi
 
 echo "⏳ Initializing local engine for $MODEL_ALIAS..."

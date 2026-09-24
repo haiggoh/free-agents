@@ -2,6 +2,33 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.1] — 2026-09-24
+
+### Fixed — effort persistence for remote free API sessions (subshell variable loss)
+
+The `0.18.9` effort persistence fix wrote the chosen effort to a per-session file at launch,
+but the interactive remote picker (`_run_remote_menu`) was called via command substitution
+(`ALIAS="$(_run_remote_menu)"`), which runs in a subshell. Variable assignments made inside
+the picker (effort choice, auto-mode state, telemetry, local-capable filter, trial inclusion)
+were lost when the subshell exited, so the launcher always fell back to the default "medium"
+effort.
+
+- `bin/remote-session.sh`:
+  - Added `_sync_state()` to write current toggle state to the nav file before returning a selection
+  - Caller reads synced state from nav file after command substitution returns
+  - Nav file format extended with "stay" navigation target for selection (vs navigate away)
+  - Fixes effort choice, auto-mode, telemetry, local-capable filter, and trial inclusion
+    all reaching the launcher when set in the interactive picker
+- `bin/csl`: Handles "stay" navigation target to remain in remote lane with updated state
+
+### Fixed — LA_SESSION_ID used before set in effort file write
+
+Commit `3618073` inserted the effort file write before session ID generation, so
+`LA_SESSION_ID` was unset when expanded in the filename. The file was written as
+`/tmp/claude-effort-` (empty suffix), which the resolver could never read.
+- `bin/remote-session.sh`: Move effort file write to after `LA_SESSION_ID` generation
+  (commit `9eb18a4`, previously untagged)
+
 ## [0.19.0] — 2026-09-23
 
 ### Changed — rapid-mlx upgraded to 0.15.0
@@ -20,6 +47,9 @@ All notable changes to `free-agents` are documented in this file.
 - `la-session-identity.sh` reads session file first (priority over `LA_CUR_EFFORT` env var)
 - Statusline renderer passes `SID` as `LA_SESSION_ID` to resolver
 - Fixes free_api sessions always showing "medium" effort regardless of launcher selection
+
+**Known issue (fixed in 0.19.1):** The interactive picker ran in a subshell due to command
+substitution, losing the effort choice and other toggle state. See 0.19.1 for the fix.
 
 ## [0.18.8] — 2026-09-23
 

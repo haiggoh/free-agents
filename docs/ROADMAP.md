@@ -10,7 +10,7 @@ so "did we skip a specced feature?" was not answerable from the repo at all. It 
 
 ## Current released version
 
-`0.19.0`
+`0.19.1`
 
 **How to use this file:** an item leaves this file only by moving into `CHANGELOG.md` under a real
 version. Nothing is deleted for being inconvenient. If an item is abandoned, it moves to
@@ -20,7 +20,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.18.8`. See `CHANGELOG.md`.
+`0.19.1`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -388,7 +388,7 @@ and the pinned waypoint `add-local-only-metrics-claude` plus related waypoints.
 
 **Branch:** `feature/local-session-identity` (not merged).
 
-## `0.21.0` — Portable manifests and artifact identity
+## `0.20.0` — Portable manifests and artifact identity
 
 **Status: NOT STARTED on `main`.** The specification and partial work live on
 `feature/portable-model-manifests`, which is not merged.
@@ -469,7 +469,7 @@ Both found 2026-09-06; fix the plans, not just the code.
 
 ---
 
-## `0.19.0` — Runtime profiles and Rapid-first model management
+## `0.21.0` — Runtime profiles and Rapid-first model management
 
 > **Renumbered 2026-09-06** from `0.14.0`. Scope is unchanged; only its place in the sequence moved,
 > because the manifest foundation below is what other workstreams actually read. Phase **A**
@@ -480,6 +480,11 @@ Both found 2026-09-06; fix the plans, not just the code.
 > **Renumbered 2026-09-21** from `0.19.0` to `0.20.0` because `0.18.0` was spent on the lime
 > theme (remote identity polish); portable manifests was already at `0.19.0` and had to slide one
 > further. Runtime profiles slides with it. Every gate list travels intact; nothing is dropped.
+>
+> **Renumbered 2026-09-24** — `0.19.0` was spent on rapid-mlx 0.15.0 upgrade (shipped 2026-09-23),
+> not portable manifests/runtime profiles. `0.19.1` is a patch for the effort persistence subshell
+> fix. Portable manifests slides to `0.20.0`, runtime profiles to `0.21.0`, oMLX lanes to `0.22.0`.
+> Every gate list travels intact; nothing is dropped.
 
 **Status: NOT STARTED.** No gate here is implemented. Nothing in `0.13.1`–`0.13.8` advances one.
 
@@ -588,10 +593,14 @@ silent dotfile mutation; published assets are immutable and checksummed.
 > **Renumbered 2026-09-21** from `0.20.0` to `0.21.0` because `0.18.0` was spent on the lime
 > theme; portable manifests → `0.19.0` → `0.21.0`, runtime profiles → `0.20.0`, oMLX lanes
 > → `0.21.0` (pushed one past manifests). Every gate list travels intact; nothing is dropped.
+>
+> **Renumbered 2026-09-24** — `0.19.0` was spent on rapid-mlx 0.15.0 upgrade (shipped 2026-09-23),
+> `0.19.1` is a patch for effort persistence. Portable manifests → `0.20.0`, runtime profiles →
+> `0.21.0`, oMLX lanes → `0.22.0`. Every gate list travels intact; nothing is dropped.
 
 ---
 
-## `0.20.0` — Backend lanes — oMLX
+## `0.22.0` — Backend lanes — oMLX
 
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.
@@ -599,6 +608,10 @@ same day.
 > **Renumbered 2026-09-21** from `0.20.0` to `0.21.0` because `0.18.0` was spent on the lime
 > theme; portable manifests → `0.19.0` → `0.21.0`, runtime profiles → `0.20.0`, oMLX lanes
 > → `0.21.0` (pushed one past manifests). Every gate list travels intact; nothing is dropped.
+>
+> **Renumbered 2026-09-24** — `0.19.0` was spent on rapid-mlx 0.15.0 upgrade, `0.19.1` patch.
+> Portable manifests → `0.20.0`, runtime profiles → `0.21.0`, oMLX lanes → `0.22.0`.
+> Every gate list travels intact; nothing is dropped.
 
 | Fact | Value |
 |---|---|

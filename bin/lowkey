@@ -169,6 +169,47 @@ Examples:
 EOF
 }
 
+# Show dry-run: display configuration without launching
+_show_dry_run() {
+  echo "=== DRY RUN — lowkey configuration ==="
+  echo "Config source: $LA_CONFIG_SOURCE"
+  if [ -n "${LA_FALLBACK_CONFIG:-}" ] && [ "$LA_FALLBACK_CONFIG" = "1" ]; then
+    echo "  ⚠ Using public fallback defaults (private models not present)"
+  fi
+  echo
+  echo "Local inference models (on disk, session-capable):"
+  for a in "${SESSION_ALIASES[@]}"; do
+    roles="$(la_roles_for_alias "$a")"
+    [ -n "$roles" ] || roles="untagged"
+    printf "  %-30s backend=%-20s thinking=%-5s effort=%-6s roles=%s\n" \
+      "$a" \
+      "$(la_serve_display "$a")" \
+      "${LA_THINK[$a]:-?}" \
+      "${LA_EFFORT[$a]:-?}" \
+      "$roles"
+  done
+  echo
+  echo "Defaults:"
+  printf "  Default model : %s\n" "$DEFAULT_MODEL"
+  printf "  Default effort: xhigh\n"
+  printf "  Progress mode : compact\n"
+  printf "  Max tokens    : 4096\n"
+  printf "  Max history   : 48000 chars (0=unlimited)\n"
+  printf "  Max file      : 48000 chars (0=unlimited)\n"
+  printf "  Session swap  : ALLOWED (--allow-session-model-mismatch)\n"
+  echo
+  echo "Launcher: $LOWKEY_CLI"
+  echo "Hotswap : $HOTSWAP"
+  echo
+  echo "Usage:"
+  echo "  lowkey                          # Interactive picker"
+  echo "  lowkey --convo [model]          # Conversation mode"
+  echo "  lowkey --prompt 'TEXT' [opts]   # Single-shot"
+  echo "  lowkey picker                   # Interactive picker (explicit)"
+  echo "  lowkey roles                    # Show model roles"
+  echo "  lowkey --dry-run                # This output"
+}
+
 # Show model roles
 _show_roles() {
   echo
@@ -382,6 +423,18 @@ _run_picker() {
 
 # Main entry point
 main() {
+  # Handle --help and --dry-run BEFORE any work (no side effects)
+  case "${1:-}" in
+    --help|-h)
+      _show_help
+      exit 0
+      ;;
+    --dry-run)
+      _show_dry_run
+      exit 0
+      ;;
+  esac
+
   # No arguments = show interactive picker menu (CSL-style)
   if [ $# -eq 0 ]; then
     _run_picker
@@ -390,10 +443,6 @@ main() {
 
   # Handle special subcommands first
   case "${1:-}" in
-    --help|-h)
-      _show_help
-      exit 0
-      ;;
     roles)
       _show_roles
       exit 0

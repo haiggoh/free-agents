@@ -35,6 +35,53 @@
 set -euo pipefail
 umask 077
 
+# Argument parsing BEFORE any work (must support --help/--dry-run/--self-test without side effects)
+case "${1:-}" in
+  -h|--help)
+    cat <<'HELP'
+launch-claude-agent-rapid-auto.sh — Local Auto Mode via Rapid-MLX (dual-identity route)
+
+Usage: launch-claude-agent-rapid-auto.sh [--help] [--dry-run] [--self-test]
+       launch-claude-agent-rapid-auto.sh <alias> [effort-override]
+
+This is the RAPID-AUTO specific launcher. It uses Rapid-MLX's dual-identity
+serving to run both the session engine AND the auto-mode classifier on ONE
+process, avoiding the prefill latency that breaks classifier calls.
+
+Flags:
+  --help       Show this help and exit
+  --dry-run    Validate config and show resolved model/backend/effort, do NOT launch
+  --self-test  Internal test hook (used by csl test suite)
+
+Environment (set by csl or caller):
+  LA_AUTO_MODE=1           MUST be 1 (auto mode is required for this launcher)
+  LA_BLIND_AUTO=0          Classifier mode (never blind-trust for rapid-auto)
+  LA_TELEMETRY=0|1         Disable/enable nonessential outbound traffic (default 0)
+  LA_QUEUE_STOP_HOOK=0|1   Queued-prompt stop hook (default 1)
+  LA_STRICT_MCP=true|false Exclude MCP servers from prompt (default true)
+  LA_SKIP_RAM_PREFLIGHT=1  Bypass RAM check (not recommended)
+
+Examples:
+  launch-claude-agent-rapid-auto.sh qwen-3.6-thinking
+  launch-claude-agent-rapid-auto.sh --dry-run deepseek-r1-architect max
+HELP
+    exit 0
+    ;;
+  --dry-run)
+    export LA_RAPID_AUTO_DRY_RUN=1
+    shift
+    ;;
+  --self-test)
+    printf '%s\n' "RAPID_AUTO_LAUNCHER_SELF_TEST_OK"
+    exit 0
+    ;;
+  -?*)
+    printf 'launch-claude-agent-rapid-auto.sh: unrecognised option: %s\n' "$1" >&2
+    printf "Try 'launch-claude-agent-rapid-auto.sh --help'.\n" >&2
+    exit 2
+    ;;
+esac
+
 _s="${BASH_SOURCE[0]}"
 while [ -h "$_s" ]; do
     _d="$(cd -P "$(dirname "$_s")" && pwd)"
@@ -46,11 +93,6 @@ while [ -h "$_s" ]; do
 done
 
 LAUNCH_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
-
-if [ "${1:-}" = "--self-test" ]; then
-    printf '%s\n' "RAPID_AUTO_LAUNCHER_SELF_TEST_OK"
-    exit 0
-fi
 
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/../config/config-lib.sh"

@@ -275,6 +275,22 @@ _nav() {
     } > "$navfile"
 }
 
+# _sync_state -> writes current state variables to the nav file with a "stay" navigation target.
+# Used when returning a selection (not navigating away) so the caller gets updated toggles.
+# The "stay" target tells the caller to remain in the remote lane with updated state.
+_sync_state() {
+    local navfile="${CSL_NAV_FILE:-/tmp/_csl_nav.$$}"
+    {
+        echo "stay"
+        # Sync state variables that the parent (csl or standalone) needs to know about
+        [[ -n "${AUTO_MODE_STATE:-}" ]] && echo "AUTO_MODE_STATE=$AUTO_MODE_STATE"
+        [[ -n "${LOCAL_CAPABLE_SHOWN:-}" ]] && echo "LOCAL_CAPABLE=$LOCAL_CAPABLE_SHOWN"
+        [[ -n "${TELEMETRY_ENABLED:-}" ]] && echo "TELEMETRY=$TELEMETRY_ENABLED"
+        [[ -n "${INCLUDE_TRIALS:-}" ]] && echo "INCLUDE_TRIALS=$INCLUDE_TRIALS"
+        [[ -n "${EFFORT_CHOICE:-}" ]] && echo "EFFORT_CHOICE=$EFFORT_CHOICE"
+    } > "$navfile"
+}
+
 # ---- local-capable filter ---------------------------------------------------
 # Load the policy file if it exists, so the interactive picker can filter
 # the roster. The filter is re-applied every render so toggle state is live.
@@ -493,6 +509,10 @@ _run_remote_menu() {
                     continue
                 fi
                 selection="${current_choices[$((sel-1))]}"
+                # Write state to nav file before returning so caller (which may be in a subshell)
+                # can read updated toggles. We don't call _nav because that writes a navigation
+                # target; we just want to sync state.
+                _sync_state
                 ;;
         esac
     done
@@ -984,7 +1004,35 @@ if [[ -z "$ALIAS" ]]; then
     # catches a NON-ZERO exit, so an empty-but-successful return used to fall straight
     # through into alias resolution below with ALIAS="", producing a bogus
     # "unknown remote alias: " error instead of a clean exit. Check emptiness explicitly.
+    # Also read state from nav file because command substitution runs in a subshell
+    # and loses variable assignments. The nav file is keyed on this shell's $$.
+    navfile="${CSL_NAV_FILE:-/tmp/_csl_nav.$$}"
+    rm -f "$navfile"
     ALIAS="$(_run_remote_menu)" || { echo "remote-session: nothing selected." >&2; exit 1; }
+    # Read synced state from nav file (written by _sync_state on selection, or _nav on navigate)
+    # First line is navigation target (home/local/quit/stay), subsequent lines are KEY=VALUE state
+    if [[ -f "$navfile" ]]; then
+        _nav_target=""
+        while IFS= read -r line; do
+            if [[ -z "$_nav_target" ]]; then
+                _nav_target="$line"
+            else
+                case "$line" in
+                    AUTO_MODE_STATE=*) AUTO_MODE_STATE="${line#*=}" ;;
+                    LOCAL_CAPABLE=*)   LOCAL_CAPABLE_SHOWN="${line#*=}" ;;
+                    TELEMETRY=*)       TELEMETRY_ENABLED="${line#*=}" ;;
+                    INCLUDE_TRIALS=*)  INCLUDE_TRIALS="${line#*=}" ;;
+                    EFFORT_CHOICE=*)   EFFORT_CHOICE="${line#*=}" ;;
+                esac
+            fi
+        done < "$navfile"
+        # Handle navigation targets
+        case "$_nav_target" in
+            home|local|quit) exit 0 ;;  # navigated away
+            stay) ;;  # stay in remote lane with updated state
+            "") exit 0 ;;  # empty nav file = navigated away
+        esac
+    fi
     if [[ -z "$ALIAS" ]]; then
         # Navigated away (home/local) or quit — csl reads the nav token itself when
         # CSL_OWNER=1; a direct invocation with nothing selected just exits cleanly.

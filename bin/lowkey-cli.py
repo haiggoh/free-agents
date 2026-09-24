@@ -869,7 +869,12 @@ def main():
         help="Inference progress display (default: compact)",
     )
     parser.add_argument("--convo", action="store_true", help="Enable continuous conversation mode")
-    
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate configuration and show what would launch, without starting a session",
+    )
+
     args = parser.parse_args()
     assistant_label = model_display_label(args.model)
     PROGRESS_MODE = args.progress
@@ -901,6 +906,30 @@ def main():
             validate_session_name(args.session)
         except ValueError as exc:
             parser.error(str(exc))
+
+    # DRY-RUN: show resolved configuration and exit without launching
+    if args.dry_run:
+        print("=== DRY RUN — lowkey-cli.py configuration ===")
+        print(f"  Model alias    : {args.model}")
+        print(f"  Display label  : {assistant_label}")
+        print(f"  Mode           : {'conversation' if args.convo else 'single-shot'}")
+        if args.prompt:
+            print(f"  Prompt         : {args.prompt[:80]}{'...' if len(args.prompt) > 80 else ''}")
+        if args.files:
+            print(f"  Files          : {', '.join(args.files)}")
+        print(f"  Max tokens     : {args.max_tokens}")
+        print(f"  Max history    : {args.max_history_chars} chars ({'unlimited' if args.max_history_chars == 0 else 'limited'})")
+        print(f"  Max file       : {args.max_file_chars} chars ({'unlimited' if args.max_file_chars == 0 else 'limited'})")
+        print(f"  Session        : {args.session if args.session else 'none (ephemeral)'}")
+        print(f"  Model mismatch : {'ALLOWED' if args.allow_session_model_mismatch else 'BLOCKED'}")
+        print(f"  Progress       : {args.progress}")
+        print(f"  Hotswap script : {HOTSWAP_SCRIPT}")
+        print(f"  Librarian      : {LIBRARIAN_SCRIPT}")
+        print(f"  Session dir    : {SESSION_DIR}")
+        print()
+        print("  Would hotswap model, start server, and dispatch.")
+        print("  DRY RUN — nothing started, no network call made.")
+        sys.exit(0)
 
     print(f"[*] Hotswapping local model '{args.model}'...", file=sys.stderr)
     port, served_model_id = hotswap_get_port(args.model)
