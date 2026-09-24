@@ -5,12 +5,13 @@ This script merges two settings files into one, handling the specific keys
 that remote-session.sh uses:
 - permissions (from blind-trust settings): deep merge allow arrays
 - sandbox (from blind-trust settings): take from blind-trust
+- network (from blind-trust settings): take from blind-trust
 - spinnerVerbs (from per-session settings): take from per-session
 
 Usage:
   merge-settings.py --base <file> --overlay <file> [--output <file>]
 
-The --base is the blind-trust settings (permissions + sandbox).
+The --base is the blind-trust settings (permissions + sandbox + network).
 The --overlay is the per-session settings (spinnerVerbs).
 """
 
@@ -36,7 +37,8 @@ def merge_settings(base: dict, overlay: dict) -> dict:
 
     Merge strategy:
     - permissions: deep merge, combine 'allow' arrays (dedup)
-    - sandbox: take from base (blind-truth settings)
+    - sandbox: take from base (blind-trust settings)
+    - network: take from base (blind-trust settings)
     - spinnerVerbs: take from overlay (per-session settings)
     - Other keys: overlay wins
     """
@@ -69,11 +71,17 @@ def merge_settings(base: dict, overlay: dict) -> dict:
     elif 'permissions' in overlay:
         result['permissions'] = overlay['permissions']
 
-    # Handle sandbox: base wins (blind-truth settings has it)
+    # Handle sandbox: base wins (blind-trust settings has it)
     if 'sandbox' in base:
         result['sandbox'] = base['sandbox']
     elif 'sandbox' in overlay:
         result['sandbox'] = overlay['sandbox']
+
+    # Handle network: base wins (blind-trust settings has it)
+    if 'network' in base:
+        result['network'] = base['network']
+    elif 'network' in overlay:
+        result['network'] = overlay['network']
 
     # Handle spinnerVerbs: overlay wins (per-session settings has it)
     if 'spinnerVerbs' in overlay:
@@ -83,7 +91,7 @@ def merge_settings(base: dict, overlay: dict) -> dict:
 
     # Any other keys from overlay
     for k, v in overlay.items():
-        if k not in ('permissions', 'sandbox', 'spinnerVerbs'):
+        if k not in ('permissions', 'sandbox', 'network', 'spinnerVerbs'):
             result[k] = v
 
     return result
