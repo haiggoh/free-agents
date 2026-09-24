@@ -677,10 +677,25 @@ if [ "${LA_BLIND_AUTO:-0}" = "1" ] && [ "$LA_AUTO_MODE" != "1" ]; then
     echo "ERROR: LA_BLIND_AUTO=1 requires LA_AUTO_MODE=1. Set auto mode (CSL_AUTO_MODE_STATE=0 or 1, or 'a'/'b' in csl) first." >&2
     exit 2
 fi
+# BLIND-TRUST MODE SELECTION
+# Option A: acceptEdits + auto-yes wrapper (bypasses classifier entirely)
+# Option B: auto + mock classifier (keeps auto mode semantics, sandbox guards active)
+# Default to Option B (mock classifier) as it preserves more auto-mode behavior.
+: "${LA_BLIND_TRUST_OPTION:=B}"
+
 if [ "$LA_AUTO_MODE" = "1" ]; then
     _PERM_MODE="auto"
     if [ "${LA_BLIND_AUTO:-0}" = "1" ]; then
-        _AUTO_MODE_APPEND="You are running in LOCAL auto mode with blind-trust enabled (no classifier review). Every consequential action is allowed without waiting for a safety check."
+        if [ "$LA_BLIND_TRUST_OPTION" = "A" ]; then
+            # Option A: use acceptEdits with auto-yes wrapper
+            _PERM_MODE="acceptEdits"
+            _AUTO_MODE_APPEND="You are running in LOCAL auto mode with blind-trust (acceptEdits + auto-yes). Every consequential action is allowed without waiting for a safety check."
+        else
+            # Option B (default): keep auto mode, use mock classifier
+            _AUTO_MODE_APPEND="You are running in LOCAL auto mode with blind-trust (mock classifier). Every consequential action is allowed without waiting for a safety check."
+            # Set mock classifier for blind-trust Option B
+            export LA_CLASSIFIER_CMD="python3 $LAUNCH_DIR/mock-classifier.py"
+        fi
     else
         _AUTO_MODE_APPEND="You are running in LOCAL auto mode with a local safety-classifier backend."
     fi

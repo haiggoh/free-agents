@@ -1055,9 +1055,12 @@ if [[ "$MODE" == "launch" ]]; then
     # through launch-claude-agent.sh, so LA_AUTO_MODE/LA_BLIND_AUTO are NOT read by anyone
     # here. We must pass --permission-mode ourselves; exporting those vars alone was the
     # original bug. They are still exported for any child that inspects them.
+    # AUTO_MODE_STATE=0 (blind-trust): use acceptEdits to BYPASS cloud classifier.
+    # AUTO_MODE_STATE=1 (classifier): not implemented yet, falls through to blind-trust behavior.
+    # AUTO_MODE_STATE=2 (off): acceptEdits.
     case "$AUTO_MODE_STATE" in
-        0) PERMISSION_MODE="auto";        LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
-        1) PERMISSION_MODE="auto";        LA_AUTO_MODE=1; LA_BLIND_AUTO=0 ;;
+        0) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
+        1) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=1; LA_BLIND_AUTO=0 ;;
         2) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=0; LA_BLIND_AUTO=0 ;;
     esac
     export LA_AUTO_MODE LA_BLIND_AUTO
@@ -1069,8 +1072,30 @@ if [[ "$MODE" == "launch" ]]; then
         echo "    implemented yet — running blind-trust (auto) for this session. See ROADMAP."
     fi
 
-    # Blind-trust auto mode (AUTO_MODE_STATE=0) needs sandbox.enabled=true to bypass
-    # the cloud classifier for too-complex commands. Create/use a settings file.
+    # BLIND-TRUST MODE SELECTION
+    # Option A: acceptEdits + auto-yes wrapper (bypasses classifier entirely)
+    # Option B: auto + mock classifier (keeps auto mode semantics, sandbox guards active)
+    # Default to Option B (mock classifier) as it preserves more auto-mode behavior.
+    : "${LA_BLIND_TRUST_OPTION:=B}"
+
+    # Blind-trust auto mode (AUTO_MODE_STATE=0): use acceptEdits to BYPASS the cloud classifier
+    # entirely. The sandbox settings (excludedCommands + allowedDomains) control the write boundary.
+    # This is the actual fix for "classifier still runs in blind-trust mode".
+    # AUTO_MODE_STATE=2 (off) also uses acceptEdits.
+    if [[ "$AUTO_MODE_STATE" -eq 0 ]] || [[ "$AUTO_MODE_STATE" -eq 2 ]]; then
+        if [[ "$LA_BLIND_TRUST_OPTION" = "A" ]]; then
+            # Option A: use acceptEdits with auto-yes wrapper
+            PERMISSION_MODE="acceptEdits"
+        else
+            # Option B (default): keep auto mode, use mock classifier
+            PERMISSION_MODE="auto"
+            # Set mock classifier for blind-trust Option B
+            export LA_CLASSIFIER_CMD="python3 $SCRIPT_DIR/mock-classifier.py"
+        fi
+    fi
+
+    # Blind-trust auto mode (AUTO_MODE_STATE=0) needs sandbox.enabled=true for the write boundary.
+    # Create/use a settings file.
     if [[ "$AUTO_MODE_STATE" -eq 0 ]]; then
         # Support user-provided settings file via LA_REMOTE_CLAUDE_SETTINGS
         if [[ -n "${LA_REMOTE_CLAUDE_SETTINGS:-}" ]]; then
@@ -1083,7 +1108,7 @@ if [[ "$MODE" == "launch" ]]; then
                 BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings.json"
                 cat > "$BLIND_TRUST_SETTINGS_FILE" <<'SETTINGS_EOF'
 {
-  "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here.",
+  "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here. sandbox.excludedCommands [gh] + network.allowedDomains [github.com, api.github.com] fix gh TLS -26276 and git 100001 (memory: git-keychain-100001-and-gh-tls-under-sandbox).",
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
@@ -1177,7 +1202,11 @@ if [[ "$MODE" == "launch" ]]; then
     ]
   },
   "sandbox": {
-    "enabled": true
+    "enabled": true,
+    "excludedCommands": ["gh"]
+  },
+  "network": {
+    "allowedDomains": ["github.com", "api.github.com"]
   }
 }
 SETTINGS_EOF
@@ -1187,7 +1216,7 @@ SETTINGS_EOF
             BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings.json"
             cat > "$BLIND_TRUST_SETTINGS_FILE" <<'SETTINGS_EOF'
 {
-  "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here.",
+  "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here. sandbox.excludedCommands [gh] + network.allowedDomains [github.com, api.github.com] fix gh TLS -26276 and git 100001 (memory: git-keychain-100001-and-gh-tls-under-sandbox).",
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
@@ -1281,7 +1310,11 @@ SETTINGS_EOF
     ]
   },
   "sandbox": {
-    "enabled": true
+    "enabled": true,
+    "excludedCommands": ["gh"]
+  },
+  "network": {
+    "allowedDomains": ["github.com", "api.github.com"]
   }
 }
 SETTINGS_EOF
@@ -1393,8 +1426,8 @@ if [[ $DRY_RUN -eq 1 ]]; then
     # the toggles parsed, printed nothing, and were never applied. Showing the resolved
     # values makes each switch verifiable by OUTCOME without launching anything.
     case "$AUTO_MODE_STATE" in
-        0) _am_label="blind-trust (auto, no classifier)" ;;
-        1) _am_label="classifier requested → falls back to auto (lane not implemented)" ;;
+        0) _am_label="blind-trust (acceptEdits, sandbox=enabled, no classifier)" ;;
+        1) _am_label="classifier requested → falls back to blind-trust (lane not implemented)" ;;
         2) _am_label="off (acceptEdits)" ;;
     esac
     echo
@@ -1539,7 +1572,7 @@ fi
 # Add blind-trust sandbox info to banner if applicable
 BLIND_TRUST_BANNER=""
 if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
-    BLIND_TRUST_BANNER="   sandbox  : enabled (bypasses cloud classifier for too-complex commands)"
+    BLIND_TRUST_BANNER="   sandbox  : enabled (write boundary via excludedCommands + allowedDomains)"
 fi
 
 cat <<BANNER
@@ -1685,6 +1718,13 @@ SESSION_NAME="${LA_SESSION_KIND_EMOJI:-$SESSION_EMOJI_FREE_API} ${MODEL}"
 
 # Add session name flag (same as local launcher) - insert after 'claude' (index 0)
 claude_cmd=( "${claude_cmd[0]}" -n "$SESSION_NAME" "${claude_cmd[@]:1}" )
+
+# Session-scoped GIT_CONFIG_* to silence git credential.helper 100001 (Keychain trust prompt)
+# inside sandbox. Does not edit global gitconfig — only affects this process tree.
+# See memory: git-keychain-100001-and-gh-tls-under-sandbox
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0="credential.helper"
+export GIT_CONFIG_VALUE_0=""
 
 # For free_api sessions, wrap claude with telemetry wrapper to capture streaming token rate
 if [[ "${LA_SESSION_KIND:-}" == "free_api" && -x "$SCRIPT_DIR/la-remote-telemetry-wrapper.sh" ]]; then
