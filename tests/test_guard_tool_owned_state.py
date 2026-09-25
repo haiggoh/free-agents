@@ -77,6 +77,22 @@ class GuardToolOwnedState(unittest.TestCase):
         p = subprocess.run([sys.executable, str(GUARD), "--bogus"], capture_output=True, text=True)
         self.assertEqual(p.returncode, 2)
 
+    def test_hooks_json_has_no_duplicate_keys(self):
+        # Two branches each adding "PreToolUse" merge cleanly in git; json.loads then keeps only the
+        # LAST one and silently drops the other guard.
+        def no_dupes(pairs):
+            keys = [k for k, _ in pairs]
+            dup = {k for k in keys if keys.count(k) > 1}
+            self.assertFalse(dup, f"duplicate keys in hooks.json: {dup}")
+            return dict(pairs)
+        json.loads((ROOT / "hooks" / "hooks.json").read_text(), object_pairs_hook=no_dupes)
+
+    def test_both_pretooluse_guards_registered(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]
+        cmds = " ".join(c["command"] for h in hooks for c in h["hooks"])
+        self.assertIn("guard-own-endpoint.py", cmds)
+        self.assertIn("guard-tool-owned-state.py", cmds)
+
     def test_registered_in_hooks_json_for_every_file_tool(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]
         entry = [h for h in hooks if any("guard-tool-owned-state.py" in c["command"] for c in h["hooks"])]

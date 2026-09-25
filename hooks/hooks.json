@@ -21,6 +21,15 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guard-own-endpoint.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {
@@ -39,17 +48,6 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/local-queue-stop-hook.py\"",
             "timeout": 10,
             "statusMessage": "Checking for queued prompts…"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guard-own-endpoint.py\""
           }
         ]
       }
