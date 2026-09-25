@@ -2,6 +2,31 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.5] — 2026-09-25
+
+### Added — PreToolUse guard against hand-editing tool-owned plugin state
+
+A remote free-API session pushed a plugin change without a version bump. `claude plugin update`
+correctly had nowhere new to land, and the session misread that as a sandbox restriction. It then
+`Write`-replaced `~/.claude/plugins/installed_plugins.json` with a file rebuilt from partial
+`grep -A 10` views, which dropped 56 of 86 entries. Its "restore" was a second Write of the same
+reconstruction. The CLI later re-filled the file from disk, so it looked healthy while recording
+stale versions, resurrected uninstalled plugins and wiping install history. Prose rules already
+said "never hand-edit the plugin cache"; this makes it mechanical.
+
+- `hooks/guard-tool-owned-state.py` (PreToolUse, matcher `Bash|Write|Edit|MultiEdit|NotebookEdit`):
+  denies writes to `installed_plugins.json`, `known_marketplaces.json`, `plugins/cache/**` and
+  `plugins/marketplaces/**` under `$CLAUDE_CONFIG_DIR` (default `~/.claude`). Reads stay allowed,
+  and so does a command that is entirely `claude plugin …` or `get-haiggoh`. A command chained
+  onto one of those is not exempt. The deny reason tells the model the likely real cause (a
+  missing version bump) and the correct path.
+  Fails open on internal error; `LA_STATE_GUARD_DISABLE=1` turns it off for a deliberate human repair.
+  `--help`, `--self-test`.
+- `tests/test_guard_tool_owned_state.py`: subprocess-boundary tests plus a hooks.json registration check;
+  mutation-tested (disabling the Bash write check turns the suite red).
+
+Also ships `024e476` (merge-settings network key handling), which landed after the 0.19.4 bump.
+
 ## [0.19.1] — 2026-09-24
 
 ### Fixed — effort persistence for remote free API sessions (subshell variable loss)
