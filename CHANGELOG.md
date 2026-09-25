@@ -2,6 +2,20 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.8] — 2026-09-26
+
+### Added — MCP wildcard allowlist in blind-trust mode (local + remote)
+
+- **Master allowlist + profile pattern**: `~/.claude/launch-profiles/allowlist-master.json` holds the base 87 Bash command allowlist. Lean profiles (`lean-local-general.json`, `lean-cloud-general.json`) extend it with `mcp__*` wildcard, grandfathering future MCP servers without launcher changes.
+- **Local blind-trust**: `launch-claude-agent.sh --enable-mcp` (or `LA_ENABLE_MCP=1`) generates blind-trust settings merging master + profile allowlists, includes `mcp__*`. `csl` gains `--enable-mcp` flag and `u` key in local picker for blind-trust MCP toggle.
+- **Remote blind-trust**: `remote-session.sh --enable-mcp` (or `LA_REMOTE_ENABLE_MCP=1`) does the same for free-API sessions. `csl remote` and remote picker (`m` key) allow MCP toggle in ALL auto-mode states including blind-trust.
+- **Inline allowlists removed**: Both launchers no longer duplicate the 400+ line inline allowlist; they read from portable JSON profiles at runtime.
+- **Wildcard `mcp__*`**: Instead of listing current servers (blender, davinci-resolve, joyia, adobe, filesystem, github), the wildcard admits any MCP tool added later.
+
+### Fixed — remote picker MCP toggle in blind-trust
+
+- `_run_remote_menu` now shows and allows `m` key to toggle MCPs even in `AUTO_MODE_STATE=0` (blind-trust), matching local picker behavior. Previously it showed "MCPs cannot be enabled in blind-trust" error.
+
 ## [0.19.7] — 2026-09-25
 
 ### Fixed — guard-tool-owned-state over-blocked harmless Bash

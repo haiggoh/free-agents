@@ -92,7 +92,7 @@ check $? "launcher uses a self-match-safe model-process gate"
 grep -qF 'LA_RAPID_AUTO_MODEL_DIR' "$CONFIG_LIB"
 check $? "config library exposes the pinned Rapid Auto Mode model"
 
-grep -qF 'rapid-mlx 0.15.0' "$LAUNCHER"
+grep -qF 'rapid-mlx 0.15.2' "$LAUNCHER"
 check $? "launcher pins the tested Rapid version"
 
 grep -qF 'requires a non-thinking session alias' "$LAUNCHER"
@@ -155,7 +155,7 @@ printf '{}\n' >"$SB/home/.models/Qwen3.6-35B-A3B-4bit/config.json"
 cat >"$SB/bin/rapid-mlx" <<'RAPID_STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = "--version" ]; then
-    printf '%s\n' "rapid-mlx 0.15.0"
+    printf '%s\n' "rapid-mlx 0.15.2"
     exit 0
 fi
 exit 97

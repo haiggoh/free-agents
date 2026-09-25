@@ -767,6 +767,29 @@ Trade-off, stated because it is real: the umbrella also disables `/design-sync`,
 CLI's update check. All three are irrelevant to a local session — `DesignSync` is already withheld by
 `LA_DENY_TOOLS`, and backend updates come from the weekly launchd check rather than the CLI's poller.
 
+### MCP tools in blind-trust auto mode
+
+When running in blind-trust auto mode (the default, `AUTO_MODE_STATE=0`), the sandbox `enabled: true`
+setting controls the write boundary — but the classifier is bypassed entirely, so every tool call
+that isn't explicitly allowlisted would prompt. To make MCP tools work without prompts in blind-trust:
+
+**Local sessions** (`csl` / `launch-claude-agent.sh`):
+- `--enable-mcp` flag or `LA_ENABLE_MCP=1`
+- `csl` local picker: press `u` to toggle MCPs in blind-trust mode
+
+**Remote free-API sessions** (`csl remote` / `remote-session.sh`):
+- `--enable-mcp` flag or `LA_REMOTE_ENABLE_MCP=1`
+- `csl remote` picker: press `m` to toggle MCPs (works in ALL auto-mode states including blind-trust)
+
+**How it works:** A master allowlist (`~/.claude/launch-profiles/allowlist-master.json`, 87 Bash
+commands) is merged with the active lean profile (`lean-local-general.json` or
+`lean-cloud-general.json`) at runtime. The profiles add the `mcp__*` wildcard, which admits **any**
+MCP tool (current: blender, davinci-resolve, joyia, adobe-for-creativity, filesystem, github — and
+any future ones). This replaces the previous inline 400+ line allowlist duplicated in each launcher.
+
+**Default is OFF:** MCPs are disabled by default in free-API sessions to conserve provider quota.
+Enable them explicitly when you need them.
+
 ### What to expect from a local session
 
 Being able to run Claude Code on a local model at all is the win here, and it is a real one: your own

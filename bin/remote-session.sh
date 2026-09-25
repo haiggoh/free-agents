@@ -23,6 +23,8 @@
 #   LA_REMOTE_PROXY_PORT_MIN/MAX  proxy port scan range (default 4141-4151)
 #   LA_REMOTE_MAX_OUTPUT_TOKENS   CLAUDE_CODE_MAX_OUTPUT_TOKENS (default 8192)
 #   LA_REMOTE_KEEP_PROXY=1        leave the proxy running after the session exits
+#   LA_REMOTE_ENABLE_MCP=1        enable MCPs for free-API sessions (default: 0, disabled)
+#                                 ignored in blind-trust auto-mode (AUTO_MODE_STATE=0)
 #
 # Cost: provider quota and billing apply; see the selected tier. This session
 # does not use the Anthropic gateway. Catalog checks consume no generation tokens.
@@ -75,6 +77,7 @@ usage() {
     echo "  -a, --auto-mode       Toggle auto-mode: blind-trust → classifier → off"
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
+    echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
 }
 
 _valid_model() {
@@ -442,9 +445,12 @@ _run_remote_menu() {
             echo "  t) $EMOJI_TELEMETRY_ON telemetry: OFF — no nonessential outbound traffic (toggle)"
         fi
         echo "  l) ⏳ limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+        # MCP toggle available in ALL auto-mode states (including blind-trust)
+        # Blind-trust settings generation includes mcp__* when LA_REMOTE_ENABLE_MCP=1
+        echo "  m) $EMOJI_MCP mcps: $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")"
         echo "  q) quit"
         echo
-        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/q): " "${#choices[@]}" >&2
+        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/q): " "${#choices[@]}" >&2
         read -r -p "" sel >&2 || { _nav "quit"; return 0; }
         case "$sel" in
             h|H) _nav "home"; return 0 ;;
@@ -478,6 +484,10 @@ _run_remote_menu() {
                 continue ;;
             l|L)
                 INCLUDE_TRIALS=$(( 1 - INCLUDE_TRIALS ))
+                continue ;;
+            m|M)
+                LA_REMOTE_ENABLE_MCP=$(( 1 - ${LA_REMOTE_ENABLE_MCP:-0} ))
+                echo "  MCPs $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")" >&2
                 continue ;;
             e|E)
                 # Select effort level (compatible with Claude's --effort flag)
@@ -967,6 +977,7 @@ while [[ $# -gt 0 ]]; do
                 SELECTED_EFFORT="choose-effort"
             fi
             shift ;;
+        --enable-mcp)     export LA_REMOTE_ENABLE_MCP=1; shift ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
         -*)               if [[ -z "$ALIAS" ]]; then
                               echo "remote-session: unknown option: $1; use --help or put Claude options after an alias / --." >&2
@@ -1106,218 +1117,110 @@ if [[ "$MODE" == "launch" ]]; then
                 echo "⚠️  LA_REMOTE_CLAUDE_SETTINGS file not found: $LA_REMOTE_CLAUDE_SETTINGS; falling back to generated settings" >&2
                 # Create default blind-trust settings with sandbox.enabled=true
                 BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings.json"
-                cat > "$BLIND_TRUST_SETTINGS_FILE" <<'SETTINGS_EOF'
-{
-  "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here. sandbox.excludedCommands [gh] + network.allowedDomains [github.com, api.github.com] fix gh TLS -26276 and git 100001 (memory: git-keychain-100001-and-gh-tls-under-sandbox).",
-  "permissions": {
-    "defaultMode": "acceptEdits",
-    "allow": [
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(echo:*)",
-      "Bash(mkdir:*)",
-      "Bash(touch:*)",
-      "Bash(printf:*)",
-      "Bash(cp:*)",
-      "Bash(mv:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)",
-      "Bash(cd:*)",
-      "Bash(pwd:*)",
-      "Bash(wc:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(sed:*)",
-      "Bash(awk:*)",
-      "Bash(cut:*)",
-      "Bash(sort:*)",
-      "Bash(uniq:*)",
-      "Bash(tr:*)",
-      "Bash(diff:*)",
-      "Bash(cmp:*)",
-      "Bash(od:*)",
-      "Bash(file:*)",
-      "Bash(stat:*)",
-      "Bash(readlink:*)",
-      "Bash(basename:*)",
-      "Bash(dirname:*)",
-      "Bash(realpath:*)",
-      "Bash(which:*)",
-      "Bash(command:*)",
-      "Bash(true:*)",
-      "Bash(test:*)",
-      "Bash(date:*)",
-      "Bash(env:*)",
-      "Bash(shasum:*)",
-      "Bash(md5:*)",
-      "Bash(jq:*)",
-      "Bash(python3:*)",
-      "Bash(bash:*)",
-      "Bash(sh:*)",
-      "Bash(zsh:*)",
-      "Bash(curl:*)",
-      "Bash(lsof:*)",
-      "Bash(ps:*)",
-      "Bash(df:*)",
-      "Bash(du:*)",
-      "Bash(uname:*)",
-      "Bash(sysctl:*)",
-      "Bash(vm_stat:*)",
-      "Bash(xattr:*)",
-      "Bash(mktemp:*)",
-      "Bash(tee:*)",
-      "Bash(xargs:*)",
-      "Bash(pytest:*)",
-      "Bash(npm:*)",
-      "Bash(node:*)",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git branch:*)",
-      "Bash(git rev-parse:*)",
-      "Bash(git rev-list:*)",
-      "Bash(git for-each-ref:*)",
-      "Bash(git ls-files:*)",
-      "Bash(git tag:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git checkout:*)",
-      "Bash(git merge:*)",
-      "Bash(git stash:*)",
-      "Bash(git worktree:*)",
-      "Bash(gh release view:*)",
-      "Bash(gh release list:*)",
-      "Bash(gh release create:*)",
-      "Bash(gh api:*)",
-      "Bash(waypoints.py:*)",
-      "Bash(interrupted:*)",
-      "Bash(claude plugin update:*)",
-      "Bash(csl:*)",
-      "Bash(la-roles.sh:*)",
-      "Bash(la-session-identity.sh:*)",
-      "Bash(local-llm-hotswap.sh:*)",
-      "Bash(librarian-dispatch.py:*)",
-      "Bash(remote-provider-doctor.py:*)"
-    ]
-  },
-  "sandbox": {
-    "enabled": true,
-    "excludedCommands": ["gh"]
-  },
-  "network": {
-    "allowedDomains": ["github.com", "api.github.com"]
-  }
+                MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
+                PROFILE_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/lean-cloud-general.json"
+                python3 - <<'PYEOF' "$BLIND_TRUST_SETTINGS_FILE" "${LA_REMOTE_ENABLE_MCP:-0}" "$MASTER_ALLOWLIST_FILE" "$PROFILE_ALLOWLIST_FILE" >/dev/null
+import json, sys
+
+def load_allowlist(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('permissions', {}).get('allow', [])
+    except Exception:
+        return []
+
+master_file = sys.argv[3]
+profile_file = sys.argv[4]
+
+master_allow = load_allowlist(master_file)
+profile_allow = load_allowlist(profile_file)
+
+# Merge: master + profile (profile wins on conflicts, preserve order)
+seen = set()
+merged_allow = []
+for item in master_allow + profile_allow:
+    if item not in seen:
+        seen.add(item)
+        merged_allow.append(item)
+
+# If MCPs disabled in blind-trust, filter out mcp__*
+enable_mcp = sys.argv[2] == "1"
+if not enable_mcp:
+    merged_allow = [item for item in merged_allow if not item.startswith("mcp__")]
+
+settings = {
+    "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here. sandbox.excludedCommands [gh] + network.allowedDomains [github.com, api.github.com] fix gh TLS -26276 and git 100001 (memory: git-keychain-100001-and-gh-tls-under-sandbox). MCP tools enabled via merged master+profile allowlist when LA_REMOTE_ENABLE_MCP=1.",
+    "permissions": {
+        "defaultMode": "auto" if enable_mcp else "acceptEdits",
+        "allow": merged_allow
+    },
+    "sandbox": {
+        "enabled": True,
+        "excludedCommands": ["gh"]
+    },
+    "network": {
+        "allowedDomains": ["github.com", "api.github.com"]
+    }
 }
-SETTINGS_EOF
+
+with open(sys.argv[1], 'w', encoding='utf-8') as f:
+    json.dump(settings, f, separators=(',', ':'))
+PYEOF
             fi
         else
             # Create default blind-trust settings with sandbox.enabled=true
             BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings.json"
-            cat > "$BLIND_TRUST_SETTINGS_FILE" <<'SETTINGS_EOF'
-{
-  "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here. sandbox.excludedCommands [gh] + network.allowedDomains [github.com, api.github.com] fix gh TLS -26276 and git 100001 (memory: git-keychain-100001-and-gh-tls-under-sandbox).",
-  "permissions": {
-    "defaultMode": "acceptEdits",
-    "allow": [
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(echo:*)",
-      "Bash(mkdir:*)",
-      "Bash(touch:*)",
-      "Bash(printf:*)",
-      "Bash(cp:*)",
-      "Bash(mv:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)",
-      "Bash(cd:*)",
-      "Bash(pwd:*)",
-      "Bash(wc:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(sed:*)",
-      "Bash(awk:*)",
-      "Bash(cut:*)",
-      "Bash(sort:*)",
-      "Bash(uniq:*)",
-      "Bash(tr:*)",
-      "Bash(diff:*)",
-      "Bash(cmp:*)",
-      "Bash(od:*)",
-      "Bash(file:*)",
-      "Bash(stat:*)",
-      "Bash(readlink:*)",
-      "Bash(basename:*)",
-      "Bash(dirname:*)",
-      "Bash(realpath:*)",
-      "Bash(which:*)",
-      "Bash(command:*)",
-      "Bash(true:*)",
-      "Bash(test:*)",
-      "Bash(date:*)",
-      "Bash(env:*)",
-      "Bash(shasum:*)",
-      "Bash(md5:*)",
-      "Bash(jq:*)",
-      "Bash(python3:*)",
-      "Bash(bash:*)",
-      "Bash(sh:*)",
-      "Bash(zsh:*)",
-      "Bash(curl:*)",
-      "Bash(lsof:*)",
-      "Bash(ps:*)",
-      "Bash(df:*)",
-      "Bash(du:*)",
-      "Bash(uname:*)",
-      "Bash(sysctl:*)",
-      "Bash(vm_stat:*)",
-      "Bash(xattr:*)",
-      "Bash(mktemp:*)",
-      "Bash(tee:*)",
-      "Bash(xargs:*)",
-      "Bash(pytest:*)",
-      "Bash(npm:*)",
-      "Bash(node:*)",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git branch:*)",
-      "Bash(git rev-parse:*)",
-      "Bash(git rev-list:*)",
-      "Bash(git for-each-ref:*)",
-      "Bash(git ls-files:*)",
-      "Bash(git tag:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git checkout:*)",
-      "Bash(git merge:*)",
-      "Bash(git stash:*)",
-      "Bash(git worktree:*)",
-      "Bash(gh release view:*)",
-      "Bash(gh release list:*)",
-      "Bash(gh release create:*)",
-      "Bash(gh api:*)",
-      "Bash(waypoints.py:*)",
-      "Bash(interrupted:*)",
-      "Bash(claude plugin update:*)",
-      "Bash(csl:*)",
-      "Bash(la-roles.sh:*)",
-      "Bash(la-session-identity.sh:*)",
-      "Bash(local-llm-hotswap.sh:*)",
-      "Bash(librarian-dispatch.py:*)",
-      "Bash(remote-provider-doctor.py:*)"
-    ]
-  },
-  "sandbox": {
-    "enabled": true,
-    "excludedCommands": ["gh"]
-  },
-  "network": {
-    "allowedDomains": ["github.com", "api.github.com"]
-  }
+            MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
+            PROFILE_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/lean-cloud-general.json"
+            python3 - <<'PYEOF' "$BLIND_TRUST_SETTINGS_FILE" "${LA_REMOTE_ENABLE_MCP:-0}" "$MASTER_ALLOWLIST_FILE" "$PROFILE_ALLOWLIST_FILE" >/dev/null
+import json, sys
+
+def load_allowlist(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('permissions', {}).get('allow', [])
+    except Exception:
+        return []
+
+master_file = sys.argv[3]
+profile_file = sys.argv[4]
+
+master_allow = load_allowlist(master_file)
+profile_allow = load_allowlist(profile_file)
+
+# Merge: master + profile (profile wins on conflicts, preserve order)
+seen = set()
+merged_allow = []
+for item in master_allow + profile_allow:
+    if item not in seen:
+        seen.add(item)
+        merged_allow.append(item)
+
+# If MCPs disabled in blind-trust, filter out mcp__*
+enable_mcp = sys.argv[2] == "1"
+if not enable_mcp:
+    merged_allow = [item for item in merged_allow if not item.startswith("mcp__")]
+
+settings = {
+    "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here. sandbox.excludedCommands [gh] + network.allowedDomains [github.com, api.github.com] fix gh TLS -26276 and git 100001 (memory: git-keychain-100001-and-gh-tls-under-sandbox). MCP tools enabled via merged master+profile allowlist when LA_REMOTE_ENABLE_MCP=1.",
+    "permissions": {
+        "defaultMode": "auto" if enable_mcp else "acceptEdits",
+        "allow": merged_allow
+    },
+    "sandbox": {
+        "enabled": True,
+        "excludedCommands": ["gh"]
+    },
+    "network": {
+        "allowedDomains": ["github.com", "api.github.com"]
+    }
 }
-SETTINGS_EOF
+
+with open(sys.argv[1], 'w', encoding='utf-8') as f:
+    json.dump(settings, f, separators=(',', ':'))
+PYEOF
         fi
     fi
 
@@ -1430,10 +1333,21 @@ if [[ $DRY_RUN -eq 1 ]]; then
         1) _am_label="classifier requested → falls back to blind-trust (lane not implemented)" ;;
         2) _am_label="off (acceptEdits)" ;;
     esac
+    # MCP status
+    if [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 && "$AUTO_MODE_STATE" -ne 0 ]]; then
+        _mcp_status="ENABLED (free-API session, auto-mode off/classifier)"
+    elif [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 && "$AUTO_MODE_STATE" -eq 0 ]]; then
+        _mcp_status="ENABLED (blind-trust mode — mcp__* allowlisted in generated settings)"
+    elif [[ "$AUTO_MODE_STATE" -eq 0 ]]; then
+        _mcp_status="DISABLED (blind-trust auto-mode; set LA_REMOTE_ENABLE_MCP=1 to enable)"
+    else
+        _mcp_status="DISABLED (default; set LA_REMOTE_ENABLE_MCP=1 to enable)"
+    fi
     echo
     echo "   resolved toggles:"
     echo "     auto-mode      : $_am_label"
     echo "     permission-mode: --permission-mode $PERMISSION_MODE"
+    echo "     mcps           : $_mcp_status"
     if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
         if [[ "$BLIND_TRUST_SETTINGS_USER_PROVIDED" -eq 1 ]]; then
             echo "     settings       : --settings $BLIND_TRUST_SETTINGS_FILE (user-provided via LA_REMOTE_CLAUDE_SETTINGS)"
@@ -1670,7 +1584,18 @@ trap _teardown EXIT INT TERM HUP
 # NOT `local` — this is top-level scope. `local` outside a function makes bash print
 # "local: can only be used in a function" and return 1, yet STILL assign the array, so the
 # bug was invisible: the session launched correctly while emitting an error line.
-claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
+
+# By default, remote free-API sessions disable MCPs (--mcp-config '{"mcpServers":{}}')
+# to save cost on paid gateway. For free API sessions, allow enabling MCPs via
+# LA_REMOTE_ENABLE_MCP=1. Blind-trust mode (AUTO_MODE_STATE=0) still disables them
+# by default since the sandbox allowlist doesn't include MCP tools.
+if [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 && "${AUTO_MODE_STATE:-0}" -ne 0 ]]; then
+    # MCPs enabled for free-API non-blind-trust sessions
+    claude_cmd=(claude --model claude-opus-5 --append-system-prompt "$AGENT_PROMPT")
+else
+    # Default: disable MCPs (original behavior for cost savings)
+    claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
+fi
 claude_cmd+=(--permission-mode "$PERMISSION_MODE")
 
 # Handle settings merge: if both blind-trust and per-session settings exist, merge them.

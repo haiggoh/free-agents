@@ -60,11 +60,16 @@ Examples:
   csl roles                              # Show role bindings
   csl remote --list                      # List remote agents
   csl qwen-3.8-operator high             # Direct launch (no picker)
+  csl --enable-mcp                       # Enable MCPs in blind-trust mode
 HELP
     exit 0
     ;;
   --dry-run)
     DRY_RUN=1
+    shift
+    ;;
+  --enable-mcp)
+    export LA_ENABLE_MCP=1
     shift
     ;;
   -?*)
@@ -159,6 +164,11 @@ STOP_HOOK="${CSL_STOP_HOOK:-1}"
 # shell and synced both ways with remote-session.sh -- it is state, not a home-screen control.
 LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
 
+# MCP enablement for blind-trust mode (local + remote sessions)
+# 0 = DISABLED (default), 1 = ENABLED (mcp__* allowlisted in blind-trust settings)
+# Only effective when AUTO_MODE_STATE=0 (blind-trust) and LA_BLIND_TRUST_OPTION=B
+LA_ENABLE_MCP="${CSL_ENABLE_MCP:-0}"
+
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
 if [ "$#" -gt 0 ]; then
@@ -208,6 +218,9 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   printf "  Telemetry: %s (toggle with 't')\n" "$([ "$TELEMETRY" = "1" ] && echo ON || echo OFF)"
   printf "  Watcher:   %s (toggle with 'w')\n" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)"
   printf "  Stop hook: %s (toggle with 's')\n" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)"
+  if [ "$AUTO_MODE_STATE" = "0" ]; then
+    printf "  MCPs (blind-trust): %s (toggle with 'm')\n" "$([ "$LA_ENABLE_MCP" = "1" ] && echo ENABLED || echo DISABLED)"
+  fi
   echo
   echo "Launcher paths:"
   printf "  Local  : %s\n" "$LAUNCHER"
@@ -337,9 +350,9 @@ OSA
   _am="$(_la_auto_mode_val)"
   _ba="$(_la_blind_auto_val)"
   if [ -n "$effort" ]; then
-    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" LA_QUEUE_STOP_HOOK="$STOP_HOOK" "$LAUNCHER" "$alias" "$effort"
+    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" LA_QUEUE_STOP_HOOK="$STOP_HOOK" LA_ENABLE_MCP="$LA_ENABLE_MCP" "$LAUNCHER" "$alias" "$effort"
   else
-    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" LA_QUEUE_STOP_HOOK="$STOP_HOOK" "$LAUNCHER" "$alias"
+    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" LA_QUEUE_STOP_HOOK="$STOP_HOOK" LA_ENABLE_MCP="$LA_ENABLE_MCP" "$LAUNCHER" "$alias"
   fi
 }
 
@@ -498,7 +511,7 @@ _run_local_picker() {
     echo "  s) $SESSION_EMOJI_FREE_API switch to remote API agents (provider/model; account quotas apply)"
     echo "     Cerebras trial opt-in: csl remote --include-trials"
     echo "  k) $EMOJI_KEY set up remote API keys"
-    echo "  m) $EMOJI_TOOLS manage Rapid-MLX runtime (install/update/inspect)"
+    echo "  M) $EMOJI_TOOLS manage Rapid-MLX runtime (install/update/inspect)"
     case "$AUTO_MODE_STATE" in
       0) echo "  a) $EMOJI_AUTO_MODE auto-mode: blind-trust — auto with no classifier (cycle)" ;;
       1) echo "  a) $EMOJI_AUTO_MODE auto-mode: classifier  — auto with local classifier (cycle)" ;;
@@ -510,6 +523,10 @@ _run_local_picker() {
     else                        echo "  w) $EMOJI_WATCHER watcher: OFF — no monitor window (toggle)"; fi
     if [ "$STOP_HOOK" = "1" ]; then echo "  p) $EMOJI_STOP_HOOK queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
     else                            echo "  p) $EMOJI_STOP_HOOK queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
+    if [ "$AUTO_MODE_STATE" = "0" ]; then
+        if [ "$LA_ENABLE_MCP" = "1" ]; then echo "  u) $EMOJI_MCP mcps (blind-trust): ENABLED (toggle)"
+        else                           echo "  u) $EMOJI_MCP mcps (blind-trust): DISABLED (toggle)"; fi
+    fi
     echo "  q) quit"
     echo
     printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
@@ -517,13 +534,21 @@ _run_local_picker() {
       q|Q) NEXT_LANE="quit"; return ;;
       h|H) NEXT_LANE="home"; return ;;
       k|K) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
-      m|M) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; continue ;;
+      M|m) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; continue ;;
       s|S) NEXT_LANE="remote"; return ;;
       w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
       a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
       b|B) AUTO_MODE_STATE=0; continue ;;  # b shortcut: jump straight to blind-trust
       t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
       p|P) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; continue ;;
+      u|U)
+        if [ "$AUTO_MODE_STATE" = "0" ]; then
+          if [ "$LA_ENABLE_MCP" = "1" ]; then LA_ENABLE_MCP=0; else LA_ENABLE_MCP=1; fi
+          echo "  MCPs in blind-trust mode: $([ "$LA_ENABLE_MCP" = "1" ] && echo ENABLED || echo DISABLED)" >&2
+        else
+          echo "  MCPs in blind-trust mode only available when auto-mode is blind-trust (a to cycle)" >&2
+        fi
+        continue ;;
       c|C)
         echo >&2
         echo "Models (on disk, session-capable):" >&2
@@ -578,6 +603,7 @@ while [ "$NEXT_LANE" != "quit" ]; do
       done
       [ "$TELEMETRY" = "1" ] && remote_args+=("-t")
       [ "$LOCAL_CAPABLE" = "1" ] && remote_args+=("--local-capable-shown")
+      [ "$LA_ENABLE_MCP" = "1" ] && remote_args+=("--enable-mcp")
       remote_args+=("--csl-owner")
       # Run remote picker in current shell (not exec) so we can return here.
       # remote-session.sh must support --csl-owner to not exec on selection.

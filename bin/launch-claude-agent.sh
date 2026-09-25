@@ -23,6 +23,7 @@ launch-claude-agent.sh — start a LOCAL Claude Code session (MLX inference on t
 Usage: launch-claude-agent.sh <alias> [effort-override]
        launch-claude-agent.sh --help
        launch-claude-agent.sh --dry-run <alias> [effort-override]
+       launch-claude-agent.sh --enable-mcp <alias> [effort-override]
 
   <alias>           Model alias from config (e.g., qwen-3.8-operator, deepseek-r1-architect)
                     Role names also accepted: operator, reasoner, validator, utility
@@ -31,6 +32,7 @@ Usage: launch-claude-agent.sh <alias> [effort-override]
 Flags:
   --help       Show this help and exit
   --dry-run    Validate config, show resolved model/backend/effort/port, do NOT launch
+  --enable-mcp Enable MCP tools in blind-trust auto mode (sets LA_ENABLE_MCP=1)
 
 Environment (set by csl or caller):
   LA_AUTO_MODE=1           Enable auto mode (permission-mode=auto)
@@ -39,16 +41,23 @@ Environment (set by csl or caller):
   LA_QUEUE_STOP_HOOK=0|1   Queued-prompt stop hook (default 1)
   LA_STRICT_MCP=true|false Exclude MCP servers from prompt (default true)
   LA_SKIP_RAM_PREFLIGHT=1  Bypass RAM check (not recommended)
+  LA_ENABLE_MCP=1          Enable MCP tools in blind-trust auto mode (default 0)
+                           Ignored when LA_STRICT_MCP=true (MCP servers excluded from prompt)
 
 Examples:
   launch-claude-agent.sh qwen-3.8-operator
   launch-claude-agent.sh operator high
   launch-claude-agent.sh --dry-run deepseek-r1-architect max
+  launch-claude-agent.sh --enable-mcp qwen-3.8-operator
 HELP
     exit 0
     ;;
   --dry-run)
     DRY_RUN=1
+    shift
+    ;;
+  --enable-mcp)
+    export LA_ENABLE_MCP=1
     shift
     ;;
   -?*)
@@ -343,6 +352,11 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     echo "  Telemetry     : $([ "$LA_TELEMETRY" = "0" ] && echo "OFF" || echo "ON")"
     echo "  Stop hook     : $([ "$LA_QUEUE_STOP_HOOK" = "1" ] && echo "ON" || echo "OFF")"
     echo "  Strict MCP    : $([ "${LA_STRICT_MCP:-true}" = "true" ] && echo "ON (excluded)" || echo "OFF (included)")"
+    if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "1" ] && [ "${LA_ENABLE_MCP:-0}" = "1" ] && [ "${LA_BLIND_TRUST_OPTION:-B}" = "B" ]; then
+        echo "  MCPs (blind)  : ENABLED (mcp__* allowlisted in generated settings)"
+    else
+        echo "  MCPs (blind)  : DISABLED (set LA_ENABLE_MCP=1 with blind-trust Option B to enable)"
+    fi
     echo "  Port range    : $LA_PORT_START - $LA_PORT_MAX"
     echo "  Endpoint      : http://localhost:<port> (NO /v1 — Claude Code appends /v1/messages)"
     echo "  Auth token    : local (backend ignores)"
@@ -682,6 +696,59 @@ fi
 # Option B: auto + mock classifier (keeps auto mode semantics, sandbox guards active)
 # Default to Option B (mock classifier) as it preserves more auto-mode behavior.
 : "${LA_BLIND_TRUST_OPTION:=B}"
+
+# MCP enablement for blind-trust mode
+# If LA_ENABLE_MCP=1 and we're in blind-trust (Option B), generate a settings file
+# with the merged allowlist from master + profile so MCP tools work without prompts.
+BLIND_TRUST_SETTINGS_FILE=""
+if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "1" ] && [ "$LA_BLIND_TRUST_OPTION" = "B" ] && [ "${LA_ENABLE_MCP:-0}" = "1" ]; then
+    BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings-local-$$.json"
+    # Read the merged allowlist from master + profile
+    _MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
+    _PROFILE_ALLOWLIST_FILE="${LA_CLAUDE_SETTINGS:-$HOME/.claude/launch-profiles/lean-local-general.json}"
+    python3 - <<'PYEOF' "$_MASTER_ALLOWLIST_FILE" "$_PROFILE_ALLOWLIST_FILE" "$BLIND_TRUST_SETTINGS_FILE" >/dev/null
+import json, sys
+
+def load_allowlist(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('permissions', {}).get('allow', [])
+    except Exception:
+        return []
+
+master_allow = load_allowlist(sys.argv[1])
+profile_allow = load_allowlist(sys.argv[2])
+
+# Merge: master + profile (profile wins on conflicts, preserve order)
+seen = set()
+merged_allow = []
+for item in master_allow + profile_allow:
+    if item not in seen:
+        seen.add(item)
+        merged_allow.append(item)
+
+settings = {
+    "_comment": "Blind-trust settings for LOCAL free-agents session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. MCP tools allowed via merged allowlist from master + profile.",
+    "permissions": {
+        "defaultMode": "auto",
+        "allow": merged_allow
+    },
+    "sandbox": {
+        "enabled": True,
+        "excludedCommands": ["gh"]
+    },
+    "network": {
+        "allowedDomains": ["github.com", "api.github.com"]
+    }
+}
+
+with open(sys.argv[3], 'w', encoding='utf-8') as f:
+    json.dump(settings, f, separators=(',', ':'))
+PYEOF
+    CLAUDE_EXTRA_ARGS+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
+    echo "🔌 MCPs ENABLED in blind-trust mode (LA_ENABLE_MCP=1) — MCP tools allowlisted via merged master+profile allowlist"
+fi
 
 if [ "$LA_AUTO_MODE" = "1" ]; then
     _PERM_MODE="auto"
