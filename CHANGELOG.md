@@ -25,7 +25,34 @@ said "never hand-edit the plugin cache"; this makes it mechanical.
 - `tests/test_guard_tool_owned_state.py`: subprocess-boundary tests plus a hooks.json registration check;
   mutation-tested (disabling the Bash write check turns the suite red).
 
-Also ships `024e476` (merge-settings network key handling), which landed after the 0.19.4 bump.
+### Fixed — blind-trust settings merge keeps network settings
+
+- `bin/merge-settings.py`: `network` (allowedDomains) from the blind-trust settings is now preserved
+  when merging with per-session settings, the same way `sandbox` already was. (`024e476`, landed
+  after the 0.19.4 bump.)
+
+## [0.19.4] — 2026-09-24
+
+### Added — blind-trust auto mode A/B test
+
+- `LA_BLIND_TRUST_OPTION=A|B` (default `B`) in `bin/launch-claude-agent.sh` and `bin/remote-session.sh`.
+  - Option A, `bin/auto-yes-acceptedits.sh`: `acceptEdits` plus an auto-yes wrapper, bypassing the classifier.
+  - Option B, `bin/mock-classifier.py`: keeps `auto` mode semantics with a mock classifier; sandbox guards stay active.
+
+## [0.19.3] — 2026-09-24
+
+### Added — install progress feedback
+
+- `install/manage-rapid-mlx.py`: a braille `spinner()` context manager wraps venv creation, the
+  locked/fresh pip installs and validation, so the 15–60s install is no longer silent.
+
+## [0.19.2] — 2026-09-24
+
+### Fixed — queue Stop hook race with the async transcript
+
+- `bin/local-queue-stop-hook.py`: the transcript is written asynchronously and can lag the turn, so a
+  correctly-marked reply could be re-notified. The hook now checks the Stop payload on stdin for
+  `QUEUE_ANSWERED` markers FIRST, and only then falls back to reading the transcript.
 
 ## [0.19.1] — 2026-09-24
 
