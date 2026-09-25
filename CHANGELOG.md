@@ -2,6 +2,18 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.6] — 2026-09-25
+
+### Added — shared rule: never rewrite a file from a partial view
+
+- `config/shared-agent-shipping-rules.txt` (loaded into every local and remote free session) gains
+  NEVER HAND-EDIT A TOOL-OWNED REGISTRY, AND NEVER REWRITE A FILE FROM A PARTIAL VIEW. It covers the
+  missing-version-bump diagnosis, in-place edits instead of whole-file rewrites rebuilt from snippets,
+  "restore means copy a real snapshot", and the fact that `! cmd` in the Bash tool does not escape the
+  sandbox. The 0.19.5 PreToolUse guard enforces this for the registry files; this rule covers every
+  other file.
+- `tests/test_guard_tool_owned_state.py`: asserts the rule is present (mutation-tested).
+
 ## [0.19.5] — 2026-09-25
 
 ### Added — PreToolUse guard against hand-editing tool-owned plugin state

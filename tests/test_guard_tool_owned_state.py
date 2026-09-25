@@ -93,6 +93,14 @@ class GuardToolOwnedState(unittest.TestCase):
         self.assertIn("guard-own-endpoint.py", cmds)
         self.assertIn("guard-tool-owned-state.py", cmds)
 
+    def test_shared_rules_carry_the_no_partial_rewrite_rule(self):
+        # The hook covers the registry files; the prose rule covers every OTHER file a model might
+        # "restore" by retyping it. Both launchers load this file into every free session.
+        text = (ROOT / "config" / "shared-agent-shipping-rules.txt").read_text()
+        self.assertIn("NEVER REWRITE A FILE FROM A PARTIAL VIEW", text)
+        self.assertIn("MISSING VERSION BUMP", text)
+        self.assertIn("does NOT escape the sandbox", text)
+
     def test_registered_in_hooks_json_for_every_file_tool(self):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]
         entry = [h for h in hooks if any("guard-tool-owned-state.py" in c["command"] for c in h["hooks"])]
