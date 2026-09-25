@@ -24,8 +24,13 @@ Protected (under $CLAUDE_CONFIG_DIR or ~/.claude):
   plugins/cache/**, plugins/marketplaces/**
 
   * Write / Edit / MultiEdit / NotebookEdit whose target resolves into a protected path -> deny.
-  * Bash whose command names a protected path AND contains a write-shaped verb
-    (redirect, cp, mv, rm, tee, sed -i, python open(...,'w'), json.dump, ...) -> deny.
+  * Bash: the command is split into simple commands (quote-aware), and each is judged by its
+    WRITE TARGET - a redirect target, the destination of cp/install/rsync/ln, every path of
+    rm/mv/tee/chmod/..., the files of sed -i, git checkout/restore/reset in a protected repo, or an
+    inline `python -c` that both names and opens protected state for writing. Relative paths are
+    resolved against any `cd` earlier in the same command. Merely NAMING the cache - running a
+    cached script, reading or copying out of it - is allowed (0.19.7; 0.19.5-0.19.6 denied any
+    command containing a protected path and a write verb anywhere, which blocked harmless work).
   * Reads stay allowed (cat, grep, ls, json.load). A command that is ENTIRELY
     `claude plugin ...` or a get-haiggoh invocation is allowed - those are the owners.
 
@@ -41,6 +46,7 @@ Environment:
 import json
 import os
 import re
+import shlex
 import sys
 
 USAGE = """guard-tool-owned-state.py - PreToolUse guard against hand-editing plugin state
@@ -110,12 +116,126 @@ def protected_file(path):
     return False
 
 
+# Verbs whose DESTINATION is the last non-option argument (or `-t DIR`).
+DEST_VERBS = {"cp", "install", "rsync", "ln", "ditto"}
+# Verbs that modify EVERY path argument they are given. `mv` is here, not above: moving a file
+# OUT of the cache removes it from the cache, so its sources count too.
+MODIFY_VERBS = {"rm", "rmdir", "unlink", "mv", "truncate", "chmod", "chown", "touch", "mkdir", "tee"}
+INPLACE_VERBS = {"sed", "perl", "ruby"}          # only with -i
+INLINE_INTERPRETERS = {"python", "python3", "perl", "ruby", "node", "sh", "bash", "zsh"}
+PREFIX_WORDS = {"!", "sudo", "command", "builtin", "exec", "nohup", "time", "env"}
+OPERATORS = {";", "&&", "||", "|", "&", "\n", "(", ")", "|&"}
+INLINE_WRITE = re.compile(
+    r"open\([^)]*['\"][wax+]|\.write_text\(|\.write\(|json\.dump\(|shutil\.|os\.(remove|unlink|rename|replace)"
+    r"|>|\bcp\b|\bmv\b|\brm\b|\btee\b|-i\b"
+)
+
+
+def _protected(tok, cwd=""):
+    """A token names protected state: directly, or as a relative path resolved against a cd'd dir."""
+    if PROTECTED_IN_CMD.search(tok):
+        return True
+    if cwd and tok and not tok.startswith(("/", "~", "$")):
+        return bool(PROTECTED_IN_CMD.search(cwd.rstrip("/") + "/" + tok))
+    return False
+
+
+def _segments(cmd):
+    """Split into simple commands, quote-aware. Returns None when the text cannot be tokenised."""
+    try:
+        lex = shlex.shlex(cmd.replace("\n", " ; "), posix=True, punctuation_chars=";&|()<>")
+        lex.whitespace_split = True
+        toks = list(lex)
+    except ValueError:
+        return None
+    segs, cur = [], []
+    for t in toks:
+        if t in OPERATORS:
+            if cur:
+                segs.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    if cur:
+        segs.append(cur)
+    return segs
+
+
+def _segment_writes(seg, cwd):
+    """True if this one simple command writes protected state. Also returns the new cwd."""
+    # Redirect targets: `> file`, `>> file`, `2> file` (shlex splits the operator off).
+    words = []
+    i = 0
+    while i < len(seg):
+        t = seg[i]
+        if t in (">", ">>", ">|") or re.fullmatch(r"\d*>>?", t):
+            target = seg[i + 1] if i + 1 < len(seg) else ""
+            if target.startswith("&") or target == "/dev/null":
+                i += 2
+                continue
+            if _protected(target, cwd):
+                return True, cwd
+            i += 2
+            continue
+        if t in ("<", "<<", "<<<"):
+            i += 2
+            continue
+        words.append(t)
+        i += 1
+    # Strip prefixes and VAR=value assignments to find the real verb.
+    while words and (words[0] in PREFIX_WORDS or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0])):
+        words = words[1:]
+    if not words:
+        return False, cwd
+    verb, args = os.path.basename(words[0]), words[1:]
+    line = " ".join(words)
+    if SANCTIONED.match(line):
+        return False, cwd
+    if verb == "cd":
+        # Track the directory as text; only the "plugins/..." suffix matters for the check.
+        tgt = args[0] if args else ""
+        if not tgt or tgt.startswith(("/", "~", "$")):
+            return False, tgt
+        return False, (cwd.rstrip("/") + "/" + tgt) if cwd else tgt
+    paths = [a for a in args if not a.startswith("-")]
+
+    def hits(cands):
+        return any(_protected(a, cwd) for a in cands)
+
+    if verb in DEST_VERBS:
+        if "-t" in args and args.index("-t") + 1 < len(args):
+            return hits([args[args.index("-t") + 1]]), cwd
+        return (hits(paths[-1:]) if len(paths) >= 2 else False), cwd
+    if verb in MODIFY_VERBS:
+        return hits(paths), cwd
+    if verb in INPLACE_VERBS and any(re.fullmatch(r"-\w*i\w*", a) or a.startswith("-i") for a in args):
+        return hits(paths), cwd
+    if verb == "git" and any(a in ("checkout", "restore", "reset", "clean", "rm", "mv") for a in args):
+        return hits(args), cwd
+    if verb in INLINE_INTERPRETERS and any(a in ("-c", "-e") for a in args):
+        code = " ".join(args)
+        return bool(_protected(code) and INLINE_WRITE.search(code)), cwd
+    return False, cwd
+
+
+# Cheap pre-filter: a command can only touch plugin state if it names it, or names a directory
+# ABOVE it that a later relative path could reach (`cd ~/.claude/plugins && rm -rf cache/x`).
+MENTIONS_STATE = re.compile(r"\.claude\b|plugins\b|installed_plugins|known_marketplaces|CLAUDE_CONFIG_DIR")
+
+
 def bash_writes_state(cmd):
-    if not PROTECTED_IN_CMD.search(cmd):
+    if not MENTIONS_STATE.search(cmd):
         return False
-    if SANCTIONED.match(cmd) and not CHAINING.search(cmd):
-        return False
-    return bool(WRITE_SHAPED.search(HARMLESS_REDIRECT.sub(" ", cmd)))
+    segs = _segments(cmd)
+    if segs is None:
+        # Untokenisable (unbalanced quotes): fall back to the conservative whole-text check.
+        return bool(WRITE_SHAPED.search(HARMLESS_REDIRECT.sub(" ", cmd)))
+    cwd = ""
+    for seg in segs:
+        writes, cwd = _segment_writes(seg, cwd)
+        if writes:
+            return True
+    return False
 
 
 def decide(payload):
@@ -157,6 +277,25 @@ SELF_TESTS = [
     ("Bash", {"command": "cat ~/.claude/plugins/installed_plugins.json 2>&1 > ~/.claude/plugins/installed_plugins.json"}, False),
     ("Bash", {"command": "claude plugin update audit-loose-ends@haiggoh"}, True),
     ("Bash", {"command": "python3 ~/ClaudeWorkspace/get-haiggoh/bin/get-haiggoh.py apply --only x"}, True),
+    # 0.19.7: false positives measured live. Naming the cache is not writing it.
+    ("Bash", {"command": "python3 ~/.claude/plugins/cache/o/p/1.0/scripts/scan.py > /tmp/out.txt"}, True),
+    ("Bash", {"command": "~/.claude/plugins/cache/o/p/1.0/scripts/redact.py f.txt; rm /tmp/x"}, True),
+    ("Bash", {"command": "cp ~/.claude/plugins/cache/o/p/1.0/a.py ~/work/a.py"}, True),
+    ("Bash", {"command": "~/.claude/plugins/cache/o/p/1.0/audit.py --dir ~/m 2>&1 | tail -1; rm -f /tmp/p.py"}, True),
+    ("Bash", {"command": "diff ~/.claude/plugins/installed_plugins.json /tmp/x > /tmp/d.txt"}, True),
+    ("Bash", {"command": "echo 'mv is not run here: ~/.claude/plugins/cache/x'"}, True),
+    # ...while the real write shapes stay denied, including ones hidden behind chaining or cd.
+    ("Bash", {"command": "cp ~/work/a.py ~/.claude/plugins/cache/o/p/1.0/a.py"}, False),
+    ("Bash", {"command": "cp -t ~/.claude/plugins/cache/o/p/1.0 ~/work/a.py"}, False),
+    ("Bash", {"command": "mv ~/.claude/plugins/cache/o/p/1.0 /tmp/gone"}, False),
+    ("Bash", {"command": "ls /tmp; tee ~/.claude/plugins/installed_plugins.json < /tmp/x"}, False),
+    ("Bash", {"command": "cd ~/.claude/plugins/cache/o/p/1.0 && echo hi > a.py"}, False),
+    ("Bash", {"command": "cd ~/.claude/plugins && rm -rf cache/o"}, False),
+    ("Bash", {"command": "cd ~/.claude && cp /tmp/x plugins/installed_plugins.json"}, False),
+    ("Bash", {"command": "cd ~/.claude/plugins && cat installed_plugins.json > /tmp/copy.json"}, True),
+    ("Bash", {"command": "python3 -c \"open('/Users/u/.claude/plugins/installed_plugins.json','w').write('{}')\""}, False),
+    ("Bash", {"command": "sudo rm -rf ~/.claude/plugins/cache/o"}, False),
+    ("Bash", {"command": "git -C ~/.claude/plugins/marketplaces/h checkout main"}, False),
     ("Write", {"file_path": "~/ClaudeWorkspace/audit-loose-ends/.claude-plugin/plugin.json"}, True),
     ("Read", {"file_path": "~/.claude/plugins/installed_plugins.json"}, True),
 ]

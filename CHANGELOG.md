@@ -2,6 +2,25 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.7] — 2026-09-25
+
+### Fixed — guard-tool-owned-state over-blocked harmless Bash
+
+0.19.5/0.19.6 denied any Bash command that contained a protected path AND a write verb anywhere, so
+running a plugin script from the cache with `> /tmp/out`, chaining an unrelated `rm`, or copying OUT of
+the cache was refused, with a deny message about version bumps that did not apply. Measured live during
+an audit pass: 3 of 6 probe commands were wrongly denied.
+
+- `hooks/guard-tool-owned-state.py`: the Bash check now splits the command into simple commands
+  (quote-aware `shlex`) and judges each by its WRITE TARGET: redirect targets, the destination of
+  cp/install/rsync/ln (incl. `-t DIR`), every path of rm/mv/tee/chmod/touch/..., `sed -i` files, git
+  checkout/restore/reset in a protected repo, and inline `python -c` that names and writes protected
+  state. Prefixes (`!`, `sudo`, `env`, `VAR=`) are stripped, and relative paths are resolved against an
+  earlier `cd` in the same command. Unbalanced quotes fall back to the old conservative check.
+- Tests: 17 new self-test cases plus two subprocess tests (false positives stay allowed; cd- and
+  chain-hidden writes stay denied). Mutation-checked: restoring the old whole-text logic, or dropping
+  cwd tracking, turns the suite red. Hook latency ~25 ms.
+
 ## [0.19.6] — 2026-09-25
 
 ### Added — shared rule: never rewrite a file from a partial view

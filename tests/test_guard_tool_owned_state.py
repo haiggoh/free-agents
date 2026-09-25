@@ -50,6 +50,26 @@ class GuardToolOwnedState(unittest.TestCase):
         _, out = run("Bash", {"command": "! cp /tmp/installed_plugins.json ~/.claude/plugins/installed_plugins.json"})
         self.assertTrue(denied(out))
 
+    def test_naming_the_cache_is_not_writing_it(self):
+        # 0.19.7 regression: 0.19.5/0.19.6 denied these because a cache path and a write verb
+        # appeared ANYWHERE in the command, not in the same write. Measured live during an audit.
+        cache = os.path.expanduser("~/.claude/plugins/cache/o/p/1.0")
+        for cmd in (f"python3 {cache}/scan.py > /tmp/out.txt",
+                    f"{cache}/redact.py f.txt; rm /tmp/x",
+                    f"cp {cache}/a.py /tmp/a.py",
+                    f"{cache}/audit.py --dir ~/m 2>&1 | tail -1; rm -f /tmp/p.py"):
+            _, out = run("Bash", {"command": cmd})
+            self.assertIsNone(out, f"wrongly denied: {cmd}")
+
+    def test_writes_reached_by_cd_or_chaining_are_denied(self):
+        for cmd in ("cd ~/.claude/plugins && rm -rf cache/o",
+                    "cd ~/.claude && cp /tmp/x plugins/installed_plugins.json",
+                    "cd ~/.claude/plugins/cache/o && echo hi > a.py",
+                    "ls /tmp; tee ~/.claude/plugins/installed_plugins.json < /tmp/x",
+                    "sudo rm -rf ~/.claude/plugins/cache/o"):
+            _, out = run("Bash", {"command": cmd})
+            self.assertTrue(denied(out), f"not denied: {cmd}")
+
     def test_read_is_allowed_silently(self):
         rc, out = run("Bash", {"command": "cat ~/.claude/plugins/installed_plugins.json"})
         self.assertEqual((rc, out), (0, None))
