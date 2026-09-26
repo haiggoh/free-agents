@@ -1085,7 +1085,7 @@ if [[ "$MODE" == "launch" ]]; then
     # AUTO_MODE_STATE=2 (off): acceptEdits.
     case "$AUTO_MODE_STATE" in
         0) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
-        1) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=1; LA_BLIND_AUTO=0 ;;
+        1) PERMISSION_MODE="auto"; LA_AUTO_MODE=1; LA_BLIND_AUTO=0 ;;
         2) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=0; LA_BLIND_AUTO=0 ;;
     esac
     export LA_AUTO_MODE LA_BLIND_AUTO
@@ -1106,8 +1106,7 @@ if [[ "$MODE" == "launch" ]]; then
     # Blind-trust auto mode (AUTO_MODE_STATE=0): use acceptEdits to BYPASS the cloud classifier
     # entirely. The sandbox settings (excludedCommands + allowedDomains) control the write boundary.
     # This is the actual fix for "classifier still runs in blind-trust mode".
-    # AUTO_MODE_STATE=2 (off) also uses acceptEdits.
-    if [[ "$AUTO_MODE_STATE" -eq 0 ]] || [[ "$AUTO_MODE_STATE" -eq 2 ]]; then
+    if [[ "$AUTO_MODE_STATE" -eq 0 ]]; then
         if [[ "$LA_BLIND_TRUST_OPTION" = "A" ]]; then
             # Option A: use acceptEdits with auto-yes wrapper
             PERMISSION_MODE="acceptEdits"
@@ -1117,6 +1116,11 @@ if [[ "$MODE" == "launch" ]]; then
             # Set mock classifier for blind-trust Option B
             export LA_CLASSIFIER_CMD="python3 $SCRIPT_DIR/mock-classifier.py"
         fi
+    fi
+
+    # AUTO_MODE_STATE=2 (off): always acceptEdits, no classifier
+    if [[ "$AUTO_MODE_STATE" -eq 2 ]]; then
+        PERMISSION_MODE="acceptEdits"
     fi
 
     # Blind-trust auto mode (AUTO_MODE_STATE=0) needs sandbox.enabled=true for the write boundary.
