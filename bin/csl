@@ -40,8 +40,9 @@ Modes:
 
 Flags:
   --help       Show this help and exit
-  --dry-run    Validate config and show what would be available, without launching
-  --enable-mcp Enable MCPs in blind-trust mode
+  --dry-run                  Validate config and show what would be available, without launching
+  --dry-run-skip-preflight   Dry-run without RAM preflight (quick config inspection)
+  --enable-mcp               Enable MCPs in blind-trust mode
 
 Subcommands:
   roles              Show which on-disk model fills each role (operator, reasoner, etc.)
@@ -68,6 +69,11 @@ HELP
       exit 0
       ;;
     --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --dry-run-skip-preflight)
+      export LA_DRY_RUN_SKIP_PREFLIGHT=1
       DRY_RUN=1
       shift
       ;;
