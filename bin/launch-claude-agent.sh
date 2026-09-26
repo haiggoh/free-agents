@@ -23,6 +23,7 @@ launch-claude-agent.sh — start a LOCAL Claude Code session (MLX inference on t
 Usage: launch-claude-agent.sh <alias> [effort-override]
        launch-claude-agent.sh --help
        launch-claude-agent.sh --dry-run <alias> [effort-override]
+       launch-claude-agent.sh --dry-run-skip-preflight <alias> [effort-override]
        launch-claude-agent.sh --enable-mcp <alias> [effort-override]
 
   <alias>           Model alias from config (e.g., qwen-3.8-operator, deepseek-r1-architect)
@@ -30,30 +31,38 @@ Usage: launch-claude-agent.sh <alias> [effort-override]
   [effort-override] Optional: low | medium | high | xhigh | max (overrides config default)
 
 Flags:
-  --help       Show this help and exit
-  --dry-run    Validate config, show resolved model/backend/effort/port, do NOT launch
-  --enable-mcp Enable MCP tools in blind-trust auto mode (sets LA_ENABLE_MCP=1)
+  --help                  Show this help and exit
+  --dry-run               Validate config, show resolved model/backend/effort/port, do NOT launch
+  --dry-run-skip-preflight  Dry-run without RAM preflight (quick config inspection)
+  --enable-mcp            Enable MCP tools in blind-trust auto mode (sets LA_ENABLE_MCP=1)
 
 Environment (set by csl or caller):
-  LA_AUTO_MODE=1           Enable auto mode (permission-mode=auto)
-  LA_BLIND_AUTO=1          Blind-trust auto mode (no classifier)
-  LA_TELEMETRY=0|1         Disable/enable nonessential outbound traffic (default 0)
-  LA_QUEUE_STOP_HOOK=0|1   Queued-prompt stop hook (default 1)
-  LA_STRICT_MCP=true|false Exclude MCP servers from prompt (default true)
-  LA_SKIP_RAM_PREFLIGHT=1  Bypass RAM check (not recommended)
-  LA_ENABLE_MCP=1          Enable MCP tools in blind-trust auto mode (default 0)
-                           Ignored when LA_STRICT_MCP=true (MCP servers excluded from prompt)
+  LA_AUTO_MODE=1                    Enable auto mode (permission-mode=auto)
+  LA_BLIND_AUTO=1                   Blind-trust auto mode (no classifier)
+  LA_TELEMETRY=0|1                  Disable/enable nonessential outbound traffic (default 0)
+  LA_QUEUE_STOP_HOOK=0|1            Queued-prompt stop hook (default 1)
+  LA_STRICT_MCP=true|false          Exclude MCP servers from prompt (default true)
+  LA_SKIP_RAM_PREFLIGHT=1           Bypass RAM check (not recommended)
+  LA_DRY_RUN_SKIP_PREFLIGHT=1       Skip RAM preflight in --dry-run (quick config inspection)
+  LA_ENABLE_MCP=1                   Enable MCP tools in blind-trust auto mode (default 0)
+                                    Ignored when LA_STRICT_MCP=true (MCP servers excluded from prompt)
 
 Examples:
   launch-claude-agent.sh qwen-3.8-operator
   launch-claude-agent.sh operator high
   launch-claude-agent.sh --dry-run deepseek-r1-architect max
+  launch-claude-agent.sh --dry-run-skip-preflight qwen-3.8-operator
   launch-claude-agent.sh --enable-mcp qwen-3.8-operator
 HELP
     exit 0
     ;;
   --dry-run)
     DRY_RUN=1
+    shift
+    ;;
+  --dry-run-skip-preflight)
+    DRY_RUN=1
+    export LA_DRY_RUN_SKIP_PREFLIGHT=1
     shift
     ;;
   --enable-mcp)
@@ -323,17 +332,25 @@ BACKEND="$LA_CUR_SERVE"
 BACKEND_DECLARED="${LA_SERVE_DECLARED[$MODEL_ALIAS]:-}"
 BACKEND_DISPLAY="$(la_serve_display "$MODEL_ALIAS")"
 
-# RAM PREFLIGHT — before any weights load. Booting a model while other servers hold RAM has
-# frozen this machine hard (Terminal AND the force-quit menu became unresponsive), and there is no
-# graceful recovery from that state, so the check must precede the load, not follow a failure.
-# It short-circuits: if the model already fits, it never even looks at the other ports.
-if [ -x "$LAUNCH_DIR/la-ram-preflight.sh" ]; then
-    if ! "$LAUNCH_DIR/la-ram-preflight.sh" "$MODEL_ALIAS"; then
-        echo
-        echo "🛑 Not launching $MODEL_ALIAS — see the RAM preflight above."
-        echo "   Override with LA_SKIP_RAM_PREFLIGHT=1 if you are certain the numbers are wrong."
-        [ "${LA_SKIP_RAM_PREFLIGHT:-0}" = "1" ] || exit 1
-        echo "   LA_SKIP_RAM_PREFLIGHT=1 set — continuing at your own risk."
+# DRY-RUN with RAM preflight skip option: LA_DRY_RUN_SKIP_PREFLIGHT=1 or --dry-run-skip-preflight
+# Allows seeing config without the preflight warning when you just want to inspect settings.
+if [ "${DRY_RUN:-0}" = "1" ] && [ "${LA_DRY_RUN_SKIP_PREFLIGHT:-0}" = "1" ]; then
+    # Skip RAM preflight for quick config inspection
+    :
+else
+    # RAM PREFLIGHT — before any weights load. Booting a model while other servers hold RAM has
+    # frozen this machine hard (Terminal AND the force-quit menu became unresponsive), and there is no
+    # graceful recovery from that state, so the check must precede the load, not follow a failure.
+    # It short-circuits: if the model already fits, it never even looks at the other ports.
+    # This MUST run even in --dry-run to warn about concurrent sessions that would block the launch.
+    if [ -x "$LAUNCH_DIR/la-ram-preflight.sh" ]; then
+        if ! "$LAUNCH_DIR/la-ram-preflight.sh" "$MODEL_ALIAS"; then
+            echo
+            echo "🛑 Not launching $MODEL_ALIAS — see the RAM preflight above."
+            echo "   Override with LA_SKIP_RAM_PREFLIGHT=1 if you are certain the numbers are wrong."
+            [ "${LA_SKIP_RAM_PREFLIGHT:-0}" = "1" ] || exit 1
+            echo "   LA_SKIP_RAM_PREFLIGHT=1 set — continuing at your own risk."
+        fi
     fi
 fi
 

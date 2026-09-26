@@ -23,9 +23,11 @@ LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 WATCHER="$CSL_DIR/local-watch.sh"
 
 # Argument parsing BEFORE any work (must support --help/--dry-run without side effects)
-case "${1:-}" in
-  -h|--help)
-    cat <<'HELP'
+# Parse all leading flags first, then handle subcommands/passthrough
+while [[ $# -gt 0 ]]; do
+  case "${1:-}" in
+    -h|--help)
+      cat <<'HELP'
 csl — Claude Code Free-Agents: Session Launcher
 
 Usage: csl [--help] [--dry-run] | csl roles [args] | csl remote [args] | csl <launcher-args>
@@ -39,6 +41,7 @@ Modes:
 Flags:
   --help       Show this help and exit
   --dry-run    Validate config and show what would be available, without launching
+  --enable-mcp Enable MCPs in blind-trust mode
 
 Subcommands:
   roles              Show which on-disk model fills each role (operator, reasoner, etc.)
@@ -62,22 +65,27 @@ Examples:
   csl qwen-3.8-operator high             # Direct launch (no picker)
   csl --enable-mcp                       # Enable MCPs in blind-trust mode
 HELP
-    exit 0
-    ;;
-  --dry-run)
-    DRY_RUN=1
-    shift
-    ;;
-  --enable-mcp)
-    export LA_ENABLE_MCP=1
-    shift
-    ;;
-  -?*)
-    printf 'csl: unrecognised option: %s\n' "$1" >&2
-    printf "Try 'csl --help'.\n" >&2
-    exit 2
-    ;;
-esac
+      exit 0
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --enable-mcp)
+      export LA_ENABLE_MCP=1
+      shift
+      ;;
+    -?*)
+      printf 'csl: unrecognised option: %s\n' "$1" >&2
+      printf "Try 'csl --help'.\n" >&2
+      exit 2
+      ;;
+    *)
+      # Not a flag — stop parsing flags
+      break
+      ;;
+  esac
+done
 
 if [ "${1:-}" = "roles" ]; then shift; exec "$CSL_DIR/la-roles.sh" "$@"; fi
 if [ "${1:-}" = "setup-remote" ]; then
@@ -167,7 +175,8 @@ LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
 # MCP enablement for blind-trust mode (local + remote sessions)
 # 0 = DISABLED (default), 1 = ENABLED (mcp__* allowlisted in blind-trust settings)
 # Only effective when AUTO_MODE_STATE=0 (blind-trust) and LA_BLIND_TRUST_OPTION=B
-LA_ENABLE_MCP="${CSL_ENABLE_MCP:-0}"
+# Flag --enable-mcp sets LA_ENABLE_MCP=1 before this; preserve it if already set
+LA_ENABLE_MCP="${LA_ENABLE_MCP:-${CSL_ENABLE_MCP:-0}}"
 
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
@@ -219,7 +228,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   printf "  Watcher:   %s (toggle with 'w')\n" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)"
   printf "  Stop hook: %s (toggle with 's')\n" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)"
   if [ "$AUTO_MODE_STATE" = "0" ]; then
-    printf "  MCPs (blind-trust): %s (toggle with 'm')\n" "$([ "$LA_ENABLE_MCP" = "1" ] && echo ENABLED || echo DISABLED)"
+    printf "  MCPs (blind-trust): %s (toggle with 'u')\n" "$([ "$LA_ENABLE_MCP" = "1" ] && echo ENABLED || echo DISABLED)"
   fi
   echo
   echo "Launcher paths:"
@@ -471,7 +480,7 @@ _pick_home_lane() {
     "$(printf '  w) %s Watcher:   %s' "$EMOJI_WATCHER" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)")" \
     "$(printf '  s) %s Stop hook: %s' "$EMOJI_STOP_HOOK" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)")"
   _box bottom
-  printf "Select [</#/k/m/q/a/t/w/s]: " >&2
+  printf "Select [</#/k/m/q/a/t/w/s/u]: " >&2
   read -r sel; sel="${sel:-<}"
   case "$sel" in
     '<'|local|LOCAL) NEXT_LANE="local" ;;
