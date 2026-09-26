@@ -2,6 +2,17 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.9] — 2026-09-27
+
+### Fixed — argument parsing + explicit MCP patterns + dry-run preflight option
+
+- **csl argument parsing fixed**: Changed from single `case` to `while` loop so multiple flags work (`csl --enable-mcp --dry-run`). Previously only the first flag was processed.
+- **Explicit MCP patterns (not wildcard)**: Replaced `mcp__*` with explicit per-server patterns for all 19 configured MCP servers (adobe-for-creativity, context7, openai-developers, vercel, greptile, linear, expo, imessage, circleback, fakechat, mintlify, exa, browser-use, render, github, magnific, blender, davinci-resolve, joyia). Claude Code does not support wildcards in allow rules.
+- **launch-claude-agent.sh --dry-run-skip-preflight**: New flag/env `LA_DRY_RUN_SKIP_PREFLIGHT=1` to skip RAM preflight during dry-run for quick config inspection without the warning.
+- **RAM preflight runs during regular --dry-run** (correct behavior — warns about concurrent sessions that would block launch).
+- **Profile files updated**: Both `lean-local-general.json` and `lean-cloud-general.json` now list explicit `mcp__<server>__*` patterns instead of wildcard.
+- **Merged allowlist**: 87 master + 19 MCP = 106 items when MCPs enabled in blind-trust mode.
+
 ## [0.19.8] — 2026-09-26
 
 ### Added — MCP wildcard allowlist in blind-trust mode (local + remote)
