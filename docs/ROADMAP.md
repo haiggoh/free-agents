@@ -10,7 +10,7 @@ so "did we skip a specced feature?" was not answerable from the repo at all. It 
 
 ## Current released version
 
-`0.19.10`
+`0.19.11`
 
 **How to use this file:** an item leaves this file only by moving into `CHANGELOG.md` under a real
 version. Nothing is deleted for being inconvenient. If an item is abandoned, it moves to
@@ -20,7 +20,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.19.10`. See `CHANGELOG.md`.
+`0.19.11`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -73,6 +73,8 @@ and rewriting one would not un-release it):
 **Shipped 2026-09-22:** `0.17.2` — Local session identity Milestone 3: Session transcript identity (stable session id in transcripts, correlation with launch metadata, transition markers on resume, idempotent SessionStart handling) (see `CHANGELOG.md`).
 
 **Shipped 2026-09-21:** `0.18.0` — Remote Free API identity Milestone 4: lime-green theme, provider-aware spinner verbs, per-session settings overlay, session name with emoji, transcript marker/transition integration (see `CHANGELOG.md`).
+
+**Shipped 2026-09-26:** `0.19.11` — Dynamic session names with launcher prefix + auto-generated suffix. UserPromptSubmit hook reads auto-generated name after first prompt and prepends `<emoji> <model-alias>` prefix. Fixes all sessions on same model sharing identical fixed names. Idempotent, resume-safe with different models (see `CHANGELOG.md`).
 
 **Reassigned again 2026-09-16.** `0.14.0` now belongs to the **free-agents identity release** (the
 project rename plus the remote-session parity fixes that made it justified). Portable manifests moved
@@ -131,6 +133,7 @@ waiting on an architecture it does not read. So the split is:
 | `0.18.0` | **Remote identity polish.** Lime-green theme, spinner verbs, per-session settings overlay, session name with emoji, transcript marker/transition integration. (Was `0.14.0`, then `0.15.0`; slid up 2026-09-19 for local-session-identity. Spent 2026-09-21 — lime theme shipped as `0.18.0`.) | nothing hard |
 | `0.18.1` | **Cosmetic fixes.** Emoji spacing, remote effort menu reorder, interactive effort prompt in launcher. (Patch, 2026-09-21.) | `0.18.0` |
 | `0.19.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`, then `0.17.0`; slid up 2026-09-19 for local-session-identity, pushed past 0.18.0 when lime theme took that slot.) | nothing hard |
+| `0.19.11` | **Dynamic session names with auto-generated suffix.** UserPromptSubmit hook reads auto-generated name after first prompt, prepends `<emoji> <model-alias>` prefix. Fixes all sessions on same model sharing identical fixed names. Idempotent, resume-safe. | nothing hard |
 | `0.20.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`.) | `0.19.0` |
 | `0.21.0` | **Backend lanes.** [oMLX](#0210--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`.) | `0.20.0` — a runtime profile is the clean way to select a backend |
 

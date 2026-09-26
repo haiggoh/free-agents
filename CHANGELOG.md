@@ -2,6 +2,23 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.11] — 2026-09-26
+
+### Added — Dynamic session names with launcher prefix + auto-generated suffix
+
+- **Session names no longer fixed at launch.** All three launchers (`launch-claude-agent.sh`,
+  `remote-session.sh`, `launch-claude-agent-rapid-auto.sh`) now omit the `-n` flag, allowing
+  Claude Code to auto-generate a session name from the first prompt's content.
+- **UserPromptSubmit hook** (`hooks/session-title-prefix.py`) runs after the first prompt,
+  reads the auto-generated name, and prepends the launcher prefix (`<emoji> <model-alias>`).
+  Result: `📡 nvidia-nemotron-ultra analyze code security` instead of the fixed
+  `📡 nvidia-nemotron-ultra` shared by all sessions on that model.
+- **Idempotent and resume-safe:** If the prefix is already present, the hook skips. On resume
+  with a different model, the old prefix is replaced with the current model's prefix while
+  preserving the auto-generated suffix.
+- **Works for local, free_api, and rapid-auto lanes.** Uses `LA_SESSION_KIND_EMOJI` and
+  `MODEL_ALIAS` (shorter alias, e.g., `nvidia-nemotron-ultra`) from the identity resolver.
+
 ## [0.19.10] — 2026-09-26
 
 ### Fixed — remote NVIDIA/Nemotron proxy hardening (thinking stays ON)
