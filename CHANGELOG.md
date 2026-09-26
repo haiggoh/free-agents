@@ -2,6 +2,19 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.3] — 2026-10-02
+
+### Fixed — tool-owned-state guard no longer denies harmless commands containing heredocs
+
+- `hooks/guard-tool-owned-state.py`: heredoc bodies are cut out before shell tokenising and judged
+  like `python -c` code. Prose with an odd number of apostrophes used to make `shlex` raise, and the
+  whole-text fallback then denied any write-shaped command that merely mentioned `.claude` (a `sed`
+  version bump on a source repo's `.claude-plugin/plugin.json`, a `git commit -F - <<MSG`).
+- The untokenisable fallback now requires a PROTECTED path, not just any `.claude` mention.
+- 6 new self-test cases (3 must-allow, 3 must-deny incl. writes via heredoc); 41/41 pass; removing the
+  body check fails the heredoc-write case (mutation-tested). Salvaged from the stale
+  `fix/guard-state-fallback-fp` branch (2026-09-26), which never reached `main`.
+
 ## [0.21.2] — 2026-10-02
 
 ### Added — Queue Recovery with Shared Replay Core
