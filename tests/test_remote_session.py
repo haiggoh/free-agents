@@ -227,6 +227,41 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                     self.assertIn('api_base: ' + base, text)
                     self.assertIn('os.environ/' + key_env, text)
 
+    def test_proxy_hooks_registered_and_linked_next_to_config(self):
+        """The callback must be importable from the CONFIG's directory, since that is where
+        LiteLLM looks; a callbacks line without the module beside it kills proxy startup."""
+        shutil.copy2(ROOT / 'bin/la_proxy_hooks.py', self.root / 'bin/la_proxy_hooks.py')
+        rundir = self.root / 'run'
+        rundir.mkdir()
+        cfg = rundir / 'proxy-4150.yaml'
+
+        def write(extra_env=None):
+            cfg.unlink(missing_ok=True)
+            (rundir / 'la_proxy_hooks.py').unlink(missing_ok=True)
+            return subprocess.run(
+                ['bash', '-c', 'source "$1"; write_proxy_config "$2" "$3" "$4" "$5" "$6"',
+                 'config', str(self.root / 'bin/library.sh'), str(cfg),
+                 'nvidia', 'nvidia/nemotron-3-ultra-550b-a55b', 'false', 'high'],
+                env=dict(self.env, **(extra_env or {})), text=True, capture_output=True)
+
+        result = write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = cfg.read_text()
+        self.assertIn('  callbacks: [la_proxy_hooks.proxy_hooks]\n', text)
+        # The callbacks key must sit INSIDE litellm_settings, not under general_settings.
+        self.assertLess(text.index('litellm_settings:'), text.index('callbacks:'))
+        self.assertLess(text.index('callbacks:'), text.index('general_settings:'))
+        link = rundir / 'la_proxy_hooks.py'
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), (self.root / 'bin/la_proxy_hooks.py').resolve())
+        # Thinking is NOT disabled to dodge the stream bug -- the hook fixes it instead.
+        self.assertEqual(text.count('        enable_thinking: true\n'), 4)
+
+        result = write({'LA_REMOTE_PROXY_HOOKS': '0'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('callbacks:', cfg.read_text())
+        self.assertIn('proxy hooks DISABLED', result.stderr)
+
     def test_effort_reaches_the_request_body_per_model_family(self):
         """An effort choice must land in the PROXY CONFIG, not only on the claude CLI.
 
