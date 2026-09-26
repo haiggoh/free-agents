@@ -2,6 +2,32 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.10] — 2026-09-26
+
+### Fixed — remote NVIDIA/Nemotron proxy hardening (thinking stays ON)
+
+- **"API Error: Content block is not a thinking block"** on Nemotron with thinking enabled. Root
+  cause is in LiteLLM 1.91's OpenAI→Anthropic stream adapter: it picks a chunk's *block* type with
+  `content` winning over `reasoning_content`, but its *delta* type the other way round, so a single
+  NVIDIA chunk carrying both (the end of the reasoning plus the first answer token) opens a text
+  block and streams a `thinking_delta` into it. New `bin/la_proxy_hooks.py` splits such chunks
+  (reasoning first) before the adapter sees them. Nothing is dropped and thinking is NOT disabled.
+  The runtime wrap lives in this repo and never edits `~/.local/pipx`. If LiteLLM's private
+  splitter disappears, it skips loudly rather than crashing.
+- **HTTP 400 "Unsupported parameter(s): `stop_sequences` / `safeguards`"** from NVIDIA NIM. The
+  Anthropic adapter forwards both keys untranslated and `drop_params` does not catch them.
+  `stop_sequences` is now translated to OpenAI `stop`, which keeps the Auto Mode classifier's
+  `</severity>` stop working, and `safeguards` is dropped.
+- **Machine-wide NVIDIA 40 RPM limit.** New `bin/rate_limiter.py` is a file-backed,
+  `fcntl`-locked token bucket (40 tokens, one per 1.5 s) shared by every proxy on the machine.
+  The proxy hook queues each NVIDIA call on it instead of letting a 429 reach Claude Code, whose
+  retries add load. State lives in `~/.claude/local-agents/.nvidia_throttle_state`. It is tunable
+  via `LA_NVIDIA_RPM` / `LA_NVIDIA_MAX_WAIT`.
+- `write_proxy_config` registers the callback and links the module next to `proxy-<port>.yaml`,
+  where LiteLLM resolves callback modules. `LA_REMOTE_PROXY_HOOKS=0` disables all three, loudly.
+- ROADMAP's "Current released version" had been left at 0.19.8 by 0.19.9, and
+  `tests/test_version_consistency.sh` was failing on main. It is realigned here.
+
 ## [0.19.9] — 2026-09-27
 
 ### Fixed — argument parsing + explicit MCP patterns + dry-run preflight option

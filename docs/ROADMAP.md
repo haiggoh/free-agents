@@ -10,7 +10,7 @@ so "did we skip a specced feature?" was not answerable from the repo at all. It 
 
 ## Current released version
 
-`0.19.8`
+`0.19.10`
 
 **How to use this file:** an item leaves this file only by moving into `CHANGELOG.md` under a real
 version. Nothing is deleted for being inconvenient. If an item is abandoned, it moves to
@@ -20,7 +20,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.19.8`. See `CHANGELOG.md`.
+`0.19.10`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.

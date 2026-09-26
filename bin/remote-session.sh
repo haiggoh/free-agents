@@ -839,6 +839,20 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
 litellm_settings:
   drop_params: true
   telemetry: false
+YAML
+    # PROXY HOOKS (bin/la_proxy_hooks.py): the mixed reasoning+content stream split behind
+    # "Content block is not a thinking block", NIM's rejected request keys (stop_sequences /
+    # safeguards -> HTTP 400), and the machine-wide NVIDIA 40 RPM bucket. LiteLLM loads a
+    # callback module RELATIVE TO THE CONFIG FILE, so the module is linked next to it.
+    # LA_REMOTE_PROXY_HOOKS=0 turns this off, loudly, for A/B-ing a regression.
+    if [[ "${LA_REMOTE_PROXY_HOOKS:-1}" != "0" && -r "$SCRIPT_DIR/la_proxy_hooks.py" ]]; then
+        ln -sf "$SCRIPT_DIR/la_proxy_hooks.py" "$(dirname "$cfg")/la_proxy_hooks.py" || return 1
+        echo "  callbacks: [la_proxy_hooks.proxy_hooks]" >> "$cfg"
+    elif [[ "${LA_REMOTE_PROXY_HOOKS:-1}" == "0" ]]; then
+        echo "remote-session: NOTE proxy hooks DISABLED (LA_REMOTE_PROXY_HOOKS=0) — no NVIDIA" >&2
+        echo "  rate limiting, no stream split, no NIM parameter fixes." >&2
+    fi
+    cat >> "$cfg" <<'YAML'
 general_settings:
   master_key: sk-local-agents-remote
 YAML
