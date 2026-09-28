@@ -63,6 +63,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 FORCE=0; LIST_ONLY=0; DRY_RUN=0; CHECK_AUTH=0; NON_AUTH_ACTION=0; ALL=0; ALLOW_TIGHT=0
 GROUP_FILTER=""; SELECTED=(); CATALOG_OVERRIDE=(); TARGET_OVERRIDE=""
 HEADROOM_GB=${LA_DISK_HEADROOM_GB:-100}
+PROFILE_FILTER=""; BACKEND_FILTER=""; CAPABILITY_FILTER=""; RECOMMENDED_ONLY=0; JSON_OUTPUT=0
 while (($#)); do
   case "$1" in
     --force) FORCE=1; NON_AUTH_ACTION=1; shift ;;
@@ -76,6 +77,11 @@ while (($#)); do
     --catalog) (($# >= 2)) || { echo '--catalog needs a file path' >&2; exit 2; }; CATALOG_OVERRIDE+=("$2"); NON_AUTH_ACTION=1; shift 2 ;;
     --group) (($# >= 2)) || { echo '--group needs a value' >&2; exit 2; }; GROUP_FILTER=$2; NON_AUTH_ACTION=1; shift 2 ;;
     --select) (($# >= 2)) || { echo '--select needs an alias' >&2; exit 2; }; SELECTED+=("$2"); NON_AUTH_ACTION=1; shift 2 ;;
+    --profile) (($# >= 2)) || { echo '--profile needs a profile ID' >&2; exit 2; }; PROFILE_FILTER=$2; NON_AUTH_ACTION=1; shift 2 ;;
+    --backend) (($# >= 2)) || { echo '--backend needs a backend name' >&2; exit 2; }; BACKEND_FILTER=$2; NON_AUTH_ACTION=1; shift 2 ;;
+    --capability) (($# >= 2)) || { echo '--capability needs a capability name' >&2; exit 2; }; CAPABILITY_FILTER=$2; NON_AUTH_ACTION=1; shift 2 ;;
+    --recommended) RECOMMENDED_ONLY=1; NON_AUTH_ACTION=1; shift ;;
+    --json) JSON_OUTPUT=1; NON_AUTH_ACTION=1; shift ;;
     -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -475,6 +481,14 @@ for i in "${QUEUE[@]}"; do
     "${cmd[@]}"
     has_payload "$dest" || { printf '%s: download produced no payload files; not marking complete\n' "$alias" >&2; exit 1; }
     write_marker "$dest" "$repo" "$rev" "$include"
+
+    # Portable manifest: build and atomically write .local-model-manifest.json
+    if [[ -x "$LA_ROOT/install/local-model-manifest.py" ]]; then
+      "$LA_ROOT/install/local-model-manifest.py" build "$dest" --output "$dest/.local-model-manifest.json" \
+        && printf '%s: portable manifest written\n' "$alias" \
+        || printf '%s: WARNING - manifest generation failed\n' "$alias" >&2
+    fi
+
     printf '%s: acquisition complete; artifact acceptance remains separate\n' "$alias"
   fi
 done
