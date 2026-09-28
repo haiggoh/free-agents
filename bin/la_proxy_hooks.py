@@ -5,28 +5,27 @@ Registered from the generated proxy YAML (`litellm_settings.callbacks: la_proxy_
 LiteLLM resolves that module RELATIVE TO THE CONFIG FILE, so remote-session.sh symlinks this file
 next to proxy-<port>.yaml; the rate limiter is found through the symlink's resolved path.
 
-Three fixes, each for a failure measured in a real proxy log (see the Bug Bash plan, W1):
+Two fixes plus one upstream check, each for a failure measured in a real proxy log (see the
+Bug Bash plan, W1):
 
 1. "Content block is not a thinking block" -- with Nemotron thinking ON. LiteLLM 1.91's
-   OpenAI->Anthropic stream adapter picks a chunk's BLOCK type with `content` winning over
-   `reasoning_content`, but its DELTA type with `reasoning_content` winning over `content`.
-   When NVIDIA packs the end of the reasoning and the first answer token into ONE chunk, the
-   adapter opens a text block and streams a thinking_delta into it; Claude Code aborts the turn.
-   Fix: split such a chunk in two (reasoning first, then the rest) before the adapter sees it.
-   Thinking stays on; nothing is dropped.
+   OpenAI->Anthropic stream adapter mistyped a chunk carrying both reasoning and content
+   (text block opened, thinking_delta streamed into it). 0.19.10 patched this at runtime;
+   LiteLLM 1.102.1 fixed it upstream, so the patch is RETIRED. The module now only PROBES the
+   installed adapter at load and warns loudly if it still has the bug (upgrade LiteLLM).
 
-2. HTTP 400 "Unsupported parameter(s): `stop_sequences` / `safeguards`". The Anthropic adapter
-   forwards both keys untranslated and drop_params does not catch them. `stop_sequences` is
-   TRANSLATED to OpenAI `stop` (which NIM supports) rather than dropped -- dropping it would let
-   the Auto Mode classifier generate past `</severity>`, which its contract rejects.
-   `safeguards` has no NIM equivalent and is dropped.
+2. HTTP 400 "Unsupported parameter(s): `safeguards`" (and `stop_sequences` before 1.102.1). The
+   Anthropic adapter forwards `safeguards` untranslated and drop_params does not catch it, so it
+   is dropped for NIM. `stop_sequences` is translated to OpenAI `stop` if it still arrives (an
+   older LiteLLM) -- dropping it would let the Auto Mode classifier generate past `</severity>`,
+   which its contract rejects. 1.102.1 does that translation itself.
 
 3. NVIDIA's 40 RPM free-tier limit across ALL proxies on the machine: every upstream NVIDIA call
    first takes a token from the file-backed bucket in rate_limiter.py, queueing instead of
    letting a 429 reach Claude Code (whose retries would only add load).
 
 Usage:
-  la_proxy_hooks.py --self-test   run the offline stream-split check against the installed LiteLLM
+  la_proxy_hooks.py --self-test   check the installed LiteLLM stream adapter handles mixed chunks
   la_proxy_hooks.py --help
 
 Environment:
@@ -35,7 +34,6 @@ Environment:
 """
 from __future__ import annotations
 
-import copy
 import os
 import sys
 from pathlib import Path
@@ -50,72 +48,61 @@ NVIDIA_PREFIX = "nvidia_nim/"
 NVIDIA_DROP_KEYS = ("safeguards",)
 
 
-# ---- fix 1: split mixed reasoning+content chunks -------------------------------------------
+# ---- upstream check: the mixed-chunk stream bug (fixed in LiteLLM 1.102.1) -----------------
 
-def _has(delta, name):
-    return bool(getattr(delta, name, None))
-
-
-def split_mixed_chunk(chunk):
-    """Return [chunk], or [reasoning_chunk, rest_chunk] when one delta mixes both kinds."""
-    choices = getattr(chunk, "choices", None)
-    if not choices or len(choices) != 1:
-        return [chunk]
-    delta = getattr(choices[0], "delta", None)
-    if delta is None:
-        return [chunk]
-    has_reasoning = _has(delta, "reasoning_content") or _has(delta, "thinking_blocks")
-    has_other = _has(delta, "content") or _has(delta, "tool_calls")
-    if not (has_reasoning and has_other):
-        return [chunk]
-
-    reasoning = copy.deepcopy(chunk)
-    rd = reasoning.choices[0].delta
-    rd.content = None
-    if hasattr(rd, "tool_calls"):
-        rd.tool_calls = None
-    reasoning.choices[0].finish_reason = None          # the finish belongs to the LAST piece
-    if hasattr(reasoning, "usage"):
-        try:
-            reasoning.usage = None
-        except Exception:
-            pass
-
-    rest = copy.deepcopy(chunk)
-    rest_d = rest.choices[0].delta
-    if hasattr(rest_d, "reasoning_content"):
-        rest_d.reasoning_content = None
-    if hasattr(rest_d, "thinking_blocks"):
-        rest_d.thinking_blocks = None
-    return [reasoning, rest]
+MIN_LITELLM = "1.102.1"
 
 
-def install_stream_split_patch():
-    """Wrap LiteLLM's _CombinedChunkSplitter._split so mixed chunks are split first.
+def _probe_chunks():
+    from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
 
-    A runtime wrap from OUR repo, never an edit under ~/.local/pipx. It is guarded: if the
-    private class or method is gone in a future LiteLLM, the patch is skipped LOUDLY and the
-    proxy runs unpatched rather than crashing.
+    def ch(content=None, reasoning=None, finish=None):
+        return ModelResponseStream(choices=[StreamingChoices(
+            index=0, delta=Delta(content=content, reasoning_content=reasoning),
+            finish_reason=finish)])
+
+    return {
+        "mixed transition": [ch(reasoning="a"), ch(content="Hi", reasoning=" b"),
+                             ch(content="!"), ch(finish="stop")],
+        "mixed first": [ch(content="\n", reasoning="a"), ch(reasoning="b"),
+                        ch(content="Hi"), ch(finish="stop")],
+    }
+
+
+def stream_mismatches(chunks):
+    """Drive LiteLLM's real Anthropic stream adapter; return (errors, text, thinking)."""
+    from litellm.llms.anthropic.experimental_pass_through.adapters.streaming_iterator import (
+        AnthropicStreamWrapper)
+    open_types, errors, text, thinking = {}, [], "", ""
+    for ev in AnthropicStreamWrapper(completion_stream=iter(chunks), model="m"):
+        if ev.get("type") == "content_block_start":
+            open_types[ev["index"]] = ev["content_block"]["type"]
+        if ev.get("type") == "content_block_delta":
+            dt, bt = ev["delta"]["type"], open_types.get(ev["index"])
+            if (dt == "thinking_delta") != (bt == "thinking"):
+                errors.append(f"{dt} into {bt}")
+            text += ev["delta"].get("text", "")
+            thinking += ev["delta"].get("thinking", "")
+    return errors, text, thinking
+
+
+def check_stream_adapter() -> bool:
+    """True if the installed adapter handles mixed chunks; warn LOUDLY (never crash) if not.
+
+    Replaces the runtime split patch of 0.19.10: upstream fixed the bug, so we no longer wrap
+    a private LiteLLM class -- but an old install must not regress silently either.
     """
     try:
-        from litellm.llms.anthropic.experimental_pass_through.adapters import streaming_iterator as si
-        splitter = si._CombinedChunkSplitter
-        original = splitter.__dict__["_split"].__func__
+        bad = [name for name, chunks in _probe_chunks().items() if stream_mismatches(chunks)[0]]
     except Exception as exc:
-        print(f"la_proxy_hooks: WARNING stream-split patch NOT installed ({exc}); "
-              f"'not a thinking block' errors may return", file=sys.stderr)
+        print(f"la_proxy_hooks: WARNING could not probe the stream adapter ({exc})",
+              file=sys.stderr)
         return False
-    if getattr(original, "_la_patched", False):
-        return True
-
-    def _split(chunk):
-        out = []
-        for piece in split_mixed_chunk(chunk):
-            out.extend(original(piece))
-        return out
-
-    _split._la_patched = True
-    splitter._split = staticmethod(_split)
+    if bad:
+        print(f"la_proxy_hooks: WARNING installed LiteLLM still has the mixed-chunk bug "
+              f"({', '.join(bad)}); expect 'Content block is not a thinking block' on Nemotron. "
+              f"Upgrade: pipx upgrade litellm  (>= {MIN_LITELLM})", file=sys.stderr)
+        return False
     return True
 
 
@@ -164,43 +151,21 @@ class LAProxyHooks(CustomLogger):
         return normalize_nvidia_kwargs(kwargs)
 
 
-# Loading this module (which LiteLLM does at proxy start) installs the stream fix.
-install_stream_split_patch()
+# Loading this module (which LiteLLM does at proxy start) checks the upstream stream fix.
+if CustomLogger is not object:
+    check_stream_adapter()
 proxy_hooks = LAProxyHooks() if CustomLogger is not object else None
 
 
 # ---- CLI ------------------------------------------------------------------------------------
 
 def _self_test() -> int:
-    from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
-    from litellm.llms.anthropic.experimental_pass_through.adapters.streaming_iterator import (
-        AnthropicStreamWrapper)
-
-    def ch(content=None, reasoning=None, finish=None):
-        return ModelResponseStream(choices=[StreamingChoices(
-            index=0, delta=Delta(content=content, reasoning_content=reasoning),
-            finish_reason=finish)])
-
-    cases = {
-        "mixed transition": [ch(reasoning="a"), ch(content="Hi", reasoning=" b"),
-                             ch(content="!"), ch(finish="stop")],
-        "mixed first": [ch(content="\n", reasoning="a"), ch(reasoning="b"),
-                        ch(content="Hi"), ch(finish="stop")],
-    }
-    bad = 0
-    for name, chunks in cases.items():
-        open_types, errors, thinking = {}, [], ""
-        for ev in AnthropicStreamWrapper(completion_stream=iter(chunks), model="m"):
-            if ev.get("type") == "content_block_start":
-                open_types[ev["index"]] = ev["content_block"]["type"]
-            if ev.get("type") == "content_block_delta":
-                dt, bt = ev["delta"]["type"], open_types.get(ev["index"])
-                if (dt == "thinking_delta") != (bt == "thinking"):
-                    errors.append(f"{dt} into {bt}")
-                thinking += ev["delta"].get("thinking", "")
+    ok = True
+    for name, chunks in _probe_chunks().items():
+        errors, _, thinking = stream_mismatches(chunks)
         print(f"{name:18s} -> {'OK' if not errors else errors}  thinking={thinking!r}")
-        bad += bool(errors)
-    return 1 if bad else 0
+        ok &= not errors
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

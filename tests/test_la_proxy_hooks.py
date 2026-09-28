@@ -4,10 +4,12 @@
   ~/.local/pipx/venvs/litellm/bin/python tests/test_la_proxy_hooks.py
 
 (skips cleanly when LiteLLM is not importable). Each fix is tested by OUTCOME against the real
-installed adapter, and the stream fix is mutation-tested: with the patch removed the same
-stream must reproduce the exact Claude Code failure, or the test proves nothing.
+installed adapter, and the stream check is mutation-tested: a planted buggy adapter must make it
+warn, or a passing check proves nothing.
 """
 import asyncio
+import contextlib
+import io
 import importlib.util
 import os
 import sys
@@ -59,42 +61,53 @@ MIXED = lambda: [ch(reasoning="plan"), ch(content="Hi", reasoning=" done"),
 
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
-class StreamSplitTests(unittest.TestCase):
-    def test_mixed_chunk_no_longer_breaks_and_loses_nothing(self):
-        load_hooks()
+class StreamAdapterTests(unittest.TestCase):
+    """The 0.19.10 split patch is retired: LiteLLM >= 1.102.1 fixed the mixed-chunk bug."""
+
+    def test_installed_adapter_handles_mixed_chunks_unpatched(self):
+        # Guards the retirement: the REAL adapter, with nothing of ours patched in, must type
+        # mixed chunks correctly. If an older LiteLLM comes back, this fails.
         errors, text, thinking = mismatches(MIXED())
         self.assertEqual(errors, [])
         self.assertEqual(text, "Hi!")
         self.assertEqual(thinking, "plan done")
-
-    def test_mixed_first_chunk(self):
-        load_hooks()
-        errors, text, thinking = mismatches(
+        errors, _, thinking = mismatches(
             [ch(content="\n", reasoning="a"), ch(reasoning="b"), ch(content="Hi"), ch(finish="stop")])
-        self.assertEqual(errors, [])
-        self.assertEqual(thinking, "ab")
+        self.assertEqual((errors, thinking), ([], "ab"))
 
-    def test_mutation_unpatched_adapter_reproduces_the_bug(self):
+    def test_module_no_longer_patches_litellm(self):
         from litellm.llms.anthropic.experimental_pass_through.adapters import streaming_iterator as si
+        before = si._CombinedChunkSplitter.__dict__.get("_split")
         load_hooks()
-        patched = si._CombinedChunkSplitter.__dict__["_split"]
-        orig = patched.__func__.__closure__
-        # Find the original function captured by the wrapper and restore it temporarily.
-        original = next(c.cell_contents for c in orig if callable(c.cell_contents)
-                        and c.cell_contents.__name__ == "_split")
-        si._CombinedChunkSplitter._split = staticmethod(original)
-        try:
-            errors, _, _ = mismatches(MIXED())
-            self.assertIn("thinking_delta into text", errors)
-        finally:
-            si._CombinedChunkSplitter._split = patched
+        self.assertIs(si._CombinedChunkSplitter.__dict__.get("_split"), before)
 
-    def test_patch_is_idempotent(self):
+    def test_check_passes_on_fixed_adapter(self):
         mod = load_hooks()
-        self.assertTrue(mod.install_stream_split_patch())
-        self.assertTrue(mod.install_stream_split_patch())
-        errors, text, _ = mismatches(MIXED())
-        self.assertEqual((errors, text), ([], "Hi!"))   # not double-split / duplicated
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertTrue(mod.check_stream_adapter())
+        self.assertEqual(err.getvalue(), "")
+
+    def test_mutation_check_warns_on_buggy_adapter(self):
+        # Planted positive: simulate the 1.91 bug (a thinking_delta inside a text block) and the
+        # check must fail LOUDLY with the upgrade hint -- otherwise a passing check proves nothing.
+        mod = load_hooks()
+        mod.stream_mismatches = lambda chunks: (["thinking_delta into text"], "", "")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertFalse(mod.check_stream_adapter())
+        self.assertIn("still has the mixed-chunk bug", err.getvalue())
+        self.assertIn("pipx upgrade litellm", err.getvalue())
+
+    def test_check_never_raises(self):
+        mod = load_hooks()
+        def boom(chunks):
+            raise RuntimeError("adapter moved")
+        mod.stream_mismatches = boom
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertFalse(mod.check_stream_adapter())
+        self.assertIn("could not probe", err.getvalue())
 
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
@@ -122,7 +135,9 @@ class NvidiaKwargsTests(unittest.TestCase):
             anthropic_message_request={"model": "m", "max_tokens": 8, "stop_sequences": ["S"],
                                        "safeguards": {}, "messages": [{"role": "user", "content": "x"}]})
         keys = set(dict(out[0] if isinstance(out, tuple) else out))
-        self.assertTrue({"stop_sequences", "safeguards"} & keys)
+        # Since LiteLLM 1.102.1 stop_sequences arrives already translated to stop; safeguards is
+        # still forwarded verbatim and NIM 400s on it, so the drop must stay.
+        self.assertIn("safeguards", keys)
 
     def test_hook_only_touches_nvidia_and_takes_a_token(self):
         hooks = self.mod.LAProxyHooks()

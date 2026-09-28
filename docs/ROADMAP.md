@@ -10,7 +10,7 @@ so "did we skip a specced feature?" was not answerable from the repo at all. It 
 
 ## Current released version
 
-`0.19.11`
+`0.19.12`
 
 **How to use this file:** an item leaves this file only by moving into `CHANGELOG.md` under a real
 version. Nothing is deleted for being inconvenient. If an item is abandoned, it moves to
@@ -20,7 +20,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.19.11`. See `CHANGELOG.md`.
+`0.19.12`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -75,6 +75,8 @@ and rewriting one would not un-release it):
 **Shipped 2026-09-21:** `0.18.0` — Remote Free API identity Milestone 4: lime-green theme, provider-aware spinner verbs, per-session settings overlay, session name with emoji, transcript marker/transition integration (see `CHANGELOG.md`).
 
 **Shipped 2026-09-26:** `0.19.11` — Dynamic session names with launcher prefix + auto-generated suffix. UserPromptSubmit hook reads auto-generated name after first prompt and prepends `<emoji> <model-alias>` prefix. Fixes all sessions on same model sharing identical fixed names. Idempotent, resume-safe with different models (see `CHANGELOG.md`).
+
+**Shipped 2026-09-28:** `0.19.12` — Retired the 0.19.10 runtime stream-split patch: LiteLLM 1.102.1 fixed the mixed reasoning+content chunk bug upstream. `la_proxy_hooks.py` now only probes the installed adapter at load and warns loudly on an old LiteLLM; the `safeguards` drop, `stop_sequences`→`stop` fallback and 40 RPM bucket stay (see `CHANGELOG.md`).
 
 **Reassigned again 2026-09-16.** `0.14.0` now belongs to the **free-agents identity release** (the
 project rename plus the remote-session parity fixes that made it justified). Portable manifests moved
@@ -134,6 +136,7 @@ waiting on an architecture it does not read. So the split is:
 | `0.18.1` | **Cosmetic fixes.** Emoji spacing, remote effort menu reorder, interactive effort prompt in launcher. (Patch, 2026-09-21.) | `0.18.0` |
 | `0.19.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`, then `0.17.0`; slid up 2026-09-19 for local-session-identity, pushed past 0.18.0 when lime theme took that slot.) | nothing hard |
 | `0.19.11` | **Dynamic session names with auto-generated suffix.** UserPromptSubmit hook reads auto-generated name after first prompt, prepends `<emoji> <model-alias>` prefix. Fixes all sessions on same model sharing identical fixed names. Idempotent, resume-safe. | nothing hard |
+| `0.19.12` | **Retire the stream-split patch.** LiteLLM 1.102.1 fixed the mixed-chunk bug upstream; the hook now only checks for it and warns. NVIDIA param fixes and RPM bucket kept. | `0.19.11` |
 | `0.20.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`.) | `0.19.0` |
 | `0.21.0` | **Backend lanes.** [oMLX](#0210--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`.) | `0.20.0` — a runtime profile is the clean way to select a backend |
 

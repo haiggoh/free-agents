@@ -2,6 +2,24 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.19.12] — 2026-09-28
+
+### Changed — stream-split patch retired (fixed upstream in LiteLLM 1.102.1)
+
+- **The 0.19.10 runtime wrap of LiteLLM's private `_CombinedChunkSplitter._split` is removed.**
+  LiteLLM 1.102.1 types a chunk carrying both `reasoning_content` and `content` correctly, so
+  "Content block is not a thinking block" no longer needs our patch. Verified against the
+  unpatched 1.102.1 adapter with the original repro (mixed transition + mixed first chunk).
+  Keeping the wrap would only have risked breaking on a future LiteLLM refactor.
+- **`la_proxy_hooks.py` now PROBES the installed adapter at load** and prints a loud WARNING with
+  the upgrade command (`pipx upgrade litellm`, >= 1.102.1) if the bug is still present, so an old
+  install cannot regress silently. The probe never raises.
+- **Kept:** the `safeguards` drop (1.102.1 still forwards it; NIM answers HTTP 400), the
+  `stop_sequences` → `stop` translation as a fallback for older LiteLLM (1.102.1 now does it
+  itself), and the machine-wide NVIDIA 40 RPM bucket.
+- Tests: the split-patch tests are replaced by adapter-outcome tests plus a planted-bug mutation
+  test for the new check (9 tests, all under the LiteLLM interpreter).
+
 ## [0.19.11] — 2026-09-26
 
 ### Added — Dynamic session names with launcher prefix + auto-generated suffix
