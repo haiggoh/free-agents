@@ -139,18 +139,70 @@ class NvidiaKwargsTests(unittest.TestCase):
         # still forwarded verbatim and NIM 400s on it, so the drop must stay.
         self.assertIn("safeguards", keys)
 
-    def test_hook_only_touches_nvidia_and_takes_a_token(self):
+    def test_hook_only_touches_nvidia_and_takes_a_slot(self):
         hooks = self.mod.LAProxyHooks()
         with tempfile.TemporaryDirectory() as d:
-            from rate_limiter import FileTokenBucket
-            hooks._bucket = FileTokenBucket(os.path.join(d, "s"), rpm=40)
+            from rate_limiter import SlidingWindowLimiter
+            hooks._bucket = SlidingWindowLimiter(os.path.join(d, "s"), rpm=40)
             other = asyncio.run(hooks.async_pre_call_deployment_hook({"model": "gemini/x"}, None))
             self.assertIsNone(other)
-            self.assertEqual(hooks._bucket.status()["tokens"], 40)
+            self.assertEqual(hooks._bucket.status()["in_window"], 0)
             out = asyncio.run(hooks.async_pre_call_deployment_hook(
                 {"model": "nvidia_nim/x", "safeguards": 1}, None))
             self.assertNotIn("safeguards", out)
-            self.assertLess(hooks._bucket.status()["tokens"], 40)
+            self.assertEqual(hooks._bucket.status()["in_window"], 1)
+
+
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class Upstream429Tests(unittest.TestCase):
+    """A real litellm.RateLimitError from NVIDIA must pause every proxy sharing the state file."""
+
+    def setUp(self):
+        self.mod = load_hooks()
+        self.dir = tempfile.TemporaryDirectory()
+        from rate_limiter import SlidingWindowLimiter
+        self.path = os.path.join(self.dir.name, "s")
+        self.hooks = self.mod.LAProxyHooks()
+        self.hooks._bucket = SlidingWindowLimiter(self.path, rpm=40, cooldown=10)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def _fail(self, exc, model="nvidia_nim/x"):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            asyncio.run(self.hooks.async_log_failure_event(
+                {"model": model, "exception": exc}, None, None, None))
+        return err.getvalue()
+
+    def _rate_limit_error(self, headers=None):
+        import httpx
+        import litellm
+        resp = httpx.Response(429, headers=headers or {},
+                              request=httpx.Request("POST", "https://integrate.api.nvidia.com"))
+        return litellm.RateLimitError(message="Too Many Requests", llm_provider="nvidia_nim",
+                                      model="x", response=resp)
+
+    def test_429_pauses_other_proxies_and_reports_window(self):
+        from rate_limiter import SlidingWindowLimiter
+        for _ in range(3):
+            self.hooks._bucket.try_acquire()
+        log = self._fail(self._rate_limit_error())
+        # 3 slots we took + the SDK's 2 hidden retries of the failed call
+        self.assertIn("NVIDIA 429 with 5/40", log)
+        other = SlidingWindowLimiter(self.path, rpm=40)       # a second proxy's view
+        self.assertGreater(other.status()["cooldown_remaining"], 9.0)
+        self.assertGreater(other.try_acquire(), 0.0)
+
+    def test_429_uses_retry_after_header(self):
+        self._fail(self._rate_limit_error({"retry-after": "30"}))
+        self.assertGreater(self.hooks._bucket.status()["cooldown_remaining"], 29.0)
+
+    def test_non_429_and_non_nvidia_do_not_pause(self):
+        import litellm
+        self._fail(litellm.BadRequestError(message="bad", model="x", llm_provider="nvidia_nim"))
+        self._fail(self._rate_limit_error(), model="gemini/x")
+        self.assertEqual(self.hooks._bucket.status()["cooldown_remaining"], 0.0)
 
 
 if __name__ == "__main__":
