@@ -2,6 +2,87 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.0] — 2026-09-29
+
+### Added — Portable local-model manifests & artifact identity
+
+- **Self-describing model store**: Each completed artifact in `~/.models/` now carries its own `.local-model-manifest.json` beside its weights. A consumer scanning the directory can list what is installed, launchable, session-eligible, and what context each artifact supports — without any checkout of this repository.
+- **Manifest v1 specification** (`docs/model-manifest-v1.md`) and **JSON Schema** (`docs/schema/local-model-manifest-v1.schema.json`) for interoperability with future consumers (AGY, other tools).
+- **Five-layer identity model**: artifact → runtime-profile → resource-profile → environment-profile → live-server (runtime profiles are 0.21.0; this commit establishes the artifact layer).
+- **Six context states, one derived**:
+  - `native_context_tokens` — architecture declaration
+  - `configured_context_tokens` — this artifact's config.json
+  - `extended_context_tokens` — explicit RoPE/YaRN setup
+  - `tested_safe_context_tokens` — measured with evidence
+  - `server_context_tokens` — live server allocation
+  - `effective_context_tokens` — MINIMUM of applicable limits (what a session may actually use)
+- **Derived autocompaction** (100K increments, 100K–1M): `claude_autocompact_tokens = min(1M, floor(effective/100K)*100K)` — recomputed by validators, never independently editable.
+- **Artifact kind vs. launchability vs. session eligibility** — three deliberate fields:
+  - Normal MLX model: `kind: model`, launchable, session-eligible
+  - MTP drafter: `kind: draft_model`, **not** launchable, **not** session-eligible, names target via `target_directory_name`
+  - TTS/Depth: launchable by own tooling, **never** session-eligible
+  - `mlx_lm`/`llama.cpp`: launchable for dispatch only, **not** session-eligible (no `/v1/messages`)
+- **Completion is a transaction**: `acquisition.status=complete` only after payload verify + manifest atomic write (temp → validate → rename). Interrupted completion repairs metadata without redownload.
+- **Researched catalogue** (`config/model-catalogue-context-list.yaml`) — 44 hand-audited entries as input/provenance, not truth. Manifest records `acquisition.catalogue_provenance` where used; validation fails closed on disagreement.
+
+### Added — Manifest toolkit (`install/local-model-manifest.py`, stdlib only)
+
+- `build --dir <model> [--output <path>] [--dry-run]` — build manifest from artifact
+- `validate --manifest <path>` — validate against schema rules
+- `inspect --dir <model>` — show discovered context, kind, launchability
+- `reconcile [--json]` — compare installed artifacts with YAML catalogue
+- `backfill --select <alias|dir>|--all [--force] [--dry-run]` — write manifests for installed artifacts
+- Atomic writes, `--dry-run` on all mutating commands, idempotent reruns
+- Clear reporting: missing/valid/stale/invalid/conflicting
+
+### Added — Downloader integration (`install/download-models.sh`)
+
+- On completion (after marker + payload verify): resolve repo/revision, inspect context candidates, reconcile with catalogue, build & validate temp manifest, atomic rename, reread & validate final state
+- Interrupted completion → repairs metadata without redownload
+- Manifest written atomically at acquisition completion
+
+### Added — CSL manifest-driven context derivation (`bin/csl`)
+
+- Resolves alias → physical directory → manifest → computes effective context (min of native/extended, configured, backend, server, tested-safe)
+- Derives 100K floor & Claude autocompaction per spec
+- Precedence: explicit override > local override > selected mode > manifest default > `LA_MAX_MODEL_LEN` fallback
+- Pre-launch validation: server context ≥ autocompaction, valid 100K increment, autocompaction ≤ effective context, extended mode has runtime support, non-launchable blocked
+- On invalid config: fail before Claude starts, print model identity, artifact context, server context, effective context, selected autocompaction, corrective action
+- Missing/invalid manifest → legacy behavior + bounded warning
+- Dry-run and picker display show `effective_ctx` and `autocompact` from manifests
+
+### Added — Controlled 44-entry backfill (gated, not blind `--all`)
+
+Ordered gates, each must pass before next:
+1. Dry-run full roster validation
+2. Backfill **Ornith** → verify `262144 → 200000 → 200k`
+3. Backfill one **131,072 model** (Granite) → verify 100K
+4. Backfill **Devstral 393,216** → verify 300K (with matching server allocation)
+5. Test shared aliases/override behavior
+6. Test **Qwen3.8 target + MTP drafter** attachment
+7. Test **TTS/DepthART exclusion** from session picker
+8. Test **Laguna 1M** with bounded server allocation
+9. Test **Llama 4 Scout** bounded to 262,144/200K (not 10M)
+10. Backfill remaining roster
+
+All 44 models now have valid manifests. Key verifications:
+- Ornith: 262K → 200K ✓
+- Granite: 131K → 100K ✓
+- Devstral: 393K → 300K ✓
+- Laguna: 1M → 1M (Claude cap) ✓
+- Llama 4 Scout: 10M → 1M (bounded) ✓
+- Qwen3.8-MTP-4bit drafter → targets Qwen3.8-27B-4bit ✓
+- TTS/DepthART correctly excluded from session picker ✓
+
+### Added — `bin/backfill-model-manifests.sh` wrapper
+
+Thin wrapper calling `install/local-model-manifest.py backfill` for common operations.
+
+### Tests
+
+- 17 fixtures (6 valid, 11 invalid) with mutation-tested validator (invert floor arithmetic, disable drafter rule, plant absolute path)
+- All existing tests pass: 43/43 fixture tests, 39/39 serve tests, version consistency
+
 ## [0.19.12] — 2026-09-28
 
 ### Changed — stream-split patch retired (fixed upstream in LiteLLM 1.102.1)
