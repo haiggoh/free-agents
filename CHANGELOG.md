@@ -2,6 +2,18 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.3] — 2026-09-30
+
+### Fixed — Sliding-window NVIDIA rate limiter + 429 cooldown + SDK hidden retries
+
+- **Root cause**: The 0.19.10 token bucket started FULL (40) and refilled at 40/min, so any rolling 60 s could admit up to 79 requests — roughly double the published limit if NVIDIA counts per rolling minute. Two concurrent sessions logged 1241 x 429 against 1139 x 200 while the bucket queued almost nothing.
+- **Fix**: Replaced token bucket with a **sliding-window limiter** (`bin/rate_limiter.py::SlidingWindowLimiter`) that admits at most `LA_NVIDIA_RPM` (default 40) requests in ANY 60 s span — the literal reading of "40 per minute".
+- **429 cooldown**: When NVIDIA still answers 429, `note_429()` records a machine-wide cooldown so ALL proxies pause (Retry-After if sent, else `LA_NVIDIA_429_COOLDOWN`, default 10 s) instead of spending their remaining allowance into the same wall. Returns the window count at that moment — the number that locates the real limit.
+- **SDK hidden retries**: LiteLLM's nvidia_nim path passes `max_retries=2` to the OpenAI SDK, so a failed 429 call actually sent 3 upstream attempts that never reached `async_pre_call_deployment_hook`. The failure hook now books these as `SDK_HIDDEN_RETRIES=2` extra slots so the window reflects what NVIDIA actually counted.
+- **State migration**: Old token-bucket state files (with `tokens`/`stamp`/`capacity`) are read as empty (safe failure = one extra window, never a permanently full wedge).
+- **New env**: `LA_NVIDIA_429_COOLDOWN` (default 10 s), `LA_NVIDIA_RPM` now means "requests per rolling 60 s window".
+- **Tests**: 12 mutation-tested cases including 4-process inter-process no-overspend, 429 pause propagation, Retry-After honouring, hidden SDK attempts booking, and old-format state migration.
+
 ## [0.20.2] — 2026-09-29
 
 ### Fixed — Blind-trust mode uses bypassPermissions (measured 0 classifier calls)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Tests for bin/rate_limiter.py -- the machine-wide NVIDIA token bucket.
+"""Tests for bin/rate_limiter.py -- the machine-wide NVIDIA sliding-window limiter.
 
 The property that matters is INTER-PROCESS: N separate processes sharing one state file must
-never spend more tokens than the bucket holds. The race test freezes the clock (no refill) so
+never take more slots than the window allows. The race test freezes the clock (no refill) so
 the expected total is exact, and widens the read->write window so a missing lock is caught
 reliably rather than by luck. The mutation check proves the test can fail.
 """
@@ -26,7 +26,7 @@ FROZEN = 1_000_000.0
 def _worker(path, attempts, disable_lock, out):
     if disable_lock:
         rl.fcntl.flock = lambda fd, op: None          # the mutation under test
-    bucket = rl.FileTokenBucket(path, rpm=40, clock=lambda: FROZEN)
+    bucket = rl.SlidingWindowLimiter(path, rpm=40, clock=lambda: FROZEN)
     orig_read = bucket._read
 
     def slow_read(fd, now):                            # widen the race window
@@ -42,7 +42,7 @@ def _worker(path, attempts, disable_lock, out):
 def _run(disable_lock):
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "state")
-        rl.FileTokenBucket(path, rpm=40, clock=lambda: FROZEN).status()  # create, full
+        rl.SlidingWindowLimiter(path, rpm=40, clock=lambda: FROZEN).status()  # create, empty
         q = mp.Queue()
         procs = [mp.Process(target=_worker, args=(path, 30, disable_lock, q)) for _ in range(4)]
         for p in procs:
@@ -52,33 +52,91 @@ def _run(disable_lock):
         return sum(q.get() for _ in procs)
 
 
-class TokenBucketTests(unittest.TestCase):
-    def test_single_process_capacity_then_wait(self):
-        with tempfile.TemporaryDirectory() as d:
-            b = rl.FileTokenBucket(os.path.join(d, "s"), rpm=40, clock=lambda: FROZEN)
-            self.assertEqual([b.try_acquire() for _ in range(40)], [0.0] * 40)
-            self.assertAlmostEqual(b.try_acquire(), 1.5, places=6)
+def _admitted_in_first_minute(limiter, now):
+    """Simulate greedy callers against a fake clock; count admissions in the first 60 s."""
+    sent = 0
+    while now[0] < 60.0:
+        if limiter.try_acquire() == 0.0:
+            sent += 1
+        else:
+            now[0] += 0.05
+    return sent
 
-    def test_refill_is_one_token_per_1_5_seconds(self):
+
+class SlidingWindowTests(unittest.TestCase):
+    def test_single_process_limit_then_wait_for_oldest(self):
         now = [FROZEN]
         with tempfile.TemporaryDirectory() as d:
-            b = rl.FileTokenBucket(os.path.join(d, "s"), rpm=40, clock=lambda: now[0])
-            for _ in range(40):
-                b.try_acquire()
-            now[0] += 1.5
+            b = rl.SlidingWindowLimiter(os.path.join(d, "s"), rpm=40, clock=lambda: now[0])
+            self.assertEqual([b.try_acquire() for _ in range(40)], [0.0] * 40)
+            self.assertAlmostEqual(b.try_acquire(), 60.0, places=6)   # oldest leaves at +60 s
+            now[0] += 60.0
             self.assertEqual(b.try_acquire(), 0.0)
-            self.assertGreater(b.try_acquire(), 0.0)
 
-    def test_corrupt_state_starts_full_not_wedged(self):
+    def test_never_more_than_limit_in_any_rolling_minute(self):
+        # The 0.19.10 token bucket admitted 79 in the first minute (full start + refill).
+        now = [0.0]
+        with tempfile.TemporaryDirectory() as d:
+            b = rl.SlidingWindowLimiter(os.path.join(d, "s"), rpm=40, clock=lambda: now[0])
+            self.assertEqual(_admitted_in_first_minute(b, now), 40)
+
+    def test_limit_is_env_tunable(self):
+        now = [0.0]
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["LA_NVIDIA_RPM"] = "30"
+            try:
+                b = rl.SlidingWindowLimiter(os.path.join(d, "s"), clock=lambda: now[0])
+            finally:
+                del os.environ["LA_NVIDIA_RPM"]
+            self.assertEqual(_admitted_in_first_minute(b, now), 30)
+
+    def test_429_pauses_every_process_sharing_the_file(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s")
+            a = rl.SlidingWindowLimiter(path, rpm=40, clock=lambda: now[0], cooldown=10)
+            other = rl.SlidingWindowLimiter(path, rpm=40, clock=lambda: now[0], cooldown=10)
+            for _ in range(5):
+                a.try_acquire()
+            info = a.note_429()
+            self.assertEqual(info["in_window"], 5)          # locates the real limit
+            self.assertAlmostEqual(other.try_acquire(), 10.0, places=6)
+            now[0] += 10.0
+            self.assertEqual(other.try_acquire(), 0.0)
+
+    def test_429_books_hidden_sdk_attempts(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = rl.SlidingWindowLimiter(os.path.join(d, "s"), rpm=40, clock=lambda: now[0])
+            b.try_acquire()
+            self.assertEqual(b.note_429(hidden_attempts=2)["in_window"], 3)
+            now[0] += 61.0                                  # all three age out together
+            self.assertEqual(b.status()["in_window"], 0)
+
+    def test_429_honours_retry_after(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = rl.SlidingWindowLimiter(os.path.join(d, "s"), rpm=40, clock=lambda: now[0])
+            self.assertEqual(b.note_429(retry_after=25)["pause"], 25.0)
+            self.assertAlmostEqual(b.try_acquire(), 25.0, places=6)
+
+    def test_old_token_bucket_state_is_not_fatal(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "s")
+            Path(p).write_text('{"tokens": 38.0, "stamp": 1.0, "capacity": 40.0}')
+            b = rl.SlidingWindowLimiter(p, rpm=40, clock=lambda: FROZEN)
+            self.assertEqual(b.try_acquire(), 0.0)
+
+    def test_corrupt_state_starts_empty_not_wedged(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "s")
             Path(p).write_text("{not json")
-            b = rl.FileTokenBucket(p, rpm=40, clock=lambda: FROZEN)
+            b = rl.SlidingWindowLimiter(p, rpm=40, clock=lambda: FROZEN)
             self.assertEqual(b.try_acquire(), 0.0)
 
     def test_timeout_raises(self):
         with tempfile.TemporaryDirectory() as d:
-            b = rl.FileTokenBucket(os.path.join(d, "s"), rpm=40, clock=lambda: FROZEN)
+            b = rl.SlidingWindowLimiter(os.path.join(d, "s"), rpm=40, clock=lambda: FROZEN)
             for _ in range(40):
                 b.try_acquire()
             with self.assertRaises(rl.RateLimitTimeout):
@@ -87,7 +145,7 @@ class TokenBucketTests(unittest.TestCase):
     def test_state_file_is_private(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "s")
-            rl.FileTokenBucket(p).status()
+            rl.SlidingWindowLimiter(p).status()
             self.assertEqual(os.stat(p).st_mode & 0o777, 0o600)
 
     def test_inter_process_never_overspends(self):
