@@ -2,6 +2,15 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.1] — 2026-09-29
+
+### Fixed — Nemotron 4 model ID format for NVIDIA NIM
+
+- **Root cause**: Roster entry for `nvidia-nemotron4` had model ID `nvidia/nemotron-4-340b` but NVIDIA NIM catalog requires `nvidia/nemotron-4-340b-instruct` (with `-instruct` suffix for the chat model).
+- **Symptom**: Selecting Nemotron 4 from the interactive menu produced "There's an issue with the selected model (claude-opus-5)" because the LiteLLM proxy used the wrong model ID.
+- **Fix**: Updated roster entry to catalog-verified model ID; `remote-session.sh --verify nvidia-nemotron4` now confirms model is catalog-listed (81 models).
+- **Status**: GENERATION-PENDING — needs live generation probe to confirm end-to-end works.
+
 ## [0.20.0] — 2026-09-29
 
 ### Added — Portable local-model manifests & artifact identity
