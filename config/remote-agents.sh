@@ -60,7 +60,7 @@ LA_REMOTE_AGENTS=(
   "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed — catalog presence is not access. Kept for A/B retesting only."
   "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed. Retest before use."
   # Additional NVIDIA models as requested
-  "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b|NVIDIA Nemotron 4 340B|unknown|Added per request - large NVIDIA model"
+  "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b-instruct|NVIDIA Nemotron 4 340B|unknown|Updated to catalog-verified model ID (2026-09-29). GENERATION-PENDING: needs probe"
   "nvidia-minitron|nvidia|nvidia/minitron-12b|NVIDIA Minitron 12B|unknown|Added per request - small efficient NVIDIA model"
 
   # --- TIER 2 — Gemini: still VERIFIED for tool-calling, but DEMOTED from the default.
