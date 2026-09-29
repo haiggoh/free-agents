@@ -711,81 +711,28 @@ if [ "${LA_BLIND_AUTO:-0}" = "1" ] && [ "$LA_AUTO_MODE" != "1" ]; then
     echo "ERROR: LA_BLIND_AUTO=1 requires LA_AUTO_MODE=1. Set auto mode (CSL_AUTO_MODE_STATE=0 or 1, or 'a'/'b' in csl) first." >&2
     exit 2
 fi
-# BLIND-TRUST MODE SELECTION
-# Option A: acceptEdits + auto-yes wrapper (bypasses classifier entirely)
-# Option B: auto + mock classifier (keeps auto mode semantics, sandbox guards active)
-# Default to Option B (mock classifier) as it preserves more auto-mode behavior.
-: "${LA_BLIND_TRUST_OPTION:=B}"
-
-# MCP enablement for blind-trust mode
-# If LA_ENABLE_MCP=1 and we're in blind-trust (Option B), generate a settings file
-# with the merged allowlist from master + profile so MCP tools work without prompts.
+# BLIND-TRUST MODE (LA_BLIND_AUTO=1, LA_AUTO_MODE=1): use bypassPermissions to BYPASS the cloud classifier
+# entirely. This is the measured winner from blind_trust_mechanism_probe.py (C1: 0 classifier requests).
+# The old LA_CLASSIFIER_CMD mechanism was never read by Claude Code (0 occurrences in binary).
 BLIND_TRUST_SETTINGS_FILE=""
-if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "1" ] && [ "$LA_BLIND_TRUST_OPTION" = "B" ] && [ "${LA_ENABLE_MCP:-0}" = "1" ]; then
+if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "1" ]; then
+    _PERM_MODE="bypassPermissions"
+    _AUTO_MODE_APPEND="You are running in LOCAL auto mode with blind-trust (bypassPermissions + DESTRUCTIVE_DENY). Every consequential action is allowed without waiting for a safety check."
+    # Generate settings via the single source of truth (blind-trust-settings.py)
     BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings-local-$$.json"
-    # Read the merged allowlist from master + profile
     _MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
     _PROFILE_ALLOWLIST_FILE="${LA_CLAUDE_SETTINGS:-$HOME/.claude/launch-profiles/lean-local-general.json}"
-    python3 - <<'PYEOF' "$_MASTER_ALLOWLIST_FILE" "$_PROFILE_ALLOWLIST_FILE" "$BLIND_TRUST_SETTINGS_FILE" >/dev/null
-import json, sys
-
-def load_allowlist(path):
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return data.get('permissions', {}).get('allow', [])
-    except Exception:
-        return []
-
-master_allow = load_allowlist(sys.argv[1])
-profile_allow = load_allowlist(sys.argv[2])
-
-# Merge: master + profile (profile wins on conflicts, preserve order)
-seen = set()
-merged_allow = []
-for item in master_allow + profile_allow:
-    if item not in seen:
-        seen.add(item)
-        merged_allow.append(item)
-
-settings = {
-    "_comment": "Blind-trust settings for LOCAL free-agents session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. MCP tools allowed via merged allowlist from master + profile.",
-    "permissions": {
-        "defaultMode": "auto",
-        "allow": merged_allow
-    },
-    "sandbox": {
-        "enabled": True,
-        "excludedCommands": ["gh"]
-    },
-    "network": {
-        "allowedDomains": ["github.com", "api.github.com"]
-    }
-}
-
-with open(sys.argv[3], 'w', encoding='utf-8') as f:
-    json.dump(settings, f, separators=(',', ':'))
-PYEOF
+    MCP_FLAG=()
+    [ "${LA_ENABLE_MCP:-0}" = "1" ] && MCP_FLAG=(--enable-mcp)
+    python3 "$LAUNCH_DIR/blind-trust-settings.py" \
+        --master "$_MASTER_ALLOWLIST_FILE" \
+        --profile "$_PROFILE_ALLOWLIST_FILE" \
+        --out "$BLIND_TRUST_SETTINGS_FILE" \
+        "${MCP_FLAG[@]}" \
+        --mechanism bypass || {
+        echo "❌ Failed to generate blind-trust settings" >&2; exit 1; }
     CLAUDE_EXTRA_ARGS+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
-    echo "🔌 MCPs ENABLED in blind-trust mode (LA_ENABLE_MCP=1) — MCP tools allowlisted via merged master+profile allowlist"
-fi
-
-if [ "$LA_AUTO_MODE" = "1" ]; then
-    _PERM_MODE="auto"
-    if [ "${LA_BLIND_AUTO:-0}" = "1" ]; then
-        if [ "$LA_BLIND_TRUST_OPTION" = "A" ]; then
-            # Option A: use acceptEdits with auto-yes wrapper
-            _PERM_MODE="acceptEdits"
-            _AUTO_MODE_APPEND="You are running in LOCAL auto mode with blind-trust (acceptEdits + auto-yes). Every consequential action is allowed without waiting for a safety check."
-        else
-            # Option B (default): keep auto mode, use mock classifier
-            _AUTO_MODE_APPEND="You are running in LOCAL auto mode with blind-trust (mock classifier). Every consequential action is allowed without waiting for a safety check."
-            # Set mock classifier for blind-trust Option B
-            export LA_CLASSIFIER_CMD="python3 $LAUNCH_DIR/mock-classifier.py"
-        fi
-    else
-        _AUTO_MODE_APPEND="You are running in LOCAL auto mode with a local safety-classifier backend."
-    fi
+    echo "🔌 Blind-trust mode: bypassPermissions + DESTRUCTIVE_DENY (no classifier, measured 0 calls)"
 else
     _PERM_MODE="acceptEdits"
     _AUTO_MODE_APPEND=""

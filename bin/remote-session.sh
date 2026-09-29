@@ -55,7 +55,7 @@ source "$SCRIPT_DIR/../config/emoji.sh"
 
 MAX_OUT="${LA_REMOTE_MAX_OUTPUT_TOKENS:-8192}"
 INCLUDE_TRIALS=0
-DRY_RUN=0
+: "${DRY_RUN:=0}"
 MODE="launch"
 ALIAS=""
 REMOTE_MODEL=""
@@ -66,8 +66,6 @@ LOCAL_CAPABLE_SHOWN=0
 CSL_OWNER=0
 # Blind-trust settings file (set when AUTO_MODE_STATE=0)
 BLIND_TRUST_SETTINGS_FILE=""
-# Whether the blind-trust settings file was user-provided (vs generated)
-BLIND_TRUST_SETTINGS_USER_PROVIDED=0
 
 usage() {
     sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
@@ -1080,12 +1078,12 @@ if [[ "$MODE" == "launch" ]]; then
     # through launch-claude-agent.sh, so LA_AUTO_MODE/LA_BLIND_AUTO are NOT read by anyone
     # here. We must pass --permission-mode ourselves; exporting those vars alone was the
     # original bug. They are still exported for any child that inspects them.
-    # AUTO_MODE_STATE=0 (blind-trust): use acceptEdits to BYPASS cloud classifier.
+    # AUTO_MODE_STATE=0 (blind-trust): use bypassPermissions to BYPASS cloud classifier (measured: 0 classifier calls).
     # AUTO_MODE_STATE=1 (classifier): not implemented yet, falls through to blind-trust behavior.
     # AUTO_MODE_STATE=2 (off): acceptEdits.
     case "$AUTO_MODE_STATE" in
-        0) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
-        1) PERMISSION_MODE="auto"; LA_AUTO_MODE=1; LA_BLIND_AUTO=0 ;;
+        0) PERMISSION_MODE="bypassPermissions"; LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
+        1) PERMISSION_MODE="bypassPermissions"; LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
         2) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=0; LA_BLIND_AUTO=0 ;;
     esac
     export LA_AUTO_MODE LA_BLIND_AUTO
@@ -1094,152 +1092,23 @@ if [[ "$MODE" == "launch" ]]; then
     # silently behaving like blind-trust, which is the failure mode this release fixes.
     if [[ "$AUTO_MODE_STATE" -eq 1 ]]; then
         echo "⚠️  auto-mode: classifier requested, but the remote classifier lane is not"
-        echo "    implemented yet — running blind-trust (auto) for this session. See ROADMAP."
+        echo "    implemented yet — running blind-trust (bypassPermissions) for this session. See ROADMAP."
     fi
 
-    # BLIND-TRUST MODE SELECTION
-    # Option A: acceptEdits + auto-yes wrapper (bypasses classifier entirely)
-    # Option B: auto + mock classifier (keeps auto mode semantics, sandbox guards active)
-    # Default to Option B (mock classifier) as it preserves more auto-mode behavior.
-    : "${LA_BLIND_TRUST_OPTION:=B}"
-
-    # Blind-trust auto mode (AUTO_MODE_STATE=0): use acceptEdits to BYPASS the cloud classifier
-    # entirely. The sandbox settings (excludedCommands + allowedDomains) control the write boundary.
-    # This is the actual fix for "classifier still runs in blind-trust mode".
+    # Blind-trust auto mode (AUTO_MODE_STATE=0): generate settings via the single source of truth.
     if [[ "$AUTO_MODE_STATE" -eq 0 ]]; then
-        if [[ "$LA_BLIND_TRUST_OPTION" = "A" ]]; then
-            # Option A: use acceptEdits with auto-yes wrapper
-            PERMISSION_MODE="acceptEdits"
-        else
-            # Option B (default): keep auto mode, use mock classifier
-            PERMISSION_MODE="auto"
-            # Set mock classifier for blind-trust Option B
-            export LA_CLASSIFIER_CMD="python3 $SCRIPT_DIR/mock-classifier.py"
-        fi
-    fi
-
-    # AUTO_MODE_STATE=2 (off): always acceptEdits, no classifier
-    if [[ "$AUTO_MODE_STATE" -eq 2 ]]; then
-        PERMISSION_MODE="acceptEdits"
-    fi
-
-    # Blind-trust auto mode (AUTO_MODE_STATE=0) needs sandbox.enabled=true for the write boundary.
-    # Create/use a settings file.
-    if [[ "$AUTO_MODE_STATE" -eq 0 ]]; then
-        # Support user-provided settings file via LA_REMOTE_CLAUDE_SETTINGS
-        if [[ -n "${LA_REMOTE_CLAUDE_SETTINGS:-}" ]]; then
-            if [[ -f "$LA_REMOTE_CLAUDE_SETTINGS" ]]; then
-                BLIND_TRUST_SETTINGS_FILE="$LA_REMOTE_CLAUDE_SETTINGS"
-                BLIND_TRUST_SETTINGS_USER_PROVIDED=1
-            else
-                echo "⚠️  LA_REMOTE_CLAUDE_SETTINGS file not found: $LA_REMOTE_CLAUDE_SETTINGS; falling back to generated settings" >&2
-                # Create default blind-trust settings with sandbox.enabled=true
-                BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings.json"
-                MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
-                PROFILE_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/lean-cloud-general.json"
-                python3 - <<'PYEOF' "$BLIND_TRUST_SETTINGS_FILE" "${LA_REMOTE_ENABLE_MCP:-0}" "$MASTER_ALLOWLIST_FILE" "$PROFILE_ALLOWLIST_FILE" >/dev/null
-import json, sys
-
-def load_allowlist(path):
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return data.get('permissions', {}).get('allow', [])
-    except Exception:
-        return []
-
-master_file = sys.argv[3]
-profile_file = sys.argv[4]
-
-master_allow = load_allowlist(master_file)
-profile_allow = load_allowlist(profile_file)
-
-# Merge: master + profile (profile wins on conflicts, preserve order)
-seen = set()
-merged_allow = []
-for item in master_allow + profile_allow:
-    if item not in seen:
-        seen.add(item)
-        merged_allow.append(item)
-
-# If MCPs disabled in blind-trust, filter out mcp__*
-enable_mcp = sys.argv[2] == "1"
-if not enable_mcp:
-    merged_allow = [item for item in merged_allow if not item.startswith("mcp__")]
-
-settings = {
-    "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here. sandbox.excludedCommands [gh] + network.allowedDomains [github.com, api.github.com] fix gh TLS -26276 and git 100001 (memory: git-keychain-100001-and-gh-tls-under-sandbox). MCP tools enabled via merged master+profile allowlist when LA_REMOTE_ENABLE_MCP=1.",
-    "permissions": {
-        "defaultMode": "auto" if enable_mcp else "acceptEdits",
-        "allow": merged_allow
-    },
-    "sandbox": {
-        "enabled": True,
-        "excludedCommands": ["gh"]
-    },
-    "network": {
-        "allowedDomains": ["github.com", "api.github.com"]
-    }
-}
-
-with open(sys.argv[1], 'w', encoding='utf-8') as f:
-    json.dump(settings, f, separators=(',', ':'))
-PYEOF
-            fi
-        else
-            # Create default blind-trust settings with sandbox.enabled=true
-            BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings.json"
-            MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
-            PROFILE_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/lean-cloud-general.json"
-            python3 - <<'PYEOF' "$BLIND_TRUST_SETTINGS_FILE" "${LA_REMOTE_ENABLE_MCP:-0}" "$MASTER_ALLOWLIST_FILE" "$PROFILE_ALLOWLIST_FILE" >/dev/null
-import json, sys
-
-def load_allowlist(path):
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return data.get('permissions', {}).get('allow', [])
-    except Exception:
-        return []
-
-master_file = sys.argv[3]
-profile_file = sys.argv[4]
-
-master_allow = load_allowlist(master_file)
-profile_allow = load_allowlist(profile_file)
-
-# Merge: master + profile (profile wins on conflicts, preserve order)
-seen = set()
-merged_allow = []
-for item in master_allow + profile_allow:
-    if item not in seen:
-        seen.add(item)
-        merged_allow.append(item)
-
-# If MCPs disabled in blind-trust, filter out mcp__*
-enable_mcp = sys.argv[2] == "1"
-if not enable_mcp:
-    merged_allow = [item for item in merged_allow if not item.startswith("mcp__")]
-
-settings = {
-    "_comment": "Blind-trust settings for a remote free-API session. sandbox.enabled changes the WRITE BOUNDARY; it does NOT stop the classifier being consulted, so the verbs a session needs must be allowlisted explicitly or every one of them prompts. Measured 2026-09-20: a bare mkdir prompted until it was listed here. sandbox.excludedCommands [gh] + network.allowedDomains [github.com, api.github.com] fix gh TLS -26276 and git 100001 (memory: git-keychain-100001-and-gh-tls-under-sandbox). MCP tools enabled via merged master+profile allowlist when LA_REMOTE_ENABLE_MCP=1.",
-    "permissions": {
-        "defaultMode": "auto" if enable_mcp else "acceptEdits",
-        "allow": merged_allow
-    },
-    "sandbox": {
-        "enabled": True,
-        "excludedCommands": ["gh"]
-    },
-    "network": {
-        "allowedDomains": ["github.com", "api.github.com"]
-    }
-}
-
-with open(sys.argv[1], 'w', encoding='utf-8') as f:
-    json.dump(settings, f, separators=(',', ':'))
-PYEOF
-        fi
+        BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings-remote-$$.json"
+        MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
+        PROFILE_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/lean-cloud-general.json"
+        MCP_FLAG=()
+        [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 ]] && MCP_FLAG=(--enable-mcp)
+        python3 "$SCRIPT_DIR/blind-trust-settings.py" \
+            --master "$MASTER_ALLOWLIST_FILE" \
+            --profile "$PROFILE_ALLOWLIST_FILE" \
+            --out "$BLIND_TRUST_SETTINGS_FILE" \
+            "${MCP_FLAG[@]}" \
+            --mechanism bypass || {
+            echo "remote-session: failed to generate blind-trust settings" >&2; exit 1; }
     fi
 
     # Telemetry must work in BOTH directions. The live path used to hardcode the
@@ -1347,8 +1216,8 @@ if [[ $DRY_RUN -eq 1 ]]; then
     # the toggles parsed, printed nothing, and were never applied. Showing the resolved
     # values makes each switch verifiable by OUTCOME without launching anything.
     case "$AUTO_MODE_STATE" in
-        0) _am_label="blind-trust (acceptEdits, sandbox=enabled, no classifier)" ;;
-        1) _am_label="classifier requested → falls back to blind-trust (lane not implemented)" ;;
+        0) _am_label="blind-trust (bypassPermissions + DESTRUCTIVE_DENY, no classifier)" ;;
+        1) _am_label="classifier requested → falls back to blind-trust (bypassPermissions, lane not implemented)" ;;
         2) _am_label="off (acceptEdits)" ;;
     esac
     # MCP status
@@ -1367,11 +1236,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "     permission-mode: --permission-mode $PERMISSION_MODE"
     echo "     mcps           : $_mcp_status"
     if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
-        if [[ "$BLIND_TRUST_SETTINGS_USER_PROVIDED" -eq 1 ]]; then
-            echo "     settings       : --settings $BLIND_TRUST_SETTINGS_FILE (user-provided via LA_REMOTE_CLAUDE_SETTINGS)"
-        else
-            echo "     settings       : --settings $BLIND_TRUST_SETTINGS_FILE (generated blind-trust with sandbox.enabled=true)"
-        fi
+        echo "     settings       : --settings $BLIND_TRUST_SETTINGS_FILE (generated blind-trust via blind-trust-settings.py, bypassPermissions + DESTRUCTIVE_DENY)"
     fi
     if [[ "${LA_REMOTE_TELEMETRY:-0}" -eq 1 ]]; then
         echo "     telemetry      : ON  (stock Claude Code reporting)"
@@ -1504,7 +1369,7 @@ fi
 # Add blind-trust sandbox info to banner if applicable
 BLIND_TRUST_BANNER=""
 if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
-    BLIND_TRUST_BANNER="   sandbox  : enabled (write boundary via excludedCommands + allowedDomains)"
+    BLIND_TRUST_BANNER="   blind-trust: bypassPermissions + DESTRUCTIVE_DENY (no classifier, measured 0 calls)"
 fi
 
 cat <<BANNER
