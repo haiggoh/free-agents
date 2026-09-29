@@ -2,6 +2,21 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.2] — 2026-09-29
+
+### Fixed — Blind-trust mode uses bypassPermissions (measured 0 classifier calls)
+
+- **Root cause**: The `LA_CLASSIFIER_CMD` mechanism was never read by Claude Code (0 occurrences in binary). Blind-trust was falling back to `acceptEdits` or a mock classifier that never actually ran.
+- **Symptom**: Classifier still ran in blind-trust mode despite the "bypass" claim.
+- **Fix**: Both `launch-claude-agent.sh` and `remote-session.sh` now use `--permission-mode bypassPermissions` (candidate C1 from `blind_trust_mechanism_probe.py`), measured at 0 classifier requests.
+- **Single source of truth**: New `bin/blind-trust-settings.py` generator produces settings with `bypassPermissions` + deterministic `DESTRUCTIVE_DENY` list, merging master + profile allowlists, de-duplicated, order preserved.
+- **Deleted**: Obsolete `bin/mock-classifier.py` and `bin/auto-yes-acceptedits.sh` (both were dead code paths).
+- **Fixed**: Incorrect comments claiming "sandbox.enabled=true is the write boundary" — sandbox is now off by default.
+
+### Added — Version consistency test now includes VERSION file
+
+- The `tests/test_version_consistency.sh` now checks all four version locations: `.claude-plugin/plugin.json`, `CHANGELOG.md`, `docs/ROADMAP.md`, and `VERSION` file.
+
 ## [0.20.1] — 2026-09-29
 
 ### Fixed — Nemotron 4 model ID format for NVIDIA NIM

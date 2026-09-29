@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# tests/test_version_consistency.sh — the release version number is written down in THREE places.
+# tests/test_version_consistency.sh — the release version number is written down in FOUR places.
 # This asserts they agree.
 #
 # Usage: bash tests/test_version_consistency.sh
 #
-# WHAT THIS PROTECTS. The plugin's version lives in three files that no single command updates:
+# WHAT THIS PROTECTS. The plugin's version lives in four files that no single command updates:
 #   1. .claude-plugin/plugin.json  — the manifest, and the only one the harness actually reads;
 #   2. CHANGELOG.md                — the first NUMBERED "## [x.y.z]" heading (## [Unreleased] is skipped);
 #   3. docs/ROADMAP.md             — the backtick-quoted version under "## Current released version".
+#   4. VERSION                     — the single-line version file used by install scripts and CI.
 #
 # WHY IT EXISTS, with evidence. The roadmap line drifted from the manifest THREE times on a single
 # day (2026-09-01): first at 0.13.5 vs 0.13.6, then again at 0.13.6 vs 0.13.7. The cause is
@@ -22,13 +23,17 @@
 # backfilled. No special case is needed for it: a missing entry means the top numbered heading is
 # still the PREVIOUS version, so the comparison fails on its own.
 #
+# THE VERSION FILE DRIFT: the VERSION file is the source of truth for install scripts and CI.
+# If it drifts from the manifest, consumers get the wrong version. This was the cause of the
+# "pushing an incomplete update to release" incident where VERSION was not bumped with the rest.
+#
 # METHOD. Pure file reads: no network, no server, no sandbox, and nothing is written. The manifest
 # is parsed as real JSON (never grepped for a version-shaped string, which would happily match a
 # dependency's version), and the two Markdown files are parsed with anchored patterns so a
 # version number quoted incidentally elsewhere in the prose cannot satisfy the check.
 #
-# A FAILURE PRINTS ALL THREE VALUES TOGETHER. Reporting only "mismatch" would leave the reader to
-# go and look up which file is the stale one; printing the three side by side makes the fix obvious
+# A FAILURE PRINTS ALL FOUR VALUES TOGETHER. Reporting only "mismatch" would leave the reader to
+# go and look up which file is the stale one; printing the four side by side makes the fix obvious
 # and, just as importantly, makes clear WHICH file is authoritative — the manifest always is.
 set -uo pipefail
 
@@ -38,6 +43,7 @@ ROOT="$HERE/.."
 MANIFEST="$ROOT/.claude-plugin/plugin.json"
 CHANGELOG="$ROOT/CHANGELOG.md"
 ROADMAP="$ROOT/docs/ROADMAP.md"
+VERSION_FILE="$ROOT/VERSION"
 
 pass=0
 fail=0
@@ -79,16 +85,24 @@ roadmap_version() {
     ' "$ROADMAP"
 }
 
+version_file() {
+    [ -f "$VERSION_FILE" ] || return 0
+    # Single line version file - just trim whitespace
+    cat "$VERSION_FILE" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
 # --- the assertions ---------------------------------------------------------
 
 mv_="$(manifest_version)"
 cv_="$(changelog_version)"
 rv_="$(roadmap_version)"
+vv_="$(version_file)"
 
 echo "version consistency:"
 echo "  .claude-plugin/plugin.json : ${mv_:-<not found>}"
 echo "  CHANGELOG.md (top entry)   : ${cv_:-<not found>}"
 echo "  docs/ROADMAP.md            : ${rv_:-<not found>}"
+echo "  VERSION                    : ${vv_:-<not found>}"
 echo
 
 if [ -z "$mv_" ]; then
@@ -113,12 +127,20 @@ else
     ok "docs/ROADMAP.md version line matches the manifest ($rv_)"
 fi
 
+if [ -z "$vv_" ]; then
+    bad "VERSION: no version found — the version file is the install/CI source of truth"
+elif [ "$vv_" != "$mv_" ]; then
+    bad "VERSION says $vv_ but plugin.json says $mv_ — the VERSION file is stale (this caused the 'incomplete release' incident); bring it in line with the manifest"
+else
+    ok "VERSION file matches the manifest ($vv_)"
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then
-    echo "✓ version consistency: $pass check(s) passed — all three copies agree on $mv_"
+    echo "✓ version consistency: $pass check(s) passed — all four copies agree on $mv_"
     exit 0
 fi
 echo "✗ version consistency: $fail of $((pass + fail)) check(s) FAILED" >&2
-echo "  plugin.json=${mv_:-<none>}  CHANGELOG=${cv_:-<none>}  ROADMAP=${rv_:-<none>}" >&2
-echo "  plugin.json is authoritative: bring the other two into line with it." >&2
+echo "  plugin.json=${mv_:-<none>}  CHANGELOG=${cv_:-<none>}  ROADMAP=${rv_:-<none>}  VERSION=${vv_:-<none>}" >&2
+echo "  plugin.json is authoritative: bring the other three into line with it." >&2
 exit 1
