@@ -10,7 +10,7 @@ so "did we skip a specced feature?" was not answerable from the repo at all. It 
 
 ## Current released version
 
-`0.20.5`
+`0.20.8`
 
 **How to use this file:** an item leaves this file only by moving into `CHANGELOG.md` under a real
 version. Nothing is deleted for being inconvenient. If an item is abandoned, it moves to
@@ -20,7 +20,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.20.5`. See `CHANGELOG.md`.
+`0.20.8`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -137,8 +137,10 @@ waiting on an architecture it does not read. So the split is:
 | `0.19.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`, then `0.17.0`; slid up 2026-09-19 for local-session-identity, pushed past 0.18.0 when lime theme took that slot.) | nothing hard |
 | `0.19.11` | **Dynamic session names with auto-generated suffix.** UserPromptSubmit hook reads auto-generated name after first prompt, prepends `<emoji> <model-alias>` prefix. Fixes all sessions on same model sharing identical fixed names. Idempotent, resume-safe. | nothing hard |
 | `0.19.12` | **Retire the stream-split patch.** LiteLLM 1.102.1 fixed the mixed-chunk bug upstream; the hook now only checks for it and warns. NVIDIA param fixes and RPM bucket kept. | `0.19.11` |
-| `0.20.0` | **Runtime profiles.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`.) | `0.19.0` |
-| `0.21.0` | **Backend lanes.** [oMLX](#0210--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`.) | `0.20.0` — a runtime profile is the clean way to select a backend |
+| `0.20.0` | **Portable local-model manifests & artifact identity.** Self-describing `.local-model-manifest.json` beside each artifact, manifest toolkit, five-layer identity model, six context states with derived autocompaction, completion as transaction, researched catalogue. (Released 2026-09-29.) | — |
+| `0.21.0` | **Runtime profiles and Rapid-first model management.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`.) | `0.20.0` — portable manifests provide the artifact identity the profiles resolve |
+| `0.22.0` | **Session picker TUI.** Interactive Textual-based session picker with accordion navigation, launch handoff via nav file, and full entry-point wiring (`csl`, `local-session.sh`, `remote-session.sh`, `session-picker`). Replaces the numbered menu with arrow keys, letter shortcuts, grouped menus, and persistent settings. | `0.21.0` — runtime profiles provide the resolver the UI consumes |
+| `0.23.0` | **Backend lanes.** [oMLX](#0210--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`, then `0.22.0`, then `0.23.0`.) | `0.22.0` — a runtime profile is the clean way to select a backend |
 
 **Not release-gated at all.** These run continuously against whatever is current, and must not be
 parked behind a version number: model acquisition waves, the tournament, retirement and disk
@@ -475,7 +477,7 @@ Both found 2026-09-06; fix the plans, not just the code.
 
 ---
 
-## `0.21.0` — Runtime profiles and Rapid-first model management
+## `0.22.0` — Runtime profiles and Rapid-first model management
 
 > **Renumbered 2026-09-06** from `0.14.0`. Scope is unchanged; only its place in the sequence moved,
 > because the manifest foundation below is what other workstreams actually read. Phase **A**
@@ -486,11 +488,14 @@ Both found 2026-09-06; fix the plans, not just the code.
 > **Renumbered 2026-09-21** from `0.19.0` to `0.20.0` because `0.18.0` was spent on the lime
 > theme (remote identity polish); portable manifests was already at `0.19.0` and had to slide one
 > further. Runtime profiles slides with it. Every gate list travels intact; nothing is dropped.
->
+
 > **Renumbered 2026-09-24** — `0.19.0` was spent on rapid-mlx 0.15.0 upgrade (shipped 2026-09-23),
 > not portable manifests/runtime profiles. `0.19.1` is a patch for the effort persistence subshell
 > fix. Portable manifests slides to `0.20.0`, runtime profiles to `0.21.0`, oMLX lanes to `0.22.0`.
 > Every gate list travels intact; nothing is dropped.
+
+> **Renumbered 2026-09-30** — UI branch (Session Picker TUI) takes `0.21.0` for near-term release;
+> runtime profiles slides to `0.22.0`, oMLX lanes to `0.23.0`. Every gate list travels intact; nothing is dropped.
 
 **Status: NOT STARTED.** No gate here is implemented. Nothing in `0.13.1`–`0.13.8` advances one.
 
@@ -498,115 +503,7 @@ Both found 2026-09-06; fix the plans, not just the code.
 Rapid-First Model Management.md` (1,288 lines), tracked by waypoint `local-agents-0-14-0-runtime`.
 That plan is authoritative for detail; this section is the checklist, and is deliberately terse
 enough to stay accurate.
-
-### The decision it supports
-
-Separate **artifact identity** (what is on disk) from **runtime behaviour** (how it is served). Today
-one `la_register` line conflates them, which is why a model cannot have two runtime personalities
-without being registered twice — the exact duplication that forced the `qwen-3.x-rapid-*` aliases
-retired in `0.13.1`.
-
-### Identity model — five layers (§5)
-
-| Layer | Artifact | Status |
-|---|---|---|
-| Artifact identity | `config/model-catalog.psv` | ✅ exists |
-| Runtime-profile identity | `config/model-runtime-profiles.json` | ❌ not created |
-| Resource-profile identity | `config/runtime-resource-profiles.json` | ❌ not created |
-| Environment-profile identity | `config/runtime-environments.json` | ❌ not created |
-| Live-server identity | `server_<port>.meta` | 🟡 partial — exists, needs profile fields (§5.5, §12) |
-
-### Phases (§22) — strictly ordered
-
-- [ ] **A — Reconcile the live base.** Inspect branch/HEAD/tags/manifest/remote/index/worktree,
-      including ignored files. Report before mutating.
-      *Materially easier as of `0.13.5`: all four outstanding feature branches are merged to `main`,
-      so Phase A reads one consolidated base instead of five divergent branches.*
-- [ ] **B — Read-only resolver prototype.** Create only the three JSON files plus
-      `bin/la-model-profile.py`. Seed one artifact (`qwen38-27b-4bit`) and two profiles
-      (`qwen38-rapid-operator`, `qwen38-rapid-thinking`) plus one legacy fallback. Change no
-      downloader or launcher behaviour until it passes. This is the [smallest first
-      slice](#smallest-first-slice).
-- [ ] **C — Validation and legacy adaptation.** Base/local overlay loading; validate references,
-      duplicates, cycles, paths, provenance; adapt existing `la_register` entries into compatibility
-      profiles; migration preview with no writes.
-- [ ] **D — Profile-aware hotswap.** Resolve through the canonical resolver; preserve the existing
-      backend branches; emit the structured launch result (§12); expand server metadata identity;
-      verify requested vs effective `/v1/models`; refuse unsafe reuse; exercise rollback.
-- [ ] **E — Downloader adaptation.** Profile/backend/capability filters; profile→artifact resolution;
-      preserve every existing safeguard; fix registry/catalog duplication via canonical artifact
-      identity; JSON listing output.
-- [ ] **F — `csl` and roles.** Consume shared profiles; show only session-capable combinations;
-      preserve role recommendations and free composition; keep legacy aliases working.
-- [ ] **G — Dispatcher migration.** Resolve profile before hotswap; use the effective API model ID in
-      payloads; named sessions to schema v2 while still loading v1; test one-shot and conversation
-      flows on Rapid; preserve output and persistence semantics.
-- [ ] **H — Packaging preparation.** `packaging/standalone-files.txt`; deterministic builder;
-      isolated artifact tests. Do not publish until the clean-install gate passes.
-- [ ] **I — Documentation and release.** README architecture and commands; CHANGELOG with the exact
-      verified release base; document schemas, migration, profiles, fallback; align the manifest and
-      version **only after** tests pass.
-
-### Hotswap contract (§12)
-
-`SUCCESS_PORT` alone is insufficient once the user-facing profile ID differs from the API model ID
-the backend serves. Hotswap must return structured JSON (`schema_version`, `port`, `api_model_id`,
-`profile_id`, `artifact_id`, `backend`, `backend_version`, `environment_profile`, `resource_profile`,
-`reused`). `SUCCESS_PORT=` / `SUCCESS_MODEL_ID=` may continue to be emitted for compatibility, but
-consumers should migrate. **Status: ❌ not started** — hotswap emits `SUCCESS_PORT` only.
-
-### Smallest first slice
-
-Before any refactor, prove this read-only vertical slice: both profiles resolve to the same exact
-artifact; operator and thinking settings differ correctly; no network access; no change to downloader
-or launcher behaviour; all identities and provenance visible; invalid references and duplicate IDs
-fail deterministically. **Only then** may the resolver become a dependency of anything else.
-
-### Release gates (§19) — all must hold
-
-```text
-[ ] live 0.13.6 base reconciled
-[ ] artifact/profile/resource/environment schemas documented
-[ ] canonical resolver tests pass
-[ ] legacy private configuration remains usable
-[ ] profile-aware downloader regression passes
-[ ] Rapid operator/thinking profiles resolve correctly
-[ ] legacy vllm and mlx_lm behavior remains intact
-[ ] csl consumes shared profile data
-[ ] dispatcher consumes profile and API-model identity
-[ ] safe reuse compares material profile identity
-[ ] session schema migration is tested
-[ ] README, CHANGELOG, manifest, and help match behavior
-[ ] working tree and staged scope are fully understood
-[ ] rollback launch is exercised
-```
-
-Additionally, **only if** standalone packaging ships in the same release: clean-install artifact test
-passes; archive is deterministic; release manifest contains only approved files; installer avoids
-silent dotfile mutation; published assets are immutable and checksummed.
-
-### Do not confuse these with `0.16.0`
-
-- **`0.13.3` launcher profile controls** are per-**launch** environment variables
-  (`LA_CLAUDE_SETTINGS`, `LA_CLAUDE_TOOLS`, …). `0.15.0` runtime **profiles** are a resolver over
-  declared identities in JSON. Same word, different layer. Shipping the former does not advance the
-  latter.
-- **`0.13.1`'s backend resolution** (`serve=mlx` → `LA_DEFAULT_MLX_BACKEND`, `LA_SERVE_DECLARED`,
-  `la_serve_display`, `LA_MLX_BACKENDS`, `la_retired`) is the same *separation of declared from
-  effective* at the smallest scale. Phase C should **absorb and extend** these names rather than
-  build a parallel mechanism — see the waypoint for the full list.
-
-> **Renumbered 2026-09-21** from `0.20.0` to `0.21.0` because `0.18.0` was spent on the lime
-> theme; portable manifests → `0.19.0` → `0.21.0`, runtime profiles → `0.20.0`, oMLX lanes
-> → `0.21.0` (pushed one past manifests). Every gate list travels intact; nothing is dropped.
->
-> **Renumbered 2026-09-24** — `0.19.0` was spent on rapid-mlx 0.15.0 upgrade (shipped 2026-09-23),
-> `0.19.1` is a patch for effort persistence. Portable manifests → `0.20.0`, runtime profiles →
-> `0.21.0`, oMLX lanes → `0.22.0`. Every gate list travels intact; nothing is dropped.
-
----
-
-## `0.22.0` — Backend lanes — oMLX
+## `0.23.0` — Backend lanes — oMLX
 
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.
@@ -618,6 +515,9 @@ same day.
 > **Renumbered 2026-09-24** — `0.19.0` was spent on rapid-mlx 0.15.0 upgrade, `0.19.1` patch.
 > Portable manifests → `0.20.0`, runtime profiles → `0.21.0`, oMLX lanes → `0.22.0`.
 > Every gate list travels intact; nothing is dropped.
+>
+> **Renumbered 2026-09-30** — UI branch (Session Picker TUI) takes `0.21.0`; runtime profiles
+> slides to `0.22.0`, oMLX lanes to `0.23.0`. Every gate list travels intact; nothing is dropped.
 
 | Fact | Value |
 |---|---|
