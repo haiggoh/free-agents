@@ -2,6 +2,20 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.8] — 2026-09-30
+
+### Improved — Stop hook output formatting with 🪝 emoji and collapsible content
+
+- **local-queue-stop-hook.py**: Refactored output to be human-readable and concise:
+  * **🪝 emoji header** (from `emoji.sh` `EMOJI_STOP_HOOK`) for clear identification
+  * **Collapsible `<details>` sections** for full prompt content — same pattern used for tool calls in Claude Code
+  * **Concise main message**: summary (truncated to 120 chars) + action line, no repetitive full content dumps
+  * **Single full-content block** at end with consolidated helper script calls
+  * Eliminates 3× repetition of full prompt content per queued item
+- **queue_marker.py**: New single-source contract module for `QUEUE_ANSWERED` markers
+  (exports `content_hash`, `format_marker`, `extract_hashes` — both hook and helper import from here)
+- **Contract preserved**: All 16 queue marker contract tests pass (`tests/test_queue_marker_contract.sh`)
+
 ## [0.20.7] — 2026-09-30
 
 ### Added — Version detection for Opus 5.5 / 1M context support

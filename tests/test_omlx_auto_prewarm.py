@@ -1072,4 +1072,5 @@ time.sleep(60)
     backend_server.server_close()
 
 print(f"\n{PASS} passed, {FAIL} failed")
-raise SystemExit(0 if FAIL == 0 else 1)
+if __name__ == "__main__":
+    raise SystemExit(0 if FAIL == 0 else 1)

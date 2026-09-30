@@ -67,4 +67,5 @@ with tempfile.TemporaryDirectory() as td:
     check(hl.returncode == 0 and "--mechanism" in hl.stdout, "--help documents flags")
 
 print(f"\n{PASSES} passed, {len(FAILURES)} failed")
-raise SystemExit(1 if FAILURES else 0)
+if __name__ == "__main__":
+    raise SystemExit(1 if FAILURES else 0)

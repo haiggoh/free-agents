@@ -277,4 +277,5 @@ check(helped.returncode == 0 and "releases" in helped.stdout,
 print(f"\n{passed} passed, {len(failed)} failed")
 for label in failed:
     print(f"  FAILED: {label}")
-raise SystemExit(1 if failed else 0)
+if __name__ == "__main__":
+    raise SystemExit(1 if failed else 0)

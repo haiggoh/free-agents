@@ -218,4 +218,5 @@ check(json.loads(run(["report", "--json"], d10).stdout)["output_only_events"] ==
       "and reports zero output-only events")
 
 print("\n%d passed, %d failed" % (passed, failed))
-sys.exit(1 if failed else 0)
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)

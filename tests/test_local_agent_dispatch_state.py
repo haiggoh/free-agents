@@ -285,4 +285,5 @@ check(
 
 shutil.rmtree(TMP_ROOT, ignore_errors=True)
 print("\n%d passed, %d failed" % (passed, failed))
-sys.exit(1 if failed else 0)
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)

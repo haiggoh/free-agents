@@ -124,7 +124,9 @@ class StopHookGateTests(unittest.TestCase):
         self.assertIn('LA_SESSION_LAUNCHER="remote-session.sh"', remote)
         csl = (ROOT / 'bin/csl').read_text()
         self.assertIn('LA_QUEUE_STOP_HOOK="$STOP_HOOK"', csl)
-        self.assertIn('s|S)', csl, 'the `s` key must toggle the hook')
+        # The stop hook toggle is handled by the Textual picker (key "p"), not by csl directly.
+        picker_model = (ROOT / 'bin/session_picker_model.py').read_text()
+        self.assertIn('Queued-prompt hook', picker_model, 'the `p` key must toggle the hook in picker model')
 
 
 if __name__ == '__main__':

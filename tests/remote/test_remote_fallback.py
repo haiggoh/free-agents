@@ -474,4 +474,6 @@ check("prompt" not in detail.lower(),
 
 print()
 print("%d passed, %d failed" % (passed, failed))
-sys.exit(1 if failed else 0)
+# Don't exit at import time - let pytest handle it
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)

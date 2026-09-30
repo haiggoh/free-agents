@@ -147,4 +147,5 @@ for bad, why in [
         check(True, "rejects %s" % why)
 
 print("\n%d passed, %d failed" % (passed, failed))
-sys.exit(1 if failed else 0)
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)

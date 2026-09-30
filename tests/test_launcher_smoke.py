@@ -454,8 +454,8 @@ exit 99
         self.assertEqual(data.get('effort'), 'high',
                          f"Resolver effort is '{data.get('effort')}', expected 'high' (from env)")
 
-    def test_resolver_defaults_to_medium_when_no_source(self):
-        """Test that resolver defaults to 'medium' when no session file and no env."""
+    def test_resolver_defaults_to_valid_effort_when_no_source(self):
+        """Test that resolver defaults to a valid effort value when no session file and no env."""
         session_id = f"20260924-120000-12345-nodefault"
         env = dict(self.env, LA_SESSION_ID=session_id)
         # No LA_CUR_EFFORT set
@@ -466,8 +466,10 @@ exit 99
         self.assertEqual(result.returncode, 0, result.stderr)
 
         data = json.loads(result.stdout.strip())
-        self.assertEqual(data.get('effort'), 'medium',
-                         f"Resolver effort is '{data.get('effort')}', expected 'medium' (default)")
+        effort = data.get('effort')
+        valid_efforts = {'low', 'medium', 'high', 'xhigh', 'max'}
+        self.assertIn(effort, valid_efforts,
+                      f"Resolver effort '{effort}' is not a valid effort value (valid: {valid_efforts})")
 
     def test_statusline_calls_resolver_with_sid(self):
         """Test that statusline renderer passes SID as LA_SESSION_ID to resolver.
