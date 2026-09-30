@@ -15,6 +15,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+# Number of spoofed Claude IDs from LA_REMOTE_SPOOF_IDS in config/remote-agents.sh
+# Derived at test setup time so tests adapt when the list changes.
 NEW_ROUTES = {
     'mistral': ('MISTRAL_API_KEY', 'https://api.mistral.ai/v1'),
     'zai': ('ZAI_API_KEY', 'https://api.z.ai/api/paas/v4'),
@@ -78,6 +80,14 @@ sys.exit(int(os.environ['CURL_CODE']))
 ''')
         for name in ('litellm', 'claude'):
             self.stub(name, '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Offline forbidden-launch sentinel"; exit 0; fi\necho "Unexpected launch" >&2\nexit 99\n')
+        # Determine spoof ID count from the config
+        self.spoof_id_count = len(self._get_spoof_ids())
+
+    def _get_spoof_ids(self):
+        result = subprocess.run(['bash', '-c', 'source "$1"; printf "%s" "${LA_REMOTE_SPOOF_IDS}"',
+                                 'roster', str(self.root / 'config/remote-agents.sh')],
+                                env=self.env, text=True, capture_output=True, check=True)
+        return result.stdout.strip().split(',')
 
     def stub(self, name, content):
         path = self.root / 'stubs' / name
@@ -121,7 +131,7 @@ sys.exit(int(os.environ['CURL_CODE']))
         self.assertEqual(models['gemini-flash'], 'gemini-3.6-flash')
         self.assertEqual(models['gemini-3.8-flash'], 'gemini-3.8-flash')
         self.assertEqual(models['openrouter-free'], 'openrouter/free')
-        for alias, provider, model, _, tier, *_ in rows:  # 7th field (autocompact_default) is optional
+        for alias, _provider, model, _, _tier, _, _ in rows:
             with self.subTest(alias=alias):
                 extra = ['--remote-model', 'fixture/model'] if model == 'SELECT' else []
                 result = self.run_cli('remote', '--dry-run', '--include-trials', alias, *extra, csl=True)
@@ -219,14 +229,14 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                                         env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 text = cfg.read_text()
-                self.assertEqual(text.count('      model: ' + prefixes[provider] + model + '\n'), 4)
+                self.assertEqual(text.count('      model: ' + prefixes[provider] + model + '\n'), self.spoof_id_count)
                 self.assertEqual(cfg.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn('fixture-not-a-real-key', text)
                 self.assertEqual('      thinking:' in text, provider == 'gemini' and thinking == 'false')
                 # NVIDIA NIM reasoning models must have reasoning disabled at the
                 # backend, or the Anthropic translation layer 500s the session.
                 self.assertEqual(text.count('        enable_thinking: false\n'),
-                                 4 if provider == 'nvidia' and thinking == 'false' else 0)
+                                 self.spoof_id_count if provider == 'nvidia' and thinking == 'false' else 0)
                 if provider == 'cloudflare':
                     self.assertIn('/accounts/' + 'a' * 32 + '/ai/v1', text)
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)
@@ -263,7 +273,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         self.assertTrue(link.is_symlink())
         self.assertEqual(link.resolve(), (self.root / 'bin/la_proxy_hooks.py').resolve())
         # Thinking is NOT disabled to dodge the stream bug -- the hook fixes it instead.
-        self.assertEqual(text.count('        enable_thinking: true\n'), 4)
+        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
 
         result = write({'LA_REMOTE_PROXY_HOOKS': '0'})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -293,23 +303,23 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         # Nemotron: effort means "reason", expressed as enable_thinking -- NOT reasoning_effort.
         ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
         text = write('nvidia', ultra, 'high')
-        self.assertEqual(text.count('        enable_thinking: true\n'), 4)
+        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
         self.assertNotIn('reasoning_effort', text,
                          'Nemotron does not accept reasoning_effort; sending it is the bug')
         # With no effort the crash-avoiding default must survive.
         text = write('nvidia', ultra, '')
-        self.assertEqual(text.count('        enable_thinking: false\n'), 4)
+        self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
 
         # A non-Nemotron NVIDIA model DOES take the OpenAI-compatible field.
         text = write('nvidia', 'nvidia/gpt-oss-20b', 'high')
-        self.assertEqual(text.count('      reasoning_effort: high\n'), 4)
+        self.assertEqual(text.count('      reasoning_effort: high\n'), self.spoof_id_count)
 
         # Claude Code offers five levels; the OpenAI field accepts three.
         for level, expected in (('low', 'low'), ('medium', 'medium'),
                                 ('high', 'high'), ('xhigh', 'high'), ('max', 'high')):
             with self.subTest(level=level):
                 text = write('groq', 'some/model', level)
-                self.assertEqual(text.count('      reasoning_effort: ' + expected + '\n'), 4,
+                self.assertEqual(text.count('      reasoning_effort: ' + expected + '\n'), self.spoof_id_count,
                                  level + ' must map to ' + expected)
 
         # No effort chosen => no reasoning_effort at all (provider default stands).
@@ -581,7 +591,7 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
         argv = launched_argv('gemini-flash')
         self.assertIn('--permission-mode', argv)
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions',
-                         'blind-trust must use bypassPermissions (0 classifier calls, measured)')
+'blind-trust must use bypassPermissions (0 classifier calls, measured)')
 
         argv = launched_argv('-a', '-a', 'gemini-flash')
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits',

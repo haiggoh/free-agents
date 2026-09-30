@@ -50,17 +50,17 @@ LA_REMOTE_AGENTS=(
   # partially-working next, never-produced-a-token last (each row states its evidence).
   # Re-probe with: bin/remote-probe-log.py probe --all-nvidia ; report
   "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled like its Super sibling.|1m"
-  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled at the backend so the thinking-block failure cannot recur."
-  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick."
-  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Strong coding/agentic reputation; tool use still unproven."
-  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4-flash-0731|NVIDIA DeepSeek V4 Flash|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Tool use unproven."
+  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled at the backend so the thinking-block failure cannot recur.|-"
+  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick.|-"
+  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Strong coding/agentic reputation; tool use still unproven.|-"
+  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4-flash-0731|NVIDIA DeepSeek V4 Flash|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Tool use unproven.|-"
   "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained.|1m"
-  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|⚠️ EMPTY completion on 2/2 probes (HTTP 200, no content) 2026-09-15 — do not rely on it as the throttle fallback until retested."
-  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|⚠️ Returned an EMPTY completion on 2/2 probes (HTTP 200, no content). Distinct from the direct z.ai route. Retest before use."
-  "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|⚠️ Empty completion + HTTP 500 across 2 probes 2026-09-15. Retest before use."
-  "nvidia-gemma4|nvidia|google/gemma-4-31b-it|NVIDIA Gemma 4 31B|unknown|⚠️ Read TIMEOUT on 2/2 probes 2026-09-15. Gemma weights without a Gemini daily quota, if it can be made to respond."
-  "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed — catalog presence is not access. Kept for A/B retesting only."
-  "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed. Retest before use."
+  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|⚠️ EMPTY completion on 2/2 probes (HTTP 200, no content) 2026-09-15 — do not rely on it as the throttle fallback until retested.|-"
+  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|⚠️ Returned an EMPTY completion on 2/2 probes (HTTP 200, no content). Distinct from the direct z.ai route. Retest before use.|-"
+  "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|⚠️ Empty completion + HTTP 500 across 2 probes 2026-09-15. Retest before use.|-"
+  "nvidia-gemma4|nvidia|google/gemma-4-31b-it|NVIDIA Gemma 4 31B|unknown|⚠️ Read TIMEOUT on 2/2 probes 2026-09-15. Gemma weights without a Gemini daily quota, if it can be made to respond.|-"
+  "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed — catalog presence is not access. Kept for A/B retesting only.|-"
+  "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed. Retest before use.|-"
   # Additional NVIDIA models as requested
   "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b-instruct|NVIDIA Nemotron 4 340B|unknown|Updated to catalog-verified model ID (2026-09-29). GENERATION-PENDING: needs probe|-"
   "nvidia-minitron|nvidia|nvidia/minitron-12b|NVIDIA Minitron 12B|unknown|Added per request - small efficient NVIDIA model|-"
@@ -72,46 +72,46 @@ LA_REMOTE_AGENTS=(
   # quota it is the best-behaved of the free lanes.
   # ★ 3.8 FIRST, preferred over 3.6 for as long as it stays available (operator, 2026-09-15).
   # If 3.8 is withdrawn or starts erroring, 3.6 below is the fallback and is still VERIFIED.
-  "gemini-3.8-flash|gemini|gemini-3.8-flash|Gemini 3.8 Flash|renewing_free|★ PREFERRED Gemini. Catalog-listed; newer than 3.6. Thinking off for latency."
-  "gemini-3.8-flash-thinking|gemini|gemini-3.8-flash|Gemini 3.8 Flash (thinking)|renewing_free|Preferred Gemini, thinking ON — slower, stronger reasoning."
-  "gemini-flash|gemini|gemini-3.6-flash|Gemini 3.6 Flash|renewing_free|FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable."
-  "gemini-flash-thinking|gemini|gemini-3.6-flash|Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning."
-  "gemini-flash-lite|gemini|gemini-3.1-flash-lite|Gemini 3.1 Flash-Lite|renewing_free|VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use."
+  "gemini-3.8-flash|gemini|gemini-3.8-flash|Gemini 3.8 Flash|renewing_free|★ PREFERRED Gemini. Catalog-listed; newer than 3.6. Thinking off for latency.|-"
+  "gemini-3.8-flash-thinking|gemini|gemini-3.8-flash|Gemini 3.8 Flash (thinking)|renewing_free|Preferred Gemini, thinking ON — slower, stronger reasoning.|-"
+  "gemini-flash|gemini|gemini-3.6-flash|Gemini 3.6 Flash|renewing_free|FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable.|-"
+  "gemini-flash-thinking|gemini|gemini-3.6-flash|Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning.|-"
+  "gemini-flash-lite|gemini|gemini-3.1-flash-lite|Gemini 3.1 Flash-Lite|renewing_free|VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use.|-"
 
   # --- Groq: fastest tokens/sec of any free lane
-  "groq-oss120|groq|openai/gpt-oss-120b|Groq gpt-oss-120b|renewing_free|VERIFIED chat+tools. Very fast; best once Gemini quota is spent."
-  "groq-oss20|groq|openai/gpt-oss-20b|Groq gpt-oss-20b|renewing_free|Smaller/faster sibling for utility work."
-  "groq-qwen36|groq|qwen/qwen3.6-27b|Groq Qwen 3.6 27B|renewing_free|Catalog only; account quotas apply."
-  "groq-qwen38|groq|qwen/qwen3.8-27b|Groq Qwen 3.8 27B|renewing_free|Catalog only; account quotas apply."
+  "groq-oss120|groq|openai/gpt-oss-120b|Groq gpt-oss-120b|renewing_free|VERIFIED chat+tools. Very fast; best once Gemini quota is spent.|-"
+  "groq-oss20|groq|openai/gpt-oss-20b|Groq gpt-oss-20b|renewing_free|Smaller/faster sibling for utility work.|-"
+  "groq-qwen36|groq|qwen/qwen3.6-27b|Groq Qwen 3.6 27B|renewing_free|Catalog only; account quotas apply.|-"
+  "groq-qwen38|groq|qwen/qwen3.8-27b|Groq Qwen 3.8 27B|renewing_free|Catalog only; account quotas apply.|-"
 
   # --- OpenRouter: explicit free router or zero-priced, tool-capable catalog rows
-  "openrouter-free|openrouter|openrouter/free|OpenRouter free router|renewing_free|Catalog only. Routes among free models; account limits still apply."
-  "openrouter-nemotron|openrouter|nvidia/nemotron-3-super-120b-a12b:free|OpenRouter Nemotron 3 Super (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe."
-  "openrouter-code|openrouter|cohere/north-mini-code:free|OpenRouter North Mini Code (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe."
+  "openrouter-free|openrouter|openrouter/free|OpenRouter free router|renewing_free|Catalog only. Routes among free models; account limits still apply.|-"
+  "openrouter-nemotron|openrouter|nvidia/nemotron-3-super-120b-a12b:free|OpenRouter Nemotron 3 Super (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe.|-"
+  "openrouter-code|openrouter|cohere/north-mini-code:free|OpenRouter North Mini Code (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe.|-"
 
   # --- Cloudflare Workers AI: account-specific OpenAI-compatible endpoint
-  "cloudflare-oss20|cloudflare|@cf/openai/gpt-oss-20b|Cloudflare gpt-oss-20b|unknown|Catalog only. Requires cloudflare token and cloudflare-account-id; account billing applies."
-  "cloudflare-qwen38|cloudflare|@cf/qwen/qwen3.8-27b|Cloudflare Qwen 3.8 27B|unknown|Catalog only; free allocation and paid overage depend on the account."
+  "cloudflare-oss20|cloudflare|@cf/openai/gpt-oss-20b|Cloudflare gpt-oss-20b|unknown|Catalog only. Requires cloudflare token and cloudflare-account-id; account billing applies.|-"
+  "cloudflare-qwen38|cloudflare|@cf/qwen/qwen3.8-27b|Cloudflare Qwen 3.8 27B|unknown|Catalog only; free allocation and paid overage depend on the account.|-"
 
   # --- Cerebras: retain explicit trial opt-in until this account is requalified.
-  "cerebras-oss120|cerebras|gpt-oss-120b|Cerebras gpt-oss-120b|trial|Catalog only. Use --include-trials; account billing not verified."
-  "cerebras-qwen38|cerebras|qwen-3.8-27b|Cerebras Qwen 3.8 27B|trial|Catalog only. Use --include-trials; account billing not verified."
+  "cerebras-oss120|cerebras|gpt-oss-120b|Cerebras gpt-oss-120b|trial|Catalog only. Use --include-trials; account billing not verified.|-"
+  "cerebras-qwen38|cerebras|qwen-3.8-27b|Cerebras Qwen 3.8 27B|trial|Catalog only. Use --include-trials; account billing not verified.|-"
 
   # Provider selections intentionally pin no speculative default model. General
   # account API endpoints; ZAI Coding Plan is a distinct endpoint, not this route.
-  "mistral|mistral|SELECT|Mistral (choose model)|unknown|Select a catalog model; free experiment and paid plans differ. Tool session untested."
-  "zai|zai|SELECT|ZAI general API (choose model)|unknown|Explicit model required. General API billing; not the GLM Coding Plan endpoint. Tool session untested."
-  "siliconflow|siliconflow|SELECT|SiliconFlow (choose model)|unknown|International .com endpoint. Free and paid models differ; select explicitly. Tool session untested."
-  "llm7|llm7|SELECT|LLM7 (choose model)|unknown|Catalog contains free and paid models; inspect pricing and tools. Tool session untested."
-  "kilo|kilo|SELECT|Kilo Gateway (choose model)|unknown|Free and paid models differ; inspect catalog pricing. Tool session untested."
-  "vercel|vercel|SELECT|Vercel Gateway (choose model)|unknown|Credits and paid account billing apply; select explicitly. Tool session untested."
-  "sambanova|sambanova|SELECT|SambaNova (choose model)|unknown|Account trial, credit and paid billing vary. Tool session untested."
-  "modelscope|modelscope|SELECT|ModelScope (choose model)|unknown|Explicit API-Inference model required; account quota and tool use untested."
+  "mistral|mistral|SELECT|Mistral (choose model)|unknown|Select a catalog model; free experiment and paid plans differ. Tool session untested.|-"
+  "zai|zai|SELECT|ZAI general API (choose model)|unknown|Explicit model required. General API billing; not the GLM Coding Plan endpoint. Tool session untested.|-"
+  "siliconflow|siliconflow|SELECT|SiliconFlow (choose model)|unknown|International .com endpoint. Free and paid models differ; select explicitly. Tool session untested.|-"
+  "llm7|llm7|SELECT|LLM7 (choose model)|unknown|Catalog contains free and paid models; inspect pricing and tools. Tool session untested.|-"
+  "kilo|kilo|SELECT|Kilo Gateway (choose model)|unknown|Free and paid models differ; inspect catalog pricing. Tool session untested.|-"
+  "vercel|vercel|SELECT|Vercel Gateway (choose model)|unknown|Credits and paid account billing apply; select explicitly. Tool session untested.|-"
+  "sambanova|sambanova|SELECT|SambaNova (choose model)|unknown|Account trial, credit and paid billing vary. Tool session untested.|-"
+  "modelscope|modelscope|SELECT|ModelScope (choose model)|unknown|Explicit API-Inference model required; account quota and tool use untested.|-"
 )
 
 # Which spoofed Claude ids the proxy should answer to. Claude Code asks for these
 # names; the proxy maps them onto the chosen remote model.
-LA_REMOTE_SPOOF_IDS="claude-opus-5,claude-opus-4-8,claude-sonnet-5,claude-haiku-4-5-20251001"
+LA_REMOTE_SPOOF_IDS="claude-opus-5-5,claude-opus-5,claude-sonnet-5,claude-haiku-4-5-20251001"
 
 # Port range scanned for a free proxy port (kept clear of the local 8000-8010 band).
 LA_REMOTE_PROXY_PORT_MIN="${LA_REMOTE_PROXY_PORT_MIN:-4141}"

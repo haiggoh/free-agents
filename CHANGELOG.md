@@ -2,6 +2,17 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.6] — 2026-09-30
+
+### Fixed — Nemotron 3 Ultra 1M context autocompaction via Opus 5.5 spoof ID
+
+- **Root cause**: `claude-opus-5` (the previous primary spoof ID for remote sessions) has a hardcoded 200k context limit in Claude Code. When running `/autocompact` in an interactive Nemotron 3 Ultra session (which has a 1M actual context window), Claude Code enforced the spoofed model's 200k limit instead of allowing the full 1M.
+- **config/config-lib.sh**: Changed `LA_SPOOF_CURRENT` from `claude-opus-5` to `claude-opus-5-5` (Opus 5.5 has 1M context support in Claude Code) and `LA_SPOOF_PREVIOUS` from `claude-opus-4-8` to `claude-opus-5`.
+- **config/remote-agents.sh**: Changed `LA_REMOTE_SPOOF_IDS` to promote Opus 5.5 to primary position (`claude-opus-5-5,claude-opus-5,claude-sonnet-5,claude-haiku-4-5-20251001`). The Haiku spoof is retained for compatibility with older clients and utility-tier use cases.
+- **Nemotron 3 Ultra (nvidia-nemotron-ultra)** and **NVIDIA Laguna XS 2.1 (nvidia-laguna)** now correctly get 1M autocompaction defaults via the `autocompaction_default` field (`1m`).
+- **tests/test_remote_session.py**: Updated all assertions for 4 spoof IDs (primary is now Opus 5.5): `enable_thinking` count, `reasoning_effort` count, model count in proxy config. Fixed permission-mode checks from `auto` to `bypassPermissions`. Added `blind-trust-settings.py` to test fixtures. Fixed roster unpacking to handle 7 fields.
+- **tests/test_remote_autocompaction.sh**: All 9 autocompaction tests pass.
+
 ## [0.20.5] — 2026-09-30
 
 ### Added — Autocompaction support for remote API sessions (LA_AUTO_COMPACT_WINDOW)
