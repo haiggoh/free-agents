@@ -8,7 +8,7 @@
 # Claude Code at it, exactly as a local MLX session points at Rapid-MLX.
 #
 # Usage:
-#   remote-session.sh                      # numbered picker of remote agents
+#   remote-session.sh                      # session picker, Remote screen (Quit, no Back)
 #   remote-session.sh <alias>              # launch that remote agent
 #   remote-session.sh --list               # print the remote roster and key status
 #   remote-session.sh --verify <alias>     # check credential + model id live, launch nothing
@@ -17,6 +17,8 @@
 #   remote-session.sh --include-trials     # also offer trial-tier (non-free) agents
 #   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
 #   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
+#   remote-session.sh <alias> --effort LEVEL  # request low|medium|high|xhigh|max (omit = provider default)
+#   remote-session.sh --inventory          # machine-readable roster for the picker (TSV)
 #
 # Environment:
 #   LA_API_KEYS_DIR             credential dir (default ~/.api_keys)
@@ -87,9 +89,6 @@ ALIAS=""
 REMOTE_MODEL=""
 # Local-capable filter: 0=hidden (default), 1=shown.
 LOCAL_CAPABLE_SHOWN=0
-# When true, remote-session.sh runs as a submenu of csl and returns
-# via a navigation token on stdout instead of exec'ing claude.
-CSL_OWNER=0
 # Blind-trust settings file (set when AUTO_MODE_STATE=0)
 BLIND_TRUST_SETTINGS_FILE=""
 
@@ -281,43 +280,6 @@ _filtered_aliases() {
     done
 }
 
-# _nav -> writes a navigation token for the csl parent to read back. csl runs this
-# script as a child process (`bash "$rl" ...`), so `$$` here is the CHILD's pid, not
-# csl's — a file keyed on this script's own $$ can never be found by the parent's
-# read using ITS $$. csl passes the exact path via CSL_NAV_FILE; fall back to $$ only
-# for a standalone --csl-owner invocation with no parent to hand a path to.
-# Format: first line = navigation target (home/local/quit), subsequent lines = KEY=VALUE state sync
-_nav() {
-    local target="$1"
-    shift
-    local navfile="${CSL_NAV_FILE:-/tmp/_csl_nav.$$}"
-    {
-        echo "$target"
-        # Sync state variables that the parent (csl) needs to know about
-        [[ -n "${AUTO_MODE_STATE:-}" ]] && echo "AUTO_MODE_STATE=$AUTO_MODE_STATE"
-        [[ -n "${LOCAL_CAPABLE_SHOWN:-}" ]] && echo "LOCAL_CAPABLE=$LOCAL_CAPABLE_SHOWN"
-        [[ -n "${TELEMETRY_ENABLED:-}" ]] && echo "TELEMETRY=$TELEMETRY_ENABLED"
-        [[ -n "${INCLUDE_TRIALS:-}" ]] && echo "INCLUDE_TRIALS=$INCLUDE_TRIALS"
-        [[ -n "${EFFORT_CHOICE:-}" ]] && echo "EFFORT_CHOICE=$EFFORT_CHOICE"
-    } > "$navfile"
-}
-
-# _sync_state -> writes current state variables to the nav file with a "stay" navigation target.
-# Used when returning a selection (not navigating away) so the caller gets updated toggles.
-# The "stay" target tells the caller to remain in the remote lane with updated state.
-_sync_state() {
-    local navfile="${CSL_NAV_FILE:-/tmp/_csl_nav.$$}"
-    {
-        echo "stay"
-        # Sync state variables that the parent (csl or standalone) needs to know about
-        [[ -n "${AUTO_MODE_STATE:-}" ]] && echo "AUTO_MODE_STATE=$AUTO_MODE_STATE"
-        [[ -n "${LOCAL_CAPABLE_SHOWN:-}" ]] && echo "LOCAL_CAPABLE=$LOCAL_CAPABLE_SHOWN"
-        [[ -n "${TELEMETRY_ENABLED:-}" ]] && echo "TELEMETRY=$TELEMETRY_ENABLED"
-        [[ -n "${INCLUDE_TRIALS:-}" ]] && echo "INCLUDE_TRIALS=$INCLUDE_TRIALS"
-        [[ -n "${EFFORT_CHOICE:-}" ]] && echo "EFFORT_CHOICE=$EFFORT_CHOICE"
-    } > "$navfile"
-}
-
 # ---- local-capable filter ---------------------------------------------------
 # Load the policy file if it exists, so the interactive picker can filter
 # the roster. The filter is re-applied every render so toggle state is live.
@@ -341,6 +303,21 @@ else
 fi
 _lc_load_policy
 
+# print_inventory -> the WHOLE roster for the session picker, one TAB-separated row each:
+#   alias  provider  display  tier  local_capable(0|1)  has_key(0|1)
+# Unfiltered on purpose: the picker applies the trial / local-capable visibility toggles
+# itself, so flipping one never needs a re-run. Reads key PRESENCE only, never a secret.
+print_inventory() {
+    local e alias prov model disp tier lc key
+    for e in "${LA_REMOTE_AGENTS[@]}"; do
+        alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
+        disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
+        lc=0; _lc_is_hidden "$prov" "$model" && lc=1
+        key=0; "$KEYS" --check "$prov" >/dev/null 2>&1 && key=1
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$alias" "$prov" "$disp" "$tier" "$lc" "$key"
+    done
+}
+
 print_list() {
     printf '\n\033[1m%s  REMOTE cloud-API agents\033[0m  (provider quotas/billing apply; catalog listing is not a tool-use test)\n\n' "$SESSION_EMOJI_FREE_API"
     printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
@@ -351,7 +328,7 @@ print_list() {
         disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
         _visible "$tier" || continue
         # This is the same presentation-only filter the interactive menu applies (see
-        # _run_remote_menu) — --list is a display surface too, so it must not show a
+        # session picker) — --list is a display surface too, so it must not show a
         # local-capable model by default just because it bypasses the interactive picker.
         if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]] && _lc_is_hidden "$prov" "$model"; then
             hidden_count=$((hidden_count+1))
@@ -366,193 +343,6 @@ print_list() {
         printf '  (%d local-capable model(s) hidden — pass --local-capable-shown to show them)\n' "$hidden_count"
     fi
     printf '\n  Local MLX models are a different list: use `csl` / launch-claude-agent.sh.\n\n'
-}
-
-pick_alias() { # interactive numbered picker -> echoes the chosen alias
-    local -a choices=() e alias tier
-    for e in "${LA_REMOTE_AGENTS[@]}"; do
-        tier="$(_field "$e" 5)"; _visible "$tier" || continue
-        choices+=("$(_field "$e" 1)")
-    done
-    print_list >&2
-    local n
-    read -r -p "  Select a remote agent [1-${#choices[@]}] (q to quit): " n >&2 || return 1
-    [[ "$n" == "q" || -z "$n" ]] && return 1
-    [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#choices[@]} )) || {
-        echo "remote-session: not a valid choice: $n" >&2; return 1; }
-    printf '%s' "${choices[$((n-1))]}"
-}
-
-# ---- interactive remote picker menu loop ------------------------------------
-# Replaces the one-shot pick_alias with a full menu that supports:
-#   - switching back to the home lane / local picker
-#   - toggling local-capable hidden/visible
-#   - viewing the hidden-model report grouped by provider
-# When --csl-owner is set, navigation returns via /tmp/_csl_nav.$$ instead
-# of exiting. In that case the function returns 0 and the caller reads the
-# nav token.
-_run_remote_menu() {
-    # ALIAS may be pre-set from CLI args; if so skip the picker.
-    if [[ -n "$ALIAS" ]]; then return 0; fi
-
-    local -a choices=() e alias tier
-    local selection=""
-    local -a current_choices=()
-
-    # The whole interactive loop (menu box, prompts, reports) is redirected to stderr as
-    # a group. This function's ONLY stdout output is the final `printf '%s' "$selection"`
-    # after the loop — callers capture it via `ALIAS="$(_run_remote_menu)"`. Without this,
-    # every echo/printf that draws the menu went to stdout too, so the entire visible menu
-    # was silently swallowed into $ALIAS instead of shown to the user, and $ALIAS ended up
-    # holding menu text (or, on quit/navigate, nothing at all) rather than a real selection.
-    # `{ ... } >&2` is a redirected group, not a subshell, so variable assignments made
-    # inside (selection=, AUTO_MODE_STATE=, etc.) still reach the rest of the function.
-    {
-    while [[ -z "$selection" ]]; do
-        # Rebuild the visible roster each render.
-        choices=()
-        for e in "${LA_REMOTE_AGENTS[@]}"; do
-            tier="$(_field "$e" 5)"; _visible "$tier" || continue
-            if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
-                alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
-                _lc_is_hidden "$prov" "$model" && continue
-            fi
-            choices+=("$(_field "$e" 1)")
-        done
-
-        current_choices=("${choices[@]}")
-
-        echo
-        local hidden_count=0
-        for e in "${LA_REMOTE_AGENTS[@]}"; do
-            tier="$(_field "$e" 5)"; _visible "$tier" || continue
-            if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
-                alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
-                _lc_is_hidden "$prov" "$model" && hidden_count=$((hidden_count+1))
-            fi
-        done
-        _box top
-        _box center "$SESSION_EMOJI_FREE_API Remote API Session Picker"
-        _box mid
-        _box row "$(printf '  %d model(s) visible  (hidden: %d)' \
-                    "${#choices[@]}" "$hidden_count")"
-        _box mid
-        printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
-        local i=0 keystate
-        for e in "${LA_REMOTE_AGENTS[@]}"; do
-            alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
-            disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
-            _visible "$tier" || continue
-            if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
-                _lc_is_hidden "$prov" "$model" && continue
-            fi
-            i=$((i+1))
-            if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
-            printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$(_tier_label "$tier" "$prov")" "$keystate"
-        done
-        [[ $INCLUDE_TRIALS -eq 0 ]] && echo "  (trial-tier hidden — pass --include-trials to show)"
-        echo
-        echo "  h) $EMOJI_HOME back to lane selector"
-        echo "  e) $EMOJI_EFFORT effort: ${EFFORT_CHOICE:-<provider default>}"
-        echo "  s) $SESSION_EMOJI_LOCAL switch to local models"
-        echo "  f) 🔍 locally-runnable models: $([ "$LOCAL_CAPABLE_SHOWN" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-        echo "  R) 📋 show hidden-model report"
-        echo "  k) $EMOJI_KEY set up remote API keys"
-        case "$AUTO_MODE_STATE" in
-            0) echo "  a) $EMOJI_AUTO_MODE auto-mode: blind-trust — auto with no classifier (cycle)" ;;
-            1) echo "  a) $EMOJI_AUTO_MODE auto-mode: classifier  — auto with local classifier (cycle)" ;;
-            2) echo "  a) $EMOJI_AUTO_MODE auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
-        esac
-        if [ "$TELEMETRY_ENABLED" = "1" ]; then
-            echo "  t) $EMOJI_TELEMETRY_ON telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
-        else
-            echo "  t) $EMOJI_TELEMETRY_ON telemetry: OFF — no nonessential outbound traffic (toggle)"
-        fi
-        echo "  l) ⏳ limited trial providers: $([ "$INCLUDE_TRIALS" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
-        # MCP toggle available in ALL auto-mode states (including blind-trust)
-        # Blind-trust settings generation includes mcp__* when LA_REMOTE_ENABLE_MCP=1
-        echo "  m) $EMOJI_MCP mcps: $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")"
-        echo "  q) quit"
-        echo
-        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/q): " "${#choices[@]}" >&2
-        read -r -p "" sel >&2 || { _nav "quit"; return 0; }
-        case "$sel" in
-            h|H) _nav "home"; return 0 ;;
-            s|S) _nav "local"; return 0 ;;
-            f|F)
-                LOCAL_CAPABLE_SHOWN=$(( 1 - LOCAL_CAPABLE_SHOWN ))
-                _lc_load_policy
-                continue ;;
-            R|r)
-                # Show hidden-model report
-                echo
-                bash "$SCRIPT_DIR/local-capable-filter.sh" --report "$POLICY_FILE" --roster - 2>/dev/null <<< "$(
-                    for e in "${LA_REMOTE_AGENTS[@]}"; do
-                        printf '%s\n' "$e"
-                    done | while IFS= read -r line; do
-                        printf '%s\n' "$line"
-                    done
-                )" || echo "  (report unavailable)"
-                echo
-                echo "  (press enter to return to menu)" >&2
-                read -r -p "" _ >&2 || { _nav "quit"; return 0; }
-                continue ;;
-            k|K) python3 "$REPO_ROOT/install/setup-api-keys.py"; continue ;;
-            a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
-            t|T)
-                if [[ "$sel" == "t" ]]; then
-                    TELEMETRY_ENABLED=$(( 1 - TELEMETRY_ENABLED ))
-                else
-                    INCLUDE_TRIALS=$(( 1 - INCLUDE_TRIALS ))
-                fi
-                continue ;;
-            l|L)
-                INCLUDE_TRIALS=$(( 1 - INCLUDE_TRIALS ))
-                continue ;;
-            m|M)
-                LA_REMOTE_ENABLE_MCP=$(( 1 - ${LA_REMOTE_ENABLE_MCP:-0} ))
-                echo "  MCPs $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")" >&2
-                continue ;;
-            e|E)
-                # Select effort level (compatible with Claude's --effort flag)
-                local efforts=("low" "medium" "high" "xhigh" "max")
-                local def=2  # medium
-                if [[ -n "$EFFORT_CHOICE" ]]; then
-                    for idx in "${!efforts[@]}"; do
-                        [[ "${efforts[$idx]}" == "$EFFORT_CHOICE" ]] && def=$((idx + 1)) && break
-                    done
-                fi
-                local i=1
-                echo "  Effort levels (higher = more thinking, slower):"
-                for eff in "${efforts[@]}"; do
-                    printf "    %d) %s\n" "$i" "$eff" >&2
-                    i=$((i+1))
-                done
-                local c; printf "  Select effort [%d]: " "$def" >&2; read -r c >&2; c="${c:-$def}"
-                if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le ${#efforts[@]} ]; then
-                    EFFORT_CHOICE="${efforts[$((c-1))]}"
-                    echo "  Effort set to: $EFFORT_CHOICE" >&2
-                else
-                    echo "  Invalid selection, keeping: ${EFFORT_CHOICE:-<provider default>}" >&2
-                fi
-                continue ;;
-            q|Q) _nav "quit"; return 0 ;;
-            *)
-                if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#choices[@]}" ]; then
-                    echo "  Invalid selection." >&2
-                    continue
-                fi
-                selection="${current_choices[$((sel-1))]}"
-                # Write state to nav file before returning so caller (which may be in a subshell)
-                # can read updated toggles. We don't call _nav because that writes a navigation
-                # target; we just want to sync state.
-                _sync_state
-                ;;
-        esac
-    done
-    } >&2
-    # Return the selected alias via stdout (compatible with existing callers).
-    printf '%s' "$selection"
 }
 
 # ---- live verification ------------------------------------------------------
@@ -992,9 +782,11 @@ while [[ $# -gt 0 ]]; do
         --dry-run)        DRY_RUN=1; shift ;;
         --include-trials) INCLUDE_TRIALS=1; shift ;;
         --local-capable-shown) LOCAL_CAPABLE_SHOWN=1; shift ;;
-        --csl-owner)
-            # shellcheck disable=SC2034  # accepted for forward-compat / documentation of the --csl-owner contract; not currently read (see report)
-            CSL_OWNER=1; shift ;;
+        --effort)         [[ $# -ge 2 ]] || { echo 'remote-session: --effort needs a level' >&2; exit 2; }
+                          case "$2" in low|medium|high|xhigh|max) EFFORT_CHOICE="$2" ;;
+                              *) echo "remote-session: --effort must be low|medium|high|xhigh|max (omit it for the provider default)" >&2; exit 2 ;;
+                          esac; shift 2 ;;
+        --inventory)      MODE="inventory"; shift ;;
         -i|--install-keys) MODE="install-keys"; shift ;;
         -w|--watcher)
             # Deliberately NOT a silent no-op. The remote watcher is deferred (it cannot
@@ -1033,6 +825,7 @@ fi
 
 case "$MODE" in
     list) print_list; exit 0 ;;
+    inventory) print_inventory; exit 0 ;;
     stop) stop_proxy; exit 0 ;;
     models)
         ENTRY="$(_entry_for "$ALIAS")" || { echo 'remote-session: --models needs a known alias' >&2; exit 2; }
@@ -1047,46 +840,19 @@ case "$MODE" in
 esac
 
 # ---- launch ----------------------------------------------------------------
+# No alias: open the shared session picker at the Remote screen as a DIRECT ROOT (Quit, no
+# Back). The picker launches the chosen alias by calling this script again WITH an alias, as
+# a child, and returns to the picker when that session ends — so every direct-alias path
+# below (proxy, cleanup trap, trial guard) is the one and only launch path.
 if [[ -z "$ALIAS" ]]; then
-    # _run_remote_menu returns 0 (not an error) on navigation (h/l/q) — it wrote a
-    # nav token via _nav() and printed nothing on stdout. `ALIAS="$(...)" || ...` only
-    # catches a NON-ZERO exit, so an empty-but-successful return used to fall straight
-    # through into alias resolution below with ALIAS="", producing a bogus
-    # "unknown remote alias: " error instead of a clean exit. Check emptiness explicitly.
-    # Also read state from nav file because command substitution runs in a subshell
-    # and loses variable assignments. The nav file is keyed on this shell's $$.
-    navfile="${CSL_NAV_FILE:-/tmp/_csl_nav.$$}"
-    rm -f "$navfile"
-    ALIAS="$(_run_remote_menu)" || { echo "remote-session: nothing selected." >&2; exit 1; }
-    # Read synced state from nav file (written by _sync_state on selection, or _nav on navigate)
-    # First line is navigation target (home/local/quit/stay), subsequent lines are KEY=VALUE state
-    if [[ -f "$navfile" ]]; then
-        _nav_target=""
-        while IFS= read -r line; do
-            if [[ -z "$_nav_target" ]]; then
-                _nav_target="$line"
-            else
-                case "$line" in
-                    AUTO_MODE_STATE=*) AUTO_MODE_STATE="${line#*=}" ;;
-                    LOCAL_CAPABLE=*)   LOCAL_CAPABLE_SHOWN="${line#*=}" ;;
-                    TELEMETRY=*)       TELEMETRY_ENABLED="${line#*=}" ;;
-                    INCLUDE_TRIALS=*)  INCLUDE_TRIALS="${line#*=}" ;;
-                    EFFORT_CHOICE=*)   EFFORT_CHOICE="${line#*=}" ;;
-                esac
-            fi
-        done < "$navfile"
-        # Handle navigation targets
-        case "$_nav_target" in
-            home|local|quit) exit 0 ;;  # navigated away
-            stay) ;;  # stay in remote lane with updated state
-            "") exit 0 ;;  # empty nav file = navigated away
-        esac
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        echo "remote-session: no alias given and no terminal for the picker; pass an alias or --list." >&2
+        exit 2
     fi
-    if [[ -z "$ALIAS" ]]; then
-        # Navigated away (home/local) or quit — csl reads the nav token itself when
-        # CSL_OWNER=1; a direct invocation with nothing selected just exits cleanly.
-        exit 0
-    fi
+    _picker_args=(remote)
+    [[ $INCLUDE_TRIALS -eq 1 ]] && _picker_args+=(--include-trials)
+    [[ $LOCAL_CAPABLE_SHOWN -eq 1 ]] && _picker_args+=(--local-capable-shown)
+    exec "$SCRIPT_DIR/session-picker" "${_picker_args[@]}"
 fi
 
 # ---- interactive toggle resolution (launch mode) ---------------------------

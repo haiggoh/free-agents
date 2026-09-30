@@ -642,3 +642,4 @@ class DownloadScreen(Screen):
         check_action_table(acts)
         return acts
 
+

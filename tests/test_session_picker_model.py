@@ -229,5 +229,109 @@ class LaunchTests(unittest.TestCase):
         self.assertNotIn("provider_default", m.effort_choices("local_session"))
 
 
+class LowkeyTests(unittest.TestCase):
+    def test_owner_rules_and_effort_default(self):
+        s = m.Settings()
+        owned = m.LowkeyScreen(s, local_models(), owner=m.HOME_OWNED)
+        keys = {a.key for a in owned.actions()}
+        self.assertIn("b", keys)
+        self.assertNotIn("q", keys)
+        self.assertEqual(s.lowkey_effort, "xhigh")
+        direct = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        self.assertIn("q", {a.key for a in direct.actions()})
+
+    def test_effort_cycle_never_offers_max(self):
+        s = m.Settings()
+        lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        seen = set()
+        for _ in range(10):
+            lk.handle_key("e")
+            seen.add(s.lowkey_effort)
+        self.assertNotIn("max", seen)
+        self.assertIn("none", seen)
+
+    def test_convo_argv_carries_model_effort_and_session(self):
+        s = m.Settings(lowkey_effort="low")
+        lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        lk.session_name = "notes"
+        lk.accordion.select("gemma-4-26b")
+        argv = lk.activate_selected().argv
+        self.assertEqual(argv, ["lowkey", "--convo", "--model", "gemma-4-26b",
+                                "--effort", "low", "--session", "notes"])
+
+    def test_one_shot_argv(self):
+        lk = m.LowkeyScreen(m.Settings(), local_models(), owner=m.DIRECT_ROOT)
+        lk.accordion.select("gemma-4-26b")
+        argv = lk.one_shot("summarise X").argv
+        self.assertEqual(argv, ["lowkey", "--model", "gemma-4-26b", "--effort", "xhigh",
+                                "--prompt", "summarise X"])
+        self.assertIsNone(lk.one_shot(""))
+
+
+def catalog():
+    return [m.CatalogEntry("ornith-1.5-35b", "COMPLETE", 19.5, "existing", "o/r"),
+            m.CatalogEntry("qwen-3.8-operator", "ABSENT", 16.0, "session,operator", "q/q"),
+            m.CatalogEntry("deepseek-r1-architect", "ABSENT", 18.0, "validator", "d/d"),
+            m.CatalogEntry("mystery", "PRESENT", 5.0, "", "x/y")]
+
+
+class DownloadTests(unittest.TestCase):
+    def screen(self, free=200.0, headroom=100.0):
+        return m.DownloadScreen(m.Settings(), catalog(), free_gb=free, headroom_gb=headroom,
+                                owner=m.DIRECT_ROOT)
+
+    def test_enter_and_click_never_download(self):
+        # Fails if activating a row launches the engine (the "downloader catastrophe").
+        d = self.screen()
+        d.accordion.select("qwen-3.8-operator")
+        self.assertIsNone(d.activate_selected())
+        self.assertEqual(d.queue, ["qwen-3.8-operator"], "Enter should only toggle the queue")
+
+    def test_space_queues_review_summarises_and_cancel_makes_zero_calls(self):
+        d = self.screen()
+        for alias in ("qwen-3.8-operator", "deepseek-r1-architect"):
+            d.accordion.select(alias)
+            d.toggle_selected()
+        review = d.review()
+        self.assertEqual(review.aliases, ["qwen-3.8-operator", "deepseek-r1-architect"])
+        self.assertAlmostEqual(review.total_gb, 34.0)
+        self.assertTrue(review.fits)
+        self.assertIsNone(d.confirm(False), "cancel must produce no engine call")
+
+    def test_confirm_passes_exact_aliases_to_existing_engine(self):
+        d = self.screen()
+        d.accordion.select("deepseek-r1-architect")
+        d.toggle_selected()
+        req = d.confirm(True)
+        self.assertEqual(req.argv, ["download", "--select", "deepseek-r1-architect"])
+
+    def test_complete_entries_cost_nothing_and_empty_queue_confirms_nothing(self):
+        d = self.screen()
+        d.accordion.select("ornith-1.5-35b")
+        d.toggle_selected()
+        self.assertEqual(d.review().total_gb, 0.0)
+        d.toggle_selected()
+        self.assertIsNone(d.confirm(True))
+
+    def test_review_flags_a_breached_reserve_but_leaves_the_refusal_to_the_engine(self):
+        d = self.screen(free=120.0, headroom=100.0)
+        d.accordion.select("qwen-3.8-operator")
+        d.toggle_selected()
+        d.accordion.select("deepseek-r1-architect")
+        d.toggle_selected()
+        self.assertFalse(d.review().fits)
+        # The engine's own preflight still runs: the picker never passes --allow-tight.
+        self.assertNotIn("--allow-tight", d.confirm(True).argv)
+
+    def test_no_digit_shortcuts_and_back_quit_rules(self):
+        d = self.screen()
+        for key in "0123456789":
+            self.assertIsNone(d.handle_key(key))
+        m.check_action_table(d.actions())
+        owned = m.DownloadScreen(m.Settings(), catalog(), 200, 100, owner=m.HOME_OWNED)
+        self.assertIn("b", {a.key for a in owned.actions()})
+        self.assertNotIn("q", {a.key for a in owned.actions()})
+
+
 if __name__ == "__main__":
     unittest.main()

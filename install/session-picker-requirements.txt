@@ -1,0 +1,12 @@
+# Pinned dependencies for the session picker UI (bin/session-picker). Installed ONLY into the
+# project-scoped venv created by install/setup-session-picker.sh — never a global Python and
+# never the Rapid-MLX venv. Bump deliberately and re-run tests/test_session_picker_pty.py.
+textual==3.7.1
+rich==15.0.0
+linkify-it-py==2.2.0
+markdown-it-py==4.2.0
+mdit-py-plugins==0.6.1
+mdurl==0.1.2
+platformdirs==4.12.2
+pygments==2.21.0
+typing-extensions==4.16.0
