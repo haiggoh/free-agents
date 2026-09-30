@@ -53,6 +53,32 @@ source "$ROSTER"
 # shellcheck source=../config/emoji.sh
 source "$SCRIPT_DIR/../config/emoji.sh"
 
+# Detect Claude Code version and warn if older than 2.1.280 (Opus 5.5 / 1M context support).
+# Nemotron 3 Ultra has 1M actual context, but older Claude Code enforces the spoofed model's
+# limit. claude-opus-5 has 200k hardcoded; claude-opus-5-5 has 1M support.
+# Minimum version for Opus 5.5: 2.1.280 (see Anthropic changelog).
+_check_claude_version() {
+    local min_version="2.1.280"
+    local current_version
+    current_version=$(claude --version 2>/dev/null | awk '{print $1}')
+    if [[ -n "$current_version" ]]; then
+        # Compare version strings (major.minor.patch)
+        local IFS=.
+        read -r c_major c_minor c_patch <<< "$current_version"
+        read -r m_major m_minor m_patch <<< "$min_version"
+        if (( c_major < m_major )) || (( c_major == m_major && c_minor < m_minor )) || (( c_major == m_major && c_minor == m_minor && c_patch < m_patch )); then
+            echo
+            echo "${EMOJI_WARNING:-⚠️}  Your Claude Code version ($current_version) is older than $min_version."
+            echo "    Opus 5.5 (claude-opus-5-5) with 1M context support requires $min_version or newer."
+            echo "    Nemotron 3 Ultra (1M actual context) will fall back to Opus 5 (200k limit)."
+            echo "    Update with: brew upgrade claude-code  (or your package manager)"
+            echo "    To suppress: export LA_SILENCE_CLAUDE_VERSION_WARNING=1"
+            echo
+        fi
+    fi
+}
+_check_claude_version
+
 MAX_OUT="${LA_REMOTE_MAX_OUTPUT_TOKENS:-8192}"
 INCLUDE_TRIALS=0
 : "${DRY_RUN:=0}"

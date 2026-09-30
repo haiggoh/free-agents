@@ -13,6 +13,13 @@ All notable changes to `free-agents` are documented in this file.
 - **tests/test_remote_session.py**: Updated all assertions for 4 spoof IDs (primary is now Opus 5.5): `enable_thinking` count, `reasoning_effort` count, model count in proxy config. Fixed permission-mode checks from `auto` to `bypassPermissions`. Added `blind-trust-settings.py` to test fixtures. Fixed roster unpacking to handle 7 fields.
 - **tests/test_remote_autocompaction.sh**: All 9 autocompaction tests pass.
 
+### Added — Version detection for Opus 5.5 / 1M context support
+
+- **remote-session.sh**: Added `_check_claude_version()` that runs at startup and warns if the user's Claude Code version is older than 2.1.280 (the version that added `claude-opus-5-5` with 1M context support).
+- Older versions fall back to `claude-opus-5` (200k limit), capping Nemotron 3 Ultra's 1M actual context window.
+- Warning message includes the minimum version (2.1.280), the fallback behavior, and update instructions.
+- Can be suppressed with `LA_SILENCE_CLAUDE_VERSION_WARNING=1`.
+
 ## [0.20.5] — 2026-09-30
 
 ### Added — Autocompaction support for remote API sessions (LA_AUTO_COMPACT_WINDOW)
