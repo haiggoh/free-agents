@@ -77,8 +77,8 @@ LA_MLX_BACKENDS="rapid vllm mlx_lm"
 # On Rapid the fallback id is therefore NOT reachable, which is why consumers must read the ids a
 # port actually advertises (/v1/models, or the per-port served_id in the meta file) instead of
 # assuming the configured primary. See tests/test_spoof_identity.sh.
-: "${LA_SPOOF_CURRENT:=claude-opus-5}"
-: "${LA_SPOOF_PREVIOUS:=claude-opus-4-8}"
+: "${LA_SPOOF_CURRENT:=claude-opus-5-5}"
+: "${LA_SPOOF_PREVIOUS:=claude-opus-5}"
 # The list la_register falls back to when its spoof field is empty. An overlay may override this
 # wholesale, and any single registration may still name its own ids (llama-scout pins a Haiku id).
 : "${LA_SPOOF_DEFAULT:=${LA_SPOOF_CURRENT},${LA_SPOOF_PREVIOUS}}"
@@ -413,7 +413,7 @@ la_load_config() {
   # Devstral Small 2 24B is the current leading candidate; see the launcher
   # header for the measured evidence. Cache and fixtures are isolated from
   # generic Rapid sessions and from oMLX.
-  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.15.2/bin/rapid-mlx}"
+  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.15.3/bin/rapid-mlx}"
   : "${LA_RAPID_AUTO_MODEL_DIR:=$LA_MODELS_DIR/Qwen3.6-35B-A3B-4bit}"
   : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
   : "${LA_RAPID_AUTO_PORT:=8002}"
