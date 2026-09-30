@@ -62,6 +62,7 @@ class LauncherSmokeTests(unittest.TestCase):
             'bin/generate-remote-settings.py',
             'bin/generate-local-settings.py',
             'bin/merge-settings.py',
+            'bin/blind-trust-settings.py',
             'bin/lowkey-cli.py',
             'bin/lowkey',
             'bin/omlx-progress.sh',
@@ -137,9 +138,15 @@ echo "Unexpected claude launch" >&2
 exit 99
 ''')
 
-        # python3 stub for rapid-mlx
+        # python3 stub for rapid-mlx. Side-effect-free helpers the launchers need even on
+        # --dry-run (inline `-c` validators/box renderers, and the blind-trust settings
+        # generator, which writes only under TMPDIR) are delegated to the REAL interpreter;
+        # anything else is still an unexpected launch.
         self._stub('python3', '''#!/bin/sh
 if [ "${1:-}" = --help ]; then echo "Offline python"; exit 0; fi
+case "${1:-}" in
+    -c|*/blind-trust-settings.py) exec "%s" "$@" ;;
+esac
 # Check if it's the rapid-mlx launcher
 for arg in "$@"; do
     case "$arg" in
@@ -148,7 +155,7 @@ for arg in "$@"; do
 done
 echo "Unexpected python3 launch" >&2
 exit 99
-''')
+''' % sys.executable)
 
         # git stub
         self._stub('git', '''#!/bin/sh

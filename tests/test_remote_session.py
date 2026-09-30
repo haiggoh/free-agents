@@ -121,7 +121,7 @@ sys.exit(int(os.environ['CURL_CODE']))
         self.assertEqual(models['gemini-flash'], 'gemini-3.6-flash')
         self.assertEqual(models['gemini-3.8-flash'], 'gemini-3.8-flash')
         self.assertEqual(models['openrouter-free'], 'openrouter/free')
-        for alias, provider, model, _, tier, _ in rows:
+        for alias, provider, model, _, tier, *_ in rows:  # 7th field (autocompact_default) is optional
             with self.subTest(alias=alias):
                 extra = ['--remote-model', 'fixture/model'] if model == 'SELECT' else []
                 result = self.run_cli('remote', '--dry-run', '--include-trials', alias, *extra, csl=True)

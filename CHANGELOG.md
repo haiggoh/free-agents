@@ -12,7 +12,11 @@ All notable changes to `free-agents` are documented in this file.
 - **Validation**: Same python3 validator as local launchers accepting "auto" or "100k–1m tokens".
 - **Banner display**: Shows autocompaction setting in startup banner and dry-run output.
 
-## [0.20.4] — 2026-09-30
+## [0.20.4] — 2026-09-30 — not released separately
+
+> **Shipped inside 0.20.5.** This work was written as 0.20.4 but committed together with the
+> 0.20.5 autocompaction change in one commit (`193e705`, whose `VERSION` reads 0.20.5), so no
+> commit ever carried 0.20.4 and there is deliberately no `v0.20.4` tag. Install 0.20.5 to get it.
 
 ### Added — Smooth token bucket mode + interactive menu for NVIDIA rate limiter
 
