@@ -2,6 +2,15 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.7] — 2026-09-30
+
+### Added — Version detection for Opus 5.5 / 1M context support
+
+- **remote-session.sh**: Added `_check_claude_version()` that runs at startup and warns if the user's Claude Code version is older than 2.1.280 (the version that added `claude-opus-5-5` with 1M context support).
+- Older versions fall back to `claude-opus-5` (200k limit), capping Nemotron 3 Ultra's 1M actual context window.
+- Warning message includes the minimum version (2.1.280), the fallback behavior, and update instructions.
+- Can be suppressed with `LA_SILENCE_CLAUDE_VERSION_WARNING=1`.
+
 ## [0.20.6] — 2026-09-30
 
 ### Fixed — Nemotron 3 Ultra 1M context autocompaction via Opus 5.5 spoof ID
