@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -154,6 +155,52 @@ class SlidingWindowTests(unittest.TestCase):
     def test_mutation_without_lock_overspends(self):
         # If this ever passes with the lock removed, the race test above proves nothing.
         self.assertGreater(_run(disable_lock=True), 40)
+
+
+class SavedSettingsTests(unittest.TestCase):
+    """The picker's rate-limiter screen persists settings; proxies must honour them.
+
+    Precedence: explicit constructor arg > LA_NVIDIA_* env > saved picker setting > default.
+    """
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = Path(self.tmp.name)
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("LA_NVIDIA_")}
+        self.env["LA_SESSION_MENU_CONFIG_DIR"] = str(self.cfg)
+        self.state = os.path.join(self.tmp.name, "state")
+
+    def save(self, doc):
+        (self.cfg / "session-menu.local.json").write_text(
+            '{"schema_version": 1, "rate_limiter": %s}' % doc)
+
+    def limiter(self, **env):
+        with unittest.mock.patch.dict(os.environ, {**self.env, **env}, clear=True):
+            return rl.get_limiter(self.state, clock=lambda: FROZEN)
+
+    def test_saved_mode_and_rpm_are_used(self):
+        # Fails if get_limiter only reads the environment (the old menu's settings vanished).
+        self.save('{"mode": "smooth_bucket", "rpm": 30, "bucket_capacity": 4, "cooldown": 5}')
+        lim = self.limiter()
+        self.assertIsInstance(lim, rl.SmoothTokenBucket)
+        self.assertAlmostEqual(lim.rate, 0.5)
+        self.assertEqual((lim.capacity, lim.cooldown), (4, 5.0))
+
+    def test_environment_still_wins(self):
+        self.save('{"mode": "smooth_bucket", "rpm": 30}')
+        lim = self.limiter(LA_NVIDIA_MODE="sliding_window", LA_NVIDIA_RPM="20")
+        self.assertIsInstance(lim, rl.SlidingWindowLimiter)
+        self.assertEqual(lim.limit, 20)
+
+    def test_absent_or_broken_file_falls_back_to_defaults(self):
+        self.assertEqual(self.limiter().limit, 40)
+        (self.cfg / "session-menu.local.json").write_text("{broken")
+        self.assertIsInstance(self.limiter(), rl.SlidingWindowLimiter)
+
+    def test_max_wait_uses_saved_value(self):
+        self.save('{"max_wait": 30}')
+        with unittest.mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertEqual(rl._max_wait(None), 30.0)
 
 
 if __name__ == "__main__":

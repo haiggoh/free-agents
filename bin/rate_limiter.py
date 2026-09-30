@@ -39,7 +39,12 @@ upstream attempts the caller could not see (see la_proxy_hooks.SDK_HIDDEN_RETRIE
 Usage:
   rate_limiter.py acquire [--max-wait S]  take one slot, waiting if needed; prints the wait
   rate_limiter.py status                  print the current window state, take nothing
+  rate_limiter.py menu                    open the NVIDIA rate limiter screen of the session picker
   rate_limiter.py --help
+
+Settings chosen in the picker (csl → n) are saved in config/session-menu.local.json and read
+here, so they now outlive the menu. Precedence: explicit argument > LA_NVIDIA_* environment
+variable > saved picker setting > built-in default.
 
 Environment:
   LA_NVIDIA_THROTTLE_STATE  state file (default ~/.claude/local-agents/.nvidia_throttle_state)
@@ -48,6 +53,7 @@ Environment:
   LA_NVIDIA_BUCKET_CAPACITY burst capacity for smooth_bucket mode (default 6)
   LA_NVIDIA_MAX_WAIT        seconds a caller may queue before giving up (default 120)
   LA_NVIDIA_429_COOLDOWN    seconds every proxy pauses after a 429 with no Retry-After (default 10)
+  LA_SESSION_MENU_CONFIG_DIR  where the saved picker settings live (default: this repo's config/)
 
 Exit codes: 0 ok; 2 usage error; 3 timed out waiting for a slot.
 """
@@ -66,6 +72,33 @@ DEFAULT_STATE = Path.home() / ".claude" / "local-agents" / ".nvidia_throttle_sta
 WINDOW_SECONDS = 60.0
 DEFAULT_BUCKET_CAPACITY = 6  # Small capacity for smooth limiting
 
+_ENV_FOR = {"rpm": "LA_NVIDIA_RPM", "mode": "LA_NVIDIA_MODE",
+            "bucket_capacity": "LA_NVIDIA_BUCKET_CAPACITY", "max_wait": "LA_NVIDIA_MAX_WAIT",
+            "cooldown": "LA_NVIDIA_429_COOLDOWN"}
+
+
+def _saved_settings() -> dict:
+    """The picker's saved rate_limiter section, or {} (absent, invalid, or unreadable).
+
+    Read-only and fail-open to defaults: a proxy must never stop because a preference
+    file is broken. session_menu_state validates types and ranges before returning."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import session_menu_state as sms
+        cfg = os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR
+        return sms.load(cfg).rate_limiter
+    except Exception:
+        return {}
+
+
+def _setting(key: str, default):
+    """Environment variable > saved picker setting > default (explicit args handled by callers)."""
+    env = os.environ.get(_ENV_FOR[key])
+    if env:
+        return env
+    saved = _saved_settings().get(key)
+    return default if saved is None else saved
+
 
 class RateLimitTimeout(Exception):
     """No slot became available within max_wait."""
@@ -81,11 +114,11 @@ class SmoothTokenBucket:
     def __init__(self, path: Path | str | None = None, rpm: float | None = None,
                  capacity: int | None = None, clock=time.time, cooldown: float | None = None):
         self.path = Path(path or os.environ.get("LA_NVIDIA_THROTTLE_STATE") or DEFAULT_STATE)
-        self.rate = float(rpm or os.environ.get("LA_NVIDIA_RPM") or 40) / 60.0  # tokens/sec
+        self.rate = float(rpm or _setting("rpm", 40)) / 60.0  # tokens/sec
         self.capacity = int(capacity if capacity is not None
-                           else os.environ.get("LA_NVIDIA_BUCKET_CAPACITY") or DEFAULT_BUCKET_CAPACITY)
+                           else _setting("bucket_capacity", DEFAULT_BUCKET_CAPACITY))
         self.cooldown = float(cooldown if cooldown is not None
-                              else os.environ.get("LA_NVIDIA_429_COOLDOWN") or 10)
+                              else _setting("cooldown", 10))
         self._clock = clock
         self._tokens = float(self.capacity)
         self._last_refill = clock()
@@ -264,9 +297,9 @@ class SlidingWindowLimiter:
     def __init__(self, path: Path | str | None = None, rpm: float | None = None,
                  clock=time.time, cooldown: float | None = None):
         self.path = Path(path or os.environ.get("LA_NVIDIA_THROTTLE_STATE") or DEFAULT_STATE)
-        self.limit = int(float(rpm or os.environ.get("LA_NVIDIA_RPM") or 40))
+        self.limit = int(float(rpm or _setting("rpm", 40)))
         self.cooldown = float(cooldown if cooldown is not None
-                              else os.environ.get("LA_NVIDIA_429_COOLDOWN") or 10)
+                              else _setting("cooldown", 10))
         self._clock = clock
 
     def _locked(self):
@@ -383,116 +416,23 @@ class SlidingWindowLimiter:
 
 
 def _max_wait(value: float | None) -> float:
-    return float(value if value is not None else os.environ.get("LA_NVIDIA_MAX_WAIT") or 120)
+    return float(value if value is not None else _setting("max_wait", 120))
 
 
 def get_limiter(path: Path | str | None = None, rpm: float | None = None,
                 clock=time.time, cooldown: float | None = None) -> SlidingWindowLimiter | SmoothTokenBucket:
     """Factory: returns the configured limiter mode."""
-    mode = os.environ.get("LA_NVIDIA_MODE", "sliding_window").lower()
+    mode = str(_setting("mode", "sliding_window")).lower()
     if mode == "smooth_bucket":
         return SmoothTokenBucket(path=path, rpm=rpm, clock=clock, cooldown=cooldown)
     return SlidingWindowLimiter(path=path, rpm=rpm, clock=clock, cooldown=cooldown)
 
 
-def _print_menu():
-    """Print interactive menu for rate limiter configuration."""
-    print("\n" + "=" * 60)
-    print("NVIDIA Rate Limiter Configuration")
-    print("=" * 60)
-    print("Current mode: {}".format(os.environ.get("LA_NVIDIA_MODE", "sliding_window")))
-    print("RPM limit:    {}".format(os.environ.get("LA_NVIDIA_RPM", "40")))
-    if os.environ.get("LA_NVIDIA_MODE", "sliding_window").lower() == "smooth_bucket":
-        print("Bucket cap:   {}".format(os.environ.get("LA_NVIDIA_BUCKET_CAPACITY", "6")))
-    print("Max wait:     {}s".format(os.environ.get("LA_NVIDIA_MAX_WAIT", "120")))
-    print("429 cooldown: {}s".format(os.environ.get("LA_NVIDIA_429_COOLDOWN", "10")))
-    print("State file:   {}".format(os.environ.get("LA_NVIDIA_THROTTLE_STATE", DEFAULT_STATE)))
-    print("-" * 60)
-    print("Options:")
-    print("  1) Switch to sliding_window (strict 40 RPM rolling window)")
-    print("  2) Switch to smooth_bucket (smoother, small bursts, 40 RPM avg)")
-    print("  3) Set RPM limit")
-    print("  4) Set bucket capacity (smooth_bucket only)")
-    print("  5) Set max wait time")
-    print("  6) Set 429 cooldown")
-    print("  7) Show current status")
-    print("  8) Reset state file")
-    print("  9) Export config for shell (copy-paste)")
-    print("  q) Quit")
-    print("=" * 60)
-
-
-def _interactive_menu():
-    """Interactive menu for configuring the rate limiter."""
-    while True:
-        _print_menu()
-        try:
-            choice = input("Select option: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-
-        if choice == 'q':
-            break
-        elif choice == '1':
-            os.environ["LA_NVIDIA_MODE"] = "sliding_window"
-            print("✓ Mode set to sliding_window")
-        elif choice == '2':
-            os.environ["LA_NVIDIA_MODE"] = "smooth_bucket"
-            print("✓ Mode set to smooth_bucket")
-        elif choice == '3':
-            try:
-                rpm = input("RPM limit (default 40): ").strip()
-                if rpm:
-                    os.environ["LA_NVIDIA_RPM"] = rpm
-                    print(f"✓ RPM set to {rpm}")
-            except (EOFError, KeyboardInterrupt):
-                print()
-        elif choice == '4':
-            try:
-                cap = input("Bucket capacity (default 6): ").strip()
-                if cap:
-                    os.environ["LA_NVIDIA_BUCKET_CAPACITY"] = cap
-                    print(f"✓ Capacity set to {cap}")
-            except (EOFError, KeyboardInterrupt):
-                print()
-        elif choice == '5':
-            try:
-                wait = input("Max wait seconds (default 120): ").strip()
-                if wait:
-                    os.environ["LA_NVIDIA_MAX_WAIT"] = wait
-                    print(f"✓ Max wait set to {wait}s")
-            except (EOFError, KeyboardInterrupt):
-                print()
-        elif choice == '6':
-            try:
-                cd = input("429 cooldown seconds (default 10): ").strip()
-                if cd:
-                    os.environ["LA_NVIDIA_429_COOLDOWN"] = cd
-                    print(f"✓ Cooldown set to {cd}s")
-            except (EOFError, KeyboardInterrupt):
-                print()
-        elif choice == '7':
-            limiter = get_limiter()
-            print(json.dumps(limiter.status(), indent=2))
-        elif choice == '8':
-            confirm = input("Really reset state file? (y/N): ").strip().lower()
-            if confirm == 'y':
-                path = Path(os.environ.get("LA_NVIDIA_THROTTLE_STATE", DEFAULT_STATE))
-                if path.exists():
-                    path.unlink()
-                print("✓ State file reset")
-        elif choice == '9':
-            print("\n# Copy-paste into your shell:")
-            print(f'export LA_NVIDIA_MODE="{os.environ.get("LA_NVIDIA_MODE", "sliding_window")}"')
-            print(f'export LA_NVIDIA_RPM="{os.environ.get("LA_NVIDIA_RPM", "40")}"')
-            if os.environ.get("LA_NVIDIA_MODE", "sliding_window").lower() == "smooth_bucket":
-                print(f'export LA_NVIDIA_BUCKET_CAPACITY="{os.environ.get("LA_NVIDIA_BUCKET_CAPACITY", "6")}"')
-            print(f'export LA_NVIDIA_MAX_WAIT="{os.environ.get("LA_NVIDIA_MAX_WAIT", "120")}"')
-            print(f'export LA_NVIDIA_429_COOLDOWN="{os.environ.get("LA_NVIDIA_429_COOLDOWN", "10")}"')
-            print(f'export LA_NVIDIA_THROTTLE_STATE="{os.environ.get("LA_NVIDIA_THROTTLE_STATE", str(DEFAULT_STATE))}"')
-        else:
-            print("Invalid option")
+def _open_menu() -> int:
+    """The interactive menu is the session picker's rate limiter screen (one UI, persisted)."""
+    picker = Path(__file__).resolve().parent / "session-picker"
+    os.execv(str(picker), [str(picker), "rate-limiter"])
+    return 1  # not reached
 
 
 def main(argv: list[str]) -> int:
@@ -511,8 +451,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "menu" or (not argv and sys.stdin.isatty()):
-        _interactive_menu()
-        return 0
+        return _open_menu()
 
     if not args.cmd:
         parser.print_help()

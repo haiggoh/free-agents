@@ -641,3 +641,4 @@ class DownloadScreen(Screen):
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
+
