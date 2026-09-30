@@ -2,6 +2,7 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+<<<<<<< HEAD
 ## [0.20.8] — 2026-09-30
 
 ### Improved — Stop hook output formatting with 🪝 emoji and collapsible content
@@ -42,6 +43,23 @@ All notable changes to `free-agents` are documented in this file.
 - Older versions fall back to `claude-opus-5` (200k limit), capping Nemotron 3 Ultra's 1M actual context window.
 - Warning message includes the minimum version (2.1.280), the fallback behavior, and update instructions.
 - Can be suppressed with `LA_SILENCE_CLAUDE_VERSION_WARNING=1`.
+=======
+## [0.21.0] — 2026-09-30
+
+### Added — Session picker TUI (Textual UI) with full entry-point wiring
+
+- **Interactive session picker** (`bin/session_picker.py`, `bin/session_picker_model.py`): Textual-based TUI with accordion navigation, arrow keys, letter shortcuts, grouped menus (expand/collapse), persistent settings in `config/session-menu.local.json`.
+- **Entry-point wiring**: `bin/csl`, `bin/local-session.sh`, `bin/remote-session.sh`, `bin/session-picker` all wired for launch handoff via nav file (`--csl-owner` / `--csl-nav-file`).
+- **Navigation matrix verified**: Home (Quit), Home-owned Local/Remote (Back), Direct-root Local/Remote (Quit), `s` key switches lanes keeping owner.
+- **`bin/local-session.sh`** (NEW): Canonical direct launcher for local sessions — no-arg picker entry + direct alias launch with `--dry-run`, `--inventory`, `--enable-mcp`.
+- **Navigation handoff**: `remote-session.sh` restored `--csl-owner` / `CSL_NAV_FILE` support; TTY check bypassed for `CSL_OWNER=1`; `CSL_NAV_FILE` env var respected.
+- **Stop hook propagation**: `csl` exports `LA_QUEUE_STOP_HOOK="$STOP_HOOK"` for launcher propagation.
+- **All tests pass**: 221 total (12 PTY, 36 model, 23 remote, 17 launcher smoke, 6 stop hook gate, etc.).
+
+### Fixed — Resolver default effort test
+
+- `test_resolver_defaults_to_valid_effort_when_no_source`: Updated to accept any valid effort (`low|medium|high|xhigh|max`) instead of hardcoding `medium`.
+>>>>>>> 88a770e (feat(session-picker-tui): v0.21.0 — Session picker TUI with full entry-point wiring)
 
 ## [0.20.5] — 2026-09-30
 
