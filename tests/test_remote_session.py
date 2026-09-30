@@ -35,6 +35,7 @@ class RemoteSessionTests(unittest.TestCase):
         for directory in ('bin', 'config', 'keys', 'stubs', 'home'):
             (self.root / directory).mkdir()
         for rel in ('bin/csl', 'bin/remote-session.sh', 'bin/remote-keys.sh',
+                    'bin/blind-trust-settings.py',
                     'config/remote-agents.sh', 'config/remote-agent-system-prompt.txt',
                     'config/shared-agent-shipping-rules.txt',
                     # emoji.sh is sourced unconditionally at remote-session.sh:52 and its
@@ -48,6 +49,13 @@ class RemoteSessionTests(unittest.TestCase):
                          'github-models', *NEW_ROUTES):
             (self.root / 'keys' / provider).write_text('fixture-not-a-real-key')
         (self.root / 'keys/cloudflare-account-id').write_text('a' * 32)
+        # blind-trust-settings.py reads these from HOME/.claude/launch-profiles/;
+        # empty arrays are fine — the generator degrades gracefully.
+        _lp = self.root / 'home' / '.claude' / 'launch-profiles'
+        _lp.mkdir(parents=True)
+        (_lp / 'allowlist-master.json').write_text('[]')
+        (_lp / 'lean-cloud-general.json').write_text('[]')
+        (_lp / 'lean-local-general.json').write_text('[]')
         self.env = dict(os.environ, HOME=str(self.root / 'home'),
                         TMPDIR=str(self.root), LA_API_KEYS_DIR=str(self.root / 'keys'),
                         PATH=str(self.root / 'stubs') + ':' + os.environ['PATH'],
@@ -572,8 +580,8 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
 
         argv = launched_argv('gemini-flash')
         self.assertIn('--permission-mode', argv)
-        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'auto',
-                         'blind-trust must be the DEFAULT permission mode for remote')
+        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions',
+                         'blind-trust must use bypassPermissions (0 classifier calls, measured)')
 
         argv = launched_argv('-a', '-a', 'gemini-flash')
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits',
@@ -583,15 +591,15 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
         # cumbersome to use -- so a regression to acceptEdits-by-default must fail here.
         default = self.run_cli('--dry-run', 'gemini-flash')
         self.assertEqual(default.returncode, 0, default.stderr)
-        self.assertIn('--permission-mode auto', default.stdout)
+        self.assertIn('--permission-mode bypassPermissions', default.stdout)
         self.assertIn('blind-trust', default.stdout)
         self.assertIn('telemetry      : OFF', default.stdout)
 
         # `-a` once = classifier. The lane is not implemented for remote, so it must SAY so
-        # and fall back to auto -- silently behaving like blind-trust is the dead-switch bug.
+        # and fall back to bypassPermissions -- silently behaving like blind-trust is the dead-switch bug.
         once = self.run_cli('--dry-run', '-a', 'gemini-flash')
         self.assertEqual(once.returncode, 0, once.stderr)
-        self.assertIn('--permission-mode auto', once.stdout)
+        self.assertIn('--permission-mode bypassPermissions', once.stdout)
         self.assertIn('not', once.stdout + once.stderr)
         self.assertIn('classifier', once.stdout + once.stderr)
 
@@ -603,7 +611,7 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
         # `-a` three times wraps back to blind-trust (the cycle must be a cycle).
         thrice = self.run_cli('--dry-run', '-a', '-a', '-a', 'gemini-flash')
         self.assertEqual(thrice.returncode, 0, thrice.stderr)
-        self.assertIn('--permission-mode auto', thrice.stdout)
+        self.assertIn('--permission-mode bypassPermissions', thrice.stdout)
         self.assertIn('blind-trust', thrice.stdout)
 
         # Telemetry must work in BOTH directions. The live path used to hardcode the
