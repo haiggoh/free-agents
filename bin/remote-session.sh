@@ -1174,6 +1174,44 @@ elif [[ "$MODEL" == SELECT ]]; then
 fi
 _valid_model "$MODEL" || exit 2
 DISP="$(_field "$ENTRY" 4)"; TIER="$(_field "$ENTRY" 5)"
+# Extract autocompaction default from roster (7th field) — used when LA_AUTO_COMPACT_WINDOW not set
+AC_DEFAULT="$(_field "$ENTRY" 7)"
+if [[ -z "${LA_AUTO_COMPACT_WINDOW:-}" && -n "$AC_DEFAULT" && "$AC_DEFAULT" != "-" ]]; then
+    LA_AUTO_COMPACT_WINDOW="$AC_DEFAULT"
+fi
+
+# LA_AUTO_COMPACT_WINDOW validation — mirrors launch-claude-agent.sh (must be before DRY_RUN exit)
+: "${LA_AUTO_COMPACT_WINDOW:=}"
+if [ -n "$LA_AUTO_COMPACT_WINDOW" ]; then
+    # Validate using the same python validator as local launchers
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "remote-session: python3 is required to validate LA_AUTO_COMPACT_WINDOW." >&2
+        exit 1
+    fi
+    if ! python3 -c '
+import re
+import sys
+
+value = sys.argv[1].strip().lower()
+if value == "auto":
+    raise SystemExit(0)
+
+match = re.fullmatch(r"([0-9]+)([km]?)", value)
+if not match:
+    raise SystemExit(1)
+
+amount = int(match.group(1))
+suffix = match.group(2)
+multiplier = {"": 1, "k": 1000, "m": 1000000}[suffix]
+tokens = amount * multiplier
+raise SystemExit(0 if 100000 <= tokens <= 1000000 else 1)
+' "$LA_AUTO_COMPACT_WINDOW"
+    then
+        echo "remote-session: LA_AUTO_COMPACT_WINDOW must be auto or 100k–1m tokens." >&2
+        exit 1
+    fi
+fi
+
 # An explicit override may be paid even when the original alias has a free pin.
 if [[ -n "$REMOTE_MODEL" && "$REMOTE_MODEL" != "$(_field "$ENTRY" 3)" && "$TIER" != trial ]]; then
     TIER=unknown
@@ -1244,6 +1282,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
         echo "     telemetry      : OFF (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1)"
     fi
     echo "     effort         : ${EFFORT_CHOICE:-<provider default>}"
+    [[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]] && echo "     autocompact    : --autocompact $LA_AUTO_COMPACT_WINDOW"
     echo
     exit 0
 fi
@@ -1371,6 +1410,9 @@ BLIND_TRUST_BANNER=""
 if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" ]]; then
     BLIND_TRUST_BANNER="   blind-trust: bypassPermissions + DESTRUCTIVE_DENY (no classifier, measured 0 calls)"
 fi
+# Add autocompaction to banner
+AUTOCOMPACT_BANNER=""
+[[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]] && AUTOCOMPACT_BANNER="   autocompact : $LA_AUTO_COMPACT_WINDOW"
 
 cat <<BANNER
 
@@ -1383,6 +1425,7 @@ cat <<BANNER
    cost     : $COST_NOTE
    privacy  : prompts and file contents LEAVE this machine → $PROV
 $BLIND_TRUST_BANNER
+$AUTOCOMPACT_BANNER
 BANNER
 
 # The remote models are NOT native Claude Code models: without an explicit briefing
@@ -1515,6 +1558,10 @@ fi
 # kept so the CLI's own displayed state matches what the user picked.
 if [[ -n "$EFFORT_CHOICE" ]]; then
     claude_cmd+=(--effort "$EFFORT_CHOICE")
+fi
+# LA_AUTO_COMPACT_WINDOW: pass --autocompact to claude if set
+if [[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]]; then
+    claude_cmd+=(--autocompact "$LA_AUTO_COMPACT_WINDOW")
 fi
 if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
     claude_cmd+=("${PASSTHRU[@]}")

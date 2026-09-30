@@ -4,9 +4,11 @@
 # a remote agent runs on someone else's hardware over the network, so it is
 # selected on its own menu and never mixed into the local model list.
 #
-# Each entry:  alias|provider|model-id|display|tier|notes
+# Each entry:  alias|provider|model-id|display|tier|notes|autocompact_default
 # provider must have a key mapping and a remote-session.sh proxy route.
 # tier: renewing_free | trial | unknown
+# autocompact_default: default LA_AUTO_COMPACT_WINDOW for this model (e.g., 1m for 1M-context models),
+#                      or "-" for no default, or empty. Only used when LA_AUTO_COMPACT_WINDOW is not set.
 # SELECT requires an explicit --remote-model ID or an interactive model choice.
 #
 # Recheck pinned ids with remote-session.sh --verify <alias> (catalog GET only).
@@ -47,12 +49,12 @@ LA_REMOTE_AGENTS=(
   # Ordered by USER PREFERENCE first, then GENERATION EVIDENCE: confirmed lanes first,
   # partially-working next, never-produced-a-token last (each row states its evidence).
   # Re-probe with: bin/remote-probe-log.py probe --all-nvidia ; report
-  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled like its Super sibling."
+  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled like its Super sibling.|1m"
   "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled at the backend so the thinking-block failure cannot recur."
   "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick."
   "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Strong coding/agentic reputation; tool use still unproven."
   "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4-flash-0731|NVIDIA DeepSeek V4 Flash|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Tool use unproven."
-  "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained."
+  "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained.|1m"
   "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|⚠️ EMPTY completion on 2/2 probes (HTTP 200, no content) 2026-09-15 — do not rely on it as the throttle fallback until retested."
   "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|⚠️ Returned an EMPTY completion on 2/2 probes (HTTP 200, no content). Distinct from the direct z.ai route. Retest before use."
   "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|⚠️ Empty completion + HTTP 500 across 2 probes 2026-09-15. Retest before use."
@@ -60,8 +62,8 @@ LA_REMOTE_AGENTS=(
   "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed — catalog presence is not access. Kept for A/B retesting only."
   "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed. Retest before use."
   # Additional NVIDIA models as requested
-  "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b-instruct|NVIDIA Nemotron 4 340B|unknown|Updated to catalog-verified model ID (2026-09-29). GENERATION-PENDING: needs probe"
-  "nvidia-minitron|nvidia|nvidia/minitron-12b|NVIDIA Minitron 12B|unknown|Added per request - small efficient NVIDIA model"
+  "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b-instruct|NVIDIA Nemotron 4 340B|unknown|Updated to catalog-verified model ID (2026-09-29). GENERATION-PENDING: needs probe|-"
+  "nvidia-minitron|nvidia|nvidia/minitron-12b|NVIDIA Minitron 12B|unknown|Added per request - small efficient NVIDIA model|-"
 
   # --- TIER 2 — Gemini: still VERIFIED for tool-calling, but DEMOTED from the default.
   # The free quota is reached annoyingly fast, leaving little headroom to get real work

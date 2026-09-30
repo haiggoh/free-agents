@@ -167,8 +167,8 @@ class LAProxyHooks(CustomLogger):
             super().__init__()
         self._bucket = None
         if os.environ.get("LA_PROXY_HOOKS_RATE_LIMIT", "1") != "0":
-            from rate_limiter import SlidingWindowLimiter
-            self._bucket = SlidingWindowLimiter()
+            from rate_limiter import get_limiter
+            self._bucket = get_limiter()
 
     async def async_pre_call_deployment_hook(self, kwargs, call_type):
         if not _is_nvidia(kwargs):

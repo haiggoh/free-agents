@@ -2,6 +2,27 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.5] — 2026-09-30
+
+### Added — Autocompaction support for remote API sessions (LA_AUTO_COMPACT_WINDOW)
+
+- **remote-session.sh**: Support for `LA_AUTO_COMPACT_WINDOW` environment variable to configure Claude Code autocompaction threshold for remote API sessions, mirroring the local launcher behavior.
+- **remote-session.sh**: Default autocompaction of `1m` for NVIDIA Nemotron 3 Ultra (1M context window model) and NVIDIA Laguna XS 2.1, matching their actual context window size.
+- **config/remote-agents.sh**: New 7th field `autocompaction_default` for per-model autocompaction defaults (e.g., `1m` for 1M-context models, `-` for no default).
+- **Validation**: Same python3 validator as local launchers accepting "auto" or "100k–1m tokens".
+- **Banner display**: Shows autocompaction setting in startup banner and dry-run output.
+
+## [0.20.4] — 2026-09-30
+
+### Added — Smooth token bucket mode + interactive menu for NVIDIA rate limiter
+
+- **New mode**: `LA_NVIDIA_MODE=smooth_bucket` (default stays `sliding_window`). Same 40 RPM average but with small capacity (default 6) and continuous refill (0.667 tokens/sec) for smoother limiting: small bursts allowed, then steady ~1.5s between requests instead of "all 40 then wait 60s".
+- **Interactive menu**: `rate_limiter.py menu` (or run without args in TTY) for live configuration — switch modes, set RPM, bucket capacity, max wait, cooldown, view status, reset state, export shell config.
+- **Env additions**: `LA_NVIDIA_BUCKET_CAPACITY` (default 6), `LA_NVIDIA_MODE` (sliding_window|smooth_bucket).
+- **Factory function**: `get_limiter()` in `rate_limiter.py` returns the configured mode; `la_proxy_hooks.py` now uses it so proxies respect the chosen mode automatically.
+- **Safety**: Smooth bucket caps at capacity + 60*rate = 46 requests per rolling minute (close to 40 with small headroom); 429 cooldown handles any overshoot.
+- **State migration**: Both modes handle old-format state files gracefully.
+
 ## [0.20.3] — 2026-09-30
 
 ### Fixed — Sliding-window NVIDIA rate limiter + 429 cooldown + SDK hidden retries
