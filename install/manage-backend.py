@@ -81,6 +81,7 @@ Examples:
     # install command
     inst_p = sub.add_parser("install", help="install a version")
     inst_p.add_argument("version", nargs="?", help="version to install (interactive if omitted)")
+    inst_p.add_argument("--pre", action="store_true", help="offer prereleases in picker")
     inst_p.add_argument("--python", help="base Python executable")
     inst_p.add_argument("--refresh-deps", action="store_true", help="ignore existing lock file")
     inst_p.add_argument("--source", choices=["pypi", "github"], default="pypi", help="install source (vllm-mlx)")
@@ -104,6 +105,14 @@ Examples:
     # info command
     info_p = sub.add_parser("info", help="show detailed info about a version")
     info_p.add_argument("version")
+
+    # launchd command
+    launchd_p = sub.add_parser("launchd", help="manage launchd for automatic update checks")
+    launchd_sub = launchd_p.add_subparsers(dest="launchd_action", required=True)
+    launchd_sub.add_parser("install", help="install launchd plist for weekly update checks")
+    launchd_sub.add_parser("uninstall", help="uninstall launchd plist")
+    launchd_sub.add_parser("status", help="show launchd status")
+    launchd_sub.add_parser("run-once", help="run update check once manually")
 
     return parser
 
@@ -278,6 +287,79 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_launchd(args: argparse.Namespace) -> int:
+    """Manage launchd for automatic update checks."""
+    import subprocess
+    from pathlib import Path
+
+    # Script is in the scripts directory, not install directory
+    SCRIPT_PATH = Path(__file__).parent.parent / "scripts" / "check-backend-updates.sh"
+
+    if args.launchd_action == "install":
+        # Install launchd plist
+        plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.haiggoh.backend-update-check</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>{SCRIPT_PATH}</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>10</integer>
+    <key>Minute</key>
+    <integer>17</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>{Path.home() / ".claude" / "logs" / "backend-update-check.out"}</string>
+  <key>StandardErrorPath</key>
+  <string>{Path.home() / ".claude" / "logs" / "backend-update-check.err"}</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>'''
+
+        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.haiggoh.backend-update-check.plist"
+        plist_path.parent.mkdir(parents=True, exist_ok=True)
+        plist_path.write_text(plist_content)
+        subprocess.run(["launchctl", "load", str(plist_path)], check=False)
+        print(f"Installed launchd plist at {plist_path}")
+        return 0
+
+    elif args.launchd_action == "uninstall":
+        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.haiggoh.backend-update-check.plist"
+        if plist_path.exists():
+            subprocess.run(["launchctl", "unload", str(plist_path)], check=False)
+            plist_path.unlink()
+            print("Uninstalled launchd plist")
+        else:
+            print("Launchd plist not found")
+        return 0
+
+    elif args.launchd_action == "status":
+        result = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
+        if "com.haiggoh.backend-update-check" in result.stdout:
+            print("Launchd service: INSTALLED and RUNNING")
+        else:
+            print("Launchd service: NOT INSTALLED or NOT RUNNING")
+        return 0
+
+    elif args.launchd_action == "run-once":
+        # Run the update check script directly
+        import subprocess
+        result = subprocess.run(["/bin/bash", str(Path(__file__).parent.parent / "scripts" / "check-backend-updates.sh")])
+        return result.returncode
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
     parser = build_parser()
@@ -304,6 +386,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_updates(args)
     elif args.command == "info":
         return cmd_info(args)
+    elif args.command == "launchd":
+        return cmd_launchd(args)
     else:
         parser.print_help()
         return 2
