@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import session_menu_state as sms
+import emoji_constants as ec
 
 HOME_OWNED = "home_owned"
 DIRECT_ROOT = "direct_root"
@@ -299,12 +300,12 @@ class HomeScreen(Screen):
 
     def actions(self):
         acts = [
-            Action("l", f"🦾 Local sessions ({self._format_count(self.local_count, '?')} on disk)",
+            Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR} Local sessions ({self._format_count(self.local_count, '?')} on disk)",
                    lambda: Nav("local", HOME_OWNED), section="lanes"),
-            Action("r", f"📡 Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
+            Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
-            Action("d", "📥 Download local models", lambda: Nav("tool:download"), section="tools"),
-            Action("o", "💬 Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
+            Action("d", f"{ec.EMOJI_TOOLS_STR} Download local models", lambda: Nav("tool:download"), section="tools"),
+            Action("o", f"{ec.LK_EMOJI_CONVO_STR} Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
         ]
         acts += _tool_actions()
         acts += _common_toggles(self.settings, include_watcher=True)
