@@ -229,24 +229,71 @@ class Picker(App):
     def build(self, nav: m.Nav) -> m.Screen:
         s = self.settings
         if nav.target == "home":
-            local = self.cache.setdefault("local", load_local_models())
-            remote = self.cache.setdefault("remote", load_remote_agents())
-            return m.HomeScreen(s, len(local), len(remote), nav.owner)
+            # Pass counts as None initially; they'll be loaded lazily
+            return m.HomeScreen(s, local_count=None, remote_count=None, owner=nav.owner)
         if nav.target == "local":
-            return m.LocalScreen(s, self.cache.setdefault("local", load_local_models()), nav.owner)
+            return m.LocalScreen(s, models=None, owner=nav.owner)
         if nav.target == "remote":
-            return m.RemoteScreen(s, self.cache.setdefault("remote", load_remote_agents()), nav.owner)
+            return m.RemoteScreen(s, agents=None, owner=nav.owner)
         if nav.target == "lowkey":
-            return m.LowkeyScreen(s, self.cache.setdefault("local", load_local_models()), nav.owner)
+            return m.LowkeyScreen(s, models=None, owner=nav.owner)
         if nav.target == "download":
-            entries, free, head = load_catalog()
-            return m.DownloadScreen(s, entries, free, head, nav.owner)
+            return m.DownloadScreen(s, entries=None, free_gb=None, headroom_gb=None, owner=nav.owner)
         if nav.target == "rate_limiter":
             return m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
         raise ValueError(nav.target)
 
+    def _ensure_inventory_loaded(self, screen_type: str) -> None:
+        """Lazy-load inventory for the given screen type if not already cached."""
+        if screen_type == "home" or screen_type == "local" or screen_type == "lowkey":
+            if "local" not in self.cache:
+                op_id = self._start_pending_op()
+                self.cache["local"] = load_local_models()
+                self._clear_pending_op(op_id)
+        if screen_type == "home" or screen_type == "remote":
+            if "remote" not in self.cache:
+                op_id = self._start_pending_op()
+                self.cache["remote"] = load_remote_agents()
+                self._clear_pending_op(op_id)
+        if screen_type == "download":
+            if "catalog" not in self.cache:
+                op_id = self._start_pending_op()
+                self.cache["catalog"] = load_catalog()
+                self._clear_pending_op(op_id)
+
     def goto(self, nav: m.Nav):
-        self.screen_model = self.build(nav)
+        # Ensure inventory is loaded before building the screen
+        if nav.target in ("home", "local", "lowkey"):
+            self._ensure_inventory_loaded(nav.target)
+        elif nav.target == "remote":
+            self._ensure_inventory_loaded("remote")
+        elif nav.target == "download":
+            self._ensure_inventory_loaded("download")
+
+        # Build screen with loaded inventory
+        s = self.settings
+        if nav.target == "home":
+            local = self.cache.get("local", [])
+            remote = self.cache.get("remote", [])
+            self.screen_model = m.HomeScreen(s, len(local), len(remote), nav.owner)
+        elif nav.target == "local":
+            self.screen_model = m.LocalScreen(s, self.cache.get("local"), nav.owner)
+        elif nav.target == "remote":
+            self.screen_model = m.RemoteScreen(s, self.cache.get("remote"), nav.owner)
+        elif nav.target == "lowkey":
+            self.screen_model = m.LowkeyScreen(s, self.cache.get("local"), nav.owner)
+        elif nav.target == "download":
+            catalog_data = self.cache.get("catalog")
+            if catalog_data:
+                entries, free, head = catalog_data
+            else:
+                entries, free, head = [], 0.0, 100.0
+            self.screen_model = m.DownloadScreen(s, entries, free, head, nav.owner)
+        elif nav.target == "rate_limiter":
+            self.screen_model = m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
+        else:
+            raise ValueError(nav.target)
+
         self.nav = nav
         self.render_model()
 

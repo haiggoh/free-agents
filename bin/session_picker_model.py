@@ -283,16 +283,19 @@ def _tool_actions():
 class HomeScreen(Screen):
     title = "Claude Code Free-Agents: Session Launcher"
 
-    def __init__(self, settings: Settings, local_count: int = 0, remote_count: int = 0, owner: str = DIRECT_ROOT):
+    def __init__(self, settings: Settings, local_count: int | None = None, remote_count: int | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner=owner)
         self.local_count = local_count
         self.remote_count = remote_count
 
+    def _format_count(self, count: int | None, fallback: str) -> str:
+        return str(count) if count is not None else fallback
+
     def actions(self):
         acts = [
-            Action("l", f"Local sessions ({self.local_count} on disk)",
+            Action("l", f"Local sessions ({self._format_count(self.local_count, '?')} on disk)",
                    lambda: Nav("local", HOME_OWNED), section="lanes"),
-            Action("r", f"Remote free API sessions ({self.remote_count} listed)",
+            Action("r", f"Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
             Action("d", "Download local models", lambda: Nav("tool:download"), section="tools"),
             Action("o", "Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
@@ -316,9 +319,13 @@ class LocalScreen(Screen):
     title = "Local Session Picker"
     lane_key = "l"
 
-    def __init__(self, settings: Settings, models: list[LocalModel], owner: str = DIRECT_ROOT):
+    def __init__(self, settings: Settings, models: list[LocalModel] | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
-        self.set_models(models)
+        if models is not None:
+            self.set_models(models)
+        else:
+            self.models = {}
+            self.accordion.set_groups([])
 
     def set_models(self, models: list[LocalModel]):
         self.models = {mdl.alias: mdl for mdl in models}
@@ -377,10 +384,34 @@ class RemoteScreen(Screen):
               "free quota or no billing; trial rows may cost money. Effort is a request, "
               "not a guarantee.")
 
-    def __init__(self, settings: Settings, agents: list[RemoteAgent], owner: str = DIRECT_ROOT):
+    def __init__(self, settings: Settings, agents: list[RemoteAgent] | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
-        self.agents = agents
-        self._regroup()
+        if agents is not None:
+            self.agents = agents
+            self._regroup()
+        else:
+            self.agents = []
+            self.accordion.set_groups([])
+
+    def _ensure_loaded(self):
+        """Called to ensure agents are loaded. Override in picker to lazy-load."""
+        pass
+
+    def _regroup(self):
+        buckets: dict[str, list] = {}
+        order = []
+        for agent in self.agents:
+            if not self._visible(agent):
+                continue
+            if agent.provider not in buckets:
+                order.append(agent.provider)
+            buckets.setdefault(agent.provider, []).append(agent)
+        groups = []
+        for prov in order:
+            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}"
+                          + ("" if a.has_key else "  · no key")) for a in buckets[prov]]
+            groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
+        self.accordion.set_groups(groups)
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings
