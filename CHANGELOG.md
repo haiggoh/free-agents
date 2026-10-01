@@ -2,6 +2,28 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.10] — 2026-10-01
+
+### Fixed — remote sessions could not push to GitHub (`could not read Username`)
+
+- `remote-session.sh` exported only `credential.helper=""` (added in `c4da19e`, 0.19.x) to silence the
+  harmless sandbox `failed to store: 100001`. An empty `credential.helper` RESETS the whole helper
+  list, including the URL-scoped `gh auth git-credential` helper for github.com, so git found no
+  credential and every push failed with `could not read Username for 'https://github.com': Device not
+  configured`. Models then worked around it by writing the PAT into the remote URL or into an
+  `export GH_TOKEN=…` permission rule.
+- New `bin/la-git-credential-env.sh` (sourced): keeps the reset for every host, then restores
+  `credential.https://github.com.helper = !<gh> auth git-credential`, so github.com gets the PAT from
+  `GH_TOKEN` / gh's keyring while other hosts stay silenced. `--help` and `--print` when executed;
+  `LA_GH_BIN` / `LA_GH_FALLBACK` override the gh path; missing gh warns and keeps the reset only.
+- New `tests/test_git_credential_env.sh` (14 assertions, hermetic: temp HOME, stub gh, no Keychain or
+  network). It reproduces the old bug as its own control. Mutation-tested: restoring the old block in
+  `remote-session.sh` fails 2 assertions; dropping the restored helper fails 2.
+- Not changed: `gh` x509 `OSStatus -26276` (Go TLS under Seatbelt) is a separate defect that was
+  already resolved in 0.20.2 (`3c45ee6`), when both launchers moved to `blind-trust-settings.py`, which
+  writes no `sandbox` key; last real occurrence 2026-09-29 08:43. If a profile ever re-enables the sandbox,
+  add `gh` to `sandbox.excludedCommands`.
+
 ## [0.20.9] — 2026-10-01
 
 ### Fixed — `local-inference-readonly-inventory.zsh` ignored `--help` and ran
