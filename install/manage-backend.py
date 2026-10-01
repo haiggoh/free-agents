@@ -15,6 +15,10 @@ from pathlib import Path
 # Add install directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Import managers to trigger registration via @register_manager decorator
+import managers.rapid_mlx  # noqa: F401
+import managers.vllm_mlx  # noqa: F401
+
 from managers import (
     BackendManager,
     ManagerError,

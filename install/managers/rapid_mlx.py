@@ -50,6 +50,16 @@ class RapidMLXManager(BackendManager):
     PACKAGE_NAME = "rapid-mlx"
     PYPI_URL = PYPI_URL
 
+    def __init__(self, home: Path | None = None, repo: Path | None = None) -> None:
+        """Initialize the Rapid-MLX manager.
+
+        Args:
+            home: Override home directory (useful for testing)
+            repo: Override local-agents repository path (for pin promotion)
+        """
+        super().__init__(home)
+        self._repo = repo
+
     def get_installed_versions(self) -> list[str]:
         root = self.venv_root
         entries: list[tuple[str, Path, str]] = []
@@ -207,6 +217,20 @@ class RapidMLXManager(BackendManager):
             self.validate_environment(version)
 
         plan = self._plan_pin_update(version)
+        return self._apply_pin_plan(plan, dry_run=dry_run)
+
+    def plan_pin_update(self, repo: Path, version: str):
+        """Public wrapper for _plan_pin_update."""
+        # Temporarily set _repo for the internal method
+        old_repo = self._repo
+        self._repo = repo
+        try:
+            return self._plan_pin_update(version)
+        finally:
+            self._repo = old_repo
+
+    def apply_pin_plan(self, plan, *, dry_run: bool = False):
+        """Public wrapper for _apply_pin_plan."""
         return self._apply_pin_plan(plan, dry_run=dry_run)
 
     # Helper methods (refactored from manage-rapid-mlx.py)

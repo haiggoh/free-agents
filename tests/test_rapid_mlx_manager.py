@@ -55,7 +55,6 @@ def test_rapid_mlx_get_available_versions():
         mock_response.read.return_value = b'{"releases": {"0.15.3": [{"yanked": false}], "0.15.2": [{"yanked": false}], "0.14.0": [{"yanked": false}]}}'
         mock_urlopen.return_value = mock_response
 
-        import json
         with patch("json.load", return_value=mock_payload):
             versions = mgr.get_available_versions()
             assert isinstance(versions, list)
@@ -110,7 +109,7 @@ def test_rapid_mlx_require_version():
     mgr = RapidMLXManager()
     assert mgr.require_version("0.15.3") == "0.15.3"
 
-    with pytest.raises(Exception):  # ManagerError
+    with pytest.raises(ManagerError):
         mgr.require_version("invalid")
 
 

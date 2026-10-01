@@ -207,14 +207,22 @@ class BackendManager(ABC):
         """
         ...
 
-    @abstractmethod
     def check_updates(self) -> list[tuple[str, str, str]]:
         """Check for available updates.
 
         Returns:
             List of (package, current_version, latest_version) tuples
         """
-        ...
+        outdated = []
+        for pkg in self.get_packages_to_check():
+            try:
+                installed = self._get_installed_package_version(pkg)
+                latest = self._get_latest_package_version(pkg)
+                if self._version_newer(latest, installed):
+                    outdated.append((pkg, installed, latest))
+            except Exception:
+                continue  # Skip packages that can't be checked
+        return outdated
 
     @abstractmethod
     def _get_latest_package_version(self, package: str) -> str:
@@ -299,6 +307,33 @@ class BackendManager(ABC):
             True if latest is newer
         """
         return self.version_key(latest) > self.version_key(installed)
+
+    def _get_installed_package_version(self, package: str) -> str:
+        """Get installed version of a package from the backend's environment.
+
+        Args:
+            package: Package name
+
+        Returns:
+            Installed version string
+
+        Raises:
+            ManagerError: If no versions installed or package not found
+        """
+        versions = self.get_installed_versions()
+        if not versions:
+            raise ManagerError(f"No installed versions of {self.BACKEND_NAME}")
+        target = self.target_for(versions[0])
+        python = target / "bin" / "python"
+        if not python.exists():
+            raise ManagerError(f"Python not found in {target}")
+        result = self.run_command(
+            [str(python), "-c", f"import importlib.metadata as m; print(m.version('{package}'))"],
+            capture=True
+        )
+        if result.returncode != 0:
+            raise ManagerError(f"Package {package} not found: {result.stderr}")
+        return result.stdout.strip()
 
     def run_command(
         self,

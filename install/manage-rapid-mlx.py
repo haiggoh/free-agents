@@ -7,14 +7,17 @@ This wrapper translates the old CLI to the new unified CLI:
 """
 
 import sys
+import importlib.util
 from pathlib import Path
 
-# Add install directory to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from install.manage_backend import main
+# Import manage-backend.py directly (hyphen in filename prevents normal import)
+manage_backend_path = Path(__file__).parent / "manage-backend.py"
+spec = importlib.util.spec_from_file_location("manage_backend", manage_backend_path)
+manage_backend = importlib.util.module_from_spec(spec)
+sys.modules["manage_backend"] = manage_backend
+spec.loader.exec_module(manage_backend)
 
 if __name__ == "__main__":
     # Translate old CLI to new unified CLI
     new_argv = ["--backend", "rapid-mlx"] + sys.argv[1:]
-    sys.exit(main(new_argv))
+    sys.exit(manage_backend.main(new_argv))
