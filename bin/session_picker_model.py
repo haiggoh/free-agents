@@ -18,6 +18,7 @@ Navigation contract (docs/SESSION_PICKER.md):
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass, field
 from typing import Callable
 

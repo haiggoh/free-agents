@@ -153,6 +153,15 @@ TOOLS = {
     "tool:report": lambda: ["bash", str(BIN / "local-capable-filter.sh"), "--report",
                             str(REPO / "config/local-capable-remote-models.psv"), "--roster",
                             str(REPO / "config/remote-agents.sh")],
+    "tool:rl-releases": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "releases", "--pre"],
+    "tool:rl-install": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "install"],
+    "tool:rl-promote": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "promote"],
+    "tool:rl-smoke": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "smoke"],
+    "tool:rl-snapshot": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "snapshot"],
+    "tool:rl-remove": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "remove"],
+    "tool:rl-reset": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "reset"],
+    "tool:keys:open": lambda: ["python3", "-c", "import webbrowser; webbrowser.open('https://github.com/haiggoh/free-agents/blob/main/docs/PROVIDER_SIGNUP.md')"],
+    "tool:keys:add": lambda slug: ["python3", str(REPO / "install/setup-api-keys.py"), slug],
 }
 
 
@@ -263,16 +272,20 @@ class Picker(App):
             return m.DownloadScreen(s, entries=None, free_gb=None, headroom_gb=None, owner=nav.owner)
         if nav.target == "rate_limiter":
             return m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
+        if nav.target == "runtime_manager":
+            return m.RuntimeManagerScreen(s, nav.owner)
+        if nav.target == "api_keys":
+            return m.APIKeysScreen(s, nav.owner)
         raise ValueError(nav.target)
 
     def _ensure_inventory_loaded(self, screen_type: str) -> None:
         """Lazy-load inventory for the given screen type if not already cached."""
-        if screen_type == "home" or screen_type == "local" or screen_type == "lowkey":
+        if screen_type in ("home", "local", "lowkey", "runtime_manager"):
             if "local" not in self.cache:
                 op_id = self._start_pending_op()
                 self.cache["local"] = load_local_models()
                 self._clear_pending_op(op_id)
-        if screen_type == "home" or screen_type == "remote":
+        if screen_type in ("home", "remote"):
             if "remote" not in self.cache:
                 op_id = self._start_pending_op()
                 self.cache["remote"] = load_remote_agents()
@@ -507,6 +520,11 @@ class Picker(App):
             return
         if target == "tool:rl-reset":
             self._open_prompt("prompt:rl-reset")
+            return
+        if target.startswith("tool:keys:"):
+            # API keys with specific provider
+            slug = target.split(":", 2)[2]
+            self.run_child(TOOLS["tool:keys:add"](slug), pause=True)
             return
         self.run_child(TOOLS[target](), pause=True)
 
