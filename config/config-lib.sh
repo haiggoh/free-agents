@@ -51,10 +51,10 @@ LA_CANONICAL_ROLES="operator reasoner validator utility"
 # llama.cpp / llama-server and MLX backends cannot load them, so a GGUF model must pin
 # serve=llama_cpp explicitly. la_finalize_serve warns loudly if a GGUF-looking artifact ends up
 # on an MLX backend, because that combination fails late (at weight load) and confusingly.
-LA_SERVE_BACKENDS="rapid vllm mlx_lm llama_cpp"
+LA_SERVE_BACKENDS="rapid vllm mlx_lm llama_cpp litellm"
 LA_SERVE_GENERIC="mlx auto"
 # Which backends a GENERIC value may resolve to. Narrower than LA_SERVE_BACKENDS on purpose:
-# llama_cpp is a legal PIN but must never be the MLX default, or flipping one line would reroute
+# llama_cpp and litellm are legal PINs but must never be the MLX default, or flipping one line would reroute
 # every MLX model to an engine that cannot load safetensors at all.
 LA_MLX_BACKENDS="rapid vllm mlx_lm"
 
@@ -181,12 +181,33 @@ la_discover_rapid_bin() {
   [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return 0; }
   # Newest venv by version sort, not by mtime: reinstalling an OLD version would otherwise make
   # it look newest. `sort -V` orders 0.12.18 < 0.13.2 correctly, which a lexical sort does not.
-  for c in $(ls -d "$HOME"/.venvs/rapid-mlx-*/bin/rapid-mlx 2>/dev/null | sort -V -r); do
+  # Use find instead of ls to handle edge cases properly.
+  while IFS= read -r c; do
     [ -x "$c" ] && { echo "$c"; return 0; }
-  done
+  done < <(find "$HOME"/.venvs -maxdepth 2 -name "rapid-mlx-*" -type d 2>/dev/null | sed 's|$|/bin/rapid-mlx|' | sort -V -r)
   echo ""
   return 1
 }
+
+# la_discover_backend_binary <backend> -> prints the binary path for a backend, or "".
+# Uses the unified manage-backend.py CLI to discover the active binary for a backend.
+la_discover_backend_binary() {
+  local backend="$1"
+  local manage_backend="$LA_ROOT/install/manage-backend.py"
+
+  if [[ ! -x "$manage_backend" ]]; then
+    return 1
+  fi
+
+  # Use the Python manager to find the active binary for the backend
+  python3 "$manage_backend" --backend "$backend" info latest 2>/dev/null | head -1
+}
+
+# Backend-specific discovery (fallbacks for when manage-backend.py is not available)
+la_discover_vllm_bin() { la_discover_backend_binary "vllm-mlx" || command -v vllm-mlx || true; }
+la_discover_omlx_bin() { la_discover_backend_binary "omlx" || command -v omlx || true; }
+la_discover_llama_cpp_bin() { la_discover_backend_binary "llama-cpp" || true; }
+la_discover_litellm_bin() { la_discover_backend_binary "litellm" || true; }
 
 # la_resolve_serve <declared> -> prints the concrete backend a declared value means.
 # Generic ("", mlx, auto) -> $LA_DEFAULT_MLX_BACKEND. Anything in LA_SERVE_BACKENDS is a pin and
