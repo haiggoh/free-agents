@@ -19,9 +19,11 @@ All notable changes to `free-agents` are documented in this file.
 - New `tests/test_git_credential_env.sh` (14 assertions, hermetic: temp HOME, stub gh, no Keychain or
   network). It reproduces the old bug as its own control. Mutation-tested: restoring the old block in
   `remote-session.sh` fails 2 assertions; dropping the restored helper fails 2.
-- Not changed: `gh` x509 `OSStatus -26276` under Seatbelt needs `sandbox.excludedCommands`, but no
-  launcher enables the sandbox any more (`blind-trust-settings.py` writes no `sandbox` key), so there is
-  nothing to exclude today. Revisit if a profile turns the sandbox back on.
+- Not changed: `gh` x509 `OSStatus -26276` (Go TLS under Seatbelt) is a separate defect that was
+  already resolved in 0.20.2 (`3c45ee6`), when both launchers moved to `blind-trust-settings.py`, which
+  writes no `sandbox` key; last real occurrence 2026-09-29 08:43. If a profile ever re-enables the sandbox,
+  add `gh` to `sandbox.excludedCommands`.
+
 ## [0.20.9] — 2026-10-01
 
 ### Fixed — `local-inference-readonly-inventory.zsh` ignored `--help` and ran
