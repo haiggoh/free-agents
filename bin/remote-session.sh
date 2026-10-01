@@ -1601,11 +1601,11 @@ fi
 # claude_cmd=( "${claude_cmd[0]}" -n "$SESSION_NAME" "${claude_cmd[@]:1}" )
 
 # Session-scoped GIT_CONFIG_* to silence git credential.helper 100001 (Keychain trust prompt)
-# inside sandbox. Does not edit global gitconfig — only affects this process tree.
-# See memory: git-keychain-100001-and-gh-tls-under-sandbox
-export GIT_CONFIG_COUNT=1
-export GIT_CONFIG_KEY_0="credential.helper"
-export GIT_CONFIG_VALUE_0=""
+# inside sandbox, WITHOUT losing the github.com gh helper (an empty credential.helper alone
+# wiped it, so pushes failed "could not read Username"). Only affects this process tree.
+# See bin/la-git-credential-env.sh and memory: git-keychain-100001-and-gh-tls-under-sandbox
+# shellcheck source=la-git-credential-env.sh
+. "$SCRIPT_DIR/la-git-credential-env.sh"
 
 # For free_api sessions, wrap claude with telemetry wrapper to capture streaming token rate
 if [[ "${LA_SESSION_KIND:-}" == "free_api" && -x "$SCRIPT_DIR/la-remote-telemetry-wrapper.sh" ]]; then
