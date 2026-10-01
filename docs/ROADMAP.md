@@ -8,10 +8,6 @@ documentation" and only the changelog appeared. The `0.14.0` specification lived
 repository, in a plan file on one machine, while `CHANGELOG.md`'s `[Unreleased]` section sat empty —
 so "did we skip a specced feature?" was not answerable from the repo at all. It is now.
 
-## Current released version
-
-`0.20.8`
-
 **How to use this file:** an item leaves this file only by moving into `CHANGELOG.md` under a real
 version. Nothing is deleted for being inconvenient. If an item is abandoned, it moves to
 [Deliberately deferred](#deliberately-deferred) with a reason — never silently removed.
@@ -134,13 +130,13 @@ waiting on an architecture it does not read. So the split is:
 | `0.17.2` | **Local session identity Milestone 3.** Session transcript identity (stable session id in transcripts, correlation with launch metadata). | `0.17.1` |
 | `0.18.0` | **Remote identity polish.** Lime-green theme, spinner verbs, per-session settings overlay, session name with emoji, transcript marker/transition integration. (Was `0.14.0`, then `0.15.0`; slid up 2026-09-19 for local-session-identity. Spent 2026-09-21 — lime theme shipped as `0.18.0`.) | nothing hard |
 | `0.18.1` | **Cosmetic fixes.** Emoji spacing, remote effort menu reorder, interactive effort prompt in launcher. (Patch, 2026-09-21.) | `0.18.0` |
-| `0.19.0` | **Portable manifests and artifact identity.** `.local-model-manifest.json`, manifest tooling, downloader writes a truthful manifest atomically. (Was `0.14.0`, then `0.15.0`, then `0.17.0`; slid up 2026-09-19 for local-session-identity, pushed past 0.18.0 when lime theme took that slot.) | nothing hard |
+| `0.19.0` | **Rapid-MLX 0.15.0 upgrade.** (Shipped 2026-09-23. The number had been reserved for portable manifests; that scope slid to `0.20.0` — see the 2026-09-24 renumber note.) | — |
 | `0.19.11` | **Dynamic session names with auto-generated suffix.** UserPromptSubmit hook reads auto-generated name after first prompt, prepends `<emoji> <model-alias>` prefix. Fixes all sessions on same model sharing identical fixed names. Idempotent, resume-safe. | nothing hard |
 | `0.19.12` | **Retire the stream-split patch.** LiteLLM 1.102.1 fixed the mixed-chunk bug upstream; the hook now only checks for it and warns. NVIDIA param fixes and RPM bucket kept. | `0.19.11` |
 | `0.20.0` | **Portable local-model manifests & artifact identity.** Self-describing `.local-model-manifest.json` beside each artifact, manifest toolkit, five-layer identity model, six context states with derived autocompaction, completion as transaction, researched catalogue. (Released 2026-09-29.) | — |
-| `0.21.0` | **Runtime profiles and Rapid-first model management.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`.) | `0.20.0` — portable manifests provide the artifact identity the profiles resolve |
-| `0.22.0` | **Session picker TUI.** Interactive Textual-based session picker with accordion navigation, launch handoff via nav file, and full entry-point wiring (`csl`, `local-session.sh`, `remote-session.sh`, `session-picker`). Replaces the numbered menu with arrow keys, letter shortcuts, grouped menus, and persistent settings. | `0.21.0` — runtime profiles provide the resolver the UI consumes |
-| `0.23.0` | **Backend lanes.** [oMLX](#0210--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`, then `0.22.0`, then `0.23.0`.) | `0.22.0` — a runtime profile is the clean way to select a backend |
+| `0.21.0` | **Session picker TUI.** One Textual picker behind every entry point (`csl`, `csl local`/`csl remote`, `local-session.sh`, `remote-session.sh`, `session-picker`): arrow keys, letter shortcuts, grouped menus, persistent effort/rate-limiter settings, Lowkey `--effort`, downloader queue. Plan: `AUTHORITATIVE v2 — Free Agents session UI implementation plan`. (Took `0.21.0` on 2026-09-30 because runtime profiles had not been started; branch `feature/session-picker-tui`, NOT yet green — see waypoint `free-agents-session-ui-v2`.) | nothing hard — it does not read runtime profiles |
+| `0.22.0` | **Runtime profiles and Rapid-first model management.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. NOT STARTED. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`, then `0.22.0` — slid 2026-09-30 for the session picker.) | `0.20.0` — portable manifests provide the artifact identity the profiles resolve |
+| `0.23.0` | **Backend lanes.** [oMLX](#0230--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`, then `0.22.0`, then `0.23.0`.) | `0.22.0` — a runtime profile is the clean way to select a backend |
 
 **Not release-gated at all.** These run continuously against whatever is current, and must not be
 parked behind a version number: model acquisition waves, the tournament, retirement and disk
@@ -372,8 +368,9 @@ in its catalog response, prefer that over parsing the id.
 
 ## `0.17.0` — Local session identity and observability
 
-**Status: NOT STARTED on `main`.** The work is tracked in `feature/local-session-identity`
-and the pinned waypoint `add-local-only-metrics-claude` plus related waypoints.
+**Status: SHIPPED** as `0.17.0` (tag `v0.17.0`, CHANGELOG 2026-09-21) with Milestones 2–3 in
+`0.17.1`/`0.17.2`. Kept as the specification record; remaining observability items are tracked by
+the pinned waypoint `add-local-only-metrics-claude` plus related waypoints.
 
 **Scope:** Visual and observability improvements for local sessions:
 - **Model-aware spinner words + live tok/s** (`add-local-only-metrics-claude`) — replace the
@@ -398,8 +395,9 @@ and the pinned waypoint `add-local-only-metrics-claude` plus related waypoints.
 
 ## `0.20.0` — Portable manifests and artifact identity
 
-**Status: NOT STARTED on `main`.** The specification and partial work live on
-`feature/portable-model-manifests`, which is not merged.
+**Status: SHIPPED as `0.20.0` on 2026-09-29** (merge `3581d7b`, tag `v0.20.0`; see `CHANGELOG.md`).
+This section is kept as the specification record; follow-up items still open are listed under
+the waypoints below.
 
 **Specifications of record:**
 
@@ -474,6 +472,22 @@ Both found 2026-09-06; fix the plans, not just the code.
   input file missing.** A rename may still not be enough: catalogue resolution is a hardcoded filename
   list, not a glob (`bin/la-disk-inventory.sh`), so each new catalogue must also be *registered* in the
   consumer or it stays invisible while looking installed.
+
+---
+
+## `0.21.0` — Session picker TUI
+
+**Status: IN PROGRESS** on `feature/session-picker-tui` (worktree `local-agents-session-ui`), NOT merged.
+Took `0.21.0` on 2026-09-30 because runtime profiles (below, now `0.22.0`) had not been started.
+It has **no dependency** on runtime profiles.
+
+**Specification of record:** `~/.claude/plans/AUTHORITATIVE v2 — Free Agents session UI implementation
+plan for Claude Code (hardened, adversarially reviewed).md` (Phases 0–6), tracked by waypoint
+`free-agents-session-ui-v2`.
+
+**Release gates (all required, none met as of 2026-10-01):** Phase 6 receipts — full suite and PTY
+suite green, `test_csl_menu.sh` rewritten for the picker, README/help updated, no conflict markers,
+branch pushed; then a separate user approval to merge, tag and release.
 
 ---
 
