@@ -101,7 +101,14 @@ def command_for(req: m.LaunchRequest) -> list[str]:
         # launcher inherits via exec) behave exactly as before.
         return [os.environ.get("CSL_SELF") or str(BIN / "csl"), "--picker-launch", *rest]
     if head == "remote":
-        return [os.environ.get("CSL_REMOTE_LAUNCHER") or str(BIN / "remote-session.sh"), *rest]
+        # When running as a child of csl (HOME_OWNED), pass --csl-owner and --csl-nav-file
+        # so remote-session.sh returns via nav file instead of exec'ing claude directly.
+        base = os.environ.get("CSL_REMOTE_LAUNCHER") or str(BIN / "remote-session.sh")
+        if getattr(req, "owner", "direct_root") == "home_owned":
+            import tempfile
+            navfile = os.path.join(tempfile.gettempdir(), f"_csl_nav.{os.getpid()}")
+            return [base, "--csl-owner", "--csl-nav-file", navfile, *rest]
+        return [base, *rest]
     if head == "lowkey":
         return [sys.executable if os.environ.get("LOWKEY_USE_PICKER_PY") else "python3",
                 str(BIN / "lowkey-cli.py"), *rest]
@@ -187,7 +194,7 @@ class Picker(App):
         if nav.target == "home":
             local = self.cache.setdefault("local", load_local_models())
             remote = self.cache.setdefault("remote", load_remote_agents())
-            return m.HomeScreen(s, len(local), len(remote))
+            return m.HomeScreen(s, len(local), len(remote), nav.owner)
         if nav.target == "local":
             return m.LocalScreen(s, self.cache.setdefault("local", load_local_models()), nav.owner)
         if nav.target == "remote":

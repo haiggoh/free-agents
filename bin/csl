@@ -119,8 +119,17 @@ if [ "${1:-}" = "setup-remote" ]; then
 fi
 if [ "${1:-}" = "remote" ]; then
   shift
-  # No args -> remote-session.sh opens the picker at Remote as a direct root itself.
-  exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" "$@"
+  # No args -> remote-session.sh opens the picker at Remote as a csl submenu (returns via nav file).
+  # When picker launches remote as child, it passes --csl-owner and --csl-nav-file.
+  if [ "$#" -eq 0 ]; then
+    # Create nav file for state sync between picker and remote-session.sh
+    navfile="${TMPDIR:-/tmp}/_csl_nav.$$"
+    : > "$navfile"
+    exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" --csl-owner --csl-nav-file "$navfile"
+  else
+    # With args (alias, --list, --verify, etc.) delegate directly without nav file
+    exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" "$@"
+  fi
 fi
 if [ "${1:-}" = "local" ] && [ "$#" -eq 1 ]; then exec "$CSL_DIR/session-picker" local; fi
 if [ "${1:-}" = "lowkey" ]; then
@@ -355,6 +364,9 @@ LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
 # Only effective when AUTO_MODE_STATE=0 (blind-trust) and LA_BLIND_TRUST_OPTION=B
 # Flag --enable-mcp sets LA_ENABLE_MCP=1 before this; preserve it if already set
 LA_ENABLE_MCP="${LA_ENABLE_MCP:-${CSL_ENABLE_MCP:-0}}"
+
+# Export the stop hook setting for launchers (they read LA_QUEUE_STOP_HOOK)
+export LA_QUEUE_STOP_HOOK="$STOP_HOOK"
 
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.

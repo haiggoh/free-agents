@@ -283,8 +283,8 @@ def _tool_actions():
 class HomeScreen(Screen):
     title = "Claude Code Free-Agents: Session Launcher"
 
-    def __init__(self, settings: Settings, local_count: int = 0, remote_count: int = 0):
-        super().__init__(settings, owner=DIRECT_ROOT)
+    def __init__(self, settings: Settings, local_count: int = 0, remote_count: int = 0, owner: str = DIRECT_ROOT):
+        super().__init__(settings, owner=owner)
         self.local_count = local_count
         self.remote_count = remote_count
 
