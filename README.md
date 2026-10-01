@@ -234,7 +234,9 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   and `vllm-mlx-local-fork-patches.patch`.
 - **`bin/` diagnostics** — `tournament-dispatch.py`, `cancellation-matrix.py`,
   `check-tool-roundtrip.py`, `direct-route-acceptance.py`, `auto-mode-probe.sh`,
-  `librarian-dispatch.py`, `thinking-log.py`, `git-local-review`.
+  `librarian-dispatch.py`, `thinking-log.py`, `git-local-review`, and
+  `local-inference-readonly-inventory.zsh` (offline whole-stack snapshot — see
+  [`docs/READONLY_INVENTORY.md`](docs/READONLY_INVENTORY.md)).
 - **`bin/la-ram-preflight.sh`** — decides whether a model can load without stalling the machine,
   before any weights are read. Asks three questions cheapest-first (does it fit / are other models
   loaded / are they attached) and stops as soon as the answer is settled.
@@ -999,7 +1001,7 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 | `cancellation-matrix.py --port <p>` | Does a client disconnect/timeout retire the generation (freeing the single slot) rather than block the next request? |
 | `check-tool-roundtrip.py` | After a local session, verifies the native tool round-trip (call → result → answer → transcript) with no markup leak. |
 | `auto-mode-probe.sh` | Whether Claude Code's Auto Mode classifier request reaches the local endpoint (and where it routes). |
-| `local-inference-readonly-inventory.zsh` | Read-only, offline snapshot of the whole stack — venv, backends, model dirs, servers, ports, fork patches. Writes one timestamped report directory under `~/.claude/reports` and nothing else: no sudo, no network (it forces `HF_HUB_OFFLINE`/`PIP_NO_INDEX`), no weights loaded, no service started or stopped, and it refuses to overwrite an existing report path. Reach for it when you need to describe the stack's state without changing it. |
+| `local-inference-readonly-inventory.zsh` | Read-only, offline snapshot of the whole stack — venv, backends, model dirs, servers, ports, fork patches. Writes one timestamped report directory under `~/.claude/reports` and nothing else: no sudo, no network (it forces `HF_HUB_OFFLINE`/`PIP_NO_INDEX`), no weights loaded, no service started or stopped, and it refuses to overwrite an existing report path. Reach for it when you need to describe the stack's state without changing it. `--dry-run` lists what it would collect and writes nothing; `--help` shows options. Full reference: [`docs/READONLY_INVENTORY.md`](docs/READONLY_INVENTORY.md). |
 
 ## Troubleshooting
 
