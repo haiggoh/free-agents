@@ -43,6 +43,14 @@ except ImportError:  # pragma: no cover - the wrapper checks first; keep a clear
     sys.stderr.write("session-picker: the UI needs its venv — run install/setup-session-picker.sh\n")
     sys.exit(3)
 
+# Apple Terminal compatibility: suppress DECRQM 2048 query that causes stray 'p'
+# Only activates when TERM_PROGRAM=Apple_Terminal on Unix-like systems
+try:
+    from session_picker_terminal import get_driver_class
+    _DRIVER_CLASS = get_driver_class()
+except ImportError:
+    _DRIVER_CLASS = None
+
 REPO = BIN.parent
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
 
@@ -128,6 +136,8 @@ TOOLS = {
 
 
 class Picker(App):
+    # Use Apple Terminal safe driver when available (TERM_PROGRAM=Apple_Terminal on Unix)
+    driver_class = _DRIVER_CLASS
     CSS = """
     Screen { layout: vertical; }
     #title { text-style: bold; padding: 0 1; }
