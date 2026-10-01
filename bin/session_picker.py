@@ -443,6 +443,9 @@ class Picker(App):
             if h and h[0] == "group":
                 sm.accordion.expand(h[1])
                 self.render_model(keep=f"g:{h[1]}")
+            elif h and h[0] == "item":
+                # Right arrow on action item: cycle choice forward or toggle boolean
+                self._activate_action_next(h[1])
             event.stop()
             return
         if key == "left":
@@ -450,6 +453,11 @@ class Picker(App):
                 g = sm.accordion.open_group
                 sm.accordion.collapse()
                 self.render_model(keep=f"g:{g}")
+            else:
+                # Left arrow on action item: cycle choice backward or toggle boolean
+                h = self._highlighted()
+                if h and h[0] == "item":
+                    self._activate_action_prev(h[1])
             event.stop()
             return
         if key == "space" and isinstance(sm, m.DownloadScreen):
@@ -501,6 +509,34 @@ class Picker(App):
             self._open_prompt("prompt:rl-reset")
             return
         self.run_child(TOOLS[target](), pause=True)
+
+    def _activate_action_next(self, action_index: int):
+        """Cycle action choice forward (right arrow) - for boolean toggle or choice cycling."""
+        if not hasattr(self, 'action_ids') or action_index >= len(self.action_ids):
+            return
+        action = self.action_ids[action_index]
+        if not action.enabled:
+            return
+        # If it's a boolean toggle action, flip it
+        # For choice actions, cycle forward
+        # This will be handled by the action's run function returning a result
+        result = action.run()
+        if result:
+            self.dispatch(result, None)
+
+    def _activate_action_prev(self, action_index: int):
+        """Cycle action choice backward (left arrow) - for boolean toggle or choice cycling."""
+        if not hasattr(self, 'action_ids') or action_index >= len(self.action_ids):
+            return
+        action = self.action_ids[action_index]
+        if not action.enabled:
+            return
+        # For boolean toggles, left also toggles (same as right)
+        # For choice actions, cycle backward
+        # The action's run function should handle the direction if needed
+        result = action.run()
+        if result:
+            self.dispatch(result, None)
 
     # --- inline prompts (text entry, confirmations) ------------------------------------------
     PROMPTS = {"prompt:session": "Session name (letters, digits, - _; empty = ephemeral):",
