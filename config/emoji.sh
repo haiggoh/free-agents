@@ -29,6 +29,9 @@ EMOJI_TOOLS="🔧"
 EMOJI_MODEL_CHOICE="⚙️ " # was 🔆 (sun) — changed to gear
 EMOJI_MCP="🔌"
 
+# NVIDIA rate limiter emoji
+EMOJI_NVIDIA_RATE_LIMITER="🚦"
+
 # Lowkey picker emojis (shared with csl for consistency) — LK_ prefix for lowkey namespace
 LK_EMOJI_MODEL="${SESSION_EMOJI_LOCAL}"        # links to SESSION_EMOJI_LOCAL (single source of truth)
 LK_EMOJI_EFFORT="⚙️ "

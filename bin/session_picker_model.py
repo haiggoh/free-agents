@@ -282,9 +282,9 @@ def _common_toggles(s: Settings, include_watcher: bool):
 
 
 def _tool_actions():
-    return [Action("k", "API keys — install / set up", lambda: Nav("tool:keys"), section="tools"),
-            Action("v", "Rapid-MLX runtime manager", lambda: Nav("tool:runtime"), section="tools"),
-            Action("n", "NVIDIA rate limiter", lambda: Nav("rate_limiter"), section="tools")]
+    return [Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("tool:keys"), section="tools"),
+            Action("v", f"{ec.EMOJI_TOOLS_STR} Rapid-MLX runtime manager", lambda: Nav("tool:runtime"), section="tools"),
+            Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section="tools")]
 
 
 class HomeScreen(Screen):
