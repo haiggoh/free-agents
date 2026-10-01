@@ -16,8 +16,26 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Import managers to trigger registration via @register_manager decorator
-import managers.rapid_mlx  # noqa: F401
-import managers.vllm_mlx  # noqa: F401
+try:
+    import managers.rapid_mlx  # noqa: F401
+except ImportError:
+    pass
+try:
+    import managers.vllm_mlx  # noqa: F401
+except ImportError:
+    pass
+try:
+    import managers.omlx  # noqa: F401
+except ImportError:
+    pass
+try:
+    import managers.llama_cpp  # noqa: F401
+except ImportError:
+    pass
+try:
+    import managers.litellm  # noqa: F401
+except ImportError:
+    pass
 
 from managers import (
     BackendManager,
@@ -33,48 +51,59 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--home", type=Path, help=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="print the plan without executing"
-    )
-    parser.add_argument(
-        "--backend", choices=list_managers(), help="backend to manage (required for subcommands)"
-    )
+        epilog=f"""
+Available backends: {', '.join(list_managers())}
 
-    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+Examples:
+  manage-backend.py --backend rapid-mlx list
+  manage-backend.py --backend vllm-mlx releases --limit 10
+  manage-backend.py --backend omlx install 0.7.0
+  manage-backend.py --backend rapid-mlx check-updates
+  manage-backend.py --backend rapid-mlx promote 0.15.3
+  manage-backend.py --backend litellm install 1.60.0
+        """.strip(),
+    )
+    parser.add_argument("--home", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--dry-run", action="store_true", help="print the plan without executing")
+    parser.add_argument("--backend", choices=list_managers(), required=True, help="backend to manage")
+    parser.add_argument("--json", action="store_true", help="output JSON instead of text")
+
+    sub = parser.add_subparsers(dest="command", required=True, help="Command to run")
 
     # list command
-    sub.add_parser("list", help="list all registered backends")
+    sub.add_parser("list", help="list installed versions")
 
     # releases command
-    releases = sub.add_parser("releases", help="list installable releases for a backend")
-    releases.add_argument("--pre", action="store_true", help="include prereleases")
-    releases.add_argument("--limit", type=int, default=20, help="max releases to show")
-
-    # installed command
-    sub.add_parser("installed", help="list local versioned environments for a backend")
+    rel_p = sub.add_parser("releases", help="list available releases")
+    rel_p.add_argument("--pre", action="store_true", help="include prereleases")
+    rel_p.add_argument("--limit", type=int, default=20)
 
     # install command
-    install_p = sub.add_parser("install", help="install/validate a release")
-    install_p.add_argument("version", nargs="?", help="version to install (omit for interactive)")
-    install_p.add_argument("--pre", action="store_true", help="offer prereleases in picker")
-    install_p.add_argument("--python", help="base Python executable")
-    install_p.add_argument("--refresh-deps", action="store_true", help="ignore existing recreation lock")
-    install_p.add_argument("--skip-pin-update", action="store_true", help="install without promoting pins")
+    inst_p = sub.add_parser("install", help="install a version")
+    inst_p.add_argument("version", nargs="?", help="version to install (interactive if omitted)")
+    inst_p.add_argument("--python", help="base Python executable")
+    inst_p.add_argument("--refresh-deps", action="store_true", help="ignore existing lock file")
+    inst_p.add_argument("--source", choices=["pypi", "github"], default="pypi", help="install source (vllm-mlx)")
 
     # validate command
-    validate_p = sub.add_parser("validate", help="validate an installed environment")
-    validate_p.add_argument("version", help="version to validate")
+    val_p = sub.add_parser("validate", help="validate an installed version")
+    val_p.add_argument("version")
 
-    # updates command
-    sub.add_parser("updates", help="check for available package updates")
+    # check-updates command
+    chk_p = sub.add_parser("check-updates", help="check for package updates")
+
+    # promote command (for backends that support pin promotion)
+    prom_p = sub.add_parser("promote", help="promote pins to a version")
+    prom_p.add_argument("version")
+
+    # remove command
+    rem_p = sub.add_parser("remove", help="remove an installed version")
+    rem_p.add_argument("version")
+    rem_p.add_argument("--yes", action="store_true", help="skip confirmation")
 
     # info command
-    info_p = sub.add_parser("info", help="show backend info")
-    info_p.add_argument("version", nargs="?", help="version to inspect (default: latest installed)")
+    info_p = sub.add_parser("info", help="show detailed info about a version")
+    info_p.add_argument("version")
 
     return parser
 
