@@ -2,6 +2,35 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.0] — 2026-10-01
+
+### Added — Unified Backend Management with Launchd Integration
+
+- **Unified Backend Manager** (`install/manage-backend.py`): Single CLI to manage all inference backends (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) with consistent subcommands: `list`, `releases`, `installed`, `install`, `validate`, `check-updates`, `promote`, `remove`, `info`, `launchd`.
+- **Launchd Integration** for automatic weekly backend update checks: `manage-backend.py --backend <name> launchd {install,uninstall,status,run-once}`. Installs a launchd plist running weekly (Mon 10:17 AM) that checks PyPI/GitHub/Homebrew for backend updates and shows macOS notifications.
+- **Interactive csl Menu Integration**: Launchd management available from home menu (`L` key) and local picker (`L` key) with submenu for install/uninstall/status/run-once.
+- **Updated `install-backend.sh`**: Canonical installer now sets up all backends (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) via unified CLI, with `--all`, `--backend`, `--dry-run` flags.
+- **Consolidated Update Checks**: New `scripts/check_backend_updates.py` and `scripts/check-backend-updates.sh` replace the old `local-stack-update-check.sh`, checking all backends (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) via unified CLI with JSON logging and macOS notifications.
+- **Launchd Management in csl**: New `launchd` submenu accessible via `L` key in both home menu and local picker, offering install/uninstall/status/run-once options.
+- **Unified Config Integration**: Updated `config/config-lib.sh` with `la_discover_backend_binary()` using unified CLI, and `config/config.example.sh` documents all backend configuration options.
+
+### Changed
+
+- **Refactored Rapid-MLX Manager**: `install/manage-rapid-mlx.py` refactored into `install/managers/rapid_mlx.py` with full feature parity; old script now a thin wrapper for backward compatibility.
+- **New Backend Managers**: Added `VLLMMLXManager` (PyPI/GitHub sources, patch handling), `OMLXManager` (Homebrew/GitHub), `LlamaCppManager` (GitHub binary releases), `LitellmManager` (proxy management).
+- **Unified Backend Abstraction**: New `BackendManager` ABC in `install/managers/base.py` with registry pattern; all managers inherit and implement required interface.
+- **Unified CLI Entry Point**: New `install/manage-backend.py` replaces fragmented management scripts.
+- **Consolidated Update Scripts**: `scripts/check-backend-updates.py` replaces `local-stack-update-check.sh`; `scripts/daily-package-upgrade.sh` simplified (Homebrew + pipx only).
+- **Launchd Plist**: New `install/launchd/com.haiggoh.backend-update-check.plist` replaces old `local-stack-update-check.plist`.
+- **Config Updates**: `config-lib.sh` adds unified backend discovery; `config.example.sh` documents all backend config options.
+
+### Fixed
+
+- Version bump to 0.21.0 across VERSION, plugin.json, and CHANGELOG.
+- Updated plugin.json version to 0.21.0 in both main repo and worktree.
+
+---
+
 ## [0.20.11] — 2026-10-01
 
 ### Fixed — NVIDIA free-API sessions died with misleading "Connection refused" on upstream 429/overload
