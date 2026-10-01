@@ -24,6 +24,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
@@ -50,6 +51,9 @@ try:
     _DRIVER_CLASS = get_driver_class()
 except ImportError:
     _DRIVER_CLASS = None
+
+# Loading indicator delay threshold (200ms per performance amendment)
+LOADING_INDICATOR_DELAY_S = 0.2
 
 REPO = BIN.parent
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
@@ -170,6 +174,9 @@ class Picker(App):
         self.screen_model: m.Screen | None = None
         self.cache: dict = {}
         self.pending_prompt = None
+        # Loading indicator state
+        self._pending_op_timer: float | None = None
+        self._pending_op_id: int = 0
 
     # --- persistence -----------------------------------------------------------------------
     def _config_dir(self):
@@ -184,6 +191,26 @@ class Picker(App):
         warning = sms.save_rate_limiter(self._config_dir(), values)
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
+
+    # --- loading indicator ---------------------------------------------------------------------
+    def _start_pending_op(self) -> int:
+        """Start a pending operation timer. Returns operation ID."""
+        self._pending_op_id += 1
+        self._pending_op_timer = time.perf_counter()
+        return self._pending_op_id
+
+    def _check_pending_op(self, op_id: int) -> bool:
+        """Check if pending operation has exceeded delay threshold.
+        Returns True if should show loading indicator."""
+        if self._pending_op_timer is None or self._pending_op_id != op_id:
+            return False
+        elapsed = time.perf_counter() - self._pending_op_timer
+        return elapsed >= LOADING_INDICATOR_DELAY_S
+
+    def _clear_pending_op(self, op_id: int) -> None:
+        """Clear pending operation timer."""
+        if self._pending_op_id == op_id:
+            self._pending_op_timer = None
 
     # --- layout ----------------------------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -229,6 +256,11 @@ class Picker(App):
         policy = getattr(sm, "policy", "")
         if isinstance(sm, m.RemoteScreen) and sm.hidden_count():
             policy += f"  ({sm.hidden_count()} hidden by filters)"
+        # Check if any pending operation has exceeded the loading indicator delay
+        if self._pending_op_timer is not None:
+            elapsed = time.perf_counter() - self._pending_op_timer
+            if elapsed >= LOADING_INDICATOR_DELAY_S:
+                policy += "  ⏳ loading…"
         self.query_one("#policy", Static).update(policy)
         rows = self.query_one("#rows", OptionList)
         rows.clear_options()
