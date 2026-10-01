@@ -2,6 +2,21 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.9] — 2026-10-01
+
+### Fixed — `local-inference-readonly-inventory.zsh` ignored `--help` and ran
+
+- The first argument was taken as the report directory unconditionally, so `--help` ran a full
+  inventory into a new `./--help/` directory. Arguments are now parsed before any work:
+  `-h/--help` prints usage (options + environment variables), `-n/--dry-run` prints the target
+  directory and the section list derived from the script itself and writes nothing, `--` ends
+  options, unknown options and extra positionals exit 2 with a usage line on stderr.
+- New `tests/test_inventory_cli.sh` (16 assertions, temp `HOME`, never runs a real inventory);
+  mutation-tested: breaking the `--help` branch fails 3 assertions.
+- New `docs/READONLY_INVENTORY.md`: purpose, origin, options, collected sections, report files,
+  safety boundary. README Diagnostics row and "What's in the box" link to it.
+- Manifest version catches up: the manifest still said 0.20.7 at the 0.20.8 tag.
+
 ## [0.20.8] — 2026-09-30
 
 ### Improved — Stop hook output formatting with 🪝 emoji and collapsible content
