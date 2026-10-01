@@ -2,6 +2,16 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.20.11] — 2026-10-01
+
+### Fixed — NVIDIA free-API sessions died with misleading "Connection refused" on upstream 429/overload
+
+- Root cause: NVIDIA free tier (~40 RPM dynamic) returns 429/503 "Service temporarily overloaded" on bursts; LiteLLM proxy surfaced this as "Connection refused — a firewall or proxy may be blocking it" (ECONNREFUSED), killing the session on first request.
+- `rate_limiter.py`: Exponential backoff on 429 (30s→60s→120s→240s capped at 300s). New defaults: `LA_NVIDIA_429_COOLDOWN=30`, `LA_NVIDIA_MAX_WAIT=300`. Auto-reset when cooldown expires naturally or on successful acquire. Interactive menu updated.
+- `la_proxy_hooks.py`: Machine-wide 429 cooldown pauses ALL proxies on the box; books hidden SDK retries (2 per call).
+- `remote-session.sh`: Added `num_retries: 3` for NVIDIA/Gemini/Groq providers. Removed `retry_after` (causes 400 BadRequestError on NVIDIA NIM).
+- Waypoints `nvidia-429s-still-hit-with-2` and `nvidia-free-api-no-quota-cap` closed; new waypoint for connection-refused fix added and closed.
+
 ## [0.20.10] — 2026-10-01
 
 ### Fixed — remote sessions could not push to GitHub (`could not read Username`)
