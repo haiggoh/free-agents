@@ -24,6 +24,10 @@ CSL_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 WATCHER="$CSL_DIR/local-watch.sh"
 
+# Source emoji constants for dry-run output (single source of truth)
+# shellcheck source=../config/emoji.sh
+. "$CSL_DIR/../config/emoji.sh"
+
 # Argument parsing BEFORE any work (must support --help/--dry-run without side effects)
 # Parse all leading flags first, then handle subcommands/passthrough
 while [[ $# -gt 0 ]]; do
@@ -405,7 +409,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     echo "  ⚠ Using public fallback defaults (private models not present)"
   fi
   echo
-  echo "Local session models (on disk, session-capable):"
+  echo "${SESSION_EMOJI_LOCAL}  Local session models (on disk, session-capable):"
   for a in "${LA_ALIASES[@]}"; do
     case "${LA_SERVE[$a]:-}" in
       rapid|vllm)
@@ -436,7 +440,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     esac
   done
   echo
-  echo "Remote session agents: (run 'csl remote --list' for full roster)"
+  echo "${SESSION_EMOJI_FREE_API}  Remote session agents: (run 'csl remote --list' for full roster)"
   echo "  Provider roster loaded from config"
   echo "  Local-capable filter: $([ "$LOCAL_CAPABLE" = "1" ] && echo "SHOWN" || echo "HIDDEN (default)")"
   echo "  Trial inclusion: $([ "${INCLUDE_TRIALS:-0}" = "1" ] && echo "INCLUDED" || echo "EXCLUDED (default)")"

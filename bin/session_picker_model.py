@@ -349,13 +349,13 @@ class LocalScreen(Screen):
         s = self.settings
         mcp_ok = s.auto_mode == 0
         acts = [
-            Action("e", f"⚙️ Effort: {s.local_effort}", self._cycle_effort),
-            Action("s", "📡 Switch to Remote free API sessions",
+            Action("e", f"⚙️  Effort: {s.local_effort}", self._cycle_effort),
+            Action("s", "📡  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
-            Action("r", "📡 Remote free API sessions", lambda: Nav("remote", self.owner),
+            Action("r", "📡  Remote free API sessions", lambda: Nav("remote", self.owner),
                    section="hidden"),
-            Action("m", (f"🔌 MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
-                         "🔌 MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
+            Action("m", (f"🔌  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
+                         "🔌  MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
                    lambda: setattr(s, "enable_mcp", not s.enable_mcp), enabled=mcp_ok),
         ]
         # Add "Launch last model" if we have a saved last model
