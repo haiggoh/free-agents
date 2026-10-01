@@ -218,7 +218,7 @@ class Picker(App):
             yield Static("", id="title")
             yield Static("", id="policy")
             yield OptionList(id="rows")
-            yield Static("", id="actions")
+            yield OptionList(id="actions")
             yield Input(id="prompt")
             yield Static("", id="status")
 
@@ -283,13 +283,20 @@ class Picker(App):
                 if rows.get_option_at_index(idx).id == target:
                     rows.highlighted = idx
                     break
-        lines = []
+
+        # Build actions list in the actions OptionList
+        actions_list = self.query_one("#actions", OptionList)
+        actions_list.clear_options()
+        self.action_ids = []  # Track action IDs for keyboard navigation
         for a in sm.actions():
             if a.section == "hidden":
                 continue
             label = a.label if a.enabled else f"{a.label}"
-            lines.append(f"  {a.key}) {label}" + ("" if a.enabled else "  —"))
-        self.query_one("#actions", Static).update("\n".join(lines))
+            # Store action object reference
+            self.action_ids.append(a)
+            enabled_str = "" if a.enabled else "  —"
+            actions_list.add_option(Option(f"  {a.key}) {label}{enabled_str}", id=f"a:{len(self.action_ids)-1}"))
+
         status = "  ↑↓ move · Enter open/launch · ← collapse"
         if isinstance(sm, m.DownloadScreen):
             status = "  ↑↓ move · Space/Enter queue · c review"
@@ -306,12 +313,31 @@ class Picker(App):
         return self.row_ids[idx]
 
     def on_option_list_option_highlighted(self, event):
-        h = self._highlighted()
-        if h and h[0] == "item":
-            self.screen_model.accordion.selected_id = h[1]
+        # Handle both rows and actions highlighting
+        if event.option_list.id == "rows":
+            h = self._highlighted()
+            if h and h[0] == "item":
+                self.screen_model.accordion.selected_id = h[1]
+        elif event.option_list.id == "actions":
+            # Update status to show action description
+            pass
 
     def on_option_list_option_selected(self, event):
-        self.enter()
+        if event.option_list.id == "rows":
+            self.enter()
+        elif event.option_list.id == "actions":
+            self._activate_action(event.option_index)
+
+    def _activate_action(self, action_index: int):
+        """Activate an action from the actions list."""
+        if not hasattr(self, 'action_ids') or action_index >= len(self.action_ids):
+            return
+        action = self.action_ids[action_index]
+        if not action.enabled:
+            return
+        result = action.run()
+        if result:
+            self.dispatch(result, None)
 
     def enter(self):
         h = self._highlighted()
