@@ -10,6 +10,13 @@ Two modes for NVIDIA's 40 RPM free tier:
    at rpm/60 tokens per second. Same 40 RPM average but smoother: small bursts allowed,
    then steady ~1.5s between requests. Prevents "all 40 then wait 60s" experience.
 
+EXPONENTIAL BACKOFF FOR 429s (new in 0.20.x). When NVIDIA returns 429:
+- 1st 429: base_cooldown (30s)
+- 2nd 429: base_cooldown * multiplier (60s)
+- 3rd 429: base_cooldown * multiplier^2 (120s)
+- etc., capped at max_cooldown (300s)
+Resets on successful request. This prevents hammering an already-overloaded endpoint.
+
 WHY FILE-BACKED. NVIDIA's free tier allows 40 requests per minute per key, and every remote
 session runs its own LiteLLM proxy in its own process. A limiter held in memory throttles one
 proxy and lets three proxies send 120 RPM between them -- which is how one proxy log alone
@@ -39,15 +46,19 @@ upstream attempts the caller could not see (see la_proxy_hooks.SDK_HIDDEN_RETRIE
 Usage:
   rate_limiter.py acquire [--max-wait S]  take one slot, waiting if needed; prints the wait
   rate_limiter.py status                  print the current window state, take nothing
+  rate_limiter.py menu                    interactive configuration menu
   rate_limiter.py --help
 
 Environment:
-  LA_NVIDIA_THROTTLE_STATE  state file (default ~/.claude/local-agents/.nvidia_throttle_state)
-  LA_NVIDIA_RPM             requests allowed per minute (default 40)
-  LA_NVIDIA_MODE            "sliding_window" (default) or "smooth_bucket"
-  LA_NVIDIA_BUCKET_CAPACITY burst capacity for smooth_bucket mode (default 6)
-  LA_NVIDIA_MAX_WAIT        seconds a caller may queue before giving up (default 120)
-  LA_NVIDIA_429_COOLDOWN    seconds every proxy pauses after a 429 with no Retry-After (default 10)
+  LA_NVIDIA_THROTTLE_STATE    state file (default ~/.claude/local-agents/.nvidia_throttle_state)
+  LA_NVIDIA_RPM               requests allowed per minute (default 40)
+  LA_NVIDIA_MODE              "sliding_window" (default) or "smooth_bucket"
+  LA_NVIDIA_BUCKET_CAPACITY   burst capacity for smooth_bucket mode (default 6)
+  LA_NVIDIA_MAX_WAIT          seconds a caller may queue before giving up (default 300)
+  LA_NVIDIA_429_COOLDOWN      base cooldown seconds after a 429 (default 30)
+  LA_NVIDIA_429_MAX_COOLDOWN  max cooldown seconds (cap for exponential backoff, default 300)
+  LA_NVIDIA_429_BACKOFF_MULTIPLIER  exponential backoff multiplier (default 2.0)
+  LA_NVIDIA_429_MAX_RETRIES   max retry attempts before giving up (default 5)
 
 Exit codes: 0 ok; 2 usage error; 3 timed out waiting for a slot.
 """
@@ -66,6 +77,12 @@ DEFAULT_STATE = Path.home() / ".claude" / "local-agents" / ".nvidia_throttle_sta
 WINDOW_SECONDS = 60.0
 DEFAULT_BUCKET_CAPACITY = 6  # Small capacity for smooth limiting
 
+# Exponential backoff configuration for 429 handling
+DEFAULT_429_BASE_COOLDOWN = 30.0      # Base cooldown seconds (was 10)
+DEFAULT_429_MAX_COOLDOWN = 300.0      # Max cooldown seconds (was 120 max_wait)
+DEFAULT_429_BACKOFF_MULTIPLIER = 2.0  # Exponential backoff multiplier
+DEFAULT_429_MAX_RETRIES = 5           # Max retry attempts before giving up
+
 
 class RateLimitTimeout(Exception):
     """No slot became available within max_wait."""
@@ -77,6 +94,10 @@ class SmoothTokenBucket:
     Same average rate as sliding window (40 RPM = 0.667 tokens/sec) but with
     small capacity (default 6) allowing small bursts without the "all 40 then wait 60s"
     experience of a strict sliding window.
+
+    Implements exponential backoff for 429 errors:
+    - Tracks consecutive 429s and increases cooldown exponentially
+    - Resets backoff on successful requests
     """
     def __init__(self, path: Path | str | None = None, rpm: float | None = None,
                  capacity: int | None = None, clock=time.time, cooldown: float | None = None):
@@ -84,12 +105,19 @@ class SmoothTokenBucket:
         self.rate = float(rpm or os.environ.get("LA_NVIDIA_RPM") or 40) / 60.0  # tokens/sec
         self.capacity = int(capacity if capacity is not None
                            else os.environ.get("LA_NVIDIA_BUCKET_CAPACITY") or DEFAULT_BUCKET_CAPACITY)
-        self.cooldown = float(cooldown if cooldown is not None
-                              else os.environ.get("LA_NVIDIA_429_COOLDOWN") or 10)
+        # Exponential backoff config
+        self.base_cooldown = float(cooldown if cooldown is not None
+                                   else os.environ.get("LA_NVIDIA_429_COOLDOWN") or DEFAULT_429_BASE_COOLDOWN)
+        self.max_cooldown = float(os.environ.get("LA_NVIDIA_429_MAX_COOLDOWN") or DEFAULT_429_MAX_COOLDOWN)
+        self.backoff_multiplier = float(os.environ.get("LA_NVIDIA_429_BACKOFF_MULTIPLIER") or DEFAULT_429_BACKOFF_MULTIPLIER)
+        self.max_retries = int(os.environ.get("LA_NVIDIA_429_MAX_RETRIES") or DEFAULT_429_MAX_RETRIES)
         self._clock = clock
         self._tokens = float(self.capacity)
         self._last_refill = clock()
         self._cooldown_until = 0.0
+        # Exponential backoff state
+        self._consecutive_429s = 0
+        self._last_429_time = 0.0
         self._load()
 
     def _load(self):
@@ -103,14 +131,19 @@ class SmoothTokenBucket:
                     self._tokens = float(self.capacity)
                     self._last_refill = self._clock()
                     self._cooldown_until = 0.0
+                    self._consecutive_429s = 0
                 else:
                     self._tokens = float(data.get('tokens', self.capacity))
                     self._last_refill = float(data.get('last_refill', self._clock()))
                     self._cooldown_until = float(data.get('cooldown_until', 0.0))
+                    self._consecutive_429s = int(data.get('consecutive_429s', 0))
+                    self._last_429_time = float(data.get('last_429_time', 0.0))
             except Exception:
                 self._tokens = float(self.capacity)
                 self._last_refill = self._clock()
                 self._cooldown_until = 0.0
+                self._consecutive_429s = 0
+                self._last_429_time = 0.0
 
     def _save(self):
         data = {
@@ -118,7 +151,9 @@ class SmoothTokenBucket:
             'last_refill': self._last_refill,
             'capacity': self.capacity,
             'rate': self.rate,
-            'cooldown_until': self._cooldown_until
+            'cooldown_until': self._cooldown_until,
+            'consecutive_429s': self._consecutive_429s,
+            'last_429_time': self._last_429_time
         }
         # Atomic write
         tmp = self.path.with_suffix('.tmp')
@@ -138,12 +173,19 @@ class SmoothTokenBucket:
 
         Reads state from file on EVERY call (like SlidingWindowLimiter) so concurrent
         processes see each other's token consumption immediately.
+        Resets exponential backoff on successful acquisition OR when cooldown expires naturally.
         """
         fd = self._locked()
         try:
             now = self._clock()
             # Read current state from file (handles concurrent updates)
             self._load_state(fd, now)
+
+            # Check if cooldown expired naturally - if so, reset backoff
+            if self._cooldown_until > 0 and now >= self._cooldown_until:
+                self._consecutive_429s = 0
+                self._last_429_time = 0.0
+                self._cooldown_until = 0.0
 
             if now < self._cooldown_until:
                 self._save_state(fd)
@@ -152,6 +194,9 @@ class SmoothTokenBucket:
             self._refill(now)
             if self._tokens >= 1.0:
                 self._tokens -= 1.0
+                # SUCCESS: Reset exponential backoff counter
+                self._consecutive_429s = 0
+                self._last_429_time = 0.0
                 self._save_state(fd)
                 return 0.0
             # Time until next token
@@ -171,10 +216,14 @@ class SmoothTokenBucket:
             self._tokens = float(state.get('tokens', self.capacity))
             self._last_refill = float(state.get('last_refill', now))
             self._cooldown_until = float(state.get('cooldown_until', 0.0))
+            self._consecutive_429s = int(state.get('consecutive_429s', 0))
+            self._last_429_time = float(state.get('last_429_time', 0.0))
         except Exception:
             self._tokens = float(self.capacity)
             self._last_refill = now
             self._cooldown_until = 0.0
+            self._consecutive_429s = 0
+            self._last_429_time = 0.0
         # Refill based on elapsed since last_refill
         elapsed = now - self._last_refill
         if elapsed > 0:
@@ -187,7 +236,9 @@ class SmoothTokenBucket:
             'last_refill': self._last_refill,
             'capacity': self.capacity,
             'rate': self.rate,
-            'cooldown_until': self._cooldown_until
+            'cooldown_until': self._cooldown_until,
+            'consecutive_429s': self._consecutive_429s,
+            'last_429_time': self._last_429_time
         }).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
@@ -200,19 +251,42 @@ class SmoothTokenBucket:
         return fd
 
     def note_429(self, retry_after: float | None = None, hidden_attempts: int = 0) -> dict:
-        """Record an upstream 429: pause every proxy."""
+        """Record an upstream 429: pause every proxy with exponential backoff.
+
+        Tracks consecutive 429s and increases cooldown exponentially:
+        - 1st 429: base_cooldown (30s)
+        - 2nd 429: base_cooldown * multiplier (60s)
+        - 3rd 429: base_cooldown * multiplier^2 (120s)
+        - etc., capped at max_cooldown (300s)
+        Resets on successful request acquisition.
+        """
         fd = self._locked()
         try:
             now = self._clock()
             self._load_state(fd, now)
             # Book hidden attempts
             self._tokens = max(0.0, self._tokens - float(hidden_attempts))
-            pause = float(retry_after) if retry_after and retry_after > 0 else self.cooldown
+
+            # Exponential backoff: increase consecutive_429s, calculate cooldown
+            self._consecutive_429s += 1
+            # If it's been a while since last 429, reset backoff (session recovered)
+            if now - self._last_429_time > self.max_cooldown:
+                self._consecutive_429s = 1
+
+            # Calculate exponential backoff
+            backoff_cooldown = self.base_cooldown * (self.backoff_multiplier ** (self._consecutive_429s - 1))
+            backoff_cooldown = min(backoff_cooldown, self.max_cooldown)
+
+            # Use Retry-After if provided, otherwise use exponential backoff
+            pause = float(retry_after) if retry_after and retry_after > 0 else backoff_cooldown
             self._cooldown_until = max(self._cooldown_until, now + pause)
+            self._last_429_time = now
+
             self._save_state(fd)
             # Estimate requests in window: capacity - current tokens + hidden attempts booked
             in_window = int(self.capacity - self._tokens + hidden_attempts)
-            return {"in_window": in_window, "limit": int(self.rate * 60), "pause": pause}
+            return {"in_window": in_window, "limit": int(self.rate * 60), "pause": pause,
+                    "consecutive_429s": self._consecutive_429s, "backoff_cooldown": backoff_cooldown}
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -253,7 +327,11 @@ class SmoothTokenBucket:
                 "rate_per_sec": round(self.rate, 3),
                 "rpm_equiv": round(self.rate * 60, 1),
                 "cooldown_remaining": round(max(0.0, self._cooldown_until - now), 3),
-                "mode": "smooth_bucket"
+                "mode": "smooth_bucket",
+                "consecutive_429s": self._consecutive_429s,
+                "base_cooldown": self.base_cooldown,
+                "max_cooldown": self.max_cooldown,
+                "backoff_multiplier": self.backoff_multiplier
             }
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
@@ -265,9 +343,16 @@ class SlidingWindowLimiter:
                  clock=time.time, cooldown: float | None = None):
         self.path = Path(path or os.environ.get("LA_NVIDIA_THROTTLE_STATE") or DEFAULT_STATE)
         self.limit = int(float(rpm or os.environ.get("LA_NVIDIA_RPM") or 40))
-        self.cooldown = float(cooldown if cooldown is not None
-                              else os.environ.get("LA_NVIDIA_429_COOLDOWN") or 10)
+        # Exponential backoff config
+        self.base_cooldown = float(cooldown if cooldown is not None
+                                   else os.environ.get("LA_NVIDIA_429_COOLDOWN") or DEFAULT_429_BASE_COOLDOWN)
+        self.max_cooldown = float(os.environ.get("LA_NVIDIA_429_MAX_COOLDOWN") or DEFAULT_429_MAX_COOLDOWN)
+        self.backoff_multiplier = float(os.environ.get("LA_NVIDIA_429_BACKOFF_MULTIPLIER") or DEFAULT_429_BACKOFF_MULTIPLIER)
+        self.max_retries = int(os.environ.get("LA_NVIDIA_429_MAX_RETRIES") or DEFAULT_429_MAX_RETRIES)
         self._clock = clock
+        # Exponential backoff state
+        self._consecutive_429s = 0
+        self._last_429_time = 0.0
 
     def _locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,26 +360,31 @@ class SlidingWindowLimiter:
         fcntl.flock(fd, fcntl.LOCK_EX)
         return fd
 
-    def _read(self, fd: int, now: float) -> tuple[list[float], float]:
+    def _read(self, fd: int, now: float) -> tuple[list[float], float, int, float]:
         os.lseek(fd, 0, os.SEEK_SET)
         raw = os.read(fd, 65536)
         try:
             state = json.loads(raw) if raw else {}
-            stamps = [float(s) for s in state["stamps"]]
+            stamps = [float(s) for s in state.get("stamps", [])]
             cooldown_until = float(state.get("cooldown_until", 0.0))
+            consecutive_429s = int(state.get("consecutive_429s", 0))
+            last_429_time = float(state.get("last_429_time", 0.0))
         except Exception:
             # A missing, corrupt or old-format (token bucket) file starts EMPTY: the safe
             # failure is one extra window, never a permanently full one that wedges every session.
-            return [], 0.0
+            return [], 0.0, 0, 0.0
         # A stamp in the future (clock step) is treated as now, so a skewed clock can hold a
         # slot for at most one window, never forever.
         stamps = [min(s, now) for s in stamps if s > now - WINDOW_SECONDS]
         stamps.sort()
-        return stamps, cooldown_until
+        return stamps, cooldown_until, consecutive_429s, last_429_time
 
-    def _write(self, fd: int, stamps: list[float], cooldown_until: float) -> None:
+    def _write(self, fd: int, stamps: list[float], cooldown_until: float,
+           consecutive_429s: int = 0, last_429_time: float = 0.0) -> None:
         data = json.dumps({"stamps": stamps, "cooldown_until": cooldown_until,
-                           "limit": self.limit}).encode()
+                           "limit": self.limit,
+                           "consecutive_429s": consecutive_429s,
+                           "last_429_time": last_429_time}).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
         os.write(fd, data)
@@ -304,19 +394,32 @@ class SlidingWindowLimiter:
 
         The whole read-prune-append-write runs under one exclusive lock, so two processes can
         never both take the last slot.
+        Resets exponential backoff on successful acquisition OR when cooldown expires naturally.
         """
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time = self._read(fd, now)
+            self._consecutive_429s = consecutive_429s
+            self._last_429_time = last_429_time
+
+            # Check if cooldown expired naturally - if so, reset backoff
+            if cooldown_until > 0 and now >= cooldown_until:
+                consecutive_429s = 0
+                last_429_time = 0.0
+                cooldown_until = 0.0
+
             if now < cooldown_until:
-                self._write(fd, stamps, cooldown_until)
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time)
                 return cooldown_until - now
             if len(stamps) < self.limit:
                 stamps.append(now)
-                self._write(fd, stamps, cooldown_until)
+                # SUCCESS: Reset exponential backoff counter
+                self._consecutive_429s = 0
+                self._last_429_time = 0.0
+                self._write(fd, stamps, cooldown_until, 0, 0.0)
                 return 0.0
-            self._write(fd, stamps, cooldown_until)
+            self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time)
             # The oldest request leaves the window first; wait for exactly that.
             return max(1e-3, stamps[-self.limit] + WINDOW_SECONDS - now)
         finally:
@@ -324,7 +427,14 @@ class SlidingWindowLimiter:
             os.close(fd)
 
     def note_429(self, retry_after: float | None = None, hidden_attempts: int = 0) -> dict:
-        """Record an upstream 429: pause every proxy. Returns the window state at that moment.
+        """Record an upstream 429: pause every proxy with exponential backoff.
+
+        Tracks consecutive 429s and increases cooldown exponentially:
+        - 1st 429: base_cooldown (30s)
+        - 2nd 429: base_cooldown * multiplier (60s)
+        - 3rd 429: base_cooldown * multiplier^2 (120s)
+        - etc., capped at max_cooldown (300s)
+        Resets on successful request acquisition.
 
         hidden_attempts: upstream requests that were sent but never passed through acquire()
         (the OpenAI SDK's own retries inside one LiteLLM call). NVIDIA counted them, so the
@@ -333,12 +443,29 @@ class SlidingWindowLimiter:
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time = self._read(fd, now)
+
+            # Book hidden attempts
             stamps.extend([now] * max(0, int(hidden_attempts)))
-            pause = float(retry_after) if retry_after and retry_after > 0 else self.cooldown
+
+            # Exponential backoff: increase consecutive_429s, calculate cooldown
+            consecutive_429s += 1
+            # If it's been a while since last 429, reset backoff (session recovered)
+            if now - last_429_time > self.max_cooldown:
+                consecutive_429s = 1
+
+            # Calculate exponential backoff
+            backoff_cooldown = self.base_cooldown * (self.backoff_multiplier ** (consecutive_429s - 1))
+            backoff_cooldown = min(backoff_cooldown, self.max_cooldown)
+
+            # Use Retry-After if provided, otherwise use exponential backoff
+            pause = float(retry_after) if retry_after and retry_after > 0 else backoff_cooldown
             cooldown_until = max(cooldown_until, now + pause)
-            self._write(fd, stamps, cooldown_until)
-            return {"in_window": len(stamps), "limit": self.limit, "pause": pause}
+            last_429_time = now
+
+            self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time)
+            return {"in_window": len(stamps), "limit": self.limit, "pause": pause,
+                    "consecutive_429s": consecutive_429s, "backoff_cooldown": backoff_cooldown}
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -373,13 +500,17 @@ class SlidingWindowLimiter:
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time = self._read(fd, now)
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
         return {"path": str(self.path), "in_window": len(stamps), "limit": self.limit,
                 "window_seconds": WINDOW_SECONDS,
-                "cooldown_remaining": round(max(0.0, cooldown_until - now), 3)}
+                "cooldown_remaining": round(max(0.0, cooldown_until - now), 3),
+                "consecutive_429s": consecutive_429s,
+                "base_cooldown": self.base_cooldown,
+                "max_cooldown": self.max_cooldown,
+                "backoff_multiplier": self.backoff_multiplier}
 
 
 def _max_wait(value: float | None) -> float:
@@ -404,8 +535,11 @@ def _print_menu():
     print("RPM limit:    {}".format(os.environ.get("LA_NVIDIA_RPM", "40")))
     if os.environ.get("LA_NVIDIA_MODE", "sliding_window").lower() == "smooth_bucket":
         print("Bucket cap:   {}".format(os.environ.get("LA_NVIDIA_BUCKET_CAPACITY", "6")))
-    print("Max wait:     {}s".format(os.environ.get("LA_NVIDIA_MAX_WAIT", "120")))
-    print("429 cooldown: {}s".format(os.environ.get("LA_NVIDIA_429_COOLDOWN", "10")))
+    print("Max wait:         {}s".format(os.environ.get("LA_NVIDIA_MAX_WAIT", "300")))
+    print("429 base cooldown: {}s".format(os.environ.get("LA_NVIDIA_429_COOLDOWN", "30")))
+    print("429 max cooldown:  {}s".format(os.environ.get("LA_NVIDIA_429_MAX_COOLDOWN", "300")))
+    print("429 backoff mult:  {}x".format(os.environ.get("LA_NVIDIA_429_BACKOFF_MULTIPLIER", "2.0")))
+    print("429 max retries:   {}".format(os.environ.get("LA_NVIDIA_429_MAX_RETRIES", "5")))
     print("State file:   {}".format(os.environ.get("LA_NVIDIA_THROTTLE_STATE", DEFAULT_STATE)))
     print("-" * 60)
     print("Options:")
@@ -414,10 +548,13 @@ def _print_menu():
     print("  3) Set RPM limit")
     print("  4) Set bucket capacity (smooth_bucket only)")
     print("  5) Set max wait time")
-    print("  6) Set 429 cooldown")
-    print("  7) Show current status")
-    print("  8) Reset state file")
-    print("  9) Export config for shell (copy-paste)")
+    print("  6) Set 429 base cooldown")
+    print("  7) Set 429 max cooldown")
+    print("  8) Set 429 backoff multiplier")
+    print("  9) Set 429 max retries")
+    print(" 10) Show current status")
+    print(" 11) Reset state file")
+    print(" 12) Export config for shell (copy-paste)")
     print("  q) Quit")
     print("=" * 60)
 
@@ -458,7 +595,7 @@ def _interactive_menu():
                 print()
         elif choice == '5':
             try:
-                wait = input("Max wait seconds (default 120): ").strip()
+                wait = input("Max wait seconds (default 300): ").strip()
                 if wait:
                     os.environ["LA_NVIDIA_MAX_WAIT"] = wait
                     print(f"✓ Max wait set to {wait}s")
@@ -466,30 +603,57 @@ def _interactive_menu():
                 print()
         elif choice == '6':
             try:
-                cd = input("429 cooldown seconds (default 10): ").strip()
+                cd = input("429 base cooldown seconds (default 30): ").strip()
                 if cd:
                     os.environ["LA_NVIDIA_429_COOLDOWN"] = cd
-                    print(f"✓ Cooldown set to {cd}s")
+                    print(f"✓ Base cooldown set to {cd}s")
             except (EOFError, KeyboardInterrupt):
                 print()
         elif choice == '7':
+            try:
+                cd = input("429 max cooldown seconds (default 300): ").strip()
+                if cd:
+                    os.environ["LA_NVIDIA_429_MAX_COOLDOWN"] = cd
+                    print(f"✓ Max cooldown set to {cd}s")
+            except (EOFError, KeyboardInterrupt):
+                print()
+        elif choice == '8':
+            try:
+                mult = input("429 backoff multiplier (default 2.0): ").strip()
+                if mult:
+                    os.environ["LA_NVIDIA_429_BACKOFF_MULTIPLIER"] = mult
+                    print(f"✓ Backoff multiplier set to {mult}x")
+            except (EOFError, KeyboardInterrupt):
+                print()
+        elif choice == '9':
+            try:
+                retries = input("429 max retries (default 5): ").strip()
+                if retries:
+                    os.environ["LA_NVIDIA_429_MAX_RETRIES"] = retries
+                    print(f"✓ Max retries set to {retries}")
+            except (EOFError, KeyboardInterrupt):
+                print()
+        elif choice == '10':
             limiter = get_limiter()
             print(json.dumps(limiter.status(), indent=2))
-        elif choice == '8':
+        elif choice == '11':
             confirm = input("Really reset state file? (y/N): ").strip().lower()
             if confirm == 'y':
                 path = Path(os.environ.get("LA_NVIDIA_THROTTLE_STATE", DEFAULT_STATE))
                 if path.exists():
                     path.unlink()
                 print("✓ State file reset")
-        elif choice == '9':
+        elif choice == '12':
             print("\n# Copy-paste into your shell:")
             print(f'export LA_NVIDIA_MODE="{os.environ.get("LA_NVIDIA_MODE", "sliding_window")}"')
             print(f'export LA_NVIDIA_RPM="{os.environ.get("LA_NVIDIA_RPM", "40")}"')
             if os.environ.get("LA_NVIDIA_MODE", "sliding_window").lower() == "smooth_bucket":
                 print(f'export LA_NVIDIA_BUCKET_CAPACITY="{os.environ.get("LA_NVIDIA_BUCKET_CAPACITY", "6")}"')
-            print(f'export LA_NVIDIA_MAX_WAIT="{os.environ.get("LA_NVIDIA_MAX_WAIT", "120")}"')
-            print(f'export LA_NVIDIA_429_COOLDOWN="{os.environ.get("LA_NVIDIA_429_COOLDOWN", "10")}"')
+            print(f'export LA_NVIDIA_MAX_WAIT="{os.environ.get("LA_NVIDIA_MAX_WAIT", "300")}"')
+            print(f'export LA_NVIDIA_429_COOLDOWN="{os.environ.get("LA_NVIDIA_429_COOLDOWN", "30")}"')
+            print(f'export LA_NVIDIA_429_MAX_COOLDOWN="{os.environ.get("LA_NVIDIA_429_MAX_COOLDOWN", "300")}"')
+            print(f'export LA_NVIDIA_429_BACKOFF_MULTIPLIER="{os.environ.get("LA_NVIDIA_429_BACKOFF_MULTIPLIER", "2.0")}"')
+            print(f'export LA_NVIDIA_429_MAX_RETRIES="{os.environ.get("LA_NVIDIA_429_MAX_RETRIES", "5")}"')
             print(f'export LA_NVIDIA_THROTTLE_STATE="{os.environ.get("LA_NVIDIA_THROTTLE_STATE", str(DEFAULT_STATE))}"')
         else:
             print("Invalid option")

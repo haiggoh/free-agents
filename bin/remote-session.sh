@@ -857,6 +857,12 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             [[ -n "$api_base" ]] && echo "      api_base: $api_base"
             [[ -n "$think_line" ]] && echo "$think_line"
             [[ -n "$effort_line" ]] && echo "$effort_line"
+            # Retry configuration for NVIDIA (and other free-tier providers)
+            # num_retries: retry failed upstream calls instead of returning 500 immediately
+            # Note: retry_after is NOT supported by NVIDIA NIM (causes 400 BadRequestError)
+            if [[ "$prov" == "nvidia" || "$prov" == "gemini" || "$prov" == "groq" ]]; then
+                echo "      num_retries: 3"
+            fi
         } >> "$cfg"
     done
     cat >> "$cfg" <<'YAML'
