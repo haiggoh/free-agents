@@ -58,6 +58,23 @@ LOADING_INDICATOR_DELAY_S = 0.2
 REPO = BIN.parent
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
 
+# --- emoji constants (synced with config/emoji.sh) ---
+# These are the canonical emoji used across the picker
+SESSION_EMOJI_LOCAL = "🦾"
+SESSION_EMOJI_FREE_API = "📡"
+SESSION_EMOJI_CLOUD = "☁️"
+SESSION_EMOJI_UNKNOWN = "❓"
+EMOJI_TELEMETRY_ON = "🛰️"
+EMOJI_TELEMETRY_OFF = "🔇"
+EMOJI_WATCHER = "🔭"
+EMOJI_AUTO_MODE = "🤖"
+EMOJI_STOP_HOOK = "🪝"
+EMOJI_HOME = "🏠"
+EMOJI_EFFORT = "⚙️"
+EMOJI_KEY = "🔑"
+EMOJI_TOOLS = "🔧"
+EMOJI_MCP = "🔌"
+
 
 # --- inventories (read-only; never eval shell) ---------------------------------------------
 def _run(cmd, **kw):
@@ -143,13 +160,18 @@ class Picker(App):
     # Use Apple Terminal safe driver when available (TERM_PROGRAM=Apple_Terminal on Unix)
     driver_class = _DRIVER_CLASS
     CSS = """
-    Screen { layout: vertical; }
+    Screen { layout: vertical; background: $background; color: $foreground; }
     #title { text-style: bold; padding: 0 1; }
     #policy { color: $warning; padding: 0 1; }
     #rows { height: 1fr; }
     #actions { height: auto; padding: 0 1; }
     #status { height: auto; padding: 0 1; color: $text-muted; }
     #prompt { display: none; }
+    OptionList { background: $background; color: $foreground; }
+    OptionList:focus { background: $background; color: $foreground; }
+    OptionList .option--highlighted { background: $accent; color: $text; }
+    Input { background: $background; color: $foreground; }
+    Static { background: $background; color: $foreground; }
     """
     BINDINGS = [Binding("ctrl+c", "quit_now", "Quit", show=False, priority=True)]
 

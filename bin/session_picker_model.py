@@ -299,12 +299,12 @@ class HomeScreen(Screen):
 
     def actions(self):
         acts = [
-            Action("l", f"Local sessions ({self._format_count(self.local_count, '?')} on disk)",
+            Action("l", f"🦾 Local sessions ({self._format_count(self.local_count, '?')} on disk)",
                    lambda: Nav("local", HOME_OWNED), section="lanes"),
-            Action("r", f"Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
+            Action("r", f"📡 Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
-            Action("d", "Download local models", lambda: Nav("tool:download"), section="tools"),
-            Action("o", "Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
+            Action("d", "📥 Download local models", lambda: Nav("tool:download"), section="tools"),
+            Action("o", "💬 Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
         ]
         acts += _tool_actions()
         acts += _common_toggles(self.settings, include_watcher=True)
@@ -348,19 +348,19 @@ class LocalScreen(Screen):
         s = self.settings
         mcp_ok = s.auto_mode == 0
         acts = [
-            Action("e", f"Effort: {s.local_effort}", self._cycle_effort),
-            Action("s", "Switch to Remote free API sessions",
+            Action("e", f"⚙️ Effort: {s.local_effort}", self._cycle_effort),
+            Action("s", "📡 Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
-            Action("r", "Remote free API sessions", lambda: Nav("remote", self.owner),
+            Action("r", "📡 Remote free API sessions", lambda: Nav("remote", self.owner),
                    section="hidden"),
-            Action("m", (f"MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
-                         "MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
+            Action("m", (f"🔌 MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
+                         "🔌 MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
                    lambda: setattr(s, "enable_mcp", not s.enable_mcp), enabled=mcp_ok),
         ]
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
         if last_local and last_local in self.models:
-            acts.insert(0, Action("g", f"Go last: {last_local}",
+            acts.insert(0, Action("g", f"🚀 Go last: {last_local}",
                            lambda: self._launch_last("local_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=True)
         acts += [a for a in _tool_actions()]
@@ -475,21 +475,21 @@ class RemoteScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            Action("e", f"Effort: {_effort_label(s.remote_effort)}", self._cycle_effort),
-            Action("s", "Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
-            Action("l", "Local sessions", lambda: Nav("local", self.owner), section="hidden"),
-            Action("h", f"Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
+            Action("e", f"⚙️ Effort: {_effort_label(s.remote_effort)}", self._cycle_effort),
+            Action("s", "🦾 Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
+            Action("l", "🦾 Local sessions", lambda: Nav("local", self.owner), section="hidden"),
+            Action("h", f"🔖 Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
                    lambda: self._toggle("include_trials")),
-            Action("f", f"Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
+            Action("f", f"🏷️ Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
                    lambda: self._toggle("local_capable_shown")),
-            Action("x", "Hidden-model report", lambda: Nav("tool:report"), section="tools"),
-            Action("m", f"MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
+            Action("x", "📋 Hidden-model report", lambda: Nav("tool:report"), section="tools"),
+            Action("m", f"🔌 MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                    lambda: setattr(s, "enable_mcp", not s.enable_mcp)),
         ]
         # Add "Launch last model" if we have a saved last model
         last_remote = s.last_launched_model.get("remote_api_session") if s.last_launched_model else None
         if last_remote and any(a.alias == last_remote for a in self.agents if self._visible(a)):
-            acts.insert(0, Action("L", f"Launch last: {last_remote}",
+            acts.insert(0, Action("g", f"🚀 Go last: {last_remote}",
                            lambda: self._launch_last("remote_api_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=False)
         acts += _tool_actions()
@@ -546,7 +546,7 @@ class RateLimiterScreen(Screen):
     Proxies read the saved values through rate_limiter.effective_settings(); an explicit
     LA_NVIDIA_* environment variable still wins, so nothing a user exported is overridden.
     """
-    title = "NVIDIA Rate Limiter"
+    title = "🔧 NVIDIA Rate Limiter"
     RPM_STEPS = (10, 20, 30, 40)
     CAP_STEPS = (2, 4, 6, 10)
     WAIT_STEPS = (30, 60, 120, 300)
