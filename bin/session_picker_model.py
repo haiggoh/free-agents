@@ -136,6 +136,12 @@ class Settings:
     rate_limiter: dict = field(default_factory=dict)
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
+    # Last launched model per lane (for R15: remember last launched)
+    last_launched_model: dict = field(default_factory=lambda: {
+        "local_session": None,
+        "remote_api_session": None,
+        "lowkey": None,
+    })
     notes: list = field(default_factory=list)
 
 
@@ -351,11 +357,27 @@ class LocalScreen(Screen):
                          "MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
                    lambda: setattr(s, "enable_mcp", not s.enable_mcp), enabled=mcp_ok),
         ]
+        # Add "Launch last model" if we have a saved last model
+        last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
+        if last_local and last_local in self.models:
+            acts.insert(0, Action("g", f"Go last: {last_local}",
+                           lambda: self._launch_last("local_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=True)
         acts += [a for a in _tool_actions()]
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
+
+    def _launch_last(self, lane: str):
+        """Launch the last used model for the given lane."""
+        last_model = self.settings.last_launched_model.get(lane)
+        if not last_model:
+            return Nav("tool:prompt:oneshot")  # fallback
+        # Find the model and activate it
+        self.accordion.select(last_model)
+        self.accordion.expand(self.accordion._group_of(last_model) or "")
+        # Return a special nav to trigger launch
+        return self.activate_selected()
 
     def _cycle_effort(self):
         s = self.settings
@@ -367,6 +389,12 @@ class LocalScreen(Screen):
         sel = self.accordion.selected_id
         if not sel or sel not in self.models:
             return None
+        # Record last launched model for this lane
+        if self.settings.last_launched_model is not None:
+            self.settings.last_launched_model["local_session"] = sel
+            if self.settings.on_effort_saved:
+                # Trigger save to persist the last launched model
+                pass
         s = self.settings
         env = {"LA_AUTO_MODE": "0" if s.auto_mode == 2 else "1",
                "LA_BLIND_AUTO": "1" if s.auto_mode == 0 else "0",
@@ -458,11 +486,27 @@ class RemoteScreen(Screen):
             Action("m", f"MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                    lambda: setattr(s, "enable_mcp", not s.enable_mcp)),
         ]
+        # Add "Launch last model" if we have a saved last model
+        last_remote = s.last_launched_model.get("remote_api_session") if s.last_launched_model else None
+        if last_remote and any(a.alias == last_remote for a in self.agents if self._visible(a)):
+            acts.insert(0, Action("L", f"Launch last: {last_remote}",
+                           lambda: self._launch_last("remote_api_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=False)
         acts += _tool_actions()
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
+
+    def _launch_last(self, lane: str):
+        """Launch the last used model for the given lane."""
+        last_model = self.settings.last_launched_model.get(lane)
+        if not last_model:
+            return None
+        # Find the model and activate it
+        self.accordion.select(last_model)
+        self.accordion.expand(self.accordion._group_of(last_model) or "")
+        # Return a special nav to trigger launch
+        return self.activate_selected()
 
     def _cycle_effort(self):
         s = self.settings
@@ -475,6 +519,9 @@ class RemoteScreen(Screen):
         agent = next((a for a in self.agents if a.alias == sel and self._visible(a)), None)
         if agent is None:
             return None
+        # Record last launched model for this lane
+        if self.settings.last_launched_model is not None:
+            self.settings.last_launched_model["remote_api_session"] = sel
         s = self.settings
         argv = ["remote"] + ["-a"] * s.auto_mode
         if s.telemetry:
