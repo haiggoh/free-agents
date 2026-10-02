@@ -464,6 +464,7 @@ class RemoteScreen(Screen):
                           + ("" if a.has_key else "  · no key")) for a in buckets[prov]]
             groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
         self.accordion.set_groups(groups)
+        self._models_loaded = True
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings

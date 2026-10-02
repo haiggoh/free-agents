@@ -536,45 +536,6 @@ class Picker(App):
             return
         key = event.key
         sm = self.screen_model
-        if key == "right":
-            h = self._highlighted()
-            if h and h[0] == "group":
-                sm.accordion.expand(h[1])
-                self.render_model(keep=f"g:{h[1]}")
-                event.stop()
-                return
-            elif h and h[0] == "item":
-                # Right arrow on model item: no-op (action cycling handled by action selection)
-                pass
-            event.stop()
-            return
-        if key == "left":
-            h = self._highlighted()
-            if h and h[0] == "group":
-                sm.accordion.collapse()
-                self.render_model(keep=f"g:{h[1]}")
-                event.stop()
-                return
-            if sm.accordion.open_group:
-                g = sm.accordion.open_group
-                sm.accordion.collapse()
-                self.render_model(keep=f"g:{g}")
-                event.stop()
-                return
-            else:
-                # Left arrow on model item: no-op
-                if h and h[0] == "item":
-                    pass
-            event.stop()
-            return
-        if key == "space" and isinstance(sm, m.DownloadScreen):
-            h = self._highlighted()
-            if h and h[0] == "item":
-                sm.accordion.select(h[1])
-                sm.toggle_selected()
-                self.render_model(keep=f"i:{h[1]}")
-            event.stop()
-            return
         # Seamless navigation between actions and rows
         if key == "down" or key == "up":
             actions_list = self.query_one("#actions", OptionList)
@@ -612,7 +573,7 @@ class Picker(App):
             rows_list = self.query_one("#rows", OptionList)
             if self.focused is rows_list:
                 h = self._highlighted()
-                if h and h[0] == "group":
+                if h and h[0] == "group" and sm.accordion is not None:
                     if key == "right":
                         sm.accordion.expand(h[1])
                         self.render_model(keep=f"g:{h[1]}")
@@ -621,6 +582,14 @@ class Picker(App):
                     elif key == "left":
                         sm.accordion.collapse()
                         self.render_model(keep=f"g:{h[1]}")
+                        event.stop()
+                        return
+                elif h and h[0] == "item" and sm.accordion is not None and sm.accordion.open_group:
+                    # Left arrow on item with open group: collapse the group
+                    if key == "left":
+                        g = sm.accordion.open_group
+                        sm.accordion.collapse()
+                        self.render_model(keep=f"g:{g}")
                         event.stop()
                         return
 
