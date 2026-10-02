@@ -101,6 +101,7 @@ usage() {
     echo "  -a, --auto-mode       Toggle auto-mode: blind-trust → classifier → off"
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
+    echo "  --temperature VALUE   Set temperature (0.0-2.0, controls randomness/creativity)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
 }
 
@@ -472,9 +473,10 @@ _run_remote_menu() {
         # MCP toggle available in ALL auto-mode states (including blind-trust)
         # Blind-trust settings generation includes mcp__* when LA_REMOTE_ENABLE_MCP=1
         echo "  m) $EMOJI_MCP mcps: $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")"
+        echo "  O) 🌡️  temperature: ${TEMPERATURE_CHOICE:-<provider default>}"
         echo "  q) quit"
         echo
-        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/q): " "${#choices[@]}" >&2
+        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/O/q): " "${#choices[@]}" >&2
         read -r -p "" sel >&2 || { _nav "quit"; return 0; }
         case "$sel" in
             h|H) _nav "home"; return 0 ;;
@@ -534,6 +536,52 @@ _run_remote_menu() {
                     echo "  Effort set to: $EFFORT_CHOICE" >&2
                 else
                     echo "  Invalid selection, keeping: ${EFFORT_CHOICE:-<provider default>}" >&2
+                fi
+                continue ;;
+            T|t)
+                # Select temperature (0.0 - 2.0, controls randomness/creativity)
+                local temps=("0.0" "0.3" "0.7" "1.0" "1.5" "2.0")
+                local def=3  # 0.7 (balanced)
+                if [[ -n "$TEMPERATURE_CHOICE" ]]; then
+                    for idx in "${!temps[@]}"; do
+                        [[ "${temps[$idx]}" == "$TEMPERATURE_CHOICE" ]] && def=$((idx + 1)) && break
+                    done
+                fi
+                local i=1
+                echo "  Temperature (lower = focused, higher = creative):"
+                for temp in "${temps[@]}"; do
+                    printf "    %d) %s\n" "$i" "$temp" >&2
+                    i=$((i+1))
+                done
+                local c; printf "  Select temperature [%d]: " "$def" >&2; read -r c >&2; c="${c:-$def}"
+                if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le ${#temps[@]} ]; then
+                    TEMPERATURE_CHOICE="${temps[$((c-1))]}"
+                    echo "  Temperature set to: $TEMPERATURE_CHOICE" >&2
+                else
+                    echo "  Invalid selection, keeping: ${TEMPERATURE_CHOICE:-<provider default>}" >&2
+                fi
+                continue ;;
+            O|o)
+                # Select temperature (0.0 - 2.0, controls randomness/creativity)
+                local temps=("0.0" "0.3" "0.7" "1.0" "1.5" "2.0")
+                local def=3  # 0.7 (balanced)
+                if [[ -n "$TEMPERATURE_CHOICE" ]]; then
+                    for idx in "${!temps[@]}"; do
+                        [[ "${temps[$idx]}" == "$TEMPERATURE_CHOICE" ]] && def=$((idx + 1)) && break
+                    done
+                fi
+                local i=1
+                echo "  Temperature (lower = focused, higher = creative):"
+                for temp in "${temps[@]}"; do
+                    printf "    %d) %s\n" "$i" "$temp" >&2
+                    i=$((i+1))
+                done
+                local c; printf "  Select temperature [%d]: " "$def" >&2; read -r c >&2; c="${c:-$def}"
+                if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le ${#temps[@]} ]; then
+                    TEMPERATURE_CHOICE="${temps[$((c-1))]}"
+                    echo "  Temperature set to: $TEMPERATURE_CHOICE" >&2
+                else
+                    echo "  Invalid selection, keeping: ${TEMPERATURE_CHOICE:-<provider default>}" >&2
                 fi
                 continue ;;
             q|Q) _nav "quit"; return 0 ;;
@@ -771,8 +819,8 @@ stop_proxy() {
 
 # LiteLLM maps each spoofed Claude id onto the chosen remote model, so Claude
 # Code can ask for "claude-opus-5" and get the free provider underneath.
-write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking> [effort]
-    local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}"
+write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking> [effort] [temperature]
+    local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}" temperature="${6:-}"
     _available "$prov" || return 2
     _valid_model "$model" || return 2
     local litellm_model think_line="" api_base=""
@@ -894,6 +942,10 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             if [[ -n "$max_tokens_for_effort" ]]; then
                 echo "      max_tokens: $max_tokens_for_effort"
             fi
+            # Temperature control (if provided)
+            if [[ -n "$temperature" ]]; then
+                echo "      temperature: $temperature"
+            fi
             # Retry configuration for NVIDIA (and other free-tier providers)
             # num_retries: retry failed upstream calls instead of returning 500 immediately
             # Note: retry_after is NOT supported by NVIDIA NIM (causes 400 BadRequestError)
@@ -925,8 +977,8 @@ general_settings:
 YAML
 }
 
-start_proxy() { # start_proxy <provider> <model> <thinking> [effort] -> echoes port
-    local prov="$1" model="$2" thinking="$3" effort="${4:-}"
+start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperature] -> echoes port
+    local prov="$1" model="$2" thinking="$3" effort="${4:-}" temperature="${5:-}"
     umask 077
     command -v litellm >/dev/null 2>&1 || {
         echo "remote-session: litellm not found. Install with: pipx install litellm[proxy]" >&2; return 1; }
@@ -946,7 +998,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] -> echoes p
     _prepare_runtime_dir || return 1
     port="$(free_port)" || return 1
     cfg="$RUNDIR/proxy-$port.yaml"; log="$RUNDIR/proxy-$port.log"; pidf="$RUNDIR/proxy-$port.pid"
-    write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" || return 1
+    write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 1
     _prepare_runtime_file "$log" || return 1
     _prepare_runtime_file "$pidf" || return 1
     if [[ -n "${LA_LITELLM_CMD:-}" ]]; then
@@ -1058,6 +1110,8 @@ while [[ $# -gt 0 ]]; do
                 SELECTED_EFFORT="choose-effort"
             fi
             shift ;;
+        --temperature)    [[ $# -ge 2 ]] || { echo 'remote-session: --temperature needs a value (0.0-2.0)' >&2; exit 2; }
+                          TEMPERATURE_CHOICE="$2"; shift 2 ;;
         --enable-mcp)     export LA_REMOTE_ENABLE_MCP=1; shift ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
         -*)               if [[ -z "$ALIAS" ]]; then
@@ -1358,7 +1412,7 @@ fi
 
 _prepare_runtime_dir || exit 1
 echo "   proxy    : starting LiteLLM (Anthropic /v1/messages → $PROV)…"
-PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING" "$EFFORT_CHOICE")" || {
+PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING" "$EFFORT_CHOICE" "$TEMPERATURE_CHOICE")" || {
     echo "remote-session: could not start the translating proxy." >&2; exit 1; }
 echo "   proxy    : ready on http://127.0.0.1:$PORT"
 echo

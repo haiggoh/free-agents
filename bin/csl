@@ -508,8 +508,8 @@ _launch_remote() {  # opens the remote roster and hands off; never returns on su
 _la_auto_mode_val() { [ "$AUTO_MODE_STATE" = "2" ] && echo 0 || echo 1; }
 _la_blind_auto_val() { [ "$AUTO_MODE_STATE" = "0" ] && echo 1 || echo 0; }
 
-_launch() {  # $1=alias  $2=effort(optional)
-  local alias="$1" effort="${2:-}"
+_launch() {  # $1=alias  $2=effort(optional)  $3=temperature(optional)
+  local alias="$1" effort="${2:-}" temperature="${3:-}"
   _apply_session_profile "$alias"
   if [ "$WATCH" = "1" ]; then
     if [ "$(uname -s)" = "Darwin" ]; then
@@ -529,10 +529,20 @@ OSA
   local _am _ba
   _am="$(_la_auto_mode_val)"
   _ba="$(_la_blind_auto_val)"
+  local -a env_vars=(
+    "LA_AUTO_MODE=$_am"
+    "LA_BLIND_AUTO=$_ba"
+    "LA_TELEMETRY=$TELEMETRY"
+    "LA_QUEUE_STOP_HOOK=$STOP_HOOK"
+    "LA_ENABLE_MCP=$LA_ENABLE_MCP"
+  )
+  if [ -n "$temperature" ]; then
+    env_vars+=("LA_TEMPERATURE=$temperature")
+  fi
   if [ -n "$effort" ]; then
-    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" LA_QUEUE_STOP_HOOK="$STOP_HOOK" LA_ENABLE_MCP="$LA_ENABLE_MCP" "$LAUNCHER" "$alias" "$effort"
+    exec env "${env_vars[@]}" "$LAUNCHER" "$alias" "$effort"
   else
-    exec env LA_AUTO_MODE="$_am" LA_BLIND_AUTO="$_ba" LA_TELEMETRY="$TELEMETRY" LA_QUEUE_STOP_HOOK="$STOP_HOOK" LA_ENABLE_MCP="$LA_ENABLE_MCP" "$LAUNCHER" "$alias"
+    exec env "${env_vars[@]}" "$LAUNCHER" "$alias"
   fi
 }
 
@@ -649,9 +659,10 @@ _pick_home_lane() {
     "$(printf '  a) %s Auto-mode: %s' "$EMOJI_AUTO_MODE" "$_am_label")" \
     "$(printf '  t) %s Telemetry: %s' "$EMOJI_TELEMETRY_ON" "$([ "$TELEMETRY" = "1" ] && echo ON || echo OFF)")" \
     "$(printf '  w) %s Watcher:   %s' "$EMOJI_WATCHER" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)")" \
-    "$(printf '  s) %s Stop hook: %s' "$EMOJI_STOP_HOOK" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)")"
+    "$(printf '  s) %s Stop hook: %s' "$EMOJI_STOP_HOOK" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)")" \
+    "$(printf '  O) %s Temperature: %s' "🌡️" "${TEMPERATURE_CHOICE:-<provider default>}")"
   _box bottom
-  printf "Select [</#/k/m/q/a/t/w/s/u]: " >&2
+  printf "Select [</#/k/m/q/a/t/w/s/u/O]: " >&2
   read -r sel; sel="${sel:-<}"
   case "$sel" in
     '<'|local|LOCAL) NEXT_LANE="local" ;;
@@ -663,6 +674,7 @@ _pick_home_lane() {
     t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; NEXT_LANE="home" ;;
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; NEXT_LANE="home" ;;
     s|S) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; NEXT_LANE="home" ;;
+    O|o) NEXT_LANE="home" ;;  # temperature is picked in local picker
     *) NEXT_LANE="home"; echo "Invalid selection." >&2 ;;
   esac
 }
@@ -699,6 +711,7 @@ _run_local_picker() {
     esac
     if [ "$TELEMETRY" = "1" ]; then echo "  t) $EMOJI_TELEMETRY_ON telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
     else                            echo "  t) $EMOJI_TELEMETRY_ON telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
+    echo "  O) 🌡️  temperature: ${TEMPERATURE_CHOICE:-<provider default>}"
     if [ "$WATCH" = "1" ]; then echo "  w) $EMOJI_WATCHER watcher: ON  — opens a window following this session (toggle)"
     else                        echo "  w) $EMOJI_WATCHER watcher: OFF — no monitor window (toggle)"; fi
     if [ "$STOP_HOOK" = "1" ]; then echo "  p) $EMOJI_STOP_HOOK queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
@@ -729,6 +742,30 @@ _run_local_picker() {
           echo "  MCPs in blind-trust mode only available when auto-mode is blind-trust (a to cycle)" >&2
         fi
         continue ;;
+      O|o)
+        # Select temperature (0.0 - 2.0, controls randomness/creativity)
+        local temps=("0.0" "0.3" "0.7" "1.0" "1.5" "2.0")
+        local def=3  # 0.7 (balanced)
+        if [[ -n "$TEMPERATURE_CHOICE" ]]; then
+            for idx in "${!temps[@]}"; do
+                [[ "${temps[$idx]}" == "$TEMPERATURE_CHOICE" ]] && def=$((idx + 1)) && break
+            done
+        fi
+        local i=1
+        echo >&2
+        echo "  Temperature (lower = focused, higher = creative):" >&2
+        for temp in "${temps[@]}"; do
+            printf "    %d) %s\n" "$i" "$temp" >&2
+            i=$((i+1))
+        done
+        local c; printf "  Select temperature [%d]: " "$def" >&2; read -r c >&2; c="${c:-$def}"
+        if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le ${#temps[@]} ]; then
+            TEMPERATURE_CHOICE="${temps[$((c-1))]}"
+            echo "  Temperature set to: $TEMPERATURE_CHOICE" >&2
+        else
+            echo "  Invalid selection, keeping: ${TEMPERATURE_CHOICE:-<provider default>}" >&2
+        fi
+        continue ;;
       c|C)
         echo >&2
         echo "Models (on disk, session-capable):" >&2
@@ -739,14 +776,14 @@ _run_local_picker() {
         echo "Effort — higher reasons more and takes longer; lower answers sooner:" >&2
         ei=$(_pick_from "Effort" 3 "${EFFORTS[@]}")
         [ "$ei" = "0" ] && { echo "Invalid selection."; continue; }
-        _launch "$chosen" "${EFFORTS[$((ei-1))]}"
+        _launch "$chosen" "${EFFORTS[$((ei-1))]}" "${TEMPERATURE_CHOICE:-}"
         ;;
       *)
         if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#SESSION_ALIASES[@]}" ]; then
           echo "Invalid selection."; continue
         fi
         chosen="${SESSION_ALIASES[$((sel-1))]}"
-        _launch "$chosen" "${LA_EFFORT[$chosen]:-}"
+        _launch "$chosen" "${LA_EFFORT[$chosen]:-}" "${TEMPERATURE_CHOICE:-}"
         ;;
     esac
   done

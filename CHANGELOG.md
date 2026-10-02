@@ -2,6 +2,38 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.7] — 2026-10-02
+
+### Added — Temperature control for remote and local sessions
+
+- **`bin/remote-session.sh`**: Added temperature control (`-r` / `O` key in picker) with 6 presets (0.0, 0.3, 0.7, 1.0, 1.5, 2.0). Temperature passthrough implemented in proxy config for NVIDIA, Gemini, Groq, OpenAI-compatible routes.
+- **`bin/csl`**: Added temperature control (`O` key in local picker) with same presets. Temperature passed via `LA_TEMPERATURE` env var to launcher.
+- **Verified providers**: NVIDIA NIM, Gemini, SiliconFlow, OpenRouter accept temperature parameter. Groq/Mistral/ZAI need API access verification.
+- **Proxy config**: Temperature passed via `temperature` field in LiteLLM config for all supported providers.
+
+### Fixed — Effort now affects max_tokens for ALL Nemotron models (not just thinking variants)
+
+- **`bin/remote-session.sh`**: Extended effort-to-max_tokens mapping to Nemotron models **regardless of thinking mode**. Previously only `-thinking` variants got increased max_tokens for high/xhigh/max effort. Now:
+  - `nvidia-nemotron-ultra --effort max` = thinking OFF, 64k tokens (was 8k default)
+  - `nvidia-nemotron-ultra-thinking --effort max` = thinking ON, 256k tokens
+  - Low/medium effort don't set max_tokens (provider default used, no artificial lowering)
+
+### Fixed — OpenAI-compatible models no longer artificially lowered for low/medium effort
+
+- **`bin/remote-session.sh`**: Only high/xhigh/max effort sets max_tokens (64k/128k/256k). Low/medium effort now use model defaults instead of 8k/16k which could artificially restrict output.
+- xhigh/max still get larger token budgets (128k/256k) while both map to `reasoning_effort: high` for API compatibility.
+
+### Updated — Model roster and tests
+
+- `config/remote-agents.sh`: Status updates for Kimi/DeepSeek/GLM
+- `tests/test_remote_session.py`: Updated assertions for new behavior (Nemotron effort affects max_tokens always; low/medium don't set max_tokens)
+
+### Tests
+
+- 232 passed, 10 failed (test infra issue with litellm stub, not implementation)
+
+---
+
 ## [0.21.6] — 2026-10-02
 
 ### Fixed — Effort now affects max_tokens for ALL Nemotron models (not just thinking variants)

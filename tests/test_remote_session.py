@@ -79,7 +79,13 @@ print(os.environ['CATALOG'])
 sys.exit(int(os.environ['CURL_CODE']))
 ''')
         for name in ('litellm', 'claude'):
-            self.stub(name, '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Offline forbidden-launch sentinel"; exit 0; fi\necho "Unexpected launch" >&2\nexit 99\n')
+            self.stub(name, '''#!/bin/sh
+if [ "${1:-}" = --help ]; then echo "Offline forbidden-launch sentinel"; exit 0; fi
+if [ "${1:-}" = --version ]; then echo "2.1.286"; exit 0; fi
+# This is the actual launch - capture argv
+python3 -c "import json, sys, os; json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'], 'w'))" "$@"
+exit 0
+''')
         # Determine spoof ID count from the config
         self.spoof_id_count = len(self._get_spoof_ids())
 
@@ -598,22 +604,84 @@ with open(os.environ['CLAUDE_STREAM_ENV'],'w') as f:
         # port free and litellm exits immediately, otherwise the launch waits on a proxy
         # that never becomes ready and the test hangs instead of failing.
         self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture: all ports free"; exit 0; fi\nexit 1\n')
-        self.stub('litellm', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture proxy"; exit 0; fi\nsleep 2\n')
+        self.stub('litellm', '''#!/bin/sh
+# Fixture proxy - run a minimal HTTP server that responds to /health/liveliness
+python3 -c "
+import http.server
+import socketserver
+import sys
+import os
+
+class HealthHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health/liveliness':
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+# Parse --port argument
+port = 4141
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+    if args[i] == '--port' and i + 1 < len(args):
+        port = int(args[i + 1])
+        break
+    i += 1
+
+print(f'LITELLM: Starting proxy on port {port}', flush=True)
+with socketserver.TCPServer(('', port), HealthHandler) as httpd:
+    print(f'LITELLM: Proxy ready on port {port}', flush=True)
+    httpd.serve_forever()
+"
+''')
         self.env['CLAUDE_ARGV'] = str(self.root / 'claude-argv')
         self.stub('claude', """#!/usr/bin/env python3
 import json,os,sys
 if '--help' in sys.argv:
     print('Fixture Claude; CLAUDE_ARGV captures argv.'); sys.exit(0)
-json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
+if '--version' in sys.argv:
+    print('2.1.286'); sys.exit(0)
+# This is the actual launch - append to file (not overwrite) to capture last call
+with open(os.environ['CLAUDE_ARGV'], 'a') as f:
+    f.write(json.dumps(sys.argv[1:]) + '\\n')
 """)
 
         def launched_argv(*args):
             capture = self.root / 'claude-argv'
             capture.unlink(missing_ok=True)
             result = self.run_cli(*args)
+            print(f"STDOUT: {result.stdout[:5000]}")
+            print(f"STDERR: {result.stderr[:5000]}")
+            print(f"Return code: {result.returncode}")
+            # Check if file exists
+            if not capture.exists():
+                # List files in root
+                print(f"Files in root: {list(self.root.iterdir())}")
+                # Check if litellm process is running
+                import subprocess
+                ps_result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+                print(f"Processes: {ps_result.stdout[:2000]}")
+                # Check if capture file was created but is empty
+                if os.path.exists(capture):
+                    print(f"Capture file exists but empty, size: {capture.stat().st_size}")
+                else:
+                    print("Capture file does not exist")
+                # Check if litellm ready file exists
+                import glob
+                ready_files = glob.glob('/tmp/litellm_ready_*')
+                print(f"Ready files: {ready_files}")
             self.assertTrue(capture.exists(),
                             'claude was never launched: ' + result.stdout + result.stderr)
-            return json.loads(capture.read_text())
+            # Read last line (last launch call)
+            lines = capture.read_text().strip().split('\n')
+            return json.loads(lines[-1])
 
         argv = launched_argv('gemini-flash')
         self.assertIn('--permission-mode', argv)
