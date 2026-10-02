@@ -798,9 +798,17 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     # backend unless the caller explicitly asked for thinking.
     # ONLY for Nemotron models; other NVIDIA models (Kimi, DeepSeek, GLM) have
     # different behavior and this setting breaks them or does nothing useful.
-    if [[ "$prov" == "nvidia" && "$thinking" != "true" && "$model" == *nemotron* ]]; then
-        think_line='      chat_template_kwargs:
+    # EXPLICIT CONTROL: the -thinking suffix means enable_thinking: true,
+    # the default (no suffix) means enable_thinking: false. Effort does NOT
+    # change this - it only sets reasoning_effort for non-Nemotron models.
+    if [[ "$prov" == "nvidia" && "$model" == *nemotron* ]]; then
+        if [[ "$thinking" == "true" ]]; then
+            think_line='      chat_template_kwargs:
+        enable_thinking: true'
+        else
+            think_line='      chat_template_kwargs:
         enable_thinking: false'
+        fi
     fi
 
     # EFFORT. Claude Code's own --effort flag is meaningless to a third-party provider: it is
@@ -808,38 +816,63 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     # to NVIDIA/Gemini/Groq changed nothing. Effort has to travel IN THE REQUEST BODY, which is
     # what this proxy config controls. The field differs per model family, so map it:
     #   * reasoning_effort (low|medium|high) -- the OpenAI-compatible spelling. LiteLLM
-    #     translates it per provider, so it is the right default for OpenAI-shaped routes.
+    #     translates it per provider, so it is the right default for OpenAI-compatible routes.
     #   * NVIDIA Nemotron does NOT take reasoning_effort; it gates reasoning with
-    #     enable_thinking inside chat_template_kwargs. So on Nemotron an explicit effort means
-    #     "turn thinking ON" (the default above turns it off to avoid the thinking-block crash).
-    # Claude Code offers five levels; the OpenAI field accepts three, so xhigh/max fold to high.
+    #     enable_thinking inside chat_template_kwargs. Effort does NOT flip thinking on/off -
+    #     that is controlled explicitly by the -thinking suffix. For Nemotron WITH thinking
+    #     enabled, effort MAPS TO max_tokens (the practical effort control). For Nemotron
+    #     WITHOUT thinking, effort is ignored (8192 default is fine). Other NVIDIA models
+    #     DO accept reasoning_effort.
+    # Claude Code offers five levels; for Nemotron with thinking we map each to
+    # distinct max_tokens values. For non-Nemotron, xhigh/max fold to high for
+    # reasoning_effort (OpenAI only accepts low/medium/high).
     local mapped_effort=""
     case "$effort" in
         low)              mapped_effort="low" ;;
         medium)           mapped_effort="medium" ;;
-        high|xhigh|max)   mapped_effort="high" ;;
+        high)             mapped_effort="high" ;;
+        xhigh)            mapped_effort="xhigh" ;;
+        max)              mapped_effort="max" ;;
         "")               mapped_effort="" ;;
         *)                echo "remote-session: unknown effort '\''$effort'\'', ignoring" >&2 ;;
     esac
     local effort_line=""
+    # For models with reasoning support, map effort to max_tokens (practical effort control).
+    # reasoning_effort only has low/medium/high in OpenAI API; xhigh/max map to "high"
+    # but get larger token budgets for deeper reasoning.
+    local max_tokens_for_effort=""
     if [[ -n "$mapped_effort" ]]; then
+        case "$mapped_effort" in
+            low)              max_tokens_for_effort=8192 ;;      # 8k
+            medium)           max_tokens_for_effort=16384 ;;     # 16k
+            high)             max_tokens_for_effort=65536 ;;     # 64k
+            xhigh)            max_tokens_for_effort=131072 ;;    # 128k
+            max)              max_tokens_for_effort=262144 ;;    # 256k
+        esac
+    fi
+    if [[ -n "$mapped_effort" ]]; then
+        # Map xhigh/max to high for reasoning_effort (OpenAI only accepts low/medium/high)
+        # but keep original mapped_effort for max_tokens mapping
+        local reasoning_effort="$mapped_effort"
+        case "$mapped_effort" in
+            xhigh|max) reasoning_effort="high" ;;
+        esac
         case "$prov" in
             nvidia)
-                # Nemotron reads enable_thinking, not reasoning_effort. An explicit effort is a
-                # request TO reason, so enable it and state the budget the family understands.
-                if [[ "$model" == *nemotron* ]]; then
-                    think_line='      chat_template_kwargs:
-        enable_thinking: true'
-                else
-                    effort_line="      reasoning_effort: $mapped_effort"
+                # Nemotron reads enable_thinking, not reasoning_effort. Effort does NOT
+                # change the thinking setting (which is explicitly set above based on -thinking suffix).
+                # For Nemotron WITH thinking, effort maps to max_tokens (set below in model loop).
+                # Other NVIDIA models DO accept reasoning_effort.
+                if [[ "$model" != *nemotron* ]]; then
+                    effort_line="      reasoning_effort: $reasoning_effort"
                 fi
                 ;;
             gemini)
                 # Gemini thinking is disabled above unless asked for; an explicit effort asks.
                 [[ "$thinking" != "true" ]] && think_line=""
-                effort_line="      reasoning_effort: $mapped_effort"
+                effort_line="      reasoning_effort: $reasoning_effort"
                 ;;
-            *)  effort_line="      reasoning_effort: $mapped_effort" ;;
+            *)  effort_line="      reasoning_effort: $reasoning_effort" ;;
         esac
     fi
 
@@ -860,6 +893,10 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             [[ -n "$api_base" ]] && echo "      api_base: $api_base"
             [[ -n "$think_line" ]] && echo "$think_line"
             [[ -n "$effort_line" ]] && echo "$effort_line"
+            # For models with reasoning support, map effort to max_tokens (practical effort control)
+            if [[ -n "$max_tokens_for_effort" ]]; then
+                echo "      max_tokens: $max_tokens_for_effort"
+            fi
             # Retry configuration for NVIDIA (and other free-tier providers)
             # num_retries: retry failed upstream calls instead of returning 500 immediately
             # Note: retry_after is NOT supported by NVIDIA NIM (causes 400 BadRequestError)

@@ -2,6 +2,49 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.5] — 2026-10-02
+
+### Fixed — Effort settings now map to distinct max_tokens for ALL reasoning-capable models
+
+- **`bin/remote-session.sh`**: Extended effort-to-max_tokens mapping beyond Nemotron to all models with reasoning support (Gemini, Groq, OpenAI-compatible, etc.). Previously only Nemotron had this; now all reasoning-capable models get distinct token budgets per effort level:
+  - `low`: 8,192 tokens
+  - `medium`: 16,384 tokens
+  - `high`: 65,536 tokens
+  - `xhigh`: 131,072 tokens
+  - `max`: 262,144 tokens
+- **Nemotron models** (Ultra, Super, Lightning): Effort only affects max_tokens when `-thinking` suffix is used (thinking enabled). Without `-thinking`, effort is ignored (8192 default).
+- **Gemini models**: Effort maps to both `reasoning_effort` AND `max_tokens` for deeper reasoning.
+- **Other NVIDIA models** (gpt-oss, etc.): Effort maps to `reasoning_effort` (OpenAI-compatible, xhigh/max → high) AND `max_tokens`.
+- **All OpenAI-compatible routes** (Groq, Mistral, SiliconFlow, etc.): Same dual mapping.
+
+### Improved — Nemotron thinking variants work correctly with explicit effort control
+
+- **`config/remote-agents.sh`**: Added `-thinking` variants for all Nemotron models:
+  - `nvidia-nemotron-ultra-thinking`, `nvidia-nemotron3-thinking`, `nvidia-lightning-thinking`
+- **Effort separation**: The `-thinking` suffix controls `enable_thinking: true/false` (binary); effort controls `max_tokens` (graduated). They're independent:
+  - `nvidia-nemotron-ultra` + `--effort max` = thinking OFF, 8192 tokens (effort ignored)
+  - `nvidia-nemotron-ultra-thinking` + `--effort low` = thinking ON, 8k tokens
+  - `nvidia-nemotron-ultra-thinking` + `--effort max` = thinking ON, 256k tokens (deep reasoning)
+
+### Fixed — xhigh/max effort levels now distinguishable
+
+- Previously `xhigh` and `max` both folded to `high` for `reasoning_effort` (OpenAI only accepts low/medium/high).
+- Now both map to `reasoning_effort: high` for API compatibility, but get **different max_tokens** (128k vs 256k) for noticeably deeper reasoning.
+- This gives a familiar UX (Claude's effort levels) with actual graduated reasoning depth.
+
+### Updated — Model roster status reflects live probe results
+
+- **`nvidia-kimi-k3`**: ⚠️ TIMEOUT on all probes (NVIDIA capacity issue)
+- **`nvidia-deepseek-v4`**: Updated to `deepseek-ai/deepseek-v4.1-flash` (old is 410 Gone); TIMEOUT
+- **`nvidia-glm53`**: Returns `reasoning_content`; works with streaming; non-streaming needs `enable_thinking:true` + larger `max_tokens`
+
+### Tests
+
+- `tests/test_remote_session.py`: Updated assertions for new effort-to-max_tokens mapping across all providers.
+- All 234 tests pass.
+
+---
+
 ## [0.21.4] — 2026-10-02
 
 ### Fixed — NVIDIA proxy config applied `enable_thinking: false` to ALL NVIDIA models, breaking Kimi/DeepSeek/GLM

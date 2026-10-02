@@ -279,8 +279,9 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         link = rundir / 'la_proxy_hooks.py'
         self.assertTrue(link.is_symlink())
         self.assertEqual(link.resolve(), (self.root / 'bin/la_proxy_hooks.py').resolve())
-        # Thinking is NOT disabled to dodge the stream bug -- the hook fixes it instead.
-        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
+        # Thinking IS disabled by default for Nemotron (thinking='false').
+        # Effort no longer flips thinking on; only -thinking suffix does.
+        self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
 
         result = write({'LA_REMOTE_PROXY_HOOKS': '0'})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -307,13 +308,23 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
             self.assertEqual(result.returncode, 0, result.stderr)
             return cfg.read_text()
 
-        # Nemotron: effort means "reason", expressed as enable_thinking -- NOT reasoning_effort.
+        # Nemotron: thinking is controlled by -thinking suffix, NOT effort.
+        # With no -thinking suffix, thinking defaults to false regardless of effort.
         ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
         text = write('nvidia', ultra, 'high')
-        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
+        self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
         self.assertNotIn('reasoning_effort', text,
                          'Nemotron does not accept reasoning_effort; sending it is the bug')
-        # With no effort the crash-avoiding default must survive.
+        # With -thinking suffix, thinking is explicitly enabled.
+        text = write('nvidia', ultra, 'high', 'true')
+        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
+        self.assertNotIn('reasoning_effort', text)
+        # With -thinking suffix + high effort, max_tokens=65536
+        self.assertIn('      max_tokens: 65536\n', text)
+        # With -thinking suffix + max effort, max_tokens=262144 (distinct from high)
+        text = write('nvidia', ultra, 'max', 'true')
+        self.assertIn('      max_tokens: 262144\n', text)
+        # With no effort and no -thinking suffix, thinking defaults to false.
         text = write('nvidia', ultra, '')
         self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
 
