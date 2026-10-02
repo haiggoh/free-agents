@@ -111,6 +111,54 @@ class RateLimiterScreenTests(unittest.TestCase):
         self.assertEqual(saved, {"max_cooldown": 600, "backoff_multiplier": 3.0, "max_retries": 10})
 
 
+class BackendManagerContractTests(unittest.TestCase):
+    """The runtime screen drives install/manage-backend.py (0.21.0). Fails if a row calls a
+    subcommand main's parser rejects OR parses-but-never-dispatches (the merge's dead calls)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("manage_backend", ROOT / "install/manage-backend.py")
+        cls.mb = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mb)
+        cls.dispatched = set(__import__("re").findall(r'args\.command == "([a-z-]+)"',
+                             (ROOT / "install/manage-backend.py").read_text()))
+
+    def tool_argvs(self):
+        import session_picker as sp
+        for name, fn in sp.TOOLS.items():
+            if name.startswith("tool:rt-"):
+                argv = fn("rapid-mlx", "0.15.3") if name in ("tool:rt-validate", "tool:rt-info") else fn("rapid-mlx")
+                yield name, argv[2:]
+
+    def test_backend_list_matches_registry(self):
+        self.assertEqual(sorted(m.RUNTIME_BACKENDS), sorted(self.mb.list_managers()))
+
+    def test_every_runtime_row_parses_and_is_dispatched(self):
+        import importlib.util
+        if importlib.util.find_spec("textual") is None:
+            # session_picker exits(3) at import without Textual; the picker venv runs this half.
+            self.skipTest("Textual absent: run under the picker venv for the argv half")
+        argvs = list(self.tool_argvs())
+        self.assertTrue(argvs)
+        parser = self.mb.build_parser()
+        for name, argv in argvs:
+            with self.subTest(tool=name):
+                args = parser.parse_args(argv)
+                self.assertIn(args.command, self.dispatched)
+
+    def test_runtime_screens_have_back_and_unique_keys(self):
+        for owner in (m.HOME_OWNED, m.DIRECT_ROOT):
+            rt = m.RuntimeScreen(m.Settings(), owner=owner)
+            m.check_action_table(rt.actions())
+            ld = m.LaunchdScreen(m.Settings(), owner=owner)
+            self.assertEqual(ld.handle_key("escape"), m.Nav("runtime", owner))
+            self.assertEqual(ld.handle_key("b"), m.Nav("runtime", owner))
+        s = m.Settings()
+        m.RuntimeScreen(s).handle_key("c")
+        self.assertEqual(s.runtime_backend, m.RUNTIME_BACKENDS[(m.RUNTIME_BACKENDS.index("rapid-mlx") + 1) % 5])
+
+
 class ActionTableTests(unittest.TestCase):
     def all_screens(self):
         s = m.Settings()

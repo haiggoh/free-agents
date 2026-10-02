@@ -19,6 +19,21 @@ All notable changes to `free-agents` are documented in this file.
 - **Lowkey `--effort`** maps to `reasoning_effort` on every request.
 - Loading indicator with a 200 ms threshold; emoji constants sourced from `config/emoji.sh`.
 
+### Changed — backend manager screen follows 0.21.0's unified CLI
+
+- `v` on Home/lanes opens the **Backend manager** (`install/manage-backend.py --backend <b>`), with a
+  backend selector over all five backends (rapid-mlx default): list releases, install (interactive
+  choice), validate, info, and a **Launchd update checks** sub-screen (status, run once, install /
+  uninstall behind a typed `yes`).
+- The branch's old rows calling `manage-rapid-mlx.py smoke|snapshot|reset|inspect|installed` were
+  dropped: those subcommands no longer exist since 0.21.0. `promote`, `remove` and `check-updates`
+  parse in `manage-backend.py` but are not dispatched by its `main()`, so they are not offered either
+  (a contract test fails if a row calls a subcommand the CLI does not dispatch).
+- **Correction to 0.21.0:** its entry describes an uppercase `L` launchd key on csl Home and the local
+  picker. That `csl` change never reached `main`. It ships here instead, as the Launchd entry inside the
+  Backend manager — not as a top-level key, since shortcuts are case-insensitive (`L` = `l` = Local).
+  The `EMOJI_LAUNCHD*` symbols land in `config/emoji.sh` (single source; `emoji_constants.py` reads it).
+
 ### Changed — merged with main through 0.21.3
 
 - Branch history merged (not rebased) with `main` at `v0.21.3`; main's 429 exponential backoff and

@@ -146,20 +146,26 @@ def command_for(req: m.LaunchRequest) -> list[str]:
     raise ValueError(head)
 
 
+def _mb(backend: str, *args: str) -> list[str]:
+    return ["python3", str(REPO / "install/manage-backend.py"), "--backend", backend, *args]
+
+
 TOOLS = {
     "tool:keys": lambda: ["python3", str(REPO / "install/setup-api-keys.py")],
-    "tool:runtime": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py")],
     "tool:rl-status": lambda: ["python3", str(BIN / "rate_limiter.py"), "status"],
     "tool:report": lambda: ["bash", str(BIN / "local-capable-filter.sh"), "--report",
                             str(REPO / "config/local-capable-remote-models.psv"), "--roster",
                             str(REPO / "config/remote-agents.sh")],
-    "tool:rl-releases": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "releases", "--pre"],
-    "tool:rl-install": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "install"],
-    "tool:rl-promote": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "promote"],
-    "tool:rl-smoke": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "smoke"],
-    "tool:rl-snapshot": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "snapshot"],
-    "tool:rl-remove": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "remove"],
-    "tool:rl-reset": lambda: ["python3", str(REPO / "install/manage-rapid-mlx.py"), "reset"],
+    # Backend manager (install/manage-backend.py): (backend[, version]) -> argv. "tool:rl-reset" is
+    # the RATE LIMITER state reset; it is handled as a typed-confirm prompt, never run directly.
+    "tool:rt-releases": lambda b: _mb(b, "releases", "--pre"),
+    "tool:rt-install": lambda b: _mb(b, "install"),
+    "tool:rt-validate": lambda b, v: _mb(b, "validate", v),
+    "tool:rt-info": lambda b, v: _mb(b, "info", v),
+    "tool:rt-launchd-status": lambda b: _mb(b, "launchd", "status"),
+    "tool:rt-launchd-run-once": lambda b: _mb(b, "launchd", "run-once"),
+    "tool:rt-launchd-install": lambda b: _mb(b, "launchd", "install"),
+    "tool:rt-launchd-uninstall": lambda b: _mb(b, "launchd", "uninstall"),
     "tool:keys:open": lambda: ["python3", "-c", "import webbrowser; webbrowser.open('https://github.com/haiggoh/free-agents/blob/main/docs/PROVIDER_SIGNUP.md')"],
     "tool:keys:add": lambda slug: ["python3", str(REPO / "install/setup-api-keys.py"), slug],
 }
@@ -326,6 +332,10 @@ class Picker(App):
             self.screen_model = m.DownloadScreen(s, entries, free, head, nav.owner)
         elif nav.target == "rate_limiter":
             self.screen_model = m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
+        elif nav.target == "runtime":
+            self.screen_model = m.RuntimeScreen(s, nav.owner)
+        elif nav.target == "runtime_launchd":
+            self.screen_model = m.LaunchdScreen(s, nav.owner)
         else:
             raise ValueError(nav.target)
 
@@ -504,7 +514,7 @@ class Picker(App):
             return
         # Tool screens reached from Home get Back; reached from a lane they keep the lane's owner.
         owner = result.owner
-        if target in ("rate_limiter",) and isinstance(self.screen_model, m.HomeScreen):
+        if target in ("rate_limiter", "runtime") and isinstance(self.screen_model, m.HomeScreen):
             owner = m.HOME_OWNED
         if target == "home":
             self.goto(m.Nav("home", m.DIRECT_ROOT))
@@ -520,6 +530,9 @@ class Picker(App):
             return
         if target == "tool:rl-reset":
             self._open_prompt("prompt:rl-reset")
+            return
+        if target.startswith("tool:rt-"):
+            self.run_child(TOOLS[target](self.settings.runtime_backend), pause=True)
             return
         if target.startswith("tool:keys:"):
             # API keys with specific provider
@@ -560,7 +573,11 @@ class Picker(App):
     PROMPTS = {"prompt:session": "Session name (letters, digits, - _; empty = ephemeral):",
                "prompt:oneshot": "One-shot prompt:",
                "prompt:download-review": "",
-               "prompt:rl-reset": "Really delete the shared limiter state file? type yes:"}
+               "prompt:rl-reset": "Really delete the shared limiter state file? type yes:",
+               "prompt:rt-validate": "Version to validate (e.g. 0.15.3; empty cancels):",
+               "prompt:rt-info": "Version to show (e.g. 0.15.3; empty cancels):",
+               "prompt:rt-launchd-install": "Install the weekly LaunchAgent update check? type yes:",
+               "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:"}
 
     def _open_prompt(self, kind):
         self.pending_prompt = kind
@@ -612,6 +629,23 @@ class Picker(App):
                 self.run_child(["python3", "-c",
                                 "import rate_limiter as r,os;p=r.DEFAULT_STATE if not os.environ.get('LA_NVIDIA_THROTTLE_STATE') else r.Path(os.environ['LA_NVIDIA_THROTTLE_STATE']);p.unlink(missing_ok=True);print('state file reset')"],
                                pause=True, cwd=str(BIN))
+
+        elif kind in ("prompt:rt-validate", "prompt:rt-info"):
+            import re
+            if not value:
+                self.render_model()
+            elif not re.fullmatch(r"[0-9][0-9A-Za-z.]{0,31}", value):
+                self.state_warnings.append("version rejected: digits, letters and dots only")
+                self.render_model()
+            else:
+                tool = "tool:rt-" + kind.rsplit("-", 1)[1]
+                self.run_child(TOOLS[tool](self.settings.runtime_backend, value), pause=True)
+        elif kind in ("prompt:rt-launchd-install", "prompt:rt-launchd-uninstall"):
+            if value.lower() == "yes":
+                self.run_child(TOOLS["tool:" + kind.split(":", 1)[1]](self.settings.runtime_backend), pause=True)
+            else:
+                self.state_warnings.append("launchd unchanged — nothing was run")
+                self.render_model()
 
     # --- children ------------------------------------------------------------------------------
     def run_child(self, cmd, env=None, pause=False, cwd=None):

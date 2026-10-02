@@ -139,6 +139,7 @@ class Settings:
     local_capable_shown: bool = False
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
     rate_limiter: dict = field(default_factory=dict)
+    runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
     # Last launched model per lane (for R15: remember last launched)
@@ -287,7 +288,8 @@ def _common_toggles(s: Settings, include_watcher: bool):
 
 def _tool_actions():
     return [Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("tool:keys"), section="tools"),
-            Action("v", f"{ec.EMOJI_TOOLS_STR} Rapid-MLX runtime manager", lambda: Nav("tool:runtime"), section="tools"),
+            Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
+                   lambda: Nav("runtime"), section="tools"),
             Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section="tools")]
 
 
@@ -603,6 +605,63 @@ class RateLimiterScreen(Screen):
             Action("x", "Reset shared limiter state file", lambda: Nav("tool:rl-reset"), section="tools"),
         ]
         acts += self.nav_actions()
+        check_action_table(acts)
+        return acts
+
+
+# install/manage-backend.py --backend choices; tests compare this against its registry.
+RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm")
+
+
+class RuntimeScreen(Screen):
+    """Front end for install/manage-backend.py (0.21.0's unified backend manager).
+
+    Every row maps to a subcommand that main's parser accepts AND dispatches; the old
+    manage-rapid-mlx.py rows smoke/snapshot/reset/inspect/installed no longer exist there, and
+    promote/remove/check-updates parse but are not dispatched, so they are not offered.
+    """
+    title = f"{ec.EMOJI_TOOLS_STR} Backend manager"
+
+    def _cycle_backend(self):
+        self.settings.runtime_backend = _next(RUNTIME_BACKENDS, self.settings.runtime_backend)
+
+    def actions(self):
+        b = self.settings.runtime_backend
+        acts = [
+            Action("c", f"Backend: {b}", self._cycle_backend),
+            Action("r", "List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
+            Action("i", "Install a release (choose from the list)", lambda: Nav("tool:rt-install"), section="tools"),
+            Action("t", "Validate an installed version", lambda: Nav("prompt:rt-validate"), section="tools"),
+            Action("f", "Show info for an installed version", lambda: Nav("prompt:rt-info"), section="tools"),
+            Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", self.owner),
+                   section="tools"),
+        ]
+        acts += self.nav_actions()
+        check_action_table(acts)
+        return acts
+
+
+class LaunchdScreen(Screen):
+    """Weekly backend update check (manage-backend.py launchd ...). Install/uninstall change a
+    LaunchAgent, so both go through a typed confirmation; Back returns to the backend manager."""
+    title = f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks"
+
+    def handle_key(self, key: str):
+        if key == "escape":
+            return Nav("runtime", self.owner)
+        return super().handle_key(key)
+
+    def actions(self):
+        acts = [
+            Action("s", f"{ec.EMOJI_LAUNCHD_STATUS_STR} Status", lambda: Nav("tool:rt-launchd-status"), section="tools"),
+            Action("o", f"{ec.EMOJI_LAUNCHD_RUN_ONCE_STR} Run the update check once now",
+                   lambda: Nav("tool:rt-launchd-run-once"), section="tools"),
+            Action("i", f"{ec.EMOJI_LAUNCHD_INSTALL_STR} Install the weekly check (LaunchAgent)",
+                   lambda: Nav("prompt:rt-launchd-install"), section="tools"),
+            Action("u", f"{ec.EMOJI_LAUNCHD_UNINSTALL_STR} Uninstall the weekly check",
+                   lambda: Nav("prompt:rt-launchd-uninstall"), section="tools"),
+            Action("b", "Back to Backend manager", lambda: Nav("runtime", self.owner), section="nav"),
+        ]
         check_action_table(acts)
         return acts
 

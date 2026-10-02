@@ -32,6 +32,13 @@ EMOJI_MCP="🔌"
 # NVIDIA rate limiter emoji
 EMOJI_NVIDIA_RATE_LIMITER="🚦"
 
+# Launchd management emojis (backend update checks; 0.21.0's csl diff, landed in the picker in 0.22.0)
+EMOJI_LAUNCHD_INSTALL="📥"
+EMOJI_LAUNCHD_UNINSTALL="📤"
+EMOJI_LAUNCHD_STATUS="📊"
+EMOJI_LAUNCHD_RUN_ONCE="▶️"
+EMOJI_LAUNCHD="🔧"  # same as EMOJI_TOOLS, but explicit for clarity
+
 # Lowkey picker emojis (shared with csl for consistency) — LK_ prefix for lowkey namespace
 LK_EMOJI_MODEL="${SESSION_EMOJI_LOCAL}"        # links to SESSION_EMOJI_LOCAL (single source of truth)
 LK_EMOJI_EFFORT="⚙️ "
