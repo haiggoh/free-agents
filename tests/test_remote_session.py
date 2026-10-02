@@ -310,11 +310,14 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
 
         # Nemotron: thinking is controlled by -thinking suffix, NOT effort.
         # With no -thinking suffix, thinking defaults to false regardless of effort.
+        # But effort NOW maps to max_tokens for ALL Nemotron models (not just thinking).
         ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
         text = write('nvidia', ultra, 'high')
         self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
         self.assertNotIn('reasoning_effort', text,
                          'Nemotron does not accept reasoning_effort; sending it is the bug')
+        # With -thinking suffix OFF but high effort, max_tokens is still increased
+        self.assertIn('      max_tokens: 65536\n', text)
         # With -thinking suffix, thinking is explicitly enabled.
         text = write('nvidia', ultra, 'high', 'true')
         self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
@@ -325,8 +328,14 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         text = write('nvidia', ultra, 'max', 'true')
         self.assertIn('      max_tokens: 262144\n', text)
         # With no effort and no -thinking suffix, thinking defaults to false.
+        # Low/medium effort don't set max_tokens (provider default used)
+        text = write('nvidia', ultra, 'low')
+        self.assertNotIn('max_tokens', text)
+        text = write('nvidia', ultra, 'medium')
+        self.assertNotIn('max_tokens', text)
         text = write('nvidia', ultra, '')
         self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
+        self.assertNotIn('max_tokens', text)
 
         # A non-Nemotron NVIDIA model DOES take the OpenAI-compatible field.
         text = write('nvidia', 'nvidia/gpt-oss-20b', 'high')

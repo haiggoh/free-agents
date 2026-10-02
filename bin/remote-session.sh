@@ -838,16 +838,14 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     esac
     local effort_line=""
     # For models with reasoning support, map effort to max_tokens (practical effort control).
-    # reasoning_effort only has low/medium/high in OpenAI API; xhigh/max map to "high"
-    # but get larger token budgets for deeper reasoning.
+    # Only set max_tokens for high/xhigh/max to AVOID artificially lowering provider defaults.
+    # low/medium use model default; high/xhigh/max get increased budgets for deeper reasoning.
     local max_tokens_for_effort=""
     if [[ -n "$mapped_effort" ]]; then
         case "$mapped_effort" in
-            low)              max_tokens_for_effort=8192 ;;      # 8k
-            medium)           max_tokens_for_effort=16384 ;;     # 16k
-            high)             max_tokens_for_effort=65536 ;;     # 64k
-            xhigh)            max_tokens_for_effort=131072 ;;    # 128k
-            max)              max_tokens_for_effort=262144 ;;    # 256k
+            high)             max_tokens_for_effort=65536 ;;     # 64k - deeper reasoning
+            xhigh)            max_tokens_for_effort=131072 ;;    # 128k - very deep reasoning
+            max)              max_tokens_for_effort=262144 ;;    # 256k - maximum practical
         esac
     fi
     if [[ -n "$mapped_effort" ]]; then
@@ -859,9 +857,8 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         esac
         case "$prov" in
             nvidia)
-                # Nemotron reads enable_thinking, not reasoning_effort. Effort does NOT
-                # change the thinking setting (which is explicitly set above based on -thinking suffix).
-                # For Nemotron WITH thinking, effort maps to max_tokens (set below in model loop).
+                # Nemotron reads enable_thinking, not reasoning_effort.
+                # For ALL Nemotron models, effort maps to max_tokens (set below in model loop).
                 # Other NVIDIA models DO accept reasoning_effort.
                 if [[ "$model" != *nemotron* ]]; then
                     effort_line="      reasoning_effort: $reasoning_effort"
