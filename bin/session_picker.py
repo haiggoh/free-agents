@@ -357,7 +357,10 @@ class Picker(App):
         # Show/hide the rows container
         rows.display = show_models
 
-        if show_models:
+        # Check if screen has accordion with groups (RuntimeManagerScreen has accordion but no groups)
+        has_groups = hasattr(sm, 'accordion') and sm.accordion is not None and len(sm.accordion.groups) > 0
+
+        if show_models and has_groups:
             for kind, obj in sm.accordion.rows():
                 if kind == "group":
                     mark = "▾" if obj.id == sm.accordion.open_group else "▸"
@@ -369,7 +372,7 @@ class Picker(App):
                     rows.add_option(Option(f"    {box}{obj.label}", id=f"i:{obj.id}"))
                     self.row_ids.append(("item", obj.id))
 
-        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen)):
+        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.RuntimeManagerScreen)):
             rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
         target = keep or (f"i:{sm.accordion.selected_id}" if sm.accordion.selected_id else None)
         if target:

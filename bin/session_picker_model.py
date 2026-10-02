@@ -642,27 +642,36 @@ RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm")
 
 
 class RuntimeManagerScreen(Screen):
-    """Rapid-MLX Runtime Manager - manages Rapid-MLX runtime environments.
+    """Backend Manager - manages versioned runtime environments.
 
-    Provides actions for listing releases, installing, promoting, smoke-testing,
-    snapshotting, and removing versions. Drives install/manage-backend.py.
+    Supports multiple backends (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm).
+    Drives install/manage-backend.py with backend selection.
     """
-    title = "Rapid-MLX Runtime Manager"
+    title = f"{ec.EMOJI_TOOLS_STR} Backend Manager"
+    # This screen has no accordion (action-only screen)
+    _has_accordion = False
+
+    def _cycle_backend(self):
+        self.settings.runtime_backend = _next(RUNTIME_BACKENDS, self.settings.runtime_backend)
 
     def actions(self):
+        b = self.settings.runtime_backend
         acts = [
-            Action("r", "List installable releases", lambda: Nav("tool:rt-releases"), section="tools"),
-            Action("i", "Install a release", lambda: Nav("tool:rt-install"), section="tools"),
-            Action("p", "Promote pins", lambda: Nav("prompt:rt-promote"), section="tools"),
-            Action("s", "Smoke-test", lambda: Nav("prompt:rt-smoke"), section="tools"),
-            Action("n", "Snapshot", lambda: Nav("prompt:rt-snapshot"), section="tools"),
-            Action("x", "Remove", lambda: Nav("prompt:rt-remove"), section="tools"),
+            Action("c", f"Backend: {b}", self._cycle_backend),
+            Action("r", "List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
+            Action("i", "Install a release (choose from the list)", lambda: Nav("tool:rt-install"), section="tools"),
+            Action("t", "Validate an installed version", lambda: Nav("prompt:rt-validate"), section="tools"),
+            Action("f", "Show info for an installed version", lambda: Nav("prompt:rt-info"), section="tools"),
             Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", self.owner),
                    section="tools"),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
+
+    def groups(self):
+        """No accordion for this screen."""
+        return []
 
 
 class APIKeysScreen(Screen):
