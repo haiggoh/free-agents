@@ -25,6 +25,9 @@ from typing import Callable
 import session_menu_state as sms
 import emoji_constants as ec
 
+# Session Launcher title - single source of truth
+SESSION_LAUNCHER_TITLE = "Claude Code Free-Agents: Session Launcher"
+
 HOME_OWNED = "home_owned"
 DIRECT_ROOT = "direct_root"
 
@@ -289,7 +292,7 @@ def _tool_actions():
 
 
 class HomeScreen(Screen):
-    title = "Claude Code Free-Agents: Session Launcher"
+    title = SESSION_LAUNCHER_TITLE
 
     def __init__(self, settings: Settings, local_count: int | None = None, remote_count: int | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner=owner)
@@ -477,15 +480,15 @@ class RemoteScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            Action("e", f"⚙️ Effort: {_effort_label(s.remote_effort)}", self._cycle_effort),
-            Action("s", "🦾 Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
-            Action("l", "🦾 Local sessions", lambda: Nav("local", self.owner), section="hidden"),
-            Action("h", f"🔖 Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
+            Action("e", f"⚙️  Effort: {_effort_label(s.remote_effort)}", self._cycle_effort),
+            Action("s", "🦾  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
+            Action("l", "🦾  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
+            Action("h", f"🔖  Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
                    lambda: self._toggle("include_trials")),
-            Action("f", f"🏷️ Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
+            Action("f", f"🏷️  Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
                    lambda: self._toggle("local_capable_shown")),
-            Action("x", "📋 Hidden-model report", lambda: Nav("tool:report"), section="tools"),
-            Action("m", f"🔌 MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
+            Action("x", "📋  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
+            Action("m", f"🔌  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                    lambda: setattr(s, "enable_mcp", not s.enable_mcp)),
         ]
         # Add "Launch last model" if we have a saved last model
