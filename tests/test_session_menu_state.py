@@ -190,6 +190,29 @@ class StateTests(unittest.TestCase):
         sms.save_rate_limiter(self.cfg, {"mode": None})       # None clears a key
         self.assertEqual(sms.load(self.cfg).rate_limiter, {"rpm": 30})
 
+    def test_backoff_keys_validate(self):
+        # 0.20.11's backoff keys: fails if they are rejected as unknown or accept nonsense.
+        sms.save_rate_limiter(self.cfg, {"max_cooldown": 600, "backoff_multiplier": 1.5,
+                                         "max_retries": 0})
+        self.assertEqual(sms.load(self.cfg).rate_limiter,
+                         {"max_cooldown": 600, "backoff_multiplier": 1.5, "max_retries": 0})
+        for bad in ({"max_cooldown": 3601}, {"backoff_multiplier": 0.5}, {"backoff_multiplier": 11},
+                    {"max_retries": 2.5}, {"max_retries": 51}, {"max_retries": True}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                sms.save_rate_limiter(self.cfg, bad)
+
+    def test_pre_backoff_file_loads_unchanged(self):
+        # A file written before the backoff keys existed must load as-is: no warning, no rewrite.
+        path = self.cfg / sms.PREFS_NAME
+        raw = (b'{"schema_version": 1, "effort": {"local_session": "low"}, '
+               b'"rate_limiter": {"mode": "sliding_window", "rpm": 40, "max_wait": 120, "cooldown": 10}}')
+        path.write_bytes(raw)
+        state = sms.load(self.cfg)
+        self.assertEqual(state.warnings, [])
+        self.assertEqual(state.rate_limiter,
+                         {"mode": "sliding_window", "rpm": 40, "max_wait": 120, "cooldown": 10})
+        self.assertEqual(path.read_bytes(), raw)
+
 
 if __name__ == "__main__":
     unittest.main()

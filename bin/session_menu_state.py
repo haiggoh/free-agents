@@ -51,8 +51,12 @@ ALLOWED_EFFORT = {
 DEFAULT_EFFORT = {"local_session": "high", "remote_api_session": "max", "lowkey": "xhigh"}
 
 RATE_LIMITER_MODES = ("sliding_window", "smooth_bucket")
+# "cooldown" is the BASE cooldown of rate_limiter's 429 exponential backoff (0.20.11); the key
+# keeps its pre-backoff name so files saved before the backoff still load unchanged.
 _RL_NUMERIC = {"rpm": (1, 10000), "bucket_capacity": (1, 1000),
-               "max_wait": (0, 3600), "cooldown": (0, 3600)}
+               "max_wait": (0, 3600), "cooldown": (0, 3600),
+               "max_cooldown": (0, 3600), "backoff_multiplier": (1, 10), "max_retries": (0, 50)}
+_RL_WHOLE = ("rpm", "bucket_capacity", "max_retries")
 
 REPO_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
@@ -87,7 +91,7 @@ def _validate_rate_limiter(values: dict, allow_none: bool = False) -> None:
             lo, hi = _RL_NUMERIC[key]
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not lo <= value <= hi:
                 raise ValueError(f"{key} must be a number in {lo}..{hi}")
-            if key in ("rpm", "bucket_capacity") and not float(value).is_integer():
+            if key in _RL_WHOLE and not float(value).is_integer():
                 raise ValueError(f"{key} must be a whole number")
         else:
             raise ValueError(f"unknown rate limiter setting {key!r}")

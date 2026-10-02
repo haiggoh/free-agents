@@ -83,6 +83,34 @@ class NavigationTests(unittest.TestCase):
         self.assertNotIn("b", self.labels(rl2))
 
 
+class RateLimiterScreenTests(unittest.TestCase):
+    def test_screen_defaults_match_the_limiter(self):
+        # Fails if the screen shows a default the proxies do not use (the old 120 s / 10 s drift).
+        import rate_limiter as rl
+        labels = {a.key: a.label for a in m.RateLimiterScreen(m.Settings()).actions()}
+        self.assertIn(f"{int(rl.DEFAULT_MAX_WAIT)}s", labels["w"])
+        self.assertIn(f"{int(rl.DEFAULT_429_BASE_COOLDOWN)}s", labels["d"])
+        self.assertIn(f"{int(rl.DEFAULT_429_MAX_COOLDOWN)}s", labels["u"])
+        self.assertIn(f"×{rl.DEFAULT_429_BACKOFF_MULTIPLIER}", labels["y"])
+        self.assertIn(f"{rl.DEFAULT_429_MAX_RETRIES}", labels["z"])
+
+    def test_every_cycle_includes_the_limiter_default(self):
+        import rate_limiter as rl
+        S = m.RateLimiterScreen
+        self.assertIn(rl.DEFAULT_MAX_WAIT, S.WAIT_STEPS)
+        self.assertIn(rl.DEFAULT_429_BASE_COOLDOWN, S.COOLDOWN_STEPS)
+        self.assertIn(rl.DEFAULT_429_MAX_COOLDOWN, S.MAX_COOLDOWN_STEPS)
+        self.assertIn(rl.DEFAULT_429_BACKOFF_MULTIPLIER, S.MULTIPLIER_STEPS)
+        self.assertIn(rl.DEFAULT_429_MAX_RETRIES, S.RETRY_STEPS)
+
+    def test_backoff_rows_persist_through_on_save(self):
+        saved = {}
+        screen = m.RateLimiterScreen(m.Settings(), on_save=saved.update)
+        for key in "uyz":
+            screen.handle_key(key)
+        self.assertEqual(saved, {"max_cooldown": 600, "backoff_multiplier": 3.0, "max_retries": 10})
+
+
 class ActionTableTests(unittest.TestCase):
     def all_screens(self):
         s = m.Settings()

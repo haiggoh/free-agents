@@ -187,10 +187,19 @@ class SavedSettingsTests(unittest.TestCase):
         # The saved key "cooldown" is the BASE cooldown of main's 429 backoff.
         self.assertEqual((lim.capacity, lim.base_cooldown), (4, 5.0))
 
+    def test_saved_backoff_settings_are_used(self):
+        # Fails if the backoff keys (0.20.11) bypass _setting() and read only the environment.
+        self.save('{"max_cooldown": 600, "backoff_multiplier": 3, "max_retries": 7}')
+        for lim in (self.limiter(), self.limiter(LA_NVIDIA_MODE="smooth_bucket")):
+            self.assertEqual((lim.max_cooldown, lim.backoff_multiplier, lim.max_retries),
+                             (600.0, 3.0, 7))
+        lim = self.limiter(LA_NVIDIA_429_MAX_RETRIES="2")
+        self.assertEqual(lim.max_retries, 2)
+
     def test_backoff_defaults_follow_main(self):
         lim = self.limiter()
         self.assertEqual((lim.base_cooldown, lim.max_cooldown, lim.backoff_multiplier,
-                          lim.max_retries), (30.0, 300.0, 2.0, 5))
+                          lim.max_retries, rl._max_wait(None)), (30.0, 300.0, 2.0, 5, 300.0))
 
     def test_environment_still_wins(self):
         self.save('{"mode": "smooth_bucket", "rpm": 30}')

@@ -87,6 +87,7 @@ DEFAULT_429_BASE_COOLDOWN = 30.0      # Base cooldown seconds (was 10)
 DEFAULT_429_MAX_COOLDOWN = 300.0      # Max cooldown seconds (was 120 max_wait)
 DEFAULT_429_BACKOFF_MULTIPLIER = 2.0  # Exponential backoff multiplier
 DEFAULT_429_MAX_RETRIES = 5           # Max retry attempts before giving up
+DEFAULT_MAX_WAIT = 300.0              # Queue bound (0.20.11 documented 300; code kept 120 until 0.22.0)
 
 # The saved picker key "cooldown" is the BASE cooldown (kept under its old name so saved
 # files from before the backoff stay valid).
@@ -550,7 +551,7 @@ class SlidingWindowLimiter:
 
 
 def _max_wait(value: float | None) -> float:
-    return float(value if value is not None else _setting("max_wait", 120))
+    return float(value if value is not None else _setting("max_wait", DEFAULT_MAX_WAIT))
 
 
 def get_limiter(path: Path | str | None = None, rpm: float | None = None,
@@ -576,7 +577,7 @@ def main(argv: list[str]) -> int:
         epilog="Env: LA_NVIDIA_THROTTLE_STATE, LA_NVIDIA_RPM (default 40), "
                "LA_NVIDIA_MODE (sliding_window|smooth_bucket), "
                "LA_NVIDIA_BUCKET_CAPACITY (default 6), "
-               "LA_NVIDIA_MAX_WAIT, LA_NVIDIA_429_COOLDOWN (base, default 30), "
+               "LA_NVIDIA_MAX_WAIT (default 300), LA_NVIDIA_429_COOLDOWN (base, default 30), "
                "LA_NVIDIA_429_MAX_COOLDOWN (default 300), LA_NVIDIA_429_BACKOFF_MULTIPLIER (default 2.0), "
                "LA_NVIDIA_429_MAX_RETRIES (default 5); saved picker settings below the environment.")
     sub = parser.add_subparsers(dest="cmd", required=False)

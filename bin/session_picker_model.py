@@ -548,14 +548,19 @@ class RemoteScreen(Screen):
 class RateLimiterScreen(Screen):
     """NVIDIA rate limiter settings, persisted in session-menu.local.json (rate_limiter).
 
-    Proxies read the saved values through rate_limiter.effective_settings(); an explicit
-    LA_NVIDIA_* environment variable still wins, so nothing a user exported is overridden.
+    Proxies read the saved values through rate_limiter._setting(); an explicit LA_NVIDIA_*
+    environment variable still wins, so nothing a user exported is overridden. Defaults and
+    every cycle's steps include rate_limiter's own defaults, so the screen never shows a value
+    the proxies do not use.
     """
     title = "🔧 NVIDIA Rate Limiter"
     RPM_STEPS = (10, 20, 30, 40)
     CAP_STEPS = (2, 4, 6, 10)
     WAIT_STEPS = (30, 60, 120, 300)
     COOLDOWN_STEPS = (5, 10, 30, 60)
+    MAX_COOLDOWN_STEPS = (120, 300, 600, 900)
+    MULTIPLIER_STEPS = (1.5, 2.0, 3.0)
+    RETRY_STEPS = (0, 3, 5, 10)
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT,
                  on_save: Callable[[dict], object] | None = None):
@@ -584,10 +589,16 @@ class RateLimiterScreen(Screen):
                          if mode == "smooth_bucket" else "Bucket capacity: unavailable (smooth_bucket only)"),
                    lambda: self._cycle("bucket_capacity", self.CAP_STEPS, 6),
                    enabled=mode == "smooth_bucket"),
-            Action("w", f"Max wait: {self.value('max_wait', 120)}s",
-                   lambda: self._cycle("max_wait", self.WAIT_STEPS, 120)),
-            Action("d", f"429 cooldown: {self.value('cooldown', 10)}s",
-                   lambda: self._cycle("cooldown", self.COOLDOWN_STEPS, 10)),
+            Action("w", f"Max wait: {self.value('max_wait', 300)}s",
+                   lambda: self._cycle("max_wait", self.WAIT_STEPS, 300)),
+            Action("d", f"429 base cooldown: {self.value('cooldown', 30)}s",
+                   lambda: self._cycle("cooldown", self.COOLDOWN_STEPS, 30)),
+            Action("u", f"429 max cooldown: {self.value('max_cooldown', 300)}s",
+                   lambda: self._cycle("max_cooldown", self.MAX_COOLDOWN_STEPS, 300)),
+            Action("y", f"429 backoff multiplier: ×{self.value('backoff_multiplier', 2.0)}",
+                   lambda: self._cycle("backoff_multiplier", self.MULTIPLIER_STEPS, 2.0)),
+            Action("z", f"429 max retries: {self.value('max_retries', 5)}",
+                   lambda: self._cycle("max_retries", self.RETRY_STEPS, 5)),
             Action("i", "Show live limiter status", lambda: Nav("tool:rl-status"), section="tools"),
             Action("x", "Reset shared limiter state file", lambda: Nav("tool:rl-reset"), section="tools"),
         ]
