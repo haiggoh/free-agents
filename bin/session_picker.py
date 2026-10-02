@@ -57,9 +57,9 @@ except ImportError:
 # (e.g., model list loading). Startup shows loading immediately with NO delay.
 LOADING_INDICATOR_DELAY_S = 0.2
 
-# Loading animation frames - hourglass switching between filled/empty + spinner
-LOADING_FRAMES = ["⏳", "⏳", "⏳", "⏳", "⏳", "⏳", "⏳", "⏳", "⏳", "⏳"]
-LOADING_INTERVAL = 0.1  # 100ms per frame
+# Loading animation frames - hourglass alternating between flowing sand (⏳) and done (⌛️)
+LOADING_FRAMES = ["⏳", "⌛️"]
+LOADING_INTERVAL = 0.15  # 150ms per frame for smooth alternation
 
 REPO = BIN.parent
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
