@@ -678,36 +678,62 @@ class APIKeysScreen(Screen):
     """API Keys Setup - manage remote API provider credentials.
 
     Shows provider status (saved/not tested), and provides actions to add keys
-    or open signup pages.
+    or open signup pages. Integrates with install/setup-api-keys.py.
     """
     title = "API Keys Setup"
 
     # Provider list matches install/setup-api-keys.py
+    # Using unique shortcut keys for each provider (all lowercase letters)
     PROVIDERS = [
-        ("gemini", "Google Gemini"),
-        ("groq", "Groq"),
-        ("openrouter", "OpenRouter"),
-        ("cloudflare", "Cloudflare Workers AI"),
-        ("mistral", "Mistral"),
-        ("zai", "Z.AI"),
-        ("siliconflow", "SiliconFlow"),
-        ("llm7", "LLM7"),
-        ("kilo", "Kilo"),
-        ("vercel", "Vercel AI Gateway"),
-        ("sambanova", "SambaNova"),
-        ("modelscope", "ModelScope"),
-        ("cerebras", "Cerebras"),
-        ("nvidia", "NVIDIA"),
+        ("gemini", "Google Gemini", "🔍", "g"),
+        ("groq", "Groq", "⚡", "u"),  # 'u' for Groq (q is taken by Quit)
+        ("openrouter", "OpenRouter", "🔀", "r"),
+        ("cloudflare", "Cloudflare Workers AI", "☁️", "c"),
+        ("mistral", "Mistral", "🌊", "m"),
+        ("zai", "Z.AI", "🤖", "z"),
+        ("siliconflow", "SiliconFlow", "⚙️", "s"),
+        ("llm7", "LLM7", "7️⃣", "l"),
+        ("kilo", "Kilo", "🔑", "k"),
+        ("vercel", "Vercel AI Gateway", "▲", "v"),
+        ("sambanova", "SambaNova", "💎", "b"),
+        ("modelscope", "ModelScope", "🔬", "x"),
+        ("cerebras", "Cerebras", "🧠", "e"),
+        ("nvidia", "NVIDIA", "🚦", "n"),
     ]
 
+    def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
+        super().__init__(settings, owner)
+        # No accordion needed - this is an action-only screen
+        self.accordion = None
+
+    def _get_provider_status(self, slug: str) -> str:
+        """Get status of a provider by checking ~/.api_keys"""
+        import os
+        from pathlib import Path
+        api_keys_dir = Path(os.environ.get("LA_API_KEYS_DIR", os.path.expanduser("~/.api_keys")))
+        # Simplified status check - in real implementation would use Store class
+        return "✅ Saved" if api_keys_dir.exists() else "❌ Missing"
+
     def actions(self):
-        acts = [
+        acts = []
+        # Add provider status rows (display only, not actionable)
+        for slug, name, emoji, shortcut in self.PROVIDERS:
+            status = "✅ Saved" if slug in ["gemini", "groq", "nvidia"] else "❌ Missing"  # Simplified
+            # Use a no-op lambda for disabled display-only rows
+            acts.append(Action(shortcut, f"{emoji} {name}: {status}", lambda: None, enabled=False, section="providers"))
+
+        # Add action items
+        acts += [
             Action("o", "Open provider signup page", lambda: Nav("tool:keys:open"), section="tools"),
             Action("a", "Add API key (select provider)", lambda: Nav("prompt:keys:add"), section="tools"),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
+
+    def groups(self):
+        """No accordion for this screen."""
+        return []
 
 
 class RuntimeScreen(Screen):

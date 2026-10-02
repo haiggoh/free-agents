@@ -372,9 +372,9 @@ class Picker(App):
                     rows.add_option(Option(f"    {box}{obj.label}", id=f"i:{obj.id}"))
                     self.row_ids.append(("item", obj.id))
 
-        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.RuntimeManagerScreen)):
+        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.RuntimeManagerScreen, m.APIKeysScreen)):
             rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
-        target = keep or (f"i:{sm.accordion.selected_id}" if sm.accordion.selected_id else None)
+        target = keep or (f"i:{sm.accordion.selected_id}" if sm.accordion and sm.accordion.selected_id else None)
         if target:
             for idx in range(rows.option_count):
                 if rows.get_option_at_index(idx).id == target:
