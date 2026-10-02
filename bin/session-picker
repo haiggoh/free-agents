@@ -9,6 +9,8 @@
 #
 # If the venv is missing this prints the one command that creates it and exits 3. It never
 # falls back to an old numbered menu.
+# Clear screen immediately to hide shell "Last login" message
+printf '\033[2J\033[H'
 set -uo pipefail
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 BIN="$(cd -P "$(dirname "$_s")" && pwd)"
