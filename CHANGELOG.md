@@ -2,6 +2,52 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.2] — 2026-10-02
+
+### Added — Queue Recovery with Shared Replay Core
+
+- **Shared queue replay core** (`bin/queue_replay.py`): Single semantic core for queue replay,
+  classification, and acknowledgment validation used by both Stop hook and future mid-run hook.
+  Implements stable occurrence IDs (SHA-256 of session|line|content), content-matched FIFO pairing,
+  and per-occurrence acknowledgment validation.
+- **Persistent queue state** (`bin/queue_state.py`): Atomic read/write with file locking (`fcntl`),
+  schema versioning (v1), source identity binding (transcript path + mtime + size), corruption recovery.
+  State persisted at `~/.claude/state/queue/<session_id>.json`.
+- **Per-occurrence acknowledgment contract**: Three dispositions — `answered_now` (concrete answer + marker),
+  `answered_earlier` (reference to prior response + marker), `clarification` (concrete question + marker).
+  Marker-only responses rejected; substantive evidence required.
+- **Legacy marker migration**: Unambiguous legacy content-hash markers auto-migrated to occurrence-bound
+  acknowledgments; ambiguous cases (identical content, multiple occurrences) preserved for user disambiguation.
+- **Transcript lag handling**: `last_assistant_message` stdin hashes from Stop hook payload accepted for
+  acknowledgment validation, preventing double-counting when transcript hasn't flushed.
+
+### Changed
+
+- **Updated `bin/local-queue-stop-hook.py`**: Uses new `queue_replay.replay_and_classify()` as single
+  semantic core. Reconciles acknowledgments BEFORE `stop_hook_active` check (per plan). Backward-compatible
+  exports for existing test contract (`build_queue_groups`, `_content_hash`, `_extract_answered_markers`,
+  `_text_addresses_prompt`).
+- **Content-matched FIFO pairing**: Drains with content match by exact content; contentless dequeues use
+  FIFO fallback; `popAll` drains all pending oldest-first. Unmatched drains ignored; unmatched occurrences
+  become undelivered groups.
+
+### Fixed
+
+- Identical prompts ("e", "e") now tracked as distinct occurrences with separate IDs.
+- Later repeated slash commands not cleared by earlier marker — each occurrence requires own acknowledgment.
+- Marker-only responses rejected; must include substantive evidence (answer, reference, or question).
+- Persisted acknowledgments survive transcript lag, hook reinvocation, and session resume.
+- Task notifications replayed for accounting but excluded from user-answer obligations.
+
+### Tests
+
+- 22 new queue replay tests (`tests/test_queue_replay.py`) covering all edge cases: FIFO pairing,
+  out-of-order drains, contentless dequeues, popAll, identical prompts, repeated commands,
+  task notifications, legacy migration, transcript lag, acknowledgment dispositions.
+- All 250 tests pass (234 pytest + 16 bash contract tests).
+
+---
+
 ## [0.21.0] — 2026-10-01
 
 ### Added — Unified Backend Management with Launchd Integration
