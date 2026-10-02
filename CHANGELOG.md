@@ -2,7 +2,163 @@
 
 All notable changes to `free-agents` are documented in this file.
 
-<<<<<<< HEAD
+## [0.22.0] — unreleased
+
+### Added — Session picker TUI (Textual) replaces the numbered csl menus
+
+- **Interactive session picker** (`bin/session_picker.py`, `bin/session_picker_model.py`,
+  `bin/session-picker`): Textual UI with accordion navigation, arrow keys, letter shortcuts,
+  grouped menus and persistent settings in `config/session-menu.local.json`
+  (`bin/session_menu_state.py`: repo-local, locked, atomic preference store).
+- **Entry-point wiring**: `bin/csl`, `bin/remote-session.sh` and the new canonical direct launcher
+  `bin/local-session.sh` hand off through the nav file (`--csl-owner` / `CSL_NAV_FILE`).
+- **Rate limiter settings persist**: `rate_limiter.py menu` opens the picker's rate-limiter screen;
+  the limiter reads explicit argument > `LA_NVIDIA_*` env > saved picker setting > default, for every
+  setting including 0.20.11's backoff keys. The saved key `cooldown` is the BASE cooldown. The
+  numbered 12-option `_interactive_menu` from 0.20.11 is replaced by that screen.
+- **Lowkey `--effort`** maps to `reasoning_effort` on every request.
+- Loading indicator with a 200 ms threshold; emoji constants sourced from `config/emoji.sh`.
+
+### Changed — merged with main through 0.21.3
+
+- Branch history merged (not rebased) with `main` at `v0.21.3`; main's 429 exponential backoff and
+  defaults (base 30 s, max 300 s, ×2.0, 5 retries, max_wait 300 s) are kept verbatim.
+
+## [0.21.3] — 2026-10-02
+
+### Fixed — tool-owned-state guard no longer denies harmless commands containing heredocs
+
+- `hooks/guard-tool-owned-state.py`: heredoc bodies are cut out before shell tokenising and judged
+  like `python -c` code. Prose with an odd number of apostrophes used to make `shlex` raise, and the
+  whole-text fallback then denied any write-shaped command that merely mentioned `.claude` (a `sed`
+  version bump on a source repo's `.claude-plugin/plugin.json`, a `git commit -F - <<MSG`).
+- The untokenisable fallback now requires a PROTECTED path, not just any `.claude` mention.
+- 6 new self-test cases (3 must-allow, 3 must-deny incl. writes via heredoc); 41/41 pass; removing the
+  body check fails the heredoc-write case (mutation-tested). Salvaged from the stale
+  `fix/guard-state-fallback-fp` branch (2026-09-26), which never reached `main`.
+
+## [0.21.2] — 2026-10-02
+
+### Added — Queue Recovery with Shared Replay Core
+
+- **Shared queue replay core** (`bin/queue_replay.py`): Single semantic core for queue replay,
+  classification, and acknowledgment validation used by both Stop hook and future mid-run hook.
+  Implements stable occurrence IDs (SHA-256 of session|line|content), content-matched FIFO pairing,
+  and per-occurrence acknowledgment validation.
+- **Persistent queue state** (`bin/queue_state.py`): Atomic read/write with file locking (`fcntl`),
+  schema versioning (v1), source identity binding (transcript path + mtime + size), corruption recovery.
+  State persisted at `~/.claude/state/queue/<session_id>.json`.
+- **Per-occurrence acknowledgment contract**: Three dispositions — `answered_now` (concrete answer + marker),
+  `answered_earlier` (reference to prior response + marker), `clarification` (concrete question + marker).
+  Marker-only responses rejected; substantive evidence required.
+- **Legacy marker migration**: Unambiguous legacy content-hash markers auto-migrated to occurrence-bound
+  acknowledgments; ambiguous cases (identical content, multiple occurrences) preserved for user disambiguation.
+- **Transcript lag handling**: `last_assistant_message` stdin hashes from Stop hook payload accepted for
+  acknowledgment validation, preventing double-counting when transcript hasn't flushed.
+
+### Changed
+
+- **Updated `bin/local-queue-stop-hook.py`**: Uses new `queue_replay.replay_and_classify()` as single
+  semantic core. Reconciles acknowledgments BEFORE `stop_hook_active` check (per plan). Backward-compatible
+  exports for existing test contract (`build_queue_groups`, `_content_hash`, `_extract_answered_markers`,
+  `_text_addresses_prompt`).
+- **Content-matched FIFO pairing**: Drains with content match by exact content; contentless dequeues use
+  FIFO fallback; `popAll` drains all pending oldest-first. Unmatched drains ignored; unmatched occurrences
+  become undelivered groups.
+
+### Fixed
+
+- Identical prompts ("e", "e") now tracked as distinct occurrences with separate IDs.
+- Later repeated slash commands not cleared by earlier marker — each occurrence requires own acknowledgment.
+- Marker-only responses rejected; must include substantive evidence (answer, reference, or question).
+- Persisted acknowledgments survive transcript lag, hook reinvocation, and session resume.
+- Task notifications replayed for accounting but excluded from user-answer obligations.
+
+### Tests
+
+- 22 new queue replay tests (`tests/test_queue_replay.py`) covering all edge cases: FIFO pairing,
+  out-of-order drains, contentless dequeues, popAll, identical prompts, repeated commands,
+  task notifications, legacy migration, transcript lag, acknowledgment dispositions.
+- All 250 tests pass (234 pytest + 16 bash contract tests).
+
+---
+
+## [0.21.0] — 2026-10-01
+
+### Added — Unified Backend Management with Launchd Integration
+
+- **Unified Backend Manager** (`install/manage-backend.py`): Single CLI to manage all inference backends (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) with consistent subcommands: `list`, `releases`, `installed`, `install`, `validate`, `check-updates`, `promote`, `remove`, `info`, `launchd`.
+- **Launchd Integration** for automatic weekly backend update checks: `manage-backend.py --backend <name> launchd {install,uninstall,status,run-once}`. Installs a launchd plist running weekly (Mon 10:17 AM) that checks PyPI/GitHub/Homebrew for backend updates and shows macOS notifications.
+- **Interactive csl Menu Integration**: Launchd management available from home menu (`L` key) and local picker (`L` key) with submenu for install/uninstall/status/run-once.
+- **Updated `install-backend.sh`**: Canonical installer now sets up all backends (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) via unified CLI, with `--all`, `--backend`, `--dry-run` flags.
+- **Consolidated Update Checks**: New `scripts/check_backend_updates.py` and `scripts/check-backend-updates.sh` replace the old `local-stack-update-check.sh`, checking all backends (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) via unified CLI with JSON logging and macOS notifications.
+- **Launchd Management in csl**: New `launchd` submenu accessible via `L` key in both home menu and local picker, offering install/uninstall/status/run-once options.
+- **Unified Config Integration**: Updated `config/config-lib.sh` with `la_discover_backend_binary()` using unified CLI, and `config/config.example.sh` documents all backend configuration options.
+
+### Changed
+
+- **Refactored Rapid-MLX Manager**: `install/manage-rapid-mlx.py` refactored into `install/managers/rapid_mlx.py` with full feature parity; old script now a thin wrapper for backward compatibility.
+- **New Backend Managers**: Added `VLLMMLXManager` (PyPI/GitHub sources, patch handling), `OMLXManager` (Homebrew/GitHub), `LlamaCppManager` (GitHub binary releases), `LitellmManager` (proxy management).
+- **Unified Backend Abstraction**: New `BackendManager` ABC in `install/managers/base.py` with registry pattern; all managers inherit and implement required interface.
+- **Unified CLI Entry Point**: New `install/manage-backend.py` replaces fragmented management scripts.
+- **Consolidated Update Scripts**: `scripts/check-backend-updates.py` replaces `local-stack-update-check.sh`; `scripts/daily-package-upgrade.sh` simplified (Homebrew + pipx only).
+- **Launchd Plist**: New `install/launchd/com.haiggoh.backend-update-check.plist` replaces old `local-stack-update-check.plist`.
+- **Config Updates**: `config-lib.sh` adds unified backend discovery; `config.example.sh` documents all backend config options.
+
+### Fixed
+
+- Version bump to 0.21.0 across VERSION, plugin.json, and CHANGELOG.
+- Updated plugin.json version to 0.21.0 in both main repo and worktree.
+
+---
+
+## [0.20.11] — 2026-10-01
+
+### Fixed — NVIDIA free-API sessions died with misleading "Connection refused" on upstream 429/overload
+
+- Root cause: NVIDIA free tier (~40 RPM dynamic) returns 429/503 "Service temporarily overloaded" on bursts; LiteLLM proxy surfaced this as "Connection refused — a firewall or proxy may be blocking it" (ECONNREFUSED), killing the session on first request.
+- `rate_limiter.py`: Exponential backoff on 429 (30s→60s→120s→240s capped at 300s). New defaults: `LA_NVIDIA_429_COOLDOWN=30`, `LA_NVIDIA_MAX_WAIT=300`. Auto-reset when cooldown expires naturally or on successful acquire. Interactive menu updated.
+- `la_proxy_hooks.py`: Machine-wide 429 cooldown pauses ALL proxies on the box; books hidden SDK retries (2 per call).
+- `remote-session.sh`: Added `num_retries: 3` for NVIDIA/Gemini/Groq providers. Removed `retry_after` (causes 400 BadRequestError on NVIDIA NIM).
+- Waypoints `nvidia-429s-still-hit-with-2` and `nvidia-free-api-no-quota-cap` closed; new waypoint for connection-refused fix added and closed.
+
+## [0.20.10] — 2026-10-01
+
+### Fixed — remote sessions could not push to GitHub (`could not read Username`)
+
+- `remote-session.sh` exported only `credential.helper=""` (added in `c4da19e`, 0.19.x) to silence the
+  harmless sandbox `failed to store: 100001`. An empty `credential.helper` RESETS the whole helper
+  list, including the URL-scoped `gh auth git-credential` helper for github.com, so git found no
+  credential and every push failed with `could not read Username for 'https://github.com': Device not
+  configured`. Models then worked around it by writing the PAT into the remote URL or into an
+  `export GH_TOKEN=…` permission rule.
+- New `bin/la-git-credential-env.sh` (sourced): keeps the reset for every host, then restores
+  `credential.https://github.com.helper = !<gh> auth git-credential`, so github.com gets the PAT from
+  `GH_TOKEN` / gh's keyring while other hosts stay silenced. `--help` and `--print` when executed;
+  `LA_GH_BIN` / `LA_GH_FALLBACK` override the gh path; missing gh warns and keeps the reset only.
+- New `tests/test_git_credential_env.sh` (14 assertions, hermetic: temp HOME, stub gh, no Keychain or
+  network). It reproduces the old bug as its own control. Mutation-tested: restoring the old block in
+  `remote-session.sh` fails 2 assertions; dropping the restored helper fails 2.
+- Not changed: `gh` x509 `OSStatus -26276` (Go TLS under Seatbelt) is a separate defect that was
+  already resolved in 0.20.2 (`3c45ee6`), when both launchers moved to `blind-trust-settings.py`, which
+  writes no `sandbox` key; last real occurrence 2026-09-29 08:43. If a profile ever re-enables the sandbox,
+  add `gh` to `sandbox.excludedCommands`.
+
+## [0.20.9] — 2026-10-01
+
+### Fixed — `local-inference-readonly-inventory.zsh` ignored `--help` and ran
+
+- The first argument was taken as the report directory unconditionally, so `--help` ran a full
+  inventory into a new `./--help/` directory. Arguments are now parsed before any work:
+  `-h/--help` prints usage (options + environment variables), `-n/--dry-run` prints the target
+  directory and the section list derived from the script itself and writes nothing, `--` ends
+  options, unknown options and extra positionals exit 2 with a usage line on stderr.
+- New `tests/test_inventory_cli.sh` (16 assertions, temp `HOME`, never runs a real inventory);
+  mutation-tested: breaking the `--help` branch fails 3 assertions.
+- New `docs/READONLY_INVENTORY.md`: purpose, origin, options, collected sections, report files,
+  safety boundary. README Diagnostics row and "What's in the box" link to it.
+- Manifest version catches up: the manifest still said 0.20.7 at the 0.20.8 tag.
+
 ## [0.20.8] — 2026-09-30
 
 ### Improved — Stop hook output formatting with 🪝 emoji and collapsible content
@@ -43,23 +199,6 @@ All notable changes to `free-agents` are documented in this file.
 - Older versions fall back to `claude-opus-5` (200k limit), capping Nemotron 3 Ultra's 1M actual context window.
 - Warning message includes the minimum version (2.1.280), the fallback behavior, and update instructions.
 - Can be suppressed with `LA_SILENCE_CLAUDE_VERSION_WARNING=1`.
-=======
-## [0.21.0] — 2026-09-30
-
-### Added — Session picker TUI (Textual UI) with full entry-point wiring
-
-- **Interactive session picker** (`bin/session_picker.py`, `bin/session_picker_model.py`): Textual-based TUI with accordion navigation, arrow keys, letter shortcuts, grouped menus (expand/collapse), persistent settings in `config/session-menu.local.json`.
-- **Entry-point wiring**: `bin/csl`, `bin/local-session.sh`, `bin/remote-session.sh`, `bin/session-picker` all wired for launch handoff via nav file (`--csl-owner` / `--csl-nav-file`).
-- **Navigation matrix verified**: Home (Quit), Home-owned Local/Remote (Back), Direct-root Local/Remote (Quit), `s` key switches lanes keeping owner.
-- **`bin/local-session.sh`** (NEW): Canonical direct launcher for local sessions — no-arg picker entry + direct alias launch with `--dry-run`, `--inventory`, `--enable-mcp`.
-- **Navigation handoff**: `remote-session.sh` restored `--csl-owner` / `CSL_NAV_FILE` support; TTY check bypassed for `CSL_OWNER=1`; `CSL_NAV_FILE` env var respected.
-- **Stop hook propagation**: `csl` exports `LA_QUEUE_STOP_HOOK="$STOP_HOOK"` for launcher propagation.
-- **All tests pass**: 221 total (12 PTY, 36 model, 23 remote, 17 launcher smoke, 6 stop hook gate, etc.).
-
-### Fixed — Resolver default effort test
-
-- `test_resolver_defaults_to_valid_effort_when_no_source`: Updated to accept any valid effort (`low|medium|high|xhigh|max`) instead of hardcoding `medium`.
->>>>>>> 88a770e (feat(session-picker-tui): v0.21.0 — Session picker TUI with full entry-point wiring)
 
 ## [0.20.5] — 2026-09-30
 

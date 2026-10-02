@@ -1,0 +1,8 @@
+{"type": "user", "message": {"role": "user", "content": "first turn"}, "timestamp": "2026-09-16T01:00:00.000Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "reply 1"}]}, "timestamp": "2026-09-16T01:00:01.000Z"}
+{"type": "queue-operation", "operation": "enqueue", "content": "user request 1", "timestamp": "2026-09-16T01:00:02.000Z"}
+{"type": "queue-operation", "operation": "enqueue", "content": "user request 2", "timestamp": "2026-09-16T01:00:03.000Z"}
+{"type": "queue-operation", "operation": "enqueue", "content": "<task-notification>Task started</task-notification>", "timestamp": "2026-09-16T01:00:04.000Z"}
+{"type": "queue-operation", "operation": "remove", "content": "user request 1", "timestamp": "2026-09-16T01:00:05.000Z"}
+{"type": "queue-operation", "operation": "remove", "content": "<task-notification>Task started</task-notification>", "timestamp": "2026-09-16T01:00:06.000Z"}
+{"type": "queue-operation", "operation": "remove", "content": "user request 2", "timestamp": "2026-09-16T01:00:07.000Z"}

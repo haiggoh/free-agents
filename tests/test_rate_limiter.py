@@ -184,7 +184,13 @@ class SavedSettingsTests(unittest.TestCase):
         lim = self.limiter()
         self.assertIsInstance(lim, rl.SmoothTokenBucket)
         self.assertAlmostEqual(lim.rate, 0.5)
-        self.assertEqual((lim.capacity, lim.cooldown), (4, 5.0))
+        # The saved key "cooldown" is the BASE cooldown of main's 429 backoff.
+        self.assertEqual((lim.capacity, lim.base_cooldown), (4, 5.0))
+
+    def test_backoff_defaults_follow_main(self):
+        lim = self.limiter()
+        self.assertEqual((lim.base_cooldown, lim.max_cooldown, lim.backoff_multiplier,
+                          lim.max_retries), (30.0, 300.0, 2.0, 5))
 
     def test_environment_still_wins(self):
         self.save('{"mode": "smooth_bucket", "rpm": 30}')

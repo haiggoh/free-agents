@@ -223,13 +223,50 @@ def _segment_writes(seg, cwd):
 MENTIONS_STATE = re.compile(r"\.claude\b|plugins\b|installed_plugins|known_marketplaces|CLAUDE_CONFIG_DIR")
 
 
+HEREDOC_START = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _split_heredocs(cmd):
+    """Return (shell_text, [heredoc bodies]) with each body cut out of the shell text.
+
+    WHY. A heredoc body is DATA to the shell, not shell syntax, so its quotes must not reach the
+    tokeniser. Prose inside one routinely has an odd number of apostrophes ("LiteLLM's", "it's"),
+    which made shlex raise, which sent EVERY such command to the whole-text fallback -- and that
+    fallback denied a sed on a SOURCE repo's .claude-plugin/plugin.json (false positive,
+    2026-09-26). Bodies are still checked, as inline code, by the caller.
+    """
+    lines = cmd.split("\n")
+    shell, bodies, i = [], [], 0
+    while i < len(lines):
+        line = lines[i]
+        shell.append(line)
+        tags = [m.group(2) for m in HEREDOC_START.finditer(line)]
+        i += 1
+        for tag in tags:
+            body = []
+            while i < len(lines) and lines[i].strip() != tag:
+                body.append(lines[i])
+                i += 1
+            i += 1                                     # skip the terminator line
+            bodies.append("\n".join(body))
+    return "\n".join(shell), bodies
+
+
 def bash_writes_state(cmd):
     if not MENTIONS_STATE.search(cmd):
         return False
-    segs = _segments(cmd)
+    shell, bodies = _split_heredocs(cmd)
+    # A heredoc body is typically code fed to an interpreter: judge it like `python -c`.
+    for body in bodies:
+        if _protected(body) and INLINE_WRITE.search(body):
+            return True
+    segs = _segments(shell)
     if segs is None:
-        # Untokenisable (unbalanced quotes): fall back to the conservative whole-text check.
-        return bool(WRITE_SHAPED.search(HARMLESS_REDIRECT.sub(" ", cmd)))
+        # Still untokenisable (an unbalanced quote in the shell text itself). Stay conservative,
+        # but only about PROTECTED paths: a write-shaped command that merely mentions `.claude`
+        # (a notes file, a source repo's .claude-plugin/) is not plugin state.
+        text = HARMLESS_REDIRECT.sub(" ", shell)
+        return bool(PROTECTED_IN_CMD.search(text) and WRITE_SHAPED.search(text))
     cwd = ""
     for seg in segs:
         writes, cwd = _segment_writes(seg, cwd)
@@ -298,6 +335,16 @@ SELF_TESTS = [
     ("Bash", {"command": "git -C ~/.claude/plugins/marketplaces/h checkout main"}, False),
     ("Write", {"file_path": "~/ClaudeWorkspace/audit-loose-ends/.claude-plugin/plugin.json"}, True),
     ("Read", {"file_path": "~/.claude/plugins/installed_plugins.json"}, True),
+    # 2026-09-26 false positive: a heredoc body with an ODD number of apostrophes made shlex
+    # raise, and the fallback denied a version bump on a SOURCE repo's manifest.
+    ("Bash", {"command": "sed -i '' 's/0.19.9/0.19.10/' .claude-plugin/plugin.json\n"
+                         "python3 - <<'PY'\nx = \"LiteLLM's adapter, the classifier's stop, ROADMAP's\"\n"
+                         "open('CHANGELOG.md','w').write(x)\nPY"}, True),
+    ("Bash", {"command": "echo it's done > ~/.claude/notes.txt"}, True),
+    # ...and the real writes stay denied whichever path they take.
+    ("Bash", {"command": "python3 - <<'PY'\n# it's\nopen('/Users/u/.claude/plugins/installed_plugins.json','w').write('{}')\nPY"}, False),
+    ("Bash", {"command": "cat > ~/.claude/plugins/installed_plugins.json <<'EOF'\n{\"it's\": 1}\nEOF"}, False),
+    ("Bash", {"command": "echo it's > ~/.claude/plugins/installed_plugins.json"}, False),
 ]
 
 

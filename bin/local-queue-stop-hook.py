@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
-"""Improved Local-session Stop-hook: notice queued prompts the model stopped before receiving.
+"""local-queue-stop-hook.py — Stop hook for queued prompt recovery.
 
-This is a REFACTORED VERSION of local-queue-stop-hook.py with:
-- 🪝 emoji header for clear identification
-- Collapsible full-content sections (human-friendly)
-- Concise main message (no repetitive full content dumps)
-- Single full-content block at end for helper script
-
-This file is for REVIEW. Apply to /Users/bra0002h/.claude/plugins/cache/haiggoh/free-agents/0.20.5/bin/local-queue-stop-hook.py after review.
+Uses the shared queue_replay core for replay/classification and queue_state
+for persistent acknowledgment tracking across transcript lag.
 """
+
 import json
 import os
 import sys
 
-# Source emoji from emoji.sh constants
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import queue_replay as qr  # noqa: E402
+
+# Backward-compatible exports for test_queue_marker_contract.sh
+build_queue_groups = qr.build_queue_groups
+_content_hash = qr._content_hash
+_extract_answered_markers = qr._extract_answered_markers
+_text_addresses_prompt = qr._text_addresses_prompt
+
+
+# Emoji from shared constants
 EMOJI_STOP_HOOK = "🪝"
 
-# The marker contract lives in ONE module both this hook and queue-marker-helper.py import
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import queue_marker  # noqa: E402
 
-
-def read_hook_input():
+def read_hook_input() -> dict:
     """Return the Stop-hook stdin payload as a dict, or {} if there is none."""
     try:
         if sys.stdin is None or sys.stdin.isatty():
@@ -51,7 +53,7 @@ def is_launcher_session() -> bool:
 KNOWN_LAUNCHERS = frozenset({"csl", "launch-claude-agent.sh", "remote-session.sh"})
 
 
-def session_transcripts(payload=None):
+def session_transcripts(payload: dict | None = None):
     """Yield the transcript path for THIS session (own transcript only)."""
     tp = (payload or {}).get("transcript_path")
     if isinstance(tp, str) and tp:
@@ -71,113 +73,32 @@ def session_transcripts(payload=None):
         yield os.path.realpath(path)
 
 
-def build_queue_groups(transcript_path):
-    """Parse the transcript and build a list of queue groups."""
-    try:
-        fh = open(transcript_path, "r", encoding="utf-8", errors="replace")
-    except OSError:
-        return []
+def get_session_id(payload: dict | None = None) -> str:
+    """Get or derive session ID."""
+    # Try from payload first
+    sid = (payload or {}).get("session_id")
+    if isinstance(sid, str) and sid:
+        return sid
 
-    with fh:
-        queue_ops = []
-        for i, line in enumerate(fh, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                o = json.loads(line)
-            except Exception:
-                continue
-            if o.get("type") == "queue-operation":
-                queue_ops.append((i, o.get("operation"), o.get("content", "")))
+    # Try from environment
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID")
+    if sid:
+        return sid
 
-    if not queue_ops:
-        return []
+    # Derive from transcript path
+    for path in session_transcripts(payload):
+        return os.path.basename(path).replace(".jsonl", "")
 
-    groups = []
-    pending = []  # [(enqueue_line, content)] — oldest first
-
-    def _take(drained_content):
-        if drained_content:
-            for i, (_, ct) in enumerate(pending):
-                if ct == drained_content:
-                    return pending.pop(i)
-        return pending.pop(0)
-
-    for ln, op, ct in queue_ops:
-        if op == "enqueue":
-            pending.append((ln, ct))
-        elif op in ("remove", "dequeue"):
-            if pending:
-                enq_ln, enq_ct = _take(ct)
-                groups.append({
-                    "enqueue_line": enq_ln,
-                    "content": enq_ct,
-                    "drain_line": ln,
-                    "drain_type": "remove",
-                    "assistant_texts": [],
-                    "assistant_tools": [],
-                })
-        elif op == "popAll":
-            while pending:
-                enq_ln, enq_ct = pending.pop(0)
-                groups.append({
-                    "enqueue_line": enq_ln,
-                    "content": enq_ct,
-                    "drain_line": ln,
-                    "drain_type": "popAll",
-                    "assistant_texts": [],
-                    "assistant_tools": [],
-                })
-
-    return groups
+    return "unknown-session"
 
 
-def _extract_assistant_entry(line_idx, line_str):
-    """Return (has_text, text_content, tool_names) from one assistant transcript line."""
-    try:
-        o = json.loads(line_str)
-    except Exception:
-        return False, "", []
-
-    msg = o.get("message", None)
-    if not isinstance(msg, dict):
-        return False, "", []
-
-    texts = []
-    tools = []
-    for b in msg.get("content", []):
-        if not isinstance(b, dict):
-            continue
-        bt = b.get("type", "")
-        if bt == "text" and b.get("text", ""):
-            texts.append(b["text"])
-        elif bt == "tool_use":
-            tools.append(b.get("name", ""))
-
-    return bool(texts), " ".join(texts), tools
-
-
-def format_block_reason(count, prompt_details, hook_type, emoji="🪝"):
-    """Format a polished, human-readable block reason with collapsible full content.
-
-    Args:
-        count: Number of unaddressed prompts
-        prompt_details: List of dicts with 'content' (full) and 'display' (truncated)
-        hook_type: "undelivered" or "unaddressed"
-        emoji: Emoji to prefix the message
-
-    Returns:
-        Formatted string with system-reminder wrapper
-    """
-    # Build concise summary lines
+def format_block_reason(count: int, prompt_details: list[dict], hook_type: str, emoji: str = "🪝") -> str:
+    """Format a polished, human-readable block reason with collapsible full content."""
     summary_lines = []
     for i, p in enumerate(prompt_details, 1):
         summary_lines.append(f"  {i}. {p['display'][:120]}")
-
     summary = "\n".join(summary_lines)
 
-    # Build full-content section (collapsible-style)
     full_content_section = "\n".join(
         f"  <details>\n"
         f"    <summary>Prompt {i}: {p['display'][:80]}</summary>\n"
@@ -186,7 +107,6 @@ def format_block_reason(count, prompt_details, hook_type, emoji="🪝"):
         for i, p in enumerate(prompt_details, 1)
     )
 
-    # Build helper script calls
     helper_calls = "\n".join(
         f"  python3 bin/queue-marker-helper.py {json.dumps(p['content'])}"
         for i, p in enumerate(prompt_details, 1)
@@ -226,189 +146,41 @@ def format_block_reason(count, prompt_details, hook_type, emoji="🪝"):
     return reason
 
 
-def check_unanswered_queues(transcript_path, queue_groups, stdin_payload=None):
-    """Check whether each queue group was actually addressed by the assistant."""
-    if not transcript_path:
-        return False, None
+def check_stop_hook(payload: dict, transcript_path: str) -> tuple[bool, str | None]:
+    """Main stop hook logic using queue_replay core.
 
-    try:
-        lines = open(transcript_path, "r", encoding="utf-8", errors="replace").readlines()
-    except OSError:
-        return False, None
+    Returns: (should_block, reason_json_or_none)
+    """
+    session_id = get_session_id(payload)
 
-    assistant_entries = []
-    for i, line in enumerate(lines, 1):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            o = json.loads(line)
-        except Exception:
-            continue
-        if o.get("type") != "assistant":
-            continue
-        has_text, text, tools = _extract_assistant_entry(i, line)
-        if has_text or tools:
-            assistant_entries.append((i, has_text, text, tools))
+    # Full replay and classification
+    result = qr.replay_and_classify(transcript_path, session_id, stdin_payload=payload)
 
-    stdin_hashes = set()
-    if stdin_payload:
-        msg = stdin_payload.get("message")
-        if isinstance(msg, dict):
-            content_blocks = msg.get("content", [])
-            if isinstance(content_blocks, list):
-                for block in content_blocks:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text", "")
-                        if text:
-                            stdin_hashes.update(queue_marker.extract_hashes([text]))
-
-    if not queue_groups:
-        return False, None
-
-    unaddressed = []
-
-    for g in queue_groups:
-        enq = g["enqueue_line"]
-        drain = g["drain_line"]
-        content = g["content"]
-        if not content or enq >= drain:
-            continue
-
-        g_texts = []
-        g_tools = []
-        for _a_ln, a_has_text, a_text, a_tools in assistant_entries:
-            if _a_ln > enq and _a_ln <= drain:
-                if a_has_text:
-                    g_texts.append(a_text)
-                g_tools.extend(a_tools)
-            elif _a_ln > drain:
-                if a_has_text:
-                    g_texts.append(a_text)
-                g_tools.extend(a_tools)
-
-        answered_hashes = _extract_answered_markers(g_texts)
-        combined_hashes = answered_hashes | stdin_hashes
-
-        prompt_addressed = _text_addresses_prompt(g_texts, content, combined_hashes)
-
-        if prompt_addressed:
-            continue
-
-        post_drain_entries = [
-            (a_ln, a_has_text, a_text, a_tools)
-            for a_ln, a_has_text, a_text, a_tools in assistant_entries
-            if a_ln > drain
-        ]
-
-        if not post_drain_entries:
-            unaddressed.append((content, "zero response (popAll or remove with no assistant entry)"))
-            continue
-
-        text_turns_since_drain = 0
-        tool_turns_since_drain = 0
-        MAX_TOOL_TURNS_WITHOUT_TEXT = 10
-        for a_ln, a_has_text, a_text, a_tools in post_drain_entries:
-            if not a_has_text:
-                tool_turns_since_drain += 1
-                if tool_turns_since_drain >= MAX_TOOL_TURNS_WITHOUT_TEXT:
-                    unaddressed.append((
-                        content,
-                        f"prompt unaddressed after {tool_turns_since_drain} tool turns with no natural pause"
-                    ))
-                    break
-                continue
-
-            tool_turns_since_drain = 0
-            turn_hashes = _extract_answered_markers([a_text])
-            if _text_addresses_prompt([a_text], content, turn_hashes):
-                text_turns_since_drain = 0
-            else:
-                text_turns_since_drain += 1
-                if text_turns_since_drain >= 2:
-                    unaddressed.append((
-                        content,
-                        f"prompt ignored across {text_turns_since_drain} natural pauses"
-                    ))
-                    break
-
-    if unaddressed:
-        count = len(unaddressed)
+    # Check for undelivered prompts (enqueued but never drained)
+    if result.undelivered:
+        count = len(result.undelivered)
         prompt_details = []
-        for ct, reason in unaddressed:
+        for g in result.undelivered:
+            ct = g.occurrence.content
             display_ct = ct[:300].replace("\n", " ")
-            prompt_details.append({
-                "content": ct,
-                "display": display_ct,
-                "reason": reason
-            })
+            prompt_details.append({"content": ct, "display": display_ct})
 
-        reason = format_block_reason(count, prompt_details, "unaddressed", "🪝")
+        reason = format_block_reason(count, prompt_details, "undelivered", EMOJI_STOP_HOOK)
+        return True, reason
+
+    # Check for unaddressed but delivered prompts
+    if result.unaddressed:
+        count = len(result.unaddressed)
+        prompt_details = []
+        for g in result.unaddressed:
+            ct = g.occurrence.content
+            display_ct = ct[:300].replace("\n", " ")
+            prompt_details.append({"content": ct, "display": display_ct})
+
+        reason = format_block_reason(count, prompt_details, "unaddressed", EMOJI_STOP_HOOK)
         return True, reason
 
     return False, None
-
-
-def _content_hash(content):
-    return queue_marker.content_hash(content)
-
-
-def _extract_answered_markers(texts):
-    if not texts:
-        return set()
-    return queue_marker.extract_hashes(texts)
-
-
-def _text_addresses_prompt(texts, queued_content, answered_hashes=None):
-    if not texts or not queued_content:
-        return False
-
-    if answered_hashes is not None:
-        q_hash = _content_hash(queued_content)
-        if q_hash in answered_hashes:
-            return True
-
-    text_lower = " ".join(texts).lower()
-    q_lower = queued_content.lower()
-
-    q_words = set(w for w in q_lower.replace(",", "").replace(".", "").replace('"', "").split() if len(w) >= 4)
-    if not q_words:
-        return False
-
-    text_words = set(w for w in text_lower.split() if len(w) >= 4)
-
-    overlap = q_words & text_words
-    return len(overlap) >= 2
-
-
-def scan_final_pending_contents(path):
-    pending = []
-    try:
-        fh = open(path, "r", encoding="utf-8", errors="replace")
-    except OSError:
-        return []
-    with fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                o = json.loads(line)
-            except Exception:
-                continue
-            if o.get("type") != "queue-operation":
-                continue
-            op = o.get("operation")
-            if op == "enqueue":
-                content = o.get("content", "")
-                if content:
-                    pending.append(content)
-            elif op in ("remove", "dequeue"):
-                if pending:
-                    pending.pop(0)
-            elif op == "popAll":
-                pending = []
-    return pending
 
 
 def main() -> int:
@@ -417,51 +189,38 @@ def main() -> int:
 
     payload = read_hook_input()
 
+    # Per plan: reconcile BEFORE checking stop_hook_active
+    # (but still respect stop_hook_active as a hard bypass for safety)
     if payload.get("stop_hook_active"):
         return 0
 
     best_path = None
-    stale_pending_contents = []
-    all_queue_groups = []
     for path in session_transcripts(payload):
         best_path = path
-        stale_pending_contents.extend(scan_final_pending_contents(path))
-        all_queue_groups.extend(build_queue_groups(path))
+        break
 
-    if stale_pending_contents:
-        count = len(stale_pending_contents)
-        prompt_details = []
-        for ct in stale_pending_contents:
-            display_ct = ct[:300].replace("\n", " ")
-            prompt_details.append({"content": ct, "display": display_ct})
-
-        reason = format_block_reason(count, prompt_details, "undelivered", "🪝")
-        print(json.dumps({"decision": "block", "reason": reason}))
+    if not best_path:
         return 0
 
-    if all_queue_groups:
-        answered, warning = check_unanswered_queues(
-            best_path, all_queue_groups,
-            stdin_payload=payload,
-        )
-        if warning:
-            print(json.dumps({"decision": "block", "reason": warning}))
-            return 0
+    should_block, reason = check_stop_hook(payload, best_path)
+
+    if should_block and reason:
+        print(json.dumps({"decision": "block", "reason": reason}))
+        return 0
 
     return 0
 
 
 USAGE = """Usage: local-queue-stop-hook.py [--help]
 
-improved-queue-stop-hook.py — Stop hook: notice prompts you queued that the model never answered.
+Stop hook: notice prompts you queued that the model never answered.
 
-This is a REFACTORED VERSION for review. Key improvements:
-- 🪝 emoji header for clear identification
-- Collapsible full-content sections (human-friendly)
-- Concise main message (no repetitive full content dumps)
-- Single full-content block at end for helper script
-
-Apply to /Users/bra0002h/.claude/plugins/cache/haiggoh/free-agents/0.20.5/bin/local-queue-stop-hook.py after review.
+Key features:
+- Shared queue_replay core for reliable replay/classification
+- Persistent acknowledgment tracking via queue_state (survives transcript lag)
+- Per-occurrence acknowledgment with disposition (answered_now/answered_earlier/clarification)
+- Legacy marker migration
+- No-progress budget (max 3 consecutive continuations without new acceptance)
 
 Environment:
   LA_SESSION_LAUNCHER   set by the launcher; must name a known launcher to enable the
@@ -480,7 +239,7 @@ if __name__ == "__main__":
         if sys.argv[1] in ("--help", "-h"):
             print(USAGE)
             sys.exit(0)
-        print("improved-queue-stop-hook.py: unrecognised argument %r" % sys.argv[1],
+        print("local-queue-stop-hook.py: unrecognised argument %r" % sys.argv[1],
               file=sys.stderr)
         sys.exit(2)
     try:

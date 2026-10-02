@@ -17,7 +17,8 @@
 LA_MODELS_DIR="$HOME/.models"          # where your MLX model directories live
 LA_VENV="$HOME/.local-llm/bin"         # venv with `vllm-mlx` and `python -m mlx_lm` (LEGACY lane)
 
-# --- which MLX backend a bare registration gets -------------------------------
+# --- BACKEND CONFIGURATION ---------------------------------------------------
+# Rapid-MLX (DEFAULT)
 # rapid = Rapid-MLX. It is the DEFAULT because its hybrid prefix cache is what makes an
 # interactive local session usable (measured on the reference stack: 27,290 of 27,584 prompt
 # tokens cached, warm TTFT 2.0s vs 135.6s cold on vllm-mlx). Set this to `vllm` to send every
@@ -32,6 +33,21 @@ LA_DEFAULT_MLX_BACKEND=rapid
 # LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-0.15.3/bin/rapid-mlx"
 LA_RAPID_CACHE_MEMORY_MB=2048          # conservative shipped ceiling; tune to workload/RAM
 LA_RAPID_HYBRID_CACHE_ENTRIES=2        # retained recurrent/sliding-window snapshots
+
+# vllm-mlx (LEGACY comparison lane)
+# LA_VLLM_BIN=""            # Leave empty to auto-discover
+# LA_VLLM_VERSION=""        # Pin specific version if needed
+
+# oMLX (ISOLATED optional backend for Flash-Next/streaming)
+# LA_OMLX_BIN=""            # Leave empty to use Homebrew install
+
+# llama.cpp (GGUF only)
+# LA_LLAMA_CPP_BIN=""       # Leave empty to auto-discover
+
+# litellm (remote free-API proxy)
+# LA_LITELLM_BIN=""         # Leave empty to auto-discover
+# LA_LITELLM_CONFIG=""      # Path to litellm config.yaml
+
 LA_PORT_START=8000                     # port scan range for the local server
 LA_PORT_MAX=8010
 LA_MAX_OUTPUT_TOKENS=8192              # native Claude Code output cap for local turns
@@ -44,7 +60,7 @@ LA_API_TIMEOUT_MS=3600000              # per-request timeout for local sessions 
                                        # LA_MAX_OUTPUT_TOKENS=8192 is ~2.5h of generation, so even 60
                                        # min can truncate a maximal turn; use 10800000 (3h) if you want
                                        # a cap that never can. (max 2147483647)
-LA_SERVER_TIMEOUT_S=3600               # passed to the backend's `serve --timeout`. vllm-mlx's own default is
+LA_SERVER_TIMEOUT_S=3600               # passed to the backend’s `serve --timeout`. vllm-mlx’s own default is
                                        # 300s and its streaming guard enforces it SERVER-side, so a local
                                        # model that needs >5 min per turn gets its stream killed and the
                                        # client retries the whole turn. Defaults to LA_API_TIMEOUT_MS/1000.
@@ -59,7 +75,7 @@ LA_MCP_CONFIG=""                       # optional JSON naming the ONLY MCP serve
                                        # with LA_STRICT_MCP=true, so you can keep one cheap server
                                        # instead of choosing between all of them and none.
 LA_STRICT_MCP=true                     # run local interactive sessions with --strict-mcp-config, so the
-                                       # configured MCP servers' tool definitions stay out of the prompt.
+                                       # configured MCP servers’ tool definitions stay out of the prompt.
                                        # Measured: 99 -> 28 tool defs, ~46.9k -> ~23.9k prefill tokens.
                                        # Set false to keep MCP tools available at that prefill cost.
 

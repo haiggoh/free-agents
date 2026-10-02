@@ -17,8 +17,61 @@
 # Usage:
 #   zsh ./local-inference-readonly-inventory.zsh
 #   zsh ./local-inference-readonly-inventory.zsh /path/to/new-report-directory
+#   zsh ./local-inference-readonly-inventory.zsh --dry-run [/path/to/new-report-directory]
+#   zsh ./local-inference-readonly-inventory.zsh --help
 
 emulate -L zsh
+
+usage() {
+  cat <<'USAGE'
+local-inference-readonly-inventory.zsh — read-only inventory of the local-inference stack
+(hardware, processes, ports, runtimes, Homebrew/Python packages, configs, model roots,
+model directories, git repositories). Writes a NEW report directory and nothing else.
+
+Usage:
+  local-inference-readonly-inventory.zsh [--dry-run] [REPORT_DIR]
+  local-inference-readonly-inventory.zsh --help
+
+Arguments:
+  REPORT_DIR    new directory for the report; must not exist yet.
+                Default: ~/.claude/reports/local-inference-inventory-<UTC timestamp>
+
+Options:
+  -n, --dry-run print the report directory and the sections it would collect, then
+                exit 0 without creating or writing anything
+  -h, --help    show this help and exit
+  --            end of options (use before a REPORT_DIR that starts with "-")
+
+Environment:
+  HF_HOME, HUGGINGFACE_HUB_CACHE, TRANSFORMERS_CACHE, XDG_CACHE_HOME
+                extra model-cache roots to scan, in addition to the built-in list
+  HOME          base for the default report directory and the built-in model roots
+
+The script forces offline mode for Hugging Face/pip/Homebrew tooling (HF_HUB_OFFLINE=1,
+PIP_NO_INDEX=1, HOMEBREW_NO_AUTO_UPDATE=1, ...) and never uses sudo or the network.
+Scans of large model caches can take several minutes.
+USAGE
+}
+
+# Parse arguments BEFORE doing any work: an unrecognised flag must never be mistaken
+# for REPORT_DIR (a bare `--help` used to create a ./--help/ report directory).
+dry_run=0
+positional=()
+while (( $# > 0 )); do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -n|--dry-run) dry_run=1; shift ;;
+    --) shift; positional+=("$@"); break ;;
+    -*) print -u2 -- "local-inference-readonly-inventory.zsh: unknown option: $1"
+        print -u2 -- "usage: local-inference-readonly-inventory.zsh [--dry-run] [REPORT_DIR] (see --help)"
+        exit 2 ;;
+    *) positional+=("$1"); shift ;;
+  esac
+done
+if (( ${#positional} > 1 )); then
+  print -u2 -- "local-inference-readonly-inventory.zsh: expected at most one REPORT_DIR, got ${#positional}"
+  exit 2
+fi
 setopt NO_UNSET
 setopt PIPE_FAIL
 setopt EXTENDED_GLOB
@@ -39,11 +92,20 @@ export DO_NOT_TRACK=1
 
 timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
 default_output="$HOME/.claude/reports/local-inference-inventory-$timestamp"
-output_dir="${1:-$default_output}"
+output_dir="${positional[1]:-$default_output}"
 
 if [[ -e "$output_dir" ]]; then
   print -u2 -- "Refusing to overwrite existing path: $output_dir"
   exit 2
+fi
+
+if (( dry_run )); then
+  print -r -- "DRY RUN — nothing will be created or written."
+  print -r -- "Would create report directory: $output_dir"
+  print -r -- "Would collect these sections (read-only):"
+  # Derived from the script itself so the list cannot drift from what actually runs.
+  grep -E '^(section|run_report) "' -- "${0:A}" | sed -E 's/^(section|run_report) "([^"]*)".*/  - \2/'
+  exit 0
 fi
 
 mkdir -p -- "$output_dir" || {
