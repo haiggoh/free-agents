@@ -56,7 +56,7 @@ class StateTests(unittest.TestCase):
         self.assertEqual(state.effort["remote_api_session"], "max")
         self.assertEqual(state.effort["lowkey"], "minimal")
         doc = json.loads(self.file.read_text())
-        self.assertEqual(doc["schema_version"], 1)
+        self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)
 
     def test_provider_default_is_a_sentinel_that_means_omit(self):
         # Fails if provider_default is turned into a real effort string.
@@ -93,7 +93,11 @@ class StateTests(unittest.TestCase):
         self._assert_warns_and_keeps(b"{not json")
 
     def test_unknown_future_schema_warns_without_overwrite(self):
-        self._assert_warns_and_keeps(json.dumps({"schema_version": 2, "effort": {}}).encode())
+        self._assert_warns_and_keeps(json.dumps({"schema_version": 3, "effort": {}}).encode())
+
+    def test_unknown_section_warns_without_overwrite(self):
+        # Fails if a section this version does not know is silently dropped by the next write.
+        self._assert_warns_and_keeps(json.dumps({"schema_version": 2, "favourites": ["x"]}).encode())
 
     def test_value_outside_allowlist_warns_without_overwrite(self):
         self._assert_warns_and_keeps(json.dumps(
@@ -200,6 +204,37 @@ class StateTests(unittest.TestCase):
                     {"max_retries": 2.5}, {"max_retries": 51}, {"max_retries": True}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 sms.save_rate_limiter(self.cfg, bad)
+
+    # --- last launched (schema 2) ------------------------------------------------
+    def test_v1_file_migrates_only_on_confirmed_write_keeping_everything(self):
+        v1 = {"schema_version": 1, "effort": {"local_session": "low", "lowkey": "minimal"},
+              "rate_limiter": {"mode": "smooth_bucket", "rpm": 30, "cooldown": 10}}
+        raw = json.dumps(v1).encode()
+        self.file.write_bytes(raw)
+        state = sms.load(self.cfg)                       # load alone: no rewrite
+        self.assertEqual((state.warnings, state.last_launched), ([], {}))
+        self.assertEqual(self.file.read_bytes(), raw)
+        self.assertIsNone(sms.save_last_launched(self.cfg, "local_session", "qwen-3.8-operator"))
+        doc = json.loads(self.file.read_text())
+        self.assertEqual(doc["schema_version"], 2)
+        self.assertEqual(doc["effort"], v1["effort"])
+        self.assertEqual(doc["rate_limiter"], v1["rate_limiter"])
+        self.assertEqual(doc["last_launched"], {"local_session": "qwen-3.8-operator"})
+
+    def test_last_launched_is_per_lane_and_validated(self):
+        sms.save_last_launched(self.cfg, "local_session", "qwen-3.8-operator")
+        sms.save_last_launched(self.cfg, "remote_api_session", "nvidia-a")
+        sms.save_effort(self.cfg, "lowkey", "low")          # other writers keep the map
+        self.assertEqual(sms.load(self.cfg).last_launched,
+                         {"local_session": "qwen-3.8-operator", "remote_api_session": "nvidia-a"})
+        for lane, bad in (("nope", "x"), ("lowkey", ""), ("lowkey", "a b"), ("lowkey", "-rf"),
+                          ("lowkey", 7)):
+            with self.subTest(lane=lane, bad=bad), self.assertRaises(ValueError):
+                sms.save_last_launched(self.cfg, lane, bad)
+
+    def test_v1_file_carrying_last_launched_is_refused(self):
+        self._assert_warns_and_keeps(json.dumps(
+            {"schema_version": 1, "last_launched": {"lowkey": "x"}}).encode())
 
     def test_pre_backoff_file_loads_unchanged(self):
         # A file written before the backoff keys existed must load as-is: no warning, no rewrite.

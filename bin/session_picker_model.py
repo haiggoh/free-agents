@@ -287,9 +287,9 @@ def _common_toggles(s: Settings, include_watcher: bool):
 
 
 def _tool_actions():
-    return [Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("tool:keys"), section="tools"),
+    return [Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section="tools"),
             Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
-                   lambda: Nav("runtime"), section="tools"),
+                   lambda: Nav("runtime_manager"), section="tools"),
             Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section="tools")]
 
 
@@ -334,6 +334,8 @@ class LocalScreen(Screen):
 
     def __init__(self, settings: Settings, models: list[LocalModel] | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
+        self._models_loaded = False
+        self._choose_model_visible = False  # Model list hidden by default
         if models is not None:
             self.set_models(models)
         else:
@@ -350,12 +352,24 @@ class LocalScreen(Screen):
             Group(f, f"{f} ({len(buckets[f])})",
                   [Item(x.alias, f"{x.alias}" + (f"  [{x.roles}]" if x.roles else "")) for x in buckets[f]])
             for f in order])
+        self._models_loaded = True
+
+    def _toggle_choose_model(self):
+        """Toggle the model list visibility."""
+        self._choose_model_visible = not self._choose_model_visible
+        if self._choose_model_visible and not self._models_loaded:
+            # The picker will lazy-load the models
+            pass
+
+    def _choose_model_label(self):
+        return "Choose model…" if not self._choose_model_visible else "Choose model (shown)"
 
     def actions(self):
         s = self.settings
         mcp_ok = s.auto_mode == 0
         acts = [
             Action("e", f"⚙️  Effort: {s.local_effort}", self._cycle_effort),
+            Action("c", self._choose_model_label(), self._toggle_choose_model),
             Action("s", "📡  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
             Action("r", "📡  Remote free API sessions", lambda: Nav("remote", self.owner),
@@ -367,7 +381,7 @@ class LocalScreen(Screen):
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
         if last_local and last_local in self.models:
-            acts.insert(0, Action("g", f"🚀 Go last: {last_local}",
+            acts.insert(0, Action("g", f"🚀 Go launch: {last_local} session",
                            lambda: self._launch_last("local_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=True)
         acts += [a for a in _tool_actions()]
@@ -421,6 +435,8 @@ class RemoteScreen(Screen):
 
     def __init__(self, settings: Settings, agents: list[RemoteAgent] | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
+        self._models_loaded = False
+        self._choose_model_visible = False  # Model list hidden by default
         if agents is not None:
             self.agents = agents
             self._regroup()
@@ -447,6 +463,7 @@ class RemoteScreen(Screen):
                           + ("" if a.has_key else "  · no key")) for a in buckets[prov]]
             groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
         self.accordion.set_groups(groups)
+        self._models_loaded = True
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings
@@ -479,10 +496,21 @@ class RemoteScreen(Screen):
         setattr(self.settings, attr, not getattr(self.settings, attr))
         self._regroup()
 
+    def _toggle_choose_model(self):
+        """Toggle the model list visibility."""
+        self._choose_model_visible = not self._choose_model_visible
+        if self._choose_model_visible and not self._models_loaded:
+            # The picker will lazy-load the models
+            pass
+
+    def _choose_model_label(self):
+        return "Choose model…" if not self._choose_model_visible else "Choose model (shown)"
+
     def actions(self):
         s = self.settings
         acts = [
             Action("e", f"⚙️  Effort: {_effort_label(s.remote_effort)}", self._cycle_effort),
+            Action("c", self._choose_model_label(), self._toggle_choose_model),
             Action("s", "🦾  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
             Action("l", "🦾  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
             Action("h", f"🔖  Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
@@ -496,7 +524,7 @@ class RemoteScreen(Screen):
         # Add "Launch last model" if we have a saved last model
         last_remote = s.last_launched_model.get("remote_api_session") if s.last_launched_model else None
         if last_remote and any(a.alias == last_remote for a in self.agents if self._visible(a)):
-            acts.insert(0, Action("g", f"🚀 Go last: {last_remote}",
+            acts.insert(0, Action("g", f"🚀 Go launch: {last_remote} session",
                            lambda: self._launch_last("remote_api_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=False)
         acts += _tool_actions()
@@ -611,6 +639,66 @@ class RateLimiterScreen(Screen):
 
 # install/manage-backend.py --backend choices; tests compare this against its registry.
 RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm")
+
+
+class RuntimeManagerScreen(Screen):
+    """Rapid-MLX Runtime Manager - manages Rapid-MLX runtime environments.
+
+    Provides actions for listing releases, installing, promoting, smoke-testing,
+    snapshotting, and removing versions. Drives install/manage-backend.py.
+    """
+    title = "Rapid-MLX Runtime Manager"
+
+    def actions(self):
+        acts = [
+            Action("r", "List installable releases", lambda: Nav("tool:rt-releases"), section="tools"),
+            Action("i", "Install a release", lambda: Nav("tool:rt-install"), section="tools"),
+            Action("p", "Promote pins", lambda: Nav("prompt:rt-promote"), section="tools"),
+            Action("s", "Smoke-test", lambda: Nav("prompt:rt-smoke"), section="tools"),
+            Action("n", "Snapshot", lambda: Nav("prompt:rt-snapshot"), section="tools"),
+            Action("x", "Remove", lambda: Nav("prompt:rt-remove"), section="tools"),
+            Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", self.owner),
+                   section="tools"),
+        ]
+        acts += self.nav_actions()
+        check_action_table(acts)
+        return acts
+
+
+class APIKeysScreen(Screen):
+    """API Keys Setup - manage remote API provider credentials.
+
+    Shows provider status (saved/not tested), and provides actions to add keys
+    or open signup pages.
+    """
+    title = "API Keys Setup"
+
+    # Provider list matches install/setup-api-keys.py
+    PROVIDERS = [
+        ("gemini", "Google Gemini"),
+        ("groq", "Groq"),
+        ("openrouter", "OpenRouter"),
+        ("cloudflare", "Cloudflare Workers AI"),
+        ("mistral", "Mistral"),
+        ("zai", "Z.AI"),
+        ("siliconflow", "SiliconFlow"),
+        ("llm7", "LLM7"),
+        ("kilo", "Kilo"),
+        ("vercel", "Vercel AI Gateway"),
+        ("sambanova", "SambaNova"),
+        ("modelscope", "ModelScope"),
+        ("cerebras", "Cerebras"),
+        ("nvidia", "NVIDIA"),
+    ]
+
+    def actions(self):
+        acts = [
+            Action("o", "Open provider signup page", lambda: Nav("tool:keys:open"), section="tools"),
+            Action("a", "Add API key (select provider)", lambda: Nav("prompt:keys:add"), section="tools"),
+        ]
+        acts += self.nav_actions()
+        check_action_table(acts)
+        return acts
 
 
 class RuntimeScreen(Screen):

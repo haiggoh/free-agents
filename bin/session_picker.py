@@ -178,8 +178,9 @@ class Picker(App):
     Screen { layout: vertical; background: $background; color: $foreground; }
     #title { text-style: bold; padding: 0 1; }
     #policy { color: $warning; padding: 0 1; }
-    #rows { height: 1fr; }
     #actions { height: auto; padding: 0 1; }
+    #rows { height: 1fr; display: none; }
+    #rows.visible { display: block; }
     #status { height: auto; padding: 0 1; color: $text-muted; }
     #prompt { display: none; }
     OptionList { background: $background; color: $foreground; }
@@ -254,8 +255,8 @@ class Picker(App):
         with Vertical():
             yield Static("", id="title")
             yield Static("", id="policy")
-            yield OptionList(id="rows")
             yield OptionList(id="actions")
+            yield OptionList(id="rows")
             yield Input(id="prompt")
             yield Static("", id="status")
 
@@ -303,26 +304,23 @@ class Picker(App):
                 self._clear_pending_op(op_id)
 
     def goto(self, nav: m.Nav):
-        # Ensure inventory is loaded before building the screen
-        if nav.target in ("home", "local", "lowkey"):
-            self._ensure_inventory_loaded(nav.target)
-        elif nav.target == "remote":
-            self._ensure_inventory_loaded("remote")
-        elif nav.target == "download":
-            self._ensure_inventory_loaded("download")
-
-        # Build screen with loaded inventory
+        # Build screen WITHOUT loading inventory (lazy loading)
+        # Inventory will be loaded on-demand when user toggles "Choose model"
         s = self.settings
         if nav.target == "home":
-            local = self.cache.get("local", [])
-            remote = self.cache.get("remote", [])
-            self.screen_model = m.HomeScreen(s, len(local), len(remote), nav.owner)
+            local = self.cache.get("local")
+            remote = self.cache.get("remote")
+            self.screen_model = m.HomeScreen(s, len(local) if local else None, len(remote) if remote else None, nav.owner)
         elif nav.target == "local":
-            self.screen_model = m.LocalScreen(s, self.cache.get("local"), nav.owner)
+            # Pass models only if already cached; otherwise pass None for lazy loading
+            local = self.cache.get("local")
+            self.screen_model = m.LocalScreen(s, local, nav.owner)
         elif nav.target == "remote":
-            self.screen_model = m.RemoteScreen(s, self.cache.get("remote"), nav.owner)
+            remote = self.cache.get("remote")
+            self.screen_model = m.RemoteScreen(s, remote, nav.owner)
         elif nav.target == "lowkey":
-            self.screen_model = m.LowkeyScreen(s, self.cache.get("local"), nav.owner)
+            local = self.cache.get("local")
+            self.screen_model = m.LowkeyScreen(s, local, nav.owner)
         elif nav.target == "download":
             catalog_data = self.cache.get("catalog")
             if catalog_data:
@@ -332,10 +330,14 @@ class Picker(App):
             self.screen_model = m.DownloadScreen(s, entries, free, head, nav.owner)
         elif nav.target == "rate_limiter":
             self.screen_model = m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
+        elif nav.target == "runtime_manager":
+            self.screen_model = m.RuntimeManagerScreen(s, nav.owner)
         elif nav.target == "runtime":
             self.screen_model = m.RuntimeScreen(s, nav.owner)
         elif nav.target == "runtime_launchd":
             self.screen_model = m.LaunchdScreen(s, nav.owner)
+        elif nav.target == "api_keys":
+            self.screen_model = m.APIKeysScreen(s, nav.owner)
         else:
             raise ValueError(nav.target)
 
@@ -357,16 +359,30 @@ class Picker(App):
         rows = self.query_one("#rows", OptionList)
         rows.clear_options()
         self.row_ids = []
-        for kind, obj in sm.accordion.rows():
-            if kind == "group":
-                mark = "▾" if obj.id == sm.accordion.open_group else "▸"
-                rows.add_option(Option(f"{mark} {obj.label}", id=f"g:{obj.id}"))
-                self.row_ids.append(("group", obj.id))
-            else:
-                queued = isinstance(sm, m.DownloadScreen) and obj.id in sm.queue
-                box = "[x] " if queued else ("[ ] " if isinstance(sm, m.DownloadScreen) else "")
-                rows.add_option(Option(f"    {box}{obj.label}", id=f"i:{obj.id}"))
-                self.row_ids.append(("item", obj.id))
+
+        # Handle lazy loading when "Choose model" is toggled
+        self._handle_lazy_load()
+
+        # Conditionally show model list based on _choose_model_visible
+        show_models = True
+        if isinstance(sm, (m.LocalScreen, m.RemoteScreen)):
+            show_models = getattr(sm, '_choose_model_visible', False)
+
+        # Show/hide the rows container
+        rows.display = show_models
+
+        if show_models:
+            for kind, obj in sm.accordion.rows():
+                if kind == "group":
+                    mark = "▾" if obj.id == sm.accordion.open_group else "▸"
+                    rows.add_option(Option(f"{mark} {obj.label}", id=f"g:{obj.id}"))
+                    self.row_ids.append(("group", obj.id))
+                else:
+                    queued = isinstance(sm, m.DownloadScreen) and obj.id in sm.queue
+                    box = "[x] " if queued else ("[ ] " if isinstance(sm, m.DownloadScreen) else "")
+                    rows.add_option(Option(f"    {box}{obj.label}", id=f"i:{obj.id}"))
+                    self.row_ids.append(("item", obj.id))
+
         if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen)):
             rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
         target = keep or (f"i:{sm.accordion.selected_id}" if sm.accordion.selected_id else None)
@@ -431,6 +447,40 @@ class Picker(App):
         if result:
             self.dispatch(result, None)
 
+    def _maybe_load_inventory(self, screen_type: str) -> None:
+        """Lazy-load inventory for the given screen type if not already cached."""
+        if screen_type in ("home", "local", "lowkey"):
+            if "local" not in self.cache:
+                op_id = self._start_pending_op()
+                self.cache["local"] = load_local_models()
+                self._clear_pending_op(op_id)
+        if screen_type == "remote":
+            if "remote" not in self.cache:
+                op_id = self._start_pending_op()
+                self.cache["remote"] = load_remote_agents()
+                self._clear_pending_op(op_id)
+
+    def _handle_lazy_load(self) -> bool:
+        """Check if current screen needs lazy loading and trigger it.
+        Returns True if lazy loading was triggered."""
+        sm = self.screen_model
+        # Check LocalScreen
+        if isinstance(sm, m.LocalScreen) and getattr(sm, '_choose_model_visible', False):
+            if not getattr(sm, '_models_loaded', False):
+                self._maybe_load_inventory("local")
+                if "local" in self.cache:
+                    sm.set_models(self.cache["local"])
+                return True
+        # Check RemoteScreen
+        if isinstance(sm, m.RemoteScreen) and getattr(sm, '_choose_model_visible', False):
+            if not getattr(sm, '_models_loaded', False):
+                self._maybe_load_inventory("remote")
+                if "remote" in self.cache:
+                    sm.agents = self.cache["remote"]
+                    sm._regroup()  # Re-group with loaded agents
+                return True
+        return False
+
     def enter(self):
         h = self._highlighted()
         if not h:
@@ -466,21 +516,30 @@ class Picker(App):
             if h and h[0] == "group":
                 sm.accordion.expand(h[1])
                 self.render_model(keep=f"g:{h[1]}")
+                event.stop()
+                return
             elif h and h[0] == "item":
-                # Right arrow on action item: cycle choice forward or toggle boolean
-                self._activate_action_next(h[1])
+                # Right arrow on model item: no-op (action cycling handled by action selection)
+                pass
             event.stop()
             return
         if key == "left":
+            h = self._highlighted()
+            if h and h[0] == "group":
+                sm.accordion.collapse()
+                self.render_model(keep=f"g:{h[1]}")
+                event.stop()
+                return
             if sm.accordion.open_group:
                 g = sm.accordion.open_group
                 sm.accordion.collapse()
                 self.render_model(keep=f"g:{g}")
+                event.stop()
+                return
             else:
-                # Left arrow on action item: cycle choice backward or toggle boolean
-                h = self._highlighted()
+                # Left arrow on model item: no-op
                 if h and h[0] == "item":
-                    self._activate_action_prev(h[1])
+                    pass
             event.stop()
             return
         if key == "space" and isinstance(sm, m.DownloadScreen):
@@ -491,6 +550,53 @@ class Picker(App):
                 self.render_model(keep=f"i:{h[1]}")
             event.stop()
             return
+        # Seamless navigation between actions and rows
+        if key == "down" or key == "up":
+            actions_list = self.query_one("#actions", OptionList)
+            rows_list = self.query_one("#rows", OptionList)
+            actions_count = actions_list.option_count
+            rows_count = rows_list.option_count
+
+            # Check if actions list is focused
+            if self.focused is actions_list:
+                if key == "down" and actions_list.highlighted == actions_count - 1:
+                    # Move from last action to first row (if rows visible)
+                    if rows_count > 0 and rows_list.display:
+                        rows_list.focus()
+                        rows_list.highlighted = 0
+                        event.stop()
+                        return
+                elif key == "up" and actions_list.highlighted == 0:
+                    # At top of actions, could wrap or stay - let default handle
+                    pass
+            # Check if rows list is focused
+            elif self.focused is rows_list:
+                if key == "up" and rows_list.highlighted == 0:
+                    # Move from first row to last action
+                    if actions_count > 0:
+                        actions_list.focus()
+                        actions_list.highlighted = actions_count - 1
+                        event.stop()
+                        return
+                elif key == "down" and rows_list.highlighted == rows_count - 1:
+                    # At bottom of rows, could wrap or stay - let default handle
+                    pass
+
+        # Handle group expand/collapse when on a group row
+        if key in ("left", "right"):
+            h = self._highlighted()
+            if h and h[0] == "group":
+                if key == "right":
+                    sm.accordion.expand(h[1])
+                    self.render_model(keep=f"g:{h[1]}")
+                    event.stop()
+                    return
+                elif key == "left":
+                    sm.accordion.collapse()
+                    self.render_model(keep=f"g:{h[1]}")
+                    event.stop()
+                    return
+
         if key == "escape" or (len(key) == 1 and key.isalpha() and key.islower()):
             keep = self._highlighted()
             result = sm.handle_key(key)
