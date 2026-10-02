@@ -796,9 +796,12 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     # translation layer then dies with "Content block is not a thinking block"
     # and takes the whole session's endpoint with it. Turn reasoning off at the
     # backend unless the caller explicitly asked for thinking.
-    [[ "$prov" == "nvidia" && "$thinking" != "true" ]] && \
+    # ONLY for Nemotron models; other NVIDIA models (Kimi, DeepSeek, GLM) have
+    # different behavior and this setting breaks them or does nothing useful.
+    if [[ "$prov" == "nvidia" && "$thinking" != "true" && "$model" == *nemotron* ]]; then
         think_line='      chat_template_kwargs:
         enable_thinking: false'
+    fi
 
     # EFFORT. Claude Code's own --effort flag is meaningless to a third-party provider: it is
     # interpreted by Anthropic's models, so passing it to `claude` while the request is proxied

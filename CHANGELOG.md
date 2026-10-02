@@ -2,6 +2,38 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.4] — 2026-10-02
+
+### Fixed — NVIDIA proxy config applied `enable_thinking: false` to ALL NVIDIA models, breaking Kimi/DeepSeek/GLM
+
+- `bin/remote-session.sh` (lines 799-804): The `write_proxy_config()` function unconditionally set `chat_template_kwargs.enable_thinking: false` for **every** NVIDIA model. This was correct for Nemotron models (which put reasoning in `reasoning_content`, not Anthropic thinking blocks), but broke other NVIDIA models:
+  - **GLM 5.3 Flash**: Outputs reasoning in `reasoning_content` instead of `content`; needs `enable_thinking: true` + larger `max_tokens` for non-streaming, or streaming mode
+  - **Kimi K3 / DeepSeek V4.1 Flash**: Timeout on all probes (NVIDIA API capacity issue, not config) — the setting did nothing to help
+  - **Nemotron models**: Still correctly get `enable_thinking: false` by default (pattern match on `*nemotron*`)
+- **Root cause**: The fix for "Content block is not a thinking block" (0.19.10) was over-generalized to all NVIDIA models instead of just Nemotron family.
+
+### Added — Explicit thinking variants for all Nemotron models
+
+- **`config/remote-agents.sh`**: New roster entries with `-thinking` suffix for user choice:
+  - `nvidia-nemotron-ultra-thinking` — Nemotron 3 Ultra 550B-A55B with reasoning enabled (verified 2026-10-02)
+  - `nvidia-nemotron3-thinking` — Nemotron 3 Super 120B-A12B with reasoning enabled (verified 2026-10-02)
+  - `nvidia-lightning-thinking` — Nemotron 3.5 Lightning 30B-A3B with reasoning enabled (verified 2026-10-02)
+- **Mechanism**: `-thinking` suffix triggers `THINKING=true` in launcher, bypassing the `enable_thinking: false` default and enabling reasoning via `chat_template_kwargs.enable_thinking: true` when effort is set.
+- **Verified**: Nemotron 3 Super tested with `enable_thinking: true` — both streaming and non-streaming work correctly (LiteLLM 1.102.1 fixed the stream bug).
+
+### Updated — Model roster status reflects live probe results (2026-10-02)
+
+- **`nvidia-kimi-k3`**: ⚠️ TIMEOUT on all probes — model listed but not responding (NVIDIA capacity/API issue)
+- **`nvidia-deepseek-v4`**: Updated to `deepseek-ai/deepseek-v4.1-flash` (old `v4-flash-0731` is 410 Gone); ⚠️ TIMEOUT on all probes
+- **`nvidia-glm53`**: ⚠️ Returns `reasoning_content` instead of `content`; works with streaming; non-streaming needs `enable_thinking:true` + larger `max_tokens`
+
+### Tests
+
+- `tests/test_remote_session.py`: Updated roster assertions for new thinking variants; fixed proxy config test to only expect `enable_thinking: false` for Nemotron models (`*nemotron*` pattern).
+- All 234 tests pass.
+
+---
+
 ## [0.21.3] — 2026-10-02
 
 ### Fixed — tool-owned-state guard no longer denies harmless commands containing heredocs

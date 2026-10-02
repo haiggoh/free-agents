@@ -114,7 +114,11 @@ sys.exit(int(os.environ['CURL_CODE']))
         # this line should mean changing the preferred lane on purpose -- not drifting into it.
         # Ultra 550B is row 1 by user preference (0.15.1); Super 120B follows it.
         self.assertEqual(rows[0][0], 'nvidia-nemotron-ultra')
-        self.assertEqual(rows[1][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[1][0], 'nvidia-nemotron-ultra-thinking')
+        self.assertEqual(rows[2][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[3][0], 'nvidia-nemotron3-thinking')
+        self.assertEqual(rows[4][0], 'nvidia-lightning')
+        self.assertEqual(rows[5][0], 'nvidia-lightning-thinking')
         self.assertEqual(rows[0][1], 'nvidia')
         # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
         leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
@@ -233,10 +237,13 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 self.assertEqual(cfg.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn('fixture-not-a-real-key', text)
                 self.assertEqual('      thinking:' in text, provider == 'gemini' and thinking == 'false')
-                # NVIDIA NIM reasoning models must have reasoning disabled at the
+                # NVIDIA NIM reasoning models (Nemotron) must have reasoning disabled at the
                 # backend, or the Anthropic translation layer 500s the session.
+                # Only Nemotron models get enable_thinking: false; other NVIDIA models
+                # (Kimi, DeepSeek, GLM, etc.) have different behavior.
+                is_nemotron = provider == 'nvidia' and 'nemotron' in model
                 self.assertEqual(text.count('        enable_thinking: false\n'),
-                                 self.spoof_id_count if provider == 'nvidia' and thinking == 'false' else 0)
+                                 self.spoof_id_count if is_nemotron and thinking == 'false' else 0)
                 if provider == 'cloudflare':
                     self.assertIn('/accounts/' + 'a' * 32 + '/ai/v1', text)
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)

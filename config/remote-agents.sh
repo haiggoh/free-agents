@@ -49,14 +49,17 @@ LA_REMOTE_AGENTS=(
   # Ordered by USER PREFERENCE first, then GENERATION EVIDENCE: confirmed lanes first,
   # partially-working next, never-produced-a-token last (each row states its evidence).
   # Re-probe with: bin/remote-probe-log.py probe --all-nvidia ; report
-  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled like its Super sibling.|1m"
-  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled at the backend so the thinking-block failure cannot recur.|-"
-  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick.|-"
-  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Strong coding/agentic reputation; tool use still unproven.|-"
-  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4-flash-0731|NVIDIA DeepSeek V4 Flash|unknown|Generation OK 1/2 probes (1 timeout) 2026-09-15 — works but not yet reliable. Tool use unproven.|-"
+  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled by default.|1m"
+  "nvidia-nemotron-ultra-thinking|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.|1m"
+  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled by default.|-"
+  "nvidia-nemotron3-thinking|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.|-"
+  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick. Reasoning disabled by default.|-"
+  "nvidia-lightning-thinking|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B (thinking)|unknown|Reasoning enabled — stronger reasoning. Verified 2026-10-02.|-"
+  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|⚠️ TIMEOUT on all probes 2026-10-02 — model listed but not responding. Capacity or API issue. Retest before use.|-"
+  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4.1-flash|NVIDIA DeepSeek V4.1 Flash|unknown|⚠️ TIMEOUT on all probes 2026-10-02 — old v4-flash-0731 is 410 Gone. Capacity or API issue. Retest before use.|-"
   "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained.|1m"
   "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|⚠️ EMPTY completion on 2/2 probes (HTTP 200, no content) 2026-09-15 — do not rely on it as the throttle fallback until retested.|-"
-  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|⚠️ Returned an EMPTY completion on 2/2 probes (HTTP 200, no content). Distinct from the direct z.ai route. Retest before use.|-"
+  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|⚠️ Returns reasoning_content instead of content. Works with streaming; non-streaming needs enable_thinking:true + larger max_tokens. Tested 2026-10-02.|-"
   "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|⚠️ Empty completion + HTTP 500 across 2 probes 2026-09-15. Retest before use.|-"
   "nvidia-gemma4|nvidia|google/gemma-4-31b-it|NVIDIA Gemma 4 31B|unknown|⚠️ Read TIMEOUT on 2/2 probes 2026-09-15. Gemma weights without a Gemini daily quota, if it can be made to respond.|-"
   "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|⚠️ HTTP 404 on 2/2 generation probes despite being catalog-listed — catalog presence is not access. Kept for A/B retesting only.|-"
