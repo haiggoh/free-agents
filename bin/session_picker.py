@@ -56,6 +56,10 @@ except ImportError:
 # Loading indicator delay threshold (200ms per performance amendment)
 LOADING_INDICATOR_DELAY_S = 0.2
 
+# Loading animation frames - hourglass switching between filled/empty + spinner
+LOADING_FRAMES = ["⏳", "⏳", "⏳", "⏳", "⏳", "⏳", "⏳", "⏳", "⏳", "⏳"]
+LOADING_INTERVAL = 0.1  # 100ms per frame
+
 REPO = BIN.parent
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
 
@@ -201,6 +205,7 @@ class Picker(App):
         # Loading indicator state
         self._pending_op_timer: float | None = None
         self._pending_op_id: int = 0
+        self._loading_frame: int = 0
 
     # --- persistence -----------------------------------------------------------------------
     def _config_dir(self):
@@ -216,11 +221,12 @@ class Picker(App):
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
 
-    # --- loading indicator ---------------------------------------------------------------------
+    # --- loading indicator with animation ---------------------------------------------------------------------
     def _start_pending_op(self) -> int:
         """Start a pending operation timer. Returns operation ID."""
         self._pending_op_id += 1
         self._pending_op_timer = time.perf_counter()
+        self._loading_frame = 0
         return self._pending_op_id
 
     def _check_pending_op(self, op_id: int) -> bool:
@@ -235,6 +241,17 @@ class Picker(App):
         """Clear pending operation timer."""
         if self._pending_op_id == op_id:
             self._pending_op_timer = None
+
+    def _update_loading_animation(self) -> str:
+        """Get the next loading animation frame."""
+        if self._pending_op_timer is None:
+            return ""
+        elapsed = time.perf_counter() - self._pending_op_timer
+        if elapsed < LOADING_INDICATOR_DELAY_S:
+            return ""
+        # After 200ms, show animated loading indicator
+        frame_idx = int((elapsed - LOADING_INDICATOR_DELAY_S) / LOADING_INTERVAL) % len(LOADING_FRAMES)
+        return LOADING_FRAMES[frame_idx] + " "
 
     # --- layout ----------------------------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -338,9 +355,9 @@ class Picker(App):
             policy += f"  ({sm.hidden_count()} hidden by filters)"
         # Check if any pending operation has exceeded the loading indicator delay
         if self._pending_op_timer is not None:
-            elapsed = time.perf_counter() - self._pending_op_timer
-            if elapsed >= LOADING_INDICATOR_DELAY_S:
-                policy += "  ⏳ loading…"
+            loading_text = self._update_loading_animation()
+            if loading_text:
+                policy += f"  {loading_text}loading…"
         self.query_one("#policy", Static).update(policy)
         rows = self.query_one("#rows", OptionList)
         rows.clear_options()
