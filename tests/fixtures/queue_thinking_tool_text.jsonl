@@ -1,0 +1,7 @@
+{"type": "user", "message": {"role": "user", "content": "first turn"}, "timestamp": "2026-09-16T01:00:00.000Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "thinking about it"}]}, "timestamp": "2026-09-16T01:00:01.000Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/tmp/test.txt"}}]}, "timestamp": "2026-09-16T01:00:02.000Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "done thinking"}]}, "timestamp": "2026-09-16T01:00:03.000Z"}
+{"type": "queue-operation", "operation": "enqueue", "content": "queued prompt", "timestamp": "2026-09-16T01:00:04.000Z"}
+{"type": "queue-operation", "operation": "remove", "content": "queued prompt", "timestamp": "2026-09-16T01:00:05.000Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "response to queued prompt"}]}, "timestamp": "2026-09-16T01:00:06.000Z"}

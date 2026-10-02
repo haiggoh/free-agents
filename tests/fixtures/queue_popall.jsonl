@@ -1,0 +1,6 @@
+{"type": "user", "message": {"role": "user", "content": "first turn"}, "timestamp": "2026-09-16T01:00:00.000Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "reply 1"}]}, "timestamp": "2026-09-16T01:00:01.000Z"}
+{"type": "queue-operation", "operation": "enqueue", "content": "A", "timestamp": "2026-09-16T01:00:02.000Z"}
+{"type": "queue-operation", "operation": "enqueue", "content": "B", "timestamp": "2026-09-16T01:00:03.000Z"}
+{"type": "queue-operation", "operation": "enqueue", "content": "C", "timestamp": "2026-09-16T01:00:04.000Z"}
+{"type": "queue-operation", "operation": "popAll", "timestamp": "2026-09-16T01:00:05.000Z"}

@@ -1,0 +1,3 @@
+{"type": "user", "message": {"role": "user", "content": "first real turn"}, "timestamp": "2026-09-16T01:00:00.000Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "a real reply"}]}, "timestamp": "2026-09-16T01:00:01.000Z"}
+{"type": "queue-operation", "operation": "enqueue", "content": "the prompt that must not be lost", "timestamp": "2026-09-16T01:00:02.000Z"}
