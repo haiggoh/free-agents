@@ -53,7 +53,8 @@ try:
 except ImportError:
     _DRIVER_CLASS = None
 
-# Loading indicator delay threshold (200ms per performance amendment)
+# Loading indicator delay threshold (200ms) - applies to LAZY LOADING operations only
+# (e.g., model list loading). Startup shows loading immediately with NO delay.
 LOADING_INDICATOR_DELAY_S = 0.2
 
 # Loading animation frames - hourglass switching between filled/empty + spinner
@@ -206,6 +207,7 @@ class Picker(App):
         self._pending_op_timer: float | None = None
         self._pending_op_id: int = 0
         self._loading_frame: int = 0
+        self._startup_loading: bool = True  # Show loading immediately on startup
 
     # --- persistence -----------------------------------------------------------------------
     def _config_dir(self):
@@ -250,6 +252,19 @@ class Picker(App):
         if elapsed < LOADING_INDICATOR_DELAY_S:
             return ""
         # After 200ms, show animated loading indicator
+        frame_idx = int((elapsed - LOADING_INDICATOR_DELAY_S) / LOADING_INTERVAL) % len(LOADING_FRAMES)
+        return LOADING_FRAMES[frame_idx] + " "
+
+    def _get_loading_text(self) -> str:
+        """Get loading text - shows immediately on startup, then after delay for lazy operations."""
+        if self._startup_loading:
+            # On startup, show loading immediately
+            return "⏳ "
+        if self._pending_op_timer is None:
+            return ""
+        elapsed = time.perf_counter() - self._pending_op_timer
+        if elapsed < LOADING_INDICATOR_DELAY_S:
+            return ""
         frame_idx = int((elapsed - LOADING_INDICATOR_DELAY_S) / LOADING_INTERVAL) % len(LOADING_FRAMES)
         return LOADING_FRAMES[frame_idx] + " "
 
@@ -353,11 +368,11 @@ class Picker(App):
         policy = getattr(sm, "policy", "")
         if isinstance(sm, m.RemoteScreen) and sm.hidden_count():
             policy += f"  ({sm.hidden_count()} hidden by filters)"
-        # Check if any pending operation has exceeded the loading indicator delay
-        if self._pending_op_timer is not None:
-            loading_text = self._update_loading_animation()
-            if loading_text:
-                policy += f"  {loading_text}loading…"
+        # Show loading text - immediately on startup, after delay for lazy operations
+        loading_text = self._get_loading_text()
+        if loading_text:
+            policy += f"  {loading_text}loading…"
+            self._startup_loading = False  # Only show immediate loading on first render
         self.query_one("#policy", Static).update(policy)
         rows = self.query_one("#rows", OptionList)
         rows.clear_options()

@@ -464,7 +464,6 @@ class RemoteScreen(Screen):
                           + ("" if a.has_key else "  · no key")) for a in buckets[prov]]
             groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
         self.accordion.set_groups(groups)
-        self._models_loaded = True
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings
@@ -473,22 +472,6 @@ class RemoteScreen(Screen):
         if agent.local_capable and not s.local_capable_shown:
             return False
         return True
-
-    def _regroup(self):
-        buckets: dict[str, list] = {}
-        order = []
-        for agent in self.agents:
-            if not self._visible(agent):
-                continue
-            if agent.provider not in buckets:
-                order.append(agent.provider)
-            buckets.setdefault(agent.provider, []).append(agent)
-        groups = []
-        for prov in order:
-            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}"
-                          + ("" if a.has_key else "  · no key")) for a in buckets[prov]]
-            groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
-        self.accordion.set_groups(groups)
 
     def hidden_count(self) -> int:
         return sum(1 for a in self.agents if not self._visible(a))
