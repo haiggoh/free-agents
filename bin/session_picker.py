@@ -470,6 +470,7 @@ class Picker(App):
                 self._maybe_load_inventory("local")
                 if "local" in self.cache:
                     sm.set_models(self.cache["local"])
+                    sm._models_loaded = True
                 return True
         # Check RemoteScreen
         if isinstance(sm, m.RemoteScreen) and getattr(sm, '_choose_model_visible', False):
@@ -478,6 +479,7 @@ class Picker(App):
                 if "remote" in self.cache:
                     sm.agents = self.cache["remote"]
                     sm._regroup()  # Re-group with loaded agents
+                    sm._models_loaded = True
                 return True
         return False
 
@@ -582,20 +584,22 @@ class Picker(App):
                     # At bottom of rows, could wrap or stay - let default handle
                     pass
 
-        # Handle group expand/collapse when on a group row
+        # Handle group expand/collapse when on a group row (only when rows list is focused)
         if key in ("left", "right"):
-            h = self._highlighted()
-            if h and h[0] == "group":
-                if key == "right":
-                    sm.accordion.expand(h[1])
-                    self.render_model(keep=f"g:{h[1]}")
-                    event.stop()
-                    return
-                elif key == "left":
-                    sm.accordion.collapse()
-                    self.render_model(keep=f"g:{h[1]}")
-                    event.stop()
-                    return
+            rows_list = self.query_one("#rows", OptionList)
+            if self.focused is rows_list:
+                h = self._highlighted()
+                if h and h[0] == "group":
+                    if key == "right":
+                        sm.accordion.expand(h[1])
+                        self.render_model(keep=f"g:{h[1]}")
+                        event.stop()
+                        return
+                    elif key == "left":
+                        sm.accordion.collapse()
+                        self.render_model(keep=f"g:{h[1]}")
+                        event.stop()
+                        return
 
         if key == "escape" or (len(key) == 1 and key.isalpha() and key.islower()):
             keep = self._highlighted()
