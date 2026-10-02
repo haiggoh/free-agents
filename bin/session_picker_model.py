@@ -294,7 +294,7 @@ def _tool_actions():
 
 
 class HomeScreen(Screen):
-    title = SESSION_LAUNCHER_TITLE
+    title = f"{ec.EMOJI_HOME_STR} {SESSION_LAUNCHER_TITLE}"
 
     def __init__(self, settings: Settings, local_count: int | None = None, remote_count: int | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner=owner)
@@ -429,6 +429,7 @@ class LocalScreen(Screen):
 class RemoteScreen(Screen):
     title = "Remote Free API Session Picker"
     lane_key = "r"
+    # Neutral short explanatory subheadline (R9: no bright orange warning)
     policy = ("Prompts and file contents leave this machine. A saved key does not prove a "
               "free quota or no billing; trial rows may cost money. Effort is a request, "
               "not a guarantee.")
