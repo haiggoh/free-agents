@@ -30,6 +30,7 @@ from pathlib import Path
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
 
+import emoji_constants as ec  # noqa: E402
 import session_menu_state as sms  # noqa: E402
 import session_picker_model as m  # noqa: E402
 
@@ -58,23 +59,8 @@ LOADING_INDICATOR_DELAY_S = 0.2
 REPO = BIN.parent
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
 
-# --- emoji constants (synced with config/emoji.sh) ---
-# These are the canonical emoji used across the picker
-SESSION_EMOJI_LOCAL = "🦾"
-SESSION_EMOJI_FREE_API = "📡"
-SESSION_EMOJI_CLOUD = "☁️"
-SESSION_EMOJI_UNKNOWN = "❓"
-EMOJI_TELEMETRY_ON = "🛰️"
-EMOJI_TELEMETRY_OFF = "🔇"
-EMOJI_WATCHER = "🔭"
-EMOJI_AUTO_MODE = "🤖"
-EMOJI_STOP_HOOK = "🪝"
-EMOJI_HOME = "🏠"
-EMOJI_EFFORT = "⚙️"
-EMOJI_KEY = "🔑"
-EMOJI_TOOLS = "🔧"
-EMOJI_MCP = "🔌"
-
+# Import emoji constants from config/emoji.sh (single source of truth)
+import emoji_constants as ec
 
 # --- inventories (read-only; never eval shell) ---------------------------------------------
 def _run(cmd, **kw):
@@ -403,7 +389,9 @@ class Picker(App):
             # Store action object reference
             self.action_ids.append(a)
             enabled_str = "" if a.enabled else "  —"
-            actions_list.add_option(Option(f"  {a.key}) {label}{enabled_str}", id=f"a:{len(self.action_ids)-1}"))
+            # Display shortcut as uppercase per R8 requirement
+            display_key = a.key.upper()
+            actions_list.add_option(Option(f"  {display_key}) {label}{enabled_str}", id=f"a:{len(self.action_ids)-1}"))
 
         status = "  ↑↓ move · Enter open/launch · ← collapse"
         if isinstance(sm, m.DownloadScreen):
