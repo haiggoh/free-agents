@@ -103,7 +103,10 @@ exit 0
 
     def run_cli(self, *args, csl=False):
         return subprocess.run(['bash', str(self.root / ('bin/csl' if csl else 'bin/remote-session.sh')), *args],
-                              env=self.env, text=True, capture_output=True)
+                              env=self.env, text=True, capture_output=True,
+                              # The curl stub reads stdin; an inherited stdin that never
+                              # closes hangs the launch's health-check loop indefinitely.
+                              stdin=subprocess.DEVNULL)
 
     def roster(self):
         result = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\\n" "${LA_REMOTE_AGENTS[@]}"',
@@ -608,8 +611,11 @@ with open(os.environ['CLAUDE_STREAM_ENV'],'w') as f:
         # that never becomes ready and the test hangs instead of failing.
         self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture: all ports free"; exit 0; fi\nexit 1\n')
         self.stub('litellm', '''#!/bin/sh
-# Fixture proxy - run a minimal HTTP server that responds to /health/liveliness
-python3 -c "
+# Fixture proxy - run a minimal HTTP server that responds to /health/liveliness.
+# exec, not a child, and forward "$@": the launcher's teardown only kills a pid whose
+# command line names litellm and proxy-<port>.yaml (_is_our_proxy), so a bare
+# `python3 -c` child was never recognised and was orphaned holding port 4141 every run.
+exec python3 -c "
 import http.server
 import socketserver
 import sys
@@ -642,7 +648,7 @@ print(f'LITELLM: Starting proxy on port {port}', flush=True)
 with socketserver.TCPServer(('', port), HealthHandler) as httpd:
     print(f'LITELLM: Proxy ready on port {port}', flush=True)
     httpd.serve_forever()
-"
+" litellm "$@"
 ''')
         self.env['CLAUDE_ARGV'] = str(self.root / 'claude-argv')
         self.stub('claude', """#!/usr/bin/env python3
@@ -808,6 +814,22 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         shown = self.run_cli('--show-broken', '--list')
         self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
         self.assertRegex(shown.stdout, r'(?m)^\s*\d+\s+brokenone\b(?!-)', '--show-broken must reveal it')
+
+        # Interactive menu: hidden by default, `u` reveals it (B is a silent legacy alias), and
+        # the menu advertises u with its emoji, never B (b is Back in the picker).
+        def menu(keys):
+            r = subprocess.run(['bash', str(self.root / 'bin/remote-session.sh'), '--csl-owner'],
+                                  input=keys, env=dict(self.env, CSL_NAV_FILE=str(self.root / 'nav')),
+                                  text=True, capture_output=True, timeout=60)
+            return r.stdout + r.stderr  # the menu renders on stderr
+        row = r'(?m)^\s*\d+\s+brokenone\b(?!-)'
+        first = menu('q\n')
+        self.assertNotRegex(first, row)
+        self.assertIn('u) 🚧 unworking models: HIDDEN', first)
+        self.assertNotIn('B) ', first)
+        for key in ('u', 'B'):
+            self.assertRegex(menu(f'{key}\nq\n').split('Remote API Session Picker')[-1], row,
+                             f'{key} must reveal unworking models on the next render')
 
         (self.root / 'config/broken-nvidia-models.json').unlink()
         missing = self.run_cli('--list')

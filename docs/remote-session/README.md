@@ -91,13 +91,14 @@ Classification fails open: an entry with no policy row, or a provider that lets 
 model at runtime, stays **visible** — uncertainty is never a reason to hide something. The
 policy file is hand-curated; there is no automated generator behind it yet.
 
-### Broken-model filter
+### Unworking-model filter
 
 Models that are listed in the catalog but do not actually complete a request (404, or a timeout on
 every configuration) are recorded in `config/broken-nvidia-models.json`, each with the reason it was
 marked. They are **hidden by default** in the interactive picker and in `--list`:
 
-- **`B`** toggles them shown/hidden in the remote menu.
+- **`u`** (🚧 unworking models) toggles them shown/hidden in the remote menu. `B`, the 0.21.9
+  key, still works but is no longer shown, because the session picker reserves `b` for Back.
 - `remote-session.sh --show-broken` shows them non-interactively.
 
 To retire or restore a model, edit the JSON: the script reads the file directly, so there is no

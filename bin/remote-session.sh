@@ -105,7 +105,7 @@ usage() {
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
     echo "  --temperature VALUE   Set temperature (0.0-2.0, controls randomness/creativity)"
-    echo "  --show-broken         Show broken/unworking NVIDIA models in picker (default: hidden)"
+    echo "  --show-broken         Show unworking models (config/broken-nvidia-models.json) in picker (default: hidden; menu key u)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
 }
 
@@ -504,10 +504,10 @@ _run_remote_menu() {
         # Blind-trust settings generation includes mcp__* when LA_REMOTE_ENABLE_MCP=1
         echo "  m) $EMOJI_MCP mcps: $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")"
         echo "  O) 🌡️  temperature: ${TEMPERATURE_CHOICE:-<provider default>}"
-        echo "  B) 🔍 broken models: $([ "${SHOW_BROKEN_MODELS:-0}" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
+        echo "  u) $EMOJI_BROKEN_MODELS unworking models: $([ "${SHOW_BROKEN_MODELS:-0}" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  q) quit"
         echo
-        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/O/B/q): " "${#choices[@]}" >&2
+        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/O/u/q): " "${#choices[@]}" >&2
         read -r -p "" sel >&2 || { _nav "quit"; return 0; }
         case "$sel" in
             h|H) _nav "home"; return 0 ;;
@@ -546,9 +546,11 @@ _run_remote_menu() {
                 LA_REMOTE_ENABLE_MCP=$(( 1 - ${LA_REMOTE_ENABLE_MCP:-0} ))
                 echo "  MCPs $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")" >&2
                 continue ;;
-            B|b)
+            # u = unworking models. B (0.21.9's key) still works but is no longer advertised:
+            # the picker reserves b for Back and treats Shift-letters as the same key.
+            u|U|B)
                 SHOW_BROKEN_MODELS=$(( 1 - ${SHOW_BROKEN_MODELS:-0} ))
-                echo "  Broken models $([ "${SHOW_BROKEN_MODELS:-0}" = "1" ] && echo "SHOWN" || echo "HIDDEN")" >&2
+                echo "  Unworking models $([ "${SHOW_BROKEN_MODELS:-0}" = "1" ] && echo "SHOWN" || echo "HIDDEN")" >&2
                 continue ;;
             e|E)
                 # Select effort level (compatible with Claude's --effort flag)

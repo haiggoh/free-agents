@@ -2,6 +2,29 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.10] — 2026-10-03
+
+### Changed — unworking-models toggle moves from `B` to `u` 🚧
+
+- The remote menu now shows **`u) 🚧 unworking models`**. `B`, the 0.21.9 key, still works but is
+  no longer shown. The move was needed because the 0.22.0 session picker uses `b` for Back and
+  treats Shift-letters as the same key, so `B` and `b` could not both work. `u` is free in both the
+  bash menu and the picker's remote lane. New constant: `EMOJI_BROKEN_MODELS` in
+  `config/emoji.sh`.
+
+### Fixed — remote-session tests no longer hang or leak a server
+
+- **Leak:** the LiteLLM stub ran its health server as a bare `python3 -c` child. The launcher's
+  teardown only kills a process whose command line names `litellm` and `proxy-<port>.yaml`
+  (`_is_our_proxy`), so it never matched the stub, and every run left an orphan listening on port
+  4141. The stub now `exec`s and forwards its arguments. Mutation-checked: dropping the forward
+  brings the leak back.
+- **Hang:** `run_cli` inherited the caller's stdin, and the curl stub reads stdin. Run from an
+  interactive shell, the suite hung for 8+ minutes. Launches now get `stdin=DEVNULL`.
+- Tests: `tests/test_remote_session` 24/24 OK in about 70 s with a live stdin, and port 4141 is
+  free afterwards. The unworking-models test now also drives the menu: `u` and `B` both reveal the
+  models, and the menu lists `u`, not `B`. Mutation-checked: unbinding `u` fails the test.
+
 ## [0.21.9] — 2026-10-03
 
 ### Added — broken-model filter for remote sessions

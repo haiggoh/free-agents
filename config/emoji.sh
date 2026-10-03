@@ -28,6 +28,7 @@ EMOJI_KEY="🔑"
 EMOJI_TOOLS="🔧"
 EMOJI_MODEL_CHOICE="⚙️ " # was 🔆 (sun) — changed to gear
 EMOJI_MCP="🔌"
+EMOJI_BROKEN_MODELS="🚧"  # unworking models filter (remote menu `u`)
 
 # Lowkey picker emojis (shared with csl for consistency) — LK_ prefix for lowkey namespace
 LK_EMOJI_MODEL="${SESSION_EMOJI_LOCAL}"        # links to SESSION_EMOJI_LOCAL (single source of truth)
