@@ -163,8 +163,6 @@ TOOLS = {
 
 
 class Picker(App):
-    # Use Apple Terminal safe driver when available (TERM_PROGRAM=Apple_Terminal on Unix)
-    driver_class = _DRIVER_CLASS
     CSS = """
     Screen { layout: vertical; background: $background; color: $foreground; }
     #title { text-style: bold; padding: 0 1; }
@@ -183,7 +181,11 @@ class Picker(App):
     BINDINGS = [Binding("ctrl+c", "quit_now", "Quit", show=False, priority=True)]
 
     def __init__(self, start: str, flags: argparse.Namespace):
-        super().__init__()
+        # Through the constructor, never a class attribute: Textual 3.7.1's App.__init__ does
+        # `self.driver_class = driver_class or self.get_driver_class()`, which overwrote the
+        # class attribute 786d487 set, so Apple Terminal still got LinuxDriver (stray `p`).
+        # None = let Textual pick its default driver.
+        super().__init__(driver_class=_DRIVER_CLASS)
         state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
         self.state_warnings = list(state.warnings)
         self.settings = m.Settings(

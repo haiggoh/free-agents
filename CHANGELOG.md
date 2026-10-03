@@ -34,6 +34,19 @@ All notable changes to `free-agents` are documented in this file.
   Backend manager — not as a top-level key, since shortcuts are case-insensitive (`L` = `l` = Local).
   The `EMOJI_LAUNCHD*` symbols land in `config/emoji.sh` (single source; `emoji_constants.py` reads it).
 
+### Fixed — stray `p` on Apple Terminal (for real this time)
+
+- `786d487` set `driver_class` as a class attribute, but Textual 3.7.1's `App.__init__` assigns
+  `self.driver_class = driver_class or self.get_driver_class()`, which overwrote it. Under Apple
+  Terminal the picker therefore still used the stock `LinuxDriver` and sent the DECRQM query
+  that shows up as a `p`. The driver is now passed through `super().__init__(driver_class=…)`.
+- `tests/test_stray_p_driver.py` checks the real instance under the picker venv. With
+  `TERM_PROGRAM=Apple_Terminal` it uses `AppleTerminalSafeDriver` and sends neither `?2048$p`
+  nor `?2026$p`; other terminals get `LinuxDriver` and both queries. Mutation-checked: the old
+  class-attribute form fails it. A PTY run confirmed that pressing `p` still toggles the
+  queued-prompt hook (ON → OFF → ON).
+- Still needed: confirmation in a real Apple Terminal window.
+
 ### Changed — merged with main through 0.21.10
 
 - Second merge of `main` (merged, not rebased), bringing in 0.21.4–0.21.10: Nemotron and GLM
