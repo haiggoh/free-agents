@@ -70,7 +70,7 @@ _check_claude_version() {
         read -r m_major m_minor m_patch <<< "$min_version"
         if (( c_major < m_major )) || (( c_major == m_major && c_minor < m_minor )) || (( c_major == m_major && c_minor == m_minor && c_patch < m_patch )); then
             echo
-            echo "${EMOJI_WARNING:-⚠️}  Your Claude Code version ($current_version) is older than $min_version."
+            echo "$EMOJI_WARNING  Your Claude Code version ($current_version) is older than $min_version."
             echo "    Opus 5.5 (claude-opus-5-5) with 1M context support requires $min_version or newer."
             echo "    Nemotron 3 Ultra (1M actual context) will fall back to Opus 5 (200k limit)."
             echo "    Update with: brew upgrade claude-code  (or your package manager)"
@@ -89,20 +89,25 @@ ALIAS=""
 REMOTE_MODEL=""
 # Local-capable filter: 0=hidden (default), 1=shown.
 LOCAL_CAPABLE_SHOWN=0
+# Show broken models: 0=hidden (default), 1=shown.
+SHOW_BROKEN_MODELS=0
 # When true, remote-session.sh runs as a submenu of csl and returns
 # via a navigation token on stdout instead of exec'ing claude.
 CSL_OWNER=0
 # Blind-trust settings file (set when AUTO_MODE_STATE=0)
 BLIND_TRUST_SETTINGS_FILE=""
+TEMPERATURE_CHOICE=""
 
 usage() {
     sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
     echo ""
     echo "Additional options:"
-    echo "  -i, --install-keys    🔑  Install / set up remote API keys"
+    echo "  -i, --install-keys    $EMOJI_KEY  Install / set up remote API keys"
     echo "  -a, --auto-mode       Toggle auto-mode: blind-trust → classifier → off"
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
+    echo "  --temperature VALUE   Set temperature (0.0-2.0, controls randomness/creativity)"
+    echo "  --show-broken         Show unworking models (config/broken-nvidia-models.json) in picker (default: hidden; menu key u)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
 }
 
@@ -269,7 +274,28 @@ _lc_is_hidden() {
     [[ "$v" == "false" ]]
 }
 
-# _filtered_aliases -> prints alias names, one per line, filtered by tier + local-capable.
+# _broken_aliases -> prints the aliases listed in config/broken-nvidia-models.json, one per
+# line. Fail-open: a missing or unparseable file hides nothing, so a bad edit to the list can
+# never empty the picker. LA_BROKEN_MODELS_FILE overrides the path (tests use it).
+_broken_aliases() {
+    local f="${LA_BROKEN_MODELS_FILE:-$SCRIPT_DIR/../config/broken-nvidia-models.json}"
+    [[ -r "$f" ]] || return 0
+    python3 -c 'import json,sys
+for m in json.load(open(sys.argv[1])).get("models",[]):
+    if m.get("status","broken")=="broken" and m.get("alias"): print(m["alias"])' "$f" 2>/dev/null || true
+}
+
+# _is_broken_hidden <alias> -> 0 when the alias is listed broken AND broken models are hidden.
+# The file is read once per process (cached); SHOW_BROKEN_MODELS is re-read every call so the
+# menu's u toggle takes effect on the next render. Newline-wrapped so matching is exact.
+_BROKEN_SET=""
+_is_broken_hidden() {
+    [[ $SHOW_BROKEN_MODELS -eq 0 ]] || return 1
+    [[ -n "$_BROKEN_SET" ]] || _BROKEN_SET=$'\n'"$(_broken_aliases)"$'\n'
+    [[ "$_BROKEN_SET" == *$'\n'"$1"$'\n'* ]]
+}
+
+# _filtered_aliases -> prints alias names, one per line, filtered by tier + local-capable + broken.
 _filtered_aliases() {
     local e alias prov model disp tier
     for e in "${LA_REMOTE_AGENTS[@]}"; do
@@ -279,6 +305,8 @@ _filtered_aliases() {
         if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
             _lc_is_hidden "$prov" "$model" && continue
         fi
+        # Hide models listed broken in config/broken-nvidia-models.json unless --show-broken / B.
+        _is_broken_hidden "$alias" && continue
         echo "$alias"
     done
 }
@@ -344,17 +372,20 @@ _sync_state() {
 }
 
 # print_inventory -> the WHOLE roster for the session picker, one TAB-separated row each:
-#   alias  provider  display  tier  local_capable(0|1)  has_key(0|1)
+#   alias  provider  display  tier  local_capable(0|1)  has_key(0|1)  broken(0|1)
 # Unfiltered on purpose: the picker applies the trial / local-capable visibility toggles
 # itself, so flipping one never needs a re-run. Reads key PRESENCE only, never a secret.
 print_inventory() {
-    local e alias prov model disp tier lc key
+    local e alias prov model disp tier lc key br
+    # Broken status is reported regardless of SHOW_BROKEN_MODELS (the picker owns the toggle).
+    local SHOW_BROKEN_MODELS=0
     for e in "${LA_REMOTE_AGENTS[@]}"; do
         alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
         disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
         lc=0; _lc_is_hidden "$prov" "$model" && lc=1
         key=0; "$KEYS" --check "$prov" >/dev/null 2>&1 && key=1
-        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$alias" "$prov" "$disp" "$tier" "$lc" "$key"
+        br=0; _is_broken_hidden "$alias" && br=1
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$alias" "$prov" "$disp" "$tier" "$lc" "$key" "$br"
     done
 }
 
@@ -374,6 +405,7 @@ print_list() {
             hidden_count=$((hidden_count+1))
             continue
         fi
+        _is_broken_hidden "$alias" && continue
         i=$((i+1))
         if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
         printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$(_tier_label "$tier" "$prov")" "$keystate"
@@ -601,8 +633,8 @@ stop_proxy() {
 
 # LiteLLM maps each spoofed Claude id onto the chosen remote model, so Claude
 # Code can ask for "claude-opus-5" and get the free provider underneath.
-write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking> [effort]
-    local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}"
+write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking> [effort] [temperature]
+    local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}" temperature="${6:-}"
     _available "$prov" || return 2
     _valid_model "$model" || return 2
     local litellm_model think_line="" api_base=""
@@ -626,47 +658,92 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     # translation layer then dies with "Content block is not a thinking block"
     # and takes the whole session's endpoint with it. Turn reasoning off at the
     # backend unless the caller explicitly asked for thinking.
-    [[ "$prov" == "nvidia" && "$thinking" != "true" ]] && \
-        think_line='      chat_template_kwargs:
+    # ONLY for Nemotron models; other NVIDIA models (Kimi, DeepSeek, GLM) have
+    # different behavior and this setting breaks them or does nothing useful.
+    # EXPLICIT CONTROL: the -thinking suffix means enable_thinking: true,
+    # the default (no suffix) means enable_thinking: false. Effort does NOT
+    # change this - it only sets reasoning_effort for non-Nemotron models.
+    if [[ "$prov" == "nvidia" && "$model" == *nemotron* ]]; then
+        if [[ "$thinking" == "true" ]]; then
+            think_line='      chat_template_kwargs:
+        enable_thinking: true'
+        else
+            think_line='      chat_template_kwargs:
         enable_thinking: false'
+        fi
+    fi
+    # GLM models (z-ai/glm-*) also need enable_thinking: true when -thinking suffix used
+    # They return reasoning_content instead of content; non-streaming fails with 'NoneType' error
+    # Streaming + thinking enabled works reliably
+    if [[ "$prov" == "nvidia" && "$model" == *glm* ]]; then
+        if [[ "$thinking" == "true" ]]; then
+            think_line='      chat_template_kwargs:
+        enable_thinking: true'
+        else
+            think_line='      chat_template_kwargs:
+        enable_thinking: false'
+        fi
+    fi
 
     # EFFORT. Claude Code's own --effort flag is meaningless to a third-party provider: it is
     # interpreted by Anthropic's models, so passing it to `claude` while the request is proxied
     # to NVIDIA/Gemini/Groq changed nothing. Effort has to travel IN THE REQUEST BODY, which is
     # what this proxy config controls. The field differs per model family, so map it:
     #   * reasoning_effort (low|medium|high) -- the OpenAI-compatible spelling. LiteLLM
-    #     translates it per provider, so it is the right default for OpenAI-shaped routes.
+    #     translates it per provider, so it is the right default for OpenAI-compatible routes.
     #   * NVIDIA Nemotron does NOT take reasoning_effort; it gates reasoning with
-    #     enable_thinking inside chat_template_kwargs. So on Nemotron an explicit effort means
-    #     "turn thinking ON" (the default above turns it off to avoid the thinking-block crash).
-    # Claude Code offers five levels; the OpenAI field accepts three, so xhigh/max fold to high.
+    #     enable_thinking inside chat_template_kwargs. Effort does NOT flip thinking on/off -
+    #     that is controlled explicitly by the -thinking suffix. For Nemotron WITH thinking
+    #     enabled, effort MAPS TO max_tokens (the practical effort control). For Nemotron
+    #     WITHOUT thinking, effort is ignored (8192 default is fine). Other NVIDIA models
+    #     DO accept reasoning_effort.
+    # Claude Code offers five levels; for Nemotron with thinking we map each to
+    # distinct max_tokens values. For non-Nemotron, xhigh/max fold to high for
+    # reasoning_effort (OpenAI only accepts low/medium/high).
     local mapped_effort=""
     case "$effort" in
         low)              mapped_effort="low" ;;
         medium)           mapped_effort="medium" ;;
-        high|xhigh|max)   mapped_effort="high" ;;
+        high)             mapped_effort="high" ;;
+        xhigh)            mapped_effort="xhigh" ;;
+        max)              mapped_effort="max" ;;
         "")               mapped_effort="" ;;
         *)                echo "remote-session: unknown effort '\''$effort'\'', ignoring" >&2 ;;
     esac
     local effort_line=""
+    # For models with reasoning support, map effort to max_tokens (practical effort control).
+    # Only set max_tokens for high/xhigh/max to AVOID artificially lowering provider defaults.
+    # low/medium use model default; high/xhigh/max get increased budgets for deeper reasoning.
+    local max_tokens_for_effort=""
     if [[ -n "$mapped_effort" ]]; then
+        case "$mapped_effort" in
+            high)             max_tokens_for_effort=65536 ;;     # 64k - deeper reasoning
+            xhigh)            max_tokens_for_effort=131072 ;;    # 128k - very deep reasoning
+            max)              max_tokens_for_effort=262144 ;;    # 256k - maximum practical
+        esac
+    fi
+    if [[ -n "$mapped_effort" ]]; then
+        # Map xhigh/max to high for reasoning_effort (OpenAI only accepts low/medium/high)
+        # but keep original mapped_effort for max_tokens mapping
+        local reasoning_effort="$mapped_effort"
+        case "$mapped_effort" in
+            xhigh|max) reasoning_effort="high" ;;
+        esac
         case "$prov" in
             nvidia)
-                # Nemotron reads enable_thinking, not reasoning_effort. An explicit effort is a
-                # request TO reason, so enable it and state the budget the family understands.
-                if [[ "$model" == *nemotron* ]]; then
-                    think_line='      chat_template_kwargs:
-        enable_thinking: true'
-                else
-                    effort_line="      reasoning_effort: $mapped_effort"
+                # Nemotron reads enable_thinking, not reasoning_effort.
+                # For ALL Nemotron models, effort maps to max_tokens (set below in model loop).
+                # Other NVIDIA models DO accept reasoning_effort.
+                if [[ "$model" != *nemotron* ]]; then
+                    effort_line="      reasoning_effort: $reasoning_effort"
                 fi
                 ;;
             gemini)
                 # Gemini thinking is disabled above unless asked for; an explicit effort asks.
                 [[ "$thinking" != "true" ]] && think_line=""
-                effort_line="      reasoning_effort: $mapped_effort"
+                effort_line="      reasoning_effort: $reasoning_effort"
                 ;;
-            *)  effort_line="      reasoning_effort: $mapped_effort" ;;
+            *)  effort_line="      reasoning_effort: $reasoning_effort" ;;
         esac
     fi
 
@@ -687,6 +764,14 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             [[ -n "$api_base" ]] && echo "      api_base: $api_base"
             [[ -n "$think_line" ]] && echo "$think_line"
             [[ -n "$effort_line" ]] && echo "$effort_line"
+            # For models with reasoning support, map effort to max_tokens (practical effort control)
+            if [[ -n "$max_tokens_for_effort" ]]; then
+                echo "      max_tokens: $max_tokens_for_effort"
+            fi
+            # Temperature control (if provided)
+            if [[ -n "$temperature" ]]; then
+                echo "      temperature: $temperature"
+            fi
             # Retry configuration for NVIDIA (and other free-tier providers)
             # num_retries: retry failed upstream calls instead of returning 500 immediately
             # Note: retry_after is NOT supported by NVIDIA NIM (causes 400 BadRequestError)
@@ -718,8 +803,8 @@ general_settings:
 YAML
 }
 
-start_proxy() { # start_proxy <provider> <model> <thinking> [effort] -> echoes port
-    local prov="$1" model="$2" thinking="$3" effort="${4:-}"
+start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperature] -> echoes port
+    local prov="$1" model="$2" thinking="$3" effort="${4:-}" temperature="${5:-}"
     umask 077
     command -v litellm >/dev/null 2>&1 || {
         echo "remote-session: litellm not found. Install with: pipx install litellm[proxy]" >&2; return 1; }
@@ -739,7 +824,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] -> echoes p
     _prepare_runtime_dir || return 1
     port="$(free_port)" || return 1
     cfg="$RUNDIR/proxy-$port.yaml"; log="$RUNDIR/proxy-$port.log"; pidf="$RUNDIR/proxy-$port.pid"
-    write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" || return 1
+    write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 1
     _prepare_runtime_file "$log" || return 1
     _prepare_runtime_file "$pidf" || return 1
     if [[ -n "${LA_LITELLM_CMD:-}" ]]; then
@@ -793,15 +878,16 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] -> echoes p
     echo $! > "$pidf"
 
     # Bounded readiness wait with real diagnostics on failure.
+    # 5 minutes (300s) for proxy startup — prefill on first request can take several minutes.
     local i
-    for i in $(seq 1 60); do
+    for i in $(seq 1 300); do
         if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
             echo "$port"; return 0
         fi
         kill -0 "$(cat "$pidf")" 2>/dev/null || { echo "remote-session: proxy died during startup; inspect the private log locally: $log" >&2; return 1; }
         sleep 1
     done
-    echo "remote-session: proxy did not become ready in 60s; inspect the private log locally: $log" >&2
+    echo "remote-session: proxy did not become ready in 300s (5 min); inspect the private log locally: $log" >&2
     return 1
 }
 
@@ -858,6 +944,9 @@ while [[ $# -gt 0 ]]; do
                 SELECTED_EFFORT="choose-effort"
             fi
             shift ;;
+        --temperature)    [[ $# -ge 2 ]] || { echo 'remote-session: --temperature needs a value (0.0-2.0)' >&2; exit 2; }
+                          TEMPERATURE_CHOICE="$2"; shift 2 ;;
+        --show-broken)    SHOW_BROKEN_MODELS=1; shift ;;
         --enable-mcp)     export LA_REMOTE_ENABLE_MCP=1; shift ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
         -*)               if [[ -z "$ALIAS" ]]; then
@@ -926,6 +1015,7 @@ if [[ -z "$ALIAS" ]]; then
                         alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
                         _lc_is_hidden "$prov" "$model" && continue
                     fi
+                    _is_broken_hidden "$(_field "$e" 1)" && continue
                     choices+=("$(_field "$e" 1)")
                 done
 
@@ -952,9 +1042,10 @@ if [[ -z "$ALIAS" ]]; then
                 _box row "  f) Toggle local-capable   R) Hidden-model report"
                 _box row "  k) Install/set up keys    a) Auto-mode: $(case "$AUTO_MODE_STATE" in 0) echo "blind-trust" ;; 1) echo "classifier" ;; 2) echo "off" ;; esac)"
                 _box row "  t) Telemetry: $( [[ "$TELEMETRY_ENABLED" -eq 1 ]] && echo "ON" || echo "OFF" )    l) Local-capable: $( [[ "$LOCAL_CAPABLE_SHOWN" -eq 1 ]] && echo "SHOWN" || echo "HIDDEN" )"
-                _box row "  m) MCPs: $( [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 ]] && echo "ENABLED" || echo "DISABLED" )    q) Quit"
+                _box row "  m) MCPs: $( [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 ]] && echo "ENABLED" || echo "DISABLED" )    u) $EMOJI_BROKEN_MODELS Unworking: $( [[ "${SHOW_BROKEN_MODELS:-0}" -eq 1 ]] && echo "SHOWN" || echo "HIDDEN" )"
+                _box row "  q) Quit"
                 _box bottom
-                printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/q): " "${#choices[@]}" >&2
+                printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/u/q): " "${#choices[@]}" >&2
                 read -r -p "" sel >&2 || { _nav "quit"; return 0; }
                 case "$sel" in
                     h|H) _nav "home"; return 0 ;;
@@ -997,6 +1088,10 @@ if [[ -z "$ALIAS" ]]; then
                         else
                             export LA_REMOTE_ENABLE_MCP=1
                         fi
+                        continue ;;
+                    # u only: b is Back in the picker and letters are case-insensitive there.
+                    u|U)
+                        SHOW_BROKEN_MODELS=$(( 1 - ${SHOW_BROKEN_MODELS:-0} ))
                         continue ;;
                     c|C)
                         # Choose effort
@@ -1105,7 +1200,7 @@ if [[ "$MODE" == "launch" ]]; then
     # The genuine classifier lane is not wired for remote yet. Say so rather than
     # silently behaving like blind-trust, which is the failure mode this release fixes.
     if [[ "$AUTO_MODE_STATE" -eq 1 ]]; then
-        echo "⚠️  auto-mode: classifier requested, but the remote classifier lane is not"
+        echo "$EMOJI_WARNING  auto-mode: classifier requested, but the remote classifier lane is not"
         echo "    implemented yet — running blind-trust (bypassPermissions) for this session. See ROADMAP."
     fi
 
@@ -1303,7 +1398,7 @@ fi
 
 _prepare_runtime_dir || exit 1
 echo "   proxy    : starting LiteLLM (Anthropic /v1/messages → $PROV)…"
-PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING" "$EFFORT_CHOICE")" || {
+PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING" "$EFFORT_CHOICE" "$TEMPERATURE_CHOICE")" || {
     echo "remote-session: could not start the translating proxy." >&2; exit 1; }
 echo "   proxy    : ready on http://127.0.0.1:$PORT"
 echo
@@ -1329,7 +1424,8 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$MAX_OUT"
 #   CLAUDE_ENABLE_STREAM_WATCHDOG=0  the separate CLI 2.1.196 idle watchdog, on by default for
 #     ALL providers, which the other two DO NOT cover. This is the one that actually bites.
 # Bounded, not unbounded: API_TIMEOUT_MS still caps the request, so a genuinely dead stream ends.
-export API_TIMEOUT_MS="${LA_REMOTE_API_TIMEOUT_MS:-600000}"
+# 5 minutes (300s) for prefill + generation; overridable via LA_REMOTE_API_TIMEOUT_MS.
+export API_TIMEOUT_MS="${LA_REMOTE_API_TIMEOUT_MS:-300000}"
 export API_FORCE_IDLE_TIMEOUT=0
 export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1    # no telemetry through a third party

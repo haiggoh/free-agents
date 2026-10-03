@@ -79,7 +79,13 @@ print(os.environ['CATALOG'])
 sys.exit(int(os.environ['CURL_CODE']))
 ''')
         for name in ('litellm', 'claude'):
-            self.stub(name, '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Offline forbidden-launch sentinel"; exit 0; fi\necho "Unexpected launch" >&2\nexit 99\n')
+            self.stub(name, '''#!/bin/sh
+if [ "${1:-}" = --help ]; then echo "Offline forbidden-launch sentinel"; exit 0; fi
+if [ "${1:-}" = --version ]; then echo "2.1.286"; exit 0; fi
+# This is the actual launch - capture argv
+python3 -c "import json, sys, os; json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'], 'w'))" "$@"
+exit 0
+''')
         # Determine spoof ID count from the config
         self.spoof_id_count = len(self._get_spoof_ids())
 
@@ -97,7 +103,10 @@ sys.exit(int(os.environ['CURL_CODE']))
 
     def run_cli(self, *args, csl=False):
         return subprocess.run(['bash', str(self.root / ('bin/csl' if csl else 'bin/remote-session.sh')), *args],
-                              env=self.env, text=True, capture_output=True)
+                              env=self.env, text=True, capture_output=True,
+                              # The curl stub reads stdin; an inherited stdin that never
+                              # closes hangs the launch's health-check loop indefinitely.
+                              stdin=subprocess.DEVNULL)
 
     def roster(self):
         result = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\\n" "${LA_REMOTE_AGENTS[@]}"',
@@ -114,7 +123,11 @@ sys.exit(int(os.environ['CURL_CODE']))
         # this line should mean changing the preferred lane on purpose -- not drifting into it.
         # Ultra 550B is row 1 by user preference (0.15.1); Super 120B follows it.
         self.assertEqual(rows[0][0], 'nvidia-nemotron-ultra')
-        self.assertEqual(rows[1][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[1][0], 'nvidia-nemotron-ultra-thinking')
+        self.assertEqual(rows[2][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[3][0], 'nvidia-nemotron3-thinking')
+        self.assertEqual(rows[4][0], 'nvidia-lightning')
+        self.assertEqual(rows[5][0], 'nvidia-lightning-thinking')
         self.assertEqual(rows[0][1], 'nvidia')
         # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
         leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
@@ -233,10 +246,16 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 self.assertEqual(cfg.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn('fixture-not-a-real-key', text)
                 self.assertEqual('      thinking:' in text, provider == 'gemini' and thinking == 'false')
-                # NVIDIA NIM reasoning models must have reasoning disabled at the
+                # NVIDIA NIM reasoning models (Nemotron) must have reasoning disabled at the
                 # backend, or the Anthropic translation layer 500s the session.
+                # Only Nemotron models get enable_thinking: false; other NVIDIA models
+                # (Kimi, DeepSeek, GLM, etc.) have different behavior.
+                # GLM models also get enable_thinking explicitly set (true/false based on thinking flag).
+                is_nemotron = provider == 'nvidia' and 'nemotron' in model
+                is_glm = provider == 'nvidia' and 'glm' in model
+                expected_false_count = self.spoof_id_count if (is_nemotron or is_glm) and thinking == 'false' else 0
                 self.assertEqual(text.count('        enable_thinking: false\n'),
-                                 self.spoof_id_count if provider == 'nvidia' and thinking == 'false' else 0)
+                                 expected_false_count)
                 if provider == 'cloudflare':
                     self.assertIn('/accounts/' + 'a' * 32 + '/ai/v1', text)
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)
@@ -272,8 +291,9 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         link = rundir / 'la_proxy_hooks.py'
         self.assertTrue(link.is_symlink())
         self.assertEqual(link.resolve(), (self.root / 'bin/la_proxy_hooks.py').resolve())
-        # Thinking is NOT disabled to dodge the stream bug -- the hook fixes it instead.
-        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
+        # Thinking IS disabled by default for Nemotron (thinking='false').
+        # Effort no longer flips thinking on; only -thinking suffix does.
+        self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
 
         result = write({'LA_REMOTE_PROXY_HOOKS': '0'})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -300,15 +320,34 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
             self.assertEqual(result.returncode, 0, result.stderr)
             return cfg.read_text()
 
-        # Nemotron: effort means "reason", expressed as enable_thinking -- NOT reasoning_effort.
+        # Nemotron: thinking is controlled by -thinking suffix, NOT effort.
+        # With no -thinking suffix, thinking defaults to false regardless of effort.
+        # But effort NOW maps to max_tokens for ALL Nemotron models (not just thinking).
         ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
         text = write('nvidia', ultra, 'high')
-        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
+        self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
         self.assertNotIn('reasoning_effort', text,
                          'Nemotron does not accept reasoning_effort; sending it is the bug')
-        # With no effort the crash-avoiding default must survive.
+        # With -thinking suffix OFF but high effort, max_tokens is still increased
+        self.assertIn('      max_tokens: 65536\n', text)
+        # With -thinking suffix, thinking is explicitly enabled.
+        text = write('nvidia', ultra, 'high', 'true')
+        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
+        self.assertNotIn('reasoning_effort', text)
+        # With -thinking suffix + high effort, max_tokens=65536
+        self.assertIn('      max_tokens: 65536\n', text)
+        # With -thinking suffix + max effort, max_tokens=262144 (distinct from high)
+        text = write('nvidia', ultra, 'max', 'true')
+        self.assertIn('      max_tokens: 262144\n', text)
+        # With no effort and no -thinking suffix, thinking defaults to false.
+        # Low/medium effort don't set max_tokens (provider default used)
+        text = write('nvidia', ultra, 'low')
+        self.assertNotIn('max_tokens', text)
+        text = write('nvidia', ultra, 'medium')
+        self.assertNotIn('max_tokens', text)
         text = write('nvidia', ultra, '')
         self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
+        self.assertNotIn('max_tokens', text)
 
         # A non-Nemotron NVIDIA model DOES take the OpenAI-compatible field.
         text = write('nvidia', 'nvidia/gpt-oss-20b', 'high')
@@ -535,7 +574,7 @@ with open(os.environ['CLAUDE_STREAM_ENV'],'w') as f:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(capture.exists(), 'claude was never launched')
         self.assertEqual(json.loads(capture.read_text()), {
-            'API_TIMEOUT_MS': '600000',
+            'API_TIMEOUT_MS': '300000',
             'API_FORCE_IDLE_TIMEOUT': '0',
             'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
         })
@@ -571,22 +610,87 @@ with open(os.environ['CLAUDE_STREAM_ENV'],'w') as f:
         # port free and litellm exits immediately, otherwise the launch waits on a proxy
         # that never becomes ready and the test hangs instead of failing.
         self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture: all ports free"; exit 0; fi\nexit 1\n')
-        self.stub('litellm', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture proxy"; exit 0; fi\nsleep 2\n')
+        self.stub('litellm', '''#!/bin/sh
+# Fixture proxy - run a minimal HTTP server that responds to /health/liveliness.
+# exec, not a child, and forward "$@": the launcher's teardown only kills a pid whose
+# command line names litellm and proxy-<port>.yaml (_is_our_proxy), so a bare
+# `python3 -c` child was never recognised and was orphaned holding port 4141 every run.
+exec python3 -c "
+import http.server
+import socketserver
+import sys
+import os
+
+class HealthHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health/liveliness':
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+# Parse --port argument
+port = 4141
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+    if args[i] == '--port' and i + 1 < len(args):
+        port = int(args[i + 1])
+        break
+    i += 1
+
+print(f'LITELLM: Starting proxy on port {port}', flush=True)
+with socketserver.TCPServer(('', port), HealthHandler) as httpd:
+    print(f'LITELLM: Proxy ready on port {port}', flush=True)
+    httpd.serve_forever()
+" litellm "$@"
+''')
         self.env['CLAUDE_ARGV'] = str(self.root / 'claude-argv')
         self.stub('claude', """#!/usr/bin/env python3
 import json,os,sys
 if '--help' in sys.argv:
     print('Fixture Claude; CLAUDE_ARGV captures argv.'); sys.exit(0)
-json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
+if '--version' in sys.argv:
+    print('2.1.286'); sys.exit(0)
+# This is the actual launch - append to file (not overwrite) to capture last call
+with open(os.environ['CLAUDE_ARGV'], 'a') as f:
+    f.write(json.dumps(sys.argv[1:]) + '\\n')
 """)
 
         def launched_argv(*args):
             capture = self.root / 'claude-argv'
             capture.unlink(missing_ok=True)
             result = self.run_cli(*args)
+            print(f"STDOUT: {result.stdout[:5000]}")
+            print(f"STDERR: {result.stderr[:5000]}")
+            print(f"Return code: {result.returncode}")
+            # Check if file exists
+            if not capture.exists():
+                # List files in root
+                print(f"Files in root: {list(self.root.iterdir())}")
+                # Check if litellm process is running
+                import subprocess
+                ps_result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+                print(f"Processes: {ps_result.stdout[:2000]}")
+                # Check if capture file was created but is empty
+                if os.path.exists(capture):
+                    print(f"Capture file exists but empty, size: {capture.stat().st_size}")
+                else:
+                    print("Capture file does not exist")
+                # Check if litellm ready file exists
+                import glob
+                ready_files = glob.glob('/tmp/litellm_ready_*')
+                print(f"Ready files: {ready_files}")
             self.assertTrue(capture.exists(),
                             'claude was never launched: ' + result.stdout + result.stderr)
-            return json.loads(capture.read_text())
+            # Read last line (last launch call)
+            lines = capture.read_text().strip().split('\n')
+            return json.loads(lines[-1])
 
         argv = launched_argv('gemini-flash')
         self.assertIn('--permission-mode', argv)
@@ -676,6 +780,59 @@ json.dump(sys.argv[1:], open(os.environ['CLAUDE_ARGV'],'w'))
         self.assertIn('hiddenone', shown.stdout,
                       '--local-capable-shown must make the classified-hidden model appear in --list too, '
                       'not just in the interactive menu')
+
+    def test_broken_models_json_hides_by_default_and_show_broken_reveals(self):
+        """Aliases in config/broken-nvidia-models.json are absent from --list unless --show-broken.
+
+        Asserts on the OUTCOME (printed aliases) and reads the list from the JSON file, so a
+        hardcoded copy in the script that drifts from the file fails here. A missing file must
+        hide nothing (fail-open).
+        """
+        (self.root / 'config/local-capable-remote-models.psv').write_text('# empty, no rows\n')
+        shutil.copy2(ROOT / 'bin/local-capable-filter.sh', self.root / 'bin/local-capable-filter.sh')
+        (self.root / 'config/remote-agents.sh').write_text(
+            'LA_REMOTE_AGENTS=(\n'
+            '  "workingone|nvidia|nvidia/working|Working One|renewing_free|note"\n'
+            '  "brokenone|nvidia|nvidia/broken|Broken One|renewing_free|note"\n'
+            '  "brokenone-plus|nvidia|nvidia/broken-plus|Broken Prefix|renewing_free|note"\n'
+            ')\n'
+        )
+        (self.root / 'config/broken-nvidia-models.json').write_text(json.dumps({'models': [
+            {'model_id': 'nvidia/broken', 'alias': 'brokenone', 'status': 'broken'},
+            # Not in the roster; contains 'workingone' so a substring match would wrongly hide it.
+            {'model_id': 'nvidia/retired', 'alias': 'workingone-retired', 'status': 'broken'}]}))
+
+        default = self.run_cli('--list')
+        self.assertEqual(default.returncode, 0, default.stdout + default.stderr)
+        self.assertRegex(default.stdout, r'(?m)^\s*\d+\s+workingone\b(?!-)',
+                         'an alias that is merely a substring of a listed one must stay visible')
+        self.assertNotRegex(default.stdout, r'(?m)^\s*\d+\s+brokenone\b(?!-)',
+                            'an alias listed in broken-nvidia-models.json must be hidden by default')
+        self.assertIn('brokenone-plus', default.stdout,
+                      'matching must be exact: a listed alias must not hide a longer alias sharing its prefix')
+
+        shown = self.run_cli('--show-broken', '--list')
+        self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
+        self.assertRegex(shown.stdout, r'(?m)^\s*\d+\s+brokenone\b(?!-)', '--show-broken must reveal it')
+
+        # Interactive menu (csl-owner): hidden by default, `u` reveals it, and there is NO `B`
+        # alias on this branch — the picker treats letters case-insensitively and b is Back.
+        def menu(keys):
+            r = subprocess.run(['bash', str(self.root / 'bin/remote-session.sh'), '--csl-owner'],
+                               input=keys, env=dict(self.env, CSL_NAV_FILE=str(self.root / 'nav')),
+                               text=True, capture_output=True, timeout=60)
+            return r.stdout + r.stderr  # the menu renders on stderr
+        row = r'\d+\) Broken One\b'
+        last = lambda out: out.split('Remote cloud-API agents')[-1]
+        first = menu('q\n')
+        self.assertNotRegex(first, row)
+        self.assertIn('u) 🚧 Unworking: HIDDEN', first)
+        self.assertRegex(last(menu('u\nq\n')), row, 'u must reveal unworking models on the next render')
+        self.assertNotRegex(last(menu('B\nq\n')), row, 'B must not be an alias for u on this branch')
+
+        (self.root / 'config/broken-nvidia-models.json').unlink()
+        missing = self.run_cli('--list')
+        self.assertRegex(missing.stdout, r'(?m)^\s*\d+\s+brokenone\b(?!-)', 'no list file must hide nothing')
 
     def test_csl_owner_returns_via_nav_file_instead_of_exiting(self):
         """`--csl-owner` must hand navigation back through CSL_NAV_FILE, never exit(1).

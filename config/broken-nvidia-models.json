@@ -1,0 +1,30 @@
+{
+  "description": "NVIDIA models that are known to be non-functional on NVIDIA NIM API",
+  "last_updated": "2026-10-03",
+  "models": [
+    {
+      "model_id": "moonshotai/kimi-k3",
+      "alias": "nvidia-kimi-k3",
+      "reason": "TIMEOUT on all configurations (180s) - NVIDIA API capacity issue",
+      "status": "broken"
+    },
+    {
+      "model_id": "moonshotai/kimi-k2.6",
+      "alias": "nvidia-kimi-k26",
+      "reason": "HTTP 404 Not Found - model not accessible",
+      "status": "broken"
+    },
+    {
+      "model_id": "deepseek-ai/deepseek-v4.1-flash",
+      "alias": "nvidia-deepseek-v4",
+      "reason": "TIMEOUT on all configurations (180s) - NVIDIA API capacity issue",
+      "status": "broken"
+    },
+    {
+      "model_id": "deepseek-ai/deepseek-coder-6.7b-instruct",
+      "alias": "nvidia-deepseek-coder",
+      "reason": "HTTP 404 Not Found - model not accessible",
+      "status": "broken"
+    }
+  ]
+}

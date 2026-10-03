@@ -78,6 +78,7 @@ class RemoteAgent:
     tier: str
     local_capable: bool = False
     has_key: bool = True
+    broken: bool = False      # listed in config/broken-nvidia-models.json
 
 
 # Order matters: identity markers first, so "deepseek-r1-distill-qwen" is DeepSeek (the
@@ -137,6 +138,8 @@ class Settings:
     enable_mcp: bool = False
     include_trials: bool = True      # interactive visibility only; direct CLI keeps its guard
     local_capable_shown: bool = False
+    show_broken: bool = False        # unworking models; in-memory, like the CLI flag
+    remote_temperature: str = ""     # "" = provider default; else one of TEMPERATURES
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
     rate_limiter: dict = field(default_factory=dict)
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
@@ -149,6 +152,10 @@ class Settings:
         "lowkey": None,
     })
     notes: list = field(default_factory=list)
+
+
+# Same presets as main's bash menu (0.21.7). "" = leave it to the provider.
+TEMPERATURES = ("", "0.0", "0.3", "0.7", "1.0", "1.5", "2.0")
 
 
 def effort_choices(lane: str) -> tuple:
@@ -368,20 +375,20 @@ class LocalScreen(Screen):
         s = self.settings
         mcp_ok = s.auto_mode == 0
         acts = [
-            Action("e", f"⚙️  Effort: {s.local_effort}", self._cycle_effort),
+            Action("e", f"{ec.EMOJI_EFFORT_STR} Effort: {s.local_effort}", self._cycle_effort),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
-            Action("s", "📡  Switch to Remote free API sessions",
+            Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
-            Action("r", "📡  Remote free API sessions", lambda: Nav("remote", self.owner),
+            Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR}  Remote free API sessions", lambda: Nav("remote", self.owner),
                    section="hidden"),
-            Action("m", (f"🔌  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
-                         "🔌  MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
+            Action("m", (f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
+                         f"{ec.EMOJI_MCP_STR}  MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
                    lambda: setattr(s, "enable_mcp", not s.enable_mcp), enabled=mcp_ok),
         ]
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
         if last_local and last_local in self.models:
-            acts.insert(0, Action("g", f"🚀 Go launch: {last_local} session",
+            acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {last_local} session",
                            lambda: self._launch_last("local_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=True)
         acts += [a for a in _tool_actions()]
@@ -472,6 +479,8 @@ class RemoteScreen(Screen):
             return False
         if agent.local_capable and not s.local_capable_shown:
             return False
+        if agent.broken and not s.show_broken:
+            return False
         return True
 
     def hidden_count(self) -> int:
@@ -494,22 +503,27 @@ class RemoteScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            Action("e", f"⚙️  Effort: {_effort_label(s.remote_effort)}", self._cycle_effort),
+            Action("e", f"{ec.EMOJI_EFFORT_STR} Effort: {_effort_label(s.remote_effort)}", self._cycle_effort),
+            Action("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
+                   self._cycle_temperature),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
-            Action("s", "🦾  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
-            Action("l", "🦾  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
-            Action("h", f"🔖  Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
+            Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
+            Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
+            Action("h", f"{ec.EMOJI_TRIALS_STR}  Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
                    lambda: self._toggle("include_trials")),
-            Action("f", f"🏷️  Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
+            Action("f", f"{ec.EMOJI_LOCAL_CAPABLE_STR}  Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
                    lambda: self._toggle("local_capable_shown")),
-            Action("x", "📋  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
-            Action("m", f"🔌  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
+            # u, not B: b is Back and Shift-letters are the same key in this picker.
+            Action("u", f"{ec.EMOJI_BROKEN_MODELS_STR} Unworking models: {'SHOWN' if s.show_broken else 'HIDDEN'}",
+                   lambda: self._toggle("show_broken")),
+            Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
+            Action("m", f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                    lambda: setattr(s, "enable_mcp", not s.enable_mcp)),
         ]
         # Add "Launch last model" if we have a saved last model
         last_remote = s.last_launched_model.get("remote_api_session") if s.last_launched_model else None
         if last_remote and any(a.alias == last_remote for a in self.agents if self._visible(a)):
-            acts.insert(0, Action("g", f"🚀 Go launch: {last_remote} session",
+            acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {last_remote} session",
                            lambda: self._launch_last("remote_api_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=False)
         acts += _tool_actions()
@@ -527,6 +541,10 @@ class RemoteScreen(Screen):
         self.accordion.expand(self.accordion._group_of(last_model) or "")
         # Return a special nav to trigger launch
         return self.activate_selected()
+
+    def _cycle_temperature(self):
+        s = self.settings
+        s.remote_temperature = _next(TEMPERATURES, s.remote_temperature)
 
     def _cycle_effort(self):
         s = self.settings
@@ -555,6 +573,8 @@ class RemoteScreen(Screen):
         effort = sms.effort_arg("remote_api_session", s.remote_effort)
         if effort:
             argv += ["--effort", effort]
+        if s.remote_temperature:
+            argv += ["--temperature", s.remote_temperature]
         argv.append(agent.alias)
         env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0"}
         return LaunchRequest("remote", argv, env, agent.alias)
@@ -568,7 +588,7 @@ class RateLimiterScreen(Screen):
     every cycle's steps include rate_limiter's own defaults, so the screen never shows a value
     the proxies do not use.
     """
-    title = "🔧 NVIDIA Rate Limiter"
+    title = f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA Rate Limiter"
     RPM_STEPS = (10, 20, 30, 40)
     CAP_STEPS = (2, 4, 6, 10)
     WAIT_STEPS = (30, 60, 120, 300)
@@ -669,21 +689,25 @@ class APIKeysScreen(Screen):
 
     # Provider list matches install/setup-api-keys.py
     # Using unique shortcut keys for each provider (all lowercase letters)
+    # (slug, name, shortcut). Emojis come from config/emoji.sh (EMOJI_PROVIDER_<SLUG>).
+    # The rows are display-only, but their keys still share the screen's key table, so none
+    # may be `b` (Back) or `q` (Quit): SambaNova moved b -> y in 0.22.0 (it crashed the
+    # Home-owned screen with a duplicate-key error).
     PROVIDERS = [
-        ("gemini", "Google Gemini", "🔍", "g"),
-        ("groq", "Groq", "⚡", "u"),  # 'u' for Groq (q is taken by Quit)
-        ("openrouter", "OpenRouter", "🔀", "r"),
-        ("cloudflare", "Cloudflare Workers AI", "☁️", "c"),
-        ("mistral", "Mistral", "🌊", "m"),
-        ("zai", "Z.AI", "🤖", "z"),
-        ("siliconflow", "SiliconFlow", "⚙️", "s"),
-        ("llm7", "LLM7", "7️⃣", "l"),
-        ("kilo", "Kilo", "🔑", "k"),
-        ("vercel", "Vercel AI Gateway", "▲", "v"),
-        ("sambanova", "SambaNova", "💎", "b"),
-        ("modelscope", "ModelScope", "🔬", "x"),
-        ("cerebras", "Cerebras", "🧠", "e"),
-        ("nvidia", "NVIDIA", "🚦", "n"),
+        ("gemini", "Google Gemini", "g"),
+        ("groq", "Groq", "u"),
+        ("openrouter", "OpenRouter", "r"),
+        ("cloudflare", "Cloudflare Workers AI", "c"),
+        ("mistral", "Mistral", "m"),
+        ("zai", "Z.AI", "z"),
+        ("siliconflow", "SiliconFlow", "s"),
+        ("llm7", "LLM7", "l"),
+        ("kilo", "Kilo", "k"),
+        ("vercel", "Vercel AI Gateway", "v"),
+        ("sambanova", "SambaNova", "y"),
+        ("modelscope", "ModelScope", "x"),
+        ("cerebras", "Cerebras", "e"),
+        ("nvidia", "NVIDIA", "n"),
     ]
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
@@ -697,13 +721,15 @@ class APIKeysScreen(Screen):
         from pathlib import Path
         api_keys_dir = Path(os.environ.get("LA_API_KEYS_DIR", os.path.expanduser("~/.api_keys")))
         # Simplified status check - in real implementation would use Store class
-        return "✅ Saved" if api_keys_dir.exists() else "❌ Missing"
+        return f"{ec.EMOJI_OK_STR} Saved" if api_keys_dir.exists() else f"{ec.EMOJI_MISSING_STR} Missing"
 
     def actions(self):
         acts = []
         # Add provider status rows (display only, not actionable)
-        for slug, name, emoji, shortcut in self.PROVIDERS:
-            status = "✅ Saved" if slug in ["gemini", "groq", "nvidia"] else "❌ Missing"  # Simplified
+        for slug, name, shortcut in self.PROVIDERS:
+            emoji = ec.provider_emoji(slug)
+            status = (f"{ec.EMOJI_OK_STR} Saved" if slug in ["gemini", "groq", "nvidia"]
+                      else f"{ec.EMOJI_MISSING_STR} Missing")  # Simplified
             # Use a no-op lambda for disabled display-only rows
             acts.append(Action(shortcut, f"{emoji} {name}: {status}", lambda: None, enabled=False, section="providers"))
 

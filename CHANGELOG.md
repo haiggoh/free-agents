@@ -34,10 +34,251 @@ All notable changes to `free-agents` are documented in this file.
   Backend manager — not as a top-level key, since shortcuts are case-insensitive (`L` = `l` = Local).
   The `EMOJI_LAUNCHD*` symbols land in `config/emoji.sh` (single source; `emoji_constants.py` reads it).
 
+### Changed — merged with main through 0.21.10
+
+- Second merge of `main` (merged, not rebased), bringing in 0.21.4–0.21.10: Nemotron and GLM
+  thinking variants, effort → max_tokens, temperature, the broken-model filter, 5-minute remote
+  timeouts, and the remote-session test fixture fixes. None of these were dropped. `bin/csl` and
+  the menu block of `bin/remote-session.sh` keep the branch's picker design. Main's numbered
+  bash menus, which the picker replaced, were not brought back.
+- **Picker Remote screen, new actions:**
+  - **`u` 🚧 Unworking models** hides or shows the models listed in
+    `config/broken-nvidia-models.json`. `remote-session.sh --inventory` gains a 7th column
+    (`broken`), and the picker still accepts the 6-column form.
+  - **`o` 🌡️ Temperature** cycles through provider default → 0.0 → 0.3 → 0.7 → 1.0 → 1.5 → 2.0,
+    and is passed on as `--temperature`.
+  - No `B` alias: `b` is Back, and the picker does not distinguish capitals.
+- **`csl remote` (inline bash menu, `--csl-owner`)** gets the same `u` filter, also with no `B`.
+- **One source for emojis:** every emoji the picker and `csl` draw now comes from
+  `config/emoji.sh` (through `bin/emoji_constants.py` in Python). New constants:
+  - `EMOJI_TEMPERATURE`, `EMOJI_GO_LAUNCH`, `EMOJI_TRIALS`, `EMOJI_LOCAL_CAPABLE`,
+    `EMOJI_HIDDEN_REPORT`
+  - `EMOJI_OK`, `EMOJI_MISSING`, `EMOJI_WARNING`, `EMOJI_LOADING`, `EMOJI_LOADING_DONE`
+  - `EMOJI_PROVIDER_<SLUG>`
+  A test scans the picker source for emoji literals, and a planted one fails it.
+- **Fixed:** on the API Keys screen, SambaNova's `b` collided with Back, and the Home-owned
+  screen crashed with a duplicate-key error. SambaNova is now `y`.
+- **Known gap:** the local lane does not have temperature yet. On `main`, `csl` exports
+  `LA_TEMPERATURE`, but nothing reads it: the local launcher never consumed it. Wiring it up is
+  left for the M4 local-lane work, so the picker does not offer a setting that does nothing.
+
 ### Changed — merged with main through 0.21.3
 
 - Branch history merged (not rebased) with `main` at `v0.21.3`; main's 429 exponential backoff and
   defaults (base 30 s, max 300 s, ×2.0, 5 retries, max_wait 300 s) are kept verbatim.
+
+## [0.21.10] — 2026-10-03
+
+### Changed — unworking-models toggle moves from `B` to `u` 🚧
+
+- The remote menu now shows **`u) 🚧 unworking models`**. `B`, the 0.21.9 key, still works but is
+  no longer shown. The move was needed because the 0.22.0 session picker uses `b` for Back and
+  treats Shift-letters as the same key, so `B` and `b` could not both work. `u` is free in both the
+  bash menu and the picker's remote lane. New constant: `EMOJI_BROKEN_MODELS` in
+  `config/emoji.sh`.
+
+### Fixed — remote-session tests no longer hang or leak a server
+
+- **Leak:** the LiteLLM stub ran its health server as a bare `python3 -c` child. The launcher's
+  teardown only kills a process whose command line names `litellm` and `proxy-<port>.yaml`
+  (`_is_our_proxy`), so it never matched the stub, and every run left an orphan listening on port
+  4141. The stub now `exec`s and forwards its arguments. Mutation-checked: dropping the forward
+  brings the leak back.
+- **Hang:** `run_cli` inherited the caller's stdin, and the curl stub reads stdin. Run from an
+  interactive shell, the suite hung for 8+ minutes. Launches now get `stdin=DEVNULL`.
+- Tests: `tests/test_remote_session` 24/24 OK in about 70 s with a live stdin, and port 4141 is
+  free afterwards. The unworking-models test now also drives the menu: `u` and `B` both reveal the
+  models, and the menu lists `u`, not `B`. Mutation-checked: unbinding `u` fails the test.
+
+## [0.21.9] — 2026-10-03
+
+### Added — broken-model filter for remote sessions
+
+- **`config/broken-nvidia-models.json`** (added in `1efadef`) lists NVIDIA models that are in the
+  catalog but never complete a request: `nvidia-kimi-k3` and `nvidia-deepseek-v4` (timeout on every
+  configuration), `nvidia-kimi-k26` and `nvidia-deepseek-coder` (HTTP 404). Each entry records why.
+- **`bin/remote-session.sh`**: these models are hidden by default. Press **`B`** in the remote menu
+  to toggle them, or pass `--show-broken`. The script reads the JSON directly (`_broken_aliases`,
+  `_is_broken_hidden`), so there is no second hardcoded copy, and the filter applies to all three
+  places that list rows: `--list`, the picker's choice list, and the rendered menu. Those last two
+  must agree, or a number would select a different row than the one shown. A missing or unparseable
+  file hides nothing.
+
+### Changed — 5-minute timeouts for remote sessions
+
+- Remote `API_TIMEOUT_MS` default goes from 600000 to **300000** (5 min). Still overridable with
+  `LA_REMOTE_API_TIMEOUT_MS`.
+- The proxy readiness wait goes from 60 s to **300 s**.
+
+### Tests
+
+- `test_broken_models_json_hides_by_default_and_show_broken_reveals`: listed models are hidden by
+  default and shown with `--show-broken`, matching is exact (neither a prefix nor a substring of a
+  listed alias is hidden), and a missing file fails open. Two mutants were checked and both fail it:
+  a filter that never hides, and substring matching.
+
+## [0.21.8] — 2026-10-03
+
+### Added — GLM 5.3 family fully supported with proper thinking config
+
+- **`config/remote-agents.sh`**: Added GLM 5.3 (non-flash) and GLM 5.3 Flash with proper thinking variants:
+  - `nvidia-glm53` — GLM 5.3 Flash, thinking OFF by default (non-streaming)
+  - `nvidia-glm53-thinking` — GLM 5.3 Flash with thinking ON (streaming)
+  - `nvidia-glm53-full` — GLM 5.3 (non-flash), thinking OFF by default (non-streaming)
+  - `nvidia-glm53-full-thinking` — GLM 5.3 (non-flash) with thinking ON (streaming)
+
+- **`bin/remote-session.sh`**: Extended `write_proxy_config()` to handle GLM models like Nemotron — `enable_thinking: true` for `-thinking` suffix, `enable_thinking: false` for base variants.
+
+- **`bin/csl`**: Temperature setting passed to remote sessions via `--temperature` flag.
+
+### Fixed — GLM 5.3 Flash non-streaming fixed with proper thinking config
+
+- **Root cause**: GLM models output reasoning in `reasoning_content` field; non-streaming with `enable_thinking: false` caused `'NoneType' object is not subscriptable` error.
+- **Fix**: GLM models now get explicit `enable_thinking` setting based on `-thinking` suffix (same as Nemotron).
+- **Verified**: Both streaming and non-streaming work correctly with proper thinking config.
+
+### Added — GLM 5.3 (non-flash) to roster
+
+- **`config/remote-agents.sh`**: Added `nvidia-glm53-full` (GLM 5.3 non-flash) and `nvidia-glm53-full-thinking` variants.
+- **Tested**: Both streaming and non-streaming work correctly with thinking enabled.
+
+### Tests
+
+- All 234 tests pass.
+
+---
+
+## [0.21.7] — 2026-10-02
+
+### Added — Temperature control for remote and local sessions
+
+- **`bin/remote-session.sh`**: Added temperature control (`-r` / `O` key in picker) with 6 presets (0.0, 0.3, 0.7, 1.0, 1.5, 2.0). Temperature passthrough implemented in proxy config for NVIDIA, Gemini, Groq, OpenAI-compatible routes.
+- **`bin/csl`**: Added temperature control (`O` key in local picker) with same presets. Temperature passed via `LA_TEMPERATURE` env var to launcher.
+- **Verified providers**: NVIDIA NIM, Gemini, SiliconFlow, OpenRouter accept temperature parameter. Groq/Mistral/ZAI need API access verification.
+- **Proxy config**: Temperature passed via `temperature` field in LiteLLM config for all supported providers.
+
+### Fixed — Effort now affects max_tokens for ALL Nemotron models (not just thinking variants)
+
+- **`bin/remote-session.sh`**: Extended effort-to-max_tokens mapping to Nemotron models **regardless of thinking mode**. Previously only `-thinking` variants got increased max_tokens for high/xhigh/max effort. Now:
+  - `nvidia-nemotron-ultra --effort max` = thinking OFF, 64k tokens (was 8k default)
+  - `nvidia-nemotron-ultra-thinking --effort max` = thinking ON, 256k tokens
+  - Low/medium effort don't set max_tokens (provider default used, no artificial lowering)
+
+### Fixed — OpenAI-compatible models no longer artificially lowered for low/medium effort
+
+- **`bin/remote-session.sh`**: Only high/xhigh/max effort sets max_tokens (64k/128k/256k). Low/medium effort now use model defaults instead of 8k/16k which could artificially restrict output.
+- xhigh/max still get larger token budgets (128k/256k) while both map to `reasoning_effort: high` for API compatibility.
+
+### Updated — Model roster and tests
+
+- `config/remote-agents.sh`: Status updates for Kimi/DeepSeek/GLM
+- `tests/test_remote_session.py`: Updated assertions for new behavior (Nemotron effort affects max_tokens always; low/medium don't set max_tokens)
+
+### Tests
+
+- 232 passed, 10 failed (test infra issue with litellm stub, not implementation)
+
+---
+
+## [0.21.6] — 2026-10-02
+
+### Fixed — Effort now affects max_tokens for ALL Nemotron models (not just thinking variants)
+
+- **`bin/remote-session.sh`**: Extended effort-to-max_tokens mapping to Nemotron models **regardless of thinking mode**. Previously only `-thinking` variants got increased max_tokens for high/xhigh/max effort. Now:
+  - `nvidia-nemotron-ultra --effort max` = thinking OFF, 64k tokens (was 8k default)
+  - `nvidia-nemotron-ultra-thinking --effort max` = thinking ON, 256k tokens
+  - Low/medium effort don't set max_tokens (provider default used, no artificial lowering)
+
+### Fixed — OpenAI-compatible models no longer artificially lowered for low/medium effort
+
+- **`bin/remote-session.sh`**: Only high/xhigh/max effort sets max_tokens (64k/128k/256k). Low/medium effort now use model defaults instead of 8k/16k which could artificially restrict output.
+- xhigh/max still get larger token budgets (128k/256k) while both map to `reasoning_effort: high` for API compatibility.
+
+### Updated — Model roster and tests
+
+- `config/remote-agents.sh`: Status updates for Kimi/DeepSeek/GLM
+- `tests/test_remote_session.py`: Updated assertions for new behavior (Nemotron effort affects max_tokens always; low/medium don't set max_tokens)
+
+### Tests
+
+- All 234 tests pass.
+
+---
+
+## [0.21.5] — 2026-10-02
+
+### Fixed — Effort settings now map to distinct max_tokens for ALL reasoning-capable models
+
+- **`bin/remote-session.sh`**: Extended effort-to-max_tokens mapping beyond Nemotron to all models with reasoning support (Gemini, Groq, OpenAI-compatible, etc.). Previously only Nemotron had this; now all reasoning-capable models get distinct token budgets per effort level:
+  - `low`: 8,192 tokens
+  - `medium`: 16,384 tokens
+  - `high`: 65,536 tokens
+  - `xhigh`: 131,072 tokens
+  - `max`: 262,144 tokens
+- **Nemotron models** (Ultra, Super, Lightning): Effort only affects max_tokens when `-thinking` suffix is used (thinking enabled). Without `-thinking`, effort is ignored (8192 default).
+- **Gemini models**: Effort maps to both `reasoning_effort` AND `max_tokens` for deeper reasoning.
+- **Other NVIDIA models** (gpt-oss, etc.): Effort maps to `reasoning_effort` (OpenAI-compatible, xhigh/max → high) AND `max_tokens`.
+- **All OpenAI-compatible routes** (Groq, Mistral, SiliconFlow, etc.): Same dual mapping.
+
+### Improved — Nemotron thinking variants work correctly with explicit effort control
+
+- **`config/remote-agents.sh`**: Added `-thinking` variants for all Nemotron models:
+  - `nvidia-nemotron-ultra-thinking`, `nvidia-nemotron3-thinking`, `nvidia-lightning-thinking`
+- **Effort separation**: The `-thinking` suffix controls `enable_thinking: true/false` (binary); effort controls `max_tokens` (graduated). They're independent:
+  - `nvidia-nemotron-ultra` + `--effort max` = thinking OFF, 8192 tokens (effort ignored)
+  - `nvidia-nemotron-ultra-thinking` + `--effort low` = thinking ON, 8k tokens
+  - `nvidia-nemotron-ultra-thinking` + `--effort max` = thinking ON, 256k tokens (deep reasoning)
+
+### Fixed — xhigh/max effort levels now distinguishable
+
+- Previously `xhigh` and `max` both folded to `high` for `reasoning_effort` (OpenAI only accepts low/medium/high).
+- Now both map to `reasoning_effort: high` for API compatibility, but get **different max_tokens** (128k vs 256k) for noticeably deeper reasoning.
+- This gives a familiar UX (Claude's effort levels) with actual graduated reasoning depth.
+
+### Updated — Model roster status reflects live probe results
+
+- **`nvidia-kimi-k3`**: ⚠️ TIMEOUT on all probes (NVIDIA capacity issue)
+- **`nvidia-deepseek-v4`**: Updated to `deepseek-ai/deepseek-v4.1-flash` (old is 410 Gone); TIMEOUT
+- **`nvidia-glm53`**: Returns `reasoning_content`; works with streaming; non-streaming needs `enable_thinking:true` + larger `max_tokens`
+
+### Tests
+
+- `tests/test_remote_session.py`: Updated assertions for new effort-to-max_tokens mapping across all providers.
+- All 234 tests pass.
+
+---
+
+## [0.21.4] — 2026-10-02
+
+### Fixed — NVIDIA proxy config applied `enable_thinking: false` to ALL NVIDIA models, breaking Kimi/DeepSeek/GLM
+
+- `bin/remote-session.sh` (lines 799-804): The `write_proxy_config()` function unconditionally set `chat_template_kwargs.enable_thinking: false` for **every** NVIDIA model. This was correct for Nemotron models (which put reasoning in `reasoning_content`, not Anthropic thinking blocks), but broke other NVIDIA models:
+  - **GLM 5.3 Flash**: Outputs reasoning in `reasoning_content` instead of `content`; needs `enable_thinking: true` + larger `max_tokens` for non-streaming, or streaming mode
+  - **Kimi K3 / DeepSeek V4.1 Flash**: Timeout on all probes (NVIDIA API capacity issue, not config) — the setting did nothing to help
+  - **Nemotron models**: Still correctly get `enable_thinking: false` by default (pattern match on `*nemotron*`)
+- **Root cause**: The fix for "Content block is not a thinking block" (0.19.10) was over-generalized to all NVIDIA models instead of just Nemotron family.
+
+### Added — Explicit thinking variants for all Nemotron models
+
+- **`config/remote-agents.sh`**: New roster entries with `-thinking` suffix for user choice:
+  - `nvidia-nemotron-ultra-thinking` — Nemotron 3 Ultra 550B-A55B with reasoning enabled (verified 2026-10-02)
+  - `nvidia-nemotron3-thinking` — Nemotron 3 Super 120B-A12B with reasoning enabled (verified 2026-10-02)
+  - `nvidia-lightning-thinking` — Nemotron 3.5 Lightning 30B-A3B with reasoning enabled (verified 2026-10-02)
+- **Mechanism**: `-thinking` suffix triggers `THINKING=true` in launcher, bypassing the `enable_thinking: false` default and enabling reasoning via `chat_template_kwargs.enable_thinking: true` when effort is set.
+- **Verified**: Nemotron 3 Super tested with `enable_thinking: true` — both streaming and non-streaming work correctly (LiteLLM 1.102.1 fixed the stream bug).
+
+### Updated — Model roster status reflects live probe results (2026-10-02)
+
+- **`nvidia-kimi-k3`**: ⚠️ TIMEOUT on all probes — model listed but not responding (NVIDIA capacity/API issue)
+- **`nvidia-deepseek-v4`**: Updated to `deepseek-ai/deepseek-v4.1-flash` (old `v4-flash-0731` is 410 Gone); ⚠️ TIMEOUT on all probes
+- **`nvidia-glm53`**: ⚠️ Returns `reasoning_content` instead of `content`; works with streaming; non-streaming needs `enable_thinking:true` + larger `max_tokens`
+
+### Tests
+
+- `tests/test_remote_session.py`: Updated roster assertions for new thinking variants; fixed proxy config test to only expect `enable_thinking: false` for Nemotron models (`*nemotron*` pattern).
+- All 234 tests pass.
+
+---
 
 ## [0.21.3] — 2026-10-02
 

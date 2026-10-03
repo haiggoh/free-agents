@@ -58,7 +58,7 @@ except ImportError:
 LOADING_INDICATOR_DELAY_S = 0.2
 
 # Loading animation frames - hourglass alternating between flowing sand (⏳) and done (⌛️)
-LOADING_FRAMES = ["⏳", "⌛️"]
+LOADING_FRAMES = [ec.EMOJI_LOADING_STR, ec.EMOJI_LOADING_DONE_STR]
 LOADING_INTERVAL = 0.15  # 150ms per frame for smooth alternation
 
 REPO = BIN.parent
@@ -90,9 +90,9 @@ def load_remote_agents() -> list[m.RemoteAgent]:
     agents = []
     for line in r.stdout.splitlines():
         p = line.split("\t")
-        if len(p) == 6:
+        if len(p) in (6, 7):     # 7th column (broken) arrived with main's 0.21.9 filter
             agents.append(m.RemoteAgent(p[0], p[1], p[2], p[3], local_capable=p[4] == "1",
-                                        has_key=p[5] == "1"))
+                                        has_key=p[5] == "1", broken=len(p) == 7 and p[6] == "1"))
     return agents
 
 
@@ -259,7 +259,7 @@ class Picker(App):
         """Get loading text - shows immediately on startup, then after delay for lazy operations."""
         if self._startup_loading:
             # On startup, show loading immediately
-            return "⏳ "
+            return LOADING_FRAMES[0] + " "
         if self._pending_op_timer is None:
             return ""
         elapsed = time.perf_counter() - self._pending_op_timer
@@ -432,7 +432,7 @@ class Picker(App):
         if isinstance(sm, m.DownloadScreen):
             status = "  ↑↓ move · Space/Enter queue · c review"
         if self.state_warnings:
-            status += "\n  ⚠ " + self.state_warnings[-1]
+            status += f"\n  {ec.EMOJI_WARNING_STR} " + self.state_warnings[-1]
         self.query_one("#status", Static).update(status)
 
     # --- keys ------------------------------------------------------------------------------

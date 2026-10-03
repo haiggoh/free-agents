@@ -231,6 +231,81 @@ class GroupingTests(unittest.TestCase):
         lane.handle_key("f")                     # show local-capable
         self.assertIn("groq", {g.id for g in lane.groups()})
 
+    def test_unworking_models_hidden_by_default_and_u_reveals(self):
+        # main 0.21.9-0.21.10: rows marked broken in the inventory are hidden until `u`.
+        agents = remote_agents() + [m.RemoteAgent("nvidia-dead", "nvidia", "NVIDIA dead", "unknown",
+                                                  broken=True)]
+        lane = m.RemoteScreen(m.Settings(), agents, owner=m.DIRECT_ROOT)
+        ids = lambda: {i.id for g in lane.groups() for i in g.items}
+        self.assertNotIn("nvidia-dead", ids())
+        lane.handle_key("u")
+        self.assertIn("nvidia-dead", ids())
+        lane.handle_key("u")
+        self.assertNotIn("nvidia-dead", ids())
+
+    def test_unworking_toggle_has_no_uppercase_b_alias(self):
+        # b is Back; the picker does not distinguish case, so 0.21.9's bash `B` must not exist here.
+        lane = m.RemoteScreen(m.Settings(), remote_agents(), owner=m.HOME_OWNED)
+        keys = {a.key: a for a in lane.actions()}
+        self.assertIn("u", keys)
+        self.assertEqual(keys["b"].label, "Back to Home")
+        self.assertIsNone(lane.handle_key("B"))
+
+    def test_temperature_cycles_and_reaches_the_launch_argv(self):
+        s = m.Settings()
+        lane = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
+        lane.accordion.select("gemini-flash")
+        self.assertNotIn("--temperature", lane.activate_selected().argv)   # provider default
+        lane.handle_key("o")
+        self.assertEqual(s.remote_temperature, m.TEMPERATURES[1])
+        argv = lane.activate_selected().argv
+        self.assertEqual(argv[argv.index("--temperature") + 1], m.TEMPERATURES[1])
+        self.assertEqual(argv[-1], "gemini-flash", "the alias must stay last")
+        for _ in range(len(m.TEMPERATURES) - 1):
+            lane.handle_key("o")
+        self.assertEqual(s.remote_temperature, "", "the cycle must wrap back to provider default")
+
+    def test_lane_emojis_come_from_the_single_source(self):
+        # Every emoji in a Local/Remote/Home label must be a value defined in config/emoji.sh,
+        # read through emoji_constants. Positive control: a planted foreign emoji is caught.
+        import re
+        import emoji_constants as ec
+        known = {v.strip() for v in ec._load_emojis().values() if v.strip()}
+        emo = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u231A-\u23FF]\ufe0f?")
+        def foreign(label):
+            return [e for e in emo.findall(label) if e not in known and e + "\ufe0f" not in known]
+        self.assertEqual(foreign("🦄 planted"), ["🦄"], "the checker itself must be able to fail")
+        s = m.Settings(last_launched_model={"local_session": "gemma-4-26b",
+                                            "remote_api_session": "gemini-flash", "lowkey": None})
+        screens = [m.HomeScreen(s)]
+        for owner in (m.HOME_OWNED, m.DIRECT_ROOT):
+            screens += [m.LocalScreen(s, local_models(), owner=owner),
+                        m.RemoteScreen(s, remote_agents(), owner=owner)]
+        for screen in screens:
+            for action in screen.actions():
+                with self.subTest(screen=type(screen).__name__, key=action.key):
+                    self.assertEqual(foreign(action.label), [], action.label)
+
+    def test_no_emoji_literals_in_picker_source(self):
+        # Single source of truth: every emoji the picker draws is defined in config/emoji.sh.
+        # This scans the source text, so a new hardcoded emoji fails here even on a screen the
+        # label test does not instantiate. Comments are exempt.
+        import re
+        emo = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u231A-\u23FF\u25B2]|\d\ufe0f\u20e3")
+        for name in ("session_picker_model.py", "session_picker.py"):
+            for n, line in enumerate((ROOT / "bin" / name).read_text().splitlines(), 1):
+                code = line.split("#", 1)[0]
+                with self.subTest(file=name, line=n):
+                    self.assertEqual(emo.findall(code), [], line.strip())
+
+    def test_api_keys_screen_builds_for_both_owners(self):
+        # Provider rows share the key table with Back/Quit; SambaNova's old `b` crashed Home-owned.
+        for owner in (m.HOME_OWNED, m.DIRECT_ROOT):
+            with self.subTest(owner=owner):
+                keys = [a.key for a in m.APIKeysScreen(m.Settings(), owner=owner).actions()]
+                self.assertEqual(len(keys), len(set(keys)))
+                self.assertTrue(all(ec_ok for ec_ok in (m.ec.provider_emoji(p[0]) for p in m.APIKeysScreen.PROVIDERS)))
+
     def test_trial_rows_are_marked(self):
         lane = m.RemoteScreen(m.Settings(), remote_agents(), owner=m.DIRECT_ROOT)
         row = [i for g in lane.groups() for i in g.items if i.id == "cerebras-oss"][0]

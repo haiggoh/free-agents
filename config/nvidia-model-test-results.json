@@ -1,0 +1,43 @@
+{
+  "test_date": "2026-10-03",
+  "api": "NVIDIA NIM",
+  "summary": {
+    "total_models_tested": 5,
+    "total_configurations_tested": 20,
+    "working": 2,
+    "failed": 18,
+    "notes": "Kimi k3 and DeepSeek V4.1 Flash timeout on all configurations. Kimi k2.6 and DeepSeek Coder 6.7B return 404. GLM 5.3 Flash works only with streaming + thinking enabled."
+  },
+  "models": {
+    "moonshotai/kimi-k3": {
+      "thinking_false_stream_false": {"ok": false, "elapsed": 120.1, "error": "The read operation timed out"},
+      "thinking_true_stream_false": {"ok": false, "elapsed": 120.1, "error": "The read operation timed out"},
+      "thinking_false_stream_true": {"ok": false, "elapsed": 120.1, "error": "The read operation timed out"},
+      "thinking_true_stream_true": {"ok": false, "elapsed": 120.1, "error": "The read operation timed out"}
+    },
+    "moonshotai/kimi-k2.6": {
+      "thinking_false_stream_false": {"ok": false, "elapsed": 0.3, "error": "HTTP Error 404: Not Found"},
+      "thinking_true_stream_false": {"ok": false, "elapsed": 0.2, "error": "HTTP Error 404: Not Found"},
+      "thinking_false_stream_true": {"ok": false, "elapsed": 0.2, "error": "HTTP Error 404: Not Found"},
+      "thinking_true_stream_true": {"ok": false, "elapsed": 0.2, "error": "HTTP Error 404: Not Found"}
+    },
+    "deepseek-ai/deepseek-v4.1-flash": {
+      "thinking_false_stream_false": {"ok": false, "elapsed": 120.1, "error": "The read operation timed out"},
+      "thinking_true_stream_false": {"ok": false, "elapsed": 120.1, "error": "The read operation timed out"},
+      "thinking_false_stream_true": {"ok": false, "elapsed": 120.1, "error": "The read operation timed out"},
+      "thinking_true_stream_true": {"ok": false, "elapsed": 120.1, "error": "The read operation timed out"}
+    },
+    "deepseek-ai/deepseek-coder-6.7b-instruct": {
+      "thinking_false_stream_false": {"ok": false, "elapsed": 0.3, "error": "HTTP Error 404: Not Found"},
+      "thinking_true_stream_false": {"ok": false, "elapsed": 0.2, "error": "HTTP Error 404: Not Found"},
+      "thinking_false_stream_true": {"ok": false, "elapsed": 0.3, "error": "HTTP Error 404: Not Found"},
+      "thinking_true_stream_true": {"ok": false, "elapsed": 0.3, "error": "HTTP Error 404: Not Found"}
+    },
+    "z-ai/glm-5.3-flash": {
+      "thinking_false_stream_false": {"ok": false, "elapsed": 4.5, "error": "'NoneType' object is not subscriptable"},
+      "thinking_true_stream_false": {"ok": false, "elapsed": 115.3, "error": "'NoneType' object is not subscriptable"},
+      "thinking_false_stream_true": {"ok": true, "elapsed": 12.6, "chunks": 39},
+      "thinking_true_stream_true": {"ok": true, "elapsed": 10.5, "chunks": 35}
+    }
+  }
+}

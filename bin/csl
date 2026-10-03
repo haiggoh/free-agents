@@ -388,9 +388,9 @@ tell application "Terminal"
   do script "'$WATCHER' --attach $$"
 end tell
 OSA
-      echo "🔭 watcher window opened (following pid $$)"
+      echo "$EMOJI_WATCHER watcher window opened (following pid $$)"
     else
-      echo "🔭 watcher (run in another terminal): $WATCHER --attach $$"
+      echo "$EMOJI_WATCHER watcher (run in another terminal): $WATCHER --attach $$"
     fi
   fi
   exec "$LAUNCHER" "$@"
@@ -406,7 +406,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "=== DRY RUN — csl configuration ==="
   echo "Config source: $LA_CONFIG_SOURCE"
   if [ -n "${LA_FALLBACK_CONFIG:-}" ] && [ "$LA_FALLBACK_CONFIG" = "1" ]; then
-    echo "  ⚠ Using public fallback defaults (private models not present)"
+    echo "  $EMOJI_WARNING Using public fallback defaults (private models not present)"
   fi
   echo
   echo "${SESSION_EMOJI_LOCAL}  Local session models (on disk, session-capable):"
