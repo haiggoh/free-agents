@@ -87,6 +87,8 @@ ALIAS=""
 REMOTE_MODEL=""
 # Local-capable filter: 0=hidden (default), 1=shown.
 LOCAL_CAPABLE_SHOWN=0
+# Show broken models: 0=hidden (default), 1=shown.
+SHOW_BROKEN_MODELS=0
 # When true, remote-session.sh runs as a submenu of csl and returns
 # via a navigation token on stdout instead of exec'ing claude.
 CSL_OWNER=0
@@ -103,6 +105,7 @@ usage() {
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
     echo "  --temperature VALUE   Set temperature (0.0-2.0, controls randomness/creativity)"
+    echo "  --show-broken         Show broken/unworking NVIDIA models in picker (default: hidden)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
 }
 
@@ -269,7 +272,28 @@ _lc_is_hidden() {
     [[ "$v" == "false" ]]
 }
 
-# _filtered_aliases -> prints alias names, one per line, filtered by tier + local-capable.
+# _broken_aliases -> prints the aliases listed in config/broken-nvidia-models.json, one per
+# line. Fail-open: a missing or unparseable file hides nothing, so a bad edit to the list can
+# never empty the picker. LA_BROKEN_MODELS_FILE overrides the path (tests use it).
+_broken_aliases() {
+    local f="${LA_BROKEN_MODELS_FILE:-$SCRIPT_DIR/../config/broken-nvidia-models.json}"
+    [[ -r "$f" ]] || return 0
+    python3 -c 'import json,sys
+for m in json.load(open(sys.argv[1])).get("models",[]):
+    if m.get("status","broken")=="broken" and m.get("alias"): print(m["alias"])' "$f" 2>/dev/null || true
+}
+
+# _is_broken_hidden <alias> -> 0 when the alias is listed broken AND broken models are hidden.
+# The file is read once per process (cached); SHOW_BROKEN_MODELS is re-read every call so the
+# menu's B toggle takes effect on the next render. Newline-wrapped so matching is exact.
+_BROKEN_SET=""
+_is_broken_hidden() {
+    [[ $SHOW_BROKEN_MODELS -eq 0 ]] || return 1
+    [[ -n "$_BROKEN_SET" ]] || _BROKEN_SET=$'\n'"$(_broken_aliases)"$'\n'
+    [[ "$_BROKEN_SET" == *$'\n'"$1"$'\n'* ]]
+}
+
+# _filtered_aliases -> prints alias names, one per line, filtered by tier + local-capable + broken.
 _filtered_aliases() {
     local e alias prov model disp tier
     for e in "${LA_REMOTE_AGENTS[@]}"; do
@@ -279,6 +303,8 @@ _filtered_aliases() {
         if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
             _lc_is_hidden "$prov" "$model" && continue
         fi
+        # Hide models listed broken in config/broken-nvidia-models.json unless --show-broken / B.
+        _is_broken_hidden "$alias" && continue
         echo "$alias"
     done
 }
@@ -359,6 +385,7 @@ print_list() {
             hidden_count=$((hidden_count+1))
             continue
         fi
+        _is_broken_hidden "$alias" && continue
         i=$((i+1))
         if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
         printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$(_tier_label "$tier" "$prov")" "$keystate"
@@ -419,6 +446,7 @@ _run_remote_menu() {
                 alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
                 _lc_is_hidden "$prov" "$model" && continue
             fi
+            _is_broken_hidden "$(_field "$e" 1)" && continue
             choices+=("$(_field "$e" 1)")
         done
 
@@ -448,6 +476,7 @@ _run_remote_menu() {
             if [[ $LOCAL_CAPABLE_SHOWN -eq 0 ]]; then
                 _lc_is_hidden "$prov" "$model" && continue
             fi
+            _is_broken_hidden "$alias" && continue
             i=$((i+1))
             if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
             printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$(_tier_label "$tier" "$prov")" "$keystate"
@@ -475,9 +504,10 @@ _run_remote_menu() {
         # Blind-trust settings generation includes mcp__* when LA_REMOTE_ENABLE_MCP=1
         echo "  m) $EMOJI_MCP mcps: $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")"
         echo "  O) 🌡️  temperature: ${TEMPERATURE_CHOICE:-<provider default>}"
+        echo "  B) 🔍 broken models: $([ "${SHOW_BROKEN_MODELS:-0}" = "1" ] && echo "SHOWN" || echo "HIDDEN")"
         echo "  q) quit"
         echo
-        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/O/q): " "${#choices[@]}" >&2
+        printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/O/B/q): " "${#choices[@]}" >&2
         read -r -p "" sel >&2 || { _nav "quit"; return 0; }
         case "$sel" in
             h|H) _nav "home"; return 0 ;;
@@ -515,6 +545,10 @@ _run_remote_menu() {
             m|M)
                 LA_REMOTE_ENABLE_MCP=$(( 1 - ${LA_REMOTE_ENABLE_MCP:-0} ))
                 echo "  MCPs $([ "${LA_REMOTE_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")" >&2
+                continue ;;
+            B|b)
+                SHOW_BROKEN_MODELS=$(( 1 - ${SHOW_BROKEN_MODELS:-0} ))
+                echo "  Broken models $([ "${SHOW_BROKEN_MODELS:-0}" = "1" ] && echo "SHOWN" || echo "HIDDEN")" >&2
                 continue ;;
             e|E)
                 # Select effort level (compatible with Claude's --effort flag)
@@ -1065,15 +1099,16 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     echo $! > "$pidf"
 
     # Bounded readiness wait with real diagnostics on failure.
+    # 5 minutes (300s) for proxy startup — prefill on first request can take several minutes.
     local i
-    for i in $(seq 1 60); do
+    for i in $(seq 1 300); do
         if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
             echo "$port"; return 0
         fi
         kill -0 "$(cat "$pidf")" 2>/dev/null || { echo "remote-session: proxy died during startup; inspect the private log locally: $log" >&2; return 1; }
         sleep 1
     done
-    echo "remote-session: proxy did not become ready in 60s; inspect the private log locally: $log" >&2
+    echo "remote-session: proxy did not become ready in 300s (5 min); inspect the private log locally: $log" >&2
     return 1
 }
 
@@ -1125,6 +1160,7 @@ while [[ $# -gt 0 ]]; do
             shift ;;
         --temperature)    [[ $# -ge 2 ]] || { echo 'remote-session: --temperature needs a value (0.0-2.0)' >&2; exit 2; }
                           TEMPERATURE_CHOICE="$2"; shift 2 ;;
+        --show-broken)    SHOW_BROKEN_MODELS=1; shift ;;
         --enable-mcp)     export LA_REMOTE_ENABLE_MCP=1; shift ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
         -*)               if [[ -z "$ALIAS" ]]; then
@@ -1451,7 +1487,8 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$MAX_OUT"
 #   CLAUDE_ENABLE_STREAM_WATCHDOG=0  the separate CLI 2.1.196 idle watchdog, on by default for
 #     ALL providers, which the other two DO NOT cover. This is the one that actually bites.
 # Bounded, not unbounded: API_TIMEOUT_MS still caps the request, so a genuinely dead stream ends.
-export API_TIMEOUT_MS="${LA_REMOTE_API_TIMEOUT_MS:-600000}"
+# 5 minutes (300s) for prefill + generation; overridable via LA_REMOTE_API_TIMEOUT_MS.
+export API_TIMEOUT_MS="${LA_REMOTE_API_TIMEOUT_MS:-300000}"
 export API_FORCE_IDLE_TIMEOUT=0
 export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1    # no telemetry through a third party

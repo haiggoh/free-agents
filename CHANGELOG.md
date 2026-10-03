@@ -2,6 +2,33 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.9] — 2026-10-03
+
+### Added — broken-model filter for remote sessions
+
+- **`config/broken-nvidia-models.json`** (added in `1efadef`) lists NVIDIA models that are in the
+  catalog but never complete a request: `nvidia-kimi-k3` and `nvidia-deepseek-v4` (timeout on every
+  configuration), `nvidia-kimi-k26` and `nvidia-deepseek-coder` (HTTP 404). Each entry records why.
+- **`bin/remote-session.sh`**: these models are hidden by default. Press **`B`** in the remote menu
+  to toggle them, or pass `--show-broken`. The script reads the JSON directly (`_broken_aliases`,
+  `_is_broken_hidden`), so there is no second hardcoded copy, and the filter applies to all three
+  places that list rows: `--list`, the picker's choice list, and the rendered menu. Those last two
+  must agree, or a number would select a different row than the one shown. A missing or unparseable
+  file hides nothing.
+
+### Changed — 5-minute timeouts for remote sessions
+
+- Remote `API_TIMEOUT_MS` default goes from 600000 to **300000** (5 min). Still overridable with
+  `LA_REMOTE_API_TIMEOUT_MS`.
+- The proxy readiness wait goes from 60 s to **300 s**.
+
+### Tests
+
+- `test_broken_models_json_hides_by_default_and_show_broken_reveals`: listed models are hidden by
+  default and shown with `--show-broken`, matching is exact (neither a prefix nor a substring of a
+  listed alias is hidden), and a missing file fails open. Two mutants were checked and both fail it:
+  a filter that never hides, and substring matching.
+
 ## [0.21.8] — 2026-10-03
 
 ### Added — GLM 5.3 family fully supported with proper thinking config

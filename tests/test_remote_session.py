@@ -571,7 +571,7 @@ with open(os.environ['CLAUDE_STREAM_ENV'],'w') as f:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(capture.exists(), 'claude was never launched')
         self.assertEqual(json.loads(capture.read_text()), {
-            'API_TIMEOUT_MS': '600000',
+            'API_TIMEOUT_MS': '300000',
             'API_FORCE_IDLE_TIMEOUT': '0',
             'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
         })
@@ -774,6 +774,44 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         self.assertIn('hiddenone', shown.stdout,
                       '--local-capable-shown must make the classified-hidden model appear in --list too, '
                       'not just in the interactive menu')
+
+    def test_broken_models_json_hides_by_default_and_show_broken_reveals(self):
+        """Aliases in config/broken-nvidia-models.json are absent from --list unless --show-broken.
+
+        Asserts on the OUTCOME (printed aliases) and reads the list from the JSON file, so a
+        hardcoded copy in the script that drifts from the file fails here. A missing file must
+        hide nothing (fail-open).
+        """
+        (self.root / 'config/local-capable-remote-models.psv').write_text('# empty, no rows\n')
+        shutil.copy2(ROOT / 'bin/local-capable-filter.sh', self.root / 'bin/local-capable-filter.sh')
+        (self.root / 'config/remote-agents.sh').write_text(
+            'LA_REMOTE_AGENTS=(\n'
+            '  "workingone|nvidia|nvidia/working|Working One|renewing_free|note"\n'
+            '  "brokenone|nvidia|nvidia/broken|Broken One|renewing_free|note"\n'
+            '  "brokenone-plus|nvidia|nvidia/broken-plus|Broken Prefix|renewing_free|note"\n'
+            ')\n'
+        )
+        (self.root / 'config/broken-nvidia-models.json').write_text(json.dumps({'models': [
+            {'model_id': 'nvidia/broken', 'alias': 'brokenone', 'status': 'broken'},
+            # Not in the roster; contains 'workingone' so a substring match would wrongly hide it.
+            {'model_id': 'nvidia/retired', 'alias': 'workingone-retired', 'status': 'broken'}]}))
+
+        default = self.run_cli('--list')
+        self.assertEqual(default.returncode, 0, default.stdout + default.stderr)
+        self.assertRegex(default.stdout, r'(?m)^\s*\d+\s+workingone\b(?!-)',
+                         'an alias that is merely a substring of a listed one must stay visible')
+        self.assertNotRegex(default.stdout, r'(?m)^\s*\d+\s+brokenone\b(?!-)',
+                            'an alias listed in broken-nvidia-models.json must be hidden by default')
+        self.assertIn('brokenone-plus', default.stdout,
+                      'matching must be exact: a listed alias must not hide a longer alias sharing its prefix')
+
+        shown = self.run_cli('--show-broken', '--list')
+        self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
+        self.assertRegex(shown.stdout, r'(?m)^\s*\d+\s+brokenone\b(?!-)', '--show-broken must reveal it')
+
+        (self.root / 'config/broken-nvidia-models.json').unlink()
+        missing = self.run_cli('--list')
+        self.assertRegex(missing.stdout, r'(?m)^\s*\d+\s+brokenone\b(?!-)', 'no list file must hide nothing')
 
     def test_csl_owner_returns_via_nav_file_instead_of_exiting(self):
         """`--csl-owner` must hand navigation back through CSL_NAV_FILE, never exit(1).

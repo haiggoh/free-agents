@@ -91,6 +91,25 @@ Classification fails open: an entry with no policy row, or a provider that lets 
 model at runtime, stays **visible** — uncertainty is never a reason to hide something. The
 policy file is hand-curated; there is no automated generator behind it yet.
 
+### Broken-model filter
+
+Models that are listed in the catalog but do not actually complete a request (404, or a timeout on
+every configuration) are recorded in `config/broken-nvidia-models.json`, each with the reason it was
+marked. They are **hidden by default** in the interactive picker and in `--list`:
+
+- **`B`** toggles them shown/hidden in the remote menu.
+- `remote-session.sh --show-broken` shows them non-interactively.
+
+To retire or restore a model, edit the JSON: the script reads the file directly, so there is no
+second list to keep in sync. Like the local-capable filter it fails open, so a missing or
+unparseable file hides nothing.
+
+### Timeouts
+
+`API_TIMEOUT_MS` defaults to **300000 (5 min)** for remote sessions (it was 600000 before 0.21.9),
+and the proxy readiness wait is 300 s. Override with `LA_REMOTE_API_TIMEOUT_MS`. Local sessions
+keep their own, longer default (`LA_API_TIMEOUT_MS`).
+
 ## Model ids rot — always verify
 
 Pinned ids go stale silently and the failure looks like a broken lane:
