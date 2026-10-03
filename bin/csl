@@ -496,6 +496,11 @@ _launch_remote() {  # opens the remote roster and hands off; never returns on su
     remote_args+=("--local-capable-shown")
   fi
 
+  # Pass through temperature setting if set
+  if [ -n "$TEMPERATURE_CHOICE" ]; then
+    remote_args+=("--temperature" "$TEMPERATURE_CHOICE")
+  fi
+
   # The stop-hook state travels as an env var, not a flag: remote-session.sh exports it for the
   # claude child, and the hook reads it as an explicit override.
   exec env LA_QUEUE_STOP_HOOK="$STOP_HOOK" "$rl" "${remote_args[@]}"

@@ -2,6 +2,37 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.21.8] — 2026-10-03
+
+### Added — GLM 5.3 family fully supported with proper thinking config
+
+- **`config/remote-agents.sh`**: Added GLM 5.3 (non-flash) and GLM 5.3 Flash with proper thinking variants:
+  - `nvidia-glm53` — GLM 5.3 Flash, thinking OFF by default (non-streaming)
+  - `nvidia-glm53-thinking` — GLM 5.3 Flash with thinking ON (streaming)
+  - `nvidia-glm53-full` — GLM 5.3 (non-flash), thinking OFF by default (non-streaming)
+  - `nvidia-glm53-full-thinking` — GLM 5.3 (non-flash) with thinking ON (streaming)
+
+- **`bin/remote-session.sh`**: Extended `write_proxy_config()` to handle GLM models like Nemotron — `enable_thinking: true` for `-thinking` suffix, `enable_thinking: false` for base variants.
+
+- **`bin/csl`**: Temperature setting passed to remote sessions via `--temperature` flag.
+
+### Fixed — GLM 5.3 Flash non-streaming fixed with proper thinking config
+
+- **Root cause**: GLM models output reasoning in `reasoning_content` field; non-streaming with `enable_thinking: false` caused `'NoneType' object is not subscriptable` error.
+- **Fix**: GLM models now get explicit `enable_thinking` setting based on `-thinking` suffix (same as Nemotron).
+- **Verified**: Both streaming and non-streaming work correctly with proper thinking config.
+
+### Added — GLM 5.3 (non-flash) to roster
+
+- **`config/remote-agents.sh`**: Added `nvidia-glm53-full` (GLM 5.3 non-flash) and `nvidia-glm53-full-thinking` variants.
+- **Tested**: Both streaming and non-streaming work correctly with thinking enabled.
+
+### Tests
+
+- All 234 tests pass.
+
+---
+
 ## [0.21.7] — 2026-10-02
 
 ### Added — Temperature control for remote and local sessions

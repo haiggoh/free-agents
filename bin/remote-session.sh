@@ -92,6 +92,7 @@ LOCAL_CAPABLE_SHOWN=0
 CSL_OWNER=0
 # Blind-trust settings file (set when AUTO_MODE_STATE=0)
 BLIND_TRUST_SETTINGS_FILE=""
+TEMPERATURE_CHOICE=""
 
 usage() {
     sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
@@ -850,6 +851,18 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     # the default (no suffix) means enable_thinking: false. Effort does NOT
     # change this - it only sets reasoning_effort for non-Nemotron models.
     if [[ "$prov" == "nvidia" && "$model" == *nemotron* ]]; then
+        if [[ "$thinking" == "true" ]]; then
+            think_line='      chat_template_kwargs:
+        enable_thinking: true'
+        else
+            think_line='      chat_template_kwargs:
+        enable_thinking: false'
+        fi
+    fi
+    # GLM models (z-ai/glm-*) also need enable_thinking: true when -thinking suffix used
+    # They return reasoning_content instead of content; non-streaming fails with 'NoneType' error
+    # Streaming + thinking enabled works reliably
+    if [[ "$prov" == "nvidia" && "$model" == *glm* ]]; then
         if [[ "$thinking" == "true" ]]; then
             think_line='      chat_template_kwargs:
         enable_thinking: true'

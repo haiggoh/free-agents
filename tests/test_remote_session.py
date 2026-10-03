@@ -247,9 +247,12 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 # backend, or the Anthropic translation layer 500s the session.
                 # Only Nemotron models get enable_thinking: false; other NVIDIA models
                 # (Kimi, DeepSeek, GLM, etc.) have different behavior.
+                # GLM models also get enable_thinking explicitly set (true/false based on thinking flag).
                 is_nemotron = provider == 'nvidia' and 'nemotron' in model
+                is_glm = provider == 'nvidia' and 'glm' in model
+                expected_false_count = self.spoof_id_count if (is_nemotron or is_glm) and thinking == 'false' else 0
                 self.assertEqual(text.count('        enable_thinking: false\n'),
-                                 self.spoof_id_count if is_nemotron and thinking == 'false' else 0)
+                                 expected_false_count)
                 if provider == 'cloudflare':
                     self.assertIn('/accounts/' + 'a' * 32 + '/ai/v1', text)
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)
