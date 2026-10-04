@@ -170,30 +170,34 @@ def test_registry():
     """Test manager registry functions."""
     # Register our test manager
     register_manager(ConcreteManager)
+    try:
+        # Test list_managers
+        managers = list_managers()
+        assert "test" in managers
 
-    # Test list_managers
-    managers = list_managers()
-    assert "test" in managers
+        # Test get_manager
+        mgr_class = get_manager("test")
+        assert mgr_class is ConcreteManager
 
-    # Test get_manager
-    mgr_class = get_manager("test")
-    assert mgr_class is ConcreteManager
+        # Test get_manager_instance
+        mgr_instance = get_manager_instance("test")
+        assert isinstance(mgr_instance, ConcreteManager)
+        assert mgr_instance.BACKEND_NAME == "test"
 
-    # Test get_manager_instance
-    mgr_instance = get_manager_instance("test")
-    assert isinstance(mgr_instance, ConcreteManager)
-    assert mgr_instance.BACKEND_NAME == "test"
+        # Test get_manager for unknown
+        assert get_manager("unknown") is None
+        assert get_manager_instance("unknown") is None
 
-    # Test get_manager for unknown
-    assert get_manager("unknown") is None
-    assert get_manager_instance("unknown") is None
+        # Test iter_managers
+        from managers import iter_managers
+        registered = iter_managers()
+        assert ("test", ConcreteManager) in registered
 
-    # Test iter_managers
-    from managers import iter_managers
-    registered = iter_managers()
-    assert ("test", ConcreteManager) in registered
-
-    print("test_registry PASSED")
+        print("test_registry PASSED")
+    finally:
+        # Clean up: unregister test manager to avoid polluting global registry
+        from managers import _managers
+        _managers.pop("test", None)
 
 
 def test_manager_error():
