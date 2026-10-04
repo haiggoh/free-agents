@@ -18,7 +18,7 @@ set -uo pipefail
 case "${1:-}" in -h|--help) ;; *)
   if [ -t 1 ]; then
     _hg="$(sed -n 's/^EMOJI_LOADING="\([^"]*\)".*/\1/p' "$(cd -P "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/../config/emoji.sh" 2>/dev/null)"
-    printf '\033[?1049h\033[2J\033[H\033[?25l  %s loading…' "${_hg:-…}"
+    printf '\033[?1049h\033[2J\033[H\033[?25l  %s loading.  ' "${_hg:-…}"
     # Any exit BEFORE the exec below (venv missing, signal) must give the screen back, or the
     # user is left on a blank alternate screen with no cursor. The exec replaces this shell, so
     # the trap never fires once Textual owns the terminal (Textual restores it itself).

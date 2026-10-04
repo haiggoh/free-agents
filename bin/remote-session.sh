@@ -39,7 +39,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # session-picker draws the same frame again (harmless) and Textual takes over the screen.
 if [[ $# -eq 0 && -t 1 ]]; then
     _hg="$(sed -n 's/^EMOJI_LOADING="\([^"]*\)".*/\1/p' "$REPO_ROOT/config/emoji.sh" 2>/dev/null)"
-    printf '\033[?1049h\033[2J\033[H\033[?25l  %s loading…' "${_hg:-…}"
+    printf '\033[?1049h\033[2J\033[H\033[?25l  %s loading.  ' "${_hg:-…}"
     trap 'printf "\033[?25h\033[?1049l"' EXIT   # cleared below if we hand over to the picker
 fi
 ROSTER="$REPO_ROOT/config/remote-agents.sh"
