@@ -628,29 +628,36 @@ These controls do not change the permission-mode boundary, which is owned by the
 never by argument forwarding. Enabling the `Agent` tool does not by itself change how Auto Mode's
 classifier is routed or how good its verdicts are — those stay separate questions.
 
-### The home lane selector: local or remote, with navigation back and forth
+### The session picker (0.22.0): Home, Local and Remote
 
-`csl` (no args) no longer opens straight into the local-model list. It opens on a **home screen**
-offering `1) 🦾 Local`, `2) 🌐 Remote`, `k) Install / set up remote API keys`,
-`m) Manage Rapid-MLX runtime`, and `q) Quit`, and shows the current state of every session-wide
-toggle (auto-mode, telemetry, watcher, stop hook) and the resolved config source.
+`csl` (no arguments) opens the **session picker**, a Textual UI (one-time setup:
+`install/setup-session-picker.sh`). It replaces the numbered bash menus. Every screen is a list of
+single-letter actions. Letters are case-insensitive, digits never launch anything, and arrow keys
+plus Enter work everywhere.
 
-The locally-runnable filter is deliberately **not** on the home screen: it only ever affects the
-*remote* roster, so it lives in the remote picker as `f) 🔍 locally-runnable models`.
+- **Home:** `l` Local sessions · `r` Remote free-API sessions · `d` download models · `o` Lowkey
+  dispatch chat · `k` API keys · `v` backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp,
+  LiteLLM; the launchd update checks live in there) · `n` NVIDIA rate limiter · the session-wide
+  toggles `a` auto-mode, `t` telemetry, `p` queued-prompt hook, `w` watcher · `q` quit.
+- **Both lanes:** `g` **Go launch** starts the model this lane last launched, without loading any
+  model list. `c` **Choose model…** opens the list below the menu, grouped and collapsed, and
+  loaded only when asked for. `e` sets effort, `s` switches to the other lane, `m` toggles MCPs,
+  `b` goes back to Home (or `q` quits when the lane was opened directly).
+- **Remote only:** `o` 🌡️ temperature · `h` limited trials · `f` locally-runnable models ·
+  `u` 🚧 unworking models (`config/broken-nvidia-models.json`) · `x` hidden-model report.
 
-From inside either picker you can return to this home screen (`h`) or jump straight across to the
-other lane (`s` — switch) — all in one process, with no restart and no state loss.
-Auto-mode, telemetry, the watcher, the stop hook, and the locally-runnable filter all carry over
-across every switch — the filter included, even though only the remote picker displays it.
+Settings carry over when you switch lanes. Effort and the last-launched model per lane are
+remembered across runs in `config/session-menu.local.json`, which is private and gitignored. Every
+emoji the picker draws is defined in `config/emoji.sh`.
 
 If this installed copy has no `config.local.sh` and fell back to the public `config.example.sh`, the
 home screen also prints a warning that private models are not present in this installed copy.
 
 ### The picker: why a session is chosen differently from a dispatch
 
-`csl` lists every on-disk model whose backend can drive an interactive Claude session. Selecting
-a numbered model uses its configured default effort. The `c` option still lets you combine any listed
-model with an explicit effort (`low`, `medium`, `high`, `xhigh`, `max`). This differs from dispatch
+The Local lane's `c` list shows every on-disk model whose backend can drive an interactive Claude
+session, grouped by family. A model launches at the lane's effort (`e` cycles it, and the picker
+remembers it). This differs from dispatch
 routing because the two ways of using this plugin are different decisions:
 
 - **Dispatching local models as subagents** — the fixed roles and archetypes are the point. You route
@@ -777,11 +784,11 @@ that isn't explicitly allowlisted would prompt. To make MCP tools work without p
 
 **Local sessions** (`csl` / `launch-claude-agent.sh`):
 - `--enable-mcp` flag or `LA_ENABLE_MCP=1`
-- `csl` local picker: press `u` to toggle MCPs in blind-trust mode
+- `csl` Local lane: press `m` to toggle MCPs (blind-trust auto-mode only)
 
 **Remote free-API sessions** (`csl remote` / `remote-session.sh`):
 - `--enable-mcp` flag or `LA_REMOTE_ENABLE_MCP=1`
-- `csl remote` picker: press `m` to toggle MCPs (works in ALL auto-mode states including blind-trust)
+- `csl` Remote lane: press `m` to toggle MCPs (works in ALL auto-mode states including blind-trust)
 
 **How it works:** A master allowlist (`~/.claude/launch-profiles/allowlist-master.json`, 87 Bash
 commands) is merged with the active lean profile (`lean-local-general.json` or
@@ -1167,7 +1174,7 @@ alias local-fast="/path/to/free-agents/bin/launch-claude-agent.sh operator mediu
 alias local-xhigh="/path/to/free-agents/bin/launch-claude-agent.sh operator xhigh"
 alias local-thinking="/path/to/free-agents/bin/launch-claude-agent.sh reasoner"
 alias local-validator="/path/to/free-agents/bin/launch-claude-agent.sh validator"
-alias local-menu="/path/to/free-agents/bin/csl"        # numbered picker, incl. effort
+alias local-menu="/path/to/free-agents/bin/csl"        # session picker (Home → Local/Remote)
 alias local-window="/path/to/free-agents/bin/new-local-window.sh"
 # Dispatch — one alias, any role or model.
 alias lk="/path/to/free-agents/bin/lowkey-cli.py"

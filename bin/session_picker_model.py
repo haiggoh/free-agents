@@ -151,6 +151,10 @@ class Settings:
         "remote_api_session": None,
         "lowkey": None,
     })
+    # Remote tier of the last-launched alias (lets Go-last add --include-trials with no inventory).
+    last_launched_tier: dict = field(default_factory=dict)
+    # Called with (lane, alias, tier|None) when a launch request is made; persists it.
+    on_last_launched: Callable[[str, str, str | None], object] | None = None
     notes: list = field(default_factory=list)
 
 
@@ -387,7 +391,9 @@ class LocalScreen(Screen):
         ]
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
-        if last_local and last_local in self.models:
+        # No `in self.models` check: the list is lazy and usually not loaded yet, and launching
+        # only needs alias + effort. A since-deleted model fails in the launcher, visibly.
+        if last_local:
             acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {last_local} session",
                            lambda: self._launch_last("local_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=True)
@@ -400,12 +406,8 @@ class LocalScreen(Screen):
         """Launch the last used model for the given lane."""
         last_model = self.settings.last_launched_model.get(lane)
         if not last_model:
-            return Nav("tool:prompt:oneshot")  # fallback
-        # Find the model and activate it
-        self.accordion.select(last_model)
-        self.accordion.expand(self.accordion._group_of(last_model) or "")
-        # Return a special nav to trigger launch
-        return self.activate_selected()
+            return None
+        return self._request_for(last_model)
 
     def _cycle_effort(self):
         s = self.settings
@@ -417,13 +419,14 @@ class LocalScreen(Screen):
         sel = self.accordion.selected_id
         if not sel or sel not in self.models:
             return None
-        # Record last launched model for this lane
-        if self.settings.last_launched_model is not None:
-            self.settings.last_launched_model["local_session"] = sel
-            if self.settings.on_effort_saved:
-                # Trigger save to persist the last launched model
-                pass
+        return self._request_for(sel)
+
+    def _request_for(self, sel: str):
         s = self.settings
+        if s.last_launched_model is not None:
+            s.last_launched_model["local_session"] = sel
+        if s.on_last_launched:
+            s.on_last_launched("local_session", sel, None)
         env = {"LA_AUTO_MODE": "0" if s.auto_mode == 2 else "1",
                "LA_BLIND_AUTO": "1" if s.auto_mode == 0 else "0",
                "LA_TELEMETRY": "1" if s.telemetry else "0",
@@ -522,7 +525,9 @@ class RemoteScreen(Screen):
         ]
         # Add "Launch last model" if we have a saved last model
         last_remote = s.last_launched_model.get("remote_api_session") if s.last_launched_model else None
-        if last_remote and any(a.alias == last_remote for a in self.agents if self._visible(a)):
+        # No visible-row check: the agent list is lazy. The tier needed for --include-trials is
+        # remembered with the alias (user decision 2026-10-03: no 5.7 s inventory call on `g`).
+        if last_remote:
             acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {last_remote} session",
                            lambda: self._launch_last("remote_api_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=False)
@@ -536,11 +541,9 @@ class RemoteScreen(Screen):
         last_model = self.settings.last_launched_model.get(lane)
         if not last_model:
             return None
-        # Find the model and activate it
-        self.accordion.select(last_model)
-        self.accordion.expand(self.accordion._group_of(last_model) or "")
-        # Return a special nav to trigger launch
-        return self.activate_selected()
+        loaded = next((a for a in self.agents if a.alias == last_model), None)
+        tier = loaded.tier if loaded else self.settings.last_launched_tier.get(lane, "unknown")
+        return self._request_for(last_model, tier)
 
     def _cycle_temperature(self):
         s = self.settings
@@ -557,17 +560,22 @@ class RemoteScreen(Screen):
         agent = next((a for a in self.agents if a.alias == sel and self._visible(a)), None)
         if agent is None:
             return None
-        # Record last launched model for this lane
-        if self.settings.last_launched_model is not None:
-            self.settings.last_launched_model["remote_api_session"] = sel
+        return self._request_for(agent.alias, agent.tier)
+
+    def _request_for(self, alias: str, tier: str):
         s = self.settings
+        if s.last_launched_model is not None:
+            s.last_launched_model["remote_api_session"] = alias
+        s.last_launched_tier["remote_api_session"] = tier
+        if s.on_last_launched:
+            s.on_last_launched("remote_api_session", alias, tier)
         argv = ["remote"] + ["-a"] * s.auto_mode
         if s.telemetry:
             argv.append("-t")
         if s.local_capable_shown:
             argv.append("--local-capable-shown")
-        if agent.tier == "trial":
-            argv.append("--include-trials")     # the user explicitly picked a visible trial row
+        if tier == "trial":
+            argv.append("--include-trials")     # the user explicitly picked (or re-launched) a trial
         if s.enable_mcp:
             argv.append("--enable-mcp")
         effort = sms.effort_arg("remote_api_session", s.remote_effort)
@@ -575,9 +583,9 @@ class RemoteScreen(Screen):
             argv += ["--effort", effort]
         if s.remote_temperature:
             argv += ["--temperature", s.remote_temperature]
-        argv.append(agent.alias)
+        argv.append(alias)
         env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0"}
-        return LaunchRequest("remote", argv, env, agent.alias)
+        return LaunchRequest("remote", argv, env, alias)
 
 
 class RateLimiterScreen(Screen):

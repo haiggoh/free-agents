@@ -89,6 +89,27 @@ class StateTests(unittest.TestCase):
         self.assertIsNotNone(warning)
         self.assertEqual(self.file.read_bytes(), before, "unreadable file was clobbered")
 
+    def test_last_launched_tier_round_trips_and_clears(self):
+        # Go-last on the remote lane needs the tier without an inventory call (0.22.0).
+        self.assertIsNone(sms.save_last_launched(self.cfg, "remote_api_session", "cerebras-oss", "trial"))
+        st = sms.load(self.cfg)
+        self.assertEqual(st.last_launched["remote_api_session"], "cerebras-oss")
+        self.assertEqual(st.last_launched_tier, {"remote_api_session": "trial"})
+        self.assertNotIn("remote_api_session:tier", st.last_launched, "reserved key must not leak")
+        doc = json.loads((self.file).read_text())
+        self.assertEqual(doc["last_launched_tier"], {"remote_api_session": "trial"})
+        sms.save_last_launched(self.cfg, "remote_api_session", "gemini-flash")   # no tier -> cleared
+        self.assertEqual(sms.load(self.cfg).last_launched_tier, {})
+        with self.assertRaises(ValueError):
+            sms.save_last_launched(self.cfg, "remote_api_session", "x", "free-forever")
+
+    def test_bad_tier_in_file_is_refused_not_trusted(self):
+        (self.file).write_text(json.dumps(
+            {"schema_version": 2, "last_launched_tier": {"remote_api_session": "bogus"}}))
+        st = sms.load(self.cfg)
+        self.assertEqual(st.last_launched_tier, {})
+        self.assertTrue(st.warnings)
+
     def test_invalid_json_warns_without_overwrite(self):
         self._assert_warns_and_keeps(b"{not json")
 

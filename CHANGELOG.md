@@ -2,7 +2,7 @@
 
 All notable changes to `free-agents` are documented in this file.
 
-## [0.22.0] — unreleased
+## [0.22.0] — 2026-10-04
 
 ### Added — Session picker TUI (Textual) replaces the numbered csl menus
 
@@ -33,6 +33,29 @@ All notable changes to `free-agents` are documented in this file.
   picker. That `csl` change never reached `main`. It ships here instead, as the Launchd entry inside the
   Backend manager — not as a top-level key, since shortcuts are case-insensitive (`L` = `l` = Local).
   The `EMOJI_LAUNCHD*` symbols land in `config/emoji.sh` (single source; `emoji_constants.py` reads it).
+
+### Fixed — "Go last" (`g`) actually works
+
+- `g` only appeared once the lane's model list had loaded, and the list only loads when you press
+  `c`, so on a fresh lane it never appeared. It is now offered whenever a model is remembered.
+  Local needs only the alias and effort. Remote also needs the tier (for `--include-trials`), which
+  is now saved next to the alias in a new optional `last_launched_tier` section, so pressing `g`
+  makes no 5.7 s inventory call. The tier is checked against `remote_provider_core.TIER_CHOICES`.
+- Two latent bugs underneath it:
+  - The picker never loaded or saved `last_launched`, so nothing was remembered across runs.
+  - Pressing `g` returned a launch request that `dispatch()` could not handle, which crashed the
+    app.
+- Tests: Go-last on a fresh lane (both lanes, trial tier), launches record alias and tier, the
+  store round-trips and clears the tier, and a bad tier in the file is refused. Mutation-checked
+  (the old membership check, the tier not being written, the tier being ignored). A headless run of
+  two app lifecycles confirmed that `g` launches the remembered trial model with no inventory call.
+
+### Known regression (not fixed in 0.22.0)
+
+- At picker startup the bash script call is briefly visible before `bin/session-picker` clears the
+  screen (`cbd6302`, the "Last login" clear). What should show is the loading animation alone.
+  This is tracked as waypoint `regression-picker-startup`, together with the pre-`cbd6302` commits
+  to compare against.
 
 ### Fixed — stray `p` on Apple Terminal (for real this time)
 

@@ -40,7 +40,10 @@ from pathlib import Path
 
 SCHEMA_VERSION = 2
 READABLE_SCHEMAS = (1, 2)
-SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched")
+SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier")
+# Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
+# 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
+TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown")  # = remote_provider_core.TIER_CHOICES
 PREFS_NAME = "session-menu.local.json"
 LOCK_NAME = "session-menu.local.lock"
 MAX_BYTES = 16 * 1024
@@ -77,6 +80,7 @@ class State:
     effort: dict = field(default_factory=lambda: dict(DEFAULT_EFFORT))
     rate_limiter: dict = field(default_factory=dict)
     last_launched: dict = field(default_factory=dict)
+    last_launched_tier: dict = field(default_factory=dict)
     warnings: list = field(default_factory=list)
 
 
@@ -152,6 +156,15 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict]:
     _validate_rate_limiter(limiter)
     for lane, alias in last.items():
         _validate_last_launched(lane, alias)
+    tiers = doc.get("last_launched_tier", {})
+    if not isinstance(tiers, dict):
+        raise ValueError("preference sections must be JSON objects")
+    for lane, tier in tiers.items():
+        if lane not in ALLOWED_EFFORT or tier not in TIERS:
+            raise ValueError(f"{lane} last launched tier is not valid")
+    # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
+    for lane, tier in tiers.items():
+        last[f"{lane}:tier"] = tier
     return effort, limiter, last
 
 
@@ -187,7 +200,8 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         effort, limiter, last = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
-        state.last_launched = dict(last)
+        state.last_launched = {k: v for k, v in last.items() if ":" not in k}
+        state.last_launched_tier = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
     return state
 
 
@@ -243,8 +257,12 @@ def _update(config_dir: Path | str, mutate) -> str | None:
             found = _read(config_dir / PREFS_NAME)
             effort, limiter, last = found if found else ({}, {}, {})
             mutate(effort, limiter, last)
-            _write(config_dir, {"schema_version": SCHEMA_VERSION, "effort": effort,
-                                "rate_limiter": limiter, "last_launched": last})
+            doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
+                   "last_launched": {k: v for k, v in last.items() if ":" not in k}}
+            tiers = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
+            if tiers:
+                doc["last_launched_tier"] = tiers
+            _write(config_dir, doc)
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
     except OSError as exc:
@@ -273,12 +291,21 @@ def save_rate_limiter(config_dir: Path | str, values: dict) -> str | None:
     return _update(config_dir, mutate)
 
 
-def save_last_launched(config_dir: Path | str, lane: str, alias: str) -> str | None:
-    """Record the alias a lane last STARTED (child spawned), never a mere selection."""
+def save_last_launched(config_dir: Path | str, lane: str, alias: str,
+                       tier: str | None = None) -> str | None:
+    """Record the alias a lane last STARTED (child spawned), never a mere selection.
+
+    `tier` (remote lane) is stored beside it; None clears a stale tier from an older alias."""
     _validate_last_launched(lane, alias)
+    if tier is not None and tier not in TIERS:
+        raise ValueError(f"{lane} last launched tier is not valid")
 
     def mutate(_effort, _limiter, last):
         last[lane] = alias
+        if tier is None:
+            last.pop(f"{lane}:tier", None)
+        else:
+            last[f"{lane}:tier"] = tier
     return _update(config_dir, mutate)
 
 
@@ -314,7 +341,8 @@ def main(argv: list[str]) -> int:
         print(state.effort[args.lane])
     else:
         print(json.dumps({"effort": state.effort, "rate_limiter": state.rate_limiter,
-                          "last_launched": state.last_launched}, indent=2))
+                          "last_launched": state.last_launched,
+                          "last_launched_tier": state.last_launched_tier}, indent=2))
     return 0
 
 

@@ -306,6 +306,37 @@ class GroupingTests(unittest.TestCase):
                 self.assertEqual(len(keys), len(set(keys)))
                 self.assertTrue(all(ec_ok for ec_ok in (m.ec.provider_emoji(p[0]) for p in m.APIKeysScreen.PROVIDERS)))
 
+    def test_go_last_is_offered_before_any_model_list_loads(self):
+        # The lane must launch the remembered model WITHOUT an inventory call (lazy loading leaves
+        # models/agents empty until `c`). Remote needs the tier for --include-trials, so it is
+        # remembered alongside the alias (user decision 2026-10-03, option a).
+        s = m.Settings(remote_effort="high",
+                       last_launched_model={"local_session": "gemma-4-26b",
+                                            "remote_api_session": "cerebras-oss", "lowkey": None},
+                       last_launched_tier={"remote_api_session": "trial"})
+        local = m.LocalScreen(s, models=None, owner=m.DIRECT_ROOT)
+        req = local.handle_key("g")
+        self.assertEqual(req.argv, ["local", "gemma-4-26b", s.local_effort])
+        remote = m.RemoteScreen(s, agents=None, owner=m.DIRECT_ROOT)
+        req = remote.handle_key("g")
+        self.assertEqual(req.argv[-1], "cerebras-oss")
+        self.assertIn("--include-trials", req.argv)
+        self.assertEqual(req.argv[req.argv.index("--effort") + 1], "high")
+
+    def test_go_last_absent_without_a_remembered_model(self):
+        s = m.Settings()
+        for screen in (m.LocalScreen(s, models=None), m.RemoteScreen(s, agents=None)):
+            self.assertNotIn("g", {a.key for a in screen.actions()})
+
+    def test_launch_remembers_alias_and_tier(self):
+        saved = []
+        s = m.Settings(on_last_launched=lambda lane, alias, tier: saved.append((lane, alias, tier)))
+        lane = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
+        lane.accordion.select("cerebras-oss")
+        lane.activate_selected()
+        self.assertEqual(saved, [("remote_api_session", "cerebras-oss", "trial")])
+        self.assertEqual(s.last_launched_tier["remote_api_session"], "trial")
+
     def test_trial_rows_are_marked(self):
         lane = m.RemoteScreen(m.Settings(), remote_agents(), owner=m.DIRECT_ROOT)
         row = [i for g in lane.groups() for i in g.items if i.id == "cerebras-oss"][0]

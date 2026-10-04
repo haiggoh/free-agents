@@ -200,7 +200,12 @@ class Picker(App):
             enable_mcp=os.environ.get("LA_ENABLE_MCP", "0") == "1",
             include_trials=not flags.exclude_trials,
             local_capable_shown=flags.local_capable_shown or os.environ.get("CSL_LOCAL_CAPABLE") == "1",
-            on_effort_saved=self._save_effort)
+            on_effort_saved=self._save_effort,
+            # "Go last": restored from the store; written when a launch request is made.
+            last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
+                                 **state.last_launched},
+            last_launched_tier=dict(state.last_launched_tier),
+            on_last_launched=self._save_last_launched)
         self.start = start
         self.screen_model: m.Screen | None = None
         self.cache: dict = {}
@@ -217,6 +222,14 @@ class Picker(App):
 
     def _save_effort(self, lane, value):
         warning = sms.save_effort(self._config_dir(), lane, value)
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
+
+    def _save_last_launched(self, lane, alias, tier):
+        try:
+            warning = sms.save_last_launched(self._config_dir(), lane, alias, tier)
+        except ValueError as exc:          # an alias the store refuses: never block the launch
+            warning = f"{exc}; Go last not remembered"
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
 
@@ -608,6 +621,9 @@ class Picker(App):
             return
         if result == m.QUIT:
             self.exit(0)
+            return
+        if isinstance(result, m.LaunchRequest):     # a shortcut that launches (Go last `g`)
+            self.run_child(command_for(result), env=result.env)
             return
         target = result.target
         if target.startswith("tool:"):
