@@ -160,15 +160,21 @@ _emit_json() {
   else
     VISIBLE_COUNT=$((VISIBLE_COUNT + 1))
   fi
-  # Escape strings for JSON via python3 (avoids manual backslash/quote gymnastics).
-  local esc
-  esc="$(python3 -c '
+  # One TAB-separated record per row; _json_rows turns the whole batch into JSON in ONE python
+  # call. (A python process per row cost ~1.6 s on every remote-session.sh start.) Fields never
+  # contain TAB or newline: they come from '|'-split, line-based files.
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$alias" "$prov" "$mid" "$disp" "$tier" "$visible" "$classification" "$reason"
+}
+
+# _json_rows: TAB records on stdin -> the same one-JSON-object-per-line output as before.
+_json_rows() {
+  python3 -c '
 import json,sys
-parts = sys.argv[1:]
-print(json.dumps({"alias":parts[0],"provider":parts[1],"remote_model_id":parts[2],"display":parts[3],"tier":parts[4],
-                  "visible":parts[5]=="true","classification":parts[6],"reason":parts[7]}))
-' "$alias" "$prov" "$mid" "$disp" "$tier" "$visible" "$classification" "$reason")"
-  printf '%s\n' "$esc"
+for line in sys.stdin.read().splitlines():
+    p = line.split("\t")
+    if len(p) != 8: continue
+    print(json.dumps({"alias":p[0],"provider":p[1],"remote_model_id":p[2],"display":p[3],"tier":p[4],
+                      "visible":p[5]=="true","classification":p[6],"reason":p[7]}))'
 }
 
 # ---- join + output ----------------------------------------------------------
@@ -201,7 +207,8 @@ _rows_write() {
 
 if [[ "$MODE" == "parse" ]]; then
   _rows_tmp="$(mktemp)"
-  _rows_write > "$_rows_tmp"
+  _rows_write > "$_rows_tmp.raw"     # in this shell, so the counts survive
+  _json_rows < "$_rows_tmp.raw" > "$_rows_tmp"; rm -f "$_rows_tmp.raw"
   # Join JSON rows with commas into a single-line array.
   rows_json="$(awk 'NR>1{printf ","} {printf "%s",$0} END{print ""}' < "$_rows_tmp")"
   rm -f "$_rows_tmp"
@@ -210,7 +217,8 @@ if [[ "$MODE" == "parse" ]]; then
 else
   # Human-readable grouped report.
   _rows_tmp="$(mktemp)"
-  _rows_write > "$_rows_tmp"
+  _rows_write > "$_rows_tmp.raw"
+  _json_rows < "$_rows_tmp.raw" > "$_rows_tmp"; rm -f "$_rows_tmp.raw"
   echo "Hidden remote-model entries (local-capable), grouped by provider:"
   current_prov=""
   while IFS= read -r line; do

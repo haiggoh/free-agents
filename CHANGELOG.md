@@ -2,6 +2,32 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.22.2] — 2026-10-04
+
+### Fixed — `remote-session.sh` takes 0.7 s to start instead of 5.5 s
+
+- Every invocation (opening the picker, `--help`, a direct launch) spent about 5 seconds starting
+  python processes before doing anything. While that ran, Terminal.app kept showing
+  `Last login … % …/remote-session.sh ; exit;`, and the ⏳ frame only flashed at the very end.
+  - `_lc_load_policy` ran **four `python3 -c` per policy row** (177 starts on the 0.22 roster).
+  - `local-capable-filter.sh` ran **one per roster row**, just to escape JSON (45 starts).
+- Both now make a single python call. `--help` drops from 5.5 s to 0.7 s, and `--inventory`,
+  `--list` and the filter's `--parse`/`--report` output are byte-identical to before (md5
+  compared).
+- Test: `tests/test_remote_startup_speed.py` puts a `python3` shim first on PATH and counts real
+  process starts, including inside child scripts whose stderr is discarded. The limit is under 6.
+  Mutation-checked: the old filter (45) and the old `_lc_load_policy` (178) both fail it.
+
+### Finding — the "Last login … ; exit;" lines come from Terminal.app
+
+- Screen recordings at 16–20 fps of a Finder-style launch (`open -a Terminal <script>`) show the
+  same two lines for `9c53367`, `bd0e86d` (both still with the stray `p`) and 0.22.x alike. Before
+  our script starts, Terminal opens an interactive login shell, prints `Last login` and types the
+  script path. In those commits the lines stayed up for about 0.3–0.5 s before the `p`. In 0.22.1,
+  csl replaces them with the ⏳ frame after about one frame. No commit ever suppressed them from
+  inside the script. Removing them entirely needs a launcher that does not go through an
+  interactive shell (tracked on waypoint `regression-picker-startup`).
+
 ## [0.22.1] — 2026-10-04
 
 ### Fixed — picker startup shows the loading frame, not shell noise
