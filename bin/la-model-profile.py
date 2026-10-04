@@ -267,6 +267,10 @@ def cmd_list(args):
     if args.qualified_only:
         profiles = [p for p in profiles if all(v == "passed" for v in p.get("qualification", {}).values())]
     
+    if args.json:
+        print(json.dumps(profiles, indent=2))
+        return
+    
     print(f"{'ID':<30} {'Backend':<8} {'Artifact':<25} {'Thinking':<8} {'Qualified'}")
     print("-" * 90)
     for p in profiles:
@@ -378,6 +382,7 @@ def main():
     pl.add_argument("--backend", help="Filter by backend")
     pl.add_argument("--capability", help="Filter by capability")
     pl.add_argument("--qualified-only", action="store_true", help="Only fully qualified")
+    pl.add_argument("--json", action="store_true", help="JSON output")
     
     ps = sub.add_parser("show", help="Show resolved profile")
     ps.add_argument("profile_id")

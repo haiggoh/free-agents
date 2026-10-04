@@ -317,6 +317,48 @@ for ((i=0; i<${#A[@]}; i++)); do
 done
 ((${#IDX[@]})) || { printf "No entries for group '%s'.\n" "$GROUP_FILTER" >&2; exit 2; }
 
+
+# Filter by --profile / --backend / --capability / --recommended (after IDX built)
+if [[ -n $PROFILE_FILTER ]] || [[ -n $BACKEND_FILTER ]] || [[ -n $CAPABILITY_FILTER ]] || (( RECOMMENDED_ONLY )); then
+  RESOLVER="$LA_ROOT/bin/la-model-profile.py"
+  if [[ ! -x $RESOLVER ]]; then
+    printf "Profile/backend/capability filtering requires %s\n" "$RESOLVER" >&2
+    exit 1
+  fi
+  QUALIFYING_PROFILES=()
+  mapfile -t QUALIFYING_PROFILES < <("$RESOLVER" list --qualified-only --json 2>/dev/null | python3 -c '
+import sys, json
+data = json.load(sys.stdin)
+for p in data:
+    if "'"$BACKEND_FILTER"'" and p.get("backend") != "'"$BACKEND_FILTER"'":
+        continue
+    if "'"$CAPABILITY_FILTER"'" and "'"$CAPABILITY_FILTER"'" not in p.get("capabilities", []):
+        continue
+    print(p["id"])
+  ')
+  QUALIFYING_ALIASES=()
+  for pid in "${QUALIFYING_PROFILES[@]}"; do
+    ARTIFACT=$("$RESOLVER" artifact "$pid" 2>/dev/null)
+    for alias in "${!LA_SUBDIR[@]}"; do
+      if [[ "${LA_SUBDIR[$alias]}" == "$ARTIFACT" ]]; then
+        QUALIFYING_ALIASES+=("$alias")
+      fi
+    done
+  done
+  NEW_IDX=()
+  for i in "${IDX[@]}"; do
+    alias="${A[i]}"
+    for qa in "${QUALIFYING_ALIASES[@]}"; do
+      if [[ "$alias" == "$qa" ]]; then
+        NEW_IDX+=("$i")
+        break
+      fi
+    done
+  done
+  IDX=("${NEW_IDX[@]}")
+  ((${#IDX[@]})) || { printf "No entries match profile/backend/capability/recommended filter.\n" >&2; exit 2; }
+fi
+
 free_gb=$(df -Pg "$TARGET_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || true)
 printf 'Model downloader — config: %s\nTarget: %s\n' "$LA_CONFIG_SOURCE" "$TARGET_DIR"
 [[ -n $free_gb ]] && printf 'Disk: ~%s GB free\n' "$free_gb"
