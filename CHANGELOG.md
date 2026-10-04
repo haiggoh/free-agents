@@ -1,3 +1,49 @@
+## [0.23.0] — 2026-10-04
+
+### Added — Runtime Profiles and Rapid-First Model Management
+
+Groundwork for separating downloadable artifact identity from runnable model profiles, making Rapid-MLX the preferred backend architecture.
+
+- **Three canonical config files** (`config/`):
+  - `model-runtime-profiles.json`: Runtime profile declarations (qwen38 rapid operator/thinking + vllm fallbacks)
+  - `runtime-resource-profiles.json`: Resource/cache/operational profiles (rapid-primary-session, rapid-concurrent, rapid-smoke)
+  - `runtime-environments.json`: Backend/version/executable/env profiles (rapid-text-stable 0.12.18, legacy-vllm)
+
+- **`bin/la-model-profile.py`**: Stdlib-only canonical resolver with validate/list/show/resolve/artifact/recommend/compare-upstream/migrate-preview commands. Includes legacy adapter for config.local.sh la_register entries.
+
+- **`bin/load_profile_models.py`**: Profile loader for the session picker — converts runtime profiles to LocalModel format with unique profile_id keys.
+
+- **`bin/local-llm-hotswap.sh`**: Added `--profile PROFILE_ID` flag. Resolves through la-model-profile.py, finds registry alias matching artifact_id, overrides SERVE/TOOLP/REASONP/THINK from resolved profile, reads resource profile for Rapid config (cache_mb, hybrid_entries, etc.), emits PROFILE_ID in meta file and output.
+
+- **`install/download-models.sh`**: Added filtering flags:
+  - `--profile PROFILE_ID`: filters to aliases matching that profile's artifact
+  - `--backend BACKEND`: filters to profiles with that backend (rapid/vllm/llama_cpp/mlx_lm)
+  - `--capability CAPABILITY`: filters to profiles with that capability (reasoning, etc.)
+  - `--recommended`: filters to fully qualified profiles only
+
+- **Session picker integration** (`bin/session_picker.py`, `bin/session_picker_model.py`, `bin/load_profile_models.py`):
+  - `LocalScreen` now consumes runtime profiles via `load_profile_models.py`
+  - Profiles keyed by `profile_id` (unique) not alias (multiple profiles per alias)
+  - Display shows backend + thinking mode: `qwen-3.8-operator (rapid, thinking) [reasoner]`
+
+- **Dispatcher chain profile-aware** (`bin/agent-fallback.py`, `bin/lowkey-cli.py`):
+  - `agent-fallback.py --profile PROFILE_ID` passed through dispatch chain
+  - `lowkey-cli.py --profile PROFILE_ID` resolves profile to model alias
+  - `local-llm-hotswap.sh --profile` already supported
+  - Dry-run plan includes `local_profile`
+
+- **Tests**: 331 tests pass (14 skipped); version consistency 0.23.0 ✓; test_serve_default.sh 39/39 ✓
+
+### Fixed
+
+- `tests/test_manage_backend.py`: test_registry now unregisters test manager after test to avoid polluting global registry (fixed pre-existing test failure in BackendManagerContractTests)
+
+### Fixed in lowkey-cli.py
+
+- Fixed UnboundLocalError on `sys` by removing redundant `import sys` in dry-run block
+- Fixed sys.path assignment to avoid shadowing `sys` module
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
 # Changelog
 
 All notable changes to `free-agents` are documented in this file.
