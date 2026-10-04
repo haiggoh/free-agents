@@ -2,6 +2,27 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.22.1] — 2026-10-04
+
+### Fixed — picker startup shows the loading frame, not shell noise
+
+- **0.22.0 behaviour:** `bin/session-picker` began with a bare `\033[2J` clear (from `cbd6302`,
+  meant to hide "Last login"). Measured in a PTY: the clear arrived about 0.05 s in and Textual
+  took over about 0.3 s in. Until the clear, whatever the shell had already printed (the launch
+  command, the login banner) stayed visible, and after it the screen sat blank. The commit before
+  `cbd6302` (`3bcb9d9`) printed nothing until Textual started, so only the stray `p` was visible.
+- **Now:** the first bytes switch to the alternate screen, which hides whatever the shell printed,
+  and draw the **⏳ loading…** frame (`EMOJI_LOADING` from `config/emoji.sh`) with the cursor
+  hidden. Textual then takes over the same alternate screen without a flash, and still sends no
+  DECRQM queries under Apple Terminal.
+- **Only for a terminal:** pipes, logs and `--help` get no escape bytes. If the wrapper exits
+  before Textual starts (for example, the venv is missing), an EXIT trap gives the normal screen
+  and cursor back.
+- Tests: `tests/test_picker_startup_frame.py` (first bytes are the frame, an early exit restores
+  the screen and cursor, pipe and help output stay clean). Mutation-checked: 0.22.0's bare clear,
+  no trap, and no tty check all fail it.
+- Still needed: your visual confirmation in Terminal.app (waypoint `regression-picker-startup`).
+
 ## [0.22.0] — 2026-10-04
 
 ### Added — Session picker TUI (Textual) replaces the numbered csl menus
