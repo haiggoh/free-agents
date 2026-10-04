@@ -840,6 +840,12 @@ def main():
         default="qwen-3.8-operator",
         help="Local model alias (e.g. qwen-3.8-operator, deepseek-r1-architect, gemma-4-26b)",
     )
+    parser.add_argument(
+        "--profile",
+        default="",
+        help="Local runtime profile ID (e.g., qwen38-rapid-operator); if given, overrides --model "
+             "and selects exact backend/thinking configuration",
+    )
     parser.add_argument("--prompt", required=False, help="Task prompt for the local model")
     parser.add_argument("--files", nargs="*", help="Optional file paths to include as context")
     parser.add_argument("--max-tokens", type=int, default=4096, help="Max tokens to generate")
@@ -918,6 +924,21 @@ def main():
 
     if args.allow_session_model_mismatch and not args.session:
         parser.error("--allow-session-model-mismatch requires --session.")
+
+    # If --profile is given, it overrides --model
+    if args.profile:
+        # Use the profile to find the model alias
+        import os
+        sys_path = sys.path; sys_path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+        from load_profile_models import load_profiles
+        profiles = load_profiles()
+        found = False
+        for p in profiles:
+            if p['profile_id'] == args.profile:
+                args.model = p['alias']
+                break
+        else:
+            parser.error(f"Profile not found: {args.profile}")
 
     if args.session:
         try:

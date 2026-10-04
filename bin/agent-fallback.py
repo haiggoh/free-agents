@@ -113,7 +113,7 @@ def _remote_providers_for_mode(mode, requested=None, doctor_ids=None):
 
 
 def _run_local(prompt, files, model, max_tokens, outdir, dry_run, timeout,
-               progress):
+               progress, profile=""):
     """Drive local-agent-dispatch.py as a subprocess. Returns (ok, answer_text).
 
     The local lane is lane-agnostic; we read its answer from stdout (its one
@@ -124,13 +124,15 @@ def _run_local(prompt, files, model, max_tokens, outdir, dry_run, timeout,
            "--model", model, "--prompt", prompt,
            "--max-tokens", str(max_tokens),
            "--progress", progress]
+    if profile:
+        cmd += ["--profile", profile]
     for fp in files:
         cmd += ["--files", fp]
     if dry_run:
         # local dispatch has no --dry-run in the MVP; we still must not run the
         # real model in a full dry-run. Report intent and stop.
-        print("[local] dry-run — would dispatch to model=%s "
-              "(%d file(s)); no request sent." % (model, len(files)),
+        print("[local] dry-run — would dispatch to model=%s profile=%s "
+              "(%d file(s)); no request sent." % (model, profile or "none", len(files)),
               file=sys.stderr)
         return False, ""
     try:
@@ -210,6 +212,9 @@ def main(argv=None):
     ap.add_argument("--prompt", required=True, help="the task prompt")
     ap.add_argument("--local-model", default=DEFAULT_LOCAL_MODEL,
                     help="local MLX model alias (default %(default)s)")
+    ap.add_argument("--profile", default="",
+                    help="local runtime profile ID (e.g., qwen38-rapid-operator); "
+                         "if given, overrides --local-model and selects exact backend/thinking")
     ap.add_argument("--remote-provider", action="append", default=None,
                     help="provider id to try in remote lanes (repeatable); "
                          "default: every configured one the mode allows")
@@ -247,6 +252,7 @@ def main(argv=None):
     if a.dry_run:
         print("DRY-RUN — no lane will be contacted.", file=sys.stderr)
         plan = {"mode": a.mode, "local_model": a.local_model,
+                "local_profile": a.profile,
                 "remote": [p for p, _ in remote_plan],
                 "remote_tiers": tiers, "dry_run": True}
         if a.json_out:
@@ -277,8 +283,8 @@ def main(argv=None):
     try_local = a.mode != "remote-free-only"
     if try_local:
         ok, answer = _run_local(a.prompt, a.files, a.local_model, a.max_tokens,
-                                outdir, a.dry_run, a.timeout, a.progress)
-        record["lanes"].append({"lane": "local", "model": a.local_model, "ok": ok,
+                                outdir, a.dry_run, a.timeout, a.progress, a.profile)
+        record["lanes"].append({"lane": "local", "model": a.local_model, "profile": a.profile, "ok": ok,
                                 "output_chars": len(answer)})
         if ok:
             final_answer = answer

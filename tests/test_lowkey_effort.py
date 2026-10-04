@@ -40,7 +40,7 @@ class LowkeyEffortTests(unittest.TestCase):
         (root / "bin").mkdir()
         shutil.copy2(ROOT / "bin/lowkey-cli.py", root / "bin/lowkey-cli.py")
         shutil.copy2(ROOT / "VERSION", root / "VERSION")
-        for name, body in (("local-llm-hotswap.sh", HOTSWAP), ("librarian-dispatch.py", LIBRARIAN)):
+        for name, body in (("local-llm-hotswap.sh", HOTSWAP), ("librarian-dispatch.py", LIBRARIAN), ("load_profile_models.py", open(ROOT / "bin/load_profile_models.py").read())):
             (root / "bin" / name).write_text(body)
             (root / "bin" / name).chmod(0o755)
         self.cli = root / "bin/lowkey-cli.py"
