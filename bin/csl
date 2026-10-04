@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # csl — "Claude Code Free-Agents: Session Launcher"
 #
-#   csl              -> interactive picker (local models, remote API, effort, toggles)
+#   csl              -> session picker Home (Local / Remote / tools), arrow keys + letters
+#   csl local        -> Local Session Picker directly (Quit, no Back)
+#   csl remote [args...] -> Remote picker directly, or an alias / --list / --verify / ...
+#   csl lowkey [args...] / csl download-models [args...] -> those tools (picker when no args)
 #   csl roles        -> disk-aware role resolver (which on-disk model fills each role)
-#   csl remote [args...] -> remote picker, alias, --list, --verify, or --include-trials
 #   csl <args...>    -> passed straight through to the local launcher, unchanged (no picker, no watcher)
 #
 # WHY the picker offers free model×effort and not just presets: dispatching local models as
@@ -22,6 +24,10 @@ CSL_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 WATCHER="$CSL_DIR/local-watch.sh"
 
+# Source emoji constants for dry-run output (single source of truth)
+# shellcheck source=../config/emoji.sh
+. "$CSL_DIR/../config/emoji.sh"
+
 # Argument parsing BEFORE any work (must support --help/--dry-run without side effects)
 # Parse all leading flags first, then handle subcommands/passthrough
 while [[ $# -gt 0 ]]; do
@@ -30,18 +36,28 @@ while [[ $# -gt 0 ]]; do
       cat <<'HELP'
 csl — Claude Code Free-Agents: Session Launcher
 
-Usage: csl [--help] [--dry-run] | csl roles [args] | csl remote [args] | csl <launcher-args>
+Usage: csl [--help] [--dry-run] | csl local | csl remote [args] | csl lowkey [args]
+       csl download-models [args] | csl roles [args] | csl <alias> [effort]
 
 Modes:
-  csl                    Interactive session launcher (local + remote)
+  csl                    Session picker Home (q quits)
+  csl local              Local Session Picker directly (q quits, no Back)
+  csl remote [args]      Remote Free API Session Picker, or remote-session.sh with args
+  csl lowkey [args]      Lowkey picker, or lowkey-cli.py with args
+  csl download-models [args]  Model downloader picker, or the engine with args
   csl roles [args]       Disk-aware role resolver (la-roles.sh)
-  csl remote [args]      Remote free/paid API session launcher
   csl <alias> [effort]   Direct passthrough to local launcher (no picker)
+
+Picker keys: arrows move, Enter opens a group / launches, l Local, r Remote, s switch lane,
+e effort, a auto-mode, t telemetry, p queued-prompt hook, w watcher, m MCPs, k API keys,
+v Rapid-MLX runtime, n NVIDIA rate limiter, h trial rows (Remote), b Back, q Quit.
+Effort chosen in a picker is remembered in config/session-menu.local.json.
 
 Flags:
   --help       Show this help and exit
   --dry-run                  Validate config and show what would be available, without launching
   --dry-run-skip-preflight   Dry-run without RAM preflight (quick config inspection)
+  --inventory  Print session-capable local models as TSV for the picker, then exit
   --enable-mcp               Enable MCPs in blind-trust mode
 
 Subcommands:
@@ -81,6 +97,13 @@ HELP
       export LA_ENABLE_MCP=1
       shift
       ;;
+    --inventory)
+      INVENTORY=1
+      shift
+      ;;
+    --picker-launch)
+      break   # internal: picker -> local session; handled after config load
+      ;;
     -?*)
       printf 'csl: unrecognised option: %s\n' "$1" >&2
       printf "Try 'csl --help'.\n" >&2
@@ -100,7 +123,28 @@ if [ "${1:-}" = "setup-remote" ]; then
 fi
 if [ "${1:-}" = "remote" ]; then
   shift
-  exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" "$@"
+  # No args -> remote-session.sh opens the picker at Remote as a csl submenu (returns via nav file).
+  # When picker launches remote as child, it passes --csl-owner and --csl-nav-file.
+  if [ "$#" -eq 0 ]; then
+    # Create nav file for state sync between picker and remote-session.sh
+    navfile="${TMPDIR:-/tmp}/_csl_nav.$$"
+    : > "$navfile"
+    exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" --csl-owner --csl-nav-file "$navfile"
+  else
+    # With args (alias, --list, --verify, etc.) delegate directly without nav file
+    exec "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}" "$@"
+  fi
+fi
+if [ "${1:-}" = "local" ] && [ "$#" -eq 1 ]; then exec "$CSL_DIR/session-picker" local; fi
+if [ "${1:-}" = "lowkey" ]; then
+  shift
+  [ "$#" -eq 0 ] && exec "$CSL_DIR/session-picker" lowkey
+  exec python3 "$CSL_DIR/lowkey-cli.py" "$@"
+fi
+if [ "${1:-}" = "download-models" ]; then
+  shift
+  [ "$#" -eq 0 ] && [ -t 0 ] && exec "$CSL_DIR/session-picker" download
+  exec "$CSL_DIR/../install/download-models.sh" "$@"
 fi
 # shellcheck source=/dev/null
 . "$CSL_DIR/../config/config-lib.sh"
@@ -325,8 +369,33 @@ LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
 # Flag --enable-mcp sets LA_ENABLE_MCP=1 before this; preserve it if already set
 LA_ENABLE_MCP="${LA_ENABLE_MCP:-${CSL_ENABLE_MCP:-0}}"
 
+# Export the stop hook setting for launchers (they read LA_QUEUE_STOP_HOOK)
+export LA_QUEUE_STOP_HOOK="$STOP_HOOK"
+
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
+# `csl --picker-launch <alias> <effort>`: how the picker starts a LOCAL session. It runs as the
+# picker's child (the picker resumes when it exits) and keeps csl's own launch semantics: the
+# session profile, and the watcher window following THIS pid — `exec` below makes the
+# launcher inherit it, exactly as the numbered menu's _launch did.
+if [ "${1:-}" = "--picker-launch" ]; then
+  shift
+  _apply_session_profile "$1"
+  if [ "${CSL_WATCH:-0}" = "1" ]; then
+    if [ "$(uname -s)" = "Darwin" ] && [ -z "${CSL_NO_WATCH_WINDOW:-}" ]; then
+      osascript >/dev/null 2>&1 <<OSA
+tell application "Terminal"
+  do script "'$WATCHER' --attach $$"
+end tell
+OSA
+      echo "$EMOJI_WATCHER watcher window opened (following pid $$)"
+    else
+      echo "$EMOJI_WATCHER watcher (run in another terminal): $WATCHER --attach $$"
+    fi
+  fi
+  exec "$LAUNCHER" "$@"
+fi
+
 if [ "$#" -gt 0 ]; then
   _apply_session_profile "$1"
   exec "$LAUNCHER" "$@"
@@ -337,10 +406,10 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "=== DRY RUN — csl configuration ==="
   echo "Config source: $LA_CONFIG_SOURCE"
   if [ -n "${LA_FALLBACK_CONFIG:-}" ] && [ "$LA_FALLBACK_CONFIG" = "1" ]; then
-    echo "  ⚠ Using public fallback defaults (private models not present)"
+    echo "  $EMOJI_WARNING Using public fallback defaults (private models not present)"
   fi
   echo
-  echo "Local session models (on disk, session-capable):"
+  echo "${SESSION_EMOJI_LOCAL}  Local session models (on disk, session-capable):"
   for a in "${LA_ALIASES[@]}"; do
     case "${LA_SERVE[$a]:-}" in
       rapid|vllm)
@@ -371,7 +440,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     esac
   done
   echo
-  echo "Remote session agents: (run 'csl remote --list' for full roster)"
+  echo "${SESSION_EMOJI_FREE_API}  Remote session agents: (run 'csl remote --list' for full roster)"
   echo "  Provider roster loaded from config"
   echo "  Local-capable filter: $([ "$LOCAL_CAPABLE" = "1" ] && echo "SHOWN" || echo "HIDDEN (default)")"
   echo "  Trial inclusion: $([ "${INCLUDE_TRIALS:-0}" = "1" ] && echo "INCLUDED" || echo "EXCLUDED (default)")"
@@ -398,472 +467,24 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
 fi
 
 # Session-capable models only — dispatch-only tiers have no Anthropic /v1/messages surface, so
-# they cannot drive an interactive session at all. mlx_lm.server serves OpenAI-only under a path
-# id; llama.cpp's llama-server likewise. rapid and vllm both expose /v1/messages.
-# LA_SERVE holds the RESOLVED backend (la_finalize_serve ran inside la_load_config), so the
-# generic "mlx" / "" declarations never reach this test — they arrive here as rapid or vllm.
-SESSION_ALIASES=()
-for a in "${LA_ALIASES[@]}"; do
-  case "${LA_SERVE[$a]:-}" in
-    rapid|vllm)
-      la_on_disk "$a" && SESSION_ALIASES+=("$a")
-      ;;
-    *) ;;
-  esac
-done
-
-if [ "${#SESSION_ALIASES[@]}" -eq 0 ]; then
-  echo "No on-disk models with an Anthropic-compatible session backend are available." >&2
-  exit 1
+# they cannot drive an interactive session at all. LA_SERVE holds the RESOLVED backend
+# (la_finalize_serve ran inside la_load_config), so only rapid/vllm reach a session.
+if [ "${INVENTORY:-0}" = "1" ]; then
+  # TSV for the picker: alias, backend, configured effort, roles, explicit family. The registry
+  # has no family field yet, so column 5 is empty and the picker classifies by model name.
+  for a in "${LA_ALIASES[@]}"; do
+    case "${LA_SERVE[$a]:-}" in
+      rapid|vllm)
+        la_on_disk "$a" || continue
+        printf '%s\t%s\t%s\t%s\t%s\n' "$a" "$(la_serve_display "$a")" "${LA_EFFORT[$a]:-}" \
+          "$(la_roles_for_alias "$a")" ""
+        ;;
+    esac
+  done
+  exit 0
 fi
 
-MODEL_LABELS=()
-for a in "${SESSION_ALIASES[@]}"; do
-  roles="$(la_roles_for_alias "$a")"
-  [ -n "$roles" ] || roles="untagged"
-  # Try to show manifest-derived context/autocompaction
-  manifest_json="$(la_load_manifest "$a")"
-  ctx_info=""
-  if [ -n "$manifest_json" ]; then
-    effective="$(la_manifest_effective_context "$manifest_json" 2>/dev/null || echo "")"
-    autocompact="$(la_manifest_autocompaction "$effective" 2>/dev/null || echo "")"
-    if [ -n "$effective" ]; then
-      ctx_info=" effective_ctx=$effective"
-      [ -n "$autocompact" ] && ctx_info="${ctx_info} autocompact=$autocompact"
-    fi
-  fi
-  MODEL_LABELS+=("$(
-    printf '%-30s backend=%-20s thinking=%-5s effort=%-6s roles=%s%s' \
-      "$a" \
-      "$(la_serve_display "$a")" \
-      "${LA_THINK[$a]:-?}" \
-      "${LA_EFFORT[$a]:-?}" \
-      "$roles" \
-      "$ctx_info"
-  )")
-done
-
-_pick_from() {   # $1=prompt  $2=default index (1-based)  rest=items -> echoes chosen 1-based index
-  # The list and the prompt go to STDERR on purpose: this function is called inside $(...), which
-  # captures stdout, so anything printed there would be swallowed into the caller's variable
-  # instead of shown to the user (and would then fail the numeric check).
-  local prompt="$1" def="$2"; shift 2
-  local n=$#
-  local i=1
-  for it in "$@"; do printf "  %d) %s\n" "$i" "$it" >&2; i=$((i+1)); done
-  local c; printf "%s [%s]: " "$prompt" "$def" >&2; read -r c; c="${c:-$def}"
-  if ! [[ "$c" =~ ^[0-9]+$ ]] || [ "$c" -lt 1 ] || [ "$c" -gt "$n" ]; then echo "0"; return; fi
-  echo "$c"
-}
-
-# 🛰️  REMOTE cloud-API agents are a DELIBERATELY SEPARATE list from the local models
-# above: a remote agent runs on a third party's hardware over the network, with a
-# different cost model (free-tier quota, not free compute) and a different privacy
-# posture (prompts leave this machine). Mixing them into one menu would make those
-# two very different choices look interchangeable, so `r` opens its own roster.
-_remote_launcher() { echo "${CSL_REMOTE_LAUNCHER:-$CSL_DIR/remote-session.sh}"; }
-
-_launch_remote() {  # opens the remote roster and hands off; never returns on success
-  local rl; rl="$(_remote_launcher)"
-  if [ ! -x "$rl" ]; then
-    echo "csl: remote session launcher not found or not executable: $rl" >&2
-    return 1
-  fi
-
-  # Build arguments to pass through to remote-session.sh to match current CSL state
-  local remote_args=()
-
-  # Watcher is deliberately NOT passed through: remote-session.sh does not support it
-  # (deferred — see docs/ROADMAP.md). Forwarding it would make the remote launch exit 2.
-  if [ "$WATCH" = "1" ]; then
-    echo "note: watcher stays off for remote sessions (not supported yet); local sessions keep it." >&2
-  fi
-
-  # Pass through auto-mode state (cycle to match current state)
-  local i=0
-  while [ $i -lt "$AUTO_MODE_STATE" ]; do
-    remote_args+=("-a")
-    i=$((i + 1))
-  done
-
-  # Pass through telemetry state
-  if [ "$TELEMETRY" = "1" ]; then
-    remote_args+=("-t")
-  fi
-
-  # Pass through local-capable filter state
-  if [ "$LOCAL_CAPABLE" = "1" ]; then
-    remote_args+=("--local-capable-shown")
-  fi
-
-  # Pass through temperature setting if set
-  if [ -n "$TEMPERATURE_CHOICE" ]; then
-    remote_args+=("--temperature" "$TEMPERATURE_CHOICE")
-  fi
-
-  # The stop-hook state travels as an env var, not a flag: remote-session.sh exports it for the
-  # claude child, and the hook reads it as an explicit override.
-  exec env LA_QUEUE_STOP_HOOK="$STOP_HOOK" "$rl" "${remote_args[@]}"
-}
-
-# Map the triple-toggle state to the env vars launch-claude-agent.sh expects.
-# State 0 (blind-trust)  → LA_AUTO_MODE=1 LA_BLIND_AUTO=1
-# State 1 (classifier)   → LA_AUTO_MODE=1 LA_BLIND_AUTO=0
-# State 2 (off)          → LA_AUTO_MODE=0
-_la_auto_mode_val() { [ "$AUTO_MODE_STATE" = "2" ] && echo 0 || echo 1; }
-_la_blind_auto_val() { [ "$AUTO_MODE_STATE" = "0" ] && echo 1 || echo 0; }
-
-_launch() {  # $1=alias  $2=effort(optional)  $3=temperature(optional)
-  local alias="$1" effort="${2:-}" temperature="${3:-}"
-  _apply_session_profile "$alias"
-  if [ "$WATCH" = "1" ]; then
-    if [ "$(uname -s)" = "Darwin" ]; then
-      # $$ is THIS shell's pid, and `exec` below replaces it with the launcher — so the pid the
-      # watcher is told to follow is exactly the launcher pid it will see in pgrep. --attach waits
-      # for that session's port/transcript sidecars, so spawning it first is safe.
-      osascript >/dev/null 2>&1 <<OSA
-tell application "Terminal"
-  do script "'$WATCHER' --attach $$"
-end tell
-OSA
-      echo "🔭 watcher window opened (following pid $$; engine health now, mutations from turn 1)"
-    else
-      echo "🔭 watcher (run in another terminal): $WATCHER --attach $$"
-    fi
-  fi
-  local _am _ba
-  _am="$(_la_auto_mode_val)"
-  _ba="$(_la_blind_auto_val)"
-  local -a env_vars=(
-    "LA_AUTO_MODE=$_am"
-    "LA_BLIND_AUTO=$_ba"
-    "LA_TELEMETRY=$TELEMETRY"
-    "LA_QUEUE_STOP_HOOK=$STOP_HOOK"
-    "LA_ENABLE_MCP=$LA_ENABLE_MCP"
-  )
-  if [ -n "$temperature" ]; then
-    env_vars+=("LA_TEMPERATURE=$temperature")
-  fi
-  if [ -n "$effort" ]; then
-    exec env "${env_vars[@]}" "$LAUNCHER" "$alias" "$effort"
-  else
-    exec env "${env_vars[@]}" "$LAUNCHER" "$alias"
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# Box drawing. The menus are framed with box characters, and every row used to be
-# padded by a HAND-COUNTED printf width ("%-25s" plus literal trailing spaces).
-# That cannot stay aligned once emoji are in the text, for two reasons:
-#
-#   1. an emoji occupies TWO terminal columns but is ONE character, so any
-#      character-count padding is short by one column per emoji;
-#   2. several of these emoji are TWO codepoints -- a base glyph plus U+FE0F
-#      VARIATION SELECTOR-16 (🔭 🛰️ 🔆). Those report East-Asian-width "NA",
-#      so even a width-aware routine misjudges them unless VS16 is handled
-#      explicitly. This is why some rows were off by one and others by two.
-#
-# So rows are padded by measured DISPLAY WIDTH instead of by character count.
-# BOX_INNER is the printable width between the two frame characters; change it
-# once and every row, rule and header follows.
-# ---------------------------------------------------------------------------
-BOX_INNER=62
-
-# _box <kind> [text...] — render framed menu rows in ONE python3 call.
-# Per-row shelling out would put a process launch on every menu repaint; the whole
-# box is cheap to build at once. Each argument is one row; the kind selects the
-# frame pieces. Rows are padded by MEASURED DISPLAY WIDTH, never by character count.
-#   top | mid | bottom          — a horizontal rule
-#   row  <text>...              — left-aligned rows
-#   center <text>...            — centered rows
-_box() {
-  LC_ALL=en_US.UTF-8 python3 -c '
-import sys, unicodedata
-
-INNER = int(sys.argv[1])
-kind = sys.argv[2]
-rows = sys.argv[3:]
-
-
-def width(text):
-    """Display columns. Two traps, both of which bit the hand-counted version:
-    an emoji is one character but two columns, and several of these emoji are a
-    base glyph plus U+FE0F VARIATION SELECTOR-16, which adds no width at all."""
-    total = 0
-    for char in text:
-        if char == "\ufe0f" or unicodedata.combining(char):
-            continue
-        if unicodedata.east_asian_width(char) in ("W", "F") or ord(char) >= 0x1F300:
-            total += 2
-        else:
-            total += 1
-    return total
-
-
-if kind in ("top", "mid", "bottom"):
-    left, right = {"top": "╔╗", "mid": "╠╣", "bottom": "╚╝"}[kind]
-    print(left + "═" * INNER + right)
-else:
-    def truncate(text):
-        """Clip to INNER columns, ellipsis included. Padding cannot rescue a row that is
-        WIDER than the frame, and an overflowing row breaks the box as visibly as a
-        short one -- the Config path and the Remote lane line both did."""
-        if width(text) <= INNER:
-            return text
-        out = ""
-        for char in text:
-            if width(out + char) > INNER - 1:
-                break
-            out += char
-        return out + "…"
-
-    for text in rows:
-        if kind == "center":
-            text = " " * max(0, (INNER - width(text)) // 2) + text
-        text = truncate(text)
-        print("║" + text + " " * max(0, INNER - width(text)) + "║")
-' "$BOX_INNER" "$@"
-}
-
-# ---------------------------------------------------------------------------
-# Home lane selector — the top-level screen that appears before either picker.
-# The user picks local, remote, or quits. Shared state (auto-mode, telemetry,
-# watcher, stop-hook, local-capable) is preserved across lane switches.
-# ---------------------------------------------------------------------------
-_pick_home_lane() {
-  NEXT_LANE=""
-  echo
-  _box top
-  _box center "Claude Code Free-Agents: Session Launcher"
-  _box mid
-  _box row "$(printf '  Config: %s' "$LA_CONFIG_SOURCE")"
-  if [ -n "${LA_FALLBACK_CONFIG:-}" ] && [ "$LA_FALLBACK_CONFIG" = "1" ]; then
-    _box row "  ⚠ Using public fallback defaults. Private models" \
-             "    are not present in this installed copy."
-  fi
-  _box mid
-  # Main session type selection — equal options, no numbered preference
-  # Primary: < = local (points to this machine), # = remote (web/telephone symbol)
-  # Full words 'local'/'remote' accepted but not advertised
-  _box row \
-    "$(printf '  <) %s Local  — MLX models on this machine (%d on disk)' "$SESSION_EMOJI_LOCAL" "${#SESSION_ALIASES[@]}")" \
-    "$(printf '  #) %s Remote — Free/paid cloud API (provider quotas apply)' "$SESSION_EMOJI_FREE_API")"
-  _box mid
-  _box row \
-    "  k) $EMOJI_KEY Install / set up remote API keys" \
-    "  m) $EMOJI_TOOLS Manage Rapid-MLX runtime (install/update/inspect)" \
-    "  q) Quit"
-  _box mid
-  # Toggles — come AFTER main options, same label:value alignment
-  case "$AUTO_MODE_STATE" in
-    0) _am_label="blind-trust" ;;
-    1) _am_label="classifier" ;;
-    2) _am_label="off" ;;
-  esac
-  _box row \
-    "$(printf '  a) %s Auto-mode: %s' "$EMOJI_AUTO_MODE" "$_am_label")" \
-    "$(printf '  t) %s Telemetry: %s' "$EMOJI_TELEMETRY_ON" "$([ "$TELEMETRY" = "1" ] && echo ON || echo OFF)")" \
-    "$(printf '  w) %s Watcher:   %s' "$EMOJI_WATCHER" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)")" \
-    "$(printf '  s) %s Stop hook: %s' "$EMOJI_STOP_HOOK" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)")" \
-    "$(printf '  O) %s Temperature: %s' "🌡️" "${TEMPERATURE_CHOICE:-<provider default>}")"
-  _box bottom
-  printf "Select [</#/k/m/q/a/t/w/s/u/O]: " >&2
-  read -r sel; sel="${sel:-<}"
-  case "$sel" in
-    '<'|local|LOCAL) NEXT_LANE="local" ;;
-    '#'|remote|REMOTE) NEXT_LANE="remote" ;;
-    k|K) NEXT_LANE="install" ;;
-    m|M) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; NEXT_LANE="home" ;;
-    q|Q) NEXT_LANE="quit" ;;
-    a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); NEXT_LANE="home" ;;
-    t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; NEXT_LANE="home" ;;
-    w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; NEXT_LANE="home" ;;
-    s|S) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; NEXT_LANE="home" ;;
-    O|o) NEXT_LANE="home" ;;  # temperature is picked in local picker
-    *) NEXT_LANE="home"; echo "Invalid selection." >&2 ;;
-  esac
-}
-
-# ---------------------------------------------------------------------------
-# Local picker — returns via NEXT_LANE when the user navigates away or quits.
-# ---------------------------------------------------------------------------
-_run_local_picker() {
-  NEXT_LANE="home"
-  while :; do
-    echo
-    _box top
-    _box center "$SESSION_EMOJI_LOCAL Local Session Picker"
-    _box mid
-    _box row "$(printf '  %d model(s) on disk (session-capable)' "${#SESSION_ALIASES[@]}")"
-    _box mid
-    echo "Available models (on disk, session-capable; numbered rows use the configured effort):"
-    for ((i=0; i<${#MODEL_LABELS[@]}; i++)); do
-      printf "  %d) %s\n" "$((i+1))" "${MODEL_LABELS[$i]}"
-    done
-    echo
-    # Navigation first, then lane switching, then settings, then quit — the same
-    # order the remote picker uses, so the two lanes read as one interface.
-    echo "  h) $EMOJI_HOME back to lane selector"
-    echo "  c) $EMOJI_EFFORT choose a listed model × custom effort"
-    echo "  s) $SESSION_EMOJI_FREE_API switch to remote API agents (provider/model; account quotas apply)"
-    echo "     Cerebras trial opt-in: csl remote --include-trials"
-    echo "  k) $EMOJI_KEY set up remote API keys"
-    echo "  M) $EMOJI_TOOLS manage Rapid-MLX runtime (install/update/inspect)"
-    case "$AUTO_MODE_STATE" in
-      0) echo "  a) $EMOJI_AUTO_MODE auto-mode: blind-trust — auto with no classifier (cycle)" ;;
-      1) echo "  a) $EMOJI_AUTO_MODE auto-mode: classifier  — auto with local classifier (cycle)" ;;
-      2) echo "  a) $EMOJI_AUTO_MODE auto-mode: off         — acceptEdits; no classifier (cycle)" ;;
-    esac
-    if [ "$TELEMETRY" = "1" ]; then echo "  t) $EMOJI_TELEMETRY_ON telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
-    else                            echo "  t) $EMOJI_TELEMETRY_ON telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
-    echo "  O) 🌡️  temperature: ${TEMPERATURE_CHOICE:-<provider default>}"
-    if [ "$WATCH" = "1" ]; then echo "  w) $EMOJI_WATCHER watcher: ON  — opens a window following this session (toggle)"
-    else                        echo "  w) $EMOJI_WATCHER watcher: OFF — no monitor window (toggle)"; fi
-    if [ "$STOP_HOOK" = "1" ]; then echo "  p) $EMOJI_STOP_HOOK queued-prompt hook: ON  — wakes the model for prompts you queued (toggle)"
-    else                            echo "  p) $EMOJI_STOP_HOOK queued-prompt hook: OFF — queued prompts may go unanswered (toggle)"; fi
-    if [ "$AUTO_MODE_STATE" = "0" ]; then
-        if [ "$LA_ENABLE_MCP" = "1" ]; then echo "  u) $EMOJI_MCP mcps (blind-trust): ENABLED (toggle)"
-        else                           echo "  u) $EMOJI_MCP mcps (blind-trust): DISABLED (toggle)"; fi
-    fi
-    echo "  q) quit"
-    echo
-    printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
-    case "$sel" in
-      q|Q) NEXT_LANE="quit"; return ;;
-      h|H) NEXT_LANE="home"; return ;;
-      k|K) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
-      M|m) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; continue ;;
-      s|S) NEXT_LANE="remote"; return ;;
-      w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
-      a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
-      b|B) AUTO_MODE_STATE=0; continue ;;  # b shortcut: jump straight to blind-trust
-      t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
-      p|P) if [ "$STOP_HOOK" = "1" ]; then STOP_HOOK=0; else STOP_HOOK=1; fi; continue ;;
-      u|U)
-        if [ "$AUTO_MODE_STATE" = "0" ]; then
-          if [ "$LA_ENABLE_MCP" = "1" ]; then LA_ENABLE_MCP=0; else LA_ENABLE_MCP=1; fi
-          echo "  MCPs in blind-trust mode: $([ "$LA_ENABLE_MCP" = "1" ] && echo ENABLED || echo DISABLED)" >&2
-        else
-          echo "  MCPs in blind-trust mode only available when auto-mode is blind-trust (a to cycle)" >&2
-        fi
-        continue ;;
-      O|o)
-        # Select temperature (0.0 - 2.0, controls randomness/creativity)
-        local temps=("0.0" "0.3" "0.7" "1.0" "1.5" "2.0")
-        local def=3  # 0.7 (balanced)
-        if [[ -n "$TEMPERATURE_CHOICE" ]]; then
-            for idx in "${!temps[@]}"; do
-                [[ "${temps[$idx]}" == "$TEMPERATURE_CHOICE" ]] && def=$((idx + 1)) && break
-            done
-        fi
-        local i=1
-        echo >&2
-        echo "  Temperature (lower = focused, higher = creative):" >&2
-        for temp in "${temps[@]}"; do
-            printf "    %d) %s\n" "$i" "$temp" >&2
-            i=$((i+1))
-        done
-        local c; printf "  Select temperature [%d]: " "$def" >&2; read -r c >&2; c="${c:-$def}"
-        if [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 1 ] && [ "$c" -le ${#temps[@]} ]; then
-            TEMPERATURE_CHOICE="${temps[$((c-1))]}"
-            echo "  Temperature set to: $TEMPERATURE_CHOICE" >&2
-        else
-            echo "  Invalid selection, keeping: ${TEMPERATURE_CHOICE:-<provider default>}" >&2
-        fi
-        continue ;;
-      c|C)
-        echo >&2
-        echo "Models (on disk, session-capable):" >&2
-        mi=$(_pick_from "Model" 1 "${MODEL_LABELS[@]}")
-        [ "$mi" = "0" ] && { echo "Invalid selection."; continue; }
-        chosen="${SESSION_ALIASES[$((mi-1))]}"
-        echo >&2
-        echo "Effort — higher reasons more and takes longer; lower answers sooner:" >&2
-        ei=$(_pick_from "Effort" 3 "${EFFORTS[@]}")
-        [ "$ei" = "0" ] && { echo "Invalid selection."; continue; }
-        _launch "$chosen" "${EFFORTS[$((ei-1))]}" "${TEMPERATURE_CHOICE:-}"
-        ;;
-      *)
-        if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#SESSION_ALIASES[@]}" ]; then
-          echo "Invalid selection."; continue
-        fi
-        chosen="${SESSION_ALIASES[$((sel-1))]}"
-        _launch "$chosen" "${LA_EFFORT[$chosen]:-}" "${TEMPERATURE_CHOICE:-}"
-        ;;
-    esac
-  done
-}
-
-# ---------------------------------------------------------------------------
-# Main loop — owns the interactive state. Each lane runs as a function in this
-# shell so state (AUTO_MODE_STATE, TELEMETRY, WATCH, STOP_HOOK, LOCAL_CAPABLE)
-# is preserved across lane switches without subshell isolation.
-# ---------------------------------------------------------------------------
-NEXT_LANE="home"
-while [ "$NEXT_LANE" != "quit" ]; do
-  case "$NEXT_LANE" in
-    home)   _pick_home_lane ;;
-    local)  _run_local_picker ;;
-    remote)
-      # Delegate to remote-session.sh which now has its own interactive loop.
-      # It returns (does not exec) when the user navigates back or quits.
-      rl="$(_remote_launcher)"
-      if [ ! -x "$rl" ]; then
-        echo "csl: remote session launcher not found or not executable: $rl" >&2
-        NEXT_LANE="home"
-        continue
-      fi
-      # Build args matching current state
-      remote_args=()
-      if [ "$WATCH" = "1" ]; then
-        echo "note: watcher stays off for remote sessions (not supported yet); local sessions keep it." >&2
-      fi
-      i=0
-      while [ $i -lt "$AUTO_MODE_STATE" ]; do
-        remote_args+=("-a")
-        i=$((i + 1))
-      done
-      [ "$TELEMETRY" = "1" ] && remote_args+=("-t")
-      [ "$LOCAL_CAPABLE" = "1" ] && remote_args+=("--local-capable-shown")
-      [ "$LA_ENABLE_MCP" = "1" ] && remote_args+=("--enable-mcp")
-      remote_args+=("--csl-owner")
-      # Run remote picker in current shell (not exec) so we can return here.
-      # remote-session.sh must support --csl-owner to not exec on selection.
-      # CSL_NAV_FILE is keyed on THIS shell's $$, since remote-session.sh runs as a
-      # child process with its own, different $$ — it cannot discover our pid on its own.
-      navfile="/tmp/_csl_nav.$$"
-      rm -f "$navfile"
-      env LA_QUEUE_STOP_HOOK="$STOP_HOOK" CSL_NAV_FILE="$navfile" bash "$rl" "${remote_args[@]}"
-      # Read nav file: first line = navigation target, subsequent lines = KEY=VALUE state sync
-      # Reset NEXT_LANE to read fresh from nav file
-      NEXT_LANE=""
-      if [[ -f "$navfile" ]]; then
-        while IFS= read -r line; do
-          if [[ -z "$NEXT_LANE" ]]; then
-            NEXT_LANE="$line"
-          else
-            case "$line" in
-              AUTO_MODE_STATE=*) AUTO_MODE_STATE="${line#*=}" ;;
-              LOCAL_CAPABLE=*)   LOCAL_CAPABLE="${line#*=}" ;;
-              TELEMETRY=*)       TELEMETRY="${line#*=}" ;;
-              INCLUDE_TRIALS=*)  ;;  # not tracked in csl, remote-only
-              EFFORT_CHOICE=*)   ;;  # not tracked in csl, remote-only
-            esac
-          fi
-        done < "$navfile"
-      else
-        NEXT_LANE="home"
-      fi
-      rm -f "$navfile"
-      # Default if nav file was empty or missing
-      [[ -z "${NEXT_LANE:-}" ]] && NEXT_LANE="home"
-      # Handle "stay" - remain in remote lane with updated state
-      if [[ "$NEXT_LANE" == "stay" ]]; then
-        NEXT_LANE="remote"
-      fi
-      ;;
-    install) python3 "$CSL_DIR/../install/setup-api-keys.py"; NEXT_LANE="home" ;;
-    *) echo "internal error: invalid lane '$NEXT_LANE'" >&2; NEXT_LANE="home" ;;
-  esac
-done
-exit 0
+# No arguments: the shared picker, starting at Home. Zero on-disk local models is a valid
+# first run (Remote, the downloader and the key wizard are all reachable from Home), so this
+# no longer exits early the way the numbered menu did.
+exec "$CSL_DIR/session-picker" home

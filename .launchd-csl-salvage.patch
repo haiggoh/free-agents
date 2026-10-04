@@ -1,0 +1,134 @@
+diff --git a/.claude-plugin/plugin.json b/.claude-plugin/plugin.json
+index 4adf2c9..4a5fae6 100644
+--- a/.claude-plugin/plugin.json
++++ b/.claude-plugin/plugin.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "free-agents",
+-  "version": "0.20.11",
++  "version": "0.21.0",
+   "description": "Run Claude Code on FREE inference \u2014 two equal lanes: local MLX models on Apple Silicon, and free cloud APIs (Gemini, Groq, NVIDIA, and a dozen more). MAIN use: dispatch delegatable sub-tasks from your paid session to a free model, keeping your capable model driving. ALSO: full free sessions via `csl` (local) or `csl remote` (free APIs) \u2014 remote is faster and is the preferred lane for most interactive work; local wins for long unattended runs. Blind-trust auto mode by default with sandbox.enabled bypass. Additive overlay: private paths/keys in a gitignored config.local, settings.json untouched. Works whether Claude Code connects to Anthropic directly or via a gateway.",
+   "author": {
+     "name": "Heiko Brantsch"
+diff --git a/bin/csl b/bin/csl
+index 7c40bec..7193bd5 100755
+--- a/bin/csl
++++ b/bin/csl
+@@ -48,6 +48,7 @@ Subcommands:
+   roles              Show which on-disk model fills each role (operator, reasoner, etc.)
+   setup-remote       Install / set up remote API keys (csl setup-remote [providers])
+   remote             Delegate to remote-session.sh (see 'csl remote --help')
++  launchd            Manage launchd for automatic update checks (install/uninstall/status/run-once)
+ 
+ Environment:
+   CSL_LAUNCHER           Override local launcher (default: launch-claude-agent.sh)
+@@ -637,6 +638,7 @@ _pick_home_lane() {
+   _box row \
+     "  k) $EMOJI_KEY Install / set up remote API keys" \
+     "  m) $EMOJI_TOOLS Manage Rapid-MLX runtime (install/update/inspect)" \
++    "  L) $EMOJI_LAUNCHD Manage launchd (install/uninstall/status/run-once)" \
+     "  q) Quit"
+   _box mid
+   # Toggles — come AFTER main options, same label:value alignment
+@@ -658,6 +660,7 @@ _pick_home_lane() {
+     '#'|remote|REMOTE) NEXT_LANE="remote" ;;
+     k|K) NEXT_LANE="install" ;;
+     m|M) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; NEXT_LANE="home" ;;
++    L|l) NEXT_LANE="launchd_menu" ;;
+     q|Q) NEXT_LANE="quit" ;;
+     a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); NEXT_LANE="home" ;;
+     t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; NEXT_LANE="home" ;;
+@@ -707,6 +710,7 @@ _run_local_picker() {
+         if [ "$LA_ENABLE_MCP" = "1" ]; then echo "  u) $EMOJI_MCP mcps (blind-trust): ENABLED (toggle)"
+         else                           echo "  u) $EMOJI_MCP mcps (blind-trust): DISABLED (toggle)"; fi
+     fi
++    echo "  L) $EMOJI_LAUNCHD Manage launchd (install/uninstall/status/run-once)"
+     echo "  q) quit"
+     echo
+     printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
+@@ -715,6 +719,7 @@ _run_local_picker() {
+       h|H) NEXT_LANE="home"; return ;;
+       k|K) python3 "$CSL_DIR/../install/setup-api-keys.py"; continue ;;
+       M|m) python3 "$CSL_DIR/../install/manage-rapid-mlx.py"; continue ;;
++      L|l) NEXT_LANE="launchd_menu"; continue ;;
+       s|S) NEXT_LANE="remote"; return ;;
+       w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
+       a|A) AUTO_MODE_STATE=$(( (AUTO_MODE_STATE + 1) % 3 )); continue ;;
+@@ -752,6 +757,39 @@ _run_local_picker() {
+   done
+ }
+ 
++# ---------------------------------------------------------------------------
++# Launchd management menu — allows users to manage automatic update checks
++# ---------------------------------------------------------------------------
++_run_launchd_menu() {
++  NEXT_LANE="home"
++  while :; do
++    echo
++    _box top
++    _box center "🔧 Launchd Management (Automatic Update Checks)"
++    _box mid
++    _box row "This manages the weekly launchd job that checks for backend updates."
++    _box mid
++    _box row "  1) 📥 Install launchd plist (weekly checks at Mon 10:17 AM)"
++    _box row "  2) 📤 Uninstall launchd plist"
++    _box row "  3) 📊 Show launchd status"
++    _box row "  4) ▶️  Run update check once now"
++    _box row "  h) 🏠 Back to main menu"
++    _box row "  q) Quit"
++    _box mid
++    printf "Select [1-4/h/q]: " >&2
++    read -r sel; sel="${sel:-h}"
++    case "$sel" in
++      1) python3 "$CSL_DIR/../install/manage-backend.py" --backend rapid-mlx launchd install; continue ;;
++      2) python3 "$CSL_DIR/../install/manage-backend.py" --backend rapid-mlx launchd uninstall; continue ;;
++      3) python3 "$CSL_DIR/../install/manage-backend.py" --backend rapid-mlx launchd status; continue ;;
++      4) python3 "$CSL_DIR/../install/manage-backend.py" --backend rapid-mlx launchd run-once; continue ;;
++      h|H) NEXT_LANE="home"; return ;;
++      q|Q) NEXT_LANE="quit"; return ;;
++      *) echo "Invalid selection." >&2; continue ;;
++    esac
++  done
++}
++
+ # ---------------------------------------------------------------------------
+ # Main loop — owns the interactive state. Each lane runs as a function in this
+ # shell so state (AUTO_MODE_STATE, TELEMETRY, WATCH, STOP_HOOK, LOCAL_CAPABLE)
+@@ -762,6 +800,7 @@ while [ "$NEXT_LANE" != "quit" ]; do
+   case "$NEXT_LANE" in
+     home)   _pick_home_lane ;;
+     local)  _run_local_picker ;;
++    launchd_menu) _run_launchd_menu ;;
+     remote)
+       # Delegate to remote-session.sh which now has its own interactive loop.
+       # It returns (does not exec) when the user navigates back or quits.
+diff --git a/config/emoji.sh b/config/emoji.sh
+index 7883eda..c9fd852 100644
+--- a/config/emoji.sh
++++ b/config/emoji.sh
+@@ -29,6 +29,13 @@ EMOJI_TOOLS="🔧"
+ EMOJI_MODEL_CHOICE="⚙️ " # was 🔆 (sun) — changed to gear
+ EMOJI_MCP="🔌"
+ 
++# Launchd management emojis
++EMOJI_LAUNCHD_INSTALL="📥"
++EMOJI_LAUNCHD_UNINSTALL="📤"
++EMOJI_LAUNCHD_STATUS="📊"
++EMOJI_LAUNCHD_RUN_ONCE="▶️"
++EMOJI_LAUNCHD="🔧"  # same as EMOJI_TOOLS, but explicit for clarity
++
+ # Lowkey picker emojis (shared with csl for consistency) — LK_ prefix for lowkey namespace
+ LK_EMOJI_MODEL="${SESSION_EMOJI_LOCAL}"        # links to SESSION_EMOJI_LOCAL (single source of truth)
+ LK_EMOJI_EFFORT="⚙️ "
+diff --git a/tests/test_csl_menu.sh b/tests/test_csl_menu.sh
+index fb8fb3b..4f50c87 100755
+--- a/tests/test_csl_menu.sh
++++ b/tests/test_csl_menu.sh
+@@ -72,6 +72,7 @@ cp "$REPO/bin/csl" "$SB/bin/csl"
+ cp "$REPO/bin/remote-session.sh" "$SB/bin/remote-session.sh"
+ cp "$REPO/bin/local-capable-filter.sh" "$SB/bin/local-capable-filter.sh"
+ cp "$REPO/config/config-lib.sh" "$SB/config/config-lib.sh"
++cp "$REPO/config/emoji.sh" "$SB/config/emoji.sh"
+ mkdir -p "$SB/install"
+ cat > "$SB/install/setup-api-keys.py" <<'SETUP_STUB'
+ print("KEY_SETUP_REACHED")

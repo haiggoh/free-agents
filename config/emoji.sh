@@ -29,6 +29,44 @@ EMOJI_TOOLS="🔧"
 EMOJI_MODEL_CHOICE="⚙️ " # was 🔆 (sun) — changed to gear
 EMOJI_MCP="🔌"
 EMOJI_BROKEN_MODELS="🚧"  # unworking models filter (remote menu `u`)
+EMOJI_TEMPERATURE="🌡️"     # temperature preset (picker `o`, bash remote menu `O`)
+EMOJI_GO_LAUNCH="🚀"       # picker `g`: launch the last-launched model
+EMOJI_TRIALS="🔖"          # picker remote `h`: limited-trial providers shown/hidden
+EMOJI_LOCAL_CAPABLE="🏷️"   # picker remote `f`: locally-runnable models shown/hidden
+EMOJI_HIDDEN_REPORT="📋"   # hidden-model report (picker `x`, bash `R`)
+
+# Status / progress emojis (picker)
+EMOJI_OK="✅"
+EMOJI_MISSING="❌"
+EMOJI_WARNING="⚠️"
+EMOJI_LOADING="⏳"          # loading animation frame 1 (sand flowing)
+EMOJI_LOADING_DONE="⌛️"    # loading animation frame 2
+
+# API-key provider emojis (picker API keys screen; slug-keyed, upper-cased)
+EMOJI_PROVIDER_GEMINI="🔍"
+EMOJI_PROVIDER_GROQ="⚡"
+EMOJI_PROVIDER_OPENROUTER="🔀"
+EMOJI_PROVIDER_CLOUDFLARE="☁️"
+EMOJI_PROVIDER_MISTRAL="🌊"
+EMOJI_PROVIDER_ZAI="🤖"
+EMOJI_PROVIDER_SILICONFLOW="⚙️"
+EMOJI_PROVIDER_LLM7="7️⃣"
+EMOJI_PROVIDER_KILO="🔑"
+EMOJI_PROVIDER_VERCEL="▲"
+EMOJI_PROVIDER_SAMBANOVA="💎"
+EMOJI_PROVIDER_MODELSCOPE="🔬"
+EMOJI_PROVIDER_CEREBRAS="🧠"
+EMOJI_PROVIDER_NVIDIA="🚦"
+
+# NVIDIA rate limiter emoji
+EMOJI_NVIDIA_RATE_LIMITER="🚦"
+
+# Launchd management emojis (backend update checks; 0.21.0's csl diff, landed in the picker in 0.22.0)
+EMOJI_LAUNCHD_INSTALL="📥"
+EMOJI_LAUNCHD_UNINSTALL="📤"
+EMOJI_LAUNCHD_STATUS="📊"
+EMOJI_LAUNCHD_RUN_ONCE="▶️"
+EMOJI_LAUNCHD="🔧"  # same as EMOJI_TOOLS, but explicit for clarity
 
 # Lowkey picker emojis (shared with csl for consistency) — LK_ prefix for lowkey namespace
 LK_EMOJI_MODEL="${SESSION_EMOJI_LOCAL}"        # links to SESSION_EMOJI_LOCAL (single source of truth)

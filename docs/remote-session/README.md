@@ -97,8 +97,9 @@ Models that are listed in the catalog but do not actually complete a request (40
 every configuration) are recorded in `config/broken-nvidia-models.json`, each with the reason it was
 marked. They are **hidden by default** in the interactive picker and in `--list`:
 
-- **`u`** (🚧 unworking models) toggles them shown/hidden in the remote menu. `B`, the 0.21.9
-  key, still works but is no longer shown, because the session picker reserves `b` for Back.
+- **`u`** (🚧 unworking models) toggles them shown/hidden, in the session picker's Remote
+  screen and in `csl remote`. There is no `B` alias: the picker treats a letter and its capital
+  as the same key, and `b` is Back.
 - `remote-session.sh --show-broken` shows them non-interactively.
 
 To retire or restore a model, edit the JSON: the script reads the file directly, so there is no

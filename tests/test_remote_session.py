@@ -815,21 +815,20 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
         self.assertRegex(shown.stdout, r'(?m)^\s*\d+\s+brokenone\b(?!-)', '--show-broken must reveal it')
 
-        # Interactive menu: hidden by default, `u` reveals it (B is a silent legacy alias), and
-        # the menu advertises u with its emoji, never B (b is Back in the picker).
+        # Interactive menu (csl-owner): hidden by default, `u` reveals it, and there is NO `B`
+        # alias on this branch — the picker treats letters case-insensitively and b is Back.
         def menu(keys):
             r = subprocess.run(['bash', str(self.root / 'bin/remote-session.sh'), '--csl-owner'],
-                                  input=keys, env=dict(self.env, CSL_NAV_FILE=str(self.root / 'nav')),
-                                  text=True, capture_output=True, timeout=60)
+                               input=keys, env=dict(self.env, CSL_NAV_FILE=str(self.root / 'nav')),
+                               text=True, capture_output=True, timeout=60)
             return r.stdout + r.stderr  # the menu renders on stderr
-        row = r'(?m)^\s*\d+\s+brokenone\b(?!-)'
+        row = r'\d+\) Broken One\b'
+        last = lambda out: out.split('Remote cloud-API agents')[-1]
         first = menu('q\n')
         self.assertNotRegex(first, row)
-        self.assertIn('u) 🚧 unworking models: HIDDEN', first)
-        self.assertNotIn('B) ', first)
-        for key in ('u', 'B'):
-            self.assertRegex(menu(f'{key}\nq\n').split('Remote API Session Picker')[-1], row,
-                             f'{key} must reveal unworking models on the next render')
+        self.assertIn('u) 🚧 Unworking: HIDDEN', first)
+        self.assertRegex(last(menu('u\nq\n')), row, 'u must reveal unworking models on the next render')
+        self.assertNotRegex(last(menu('B\nq\n')), row, 'B must not be an alias for u on this branch')
 
         (self.root / 'config/broken-nvidia-models.json').unlink()
         missing = self.run_cli('--list')

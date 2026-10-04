@@ -10,6 +10,7 @@
 # Usage:
 #   download-models.sh                     # interactive picker
 #   download-models.sh --list               # show the catalog and exit
+#   download-models.sh --inventory          # the catalog as TSV for the session picker, then exit
 #   download-models.sh --select ALIAS ...   # non-interactive, repeatable
 #   download-models.sh --all                # everything (honours --group)
 #   download-models.sh --group NAME         # restrict to one group
@@ -68,6 +69,7 @@ while (($#)); do
   case "$1" in
     --force) FORCE=1; NON_AUTH_ACTION=1; shift ;;
     --list) LIST_ONLY=1; NON_AUTH_ACTION=1; shift ;;
+    --inventory) LIST_ONLY=1; INVENTORY=1; NON_AUTH_ACTION=1; shift ;;
     --dry-run) DRY_RUN=1; NON_AUTH_ACTION=1; shift ;;
     --check-auth) CHECK_AUTH=1; shift ;;
     --all) ALL=1; NON_AUTH_ACTION=1; shift ;;
@@ -318,6 +320,15 @@ done
 free_gb=$(df -Pg "$TARGET_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || true)
 printf 'Model downloader — config: %s\nTarget: %s\n' "$LA_CONFIG_SOURCE" "$TARGET_DIR"
 [[ -n $free_gb ]] && printf 'Disk: ~%s GB free\n' "$free_gb"
+if ((${INVENTORY:-0})); then
+  # TSV for the session picker (read-only, like --list): alias, state, size_gb, groups, repo;
+  # then one "#disk<TAB>free_gb<TAB>headroom_gb" line. States are the engine's own words.
+  for i in "${IDX[@]}"; do
+    printf '%s\t%s\t%s\t%s\t%s\n' "${A[i]}" "$(state_for "$i")" "${SIZE[i]}" "${GROUP[i]}" "${REPO[i]}"
+  done
+  printf '#disk\t%s\t%s\n' "${free_gb:-0}" "$HEADROOM_GB"
+  exit 0
+fi
 if ((LIST_ONLY || ${#SELECTED[@]} == 0)); then for i in "${IDX[@]}"; do print_entry "$i"; done; fi
 ((LIST_ONLY)) && exit 0
 

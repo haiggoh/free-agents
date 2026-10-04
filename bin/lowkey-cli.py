@@ -54,6 +54,12 @@ except OSError:
 
 PROGRESS_MODE = "compact"
 PROGRESS_LABEL = "lowkey"
+# OpenAI-style `reasoning_effort` sent with every chat-completions request, or None to
+# omit the field and let the server/template decide. Rapid-MLX validates it against this
+# closed set (api/models.py _VALID_REASONING_EFFORTS) and answers HTTP 400 to anything
+# else — `max` included — so the CLI refuses those values before dispatching.
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
+REASONING_EFFORT = None
 SESSION_DIR = os.path.expanduser(
     os.environ.get(
         "LOCAL_AGENT_SESSION_DIR",
@@ -289,6 +295,8 @@ def dispatch_messages(
             "messages": messages,
             "max_tokens": max_tokens,
         }
+        if REASONING_EFFORT is not None:
+            payload["reasoning_effort"] = REASONING_EFFORT
 
         with open(payload_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
@@ -816,7 +824,7 @@ def autosave_named_session(
 
 
 def main():
-    global PROGRESS_MODE, PROGRESS_LABEL
+    global PROGRESS_MODE, PROGRESS_LABEL, REASONING_EFFORT
 
     parser = argparse.ArgumentParser(
         description="lowkey — dispatch a prompt to a local MLX model"
@@ -835,6 +843,15 @@ def main():
     parser.add_argument("--prompt", required=False, help="Task prompt for the local model")
     parser.add_argument("--files", nargs="*", help="Optional file paths to include as context")
     parser.add_argument("--max-tokens", type=int, default=4096, help="Max tokens to generate")
+    parser.add_argument(
+        "--effort",
+        choices=REASONING_EFFORTS,
+        default=None,
+        help=(
+            "Reasoning effort sent as reasoning_effort on every request "
+            "(conversation and one-shot); omitted when not given"
+        ),
+    )
     parser.add_argument(
         "--max-history-chars",
         type=int,
@@ -879,6 +896,7 @@ def main():
     assistant_label = model_display_label(args.model)
     PROGRESS_MODE = args.progress
     PROGRESS_LABEL = assistant_label
+    REASONING_EFFORT = args.effort
 
     # Default to conversation mode if no arguments provided (no --prompt, no --convo, no other action flags)
     # This allows `lowkey` with no args to launch directly into convo mode
@@ -918,6 +936,7 @@ def main():
         if args.files:
             print(f"  Files          : {', '.join(args.files)}")
         print(f"  Max tokens     : {args.max_tokens}")
+        print(f"  Effort         : {args.effort or 'server default (reasoning_effort omitted)'}")
         print(f"  Max history    : {args.max_history_chars} chars ({'unlimited' if args.max_history_chars == 0 else 'limited'})")
         print(f"  Max file       : {args.max_file_chars} chars ({'unlimited' if args.max_file_chars == 0 else 'limited'})")
         print(f"  Session        : {args.session if args.session else 'none (ephemeral)'}")

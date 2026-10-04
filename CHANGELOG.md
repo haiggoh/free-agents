@@ -2,6 +2,107 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.22.0] — 2026-10-04
+
+### Added — Session picker TUI (Textual) replaces the numbered csl menus
+
+- **Interactive session picker** (`bin/session_picker.py`, `bin/session_picker_model.py`,
+  `bin/session-picker`): Textual UI with accordion navigation, arrow keys, letter shortcuts,
+  grouped menus and persistent settings in `config/session-menu.local.json`
+  (`bin/session_menu_state.py`: repo-local, locked, atomic preference store).
+- **Entry-point wiring**: `bin/csl`, `bin/remote-session.sh` and the new canonical direct launcher
+  `bin/local-session.sh` hand off through the nav file (`--csl-owner` / `CSL_NAV_FILE`).
+- **Rate limiter settings persist**: `rate_limiter.py menu` opens the picker's rate-limiter screen;
+  the limiter reads explicit argument > `LA_NVIDIA_*` env > saved picker setting > default, for every
+  setting including 0.20.11's backoff keys. The saved key `cooldown` is the BASE cooldown. The
+  numbered 12-option `_interactive_menu` from 0.20.11 is replaced by that screen.
+- **Lowkey `--effort`** maps to `reasoning_effort` on every request.
+- Loading indicator with a 200 ms threshold; emoji constants sourced from `config/emoji.sh`.
+
+### Changed — backend manager screen follows 0.21.0's unified CLI
+
+- `v` on Home/lanes opens the **Backend manager** (`install/manage-backend.py --backend <b>`), with a
+  backend selector over all five backends (rapid-mlx default): list releases, install (interactive
+  choice), validate, info, and a **Launchd update checks** sub-screen (status, run once, install /
+  uninstall behind a typed `yes`).
+- The branch's old rows calling `manage-rapid-mlx.py smoke|snapshot|reset|inspect|installed` were
+  dropped: those subcommands no longer exist since 0.21.0. `promote`, `remove` and `check-updates`
+  parse in `manage-backend.py` but are not dispatched by its `main()`, so they are not offered either
+  (a contract test fails if a row calls a subcommand the CLI does not dispatch).
+- **Correction to 0.21.0:** its entry describes an uppercase `L` launchd key on csl Home and the local
+  picker. That `csl` change never reached `main`. It ships here instead, as the Launchd entry inside the
+  Backend manager — not as a top-level key, since shortcuts are case-insensitive (`L` = `l` = Local).
+  The `EMOJI_LAUNCHD*` symbols land in `config/emoji.sh` (single source; `emoji_constants.py` reads it).
+
+### Fixed — "Go last" (`g`) actually works
+
+- `g` only appeared once the lane's model list had loaded, and the list only loads when you press
+  `c`, so on a fresh lane it never appeared. It is now offered whenever a model is remembered.
+  Local needs only the alias and effort. Remote also needs the tier (for `--include-trials`), which
+  is now saved next to the alias in a new optional `last_launched_tier` section, so pressing `g`
+  makes no 5.7 s inventory call. The tier is checked against `remote_provider_core.TIER_CHOICES`.
+- Two latent bugs underneath it:
+  - The picker never loaded or saved `last_launched`, so nothing was remembered across runs.
+  - Pressing `g` returned a launch request that `dispatch()` could not handle, which crashed the
+    app.
+- Tests: Go-last on a fresh lane (both lanes, trial tier), launches record alias and tier, the
+  store round-trips and clears the tier, and a bad tier in the file is refused. Mutation-checked
+  (the old membership check, the tier not being written, the tier being ignored). A headless run of
+  two app lifecycles confirmed that `g` launches the remembered trial model with no inventory call.
+
+### Known regression (not fixed in 0.22.0)
+
+- At picker startup the bash script call is briefly visible before `bin/session-picker` clears the
+  screen (`cbd6302`, the "Last login" clear). What should show is the loading animation alone.
+  This is tracked as waypoint `regression-picker-startup`, together with the pre-`cbd6302` commits
+  to compare against.
+
+### Fixed — stray `p` on Apple Terminal (for real this time)
+
+- `786d487` set `driver_class` as a class attribute, but Textual 3.7.1's `App.__init__` assigns
+  `self.driver_class = driver_class or self.get_driver_class()`, which overwrote it. Under Apple
+  Terminal the picker therefore still used the stock `LinuxDriver` and sent the DECRQM query
+  that shows up as a `p`. The driver is now passed through `super().__init__(driver_class=…)`.
+- `tests/test_stray_p_driver.py` checks the real instance under the picker venv. With
+  `TERM_PROGRAM=Apple_Terminal` it uses `AppleTerminalSafeDriver` and sends neither `?2048$p`
+  nor `?2026$p`; other terminals get `LinuxDriver` and both queries. Mutation-checked: the old
+  class-attribute form fails it. A PTY run confirmed that pressing `p` still toggles the
+  queued-prompt hook (ON → OFF → ON).
+- Still needed: confirmation in a real Apple Terminal window.
+
+### Changed — merged with main through 0.21.10
+
+- Second merge of `main` (merged, not rebased), bringing in 0.21.4–0.21.10: Nemotron and GLM
+  thinking variants, effort → max_tokens, temperature, the broken-model filter, 5-minute remote
+  timeouts, and the remote-session test fixture fixes. None of these were dropped. `bin/csl` and
+  the menu block of `bin/remote-session.sh` keep the branch's picker design. Main's numbered
+  bash menus, which the picker replaced, were not brought back.
+- **Picker Remote screen, new actions:**
+  - **`u` 🚧 Unworking models** hides or shows the models listed in
+    `config/broken-nvidia-models.json`. `remote-session.sh --inventory` gains a 7th column
+    (`broken`), and the picker still accepts the 6-column form.
+  - **`o` 🌡️ Temperature** cycles through provider default → 0.0 → 0.3 → 0.7 → 1.0 → 1.5 → 2.0,
+    and is passed on as `--temperature`.
+  - No `B` alias: `b` is Back, and the picker does not distinguish capitals.
+- **`csl remote` (inline bash menu, `--csl-owner`)** gets the same `u` filter, also with no `B`.
+- **One source for emojis:** every emoji the picker and `csl` draw now comes from
+  `config/emoji.sh` (through `bin/emoji_constants.py` in Python). New constants:
+  - `EMOJI_TEMPERATURE`, `EMOJI_GO_LAUNCH`, `EMOJI_TRIALS`, `EMOJI_LOCAL_CAPABLE`,
+    `EMOJI_HIDDEN_REPORT`
+  - `EMOJI_OK`, `EMOJI_MISSING`, `EMOJI_WARNING`, `EMOJI_LOADING`, `EMOJI_LOADING_DONE`
+  - `EMOJI_PROVIDER_<SLUG>`
+  A test scans the picker source for emoji literals, and a planted one fails it.
+- **Fixed:** on the API Keys screen, SambaNova's `b` collided with Back, and the Home-owned
+  screen crashed with a duplicate-key error. SambaNova is now `y`.
+- **Known gap:** the local lane does not have temperature yet. On `main`, `csl` exports
+  `LA_TEMPERATURE`, but nothing reads it: the local launcher never consumed it. Wiring it up is
+  left for the M4 local-lane work, so the picker does not offer a setting that does nothing.
+
+### Changed — merged with main through 0.21.3
+
+- Branch history merged (not rebased) with `main` at `v0.21.3`; main's 429 exponential backoff and
+  defaults (base 30 s, max 300 s, ×2.0, 5 retries, max_wait 300 s) are kept verbatim.
+
 ## [0.21.10] — 2026-10-03
 
 ### Changed — unworking-models toggle moves from `B` to `u` 🚧
