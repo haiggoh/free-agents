@@ -12,7 +12,7 @@
 set -euo pipefail
 umask 077
 
-REPO="$HOME/ClaudeWorkspace/local-agents"
+REPO="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPECTED_BRANCH="fix/omlx-classifier-prewarm"
 ALIAS="qwen-3.8-operator"
 EXPECTED_SPEC='{"method":"mtp","model":"'"$HOME"'/.models/Qwen3.8-27B-MTP-4bit","num_speculative_tokens":3,"disable_auto_k":false,"continuous_batching":false,"allow_dynamic_membership":false}'

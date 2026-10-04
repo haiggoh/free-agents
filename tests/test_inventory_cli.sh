@@ -72,5 +72,16 @@ run_case --dry-run -- -dash-dir
 printf '%s' "$OUT" | grep -q 'Would create report directory: -dash-dir'
 check $? "-- allows a REPORT_DIR starting with a dash"
 
+# The repo root must come from the script's own location, never a hardcoded checkout path:
+# a copy of the script at a temp path must report that temp path, reached through a symlink.
+copy="$(mktemp -d)/moved-checkout"
+mkdir -p "$copy/bin" && cp "$SCRIPT" "$copy/bin/"
+ln -s "$copy/bin/local-inference-readonly-inventory.zsh" "$copy/link.zsh"
+copy="$(cd -P "$copy" && pwd)"
+SCRIPT="$copy/link.zsh" run_case --dry-run
+printf '%s' "$OUT" | grep -qx "Repository root: $copy"
+check $? "--dry-run resolves the repo root from the script's real location"
+rm -rf "$(dirname "$copy")"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

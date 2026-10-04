@@ -9,7 +9,8 @@ import time
 url = 'https://integrate.api.nvidia.com/v1/chat/completions'
 key = os.environ.get('NVIDIA_API_KEY') or open(os.path.expanduser('~/.api_keys/nvidia')).read().strip()
 
-RESULTS_FILE = '/Users/bra0002h/ClaudeWorkspace/local-agents/config/nvidia-model-test-results.json'
+RESULTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                            'config', 'nvidia-model-test-results.json')
 
 MODELS = [
     'moonshotai/kimi-k3',

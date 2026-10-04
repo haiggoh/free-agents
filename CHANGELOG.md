@@ -2,6 +2,25 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.22.5] — 2026-10-04
+
+### Fixed — no script hardcodes the checkout's location
+
+Groundwork for moving the canonical checkout from `~/ClaudeWorkspace/local-agents` to
+`~/ClaudeWorkspace/free-agents`.
+
+- `bin/local-inference-readonly-inventory.zsh` read the catalog, models dir and git repo from
+  `$HOME/ClaudeWorkspace/local-agents`. It now resolves `repo_root` from its own real path
+  (`${0:A:h:h}`, through the `~/.claude/scripts` symlink), and `--dry-run` prints it.
+- `tests/smoke_qwen38_mtp.sh` and `scripts/test-nvidia-models.py` resolve the repo from their
+  own location instead of an absolute path.
+- `bin/lk` is now a relative symlink to `lowkey`; it was an absolute link into the old checkout,
+  so every clone or worktree pointed back at it.
+- `docs/ROADMAP.md` records the 2026-10-02 renumber (`0.21.0` = backend manager, `0.22.0` = the
+  session picker, now shipped; runtime profiles `0.23.0`, oMLX lanes `0.24.0`).
+- Tests: `test_inventory_cli.sh` runs a copy of the script from a temp path through a symlink and
+  checks that it reports that path (fails if the hardcoded path comes back) — 17 passed.
+
 ## [0.22.4] — 2026-10-04
 
 ### Fixed — copying works in Terminal.app; the loading animation is visible

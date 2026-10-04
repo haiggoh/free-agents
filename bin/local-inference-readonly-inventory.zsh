@@ -22,6 +22,10 @@
 
 emulate -L zsh
 
+# The checkout this script lives in, resolved through any symlink (e.g. ~/.claude/scripts/…),
+# so the inventory follows the repo wherever it is cloned instead of a hardcoded path.
+repo_root="${0:A:h:h}"
+
 usage() {
   cat <<'USAGE'
 local-inference-readonly-inventory.zsh — read-only inventory of the local-inference stack
@@ -102,6 +106,7 @@ fi
 if (( dry_run )); then
   print -r -- "DRY RUN — nothing will be created or written."
   print -r -- "Would create report directory: $output_dir"
+  print -r -- "Repository root: $repo_root"
   print -r -- "Would collect these sections (read-only):"
   # Derived from the script itself so the list cannot drift from what actually runs.
   grep -E '^(section|run_report) "' -- "${0:A}" | sed -E 's/^(section|run_report) "([^"]*)".*/  - \2/'
@@ -436,10 +441,10 @@ config_candidates=(
   "$HOME/.claude/settings.local.json"
   "$HOME/.claude/scripts/download-more-models.sh"
   "$HOME/.claude/scripts/download-more-models.zsh"
-  "$HOME/ClaudeWorkspace/local-agents/config/model-catalog.psv"
-  "$HOME/ClaudeWorkspace/local-agents/config/model-catalog.local.psv"
-  "$HOME/ClaudeWorkspace/local-agents/install/download-models.sh"
-  "$HOME/ClaudeWorkspace/local-agents/pyproject.toml"
+  "$repo_root/config/model-catalog.psv"
+  "$repo_root/config/model-catalog.local.psv"
+  "$repo_root/install/download-models.sh"
+  "$repo_root/pyproject.toml"
 )
 
 for config_path in "${config_candidates[@]}"; do
@@ -475,7 +480,7 @@ model_root_candidates=(
   "$HOME/Library/Caches/huggingface"
   "$HOME/Library/Application Support/ComfyUI/models"
   "$HOME/ComfyUI/models"
-  "$HOME/ClaudeWorkspace/local-agents/models"
+  "$repo_root/models"
 )
 
 for variable_name in HF_HOME HUGGINGFACE_HUB_CACHE TRANSFORMERS_CACHE XDG_CACHE_HOME; do
@@ -850,7 +855,7 @@ git_tsv="$output_dir/git-repositories.tsv"
 print -r -- $'repository\thead\tbranch\torigin\tdirty_entries' > "$git_tsv"
 
 git_search_roots=(
-  "$HOME/ClaudeWorkspace/local-agents"
+  "$repo_root"
   "$HOME/.claude"
   "$HOME/ClaudeWorkspace"
 )
