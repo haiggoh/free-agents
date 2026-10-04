@@ -59,7 +59,16 @@ LOADING_INDICATOR_DELAY_S = 0.2
 
 # Loading animation frames - hourglass alternating between flowing sand (⏳) and done (⌛️)
 LOADING_FRAMES = [ec.EMOJI_LOADING_STR, ec.EMOJI_LOADING_DONE_STR]
-LOADING_INTERVAL = 0.15  # 150ms per frame for smooth alternation
+# One beat = 0.4 s: the hourglass flips every 2 beats (0.8 s) and the dots grow . .. ... every
+# beat. At 0.15 s the two hourglass glyphs (nearly identical at terminal size) blurred into
+# one, so the animation looked static (measured: frames did alternate; user saw no motion).
+LOADING_INTERVAL = 0.4
+LOADING_DOTS = (".  ", ".. ", "...")
+
+
+def loading_label(tick: int, what: str = "loading") -> str:
+    """Hourglass frame, then the label with 1-3 dots padded to a fixed width (nothing jumps)."""
+    return f"{LOADING_FRAMES[(tick // 2) % len(LOADING_FRAMES)]} {what}{LOADING_DOTS[tick % len(LOADING_DOTS)]}"
 
 REPO = BIN.parent
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
@@ -172,7 +181,7 @@ class Picker(App):
     #title { text-style: bold; padding: 0 1; }
     #policy { color: ansi_bright_black; padding: 0 1; }
     #actions { height: auto; padding: 0 1; }
-    #rows { height: 1fr; display: none; }
+    #rows { height: 1fr; display: none; margin-top: 1; }   /* a blank line before the model list */
     #rows.visible { display: block; }
     /* Secondary text is grey (ANSI bright-black): readable on light AND dark terminals.
        Only background and main text are the terminal's own defaults. */
@@ -358,6 +367,9 @@ class Picker(App):
         if not getattr(self, "pending_prompt", None):
             self._rerender_keep_focus()
 
+    def _startup_tick(self):
+        return False
+
     def _waiting_for(self):
         """The inventory the visible screen is waiting on, if any (drives the loading line)."""
         sm = self.screen_model
@@ -370,9 +382,10 @@ class Picker(App):
 
     def _tick_loading(self):
         if self._waiting_for():
-            self._loading_frame = (self._loading_frame + 1) % len(LOADING_FRAMES)
-            self.query_one("#status", Static).update(
-                f"  {LOADING_FRAMES[self._loading_frame]} loading models…")
+            self._loading_frame += 1
+            self.query_one("#status", Static).update("  " + loading_label(self._loading_frame, "loading models"))
+        elif self._startup_tick():
+            pass
 
     def _rerender_keep_focus(self):
         actions_list = self.query_one("#actions", OptionList)
@@ -450,9 +463,8 @@ class Picker(App):
         self.query_one("#title", Static).update(Text(sm.title, style="bold"))
         policy = getattr(sm, "policy", "")
         # Show loading text - immediately on startup, after delay for lazy operations
-        loading_text = self._get_loading_text()
-        if loading_text:
-            policy += f"  {loading_text}loading…"
+        if self._startup_loading:
+            policy += "  " + loading_label(self._loading_frame)
             self._startup_loading = False  # Only show immediate loading on first render
         self.query_one("#policy", Static).update(policy)
         rows = self.query_one("#rows", OptionList)
@@ -509,10 +521,10 @@ class Picker(App):
             display_key = a.key.upper()
             actions_list.add_option(Option(f"  {display_key}) {label}{enabled_str}", id=f"a:{len(self.action_ids)-1}"))
 
-        status = "  ↑↓ move · Enter/click select · ←→ change setting · ← collapse"
+        status = "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies"
         waiting = self._waiting_for() if hasattr(self, "_loading") else None
         if waiting:
-            status = f"  {LOADING_FRAMES[self._loading_frame]} loading models…"
+            status = "  " + loading_label(self._loading_frame, "loading models")
         if isinstance(sm, m.DownloadScreen):
             status = "  ↑↓ move · Space/Enter queue · c review"
         if self.state_warnings:
@@ -876,6 +888,20 @@ class Picker(App):
             self.state_warnings.append(f"last child exited {rc}")
         self.cache.pop("local", None) if isinstance(self.screen_model, m.DownloadScreen) else None
         self.render_model(keep=(f"{'g' if keep[0] == 'group' else 'i'}:{keep[1]}" if keep else None))
+
+    def copy_to_clipboard(self, text: str) -> None:
+        # Textual copies via OSC 52, which macOS Terminal.app ignores (Textual's own docs say
+        # so) — that is why copying silently did nothing. Also hand the text to the system
+        # clipboard: pbcopy on macOS, wl-copy/xclip elsewhere when present. Never fatal.
+        super().copy_to_clipboard(text)
+        import shutil
+        for cmd in (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"]):
+            if shutil.which(cmd[0]):
+                try:
+                    subprocess.run(cmd, input=text, text=True, timeout=3, check=False)
+                except (OSError, subprocess.SubprocessError):
+                    continue
+                break
 
     def action_copy_selection(self):
         text = self.screen.get_selected_text()

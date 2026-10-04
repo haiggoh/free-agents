@@ -50,7 +50,7 @@ class StartupFrame(unittest.TestCase):
         # A venv that does not exist makes the wrapper exit right after the frame, so no Textual
         # is needed and the test cannot hang on a UI.
         buf = pty_bytes({"LA_PICKER_VENV": "/nonexistent"})
-        frame = ("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l  " + loading_emoji() + " loading…").encode()
+        frame = ("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l  " + loading_emoji() + " loading.  ").encode()
         self.assertTrue(buf.startswith(frame), repr(buf[:80]))
 
     def test_early_exit_restores_screen_and_cursor(self):

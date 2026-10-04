@@ -379,6 +379,21 @@ class GroupingTests(unittest.TestCase):
         self.assertTrue(lane.title.startswith(m.ec.SESSION_EMOJI_FREE_API_STR))
         self.assertTrue(m.LocalScreen(m.Settings(), local_models()).title.startswith(m.ec.SESSION_EMOJI_LOCAL_STR))
 
+    def test_loading_label_animates_hourglass_and_dots(self):
+        # Needs the Textual picker module; runs under the picker venv (skips otherwise).
+        try:
+            import session_picker as sp
+        except SystemExit:
+            self.skipTest("Textual absent")
+        frames = [sp.loading_label(t) for t in range(6)]
+        self.assertEqual(len({len(f.split(" ", 1)[1]) for f in frames}), 1, "fixed-width text: nothing jumps")
+        self.assertEqual([f.split(" ", 1)[1] for f in frames[:3]],
+                         ["loading.  ", "loading.. ", "loading..."])
+        glyphs = [f.split(" ", 1)[0] for f in frames]
+        self.assertEqual(glyphs[0], glyphs[1], "the hourglass holds for two beats")
+        self.assertNotEqual(glyphs[1], glyphs[2], "then flips")
+        self.assertGreaterEqual(sp.LOADING_INTERVAL, 0.3, "faster than ~3/s reads as static")
+
     def test_trial_rows_are_marked(self):
         lane = m.RemoteScreen(m.Settings(), remote_agents(), owner=m.DIRECT_ROOT)
         row = [i for g in lane.groups() for i in g.items if i.id == "cerebras-oss"][0]

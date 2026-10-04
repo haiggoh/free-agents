@@ -337,7 +337,7 @@ def _tool_actions(backend: bool = True):
 
 class HomeScreen(Screen):
     # The plugin's identity, not "home": both lanes' icons (user, 2026-10-04).
-    title = f"{ec.SESSION_EMOJI_LOCAL_STR}{ec.SESSION_EMOJI_FREE_API_STR} {SESSION_LAUNCHER_TITLE}"
+    title = f"{SESSION_LAUNCHER_TITLE}  {ec.SESSION_EMOJI_LOCAL_STR} {ec.SESSION_EMOJI_FREE_API_STR}"
 
     @property
     def policy(self):

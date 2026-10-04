@@ -2,6 +2,24 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.22.4] — 2026-10-04
+
+### Fixed — copying works in Terminal.app; the loading animation is visible
+
+- **Copy:** Textual copies through OSC 52, which macOS Terminal.app ignores (Textual's own docs
+  say so), so Ctrl+C/⌘C on a selection did nothing. The picker now also passes the text to the
+  system clipboard (`pbcopy`, or `wl-copy`/`xclip` where those exist). Verified against the real
+  clipboard with `pbpaste`.
+- **Loading animation:** the frames were alternating, but at 0.15 s the two hourglass glyphs
+  blurred into one, so it looked static. Now each beat is 0.4 s: the hourglass flips every two
+  beats, and the dots grow `.` → `..` → `...` at a fixed width. The bash pre-frames match the
+  first beat.
+- **Layout:** the Home title has the lane icons after the headline (`… Session Launcher  🦾 📡`),
+  there is a blank line before the model list, and the status line hints that dragging selects
+  text and ⌘C/Ctrl+C copies.
+- Tests: `test_loading_label_animates_hourglass_and_dots` (fixed width, holds for two beats then
+  flips, interval at least 0.3 s), plus the existing suites.
+
 ## [0.22.3] — 2026-10-04
 
 ### Changed — picker polish (user review of 0.22.2)
