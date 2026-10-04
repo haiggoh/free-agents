@@ -83,10 +83,14 @@ def check_action_table(actions) -> None:
 @dataclass
 class LocalModel:
     alias: str
+    profile_id: str = ""      # unique profile identifier (for multiple profiles per alias)
     effort: str = ""
     roles: str = ""
     family: str = ""          # explicit family from registry metadata, when present
     backend: str = ""
+    thinking: bool = False
+    tool_parser: str = ""
+    reasoning_parser: str = ""
 
 
 @dataclass
@@ -406,14 +410,20 @@ class LocalScreen(Screen):
             self.accordion.set_groups([])
 
     def set_models(self, models: list[LocalModel]):
-        self.models = {mdl.alias: mdl for mdl in models}
+        # Key by profile_id for uniqueness (multiple profiles can share same alias)
+        self.models = {mdl.profile_id or mdl.alias: mdl for mdl in models}
         buckets: dict[str, list] = {}
         for mdl in models:
             buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(mdl)
         order = sorted(buckets, key=lambda f: (f == "Other", f.lower()))
         self.accordion.set_groups([
             Group(f, f"{f} ({len(buckets[f])})",
-                  [Item(x.alias, f"{x.alias}" + (f"  [{x.roles}]" if x.roles else "")) for x in buckets[f]])
+                  [Item(
+                       x.profile_id or x.alias,
+                       f"{x.alias}"
+                       + (f" ({x.backend}" + (", thinking" if x.thinking else "") + ")" if x.backend else "")
+                       + (f"  [{x.roles}]" if x.roles else "")
+                   ) for x in buckets[f]])
             for f in order])
         self._models_loaded = True
 
@@ -460,7 +470,17 @@ class LocalScreen(Screen):
         last_model = self.settings.last_launched_model.get(lane)
         if not last_model:
             return None
-        return self._request_for(last_model)
+        # Find the model by alias if models are loaded
+        mdl = None
+        for m in self.models.values():
+            if m.alias == last_model:
+                mdl = m
+                break
+        if mdl:
+            return self._request_for(mdl.profile_id or mdl.alias, mdl)
+        # Fallback: models not loaded or model not in profiles (legacy alias)
+        # Use the alias directly as before
+        return self._request_for(last_model, LocalModel(alias=last_model))
 
     def _cycle_effort(self):
         self._set_effort(_next(effort_choices("local_session"), self.settings.local_effort))
@@ -475,21 +495,24 @@ class LocalScreen(Screen):
         sel = self.accordion.selected_id
         if not sel or sel not in self.models:
             return None
-        return self._request_for(sel)
+        mdl = self.models[sel]
+        return self._request_for(mdl.profile_id or mdl.alias, mdl)
 
-    def _request_for(self, sel: str):
+    def _request_for(self, profile_id: str, mdl: LocalModel):
         s = self.settings
         if s.last_launched_model is not None:
-            s.last_launched_model["local_session"] = sel
+            s.last_launched_model["local_session"] = mdl.alias
         if s.on_last_launched:
-            s.on_last_launched("local_session", sel, None)
+            s.on_last_launched("local_session", mdl.alias, None)
         env = {"LA_AUTO_MODE": "0" if s.auto_mode == 2 else "1",
                "LA_BLIND_AUTO": "1" if s.auto_mode == 0 else "0",
                "LA_TELEMETRY": "1" if s.telemetry else "0",
                "LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
                "LA_ENABLE_MCP": "1" if s.enable_mcp else "0",
                "CSL_WATCH": "1" if s.watcher else "0"}
-        return LaunchRequest("local", ["local", sel, s.local_effort], env, sel)
+        # Use profile_id for the launcher if available, else alias
+        launch_alias = mdl.profile_id if mdl.profile_id else mdl.alias
+        return LaunchRequest("local", ["local", launch_alias, s.local_effort], env, mdl.alias)
 
 
 class RemoteScreen(Screen):

@@ -82,15 +82,36 @@ def _run(cmd, **kw):
 
 
 def load_local_models() -> list[m.LocalModel]:
-    csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
-    r = _run(["bash", csl, "--inventory"])
-    models = []
-    for line in r.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) >= 4 and parts[0]:
-            models.append(m.LocalModel(alias=parts[0], backend=parts[1], effort=parts[2],
-                                       roles=parts[3], family=parts[4] if len(parts) > 4 else ""))
-    return models
+    # Use the new profile-based loader
+    try:
+        r = _run(["bash", str(BIN / "load-profile-models.py")], timeout=10)
+        import json
+        models_data = json.loads(r.stdout)
+        models = []
+        for d in models_data:
+            models.append(m.LocalModel(
+                alias=d["alias"],
+                profile_id=d["profile_id"],
+                effort=d["effort"],
+                roles=d["roles"],
+                family=d["family"],
+                backend=d["backend"],
+                thinking=d["thinking"],
+                tool_parser=d["tool_parser"],
+                reasoning_parser=d["reasoning_parser"],
+            ))
+        return models
+    except Exception as e:
+        # Fallback to old method if profile loader fails
+        csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
+        r = _run(["bash", csl, "--inventory"])
+        models = []
+        for line in r.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 4 and parts[0]:
+                models.append(m.LocalModel(alias=parts[0], backend=parts[1], effort=parts[2],
+                                           roles=parts[3], family=parts[4] if len(parts) > 4 else ""))
+        return models
 
 
 def load_remote_agents() -> list[m.RemoteAgent]:
