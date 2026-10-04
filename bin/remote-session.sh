@@ -257,15 +257,15 @@ declare -A _LC_VISIBLE
 _lc_load_policy() {
     _LC_VISIBLE=()
     if [[ -z "${_POLICY_JSON:-}" ]]; then return; fi
-    while IFS= read -r line; do
-        [[ -z "$line" ]] && continue
-        local v alias prov mid
-        v="$(printf '%s' "$line" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());print("true" if d.get("visible",True) else "false")')"
-        alias="$(printf '%s' "$line" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());print(d.get("alias",""))')"
-        prov="$(printf '%s' "$line" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());print(d.get("provider",""))')"
-        mid="$(printf '%s' "$line" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());print(d.get("remote_model_id",""))')"
-        _LC_VISIBLE["${prov}|${mid}"]="${v:-true}"
-    done <<< "$(printf '%s' "$_POLICY_JSON" | python3 -c 'import json,sys;d=json.loads(sys.stdin.read());[print(json.dumps(r)) for r in d.get("rows",[])]' 2>/dev/null)"
+    # ONE python call for the whole policy, emitting "provider|model_id<TAB>true|false" per row.
+    # It used to spawn four python processes per row (177 on the 0.22 roster), which cost
+    # 3-5 s on EVERY invocation, --help included, while Terminal still showed the launch line.
+    local key v
+    while IFS=$'\t' read -r key v; do
+        [[ -n "$key" ]] && _LC_VISIBLE["$key"]="${v:-true}"
+    done <<< "$(printf '%s' "$_POLICY_JSON" | python3 -c 'import json,sys
+for r in json.loads(sys.stdin.read()).get("rows",[]):
+    print("%s|%s\t%s" % (r.get("provider",""), r.get("remote_model_id",""), "true" if r.get("visible",True) else "false"))' 2>/dev/null)"
 }
 _lc_is_hidden() {
     # $1=provider $2=model_id -> 0 if hidden, 1 if visible
