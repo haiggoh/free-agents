@@ -58,6 +58,14 @@ EMOJI_PROVIDER_MODELSCOPE="🔬"
 EMOJI_PROVIDER_CEREBRAS="🧠"
 EMOJI_PROVIDER_NVIDIA="🚦"
 
+# Backend manager actions (picker `v` screen)
+EMOJI_BACKEND="🧩"          # backend selector (Rapid-MLX / vllm-mlx / oMLX / llama.cpp / LiteLLM)
+EMOJI_RELEASES="📜"         # list installable releases
+EMOJI_INSTALL="📦"          # install a release
+EMOJI_VALIDATE="🩺"         # validate an installed version
+EMOJI_INFO="ℹ️"             # show info for an installed version
+EMOJI_BACK="↩️"             # generic Back (to the screen that opened this one); Home uses EMOJI_HOME
+
 # NVIDIA rate limiter emoji
 EMOJI_NVIDIA_RATE_LIMITER="🚦"
 

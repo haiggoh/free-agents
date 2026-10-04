@@ -203,6 +203,13 @@ def provider_emoji(slug: str) -> str:
     """EMOJI_PROVIDER_<SLUG> from config/emoji.sh ("" when not defined)."""
     return _EMOJIS.get("EMOJI_PROVIDER_" + slug.upper().replace("-", "_"), "")
 
+EMOJI_BACKEND_STR = _EMOJIS.get("EMOJI_BACKEND", "🧩")
+EMOJI_RELEASES_STR = _EMOJIS.get("EMOJI_RELEASES", "📜")
+EMOJI_INSTALL_STR = _EMOJIS.get("EMOJI_INSTALL", "📦")
+EMOJI_VALIDATE_STR = _EMOJIS.get("EMOJI_VALIDATE", "🩺")
+EMOJI_INFO_STR = _EMOJIS.get("EMOJI_INFO", "ℹ️")
+EMOJI_BACK_STR = _EMOJIS.get("EMOJI_BACK", "↩️")
+
 # Lowkey string versions
 LK_EMOJI_MODEL_STR = _EMOJIS.get("LK_EMOJI_MODEL", "🦾")
 LK_EMOJI_EFFORT_STR = _EMOJIS.get("LK_EMOJI_EFFORT", "⚙️")

@@ -40,7 +40,7 @@ Environment (set by csl or caller):
   LA_AUTO_MODE=1                    Enable auto mode (permission-mode=auto)
   LA_BLIND_AUTO=1                   Blind-trust auto mode (no classifier)
   LA_TELEMETRY=0|1                  Disable/enable nonessential outbound traffic (default 0)
-  LA_QUEUE_STOP_HOOK=0|1            Queued-prompt stop hook (default 1)
+  LA_QUEUE_STOP_HOOK=0|1            Queued-prompt stop hook (default 0)
   LA_STRICT_MCP=true|false          Exclude MCP servers from prompt (default true)
   LA_SKIP_RAM_PREFLIGHT=1           Bypass RAM check (not recommended)
   LA_DRY_RUN_SKIP_PREFLIGHT=1       Skip RAM preflight in --dry-run (quick config inspection)
@@ -445,7 +445,7 @@ export CLAUDE_IS_LOCAL="true"                                 # generic signal t
 export LA_SESSION_LAUNCHER="launch-claude-agent.sh"            # names the launcher for plugin hooks (stop-hook gate)
 # Queued-prompt Stop hook. ON unless the caller (csl `s`, or the env) turned it off.
 # Exported explicitly so the hook sees an unambiguous value rather than inheriting one.
-export LA_QUEUE_STOP_HOOK="${LA_QUEUE_STOP_HOOK:-1}"
+export LA_QUEUE_STOP_HOOK="${LA_QUEUE_STOP_HOOK:-0}"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$LA_MAX_OUTPUT_TOKENS"   # bound worst-case turn time + stay under max_model_len
 # Timeouts: Claude Code's defaults assume a fast cloud endpoint. A local 27B doing a big prefill over
 # many tools routinely exceeds them, causing a "Request timed out" + retry-loop mid-session. Relax both

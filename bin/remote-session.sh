@@ -34,6 +34,14 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# A bare interactive launch opens the picker: draw its loading frame NOW, before ~0.7 s of
+# roster/policy setup, so Terminal's "Last login … ; exit;" lines are covered at once.
+# session-picker draws the same frame again (harmless) and Textual takes over the screen.
+if [[ $# -eq 0 && -t 1 ]]; then
+    _hg="$(sed -n 's/^EMOJI_LOADING="\([^"]*\)".*/\1/p' "$REPO_ROOT/config/emoji.sh" 2>/dev/null)"
+    printf '\033[?1049h\033[2J\033[H\033[?25l  %s loading…' "${_hg:-…}"
+    trap 'printf "\033[?25h\033[?1049l"' EXIT   # cleared below if we hand over to the picker
+fi
 ROSTER="$REPO_ROOT/config/remote-agents.sh"
 KEYS="$SCRIPT_DIR/remote-keys.sh"
 RUNDIR="${TMPDIR:-/tmp}/local-agents-remote"
@@ -1168,6 +1176,7 @@ if [[ -z "$ALIAS" ]]; then
         _picker_args=(remote)
         [[ $INCLUDE_TRIALS -eq 1 ]] && _picker_args+=(--include-trials)
         [[ $LOCAL_CAPABLE_SHOWN -eq 1 ]] && _picker_args+=(--local-capable-shown)
+        trap - EXIT
         exec "$SCRIPT_DIR/session-picker" "${_picker_args[@]}"
     fi
 fi
@@ -1431,7 +1440,7 @@ export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1    # no telemetry through a third party
 export CLAUDE_IS_REMOTE_API="true"                   # distinct from CLAUDE_IS_LOCAL
 export LA_SESSION_LAUNCHER="remote-session.sh"       # names the launcher for plugin hooks (stop-hook gate)
-export LA_QUEUE_STOP_HOOK="${LA_QUEUE_STOP_HOOK:-1}" # queued-prompt Stop hook; ON unless turned off
+export LA_QUEUE_STOP_HOOK="${LA_QUEUE_STOP_HOOK:-0}" # queued-prompt Stop hook; OFF unless turned on (0.22.3)
 export LA_REMOTE_AGENT="$ALIAS"
 export LA_REMOTE_PROVIDER="$PROV"
 

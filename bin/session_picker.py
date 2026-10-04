@@ -163,29 +163,45 @@ TOOLS = {
 
 
 class Picker(App):
+    # R5: no painted background. The `textual-ansi` theme maps background/foreground to the
+    # terminal's own defaults (ANSI 39/49) and ansi_color=True keeps them ANSI instead of
+    # converting to truecolor, so light, dark and custom terminal themes all show through.
+    # R9: the Remote policy line is neutral (muted), not the orange warning colour.
     CSS = """
-    Screen { layout: vertical; background: $background; color: $foreground; }
+    Screen { layout: vertical; background: ansi_default; color: ansi_default; }
     #title { text-style: bold; padding: 0 1; }
-    #policy { color: $warning; padding: 0 1; }
+    #policy { color: ansi_bright_black; padding: 0 1; }
     #actions { height: auto; padding: 0 1; }
     #rows { height: 1fr; display: none; }
     #rows.visible { display: block; }
-    #status { height: auto; padding: 0 1; color: $text-muted; }
+    /* Secondary text is grey (ANSI bright-black): readable on light AND dark terminals.
+       Only background and main text are the terminal's own defaults. */
+    #status { height: auto; padding: 0 1; color: ansi_bright_black; }
     #prompt { display: none; }
-    OptionList { background: $background; color: $foreground; }
-    OptionList:focus { background: $background; color: $foreground; }
-    OptionList .option--highlighted { background: $accent; color: $text; }
-    Input { background: $background; color: $foreground; }
-    Static { background: $background; color: $foreground; }
+    OptionList { background: ansi_default; color: ansi_default; border: none; }
+    OptionList:focus { background: ansi_default; color: ansi_default; border: none; }
+    /* Highlight and hover never paint a block: soft-blue text (ANSI bright-blue, which every
+       light/dark terminal theme tunes to be readable) on the terminal's own background. */
+    OptionList { background-tint: ansi_default 0%; }
+    OptionList > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: none; }
+    OptionList:focus > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: bold; }
+    OptionList > .option-list--option-hover { background: ansi_default; color: ansi_bright_blue; }
+    Input { background: ansi_default; color: ansi_default; }
+    Static { background: ansi_default; color: ansi_default; }
     """
-    BINDINGS = [Binding("ctrl+c", "quit_now", "Quit", show=False, priority=True)]
+    # Ctrl+C copies the mouse selection when there is one and quits otherwise; Cmd+C (super+c,
+    # where the terminal forwards it) always copies. Title/subheadline/status are selectable
+    # Static text, and the terminal's own selection (Option-drag in Terminal.app) still works.
+    BINDINGS = [Binding("ctrl+c", "copy_or_quit", "Copy / Quit", show=False, priority=True),
+                Binding("super+c", "copy_selection", "Copy", show=False, priority=True)]
 
     def __init__(self, start: str, flags: argparse.Namespace):
         # Through the constructor, never a class attribute: Textual 3.7.1's App.__init__ does
         # `self.driver_class = driver_class or self.get_driver_class()`, which overwrote the
         # class attribute 786d487 set, so Apple Terminal still got LinuxDriver (stray `p`).
         # None = let Textual pick its default driver.
-        super().__init__(driver_class=_DRIVER_CLASS)
+        super().__init__(driver_class=_DRIVER_CLASS, ansi_color=True)
+        self.theme = "textual-ansi"
         state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
         self.state_warnings = list(state.warnings)
         self.settings = m.Settings(
@@ -195,7 +211,7 @@ class Picker(App):
             rate_limiter=dict(state.rate_limiter),
             auto_mode=int(os.environ.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
             telemetry=os.environ.get("CSL_TELEMETRY", "0") == "1",
-            stop_hook=os.environ.get("CSL_STOP_HOOK", "1") != "0",
+            stop_hook=os.environ.get("CSL_STOP_HOOK", "0") == "1",   # OFF by default (0.22.3)
             watcher=os.environ.get("CSL_WATCH", "0") == "1",
             enable_mcp=os.environ.get("LA_ENABLE_MCP", "0") == "1",
             include_trials=not flags.exclude_trials,
@@ -207,6 +223,7 @@ class Picker(App):
             last_launched_tier=dict(state.last_launched_tier),
             on_last_launched=self._save_last_launched)
         self.start = start
+        self.nav_stack: list = []          # callers of sub-screens (Back returns to them)
         self.screen_model: m.Screen | None = None
         self.cache: dict = {}
         self.pending_prompt = None
@@ -295,6 +312,75 @@ class Picker(App):
 
     def on_mount(self):
         self.goto(m.Nav(self.start, m.DIRECT_ROOT))
+        # Menu first, then warm the model lists in the background (plan R13/R14): by the time
+        # the user presses `c` the slow remote inventory (~1-6 s) is usually already cached.
+        self.call_after_refresh(self._prefetch, ("local", "remote"))
+        self.set_interval(LOADING_INTERVAL, self._tick_loading)
+
+    # --- background inventory ----------------------------------------------------------------
+    LOADERS = {"local": "load_local_models", "remote": "load_remote_agents"}
+
+    def _prefetch(self, kinds):
+        import threading
+        if not hasattr(self, "_loading"):
+            self._loading = set()
+        for kind in kinds:
+            if kind in self.cache or kind in self._loading:
+                continue                      # cached, or a load is already running (coalesce)
+            self._loading.add(kind)
+            threading.Thread(target=self._load_in_thread, args=(kind,), daemon=True).start()
+
+    def _load_in_thread(self, kind):
+        try:
+            data, err = globals()[self.LOADERS[kind]](), None
+        except Exception as exc:              # surfaced as a status warning, never swallowed
+            data, err = [], f"{kind} model list failed to load: {exc}"
+        self.call_from_thread(self._loaded, kind, data, err)
+
+    def _loaded(self, kind, data, err):
+        self._loading.discard(kind)
+        self.cache[kind] = data
+        if err and err not in self.state_warnings:
+            self.state_warnings.append(err)
+        sm = self.screen_model
+        # Fill an already-open list in place; otherwise just refresh counts/labels.
+        if isinstance(sm, m.RemoteScreen) and kind == "remote" and not sm._models_loaded:
+            sm.agents = data
+            sm._regroup()
+        elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
+            sm.set_models(data)
+            sm._models_loaded = True
+        elif isinstance(sm, m.HomeScreen):
+            if kind == "local":
+                sm.local_count = len(data)
+            else:
+                sm.remote_count = len(data)
+        if not getattr(self, "pending_prompt", None):
+            self._rerender_keep_focus()
+
+    def _waiting_for(self):
+        """The inventory the visible screen is waiting on, if any (drives the loading line)."""
+        sm = self.screen_model
+        loading = getattr(self, "_loading", set())
+        if isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and "remote" in loading:
+            return "remote"
+        if isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and getattr(sm, "_choose_model_visible", True) and "local" in loading:
+            return "local"
+        return None
+
+    def _tick_loading(self):
+        if self._waiting_for():
+            self._loading_frame = (self._loading_frame + 1) % len(LOADING_FRAMES)
+            self.query_one("#status", Static).update(
+                f"  {LOADING_FRAMES[self._loading_frame]} loading models…")
+
+    def _rerender_keep_focus(self):
+        actions_list = self.query_one("#actions", OptionList)
+        idx = actions_list.highlighted
+        if self.focused is actions_list and idx is not None and idx < len(getattr(self, "action_ids", [])):
+            self._rerender_keep_action(idx)
+        else:
+            self.render_model(keep=(lambda h: f"{'g' if h[0] == 'group' else 'i'}:{h[1]}" if h else None)(self._highlighted()))
 
     # --- navigation ------------------------------------------------------------------------
     def build(self, nav: m.Nav) -> m.Screen:
@@ -317,24 +403,6 @@ class Picker(App):
         if nav.target == "api_keys":
             return m.APIKeysScreen(s, nav.owner)
         raise ValueError(nav.target)
-
-    def _ensure_inventory_loaded(self, screen_type: str) -> None:
-        """Lazy-load inventory for the given screen type if not already cached."""
-        if screen_type in ("home", "local", "lowkey", "runtime_manager"):
-            if "local" not in self.cache:
-                op_id = self._start_pending_op()
-                self.cache["local"] = load_local_models()
-                self._clear_pending_op(op_id)
-        if screen_type in ("home", "remote"):
-            if "remote" not in self.cache:
-                op_id = self._start_pending_op()
-                self.cache["remote"] = load_remote_agents()
-                self._clear_pending_op(op_id)
-        if screen_type == "download":
-            if "catalog" not in self.cache:
-                op_id = self._start_pending_op()
-                self.cache["catalog"] = load_catalog()
-                self._clear_pending_op(op_id)
 
     def goto(self, nav: m.Nav):
         # Build screen WITHOUT loading inventory (lazy loading)
@@ -381,8 +449,6 @@ class Picker(App):
         sm = self.screen_model
         self.query_one("#title", Static).update(Text(sm.title, style="bold"))
         policy = getattr(sm, "policy", "")
-        if isinstance(sm, m.RemoteScreen) and sm.hidden_count():
-            policy += f"  ({sm.hidden_count()} hidden by filters)"
         # Show loading text - immediately on startup, after delay for lazy operations
         loading_text = self._get_loading_text()
         if loading_text:
@@ -443,7 +509,10 @@ class Picker(App):
             display_key = a.key.upper()
             actions_list.add_option(Option(f"  {display_key}) {label}{enabled_str}", id=f"a:{len(self.action_ids)-1}"))
 
-        status = "  ↑↓ move · Enter open/launch · ← collapse"
+        status = "  ↑↓ move · Enter/click select · ←→ change setting · ← collapse"
+        waiting = self._waiting_for() if hasattr(self, "_loading") else None
+        if waiting:
+            status = f"  {LOADING_FRAMES[self._loading_frame]} loading models…"
         if isinstance(sm, m.DownloadScreen):
             status = "  ↑↓ move · Space/Enter queue · c review"
         if self.state_warnings:
@@ -481,22 +550,38 @@ class Picker(App):
         action = self.action_ids[action_index]
         if not action.enabled:
             return
+        if action.step is not None:
+            self._step_action(action_index, +1)
+            return
         result = action.run()
         if result:
             self.dispatch(result, None)
+        else:
+            self._rerender_keep_action(action_index)
+
+    def _step_action(self, action_index: int, direction: int):
+        action = self.action_ids[action_index]
+        if not action.enabled or action.step is None:
+            return
+        action.step(direction)
+        self._rerender_keep_action(action_index)
+
+    def _rerender_keep_action(self, action_index: int):
+        """Redraw with the highlight left on the same action row (settings change in place)."""
+        actions_list = self.query_one("#actions", OptionList)
+        key = self.action_ids[action_index].key if action_index < len(self.action_ids) else None
+        self.render_model()
+        for i, a in enumerate(self.action_ids):
+            if a.key == key:
+                actions_list.highlighted = i
+                break
 
     def _maybe_load_inventory(self, screen_type: str) -> None:
-        """Lazy-load inventory for the given screen type if not already cached."""
-        if screen_type in ("home", "local", "lowkey"):
-            if "local" not in self.cache:
-                op_id = self._start_pending_op()
-                self.cache["local"] = load_local_models()
-                self._clear_pending_op(op_id)
-        if screen_type == "remote":
-            if "remote" not in self.cache:
-                op_id = self._start_pending_op()
-                self.cache["remote"] = load_remote_agents()
-                self._clear_pending_op(op_id)
+        """Never blocks the UI: a cache miss starts (or joins) the background load, and
+        _loaded() fills the list when it lands while the loading line animates."""
+        kind = "remote" if screen_type == "remote" else "local"
+        if kind not in self.cache:
+            self._prefetch((kind,))
 
     def _handle_lazy_load(self) -> bool:
         """Check if current screen needs lazy loading and trigger it.
@@ -583,6 +668,14 @@ class Picker(App):
                     # At bottom of rows, could wrap or stay - let default handle
                     pass
 
+        if key in ("left", "right"):
+            actions_list = self.query_one("#actions", OptionList)
+            if self.focused is actions_list and actions_list.highlighted is not None:
+                idx = actions_list.highlighted
+                if idx < len(self.action_ids) and self.action_ids[idx].step is not None:
+                    self._step_action(idx, +1 if key == "right" else -1)
+                    event.stop()
+                    return
         # Handle group expand/collapse when on a group row (only when rows list is focused)
         if key in ("left", "right"):
             rows_list = self.query_one("#rows", OptionList)
@@ -610,8 +703,12 @@ class Picker(App):
 
         if key == "escape" or (len(key) == 1 and key.isalpha() and key.islower()):
             keep = self._highlighted()
+            idx = next((i for i, a in enumerate(getattr(self, "action_ids", [])) if a.key == key), None)
             result = sm.handle_key(key)
             event.stop()
+            if result is None and idx is not None:
+                self._rerender_keep_action(idx)
+                return
             self.dispatch(result, keep)
 
     def dispatch(self, result, keep=None):
@@ -632,14 +729,31 @@ class Picker(App):
         if target.startswith("prompt:"):
             self._open_prompt(target)
             return
-        # Tool screens reached from Home get Back; reached from a lane they keep the lane's owner.
+        if result is m.BACK or target == "back":
+            self._go_back()
+            return
         owner = result.owner
-        if target in ("rate_limiter", "runtime") and isinstance(self.screen_model, m.HomeScreen):
-            owner = m.HOME_OWNED
+        # Tool/settings screens are sub-screens of whatever opened them: Back returns there
+        # (Home or the exact lane), never Quit — even when the lane itself was a direct root.
+        if target in self.SUB_TARGETS:
+            self.nav_stack.append(self.nav)
+            caller = self.screen_model
+            self.goto(m.Nav(target, m.SUB))
+            self.screen_model.back_label = (
+                f"{ec.EMOJI_HOME_STR} Back to Home" if isinstance(caller, m.HomeScreen)
+                else f"{ec.EMOJI_BACK_STR} Back to " + (caller.title.split(" ", 1)[-1] if getattr(caller, "title", "") else "previous"))
+            self.render_model()
+            return
         if target == "home":
             self.goto(m.Nav("home", m.DIRECT_ROOT))
             return
         self.goto(m.Nav(target, owner))
+
+    SUB_TARGETS = ("rate_limiter", "runtime_manager", "runtime", "api_keys", "runtime_launchd")
+
+    def _go_back(self):
+        prev = self.nav_stack.pop() if self.nav_stack else m.Nav("home", m.DIRECT_ROOT)
+        self.goto(prev)
 
     def run_tool(self, target):
         if target == "tool:download":
@@ -660,34 +774,6 @@ class Picker(App):
             self.run_child(TOOLS["tool:keys:add"](slug), pause=True)
             return
         self.run_child(TOOLS[target](), pause=True)
-
-    def _activate_action_next(self, action_index: int):
-        """Cycle action choice forward (right arrow) - for boolean toggle or choice cycling."""
-        if not hasattr(self, 'action_ids') or action_index >= len(self.action_ids):
-            return
-        action = self.action_ids[action_index]
-        if not action.enabled:
-            return
-        # If it's a boolean toggle action, flip it
-        # For choice actions, cycle forward
-        # This will be handled by the action's run function returning a result
-        result = action.run()
-        if result:
-            self.dispatch(result, None)
-
-    def _activate_action_prev(self, action_index: int):
-        """Cycle action choice backward (left arrow) - for boolean toggle or choice cycling."""
-        if not hasattr(self, 'action_ids') or action_index >= len(self.action_ids):
-            return
-        action = self.action_ids[action_index]
-        if not action.enabled:
-            return
-        # For boolean toggles, left also toggles (same as right)
-        # For choice actions, cycle backward
-        # The action's run function should handle the direction if needed
-        result = action.run()
-        if result:
-            self.dispatch(result, None)
 
     # --- inline prompts (text entry, confirmations) ------------------------------------------
     PROMPTS = {"prompt:session": "Session name (letters, digits, - _; empty = ephemeral):",
@@ -790,6 +876,18 @@ class Picker(App):
             self.state_warnings.append(f"last child exited {rc}")
         self.cache.pop("local", None) if isinstance(self.screen_model, m.DownloadScreen) else None
         self.render_model(keep=(f"{'g' if keep[0] == 'group' else 'i'}:{keep[1]}" if keep else None))
+
+    def action_copy_selection(self):
+        text = self.screen.get_selected_text()
+        if text:
+            self.copy_to_clipboard(text)
+            self.screen.clear_selection()
+            self.notify("Copied", timeout=1.5)
+        return bool(text)
+
+    def action_copy_or_quit(self):
+        if not self.action_copy_selection():
+            self.action_quit_now()
 
     def action_quit_now(self):
         self.exit(130)

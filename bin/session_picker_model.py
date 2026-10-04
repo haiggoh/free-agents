@@ -39,6 +39,10 @@ class Nav:
 
 
 QUIT = Nav("quit")
+# A tool/settings screen opened FROM another screen (Home or a lane). Its nav row is
+# "Back to <caller>", never Quit; the app keeps the caller stack and restores it.
+SUB = "sub"
+BACK = Nav("back")
 
 
 @dataclass
@@ -48,6 +52,21 @@ class Action:
     run: Callable[[], object]
     enabled: bool = True
     section: str = "settings"
+    # Settings rows (toggle / multi-choice): step(+1|-1). Enter, click and Right call +1, Left
+    # calls -1. None = a plain action (navigation, launch, tool) that only Enter/click runs.
+    step: Callable[[int], object] | None = None
+
+
+def setting(key: str, label: str, choices, get: Callable[[], object], put: Callable[[object], object],
+            enabled: bool = True) -> Action:
+    """A row whose value cycles through `choices` in either direction (wraps)."""
+    def step(d: int):
+        try:
+            i = list(choices).index(get())
+        except ValueError:
+            i = -1 if d > 0 else 0
+        put(list(choices)[(i + d) % len(choices)])
+    return Action(key, label, lambda: step(1), enabled=enabled, step=step)
 
 
 def check_action_table(actions) -> None:
@@ -133,7 +152,7 @@ class Settings:
     remote_effort: str = sms.DEFAULT_EFFORT["remote_api_session"]
     auto_mode: int = 0
     telemetry: bool = False
-    stop_hook: bool = True
+    stop_hook: bool = False          # queued-prompt hook OFF by default (user, 0.22.3)
     watcher: bool = False
     enable_mcp: bool = False
     include_trials: bool = True      # interactive visibility only; direct CLI keeps its guard
@@ -257,10 +276,14 @@ class Screen:
     def groups(self):
         return self.accordion.groups
 
+    back_label = "Back"
+
     def nav_actions(self):
         acts = []
-        if self.owner == HOME_OWNED:
-            acts.append(Action("b", "Back to Home", lambda: Nav("home", HOME_OWNED), section="nav"))
+        if self.owner == SUB:
+            acts.append(Action("b", self.back_label, lambda: BACK, section="nav"))
+        elif self.owner == HOME_OWNED:
+            acts.append(Action("b", f"{ec.EMOJI_HOME_STR} Back to Home", lambda: Nav("home", HOME_OWNED), section="nav"))
         else:
             acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
         return acts
@@ -270,6 +293,8 @@ class Screen:
 
     def handle_key(self, key: str):
         if key == "escape":
+            if self.owner == SUB:
+                return BACK
             return Nav("home", HOME_OWNED) if self.owner == HOME_OWNED else QUIT
         for action in self.actions():
             if action.key == key:
@@ -282,30 +307,50 @@ class Screen:
         return None
 
 
+def _toggle(s, attr):
+    return (False, True), (lambda: getattr(s, attr)), (lambda v: setattr(s, attr, v))
+
+
 def _common_toggles(s: Settings, include_watcher: bool):
     acts = [
-        Action("a", f"Auto-mode: {AUTO_MODE_LABELS[s.auto_mode]}",
-               lambda: setattr(s, "auto_mode", (s.auto_mode + 1) % 3)),
-        Action("t", f"Telemetry: {'ON' if s.telemetry else 'OFF'}",
-               lambda: setattr(s, "telemetry", not s.telemetry)),
-        Action("p", f"Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
-               lambda: setattr(s, "stop_hook", not s.stop_hook)),
+        setting("a", f"{ec.EMOJI_AUTO_MODE_STR} Auto-mode: {AUTO_MODE_LABELS[s.auto_mode]}",
+                (0, 1, 2), lambda: s.auto_mode, lambda v: setattr(s, "auto_mode", v)),
+        setting("t", f"{ec.EMOJI_TELEMETRY_ON_STR} Telemetry: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry")),
+        setting("p", f"{ec.EMOJI_STOP_HOOK_STR} Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
+                *_toggle(s, "stop_hook")),
     ]
     if include_watcher:
-        acts.append(Action("w", f"Watcher: {'ON' if s.watcher else 'OFF'}",
-                           lambda: setattr(s, "watcher", not s.watcher)))
+        acts.append(setting("w", f"{ec.EMOJI_WATCHER_STR} Watcher: {'ON' if s.watcher else 'OFF'}",
+                            *_toggle(s, "watcher")))
     return acts
 
 
-def _tool_actions():
-    return [Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section="tools"),
+def _tool_actions(backend: bool = True):
+    # The backend manager drives LOCAL runtimes (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM),
+    # so the Remote lane does not offer it (user, 2026-10-04).
+    acts = [Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section="tools"),
             Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
                    lambda: Nav("runtime_manager"), section="tools"),
             Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section="tools")]
+    return acts if backend else [a for a in acts if a.key != "v"]
 
 
 class HomeScreen(Screen):
-    title = f"{ec.EMOJI_HOME_STR} {SESSION_LAUNCHER_TITLE}"
+    # The plugin's identity, not "home": both lanes' icons (user, 2026-10-04).
+    title = f"{ec.SESSION_EMOJI_LOCAL_STR}{ec.SESSION_EMOJI_FREE_API_STR} {SESSION_LAUNCHER_TITLE}"
+
+    @property
+    def policy(self):
+        # Identity subheadline, then the 0.21 menu's config line.
+        import os
+        line = "Claude Code on free inference — local MLX models on this Mac, or free cloud APIs"
+        src = os.environ.get("LA_CONFIG_SOURCE", "")
+        if src:
+            line += f"\nConfig: {src}"
+        if os.environ.get("LA_FALLBACK_CONFIG") == "1":
+            line += (f"\n{ec.EMOJI_WARNING_STR} Using public fallback defaults. Private models "
+                     "are not present in this installed copy.")
+        return line
 
     def __init__(self, settings: Settings, local_count: int | None = None, remote_count: int | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner=owner)
@@ -340,7 +385,14 @@ class LaunchRequest:
 
 
 class LocalScreen(Screen):
-    title = "Local Session Picker"
+    title = f"{ec.SESSION_EMOJI_LOCAL_STR} Local Session Picker"
+
+    @property
+    def policy(self):
+        # Restored 0.21 subheadline: "N model(s) on disk (session-capable)".
+        n = len(self.models) if getattr(self, "_models_loaded", False) and self.models else None
+        return (f"{n} model(s) on disk (session-capable)" if n is not None
+                else "MLX models on this machine")
     lane_key = "l"
 
     def __init__(self, settings: Settings, models: list[LocalModel] | None = None, owner: str = DIRECT_ROOT):
@@ -379,15 +431,16 @@ class LocalScreen(Screen):
         s = self.settings
         mcp_ok = s.auto_mode == 0
         acts = [
-            Action("e", f"{ec.EMOJI_EFFORT_STR} Effort: {s.local_effort}", self._cycle_effort),
+            setting("e", f"{ec.EMOJI_EFFORT_STR} Effort: {s.local_effort}", effort_choices("local_session"),
+                    lambda: s.local_effort, lambda v: self._set_effort(v)),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR}  Remote free API sessions", lambda: Nav("remote", self.owner),
                    section="hidden"),
-            Action("m", (f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
-                         f"{ec.EMOJI_MCP_STR}  MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
-                   lambda: setattr(s, "enable_mcp", not s.enable_mcp), enabled=mcp_ok),
+            setting("m", (f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
+                          f"{ec.EMOJI_MCP_STR}  MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
+                    *_toggle(s, "enable_mcp"), enabled=mcp_ok),
         ]
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
@@ -410,8 +463,11 @@ class LocalScreen(Screen):
         return self._request_for(last_model)
 
     def _cycle_effort(self):
+        self._set_effort(_next(effort_choices("local_session"), self.settings.local_effort))
+
+    def _set_effort(self, value):
         s = self.settings
-        s.local_effort = _next(effort_choices("local_session"), s.local_effort)
+        s.local_effort = value
         if s.on_effort_saved:
             s.on_effort_saved("local_session", s.local_effort)
 
@@ -437,12 +493,18 @@ class LocalScreen(Screen):
 
 
 class RemoteScreen(Screen):
-    title = "Remote Free API Session Picker"
+    title = f"{ec.SESSION_EMOJI_FREE_API_STR} Remote API Session Picker"
     lane_key = "r"
-    # Neutral short explanatory subheadline (R9: no bright orange warning)
-    policy = ("Prompts and file contents leave this machine. A saved key does not prove a "
-              "free quota or no billing; trial rows may cost money. Effort is a request, "
-              "not a guarantee.")
+
+    @property
+    def policy(self):
+        # Restored 0.21 subheadline: "N model(s) visible (hidden: M)". The cloud/billing
+        # disclaimer is gone by user decision (2026-10-04); per-row "trial — possible cost"
+        # and "no key" labels still say what matters where it matters.
+        if not self._models_loaded:
+            return "Free/paid cloud API (provider quotas apply)"
+        vis = sum(1 for a in self.agents if self._visible(a))
+        return f"{vis} model(s) visible  (hidden: {self.hidden_count()})"
 
     def __init__(self, settings: Settings, agents: list[RemoteAgent] | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
@@ -493,6 +555,14 @@ class RemoteScreen(Screen):
         setattr(self.settings, attr, not getattr(self.settings, attr))
         self._regroup()
 
+    def _filter(self, key, label, attr):
+        s = self.settings
+        def put(v):
+            setattr(s, attr, v)
+            self._regroup()
+        return setting(key, f"{label}: {'SHOWN' if getattr(s, attr) else 'HIDDEN'}", (False, True),
+                       lambda: getattr(s, attr), put)
+
     def _toggle_choose_model(self):
         """Toggle the model list visibility."""
         self._choose_model_visible = not self._choose_model_visible
@@ -506,22 +576,20 @@ class RemoteScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            Action("e", f"{ec.EMOJI_EFFORT_STR} Effort: {_effort_label(s.remote_effort)}", self._cycle_effort),
-            Action("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
-                   self._cycle_temperature),
+            setting("e", f"{ec.EMOJI_EFFORT_STR} Effort: {_effort_label(s.remote_effort)}",
+                    effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v)),
+            setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
+                    TEMPERATURES, lambda: s.remote_temperature, lambda v: setattr(s, "remote_temperature", v)),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
             Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
-            Action("h", f"{ec.EMOJI_TRIALS_STR}  Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
-                   lambda: self._toggle("include_trials")),
-            Action("f", f"{ec.EMOJI_LOCAL_CAPABLE_STR}  Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
-                   lambda: self._toggle("local_capable_shown")),
+            self._filter("h", f"{ec.EMOJI_TRIALS_STR}  Limited trials", "include_trials"),
+            self._filter("f", f"{ec.EMOJI_LOCAL_CAPABLE_STR}  Locally-runnable models", "local_capable_shown"),
             # u, not B: b is Back and Shift-letters are the same key in this picker.
-            Action("u", f"{ec.EMOJI_BROKEN_MODELS_STR} Unworking models: {'SHOWN' if s.show_broken else 'HIDDEN'}",
-                   lambda: self._toggle("show_broken")),
+            self._filter("u", f"{ec.EMOJI_BROKEN_MODELS_STR} Unworking models", "show_broken"),
             Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
-            Action("m", f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
-                   lambda: setattr(s, "enable_mcp", not s.enable_mcp)),
+            setting("m", f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
+                    *_toggle(s, "enable_mcp")),
         ]
         # Add "Launch last model" if we have a saved last model
         last_remote = s.last_launched_model.get("remote_api_session") if s.last_launched_model else None
@@ -531,7 +599,7 @@ class RemoteScreen(Screen):
             acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {last_remote} session",
                            lambda: self._launch_last("remote_api_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=False)
-        acts += _tool_actions()
+        acts += _tool_actions(backend=False)
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
@@ -550,8 +618,11 @@ class RemoteScreen(Screen):
         s.remote_temperature = _next(TEMPERATURES, s.remote_temperature)
 
     def _cycle_effort(self):
+        self._set_effort(_next(effort_choices("remote_api_session"), self.settings.remote_effort))
+
+    def _set_effort(self, value):
         s = self.settings
-        s.remote_effort = _next(effort_choices("remote_api_session"), s.remote_effort)
+        s.remote_effort = value
         if s.on_effort_saved:
             s.on_effort_saved("remote_api_session", s.remote_effort)
 
@@ -670,11 +741,11 @@ class RuntimeManagerScreen(Screen):
     def actions(self):
         b = self.settings.runtime_backend
         acts = [
-            Action("c", f"Backend: {b}", self._cycle_backend),
-            Action("r", "List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
-            Action("i", "Install a release (choose from the list)", lambda: Nav("tool:rt-install"), section="tools"),
-            Action("t", "Validate an installed version", lambda: Nav("prompt:rt-validate"), section="tools"),
-            Action("f", "Show info for an installed version", lambda: Nav("prompt:rt-info"), section="tools"),
+            Action("c", f"{ec.EMOJI_BACKEND_STR} Backend: {b}", self._cycle_backend),
+            Action("r", f"{ec.EMOJI_RELEASES_STR} List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
+            Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", lambda: Nav("tool:rt-install"), section="tools"),
+            Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", lambda: Nav("prompt:rt-validate"), section="tools"),
+            Action("f", f"{ec.EMOJI_INFO_STR} Show info for an installed version", lambda: Nav("prompt:rt-info"), section="tools"),
             Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", self.owner),
                    section="tools"),
         ]
@@ -770,11 +841,11 @@ class RuntimeScreen(Screen):
     def actions(self):
         b = self.settings.runtime_backend
         acts = [
-            Action("c", f"Backend: {b}", self._cycle_backend),
-            Action("r", "List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
-            Action("i", "Install a release (choose from the list)", lambda: Nav("tool:rt-install"), section="tools"),
-            Action("t", "Validate an installed version", lambda: Nav("prompt:rt-validate"), section="tools"),
-            Action("f", "Show info for an installed version", lambda: Nav("prompt:rt-info"), section="tools"),
+            Action("c", f"{ec.EMOJI_BACKEND_STR} Backend: {b}", self._cycle_backend),
+            Action("r", f"{ec.EMOJI_RELEASES_STR} List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
+            Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", lambda: Nav("tool:rt-install"), section="tools"),
+            Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", lambda: Nav("prompt:rt-validate"), section="tools"),
+            Action("f", f"{ec.EMOJI_INFO_STR} Show info for an installed version", lambda: Nav("prompt:rt-info"), section="tools"),
             Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", self.owner),
                    section="tools"),
         ]
@@ -790,7 +861,7 @@ class LaunchdScreen(Screen):
 
     def handle_key(self, key: str):
         if key == "escape":
-            return Nav("runtime", self.owner)
+            return BACK if self.owner == SUB else Nav("runtime", self.owner)
         return super().handle_key(key)
 
     def actions(self):
@@ -802,7 +873,8 @@ class LaunchdScreen(Screen):
                    lambda: Nav("prompt:rt-launchd-install"), section="tools"),
             Action("u", f"{ec.EMOJI_LAUNCHD_UNINSTALL_STR} Uninstall the weekly check",
                    lambda: Nav("prompt:rt-launchd-uninstall"), section="tools"),
-            Action("b", "Back to Backend manager", lambda: Nav("runtime", self.owner), section="nav"),
+            Action("b", f"{ec.EMOJI_BACK_STR} Back to Backend manager",
+                   lambda: BACK if self.owner == SUB else Nav("runtime", self.owner), section="nav"),
         ]
         check_action_table(acts)
         return acts

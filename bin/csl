@@ -71,7 +71,7 @@ Environment:
   CSL_WATCH=1            Default watcher ON
   CSL_AUTO_MODE_STATE=0|1|2  Initial auto-mode: 0=blind-trust, 1=classifier, 2=off
   CSL_TELEMETRY=1        Default telemetry ON (default OFF)
-  CSL_STOP_HOOK=0        Default stop hook OFF (default ON)
+  CSL_STOP_HOOK=1        Default stop hook ON (default OFF since 0.22.3)
   CSL_LOCAL_CAPABLE=1    Show local-capable models in remote picker (default hidden)
 
 Examples:
@@ -346,13 +346,13 @@ TELEMETRY="${CSL_TELEMETRY:-0}"
 # stops, your prompt is never answered, and nothing says so. Defaulting it OFF would mean the net
 # is missing exactly when you forgot about it.
 #
-# Toggle with `s` (home) or `p` (local picker), or set CSL_STOP_HOOK=0 to default it off. The launcher turns this into
+# Toggle with `s` (home) or `p` (local picker), or set CSL_STOP_HOOK=1 to default it on (OFF by default since 0.22.3). The launcher turns this into
 # LA_QUEUE_STOP_HOOK, which the hook reads as an explicit override — so the switch works for any
 # caller of launch-claude-agent.sh / remote-session.sh, not just this picker.
 #
 # The hook only ever engages for sessions started by one of this project's launchers (they stamp
 # LA_SESSION_LAUNCHER); an ordinary cloud/gateway `claude` never runs it regardless of this setting.
-STOP_HOOK="${CSL_STOP_HOOK:-1}"
+STOP_HOOK="${CSL_STOP_HOOK:-0}"
 
 # Local-capable filter state for the remote roster.
 # 0 = HIDDEN (default): local-capable models are hidden in the remote picker.
