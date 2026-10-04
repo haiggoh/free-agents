@@ -64,6 +64,15 @@ and rewriting one would not un-release it):
 - `0.15.1` itself is a patch release (three defect fixes plus the estimator), so it spends no
   reserved number.
 
+**Renumbered 2026-10-02 — `0.21.0` was spent on the unified backend manager.** The session
+picker TUI had reserved `0.21.0` (2026-09-30), but `feature/unified-backend-management` was
+finished first and released as `0.21.0` on 2026-10-01; queue recovery and the remote-session fixes
+followed as patch releases `0.21.2`–`0.21.10`. Published tags are immutable, so the TUI takes the
+**renumber upward** path: session picker TUI `0.21.0` → `0.22.0` (shipped 2026-10-04), runtime
+profiles `0.22.0` → `0.23.0`, oMLX lanes `0.23.0` → `0.24.0`. Every gate list travels intact;
+nothing is dropped. Note that `0.21.0` already ships an `OMLXManager` (install/update only) — it is
+a building block for the `0.24.0` lane, not the lane itself.
+
 **Shipped 2026-09-20:** `0.16.0` — Live remote catalog discovery and auto-classification (see `CHANGELOG.md`).
 
 **Shipped 2026-09-22:** `0.17.2` — Local session identity Milestone 3: Session transcript identity (stable session id in transcripts, correlation with launch metadata, transition markers on resume, idempotent SessionStart handling) (see `CHANGELOG.md`).
@@ -134,9 +143,11 @@ waiting on an architecture it does not read. So the split is:
 | `0.19.11` | **Dynamic session names with auto-generated suffix.** UserPromptSubmit hook reads auto-generated name after first prompt, prepends `<emoji> <model-alias>` prefix. Fixes all sessions on same model sharing identical fixed names. Idempotent, resume-safe. | nothing hard |
 | `0.19.12` | **Retire the stream-split patch.** LiteLLM 1.102.1 fixed the mixed-chunk bug upstream; the hook now only checks for it and warns. NVIDIA param fixes and RPM bucket kept. | `0.19.11` |
 | `0.20.0` | **Portable local-model manifests & artifact identity.** Self-describing `.local-model-manifest.json` beside each artifact, manifest toolkit, five-layer identity model, six context states with derived autocompaction, completion as transaction, researched catalogue. (Released 2026-09-29.) | — |
-| `0.21.0` | **Session picker TUI.** One Textual picker behind every entry point (`csl`, `csl local`/`csl remote`, `local-session.sh`, `remote-session.sh`, `session-picker`): arrow keys, letter shortcuts, grouped menus, persistent effort/rate-limiter settings, Lowkey `--effort`, downloader queue. Plan: `AUTHORITATIVE v2 — Free Agents session UI implementation plan`. (Took `0.21.0` on 2026-09-30 because runtime profiles had not been started; branch `feature/session-picker-tui`, NOT yet green — see waypoint `free-agents-session-ui-v2`.) | nothing hard — it does not read runtime profiles |
-| `0.22.0` | **Runtime profiles and Rapid-first model management.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. NOT STARTED. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`, then `0.22.0` — slid 2026-09-30 for the session picker.) | `0.20.0` — portable manifests provide the artifact identity the profiles resolve |
-| `0.23.0` | **Backend lanes.** [oMLX](#0230--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`, then `0.22.0`, then `0.23.0`.) | `0.22.0` — a runtime profile is the clean way to select a backend |
+| `0.21.0` | **Unified backend manager.** `install/manage-backend.py` + `install/managers/` for Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm; launchd weekly update check; `manage-rapid-mlx.py` reduced to a compatibility shim. (Shipped 2026-10-01 — took the number the session picker had reserved; see the 2026-10-02 renumber note.) | — |
+| `0.21.2`–`0.21.10` | **Patches.** Queue recovery, guard heredoc fix, NVIDIA thinking/effort/temperature controls, GLM 5.3, broken-model filter. (Shipped 2026-10-02 – 2026-10-03.) | `0.21.0` |
+| `0.22.0` | **Session picker TUI.** One Textual picker behind every entry point (`csl`, `csl local`/`csl remote`, `local-session.sh`, `remote-session.sh`, `session-picker`). (Was `0.21.0` — slid 2026-10-02 for the backend manager. Shipped 2026-10-04; polish patches `0.22.1`–`0.22.4` the same day.) | — |
+| `0.23.0` | **Runtime profiles and Rapid-first model management.** The three profile JSONs, canonical resolver, profile-aware hotswap, `csl`/roles, dispatcher migration. NOT STARTED. (Was `0.15.0`, then `0.16.0`, then `0.18.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`, then `0.22.0`, then `0.23.0` — slid 2026-09-30 and 2026-10-02.) | `0.20.0` — portable manifests provide the artifact identity the profiles resolve |
+| `0.24.0` | **Backend lanes.** [oMLX](#0240--backend-lanes--omlx) as an isolated optional backend. (Was `0.16.0`, then `0.17.0`, then `0.19.0`, then `0.20.0`, then `0.21.0`, then `0.22.0`, then `0.23.0`, then `0.24.0`.) | `0.23.0` — a runtime profile is the clean way to select a backend; `0.21.0`'s `OMLXManager` already handles install/update |
 
 **Not release-gated at all.** These run continuously against whatever is current, and must not be
 parked behind a version number: model acquisition waves, the tournament, retirement and disk
@@ -475,23 +486,19 @@ Both found 2026-09-06; fix the plans, not just the code.
 
 ---
 
-## `0.21.0` — Session picker TUI
+## `0.22.0` — Session picker TUI
 
-**Status: IN PROGRESS** on `feature/session-picker-tui` (worktree `local-agents-session-ui`), NOT merged.
-Took `0.21.0` on 2026-09-30 because runtime profiles (below, now `0.22.0`) had not been started.
-It has **no dependency** on runtime profiles.
+**Status: SHIPPED 2026-10-04** (`0.22.0`, polish patches `0.22.1`–`0.22.4`; see `CHANGELOG.md`).
+Took `0.21.0` on 2026-09-30 because runtime profiles had not been started; **renumbered 2026-10-02 to
+`0.22.0`** because `0.21.0` shipped the unified backend manager first.
 
 **Specification of record:** `~/.claude/plans/AUTHORITATIVE v2 — Free Agents session UI implementation
 plan for Claude Code (hardened, adversarially reviewed).md` (Phases 0–6), tracked by waypoint
-`free-agents-session-ui-v2`.
-
-**Release gates (all required, none met as of 2026-10-01):** Phase 6 receipts — full suite and PTY
-suite green, `test_csl_menu.sh` rewritten for the picker, README/help updated, no conflict markers,
-branch pushed; then a separate user approval to merge, tag and release.
+`free-agents-session-ui-v2`, plus the 2026-10-01 refinement plan (R1–R17).
 
 ---
 
-## `0.22.0` — Runtime profiles and Rapid-first model management
+## `0.23.0` — Runtime profiles and Rapid-first model management
 
 > **Renumbered 2026-09-06** from `0.14.0`. Scope is unchanged; only its place in the sequence moved,
 > because the manifest foundation below is what other workstreams actually read. Phase **A**
@@ -511,13 +518,16 @@ branch pushed; then a separate user approval to merge, tag and release.
 > **Renumbered 2026-09-30** — UI branch (Session Picker TUI) takes `0.21.0` for near-term release;
 > runtime profiles slides to `0.22.0`, oMLX lanes to `0.23.0`. Every gate list travels intact; nothing is dropped.
 
+> **Renumbered 2026-10-02** — `0.21.0` was spent on the unified backend manager; the session picker
+> TUI slides to `0.22.0`, runtime profiles to `0.23.0`, oMLX lanes to `0.24.0`.
+
 **Status: NOT STARTED.** No gate here is implemented. Nothing in `0.13.1`–`0.13.8` advances one.
 
 **Specification of record:** `~/.claude/plans/Plan — local-agents 0.14.0 Runtime Profiles and
 Rapid-First Model Management.md` (1,288 lines), tracked by waypoint `local-agents-0-14-0-runtime`.
 That plan is authoritative for detail; this section is the checklist, and is deliberately terse
 enough to stay accurate.
-## `0.23.0` — Backend lanes — oMLX
+## `0.24.0` — Backend lanes — oMLX
 
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.
@@ -532,6 +542,9 @@ same day.
 >
 > **Renumbered 2026-09-30** — UI branch (Session Picker TUI) takes `0.21.0`; runtime profiles
 > slides to `0.22.0`, oMLX lanes to `0.23.0`. Every gate list travels intact; nothing is dropped.
+>
+> **Renumbered 2026-10-02** — `0.21.0` spent on the unified backend manager (which already ships an
+> `OMLXManager` for install/update); TUI → `0.22.0`, runtime profiles → `0.23.0`, oMLX lanes → `0.24.0`.
 
 | Fact | Value |
 |---|---|
