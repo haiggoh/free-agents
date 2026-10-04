@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "rapid-text-stable",
+      "backend": "rapid",
+      "version": "0.12.18",
+      "tag": "v0.12.18",
+      "executable": "~/.venvs/rapid-mlx-0.12.18/bin/rapid-mlx",
+      "expected_dependencies": {
+        "mlx": ">=0.31.2,<0.32",
+        "mlx-lm": ">=0.31.3,<0.32",
+        "transformers": ">=5.0.0,<5.13"
+      }
+    },
+    {
+      "id": "legacy-vllm",
+      "backend": "vllm",
+      "executable": "~/.local-llm/bin/vllm-mlx"
+    }
+  ]
+}

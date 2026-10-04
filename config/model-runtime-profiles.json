@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "qwen38-rapid-operator",
+      "artifact_id": "qwen38-27b-4bit",
+      "backend": "rapid",
+      "environment_profile": "rapid-text-stable",
+      "resource_profile": "rapid-primary-session",
+      "modality": "text",
+      "tool_parser": "qwen3_coder_xml",
+      "reasoning_parser": null,
+      "thinking": false,
+      "capabilities": ["chat", "streaming", "tools", "attachments"],
+      "qualification": {
+        "load": "passed",
+        "anthropic_messages": "passed",
+        "streaming": "passed",
+        "tools": "passed",
+        "managed_session": "passed"
+      },
+      "fallback": "qwen38-vllm-operator"
+    },
+    {
+      "id": "qwen38-rapid-thinking",
+      "artifact_id": "qwen38-27b-4bit",
+      "backend": "rapid",
+      "environment_profile": "rapid-text-stable",
+      "resource_profile": "rapid-primary-session",
+      "modality": "text",
+      "tool_parser": "qwen3_coder_xml",
+      "reasoning_parser": "qwen3",
+      "thinking": true,
+      "capabilities": ["chat", "streaming", "tools", "attachments", "reasoning"],
+      "qualification": {
+        "load": "passed",
+        "anthropic_messages": "passed",
+        "streaming": "passed",
+        "tools": "passed",
+        "managed_session": "passed"
+      },
+      "fallback": "qwen38-vllm-thinking"
+    },
+    {
+      "id": "qwen38-vllm-operator",
+      "artifact_id": "qwen38-27b-4bit",
+      "backend": "vllm",
+      "environment_profile": "legacy-vllm",
+      "resource_profile": "rapid-primary-session",
+      "modality": "text",
+      "tool_parser": "qwen3_coder_xml",
+      "reasoning_parser": null,
+      "thinking": false,
+      "capabilities": ["chat", "streaming", "tools", "attachments"],
+      "qualification": {
+        "load": "passed",
+        "anthropic_messages": "passed",
+        "streaming": "passed",
+        "tools": "passed",
+        "managed_session": "passed"
+      }
+    },
+    {
+      "id": "qwen38-vllm-thinking",
+      "artifact_id": "qwen38-27b-4bit",
+      "backend": "vllm",
+      "environment_profile": "legacy-vllm",
+      "resource_profile": "rapid-primary-session",
+      "modality": "text",
+      "tool_parser": "qwen3_coder_xml",
+      "reasoning_parser": "qwen3",
+      "thinking": true,
+      "capabilities": ["chat", "streaming", "tools", "attachments", "reasoning"],
+      "qualification": {
+        "load": "passed",
+        "anthropic_messages": "passed",
+        "streaming": "passed",
+        "tools": "passed",
+        "managed_session": "passed"
+      }
+    }
+  ]
+}
