@@ -21,6 +21,7 @@ import os
 import sys
 import argparse
 import re
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
@@ -90,6 +91,15 @@ def get_catalog_artifacts() -> set:
                 parts = line.split('|')
                 if len(parts) >= 2:
                     artifacts.add(parts[0].strip())
+    # Also include registry subdirs from config.local.sh (private overlay)
+    # We read config.local.sh through config-lib.sh to get the full registry
+    try:
+        result = subprocess.run(['bash', '-c', 'source ' + str(CONFIG_DIR) + '/config-lib.sh && la_load_config && for a in ${!LA_SUBDIR[@]}; do echo "${LA_SUBDIR[$a]}"; done'], capture_output=True, text=True, cwd=REPO_ROOT)
+        for line in result.stdout.strip().split('\n'):
+            if line.strip():
+                artifacts.add(line.strip())
+    except:
+        pass
     return artifacts
 
 def validate_schemas(runtime: Dict, resource: Dict, environment: Dict, catalog_artifacts: set) -> List[str]:

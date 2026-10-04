@@ -3,7 +3,7 @@
   "profiles": [
     {
       "id": "qwen38-rapid-operator",
-      "artifact_id": "qwen38-27b-4bit",
+      "artifact_id": "Qwen3.8-27B-4bit",
       "backend": "rapid",
       "environment_profile": "rapid-text-stable",
       "resource_profile": "rapid-primary-session",
@@ -23,7 +23,7 @@
     },
     {
       "id": "qwen38-rapid-thinking",
-      "artifact_id": "qwen38-27b-4bit",
+      "artifact_id": "Qwen3.8-27B-4bit",
       "backend": "rapid",
       "environment_profile": "rapid-text-stable",
       "resource_profile": "rapid-primary-session",
@@ -43,7 +43,7 @@
     },
     {
       "id": "qwen38-vllm-operator",
-      "artifact_id": "qwen38-27b-4bit",
+      "artifact_id": "Qwen3.8-27B-4bit",
       "backend": "vllm",
       "environment_profile": "legacy-vllm",
       "resource_profile": "rapid-primary-session",
@@ -62,7 +62,7 @@
     },
     {
       "id": "qwen38-vllm-thinking",
-      "artifact_id": "qwen38-27b-4bit",
+      "artifact_id": "Qwen3.8-27B-4bit",
       "backend": "vllm",
       "environment_profile": "legacy-vllm",
       "resource_profile": "rapid-primary-session",
