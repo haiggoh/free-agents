@@ -248,7 +248,7 @@ class GroupingTests(unittest.TestCase):
         lane = m.RemoteScreen(m.Settings(), remote_agents(), owner=m.HOME_OWNED)
         keys = {a.key: a for a in lane.actions()}
         self.assertIn("u", keys)
-        self.assertEqual(keys["b"].label, "Back to Home")
+        self.assertEqual(keys["b"].label, f"{m.ec.EMOJI_HOME_STR} Back to Home")
         self.assertIsNone(lane.handle_key("B"))
 
     def test_temperature_cycles_and_reaches_the_launch_argv(self):
@@ -336,6 +336,48 @@ class GroupingTests(unittest.TestCase):
         lane.activate_selected()
         self.assertEqual(saved, [("remote_api_session", "cerebras-oss", "trial")])
         self.assertEqual(s.last_launched_tier["remote_api_session"], "trial")
+
+    def test_settings_rows_step_both_ways_and_wrap(self):
+        # Enter/click/Right = step(+1), Left = step(-1); toggles, auto-mode (3 states), effort.
+        s = m.Settings()
+        lane = m.RemoteScreen(s, remote_agents(), owner=m.HOME_OWNED)
+        acts = {a.key: a for a in lane.actions()}
+        for key in ("a", "t", "p", "m", "e", "o", "h", "f", "u"):
+            self.assertIsNotNone(acts[key].step, f"{key} must be a settings row")
+        self.assertNotIn("v", acts, "the Remote lane does not offer the (local) backend manager")
+        for key in ("c", "s", "x", "k", "n", "b"):
+            self.assertIsNone(acts[key].step, f"{key} is navigation, not a setting")
+        acts["a"].step(+1); self.assertEqual(s.auto_mode, 1)
+        acts["a"].step(-1); acts["a"].step(-1); self.assertEqual(s.auto_mode, 2, "Left wraps 0 -> 2")
+        start = s.remote_effort
+        acts["e"].step(+1); self.assertNotEqual(s.remote_effort, start)
+        acts["e"].step(-1); self.assertEqual(s.remote_effort, start)
+        acts["t"].step(-1); self.assertTrue(s.telemetry, "a boolean flips either way")
+
+    def test_defaults_and_icons_requested_2026_10_04(self):
+        s = m.Settings()
+        self.assertFalse(s.stop_hook, "queued-prompt hook is OFF by default")
+        labels = {a.key: a.label for a in m.HomeScreen(s).actions()}
+        self.assertTrue(labels["t"].startswith(m.ec.EMOJI_TELEMETRY_ON_STR), "satellite even when OFF")
+        self.assertTrue(labels["a"].startswith(m.ec.EMOJI_AUTO_MODE_STR))
+        self.assertTrue(labels["p"].startswith(m.ec.EMOJI_STOP_HOOK_STR))
+
+    def test_sub_screens_offer_back_not_quit(self):
+        for cls in (m.RateLimiterScreen, m.RuntimeManagerScreen, m.APIKeysScreen, m.RuntimeScreen,
+                    m.LaunchdScreen):
+            sc = cls(m.Settings(), owner=m.SUB)
+            nav = [a for a in sc.actions() if a.section == "nav"]
+            with self.subTest(screen=cls.__name__):
+                self.assertEqual([a.key for a in nav], ["b"])
+                self.assertIs(nav[0].run(), m.BACK)
+                self.assertIs(sc.handle_key("escape"), m.BACK)
+
+    def test_remote_subheadline_has_no_disclaimer(self):
+        lane = m.RemoteScreen(m.Settings(), remote_agents(), owner=m.DIRECT_ROOT)
+        self.assertNotIn("leave this machine", lane.policy)
+        self.assertRegex(lane.policy, r"^\d+ model\(s\) visible  \(hidden: \d+\)$")
+        self.assertTrue(lane.title.startswith(m.ec.SESSION_EMOJI_FREE_API_STR))
+        self.assertTrue(m.LocalScreen(m.Settings(), local_models()).title.startswith(m.ec.SESSION_EMOJI_LOCAL_STR))
 
     def test_trial_rows_are_marked(self):
         lane = m.RemoteScreen(m.Settings(), remote_agents(), owner=m.DIRECT_ROOT)

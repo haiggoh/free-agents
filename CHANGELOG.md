@@ -2,6 +2,52 @@
 
 All notable changes to `free-agents` are documented in this file.
 
+## [0.22.3] — 2026-10-04
+
+### Changed — picker polish (user review of 0.22.2)
+
+- **Settings react to Enter, click and ←/→.** Toggles, the three-state auto-mode, effort,
+  temperature and the Remote filters are now settings rows. Enter, click and → step forward, ←
+  steps back, the cycle wraps, and the highlight stays on the row. Before, they only responded to
+  their letter key: Enter returned nothing and skipped the redraw, and the ←/→ handlers were
+  never wired up.
+- **The model list loads in the background.** Once the menu is drawn, local and remote
+  inventories load on worker threads, and parallel requests for the same list share one load.
+  `c` (Choose model) shows the cached list at once. If it is still loading, the status line
+  animates ⏳/⌛️ and the list fills in when it arrives. Nothing blocks the UI any more.
+  Measured: the remote list was cached 4 s after opening the lane, and `c` then showed 23 rows in
+  0.29 s.
+- **Sub-screens go Back, not Quit.** The rate limiter, backend manager, API keys and launchd
+  screens return to whichever screen opened them (a caller stack): "🏠 Back to Home" or
+  "↩️ Back to <lane>". Esc does the same.
+- **Terminal-native colours (R5).** The `textual-ansi` theme with `ansi_color=True`: background
+  and main text are the terminal's defaults, so light and dark themes both work, and the PTY
+  output contains no painted background at all. Secondary text (status line, subheadlines) is
+  grey (ANSI bright-black). Highlight and hover are soft blue text (ANSI bright-blue) instead of
+  a block.
+- **Headlines and subheadlines restored from 0.21, with emojis:**
+  - Home: 🦾📡 title and a one-line plugin identity, plus the config source.
+  - Local: 🦾 "Local Session Picker", "N model(s) on disk".
+  - Remote: 📡 "Remote API Session Picker", "N model(s) visible (hidden: M)".
+- **Remote disclaimer removed.** "Prompts and file contents leave this machine…" is gone, by user
+  decision; the per-row trial and no-key labels remain. The orange colour is gone too (R9).
+- **Emojis everywhere, all from `config/emoji.sh`:**
+  - auto-mode 🤖, telemetry 🛰️ (also when OFF), queued-prompt hook 🪝, watcher 🔭;
+  - backend manager rows (🧩 📜 📦 🩺 ℹ️) and Back (🏠 / ↩️).
+- **The queued-prompt hook is OFF by default** in `csl`, the picker, `launch-claude-agent.sh`,
+  `local-session.sh` and `remote-session.sh`. `CSL_STOP_HOOK=1` or `LA_QUEUE_STOP_HOOK=1` turns
+  it back on.
+- **The Remote lane no longer offers the backend manager (`v`).** It manages local runtimes only.
+- **Copying text works.** Drag to select, then Ctrl+C copies (Ctrl+C with nothing selected still
+  quits), and Cmd+C copies wherever the terminal forwards it.
+- **`remote-session.sh` direct launch:** the ⏳ frame is drawn 0.017 s after start, before roster
+  setup, instead of after it.
+- **New `install/make-terminal-launchers.py`** writes `.terminal` launchers (copied from your
+  default Terminal profile, run directly with no shell). Screen-recorded: they open straight to
+  ⏳ with no "Last login" and no typed `… ; exit;` line. Existing files are never overwritten.
+- Tests: picker_model 55 (step rows, defaults and icons, sub-screen Back, no disclaimer),
+  remote_session 24, the full Python and pytest set green.
+
 ## [0.22.2] — 2026-10-04
 
 ### Fixed — `remote-session.sh` takes 0.7 s to start instead of 5.5 s

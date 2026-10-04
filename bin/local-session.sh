@@ -52,7 +52,7 @@ Environment (set by csl or caller):
   LA_AUTO_MODE=1                    Enable auto mode (permission-mode=auto)
   LA_BLIND_AUTO=1                   Blind-trust auto mode (no classifier)
   LA_TELEMETRY=0|1                  Disable/enable nonessential outbound traffic (default 0)
-  LA_QUEUE_STOP_HOOK=0|1            Queued-prompt stop hook (default 1)
+  LA_QUEUE_STOP_HOOK=0|1            Queued-prompt stop hook (default 0)
   LA_STRICT_MCP=true|false          Exclude MCP servers from prompt (default true)
   LA_SKIP_RAM_PREFLIGHT=1           Bypass RAM check (not recommended)
   LA_DRY_RUN_SKIP_PREFLIGHT=1       Skip RAM preflight in --dry-run (quick config inspection)
@@ -210,7 +210,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "Auto-mode: $([ "${LA_AUTO_MODE:-0}" = "1" ] && echo "ON" || echo "OFF")"
     echo "Blind-trust: $([ "${LA_BLIND_AUTO:-0}" = "1" ] && echo "ON" || echo "OFF")"
     echo "Telemetry: $([ "${LA_TELEMETRY:-0}" = "1" ] && echo "ON" || echo "OFF")"
-    echo "Stop hook: $([ "${LA_QUEUE_STOP_HOOK:-1}" = "1" ] && echo "ON" || echo "OFF")"
+    echo "Stop hook: $([ "${LA_QUEUE_STOP_HOOK:-0}" = "1" ] && echo "ON" || echo "OFF")"
     echo "MCPs: $([ "${LA_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")"
     echo "Launcher: $SCRIPT_DIR/launch-claude-agent.sh"
     exit 0
