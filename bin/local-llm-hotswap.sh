@@ -14,6 +14,24 @@ HOTSWAP_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 . "$HOTSWAP_DIR/../config/config-lib.sh"
 la_load_config || exit 1
 
+# --- Hardware detection for CUDA tier routing ---------------------------------
+# Source la-hw-detect.sh to get LA_HARDWARE, LA_VRAM_GB, LA_CUDA_WARNING
+# shellcheck source=/dev/null
+. "$HOTSWAP_DIR/la-hw-detect.sh"
+
+# Determine CUDA tier based on VRAM
+# Tier A: VRAM >= 16GB → vLLM fully resident
+# Tier B: VRAM <= 8GB + high system RAM → vLLM with UVM/KV offload or llama-server with -ngl
+# Tier C: CPU-only (no CUDA) → llama-server CPU mode
+CUDA_TIER=""
+if [ "$LA_HARDWARE" = "cuda" ] && [ -n "${LA_VRAM_GB:-}" ] && [ "$LA_VRAM_GB" -gt 0 ]; then
+    if [ "$LA_VRAM_GB" -ge 16 ]; then
+        CUDA_TIER="A"
+    else
+        CUDA_TIER="B"
+    fi
+fi
+
 # --- Profile-aware mode ---------------------------------------------------------
 # If --profile is given, resolve through the canonical resolver and extract
 # the model alias, backend, environment, resource profile, artifact path, etc.
@@ -387,6 +405,174 @@ if [ "$SERVE" = "llama_cpp" ]; then
     echo "     llama-server -m $MODEL_DIR/<model>.gguf --port 8080 -c 32768"
     echo "   llama.cpp remains the backend for GGUF artifacts; rapid/vllm are for MLX artifacts."
     exit 3
+fi
+
+# --- CUDA Tier A (VRAM >= 16GB): vLLM fully resident --------------------------------------
+if [ "$CUDA_TIER" = "A" ]; then
+    echo "🎮 CUDA Tier A detected (VRAM >= 16GB) — launching vLLM fully VRAM-resident."
+
+    # Check for vLLM binary (could be in manage-cuda-backend venv)
+    VLLM_BIN="${LA_CUDA_BIN:-$(command -v vllm 2>/dev/null || echo "")}"
+    if [ -z "$VLLM_BIN" ] || [ ! -x "$VLLM_BIN" ]; then
+        echo "❌ vLLM not found. Install with: manage-cuda-backend.py install vllm" >&2
+        exit 1
+    fi
+
+    # Build vLLM command for Tier A (full VRAM)
+    VLLM_CMD=(
+        "$VLLM_BIN" serve "$MODEL_DIR"
+        --host 127.0.0.1
+        --port "$TARGET_PORT"
+        --served-model-name "$SPOOF_PRIMARY"
+        --max-model-len "$LA_MAX_MODEL_LEN"
+        --max-num-seqs "$LA_VLLM_MAX_NUM_SEQS"
+        --max-concurrent-requests "$LA_VLLM_MAX_CONCURRENT_REQUESTS"
+        --gpu-memory-utilization 0.9
+        --timeout "$LA_SERVER_TIMEOUT_S"
+    )
+
+    # Tool calling
+    if [ -n "$TOOLP" ]; then
+        VLLM_CMD+=(--enable-auto-tool-choice --tool-call-parser "$TOOLP")
+    fi
+
+    # Reasoning
+    if [ "$THINK" = "true" ]; then
+        VLLM_CMD+=(--reasoning-parser "${REASONP:-qwen3}" --default-temperature 0.6 --default-top-p 0.95)
+    fi
+
+    echo "🚀 Launching $MODEL_NAME via CUDA vLLM (Tier A) on port $TARGET_PORT..."
+    nohup "${VLLM_CMD[@]}" > "$LOG_FILE" 2>&1 &
+    VLLM_PID=$!
+
+    wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$VLLM_PID" "$SPOOF_PRIMARY"
+    tail -n 8 "$LOG_FILE"
+    _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+    echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
+    echo "SUCCESS_PORT=$TARGET_PORT"
+    [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
+    exit 0
+fi
+
+# --- CUDA Tier B (VRAM <= 8GB): vLLM with UVM offload or llama-server --------------------
+if [ "$CUDA_TIER" = "B" ]; then
+    echo "🎮 CUDA Tier B detected (VRAM <= 8GB) — using offload strategy."
+
+    # Check model type from subdir/runtime
+    if [[ "$MODEL_DIR" == *"awq"* ]] || [[ "$MODEL_DIR" == *"exl2"* ]] || [[ "$MODEL_DIR" == *"AWQ"* ]] || [[ "$MODEL_DIR" == *"EXL2"* ]]; then
+        # AWQ/EXL2 → vLLM with UVM/KV cache offload
+        echo "📦 AWQ/EXL2 model detected — using vLLM with UVM/KV cache offload (--swap-space)."
+
+        VLLM_BIN="${LA_CUDA_BIN:-$(command -v vllm 2>/dev/null || echo "")}"
+        if [ -z "$VLLM_BIN" ] || [ ! -x "$VLLM_BIN" ]; then
+            echo "❌ vLLM not found. Install with: manage-cuda-backend.py install vllm" >&2
+            exit 1
+        fi
+
+        # Calculate swap space (GB): use system RAM - VRAM - 10GB headroom
+        # We'll default to 16GB swap if system RAM is high
+        SWAP_SPACE="${LA_VLLM_SWAP_SPACE:-16}"
+
+        VLLM_CMD=(
+            "$VLLM_BIN" serve "$MODEL_DIR"
+            --host 127.0.0.1
+            --port "$TARGET_PORT"
+            --served-model-name "$SPOOF_PRIMARY"
+            --max-model-len "$LA_MAX_MODEL_LEN"
+            --max-num-seqs "$LA_VLLM_MAX_NUM_SEQS"
+            --max-concurrent-requests "$LA_VLLM_MAX_CONCURRENT_REQUESTS"
+            --gpu-memory-utilization 0.85
+            --swap-space "$SWAP_SPACE"
+            --timeout "$LA_SERVER_TIMEOUT_S"
+        )
+
+        if [ -n "$TOOLP" ]; then
+            VLLM_CMD+=(--enable-auto-tool-choice --tool-call-parser "$TOOLP")
+        fi
+
+        if [ "$THINK" = "true" ]; then
+            VLLM_CMD+=(--reasoning-parser "${REASONP:-qwen3}" --default-temperature 0.6 --default-top-p 0.95)
+        fi
+
+        echo "🚀 Launching $MODEL_NAME via CUDA vLLM (Tier B, UVM offload) on port $TARGET_PORT..."
+        nohup "${VLLM_CMD[@]}" > "$LOG_FILE" 2>&1 &
+        VLLM_PID=$!
+
+        wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$VLLM_PID" "$SPOOF_PRIMARY"
+        tail -n 8 "$LOG_FILE"
+        _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+        echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
+        echo "SUCCESS_PORT=$TARGET_PORT"
+        [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
+        exit 0
+    else
+        # GGUF/other → llama-server with -ngl offload
+        echo "📦 GGUF/other model detected — using llama-server with -ngl offload."
+
+        LLAMA_SERVER="${LA_LLAMA_SERVER:-$(command -v llama-server 2>/dev/null || echo "")}"
+        if [ -z "$LLAMA_SERVER" ] || [ ! -x "$LLAMA_SERVER" ]; then
+            echo "❌ llama-server not found. Install with: brew install llama.cpp or manage-cuda-backend.py install llama-cpp" >&2
+            exit 1
+        fi
+
+        # Calculate -ngl (GPU layers): fill ~7.5GB VRAM
+        # Rough heuristic: each layer ~100MB for 7B, ~200MB for 13B, ~400MB for 30B+
+        # We'll use a conservative -ngl 20 for 8GB VRAM
+        NGL="${LA_LLAMA_NGL:-20}"
+
+        LLAMA_CMD=(
+            "$LLAMA_SERVER"
+            -m "$MODEL_DIR"
+            --host 127.0.0.1
+            --port "$TARGET_PORT"
+            -c 32768
+            -ngl "$NGL"
+            --mlock
+        )
+
+        echo "🚀 Launching $MODEL_NAME via llama-server (Tier B, -ngl $NGL) on port $TARGET_PORT..."
+        nohup "${LLAMA_CMD[@]}" > "$LOG_FILE" 2>&1 &
+        LLAMA_PID=$!
+
+        wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$LLAMA_PID" "$SPOOF_PRIMARY"
+        tail -n 8 "$LOG_FILE"
+        _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+        echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
+        echo "SUCCESS_PORT=$TARGET_PORT"
+        [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
+        exit 0
+    fi
+fi
+
+# --- CUDA Tier C (CPU-only fallback) -------------------------------------------------------
+if [ "$CUDA_TIER" = "C" ] || [ "$LA_HARDWARE" = "cpu-only" ]; then
+    echo "💻 CUDA Tier C (CPU-only) — launching llama-server in CPU mode."
+
+    LLAMA_SERVER="${LA_LLAMA_SERVER:-$(command -v llama-server 2>/dev/null || echo "")}"
+    if [ -z "$LLAMA_SERVER" ] || [ ! -x "$LLAMA_SERVER" ]; then
+        echo "❌ llama-server not found. Install with: brew install llama.cpp" >&2
+        exit 1
+    fi
+
+    LLAMA_CMD=(
+        "$LLAMA_SERVER"
+        -m "$MODEL_DIR"
+        --host 127.0.0.1
+        --port "$TARGET_PORT"
+        -c 32768
+    )
+
+    echo "💻 Launching $MODEL_NAME via llama-server (CPU mode) on port $TARGET_PORT..."
+    nohup "${LLAMA_CMD[@]}" > "$LOG_FILE" 2>&1 &
+    LLAMA_PID=$!
+
+    wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$LLAMA_PID" "$MODEL_DIR"
+    tail -n 8 "$LOG_FILE"
+    _preflight_warmup "$TARGET_PORT" "$MODEL_DIR"
+    echo "DISPATCH_MODEL=$MODEL_DIR"
+    echo "SUCCESS_PORT=$TARGET_PORT"
+    [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
+    exit 0
 fi
 
 # --- vllm-mlx branch (LEGACY lane — rapid is the default; see config-lib's backend vocabulary) --
