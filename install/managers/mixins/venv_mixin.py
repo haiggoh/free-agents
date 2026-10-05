@@ -179,7 +179,7 @@ class VenvMixin:
             version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
             if not self.VERSION_RE.fullmatch(version):
                 continue
-            state = "installed" if self._is_complete(path) else "incomplete"
+            state = "complete" if self._is_complete(path) else "incomplete"
             entries.append((version, path, state))
         return sorted(entries, key=lambda item: self.version_key(item[0]), reverse=True)
 
@@ -194,7 +194,7 @@ class VenvMixin:
         infos = []
         for version, path, status in self.installed_versions():
             metadata = {}
-            if status == "installed":
+            if status == "complete":
                 try:
                     validated = self.validate_environment(version)
                     status = "validated"

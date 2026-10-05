@@ -19,7 +19,7 @@ class BackendInfo:
         name: Backend identifier (e.g., "rapid-mlx", "vllm-mlx")
         version: Installed version string
         path: Path to the virtual environment
-        status: Installation status ("installed", "incomplete", "validated", "error")
+        status: Installation status ("complete", "incomplete", "validated", "error")
         metadata: Additional backend-specific information
     """
     name: str

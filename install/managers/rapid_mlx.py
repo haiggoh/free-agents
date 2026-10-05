@@ -42,6 +42,10 @@ PATH_PIN_RE = re.compile(
 RAPID_AUTO_VERSION_RE = re.compile(r"rapid-mlx (?P<version>\d+\.\d+\.\d+)")
 
 
+# Sentinel default: "use the manager's own default_pin_validator" (None means skip it).
+_DEFAULT_VALIDATOR = object()
+
+
 @register_manager
 class RapidMLXManager(BackendManager):
     BACKEND_NAME = "rapid-mlx"
@@ -229,9 +233,10 @@ class RapidMLXManager(BackendManager):
         finally:
             self._repo = old_repo
 
-    def apply_pin_plan(self, plan, *, dry_run: bool = False):
-        """Public wrapper for _apply_pin_plan."""
-        return self._apply_pin_plan(plan, dry_run=dry_run)
+    def apply_pin_plan(self, plan, *, dry_run: bool = False, validator=_DEFAULT_VALIDATOR,
+                       backup_root: Path | None = None):
+        """Public wrapper for _apply_pin_plan (validator=None skips the repo's own test run)."""
+        return self._apply_pin_plan(plan, dry_run=dry_run, validator=validator, backup_root=backup_root)
 
     # Helper methods (refactored from manage-rapid-mlx.py)
     def _binary_version(self, binary: Path) -> str:
@@ -343,20 +348,55 @@ print(json.dumps(out, sort_keys=True))
             raise ManagerError("pin surfaces are partially migrated: " + "; ".join(missing))
         return (version, tuple(changes), tuple(scanned))
 
-    def _apply_pin_plan(self, plan, *, dry_run: bool = False):
+    def tracked_repo_clean(self, repo: Path) -> None:
+        """Refuse to promote over uncommitted tracked work (tests may replace this)."""
+        unstaged = subprocess.run(["git", "diff", "--quiet"], cwd=repo, check=False).returncode
+        staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo, check=False).returncode
+        if unstaged or staged:
+            raise ManagerError("pin promotion requires a clean tracked worktree and index")
+
+    def default_pin_validator(self, repo: Path, version: str) -> None:
+        """Post-write checks: every surface carries the new pin, and the repo still passes."""
+        launcher = repo / "bin" / "launch-claude-agent-rapid-auto.sh"
+        config = repo / "config" / "config-lib.sh"
+        tests = repo / "tests" / "test_rapid_auto_mode.sh"
+        for p in (launcher, config, tests):
+            text = p.read_text(encoding="utf-8")
+            if p.name != "test_rapid_auto_mode.sh" and f"rapid-mlx-{version}/bin/rapid-mlx" not in text:
+                raise ManagerError(f"post-promotion versioned path missing from {p}")
+            if p in (launcher, tests) and f"rapid-mlx {version}" not in text:
+                raise ManagerError(f"post-promotion exact version assertion missing from {p}")
+        compile_code = (
+            "from pathlib import Path; "
+            "[compile(Path(p).read_text(encoding='utf-8'), p, 'exec') "
+            "for p in ('install/manage-rapid-mlx.py', 'tests/test_manage_rapid_mlx.py')]"
+        )
+        self.run_command([sys.executable, "-B", "-c", compile_code], cwd=repo)
+        self.run_command(["bash", "tests/test_rapid_auto_mode.sh"], cwd=repo)
+        self.run_command(["git", "diff", "--check"], cwd=repo)
+
+    def _apply_pin_plan(self, plan, *, dry_run: bool = False, validator=_DEFAULT_VALIDATOR,
+                        backup_root: Path | None = None):
+        """Back up, write, validate, verify — and roll EVERY written file back on ANY failure.
+
+        Restores two guarantees the 0.21.0 class port lost: a validation failure (ManagerError,
+        or CalledProcessError from the repo's own tests) now rolls back instead of leaving the
+        repo half-promoted, and post-write verification compares each file with ITS OWN planned
+        bytes (it compared every file with the last file's content, so any multi-file promotion
+        failed verification)."""
         version, changes, _scanned = plan
         repo = self._repo.resolve() if self._repo else None
         if dry_run or not changes:
             return {"result": "dry_run" if dry_run else "already_promoted", "changed": []}
+        if repo is None:
+            raise ManagerError("Repository required for pin promotion")
+        if validator is _DEFAULT_VALIDATOR:
+            validator = self.default_pin_validator
+        self.tracked_repo_clean(repo)
 
-        if repo:
-            # Check clean worktree
-            unstaged = subprocess.run(["git", "diff", "--quiet"], cwd=repo, check=False).returncode
-            staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo, check=False).returncode
-            if unstaged or staged:
-                raise ManagerError("pin promotion requires a clean tracked worktree and index")
-
-        transaction = self.cache_root() / "pin-transactions" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{os.getpid()}")
+        transaction = backup_root or (
+            self.cache_root() / "pin-transactions" /
+            (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{os.getpid()}"))
         transaction.mkdir(parents=True, exist_ok=False)
         os.chmod(transaction, 0o700)
         manifest = []
@@ -377,7 +417,7 @@ print(json.dumps(out, sort_keys=True))
                     "private": private,
                 })
             self.atomic_json(transaction / "manifest.json", {"version": version, "files": manifest})
-            for path, _before, after, private, mode in changes:
+            for path, before, after, private, mode in changes:
                 fd, name = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
                 temporary = Path(name)
                 try:
@@ -390,38 +430,17 @@ print(json.dumps(out, sort_keys=True))
                 finally:
                     temporary.unlink(missing_ok=True)
                 written.append((path, before, mode))
-
-            # Validate
-            if repo:
-                launcher = repo / "bin" / "launch-claude-agent-rapid-auto.sh"
-                config = repo / "config" / "config-lib.sh"
-                tests = repo / "tests" / "test_rapid_auto_mode.sh"
-                for p in (launcher, config, tests):
-                    text = p.read_text(encoding="utf-8")
-                    if p.name != "test_rapid_auto_mode.sh" and f"rapid-mlx-{version}/bin/rapid-mlx" not in text:
-                        raise ManagerError(f"post-promotion versioned path missing from {p}")
-                    if p in (launcher, tests) and f"rapid-mlx {version}" not in text:
-                        raise ManagerError(f"post-promotion exact version assertion missing from {p}")
-                # Compile check
-                compile_code = (
-                    "from pathlib import Path; "
-                    "[compile(Path(p).read_text(encoding='utf-8'), p, 'exec') "
-                    "for p in ('install/manage-rapid-mlx.py', 'tests/test_manage_rapid_mlx.py')]"
-                )
-                self.run_command([sys.executable, "-B", "-c", compile_code], cwd=repo)
-                self.run_command(["bash", "tests/test_rapid_auto_mode.sh"], cwd=repo)
-                self.run_command(["git", "diff", "--check"], cwd=repo)
-
-            for path, _before, _mode in written:
+            if validator:
+                validator(repo, version)
+            for path, _before, after, _private, _mode in changes:
                 if path.read_bytes() != after:
                     raise ManagerError(f"post-write verification failed: {path}")
-
             return {
                 "result": "promoted",
                 "changed": [str(c[0].relative_to(repo)) for c in changes],
                 "transaction": str(transaction),
             }
-        except OSError as exc:
+        except Exception as exc:
             rollback_errors = []
             for path, before, mode in reversed(written):
                 try:
@@ -436,8 +455,9 @@ print(json.dumps(out, sort_keys=True))
                         os.replace(temporary, path)
                     finally:
                         temporary.unlink(missing_ok=True)
-                except OSError as rollback_exc:
+                except Exception as rollback_exc:  # catastrophic filesystem case
                     rollback_errors.append(f"{path}: {rollback_exc}")
             if rollback_errors:
-                raise ManagerError(f"pin promotion failed ({exc}); rollback also failed:\n" + "\n".join(rollback_errors)) from exc
+                raise ManagerError(f"pin promotion failed ({exc}); rollback also failed:\n"
+                                   + "\n".join(rollback_errors)) from exc
             raise ManagerError(f"pin promotion failed and was rolled back: {exc}") from exc

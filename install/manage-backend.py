@@ -71,7 +71,8 @@ Examples:
     sub = parser.add_subparsers(dest="command", required=True, help="Command to run")
 
     # list command
-    sub.add_parser("list", help="list installed versions")
+    sub.add_parser("list", help="list registered backends")
+    sub.add_parser("installed", help="list installed versions of --backend (complete/incomplete)")
 
     # releases command
     rel_p = sub.add_parser("releases", help="list available releases")

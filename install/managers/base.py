@@ -344,7 +344,7 @@ class BackendManager(
         infos = []
         for version, path, status in self.installed_versions():
             metadata = {}
-            if status == "installed":
+            if status == "complete":
                 try:
                     validated = self.validate_environment(version)
                     status = "validated"

@@ -1,3 +1,38 @@
+## [0.23.2] — 2026-10-05
+
+Backend manager refactor, plus fixes for regressions it surfaced from the 0.21.0 port.
+
+### Changed
+- **Shared manager plumbing split into mixins.** `install/managers/_common.py` holds
+  `BackendInfo`, `VersionInfo` and `ManagerError`. `install/managers/mixins/` holds version
+  parsing, venv handling, PyPI/GitHub release sources and binary installs. Only
+  `BackendManager` inherits `VersionParsingMixin` directly, which removes the diamond-inheritance
+  MRO conflicts. `base.py` is about 170 lines shorter. `ManagerError` is still importable from
+  `managers.base`.
+
+### Fixed
+- **Pin promotion no longer leaves a repo half-promoted.** When the class port's post-write
+  validation failed (wrong pin, or the repo's own `test_rapid_auto_mode.sh` failing with
+  `CalledProcessError`), the exception escaped without rollback, because only `OSError` was
+  caught. Every written file is again restored byte-for-byte on any failure, and the error
+  says "rolled back".
+- **Pin promotion's post-write check** compared every file with the *last* file's planned
+  bytes, so any multi-file promotion failed verification. Each file is checked against its own
+  planned content again. The validator and backup directory are injectable once more.
+- **One status vocabulary:** a ready environment is `complete` everywhere. The shared
+  `installed_versions()` said `installed`, while the per-backend code, the tests and the
+  manifest tool said `complete`.
+- **`manage-backend.py --backend X installed`** now works. The handler existed but was never
+  registered as a subcommand, so listing installed versions was unreachable. `list` is
+  correctly described as listing registered *backends*.
+
+### Tests
+- `test_manage_rapid_mlx.py`: 30/30, up from 22/25. Promotion is tested for real again
+  (writes, 600 private overlay, manifest, idempotent second run), plus a new check that a
+  failing validator rolls every file back. The "wrapper translates backend argument" check
+  inspected the test process's own `sys.argv` and could never pass; it now runs the wrapper.
+  Each fix was mutation-tested.
+
 ## [0.23.1] — 2026-10-05
 
 Session picker fixes and polish on top of the 0.23.0 API Keys redesign.
