@@ -93,9 +93,9 @@ ACCORDION_FIXTURES = {
 }
 
 
-# Provider ordering (NVIDIA first, then alphabetical)
+# Provider ordering: NVIDIA first, then Google, then Groq, then alphabetical
 EXPECTED_PROVIDER_ORDER = [
-    "nvidia", "cerebras", "cloudflare", "gemini", "groq", "kilo",
+    "nvidia", "gemini", "groq", "cerebras", "cloudflare", "kilo",
     "llm7", "mistral", "modelscope", "openrouter", "sambanova",
     "siliconflow", "vercel", "zai"
 ]

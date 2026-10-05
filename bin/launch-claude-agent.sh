@@ -610,6 +610,23 @@ esac
 # Built-in tools are the other half of the prompt, and --disallowedTools (unlike --allowedTools) drops
 # their DEFINITIONS from the payload, not just their permission to run. Withhold the ones a local
 # session cannot use anyway — see LA_DENY_TOOLS in config-lib.sh for the per-tool reasoning.
+# Intercept Agents: if enabled, ensure Agent is in the deny list (default ON). If disabled, remove Agent.
+if [ -n "${LA_DENY_TOOLS:-}" ]; then
+    # Check if intercept_agents is set (from session picker state)
+    # Default is ON (1) - deny the native Agent tool
+    INTERCEPT_AGENTS="${INTERCEPT_AGENTS:-1}"
+    if [ "$INTERCEPT_AGENTS" = "1" ]; then
+        # Ensure Agent is in LA_DENY_TOOLS
+        case ",$LA_DENY_TOOLS," in
+            *,Agent,*) ;;  # already there
+            *) LA_DENY_TOOLS="$LA_DENY_TOOLS,Agent" ;;
+        esac
+    else
+        # Remove Agent from LA_DENY_TOOLS
+        LA_DENY_TOOLS=$(echo "$LA_DENY_TOOLS" | tr ',' '\n' | grep -v '^Agent$' | tr '\n' ',' | sed 's/,$//')
+    fi
+fi
+
 DENY_FLAG=""
 if [ -n "${LA_DENY_TOOLS:-}" ]; then
     DENY_FLAG="--disallowedTools $LA_DENY_TOOLS"
@@ -617,6 +634,11 @@ if [ -n "${LA_DENY_TOOLS:-}" ]; then
     echo "🚫 Withholding $_deny_n built-in tool definitions this session (LA_DENY_TOOLS)."
     echo "   They are absent, not merely denied — that is the point (a definition costs prefill even"
     echo "   when unused). Set LA_DENY_TOOLS= (empty) in your config to send the full tool surface."
+    if [ "$INTERCEPT_AGENTS" = "1" ]; then
+        echo "   Intercept Agents: ON — native Agent tool denied (FreeAgent replacement active)"
+    else
+        echo "   Intercept Agents: OFF — native Agent tool allowed"
+    fi
 fi
 
 # Local-model behavior is maintained as a data template rather than embedded

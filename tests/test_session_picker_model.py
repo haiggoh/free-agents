@@ -447,6 +447,61 @@ class GroupingTests(unittest.TestCase):
         self.assertIn("b", {a.key for a in lane.actions()})
         self.assertIsNone(lane.activate_selected())
 
+    def test_cloud_config_screen_has_expected_structure(self):
+        """CloudConfigScreen has correct title, actions, and toggles work correctly."""
+        s = m.Settings()
+        cloud = m.CloudConfigScreen(s)
+
+        # Title has both cloud and wrench emojis
+        self.assertTrue(cloud.title.startswith(m.ec.EMOJI_CLOUD_CONFIG_STR))
+        self.assertIn(m.ec.EMOJI_TOOLS_STR, cloud.title)
+
+        # Has three toggle actions + nav
+        actions = {a.key: a for a in cloud.actions()}
+        self.assertIn("x", actions, "Missing Intercept Agents toggle (x)")
+        self.assertIn("y", actions, "Missing Classifier toggle (y)")
+        self.assertIn("p", actions, "Missing Bypass Permissions toggle (p)")
+
+        # Intercept Agents toggle
+        self.assertIn("Intercept Agents", actions["x"].label)
+        self.assertTrue(actions["x"].label.endswith("ON (FreeAgent)") or actions["x"].label.endswith("OFF (Native Agent)"))
+
+        # Classifier toggle
+        self.assertIn("Classifier:", actions["y"].label)
+        self.assertIn(m.CLASSIFIER_SOURCE_LABELS[s.classifier_source], actions["y"].label)
+
+        # Bypass Permissions toggle
+        self.assertIn("Bypass Permissions", actions["p"].label)
+        self.assertTrue(actions["p"].label.endswith("ON") or actions["p"].label.endswith("OFF"))
+
+        # Toggles actually work - test each one
+        initial_intercept = s.intercept_agents
+        actions["x"].run()
+        self.assertEqual(s.intercept_agents, not initial_intercept)
+
+        initial_classifier = s.classifier_source
+        actions["y"].run()
+        self.assertEqual(s.classifier_source, (initial_classifier + 1) % 3)
+
+        initial_bypass = s.cloud_bypass_permissions
+        actions["p"].run()
+        self.assertEqual(s.cloud_bypass_permissions, not initial_bypass)
+
+        # Nav action works
+        nav_actions = [a for a in cloud.actions() if a.section == "nav"]
+        self.assertEqual(len(nav_actions), 1)
+        self.assertEqual(nav_actions[0].key, "q")
+        self.assertIs(nav_actions[0].run(), m.QUIT)
+
+    def test_cloud_config_screen_owner_sub_nav_is_back(self):
+        """CloudConfigScreen with SUB owner has Back nav, not Quit."""
+        s = m.Settings()
+        cloud = m.CloudConfigScreen(s, owner=m.SUB)
+        nav_actions = [a for a in cloud.actions() if a.section == "nav"]
+        self.assertEqual(len(nav_actions), 1)
+        self.assertEqual(nav_actions[0].key, "b")
+        self.assertIs(nav_actions[0].run(), m.BACK)
+
 
 class LaunchTests(unittest.TestCase):
     def test_local_launch_passes_selected_effort(self):

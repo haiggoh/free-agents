@@ -1,3 +1,68 @@
+## [0.24.0] — 2026-10-06
+
+### Added — Cloud Session Configuration & Native Agent Interception
+
+**CloudConfigScreen** (new `session_picker_model.py` screen, key `c` from Home):
+- **Intercept Agents toggle** (x): Deny native `Agent` tool, replace with `FreeAgent` native plugin tool
+- **Classifier Source selector** (y): NVIDIA API / Local Devstral / Auto (local on local, remote on remote)
+- **Bypass Permissions toggle** (p): Blind-trust auto mode for cloud sessions (`bypassPermissions`)
+- Both menu item and screen title use cloud + wrench emojis with space: `☁️ 🔧 Cloud Session Configuration`
+- Persists in `session-menu.local.json` (schema v4) under `intercept_agents` and `cloud_bypass_permissions`
+
+**HomeScreen**: Cloud session configuration moved to 3rd position (after Local/Remote)
+
+**APIKeysScreen** improvements:
+- Key emoji (🔑) from single source of truth (`config/emoji.sh` → `emoji_constants.py`)
+- Provider order: NVIDIA → Google (gemini) → Groq → alphabetical
+- Empty newline before Google (after NVIDIA's "Add key" item)
+- Back to Home at bottom (matching other menus)
+- "More providers" toggle (hidden by default, shows all providers when enabled)
+
+**remote-session.sh**: `CLOUD_BYPASS_PERMISSIONS` env var support; when enabled forces `bypassPermissions` regardless of `AUTO_MODE_STATE`
+
+### Added — Native Agent Interception (Deny & Replace)
+
+**Unified Registry** (`config-lib.sh`, `config.example.sh`):
+- New `api` backend: free API models via `~/.api_keys/` (no local weights)
+- New `litellm` backend: LiteLLM proxy (port 4141) for remote models
+- Updated `LA_SERVE_BACKENDS` vocabulary and documentation
+- Example entries: `nemotron-550b`, `nemotron-35b`, `gemini-3.8-flash`, `kimi-k3`, `deepseek-v4-flash`, `groq-gpt-oss-120b`
+
+**council-router.sh** — Dynamic role router with priority chain:
+1. `api` backends (if API keys exist in `~/.api_keys/`)
+2. `litellm` backends (if proxy reachable)
+3. Local backends (`rapid`, `vllm`, `mlx_lm`, `llama_cpp`)
+
+**free-agent-tool.py** — Native plugin tool replacement for built-in `Agent` tool:
+- Matches native Agent tool schema (prompt, subagent_type, description, model, files)
+- Routes via `council-router.sh` → selects best model for role
+- Supports local (rapid/vllm/mlx_lm), api, and litellm backends
+- Returns JSON matching native Agent tool output format
+
+**LA_DENY_TOOLS enforcement** (`launch-claude-agent.sh`):
+- Ensures `Agent` is in deny list when Intercept Agents is ON (default)
+- Removes `Agent` from deny list when OFF
+
+**Session menu state** (`session_menu_state.py` schema v4):
+- Added `intercept_agents` persistence (default "1" = ON)
+- CLI: `set-intercept` command
+
+**Session picker model** (`session_picker_model.py`):
+- `intercept_agents` and `cloud_bypass_permissions` Settings fields
+- Passed via env: `INTERCEPT_AGENTS`, `CLOUD_BYPASS_PERMISSIONS`
+
+### Changed
+- `csl` dry-run shows Intercept Agents toggle status
+- `la_on_disk()` now returns success for `api`/`litellm` backends (no local weights needed)
+- `LA_SERVE_BACKENDS` includes `api`; `la_register` docs updated for new backends
+
+### Tests
+- Full suite: 376 passed, 0 failed, 40 skipped
+- CloudConfigScreen: 2 new tests (structure + owner SUB nav)
+- APIKeysScreen: 24 tests passing (provider order, More providers toggle, Back nav)
+- Session menu state: 24 tests passing (schema v4 with intercept_agents)
+- All free-agents tests passing (376/376)
+
 ## [0.23.5] — 2026-10-05
 
 Model context & autocompaction catalogue integration (hybrid approach, Plan Phase 5C/8).

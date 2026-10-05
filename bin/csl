@@ -363,6 +363,12 @@ STOP_HOOK="${CSL_STOP_HOOK:-0}"
 # shell and synced both ways with remote-session.sh -- it is state, not a home-screen control.
 LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
 
+# Intercept Paid Agents toggle (Deny & Replace).
+# 1 = ON (default): deny the native Agent tool via LA_DENY_TOOLS, replacing it with FreeAgent.
+# 0 = OFF: allow the native Agent tool (paid gateway subagents).
+# State persists in config/session-menu.local.json.
+INTERCEPT_AGENTS="${CSL_INTERCEPT_AGENTS:-1}"
+
 # MCP enablement for blind-trust mode (local + remote sessions)
 # 0 = DISABLED (default), 1 = ENABLED (mcp__* allowlisted in blind-trust settings)
 # Only effective when AUTO_MODE_STATE=0 (blind-trust) and LA_BLIND_TRUST_OPTION=B
@@ -458,6 +464,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   if [ "$AUTO_MODE_STATE" = "0" ]; then
     printf "  MCPs (blind-trust): %s (toggle with 'u')\n" "$([ "$LA_ENABLE_MCP" = "1" ] && echo ENABLED || echo DISABLED)"
   fi
+  printf "  Intercept Agents: %s (toggle with 'x')\n" "$([ "$INTERCEPT_AGENTS" = "1" ] && echo "ON (FreeAgent)" || echo "OFF (Native Agent)")"
   echo
   echo "Launcher paths:"
   printf "  Local  : %s\n" "$LAUNCHER"

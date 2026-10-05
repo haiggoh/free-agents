@@ -51,10 +51,10 @@ LA_CANONICAL_ROLES="operator reasoner validator utility"
 # llama.cpp / llama-server and MLX backends cannot load them, so a GGUF model must pin
 # serve=llama_cpp explicitly. la_finalize_serve warns loudly if a GGUF-looking artifact ends up
 # on an MLX backend, because that combination fails late (at weight load) and confusingly.
-LA_SERVE_BACKENDS="rapid vllm mlx_lm llama_cpp litellm"
+LA_SERVE_BACKENDS="rapid vllm mlx_lm llama_cpp litellm api"
 LA_SERVE_GENERIC="mlx auto"
 # Which backends a GENERIC value may resolve to. Narrower than LA_SERVE_BACKENDS on purpose:
-# llama_cpp and litellm are legal PINs but must never be the MLX default, or flipping one line would reroute
+# llama_cpp, litellm and api are legal PINS but must never be the MLX default, or flipping one line would reroute
 # every MLX model to an engine that cannot load safetensors at all.
 LA_MLX_BACKENDS="rapid vllm mlx_lm"
 
@@ -128,7 +128,7 @@ declare -A LA_MODEL_CONTEXT_OVERRIDE LA_MODEL_AUTOCOMPACT_OVERRIDE
 # These provide the catalogue defaults per model folder.
 declare -A LA_CATALOGUE_CONTEXT LA_CATALOGUE_AUTOCOMPACT LA_CATALOGUE_EXTENDED_CONTEXT LA_CATALOGUE_EXTENDED_AUTOCOMPACT LA_CATALOGUE_ENTRY_TYPE
 
-# la_register <alias> <subdir> <serve:mlx|rapid|vllm|mlx_lm|llama_cpp> <tool_parser> <reasoning_parser>
+# la_register <alias> <subdir> <serve:mlx|rapid|vllm|mlx_lm|llama_cpp|litellm|api> <tool_parser> <reasoning_parser>
 #             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb] [rapid_spec_json]
 # reasoning_parser may be "" (none). The last four are OPTIONAL and additive, so pre-existing
 # 8-field config lines keep working unchanged:
@@ -136,7 +136,9 @@ declare -A LA_CATALOGUE_CONTEXT LA_CATALOGUE_AUTOCOMPACT LA_CATALOGUE_EXTENDED_C
 #            just not offered by role in the resolver).
 #   hf_repo  Hugging Face repo id — lets the interactive installer download this model; "" = the
 #            installer won't manage it (you place the weights yourself).
+#            For serve=litellm|api: the provider/model identifier for the API (e.g., "nvidia/nemotron-3-ultra-550b-a55b").
 #   size_gb  approx download size, for the installer's disk/consent display; "" = unknown.
+#            For serve=litellm|api: the model parameter count in billions (e.g., "550").
 #   rapid_spec_json  optional Rapid --speculative-config JSON; "" = force baseline decode.
 # Called once per model from the config file.
 la_register() {
@@ -752,10 +754,17 @@ la_resolve_target() {
 # just a non-empty directory). This is what
 # makes the roster "informed by what's actually available": a registered model isn't usable until
 # its files are present, so the resolver/installer check disk, not just registration.
+# For serve=api|litellm backends, no local weights are needed — they always return success.
 la_on_disk() {
-  local sub="${LA_SUBDIR[$1]:-}" d
+  local alias="$1"
+  local sub="${LA_SUBDIR[$alias]:-}"
+  local serve="${LA_SERVE[$alias]:-}"
   [ -n "$sub" ] || return 1
-  d="$LA_MODELS_DIR/$sub"
+  # API and LiteLLM backends don't require local weights
+  case "$serve" in
+    api|litellm) return 0 ;;
+  esac
+  local d="$LA_MODELS_DIR/$sub"
   [ -d "$d" ] || return 1
   # Require an actual WEIGHT file, not merely a non-empty directory. A metadata-only shell (configs
   # + tokenizer, no weights) is left behind by an aborted download; it looks installed and is not,

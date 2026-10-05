@@ -38,9 +38,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 3
-READABLE_SCHEMAS = (1, 2, 3)
-SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature")
+SCHEMA_VERSION = 4
+READABLE_SCHEMAS = (1, 2, 3, 4)
+SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature", "intercept_agents")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown")  # = remote_provider_core.TIER_CHOICES
@@ -78,6 +78,10 @@ _RL_NUMERIC = {"rpm": (1, 10000), "bucket_capacity": (1, 1000),
                "max_cooldown": (0, 3600), "backoff_multiplier": (1, 10), "max_retries": (0, 50)}
 _RL_WHOLE = ("rpm", "bucket_capacity", "max_retries")
 
+# Intercept Agents toggle (Deny & Replace): 1 = ON (FreeAgent), 0 = OFF (Native Agent)
+INTERCEPT_AGENTS_CHOICES = ("0", "1")
+DEFAULT_INTERCEPT_AGENTS = "1"
+
 # A launcher alias: what csl / remote-session.sh / lowkey accept as a model name.
 _ALIAS_RE = __import__("re").compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}")
 
@@ -91,6 +95,7 @@ class State:
     last_launched: dict = field(default_factory=dict)
     last_launched_tier: dict = field(default_factory=dict)
     temperature: dict = field(default_factory=lambda: dict(DEFAULT_TEMPERATURE))
+    intercept_agents: str = DEFAULT_INTERCEPT_AGENTS
     warnings: list = field(default_factory=list)
 
 
@@ -146,8 +151,8 @@ def _unsafe_dir(config_dir: Path) -> str | None:
     return None
 
 
-def _parse(raw: bytes) -> tuple[dict, dict, dict, dict]:
-    """Return (effort, rate_limiter, last_launched, temperature) or raise ValueError with a short reason."""
+def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str]:
+    """Return (effort, rate_limiter, last_launched, temperature, intercept_agents) or raise ValueError with a short reason."""
     if len(raw) > MAX_BYTES:
         raise ValueError("preference file is too large")
     try:
@@ -167,6 +172,7 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict]:
     limiter = doc.get("rate_limiter", {})
     last = doc.get("last_launched", {})
     temperature = doc.get("temperature", {})
+    intercept_agents = doc.get("intercept_agents", DEFAULT_INTERCEPT_AGENTS)
     if not all(isinstance(x, dict) for x in (effort, limiter, last, temperature)):
         raise ValueError("preference sections must be JSON objects")
     for lane, value in effort.items():
@@ -176,6 +182,8 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict]:
         _validate_last_launched(lane, alias)
     for lane, value in temperature.items():
         _validate_temperature(lane, value)
+    if intercept_agents not in INTERCEPT_AGENTS_CHOICES:
+        raise ValueError(f"intercept_agents must be one of {', '.join(INTERCEPT_AGENTS_CHOICES)}")
     tiers = doc.get("last_launched_tier", {})
     if not isinstance(tiers, dict):
         raise ValueError("preference sections must be JSON objects")
@@ -185,10 +193,10 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict]:
     # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
     for lane, tier in tiers.items():
         last[f"{lane}:tier"] = tier
-    return effort, limiter, last, temperature
+    return effort, limiter, last, temperature, intercept_agents
 
 
-def _read(path: Path) -> tuple[dict, dict, dict] | None:
+def _read(path: Path) -> tuple[dict, dict, dict, dict, str] | None:
     """None when absent; raises ValueError when present but unusable."""
     try:
         st = os.lstat(path)
@@ -217,12 +225,13 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.warnings.append(f"{exc}; using built-in defaults and leaving the file untouched")
         return state
     if found:
-        effort, limiter, last, temperature = found
+        effort, limiter, last, temperature, intercept_agents = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
         state.last_launched_tier = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
         state.temperature.update(temperature)
+        state.intercept_agents = intercept_agents
     return state
 
 
@@ -267,7 +276,7 @@ def _write(config_dir: Path, doc: dict) -> None:
 def _update(config_dir: Path | str, mutate) -> str | None:
     """Apply `mutate(effort, limiter, last_launched, temperature)` under the lock. Returns a warning or None.
 
-    Always writes schema 3, so a schema-1/2 file is migrated here (and only here), carrying every
+    Always writes schema 4, so a schema-1/2/3 file is migrated here (and only here), carrying every
     section it already had."""
     config_dir = Path(config_dir)
     reason = _unsafe_dir(config_dir)
@@ -277,13 +286,14 @@ def _update(config_dir: Path | str, mutate) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature = found
+                effort, limiter, last, temperature, intercept_agents = found
             else:
-                effort, limiter, last, temperature = {}, {}, {}, {}
+                effort, limiter, last, temperature, intercept_agents = {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS
             mutate(effort, limiter, last, temperature)
             doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
                    "last_launched": {k: v for k, v in last.items() if ":" not in k},
-                   "temperature": temperature}
+                   "temperature": temperature,
+                   "intercept_agents": intercept_agents}
             tiers = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
             if tiers:
                 doc["last_launched_tier"] = tiers
@@ -342,6 +352,41 @@ def save_temperature(config_dir: Path | str, lane: str, value: str) -> str | Non
     return _update(config_dir, mutate)
 
 
+def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
+    if value not in INTERCEPT_AGENTS_CHOICES:
+        raise ValueError(f"intercept_agents must be one of {', '.join(INTERCEPT_AGENTS_CHOICES)}")
+
+    def mutate(_effort, _limiter, _last, _temperature):
+        # intercept_agents is handled specially in _update via the found value
+        pass
+    # We need to update the intercept_agents value directly
+    config_dir = Path(config_dir)
+    reason = _unsafe_dir(config_dir)
+    if reason:
+        return f"{reason}; the choice applies to this run only"
+    try:
+        with _locked(config_dir):
+            found = _read(config_dir / PREFS_NAME)
+            if found:
+                effort, limiter, last, temperature, _ = found
+            else:
+                effort, limiter, last, temperature = {}, {}, {}, {}
+            doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
+                   "last_launched": {k: v for k, v in last.items() if ":" not in k},
+                   "temperature": temperature,
+                   "intercept_agents": value}
+            tiers = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
+            if tiers:
+                doc["last_launched_tier"] = tiers
+            _write(config_dir, doc)
+    except ValueError as exc:
+        return f"{exc}; not saved (file left untouched), the choice applies to this run only"
+    except OSError as exc:
+        code = errno.errorcode.get(exc.errno, "error") if exc.errno else "error"
+        return f"could not save preferences ({code}); the choice applies to this run only"
+    return None
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="session_menu_state.py",
@@ -360,6 +405,8 @@ def main(argv: list[str]) -> int:
     st.add_argument("lane", choices=list(ALLOWED_TEMPERATURE))
     st.add_argument("value")
     sub.add_parser("show", help="print the effective state as JSON")
+    ia = sub.add_parser("set-intercept", help="persist intercept agents toggle")
+    ia.add_argument("value", choices=list(INTERCEPT_AGENTS_CHOICES))
     args = parser.parse_args(argv)
 
     if args.cmd == "set":
@@ -382,6 +429,16 @@ def main(argv: list[str]) -> int:
             print(f"session_menu_state: warning: {warning}", file=sys.stderr)
             return 1
         return 0
+    if args.cmd == "set-intercept":
+        try:
+            warning = save_intercept_agents(REPO_CONFIG_DIR, args.value)
+        except ValueError as exc:
+            print(f"session_menu_state: {exc}", file=sys.stderr)
+            return 2
+        if warning:
+            print(f"session_menu_state: warning: {warning}", file=sys.stderr)
+            return 1
+        return 0
     state = load(REPO_CONFIG_DIR)
     for warning in state.warnings:
         print(f"session_menu_state: warning: {warning}", file=sys.stderr)
@@ -393,7 +450,8 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"effort": state.effort, "rate_limiter": state.rate_limiter,
                           "last_launched": state.last_launched,
                           "last_launched_tier": state.last_launched_tier,
-                          "temperature": state.temperature}, indent=2))
+                          "temperature": state.temperature,
+                          "intercept_agents": state.intercept_agents}, indent=2))
     return 0
 
 

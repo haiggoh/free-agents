@@ -176,6 +176,10 @@ class Settings:
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
     # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=Local Devstral always, 2=Auto)
     classifier_source: int = 2
+    # Intercept Agents toggle (Deny & Replace): True = ON (FreeAgent), False = OFF (Native Agent)
+    intercept_agents: bool = True
+    # Bypass permissions mode for cloud sessions (blind-trust auto mode)
+    cloud_bypass_permissions: bool = False
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
     # Called with (lane, value) when the user CONFIRMS a temperature change; persists it.
@@ -420,6 +424,7 @@ class HomeScreen(Screen):
                    lambda: Nav("local", HOME_OWNED), section="lanes"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
+            Action("c", f"{ec.EMOJI_CLOUD_CONFIG_STR} {ec.EMOJI_TOOLS_STR} Cloud session configuration…", lambda: Nav("cloud_config", HOME_OWNED), section="tools"),
             Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools"),
             Action("o", f"{ec.LK_EMOJI_CONVO_STR} Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
         ]
@@ -566,7 +571,8 @@ class LocalScreen(Screen):
                "LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
                "LA_ENABLE_MCP": "1" if s.enable_mcp else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
-               "CSL_WATCH": "1" if s.watcher else "0"}
+               "CSL_WATCH": "1" if s.watcher else "0",
+               "INTERCEPT_AGENTS": "1" if s.intercept_agents else "0"}
         # Use profile_id for the launcher if available, else alias
         launch_alias = mdl.profile_id if mdl.profile_id else mdl.alias
         argv = ["local", launch_alias, s.local_effort]
@@ -741,7 +747,9 @@ class RemoteScreen(Screen):
             argv += ["--temperature", s.remote_temperature]
         argv.append(alias)
         env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
-               "LA_CLASSIFIER_SOURCE": str(s.classifier_source)}
+               "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
+               "INTERCEPT_AGENTS": "1" if s.intercept_agents else "0",
+               "CLOUD_BYPASS_PERMISSIONS": "1" if s.cloud_bypass_permissions else "0"}
         return LaunchRequest("remote", argv, env, alias)
 
 
@@ -782,6 +790,47 @@ class RemoteFiltersScreen(Screen):
     def _regroup_remote_if_loaded(self):
         # This is a best-effort; the remote screen will regroup when next opened
         pass
+
+    def groups(self):
+        """No accordion for this screen."""
+        return []
+
+
+class CloudConfigScreen(Screen):
+    """Cloud session configuration settings.
+
+    Settings that affect cloud sessions (remote API and gateway sessions):
+    - Intercept Agents: replace native Agent tool with FreeAgent
+    - Classifier Source: NVIDIA API / Local Devstral / Auto
+    - Bypass Permissions: blind-trust auto mode for cloud sessions
+    """
+    title = f"{ec.EMOJI_CLOUD_CONFIG_STR} {ec.EMOJI_TOOLS_STR} Cloud Session Configuration"
+
+    def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
+        super().__init__(settings, owner)
+        # No accordion needed - this is an action-only screen
+        self.accordion = None
+
+    def actions(self):
+        s = self.settings
+        acts = [
+            Action("x", f"{ec.EMOJI_SHIELD_STR}  Intercept Agents: {'ON (FreeAgent)' if s.intercept_agents else 'OFF (Native Agent)'}",
+                   lambda: self._toggle("intercept_agents")),
+            Action("y", f"Classifier: {CLASSIFIER_SOURCE_LABELS[s.classifier_source]}",
+                   lambda: self._cycle_classifier()),
+            Action("p", f"{ec.EMOJI_AUTO_MODE_STR}  Bypass Permissions (blind-trust): {'ON' if s.cloud_bypass_permissions else 'OFF'}",
+                   lambda: self._toggle("cloud_bypass_permissions")),
+        ]
+        acts += self.nav_actions()
+        check_action_table(acts)
+        return acts
+
+    def _toggle(self, attr):
+        setattr(self.settings, attr, not getattr(self.settings, attr))
+
+    def _cycle_classifier(self):
+        s = self.settings
+        s.classifier_source = (s.classifier_source + 1) % 3
 
     def groups(self):
         """No accordion for this screen."""
@@ -896,17 +945,17 @@ class APIKeysScreen(Screen):
     - Add provider key (launches wizard)
     Only one provider's actions are visible at a time.
     """
-    title = "API Keys Setup"
+    title = f"{ec.EMOJI_KEY_STR} API Keys Setup"
 
-    # Provider list matches install/setup-api-keys.py
-    # NVIDIA first (user request), then alphabetical
+    # Provider list: NVIDIA first, then Google, then Groq, then alphabetical
     # (slug, name, shortcut, signup_url, key_files)
     PROVIDERS = [
         ("nvidia", "NVIDIA", "n", "https://build.nvidia.com/settings/api-keys", ("nvidia",)),
-        ("cerebras", "Cerebras", "e", "https://cloud.cerebras.ai/platform/", ("cerebras",)),
-        ("cloudflare", "Cloudflare Workers AI", "c", "https://dash.cloudflare.com/profile/api-tokens", ("cloudflare", "cloudflare-account-id")),
+        # --- gap ---
         ("gemini", "Google Gemini", "g", "https://aistudio.google.com/apikey", ("gemini",)),
         ("groq", "Groq", "u", "https://console.groq.com/keys", ("groq",)),
+        ("cerebras", "Cerebras", "e", "https://cloud.cerebras.ai/platform/", ("cerebras",)),
+        ("cloudflare", "Cloudflare Workers AI", "c", "https://dash.cloudflare.com/profile/api-tokens", ("cloudflare", "cloudflare-account-id")),
         ("kilo", "Kilo", "k", "https://app.kilo.ai", ("kilo",)),
         ("llm7", "LLM7", "l", "https://dash.llm7.io", ("llm7",)),
         ("mistral", "Mistral", "m", "https://console.mistral.ai/home?profile_dialog=api-keys", ("mistral",)),
@@ -922,12 +971,16 @@ class APIKeysScreen(Screen):
         super().__init__(settings, owner)
         # Build accordion with providers as groups
         groups = []
-        for slug, name, _shortcut, _url, key_files in self.PROVIDERS:
+        for i, (slug, name, _shortcut, _url, key_files) in enumerate(self.PROVIDERS):
             status = self._get_provider_status(slug, key_files)
+            # Add visual separator after NVIDIA (index 0)
+            label = f"{name}: {status}"
+            if i == 0:
+                label = f"{label}\n"  # Empty line after NVIDIA
             # Each provider group has two items: Open page and Add key
             groups.append(Group(
                 slug,
-                f"{name}: {status}",
+                label,
                 [
                     Item(f"open:{slug}", f"Open {name} signup page"),
                     Item(f"add:{slug}", f"Add {name} key"),
@@ -951,18 +1004,57 @@ class APIKeysScreen(Screen):
 
     def actions(self):
         # No static actions - all actions are via accordion items
-        acts = self.nav_actions()
+        # Add Back at bottom (matching other menus - Back to Home for HOME_OWNED, BACK for SUB)
+        if self.owner == HOME_OWNED:
+            acts = [Action("b", f"{ec.EMOJI_HOME_STR} Back to Home", lambda: Nav("home", HOME_OWNED), section="nav")]
+        else:
+            acts = [Action("b", f"{ec.EMOJI_HOME_STR} Back", lambda: BACK, section="nav")]
         check_action_table(acts)
         return acts
 
+    def _rebuild_groups(self):
+        """Rebuild accordion groups based on _show_all_providers flag."""
+        groups = []
+        for i, (slug, name, _shortcut, _url, key_files) in enumerate(self.PROVIDERS):
+            # Skip providers after NVIDIA if not showing all
+            if i > 0 and not getattr(self, '_show_all_providers', False):
+                continue
+            status = self._get_provider_status(slug, key_files)
+            label = f"{name}: {status}"
+            # Add visual separator BEFORE this group if it's the first non-NVIDIA provider (Google)
+            if i == 1:
+                label = f"\n{label}"  # Empty line before Google (after NVIDIA's Add key)
+            # Each provider group has two items: Open page and Add key
+            groups.append(Group(
+                slug,
+                label,
+                [
+                    Item(f"open:{slug}", f"Open {name} signup page"),
+                    Item(f"add:{slug}", f"Add {name} key"),
+                ]
+            ))
+        # Add "More providers" item if not showing all
+        if not getattr(self, '_show_all_providers', False):
+            groups.append(Group(
+                "more",
+                "More providers…",
+                [
+                    Item("more:show", "Show all providers"),
+                ]
+            ))
+        self.accordion.set_groups(groups)
+        # Default expand NVIDIA (first group)
+        if groups:
+            self.accordion.open_group = groups[0].id
+
     def activate_selected(self):
-        """Handle activation of accordion items (Open page / Add key).
+        """Handle activation of accordion items (Open page / Add key / More).
         Returns LaunchRequest to launch the appropriate command.
         """
         sel = self.accordion.selected_id
         if not sel:
             return None
-        # sel format: "open:slug" or "add:slug"
+        # sel format: "open:slug" or "add:slug" or "more:show"
         if sel.startswith("open:"):
             slug = sel[5:]
             # Open browser directly without suspending - macOS 'open' command works async
@@ -973,6 +1065,11 @@ class APIKeysScreen(Screen):
         elif sel.startswith("add:"):
             # Inline key entry in the picker (the app opens a hidden Input), not the old wizard
             return Nav(f"tool:keys:wizard:{sel[4:]}", self.owner)
+        elif sel.startswith("more:"):
+            # Toggle more providers visibility
+            self._show_all_providers = not getattr(self, '_show_all_providers', False)
+            self._rebuild_groups()
+            return None
         return None
 
 

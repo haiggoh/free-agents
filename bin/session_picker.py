@@ -482,6 +482,8 @@ class Picker(App):
             return m.RuntimeManagerScreen(s, nav.owner)
         if nav.target == "api_keys":
             return m.APIKeysScreen(s, nav.owner)
+        if nav.target == "cloud_config":
+            return m.CloudConfigScreen(s, nav.owner)
         raise ValueError(nav.target)
 
     def goto(self, nav: m.Nav):
@@ -524,6 +526,8 @@ class Picker(App):
             self.screen_model = m.APIKeysScreen(s, nav.owner)
         elif nav.target == "remote_filters":
             self.screen_model = m.RemoteFiltersScreen(s, nav.owner)
+        elif nav.target == "cloud_config":
+            self.screen_model = m.CloudConfigScreen(s, nav.owner)
         else:
             raise ValueError(nav.target)
 
@@ -1108,7 +1112,7 @@ def main(argv):
     ap = argparse.ArgumentParser(prog="session-picker",
                                  description="Free Agents session picker (arrow keys, letter shortcuts).")
     ap.add_argument("screen", nargs="?", default="home",
-                    choices=["home", "local", "remote", "lowkey", "download", "rate-limiter", "remote_filters"])
+                    choices=["home", "local", "remote", "lowkey", "download", "rate-limiter", "remote_filters", "cloud_config"])
     ap.add_argument("--include-trials", action="store_true", help="show trial rows (the default)")
     ap.add_argument("--exclude-trials", action="store_true", help="start with trial rows hidden")
     ap.add_argument("--local-capable-shown", action="store_true",

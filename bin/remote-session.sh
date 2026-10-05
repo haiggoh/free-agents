@@ -1206,6 +1206,16 @@ if [[ "$MODE" == "launch" ]]; then
     esac
     export LA_AUTO_MODE LA_BLIND_AUTO
 
+    # Cloud bypass permissions (blind-trust for cloud sessions) - can be set independently
+    # of auto-mode state. When ON, uses bypassPermissions regardless of AUTO_MODE_STATE.
+    : "${CLOUD_BYPASS_PERMISSIONS:=0}"
+    if [[ "$CLOUD_BYPASS_PERMISSIONS" -eq 1 ]]; then
+        PERMISSION_MODE="bypassPermissions"
+        LA_AUTO_MODE=1
+        LA_BLIND_AUTO=1
+    fi
+    export LA_AUTO_MODE LA_BLIND_AUTO
+
     # Classifier source for Auto Mode (when not blind-trust).
     #   0 = NVIDIA API (fallback: Devstral local)
     #   1 = Local Devstral (always)

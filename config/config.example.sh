@@ -94,7 +94,7 @@ LA_COUNCIL_NOTE=""
 # installer (`install/download-models.sh` reads hf_repo/size from here). Change models HERE only.
 # One la_register line per model:
 #
-#   la_register <alias> <subdir> <serve> <tool_parser> <reasoning_parser> <thinking> <spoof_id> <effort> [roles] [hf_repo] [size_gb]
+#   la_register <alias> <subdir> <serve> <tool_parser> <reasoning_parser> <thinking> <spoof_id> <effort> [roles] [hf_repo] [size_gb] [rapid_spec_json]
 #
 #   alias            what a session/dispatch requests (e.g. `launch ... my-operator`)
 #   subdir           directory name under LA_MODELS_DIR
@@ -106,6 +106,12 @@ LA_COUNCIL_NOTE=""
 #                    mlx_lm     mlx_lm.server, dispatch-only (no /v1/messages)
 #                    llama_cpp  GGUF artifact, served by llama-server. NOT launched by hotswap;
 #                               it stops with instructions instead of loading GGUF into MLX.
+#                    litellm    LiteLLM proxy (Anthropic /v1/messages route). Use for remote free-API
+#                               models via a local proxy (e.g., NVIDIA Nemotron 550B, Gemini).
+#                               Requires LA_LITELLM_CONFIG pointing to a litellm config with the model.
+#                    api        Direct free-API endpoint (no local proxy). Uses LA_API_KEYS_DIR to find
+#                               API keys in ~/.api_keys/. The subdir is the provider (nvidia|gemini|groq|...).
+#                               Does not require local weights — skips disk check.
 #   tool_parser      --tool-call-parser: auto|qwen|qwen3_coder|mistral|llama|hermes|
 #                    deepseek|gpt-oss|... (pick the one matching the model's emitted tool format)
 #   reasoning_parser --reasoning-parser (qwen3|deepseek_r1|...) or "" for none
@@ -122,8 +128,11 @@ LA_COUNCIL_NOTE=""
 #                    models (your A/B choice); leaving a role unfilled is fine (that work stays on
 #                    cloud). OMIT for an untagged model (still launchable, just not offered by role).
 #   hf_repo          OPTIONAL Hugging Face repo id — lets the interactive installer download it.
-#                    OMIT to manage the weights yourself.
+#                    OMIT to manage the weights yourself. For api/litellm backends, this is the
+#                    provider/model identifier (e.g., "nvidia/nemotron-3-ultra-550b-a55b").
 #   size_gb          OPTIONAL approx download size (installer display / disk consent). OMIT if unknown.
+#                    For api/litellm backends, this is the model parameter count in billions (e.g., "550").
+#   rapid_spec_json  OPTIONAL Rapid --speculative-config JSON; "" = force baseline decode.
 #
 # Fields are positional: to set a later optional field, pass "" for any earlier one you're skipping.
 # The examples below are the maintainer's mid-2026 M4-Max stack — REPLACE with your models. Note
@@ -144,6 +153,26 @@ la_register qwen-3.8-operator      Qwen3.8-27B-4bit                   mlx    qwe
 la_register qwen-3.8-thinking      Qwen3.8-27B-4bit                   mlx    qwen  qwen3       true  ""           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
 la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  mlx    qwen  deepseek_r1 true  ""           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
 la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false "$LA_SPOOF_UTILITY"      low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
+
+# --- Free-API remote models (api backend) -------------------------------------
+# These use the 'api' serve backend and do NOT require local weights.
+# The subdir is the provider name (must match a file in ~/.api_keys/).
+# hf_repo field is the provider/model identifier for the API.
+# size_gb field is the model parameter count in billions.
+# UNCOMMENT and add your API keys to ~/.api_keys/ to enable.
+# Example: echo "sk-..." > ~/.api_keys/nvidia
+# la_register nemotron-550b          nvidia                             api    auto  ""          false ""           high  "reasoner,validator" nvidia/nemotron-3-ultra-550b-a55b 550
+# la_register nemotron-35b           nvidia                             api    auto  ""          false ""           high  "operator,reasoner"  nvidia/nemotron-3-5-lightning-30b 30
+# la_register gemini-3.8-flash       gemini                             api    auto  ""          false ""           high  "reasoner,validator" google/gemini-3.8-flash 200
+# la_register kimi-k3                kimi                               api    auto  ""          false ""           max   "reasoner"           moonshotai/kimi-k3 1000
+# la_register deepseek-v4-flash      deepseek                           api    auto  ""          false ""           high  "reasoner,operator"  deepseek-ai/deepseek-v4-flash 500
+# la_register groq-gpt-oss-120b      groq                               api    auto  ""          false ""           high  "utility,operator"   gpt-oss-120b 120
+
+# --- LiteLLM proxy models (litellm backend) -----------------------------------
+# These use the 'litellm' serve backend via a local LiteLLM proxy (port 4141).
+# Requires LA_LITELLM_CONFIG pointing to a litellm config YAML.
+# UNCOMMENT when proxy is configured.
+# la_register nemotron-550b-litellm  nemotron-550b                      litellm auto  ""         false ""           high  "reasoner"           nvidia/nemotron-3-ultra-550b-a55b 550
 
 # --- Classifier qualification candidate (Auto Mode) --------------------------
 # Devstral Small 2 24B — leading candidate for local Auto Mode classifier.
@@ -172,6 +201,18 @@ la_role reasoner  deepseek-r1-architect max    both      # A/B reasoner — stro
 la_role validator deepseek-r1-architect max    dispatch  # independent review — dispatch (no tool_calls)
 la_role utility   llama-scout           low    dispatch  # cheap classification — dispatch-only
 # la_role utility   devstral-small2       medium dispatch  # Auto Mode classifier — dispatch-only (enable after qualification)
+
+# Example API model role bindings (UNCOMMENT when API keys are configured in ~/.api_keys/):
+# la_role reasoner  nemotron-550b         high   dispatch  # NVIDIA Nemotron 550B — big reasoner via API
+# la_role operator  nemotron-35b          high   dispatch  # NVIDIA Nemotron 35B — operator via API
+# la_role reasoner  gemini-3.8-flash      high   dispatch  # Gemini 3.8 Flash — big reasoner via API
+# la_role reasoner  kimi-k3               max    dispatch  # Kimi K3 — max reasoner via API
+# la_role reasoner  deepseek-v4-flash     high   dispatch  # DeepSeek V4 Flash — reasoner via API
+# la_role utility   groq-gpt-oss-120b     high   dispatch  # Groq gpt-oss-120b — fast utility via API
+
+# Example LiteLLM proxy model role bindings (UNCOMMENT when proxy is configured):
+# la_role reasoner  nemotron-550b-litellm high   dispatch  # Nemotron 550B via LiteLLM proxy
+
 # Optional per-launch Claude Code profile controls. Environment variables passed
 # to one launch override these defaults. Leave empty for existing behavior.
 LA_AGENT_PROMPT_FILE=""    # default: config/local-agent-system-prompt.txt

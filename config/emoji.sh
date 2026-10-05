@@ -16,6 +16,9 @@ SESSION_EMOJI_CLOUD="☁️"        # cloud/gateway sessions
 SESSION_EMOJI_REMOTE_API="📡"   # alias for free_api
 SESSION_EMOJI_UNKNOWN="❓"      # was 🧭 (compass) — reserved for waypoints plugin
 
+# Explicit cloud session configuration emoji (for UI)
+EMOJI_CLOUD_CONFIG="☁️"
+
 # Telemetry / feature emojis (not session kinds, but shared across scripts)
 EMOJI_TELEMETRY_ON="🛰️ "
 EMOJI_TELEMETRY_OFF="🔇"
@@ -36,6 +39,7 @@ EMOJI_LOCAL_CAPABLE="🏷️"   # picker remote `f`: locally-runnable models sho
 EMOJI_HIDDEN_REPORT="📋"   # hidden-model report (picker `x`, bash `R`)
 EMOJI_FILTER="🔍"           # filter submenu (picker remote `y`)
 EMOJI_DOWNLOAD="📥"         # download models (picker `d`, distinct from backend manager)
+EMOJI_SHIELD="🛡️"          # intercept agents toggle (picker `x`)
 
 # Status / progress emojis (picker)
 EMOJI_OK="✅"

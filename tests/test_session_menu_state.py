@@ -114,7 +114,7 @@ class StateTests(unittest.TestCase):
         self._assert_warns_and_keeps(b"{not json")
 
     def test_unknown_future_schema_warns_without_overwrite(self):
-        self._assert_warns_and_keeps(json.dumps({"schema_version": 4, "effort": {}}).encode())
+        self._assert_warns_and_keeps(json.dumps({"schema_version": 5, "effort": {}}).encode())
 
     def test_unknown_section_warns_without_overwrite(self):
         # Fails if a section this version does not know is silently dropped by the next write.
@@ -237,7 +237,7 @@ class StateTests(unittest.TestCase):
         self.assertEqual(self.file.read_bytes(), raw)
         self.assertIsNone(sms.save_last_launched(self.cfg, "local_session", "qwen-3.8-operator"))
         doc = json.loads(self.file.read_text())
-        self.assertEqual(doc["schema_version"], 3)
+        self.assertEqual(doc["schema_version"], 4)
         self.assertEqual(doc["effort"], v1["effort"])
         self.assertEqual(doc["rate_limiter"], v1["rate_limiter"])
         self.assertEqual(doc["last_launched"], {"local_session": "qwen-3.8-operator"})

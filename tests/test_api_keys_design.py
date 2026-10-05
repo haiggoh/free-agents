@@ -255,7 +255,7 @@ class HomeScreenCleanTests(unittest.TestCase):
             sections[a.section] = sections.get(a.section, 0) + 1
 
         self.assertEqual(sections.get("lanes", 0), 2)
-        self.assertEqual(sections.get("tools", 0), 4)
+        self.assertEqual(sections.get("tools", 0), 5)
         self.assertEqual(sections.get("nav", 0), 1)
 
 
