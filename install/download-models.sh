@@ -83,6 +83,9 @@ while (($#)); do
     --backend) (($# >= 2)) || { echo '--backend needs a backend name' >&2; exit 2; }; BACKEND_FILTER=$2; NON_AUTH_ACTION=1; shift 2 ;;
     --capability) (($# >= 2)) || { echo '--capability needs a capability name' >&2; exit 2; }; CAPABILITY_FILTER=$2; NON_AUTH_ACTION=1; shift 2 ;;
     --recommended) RECOMMENDED_ONLY=1; NON_AUTH_ACTION=1; shift ;;
+    --hf-repo) (($# >= 2)) || { echo '--hf-repo needs a repo ID' >&2; exit 2; }; DYNAMIC_HF_REPO=$2; DYNAMIC_HF=1; NON_AUTH_ACTION=1; shift 2 ;;
+    --alias) (($# >= 2)) || { echo '--alias needs an alias' >&2; exit 2; }; DYNAMIC_ALIAS=$2; NON_AUTH_ACTION=1; shift 2 ;;
+    --include) (($# >= 2)) || { echo '--include needs a pattern' >&2; exit 2; }; DYNAMIC_INCLUDE=$2; NON_AUTH_ACTION=1; shift 2 ;;
     --json) JSON_OUTPUT=1; NON_AUTH_ACTION=1; shift ;;
     -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
@@ -276,6 +279,41 @@ for catalog_file in "${CATALOG_FILES[@]}"; do
   _seen_catalog[$_real]=1
   load_catalog_file "$catalog_file"
 done
+
+# --- Dynamic HF repo injection (Phase 2) ------------------------------------
+# If --hf-repo was provided, construct a catalog row in memory and inject it into
+# the existing download queue (same arrays used by static catalog). This preserves
+# deduplication, disk space checks, and the .la-download-complete marker logic.
+if (( ${DYNAMIC_HF:-0} )); then
+  # Require --alias for dynamic fetches
+  if [[ -z ${DYNAMIC_ALIAS:-} ]]; then
+    printf 'Error: --hf-repo requires --alias to identify the model.\n' >&2
+    exit 2
+  fi
+  # Warn if no --include pattern provided (full repo download is often huge)
+  if [[ -z ${DYNAMIC_INCLUDE:-} ]]; then
+    printf 'Warning: --hf-repo without --include will download the ENTIRE HF repo (all formats: FP16, AWQ, GGUF, etc.).\n' >&2
+    printf '         This can be hundreds of GB. Use --include "*.safetensors" or --include "*.gguf" to limit.\n' >&2
+    # Continue anyway - user explicitly chose to download everything
+  fi
+  # Construct a pseudo-catalog entry
+  # Format: alias|label|repo|rev|sub|size|group|status|include|runtime
+  # Use the HF repo as the subdir name (sanitized) with "dyn_" prefix to avoid conflicts
+  sanitized_repo=$(printf '%s' "$DYNAMIC_HF_REPO" | sed 's|/|_|g' | sed 's|[^a-zA-Z0-9_]|_|g')
+  dyn_alias="$DYNAMIC_ALIAS"
+  dyn_label="$DYNAMIC_ALIAS (dynamic: $DYNAMIC_HF_REPO)"
+  dyn_repo="$DYNAMIC_HF_REPO"
+  dyn_rev="main"
+  dyn_sub="dyn_$sanitized_repo"  # prefix with dyn_ to avoid conflicts with static catalog
+  dyn_size="?"  # unknown until downloaded
+  dyn_group="dynamic"
+  dyn_status="dynamic"
+  dyn_include="${DYNAMIC_INCLUDE:-}"
+  dyn_runtime="dynamic"
+  # Inject using the SAME add_entry function to preserve deduplication logic
+  add_entry "$dyn_alias" "$dyn_label" "$dyn_repo" "$dyn_rev" "$dyn_sub" "$dyn_size" "$dyn_group" "$dyn_status" "$dyn_include" "$dyn_runtime"
+  printf 'Injected dynamic HF repo: %s as alias %s\n' "$DYNAMIC_HF_REPO" "$DYNAMIC_ALIAS" >&2
+fi
 
 marker() { printf '%s/.la-download-complete' "$1"; }
 has_payload() {
