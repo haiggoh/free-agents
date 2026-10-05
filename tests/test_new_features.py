@@ -1,332 +1,265 @@
 #!/usr/bin/env python3
-"""tests/test_new_features.py — Comprehensive tests for new session picker features.
+"""tests/test_new_features.py — session picker features added in the 0.22/0.23 line.
 
-Tests for:
-- RuntimeManagerScreen (Phase 5)
-- APIKeysScreen (Phase 6)
-- Left/Right arrow navigation for action items
-- Emoji constants from config/emoji.sh
-- Last-launched model persistence
-- Loading indicator (200ms)
-- Emoji spacing fixes
+Covers the Backend Manager screen, the API Keys accordion with INLINE key entry (paste advances,
+typing needs Enter, whitespace is stripped from pastes, the signup page opens through a stub —
+never a real browser), Left/Right cycling of settings, last-launched persistence, the loading
+line, and emoji constants/spacing. UI flows run through Textual's pilot (picker_harness);
+pure model/constant checks need no UI at all.
+
+Run: ~/.local/share/free-agents/picker-venv/bin/python -m pytest tests/test_new_features.py
 """
-
-import json
 import os
-import pty
-import re
-import select
-import signal
-import tempfile
-import time
+import stat
+import sys
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-VENV_PY = Path(os.environ.get("LA_PICKER_VENV", Path.home() / ".local/share/free-agents/picker-venv")) / "bin/python"
-ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[()][0-9A-Za-z]|\x1b[=>]|\x1b\][^\x07]*\x07")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from picker_harness import ROOT, PilotCase, PTYCase  # noqa: E402
 
-KEYS = {"down": "\x1b[B", "up": "\x1b[A", "right": "\x1b[C", "left": "\x1b[D",
-        "enter": "\r", "esc": "\x1b", "space": " ", "ctrl-c": "\x03"}
-
-RECORDER = r"""#!/bin/sh
-python3 - "$0" "$@" <<'PY'
-import json, os, sys
-rec = {"prog": os.path.basename(sys.argv[1]), "argv": sys.argv[2:], "cwd": os.getcwd(),
-       "tty": os.isatty(0),
-       "env": {k: os.environ.get(k) for k in ("LA_AUTO_MODE", "LA_BLIND_AUTO", "LA_TELEMETRY",
-               "LA_QUEUE_STOP_HOOK", "LA_ENABLE_MCP", "CSL_WATCH")}}
-with open(os.environ["PICKER_LOG"], "a") as fh:
-    fh.write(json.dumps(rec) + "\n")
-PY
-echo "CHILD-RAN $(basename "$0")"
-exit "${STUB_RC:-0}"
-"""
-
-LOCAL_INV = "\n".join(f"{a}\trapid\thigh\t\t" for a in (
-    "qwen-3.8-operator", "qwen-3.6-thinking", "deepseek-r1-architect", "devstral-2-123b",
-    "codestral-25", "gemma-4-26b", "ornith-1.5-35b", "mystery-model", "llama-4-scout",
-    "qwen-3.8-thinking", "mistral-small-4", "glm-5-air")) + "\n"
-REMOTE_INV = ("nvidia-a\tnvidia\tNVIDIA A\tunknown\t0\t1\n"
-              "gemini-flash\tgemini\tGemini Flash\trenewing_free\t0\t1\n"
-              "cerebras-oss\tcerebras\tCerebras OSS\ttrial\t0\t1\n")
-DL_INV = ("qwen-3.8-operator\tABSENT\t16\tsession\tq/q\n"
-          "gemma-4-26b\tABSENT\t14\tsession\tg/g\n#disk\t500\t100\n")
+sys.path.insert(0, str(ROOT / "bin"))
 
 
-def inventory_stub(text):
-    return "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = --inventory ] && { cat <<'EOF'\n" + text + \
-        "EOF\nexit 0; }; done\n" + RECORDER.split("\n", 1)[1]
+class BackendManagerScreen(PilotCase):
+    def test_reachable_from_home_with_its_actions_and_back(self):
+        async def s(app, pilot, h):
+            await h.press("v")
+            await h.wait_screen("RuntimeManagerScreen")
+            self.assertIn("Backend Manager", h.title())
+            text = h.text()
+            for label in ("Backend: rapid-mlx", "List installable releases", "Install a release",
+                          "Validate an installed version", "Show info for an installed version",
+                          "Launchd update checks", "Back to Home"):
+                self.assertIn(label, text)
+            await h.press("b")
+            await h.wait_screen("HomeScreen")
+        self.run_picker(s)
+
+    def test_backend_cycles_and_info_prompt_rejects_bad_version(self):
+        async def s(app, pilot, h):
+            await h.press("v")
+            await h.wait_screen("RuntimeManagerScreen")
+            await h.press("c")
+            await h.wait_for(lambda: "Backend: rapid-mlx" not in h.text(), "backend to cycle")
+            await h.press("f")                        # inline version prompt, no child yet
+            await h.wait_text("Version to show")
+            await h.press(*"1;rm", "enter")
+            await h.wait_text("version rejected")
+            self.assertEqual(self.launches(), [])
+        self.run_picker(s)
 
 
-@unittest.skipUnless(VENV_PY.exists(), "picker venv missing: run install/setup-session-picker.sh")
-class NewFeaturesPTY(unittest.TestCase):
-    """PTY tests for new features in the session picker."""
+class APIKeysScreen(PilotCase):
+    async def _open_add(self, h, slug):
+        await h.open_group(slug)
+        await h.goto_row("item", f"add:{slug}")
+        await h.press("enter")
+        await h.wait_for(lambda: h.app.query_one("#prompt").display, "the inline key prompt")
+        return h.app.query_one("#prompt")
 
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        t = Path(self.tmp.name)
-        self.log = t / "launches.jsonl"
-        self.cfg = t / "config"
-        self.cfg.mkdir()
-        stubs = t / "stubs"
-        stubs.mkdir()
-        for name, text in (("csl", LOCAL_INV), ("remote-session.sh", REMOTE_INV),
-                           ("download-models.sh", DL_INV)):
-            (stubs / name).write_text(inventory_stub(text))
-            (stubs / name).chmod(0o755)
-        self.workdir = t / "project dir with spaces"
-        self.workdir.mkdir()
-        self.env = dict(os.environ, PICKER_LOG=str(self.log), CSL_SELF=str(stubs / "csl"),
-                        CSL_REMOTE_LAUNCHER=str(stubs / "remote-session.sh"),
-                        LA_DOWNLOADER=str(stubs / "download-models.sh"),
-                        LA_SESSION_MENU_CONFIG_DIR=str(self.cfg), TERM="xterm-256color",
-                        COLUMNS="100", LINES="40")
-        self.env.pop("NO_COLOR", None)
+    def _key(self, name):
+        return (self.keys / name).read_text()
 
-    # --- pty plumbing -----------------------------------------------------------------------
-    def spawn(self, *args, entry=None):
-        cmd = entry or [str(ROOT / "bin/session-picker"), *args]
-        pid, fd = pty.fork()
-        if pid == 0:
-            os.chdir(self.workdir)
-            os.execve(cmd[0], cmd, self.env)
-        self.pid, self.fd, self.buf = pid, fd, ""
-        self.addCleanup(self._reap)
-        return fd
+    def test_reachable_from_home_nvidia_first_with_missing_status(self):
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            rows = h.labels("rows")
+            self.assertIn("NVIDIA: ❌ Missing", rows[0])   # NVIDIA first, expanded
+            self.assertIn("Open NVIDIA signup page", rows[1])
+            self.assertIn("Add NVIDIA key", rows[2])
+            for name in ("Google Gemini", "Groq", "OpenRouter"):
+                self.assertIn(name, h.text())
+        self.run_picker(s)
 
-    def _reap(self):
-        try:
-            os.kill(self.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            os.waitpid(self.pid, 0)
-        except ChildProcessError:
-            pass
+    def test_open_signup_page_uses_the_opener_not_a_real_browser(self):
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            await h.goto_row("item", "open:nvidia")
+            await h.press("enter")
+            await h.wait_for(lambda: self.launches(), "the opener stub to run")
+            self.assertEqual([(r["prog"], r["argv"]) for r in self.launches()],
+                             [("url-opener", ["https://build.nvidia.com/settings/api-keys"])])
+            self.assertEqual(h.screen(), "APIKeysScreen")
+        self.run_picker(s)
 
-    def pump(self, secs=0.4):
-        end = time.time() + secs
-        while time.time() < end:
-            r, _, _ = select.select([self.fd], [], [], 0.05)
-            if r:
-                try:
-                    self.buf += os.read(self.fd, 65536).decode("utf-8", "replace")
-                except OSError:
-                    return
+    def test_add_key_is_inline_hidden_and_label_shown_once(self):
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            prompt = await self._open_add(h, "nvidia")
+            self.assertTrue(prompt.password, "key input must be hidden")
+            self.assertEqual(prompt.placeholder, "", "label must not repeat inside the field")
+            self.assertIn("API key/token for NVIDIA", h.status())
+            self.assertIn("paste advances automatically", h.status())
+            self.assertEqual(self.launches(), [], "must not hand off to the old wizard")
+        self.run_picker(s)
 
-    def screen(self):
-        return ANSI.sub("", self.buf)
+    def test_typed_key_waits_for_enter_then_saves_600(self):
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            prompt = await self._open_add(h, "nvidia")
+            await h.press(*"nvapi-TYPED1", gap=0.02)
+            self.assertTrue(prompt.display, "typing alone must not submit")
+            self.assertFalse((self.keys / "nvidia").exists())
+            await h.press("enter")
+            await h.wait_text("NVIDIA: ✅ Saved")
+            self.assertFalse(prompt.display)
+            self.assertFalse(prompt.password, "hidden mode must not leak into later prompts")
+        self.run_picker(s)
+        self.assertEqual(self._key("nvidia"), "nvapi-TYPED1\n")
+        self.assertEqual(stat.S_IMODE((self.keys / "nvidia").stat().st_mode), 0o600)
 
-    def wait_for(self, text, secs=15):
-        end = time.time() + secs
-        while time.time() < end:
-            self.pump(0.2)
-            if text in self.screen():
-                return
-            self.fail(f"never saw {text!r}; tail:\n{self.screen()[-1500:]}")
+    def test_paste_advances_and_strips_all_whitespace(self):
+        from textual import events
 
-    def send(self, *keys, gap=0.25):
-        for k in keys:
-            os.write(self.fd, str(KEYS.get(k, k)).encode())
-            self.pump(gap)
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            prompt = await self._open_add(h, "groq")
+            prompt.post_message(events.Paste("  gsk-AB CD\nEF\t12\r\n"))
+            await h.wait_text("Groq: ✅ Saved")
+            self.assertFalse(prompt.display, "a paste submits without Enter")
+            self.assertTrue(any("removed" in w and "whitespace" in w for w in app.state_warnings),
+                            app.state_warnings)
+        self.run_picker(s)
+        self.assertEqual(self._key("groq"), "gsk-ABCDEF12\n")
 
-    def mark(self):
+    def test_trailing_newline_is_dropped_silently_and_blank_paste_waits(self):
+        from textual import events
+
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            prompt = await self._open_add(h, "gemini")
+            prompt.post_message(events.Paste(" \n "))
+            await h.settle(0.4)
+            self.assertTrue(prompt.display, "whitespace-only paste must keep waiting")
+            self.assertEqual(prompt.value, "")
+            prompt.post_message(events.Paste("AIza-KEY\n"))
+            await h.wait_text("Google Gemini: ✅ Saved")
+            self.assertFalse(any("whitespace" in w for w in app.state_warnings), app.state_warnings)
+        self.run_picker(s)
+        self.assertEqual(self._key("gemini"), "AIza-KEY\n")
+
+    def test_empty_enter_skips_without_saving(self):
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            await self._open_add(h, "nvidia")
+            await h.press("enter")
+            await h.wait_for(lambda: "skipped — no key saved" in app.state_warnings, "skip notice")
+        self.run_picker(s)
+        self.assertEqual(list(self.keys.iterdir()), [])
+
+    def test_existing_key_is_never_overwritten(self):
+        (self.keys / "nvidia").write_text("nvapi-ORIGINAL\n")
+        (self.keys / "nvidia").chmod(0o600)
+
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            await self._open_add(h, "nvidia")
+            await h.press(*"nvapi-NEW", "enter", gap=0.02)
+            await h.wait_for(lambda: any("already saved" in w for w in app.state_warnings), "kept notice")
+        self.run_picker(s)
+        self.assertEqual(self._key("nvidia"), "nvapi-ORIGINAL\n")
+
+    def test_cloudflare_fills_token_then_account_id(self):
+        acct = "0123456789abcdef0123456789abcdef"
+
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            await self._open_add(h, "cloudflare")
+            await h.press(*"cf-TOKEN", "enter", gap=0.02)
+            await h.wait_for(lambda: any("add again for cloudflare-account-id" in w
+                                         for w in app.state_warnings), "next-file notice")
+            await self._open_add(h, "cloudflare")
+            await h.press(*acct, "enter", gap=0.02)
+            await h.wait_text("Cloudflare Workers AI: ✅ Saved")
+        self.run_picker(s)
+        self.assertEqual(self._key("cloudflare"), "cf-TOKEN\n")
+        self.assertEqual(self._key("cloudflare-account-id"), acct + "\n")
+
+
+class ArrowKeysCycleSettings(PilotCase):
+    def _effort(self, h):
+        return next(a for a in h.labels() if "Effort:" in a).split("Effort:", 1)[1].strip()
+
+    def test_right_and_left_cycle_effort(self):
+        async def s(app, pilot, h):
+            await h.press("e")                        # select the Effort row (it also cycles once)
+            first = self._effort(h)
+            await h.press("right")
+            second = self._effort(h)
+            self.assertNotEqual(first, second)
+            await h.press("left")
+            self.assertEqual(self._effort(h), first)
+        self.run_picker(s, start="local")
+
+    def test_right_left_toggle_boolean_mcps(self):
+        async def s(app, pilot, h):
+            await h.press("m")
+            await h.wait_text("MCPs: ENABLED")
+            await h.press("right")
+            await h.wait_text("MCPs: DISABLED")
+            await h.press("left")
+            await h.wait_text("MCPs: ENABLED")
+        self.run_picker(s, start="local")
+
+
+class LastLaunchedPersistence(PilotCase):
+    def test_local_launch_offers_go_launch_and_persists(self):
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("deepseek-r1-architect")
+            await h.goto_row("item", "deepseek-r1-architect")
+            await h.press("enter")
+            await h.wait_for(lambda: self.launches(), "a recorded launch")
+            await h.wait_text("Go launch: deepseek-r1-architect session")
+            self.assertEqual(self.saved_state()["last_launched"]["local_session"], "deepseek-r1-architect")
+        self.run_picker(s, start="local")
+
+    def test_remote_launch_persists(self):
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("NVIDIA A")
+            await h.goto_row("item", "nvidia-a")
+            await h.press("enter")
+            await h.wait_for(lambda: self.launches(), "a recorded launch")
+            self.assertEqual(self.saved_state()["last_launched"]["remote_api_session"], "nvidia-a")
+        self.run_picker(s, start="remote")
+
+
+class DownloaderQueue(PilotCase):
+    def test_space_queues_and_unqueues_like_the_status_line_says(self):
+        async def s(app, pilot, h):
+            await h.wait_text("qwen-3.8-operator")
+            self.assertIn("Space/Enter queue", h.status())
+            await h.goto_row("item", "qwen-3.8-operator")
+            await h.press("space")
+            await h.wait_text("(1 queued)")
+            await h.press("space")
+            await h.wait_text("(0 queued)")
+        self.run_picker(s, start="download")
+
+
+class LoadingLine(PTYCase):
+    def test_no_loading_flash_on_fast_quit(self):
+        self.spawn()
+        self.wait_for("Claude Code Free-Agents: Session Launcher")
         self.buf = ""
-
-    def exit_code(self, secs=10):
-        end = time.time() + secs
-        while time.time() < end:
-            self.pump(0.1)
-            pid, status = os.waitpid(self.pid, os.WNOHANG)
-            if pid:
-                return os.waitstatus_to_exitcode(status)
-        self.fail("picker did not exit")
-
-    def launches(self):
-        if not self.log.exists():
-            return []
-        return [json.loads(x) for x in self.log.read_text().splitlines()]
-
-    # --- tests for RuntimeManagerScreen (Phase 5) -------------------------------------------
-    def test_runtime_manager_screen_accessible_from_home(self):
-        """Runtime Manager screen is accessible from Home via 'v' key."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("v")
-        self.wait_for("Rapid-MLX Runtime Manager")
-        screen = self.screen()
-        self.assertIn("Rapid-MLX Runtime Manager", screen)
-        # Should have actions for releases, install, promote, smoke, snapshot, remove
-        self.assertIn("List installable releases", self.screen())
-        self.assertIn("Install a release", self.screen())
-        self.assertIn("Promote pins", self.screen())
-        self.assertIn("Smoke-test", self.screen())
-        self.assertIn("Snapshot", self.screen())
-        self.assertIn("Remove", self.screen())
         self.send("q")
         self.assertEqual(self.exit_code(), 0)
+        self.assertNotIn("⏳", self.screen())
 
-    def test_runtime_manager_shows_installed_versions(self):
-        """Runtime Manager shows installed versions with status."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("v")
-        self.wait_for("Rapid-MLX Runtime Manager")
-        screen = self.screen()
-        # Should show installed versions or "no versioned environments"
-        self.assertTrue("installed" in screen.lower() or "no versioned" in screen.lower())
-        self.send("q")
-        self.assertEqual(self.exit_code(), 0)
 
-    def test_runtime_manager_releases_list(self):
-        """Runtime Manager can list releases from PyPI."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("v")
-        self.wait_for("Rapid-MLX Runtime Manager")
-        self.mark()
-        self.send("r")
-        self.wait_for("Available Rapid-MLX releases")
-        _ = self.screen()
-        # Should list versions
-        self.assertRegex(self.screen(), r"\d+\.\d+\.\d+")
-        self.send("q")
-        self.exit_code()
-
-    def test_runtime_manager_install_dry_run(self):
-        """Runtime Manager install dry-run works."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("v")
-        self.wait_for("Rapid-MLX Runtime Manager")
-        self.mark()
-        self.send("i")
-        self.wait_for("Choose version number")
-        # Cancel with blank input
-        self.send("enter")
-        self.wait_for("Rapid-MLX Runtime Manager")
-        self.send("q")
-        self.exit_code()
-
-    # --- tests for APIKeysScreen (Phase 6) --------------------------------------------------
-    def test_api_keys_screen_accessible_from_home(self):
-        """API Keys screen is accessible from Home via 'k' key."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("k")
-        self.wait_for("API Keys Setup")
-        screen = self.screen()
-        self.assertIn("API Keys Setup", screen)
-        # Should list providers with status
-        self.assertIn("Google Gemini", self.screen())
-        self.assertIn("Groq", self.screen())
-        self.assertIn("OpenRouter", self.screen())
-        # Should have status icons
-        self.assertIn("✅", self.screen()) or self.assertIn("❌", self.screen())
-        self.send("q")
-        self.assertEqual(self.exit_code(), 0)
-
-    def test_api_keys_shows_provider_status(self):
-        """API Keys screen shows provider status with icons."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("k")
-        self.wait_for("API Keys Setup")
-        _ = self.screen()
-        # Should show status for each provider
-        self.assertIn("Google Gemini", self.screen())
-        self.assertIn("Groq", self.screen())
-        # Status should have icons
-        self.assertRegex(self.screen(), r"[✅❌⚠️]")
-        self.send("q")
-        self.assertEqual(self.exit_code(), 0)
-
-    def test_api_keys_open_signup_page(self):
-        """API Keys screen can open provider signup page via provider group."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("k")
-        self.wait_for("API Keys Setup")
-        self.mark()
-        # NVIDIA is first group (expanded by default), select "Open NVIDIA signup page"
-        self.send("enter")  # Select the first item (Open NVIDIA signup page)
-        # Should attempt to open browser (will fail in headless but shouldn't crash)
-        self.wait_for("API Keys Setup")
-        self.send("q")
-        self.exit_code()
-
-    # --- tests for Left/Right arrow navigation (Phase 1/3) ---------------------------------
-    def test_right_arrow_cycles_action_choice(self):
-        """Right arrow on action item cycles choice forward."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("l")  # Go to Local
-        self.wait_for("Local Session Picker")
-        self.mark()
-        # Navigate to Effort action
-        self.send("down", "down")  # Move to first action (Effort)
-        self.pump(0.5)
-        # Right arrow should cycle effort
-        self.send("right")
-        self.wait_for("Effort: medium")  # high -> medium
-        self.send("q")
-        self.exit_code()
-
-    def test_left_arrow_cycles_action_choice_backward(self):
-        """Left arrow on action item cycles choice backward."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("l")
-        self.wait_for("Local Session Picker")
-        self.mark()
-        # Navigate to Effort action
-        self.send("down", "down")
-        self.pump(0.5)
-        # Left arrow should cycle backward
-        self.send("left")
-        self.wait_for("Effort: max")  # high <- max (wraps)
-        self.send("q")
-        self.exit_code()
-
-    def test_right_left_arrow_on_boolean_toggles(self):
-        """Right/Left arrows toggle boolean actions."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("l")
-        self.wait_for("Local Session Picker")
-        self.mark()
-        # Navigate to MCPs (boolean toggle)
-        self.send("down", "down", "down", "down", "down")  # Move to MCPs
-        self.pump(0.5)
-        # Right arrow should toggle
-        self.send("right")
-        self.wait_for("MCPs: ENABLED")
-        # Left arrow should toggle back
-        self.send("left")
-        self.wait_for("MCPs: DISABLED")
-        self.send("q")
-        self.exit_code()
-
-    # --- tests for Emoji constants (Phase 4) -----------------------------------------------
+class EmojiConstants(unittest.TestCase):
     def test_emoji_constants_from_config(self):
-        """Emoji constants are loaded from config/emoji.sh."""
-        import sys
-        sys.path.insert(0, str(ROOT / "bin"))
         import emoji_constants as ec
-
-        # Check key emojis are loaded
         self.assertEqual(ec.SESSION_EMOJI_LOCAL_STR, "🦾")
         self.assertEqual(ec.SESSION_EMOJI_FREE_API_STR, "📡")
         self.assertEqual(ec.EMOJI_EFFORT_STR, "⚙️ ")
@@ -334,125 +267,28 @@ class NewFeaturesPTY(unittest.TestCase):
         self.assertEqual(ec.EMOJI_TOOLS_STR, "🔧")
         self.assertEqual(ec.EMOJI_MCP_STR, "🔌")
         self.assertEqual(ec.EMOJI_KEY_STR, "🔑")
-        self.assertEqual(ec.EMOJI_TOOLS_STR, "🔧")
 
     def test_emoji_constants_used_in_screens(self):
-        """Emoji constants are used in screen titles and actions."""
-        import sys
-        sys.path.insert(0, str(ROOT / "bin"))
         import session_picker_model as m
+        acts = m.HomeScreen(m.Settings(), local_count=12, remote_count=36).actions()
+        self.assertIn("🦾", next(a for a in acts if a.key == "l").label)
+        self.assertIn("📡", next(a for a in acts if a.key == "r").label)
 
-        s = m.Settings()
-        home = m.HomeScreen(m.Settings(), local_count=12, remote_count=36)
-        acts = home.actions()
-
-        # Check emojis are used
-        local_action = next(a for a in acts if a.key == "l")
-        self.assertIn("🦾", local_action.label)
-
-        remote_action = next(a for a in acts if a.key == "r")
-        self.assertIn("📡", remote_action.label)
-
-    # --- tests for Last-launched persistence (Phase 3) ------------------------------------
-    def test_last_launched_model_persisted_locally(self):
-        """Last launched local model is persisted and shown in 'Go last' action."""
-        self.spawn("local")
-        self.wait_for("Local Session Picker")
-        self.mark()
-        self.send("down", "down", "enter")  # Launch first model
-        self.wait_for("CHILD-RAN csl", secs=15)
-        self.wait_for("Local Session Picker")
-        self.mark()
-
-        # Check "Go last" action appears
-        _ = self.screen()
-        self.assertIn("Go last:", self.screen())
-
-        self.send("q")
-        self.exit_code()
-
-    def test_last_launched_remote_persisted(self):
-        """Last launched remote model is persisted and shown in 'Go last' action."""
-        self.spawn("remote")
-        self.wait_for("Remote Free API Session Picker")
-        self.mark()
-        # Need installed agents to test - skip if none
-        screen = self.screen()
-        if "nvidia-a" in screen:
-            self.send("down", "down", "enter")
-            self.wait_for("CHILD-RAN remote-session.sh", secs=15)
-            self.wait_for("Remote Free API Session Picker")
-            self.mark()
-            _ = self.screen()
-            self.assertIn("Go last:", self.screen())
-        self.send("q")
-        self.exit_code()
-
-    # --- tests for Loading indicator (Phase 2) ---------------------------------------------
-    def test_loading_indicator_shows_after_200ms(self):
-        """Loading indicator shows after 200ms delay."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("l")
-        # Should show loading indicator after 200ms
-        self.wait_for("⏳ loading…", secs=1)
-        self.wait_for("Local Session Picker", secs=5)
-        self.send("q")
-        self.exit_code()
-
-    def test_loading_indicator_no_flash_on_fast_ops(self):
-        """Loading indicator doesn't flash on fast operations."""
-        self.spawn()
-        self.wait_for("Claude Code Free-Agents: Session Launcher")
-        self.mark()
-        self.send("q")  # Fast exit
-        self.assertEqual(self.exit_code(), 0)
-        # Should not have shown loading indicator
-        self.assertNotIn("⏳", self.screen())
-
-    # --- tests for Emoji spacing fixes -----------------------------------------------------
     def test_emoji_spacing_in_effort_labels(self):
-        """Effort labels have space after emoji."""
-        import sys
-        sys.path.insert(0, str(ROOT / "bin"))
         import session_picker_model as m
-
-        s = m.Settings()
-        local = m.LocalScreen(m.Settings(), models=[])
-        acts = local.actions()
-        effort_action = next(a for a in acts if a.key == "e")
-        # Should have space after emoji
-        self.assertIn("⚙️  Effort", effort_action.label)
-
-        # Check remote screen
-        remote = m.RemoteScreen(m.Settings(), agents=[])
-        acts = remote.actions()
-        effort_action = next(a for a in acts if a.key == "e")
-        self.assertIn("⚙️  Effort", effort_action.label)
+        for screen in (m.LocalScreen(m.Settings(), models=[]), m.RemoteScreen(m.Settings(), agents=[])):
+            effort = next(a for a in screen.actions() if a.key == "e")
+            self.assertIn("⚙️  Effort", effort.label)
 
     def test_emoji_spacing_in_other_labels(self):
-        """Other labels have consistent emoji spacing."""
-        import sys
-        sys.path.insert(0, str(ROOT / "bin"))
         import session_picker_model as m
-
-        s = m.Settings()
-        local = m.LocalScreen(m.Settings(), models=[])
-        acts = local.actions()
-
-        # Check various actions have proper spacing
-        for action in acts:
+        for action in m.LocalScreen(m.Settings(), models=[]).actions():
             label = action.label
-            # Should not have emoji stuck to text
-            for emoji in ["🦾", "📡", "🔧", "💬", "🔑", "🔌", "🚀", "📥", "📌", "🔬", "📄", "🧹", "📦", "📡", "🦾", "🔖", "🏷️", "🔌"]:
+            for emoji in ["🦾", "📡", "🔧", "💬", "🔑", "🔌", "🚀", "📥", "📌", "🔬", "📄", "🧹", "📦", "🔖", "🏷️"]:
                 if emoji in label:
-                    idx = label.index(emoji)
-                    if idx + len(emoji) < len(label):
-                        next_char = label[idx + len(emoji)]
-                        # Should have space after emoji
-                        self.assertEqual(next_char, " ",
-                            f"Emoji {emoji} in '{label}' should be followed by space")
+                    idx = label.index(emoji) + len(emoji)
+                    if idx < len(label):
+                        self.assertEqual(label[idx], " ", f"Emoji {emoji} in {label!r} needs a space after it")
 
 
 if __name__ == "__main__":

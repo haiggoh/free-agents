@@ -1206,6 +1206,14 @@ if [[ "$MODE" == "launch" ]]; then
     esac
     export LA_AUTO_MODE LA_BLIND_AUTO
 
+    # Classifier source for Auto Mode (when not blind-trust).
+    #   0 = NVIDIA API (fallback: Devstral local)
+    #   1 = Local Devstral (always)
+    #   2 = Auto: local classifier on local session, NVIDIA API on remote session
+    # Default is 2 (Auto).
+    : "${LA_CLASSIFIER_SOURCE:=2}"
+    export LA_CLASSIFIER_SOURCE
+
     # The genuine classifier lane is not wired for remote yet. Say so rather than
     # silently behaving like blind-trust, which is the failure mode this release fixes.
     if [[ "$AUTO_MODE_STATE" -eq 1 ]]; then

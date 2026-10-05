@@ -68,17 +68,40 @@ SESSION_DIR = os.path.expanduser(
 )
 
 
+def _run_hotswap_visible(cmd) -> subprocess.CompletedProcess:
+    """Run the hotswap script, echoing its output to stderr AS IT ARRIVES while capturing it.
+
+    Plain capture_output hid everything until exit — but stdin stays the terminal, so when the
+    RAM preflight blocks a load it asks "[p/e/a]" and waits on a read nobody could see: a silent
+    stall. Streaming raw chunks (not lines) also shows a prompt that has no trailing newline,
+    and the user's answer still reaches the script through the inherited stdin."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    chunks = []
+    fd = proc.stdout.fileno()
+    while True:
+        data = os.read(fd, 4096)
+        if not data:
+            break
+        chunks.append(data)
+        sys.stderr.buffer.write(data)
+        sys.stderr.flush()
+    proc.stdout.close()
+    out = b"".join(chunks).decode("utf-8", "replace")
+    return subprocess.CompletedProcess(cmd, proc.wait(), stdout=out, stderr="")
+
+
 def hotswap_get_port(model_alias: str) -> tuple[int, str]:
     """Run local-llm-hotswap.sh to ensure model server is active and get port + dispatch model ID."""
     if not os.path.isfile(HOTSWAP_SCRIPT):
         raise FileNotFoundError(f"Hotswap script not found: {HOTSWAP_SCRIPT}")
 
     cmd = [HOTSWAP_SCRIPT, model_alias]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = _run_hotswap_visible(cmd)
 
     if res.returncode != 0:
-        print(f"[-] Hotswap failed for '{model_alias}':", file=sys.stderr)
-        print(res.stderr or res.stdout, file=sys.stderr)
+        # Its output (e.g. the RAM preflight's reasons) was already shown live above.
+        print(f"[-] Hotswap failed for '{model_alias}' (exit {res.returncode}); see the output above.",
+              file=sys.stderr)
         sys.exit(res.returncode)
 
     # The hotswap script's contract is a line reading `SUCCESS_PORT=<port>`; it is

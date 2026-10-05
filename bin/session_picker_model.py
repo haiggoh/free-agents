@@ -212,6 +212,14 @@ PROVIDER_SIGNUP_URLS = {
 }
 
 
+def open_url(url: str) -> None:
+    """Open url in the browser without blocking. LA_URL_OPENER overrides the macOS `open`
+    command (tests point it at a recorder so no real browser window appears)."""
+    import os
+    opener = os.environ.get("LA_URL_OPENER") or "open"
+    subprocess.Popen([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def effort_choices(lane: str) -> tuple:
     return sms.ALLOWED_EFFORT[lane]
 
@@ -334,7 +342,7 @@ class Screen:
                 return action.run()
         return None
 
-    def activate_selected(self) -> LaunchRequest | None:
+    def activate_selected(self) -> LaunchRequest | Nav | None:
         return None
 
 
@@ -947,19 +955,13 @@ class APIKeysScreen(Screen):
         if sel.startswith("open:"):
             slug = sel[5:]
             # Open browser directly without suspending - macOS 'open' command works async
-            import subprocess
             url = PROVIDER_SIGNUP_URLS.get(slug)
             if url:
-                subprocess.Popen(["open", url],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                open_url(url)
             return None
         elif sel.startswith("add:"):
-            slug = sel[4:]
-            # Launch setup wizard for this provider
-            from pathlib import Path
-            BIN = Path(__file__).resolve().parent
-            REPO = BIN.parent
-            return LaunchRequest("keys", ["python3", str(REPO / "install/setup-api-keys.py"), slug], {}, slug)
+            # Inline key entry in the picker (the app opens a hidden Input), not the old wizard
+            return Nav(f"tool:keys:wizard:{sel[4:]}", self.owner)
         return None
 
 

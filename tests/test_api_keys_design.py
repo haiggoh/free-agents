@@ -78,15 +78,15 @@ class APIKeysDesignTests(unittest.TestCase):
         result = api_keys.activate_selected()
         self.assertIsNone(result)
 
-    def test_activate_add_item_returns_launchrequest(self):
-        """Activating 'add:<slug>' returns LaunchRequest with lane='keys'."""
+    def test_activate_add_item_opens_inline_prompt_not_wizard(self):
+        """Activating 'add:<slug>' asks the app for the INLINE key prompt (tool:keys:wizard:<slug>);
+        it must never hand off to the old setup-api-keys.py terminal wizard."""
         api_keys = m.APIKeysScreen(self.settings)
         api_keys.accordion.select("add:nvidia")
         result = api_keys.activate_selected()
-        self.assertIsInstance(result, m.LaunchRequest)
-        self.assertEqual(result.lane, "keys")
-        self.assertIn("setup-api-keys.py", " ".join(result.argv))
-        self.assertEqual(result.argv[-1], "nvidia")
+        self.assertNotIsInstance(result, m.LaunchRequest)
+        self.assertIsInstance(result, m.Nav)
+        self.assertEqual(result.target, "tool:keys:wizard:nvidia")
 
     def test_provider_labels_show_real_status_from_filesystem(self):
         """Provider group labels show status based on actual key files."""

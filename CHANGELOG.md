@@ -1,3 +1,50 @@
+## [0.23.1] — 2026-10-05
+
+Session picker fixes and polish on top of the 0.23.0 API Keys redesign.
+
+### Fixed
+- **API Keys "Add key" stays inside the picker.** It used to launch the old `setup-api-keys.py`
+  terminal wizard. Now a hidden input opens inline. **Pasting advances automatically**, so a key
+  cannot be pasted twice; a **typed** key waits for Enter; an empty Enter skips. All whitespace
+  (spaces, tabs, newlines, a key wrapped across lines) is removed from a pasted key, and a note
+  appears when the removal was more than a trailing newline. The prompt label is shown once
+  (it was also repeated inside the field). Three bugs in this path that had never run are fixed:
+  a `NameError` on an undefined provider list, an `import` of the hyphenated
+  `setup-api-keys.py` that always failed, and one value being written to every missing file
+  (Cloudflare now fills token, then account ID, one entry each). The save respects
+  `LA_API_KEYS_DIR`, the status labels refresh after saving, and an existing key is never
+  overwritten.
+- **Local model list.** The picker loaded models through `load-profile-models.py`, but ran that
+  Python script under `bash` and passed `timeout` twice, so it always failed. A catch-all then
+  fell back silently. Even when working, that loader listed only the few hand-declared runtime
+  profiles, all mapped to one alias. The picker again lists every on-disk model from
+  `csl --inventory`. Listing every on-disk model through runtime profiles (autodiscovery) is planned as a follow-up release.
+- **Download screen was always empty** (since 0.22.3): the background-loading rewrite dropped the
+  catalog load. It loads in the background again, like the local/remote lists, and refreshes
+  after a download. **Space** now queues/unqueues a model, as the status line always said.
+- **Lowkey stalled silently when the RAM preflight blocked a load.** Hotswap output was captured
+  until exit while the preflight waited for a `[p/e/a]` answer nobody could see. The output now
+  streams live, so the reasons and the question are visible and the answer reaches the script.
+- **Remote "Filter settings…"** is a sub-screen again: its nav row is Back to Remote, not Quit.
+
+### Changed
+- Opening a provider's signup page goes through `LA_URL_OPENER` (default: macOS `open`), so tests
+  record the call instead of opening a real browser window.
+- `LA_CLASSIFIER_SOURCE` (the picker's Classifier setting, 0 NVIDIA / 1 local Devstral /
+  2 Auto) is now resolved by `launch-claude-agent.sh` and passed through by `remote-session.sh`.
+
+### Tests
+- New `tests/picker_harness.py`: picker tests drive the app with Textual's pilot (reading
+  widget state, navigating to rows by id) instead of scraping a PTY that Textual only partially
+  repaints. PTY tests remain only for terminal-edge behaviour (Ctrl-C restoring tty modes,
+  entry points, exit codes). `test_session_picker_pty.py` (13) and `test_new_features.py` (21)
+  are green, up from 23 failures. They now cover inline key entry, paste/typing, whitespace
+  stripping, Cloudflare's two files, the signup opener, Space-to-queue, and the catalog
+  regression. Each fix was mutation-tested: undoing it makes a test fail.
+- A `wait_for` helper in `test_new_features.py` failed after 0.2 s instead of 15 s (its `fail`
+  was inside the retry loop), so earlier failures there were partly timing artefacts.
+- `test_lowkey_cli_dispatch.py`: the preflight prompt must be visible before it is answered.
+
 ## [0.23.0] — 2026-10-04
 
 ### Added — Runtime Profiles and Rapid-First Model Management

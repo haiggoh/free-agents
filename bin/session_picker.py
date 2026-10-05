@@ -77,41 +77,24 @@ NO_COLOR = bool(os.environ.get("NO_COLOR"))
 import emoji_constants as ec
 
 # --- inventories (read-only; never eval shell) ---------------------------------------------
-def _run(cmd, **kw):
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=60, **kw)
+def _run(cmd, timeout=60, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw)
 
 
 def load_local_models() -> list[m.LocalModel]:
-    # Use the new profile-based loader
-    try:
-        r = _run(["bash", str(BIN / "load-profile-models.py")], timeout=10)
-        import json
-        models_data = json.loads(r.stdout)
-        models = []
-        for d in models_data:
-            models.append(m.LocalModel(
-                alias=d["alias"],
-                profile_id=d["profile_id"],
-                effort=d["effort"],
-                roles=d["roles"],
-                family=d["family"],
-                backend=d["backend"],
-                thinking=d["thinking"],
-                tool_parser=d["tool_parser"],
-                reasoning_parser=d["reasoning_parser"],
-            ))
-        return models
-    except Exception as e:
-        # Fallback to old method if profile loader fails
-        csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
-        r = _run(["bash", csl, "--inventory"])
-        models = []
-        for line in r.stdout.splitlines():
-            parts = line.split("\t")
-            if len(parts) >= 4 and parts[0]:
-                models.append(m.LocalModel(alias=parts[0], backend=parts[1], effort=parts[2],
-                                           roles=parts[3], family=parts[4] if len(parts) > 4 else ""))
-        return models
+    # The on-disk registry (csl --inventory) is the model list. 0.23.0 replaced it with
+    # load-profile-models.py, which holds only a few hand-declared profiles, maps every one of
+    # them to the first "operator" alias, and was run under bash (so it always failed into this
+    # path anyway). Profile-aware discovery is tracked as its own work item, not done here.
+    csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
+    r = _run(["bash", csl, "--inventory"])
+    models = []
+    for line in r.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 4 and parts[0]:
+            models.append(m.LocalModel(alias=parts[0], backend=parts[1], effort=parts[2],
+                                       roles=parts[3], family=parts[4] if len(parts) > 4 else ""))
+    return models
 
 
 def load_remote_agents() -> list[m.RemoteAgent]:
@@ -212,6 +195,33 @@ TOOLS = {
     "tool:rt-launchd-uninstall": lambda b: _mb(b, "launchd", "uninstall"),
     "tool:keys:add": lambda slug: ["python3", str(REPO / "install/setup-api-keys.py"), slug],
 }
+
+
+class PromptInput(Input):
+    """The inline prompt. With submit_on_paste set (API keys), a paste replaces the field and
+    submits at once, like the old wizard's bracketed-paste reader: a key can never be pasted
+    twice into one value, and no extra Enter is needed."""
+    submit_on_paste = False
+
+    def _on_paste(self, event):
+        if self.submit_on_paste and event.text:
+            # prevent_default: Textual also runs Input._on_paste (MRO dispatch), which would
+            # insert the raw first line into the field; stop() alone only halts bubbling.
+            event.prevent_default()
+            event.stop()
+            # A key never contains whitespace, so drop ALL of it: trailing newline, stray
+            # spaces, or a key wrapped across lines would otherwise be saved as-is (or cut off).
+            key = "".join(event.text.split())
+            if not key:
+                return                      # whitespace-only paste: keep waiting
+            removed = len(event.text) - len(key)
+            if removed and len(event.text.strip()) != len(key):
+                self.app.state_warnings.append(
+                    f"removed {removed} whitespace character(s) from the pasted key")
+            self.value = key
+            self.post_message(self.Submitted(self, self.value))
+        # Other prompts: no call to super() — Textual dispatches Input._on_paste itself, and
+        # calling it here too inserted every paste twice.
 
 
 class Picker(App):
@@ -359,7 +369,7 @@ class Picker(App):
             yield Static("", id="policy")
             yield OptionList(id="actions")
             yield OptionList(id="rows")
-            yield Input(id="prompt")
+            yield PromptInput(id="prompt")
             yield Static("", id="status")
 
     def on_mount(self):
@@ -370,7 +380,7 @@ class Picker(App):
         self.set_interval(LOADING_INTERVAL, self._tick_loading)
 
     # --- background inventory ----------------------------------------------------------------
-    LOADERS = {"local": "load_local_models", "remote": "load_remote_agents"}
+    LOADERS = {"local": "load_local_models", "remote": "load_remote_agents", "catalog": "load_catalog"}
 
     def _prefetch(self, kinds):
         import threading
@@ -402,7 +412,10 @@ class Picker(App):
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data)
             sm._models_loaded = True
-        elif isinstance(sm, m.HomeScreen):
+        elif isinstance(sm, m.DownloadScreen) and kind == "catalog" and not sm.entries:
+            entries, free, head = data if data else ([], 0.0, 100.0)
+            self.screen_model = m.DownloadScreen(self.settings, entries, free, head, sm.owner)
+        elif isinstance(sm, m.HomeScreen) and kind in ("local", "remote"):
             if kind == "local":
                 sm.local_count = len(data)
             else:
@@ -421,6 +434,8 @@ class Picker(App):
             return "remote"
         if isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and getattr(sm, "_choose_model_visible", True) and "local" in loading:
             return "local"
+        if isinstance(sm, m.DownloadScreen) and "catalog" in loading:
+            return "catalog"
         return None
 
     def _tick_loading(self):
@@ -479,11 +494,14 @@ class Picker(App):
             local = self.cache.get("local")
             self.screen_model = m.LowkeyScreen(s, local, nav.owner)
         elif nav.target == "download":
+            # 0.22.3's background loading dropped the catalog load, so this screen always
+            # opened empty. It now loads like local/remote and fills in via _loaded().
             catalog_data = self.cache.get("catalog")
             if catalog_data:
                 entries, free, head = catalog_data
             else:
                 entries, free, head = [], 0.0, 100.0
+                self._prefetch(("catalog",))
             self.screen_model = m.DownloadScreen(s, entries, free, head, nav.owner)
         elif nav.target == "rate_limiter":
             self.screen_model = m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
@@ -681,7 +699,9 @@ class Picker(App):
             self.render_model(keep=f"i:{h[1]}")
             return
         req = self.screen_model.activate_selected()
-        if req:
+        if isinstance(req, m.Nav):      # API Keys "Add key" -> inline prompt via run_tool
+            self.dispatch(req)
+        elif req:
             self.run_child(command_for(req), env=req.env)
 
     def on_key(self, event):
@@ -693,6 +713,15 @@ class Picker(App):
             return
         key = event.key
         sm = self.screen_model
+        # The downloader's status line promises "Space/Enter queue"; Space was never wired.
+        if key == "space" and isinstance(sm, m.DownloadScreen):
+            h = self._highlighted()
+            if h and h[0] == "item":
+                sm.accordion.select(h[1])
+                sm.toggle_selected()
+                self.render_model(keep=f"i:{h[1]}")
+            event.stop()
+            return
         # Seamless navigation between actions and rows
         if key == "down" or key == "up":
             actions_list = self.query_one("#actions", OptionList)
@@ -806,7 +835,8 @@ class Picker(App):
             return
         self.goto(m.Nav(target, owner))
 
-    SUB_TARGETS = ("rate_limiter", "runtime_manager", "runtime", "api_keys", "runtime_launchd")
+    SUB_TARGETS = ("rate_limiter", "runtime_manager", "runtime", "api_keys", "runtime_launchd",
+                   "remote_filters")   # Filter settings… returns to Remote, never Quit
 
     def _go_back(self):
         prev = self.nav_stack.pop() if self.nav_stack else m.Nav("home", m.DIRECT_ROOT)
@@ -830,26 +860,14 @@ class Picker(App):
             slug = target.split(":", 3)[3]
             url = PROVIDER_SIGNUP_URLS.get(slug)
             if url:
-                import subprocess
-                subprocess.Popen(["open", url],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                m.open_url(url)
             return
         if target.startswith("tool:keys:wizard:"):
             # Open inline prompt for API key entry
             slug = target.split(":", 3)[3]
             self._pending_provider = slug
             # Find provider name for the prompt
-            provider_name = slug
-            for p in PROVIDERS:
-                if p.slug == slug:
-                    provider_name = p.name
-                    break
             self._open_prompt("prompt:keys:key")
-            # Update the prompt label with provider name
-            prompt = self.query_one("#prompt", Input)
-            label = self.PROMPTS["prompt:keys:key"].format(provider=provider_name)
-            prompt.placeholder = label
-            self.query_one("#status", Static).update("  " + label)
             return
         if target.startswith("tool:keys:"):
             # API keys with specific provider (tool:keys:add:<slug>)
@@ -868,7 +886,7 @@ class Picker(App):
                "prompt:rt-launchd-install": "Install the weekly LaunchAgent update check? type yes:",
                "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
-               "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically; Enter skips):"}
+               "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically, or type it and press Enter; empty Enter skips):"}
 
     def _open_prompt(self, kind):
         self.pending_prompt = kind
@@ -881,10 +899,11 @@ class Picker(App):
                      "Type yes to download, anything else cancels:")
         elif kind == "prompt:keys:key":
             # Replace {provider} placeholder with actual provider name
-            provider = getattr(self, '_pending_provider', 'unknown')
-            label = label.format(provider=provider)
+            slug = getattr(self, '_pending_provider', 'unknown')
+            label = label.format(provider=next((name for s_, name, *_ in m.APIKeysScreen.PROVIDERS if s_ == slug), slug))
             prompt.password = True  # Hidden input for API key
-        prompt.placeholder = label
+            prompt.submit_on_paste = True
+        prompt.placeholder = ""   # the label is shown once, in #status below the input
         prompt.value = ""
         prompt.display = True
         self.query_one("#status", Static).update("  " + label)
@@ -893,6 +912,8 @@ class Picker(App):
     def _close_prompt(self):
         prompt = self.query_one("#prompt", Input)
         prompt.display = False
+        prompt.password = False
+        prompt.submit_on_paste = False
         self.pending_prompt = None
         self.query_one("#rows", OptionList).focus()
         self.render_model()
@@ -953,11 +974,15 @@ class Picker(App):
                 provider = getattr(self, '_pending_provider', None)
                 if provider:
                     self._save_api_key(provider, value)
+                    if isinstance(sm, m.APIKeysScreen):   # refresh the Saved/Missing labels
+                        fresh = m.APIKeysScreen(self.settings, sm.owner)
+                        fresh.back_label, fresh.accordion.open_group = sm.back_label, provider
+                        self.screen_model = fresh
                 else:
                     self.state_warnings.append("no provider selected")
                 self.render_model()
             else:
-                self.state_warnings.append("API key required")
+                self.state_warnings.append("skipped — no key saved")
                 self.render_model()
 
     # --- children ------------------------------------------------------------------------------
@@ -981,7 +1006,9 @@ class Picker(App):
         self.state_warnings = [w for w in self.state_warnings if not w.startswith("last child")]
         if rc not in (0, None):
             self.state_warnings.append(f"last child exited {rc}")
-        self.cache.pop("local", None) if isinstance(self.screen_model, m.DownloadScreen) else None
+        if isinstance(self.screen_model, m.DownloadScreen):   # a download changes what is on disk
+            self.cache.pop("local", None)
+            self.cache.pop("catalog", None)
         self.render_model(keep=(f"{'g' if keep[0] == 'group' else 'i'}:{keep[1]}" if keep else None))
 
     def _save_api_key(self, provider: str, key: str) -> None:
@@ -990,12 +1017,17 @@ class Picker(App):
         REPO = Path(__file__).resolve().parent.parent
         sys.path.insert(0, str(REPO / "install"))
         try:
-            from setup_api_keys import Store, validate_value, StoreError, PROVIDERS
-        except ImportError:
-            self.state_warnings.append("Could not load setup_api_keys module")
+            # The module file is install/setup-api-keys.py (hyphenated), so a plain import fails
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("setup_api_keys", REPO / "install/setup-api-keys.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            Store, validate_value, StoreError, PROVIDERS = mod.Store, mod.validate_value, mod.StoreError, mod.PROVIDERS
+        except (ImportError, OSError, AttributeError):
+            self.state_warnings.append("Could not load install/setup-api-keys.py")
             return
 
-        api_keys_dir = REPO.parent / ".api_keys" if (REPO.parent / ".api_keys").exists() else Path.home() / ".api_keys"
+        api_keys_dir = Path(os.environ.get("LA_API_KEYS_DIR", "~/.api_keys")).expanduser()
 
         try:
             with Store(api_keys_dir) as store:
@@ -1015,18 +1047,18 @@ class Picker(App):
                     self.state_warnings.append(f"{provider_obj.name}: key already saved")
                     return
 
-                # Validate and save the key
-                for name in missing:
-                    try:
-                        validate_value(name, key)
-                        store.save_new(name, key)
-                        self.state_warnings.append(f"Saved {name} for {provider_obj.name}")
-                    except StoreError as exc:
-                        self.state_warnings.append(f"{name}: {exc}")
-                        return
-                    except OSError:
-                        self.state_warnings.append(f"Could not save {name}; check file status")
-                        return
+                # One value per entry: a multi-file provider (Cloudflare: token + account id)
+                # fills its next missing file each time "Add key" is used
+                name = missing[0]
+                try:
+                    validate_value(name, key)
+                    store.save_new(name, key)
+                    rest = f"; add again for {', '.join(missing[1:])}" if missing[1:] else ""
+                    self.state_warnings.append(f"Saved {name} for {provider_obj.name}{rest}")
+                except StoreError as exc:
+                    self.state_warnings.append(f"{name}: {exc}")
+                except OSError:
+                    self.state_warnings.append(f"Could not save {name}; check file status")
 
         except StoreError as exc:
             self.state_warnings.append(f"Store error: {exc}")

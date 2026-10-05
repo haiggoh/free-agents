@@ -184,6 +184,42 @@ if [ "$LA_TELEMETRY" = "0" ]; then
     export DISABLE_ERROR_REPORTING=1
     export DISABLE_AUTOUPDATER=1
 fi
+# Classifier source for Auto Mode (when not blind-trust).
+#   0 = NVIDIA API (fallback: Devstral local)
+#   1 = Local Devstral (always)
+#   2 = Auto: local classifier on local session, NVIDIA API on remote session
+# Default is 2 (Auto) to match the picker default.
+: "${LA_CLASSIFIER_SOURCE:=2}"
+
+# Resolve classifier source to actual backend
+# When blind-trust (LA_BLIND_AUTO=1), classifier source is irrelevant (no classifier in loop)
+if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "0" ]; then
+    # In auto mode with classifier, determine which classifier backend to use
+    case "${LA_CLASSIFIER_SOURCE}" in
+        0)  # NVIDIA API
+            export LA_AUTO_MODE_CLASSIFIER_BACKEND="nvidia"
+            ;;
+        1)  # Local Devstral (always)
+            export LA_AUTO_MODE_CLASSIFIER_BACKEND="local"
+            export LA_AUTO_MODE_RUNTIME="rapid"
+            # Devstral uses Rapid-MLX with mistral parser
+            ;;
+        2)  # Auto: local on local, remote on remote
+            if [ "${ANTHROPIC_BASE_URL:-}" = http://localhost:* ] || [ "${CLAUDE_IS_LOCAL:-0}" = "1" ]; then
+                export LA_AUTO_MODE_CLASSIFIER_BACKEND="local"
+                export LA_AUTO_MODE_RUNTIME="rapid"
+            else
+                export LA_AUTO_MODE_CLASSIFIER_BACKEND="nvidia"
+            fi
+            ;;
+        *)
+            echo "WARNING: Unknown LA_CLASSIFIER_SOURCE=$LA_CLASSIFIER_SOURCE, defaulting to Auto" >&2
+            export LA_AUTO_MODE_CLASSIFIER_BACKEND="local"
+            export LA_AUTO_MODE_RUNTIME="rapid"
+            ;;
+    esac
+fi
+
 # Accept a ROLE NAME (operator/reasoner/validator/utility) wherever an alias is accepted, so a
 # caller never has to hardcode a model name that goes stale silently. An alias still wins, so this
 # cannot change what any existing invocation does.

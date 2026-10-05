@@ -298,6 +298,47 @@ print("\n== EOF/Interrupt handling ==")
 check(True, "main loop catches EOFError/KeyboardInterrupt and calls autosave")
 
 
+print("\n== Hotswap output is visible while it runs (RAM preflight prompt) ==")
+
+# Regression: capture_output hid the RAM preflight's "[p/e/a]" question until exit while the
+# script waited on the terminal for an answer -> a silent stall. Drive it in a pty: the prompt
+# must appear BEFORE we answer, and the answer must reach the script.
+import pty, select, tempfile, time  # noqa: E401,E402
+with tempfile.TemporaryDirectory() as _d:
+    _hs = os.path.join(_d, "hotswap.sh")
+    with open(_hs, "w") as fh:
+        fh.write("#!/bin/bash\necho 'RAM preflight: needs 22 GB, 9 GB free'\n"
+                 "printf 'Proceed anyway (p), evict (e), or abort (a)? [p/e/a] '\nread -r ans\n"
+                 "[ \"$ans\" = p ] && { echo SUCCESS_PORT=8001; echo DISPATCH_MODEL=m; exit 0; }\n"
+                 "echo 'aborted; nothing loaded.'; exit 1\n")
+    os.chmod(_hs, 0o755)
+    for _answer, _want in ((b"p\n", "RESULT (8001, 'm')"), (b"a\n", "EXIT 1")):
+        _pid, _fd = pty.fork()
+        if _pid == 0:
+            lad.HOTSWAP_SCRIPT = _hs
+            try:
+                print("RESULT", lad.hotswap_get_port("qwen"))
+            except SystemExit as e:
+                print("EXIT", e.code)
+            sys.stdout.flush()                   # os._exit skips the flush; the line is the result
+            os._exit(0)
+        _buf, _seen_before_answer, _end = b"", False, time.time() + 6
+        while time.time() < _end:
+            if select.select([_fd], [], [], 0.1)[0]:
+                try:
+                    _buf += os.read(_fd, 4096)
+                except OSError:
+                    break
+            if not _seen_before_answer and b"[p/e/a]" in _buf:
+                _seen_before_answer = True
+                os.write(_fd, _answer)
+        if not _seen_before_answer:              # stalled exactly like the bug: don't hang the suite
+            os.kill(_pid, 9)
+        os.waitpid(_pid, 0)
+        check(_seen_before_answer, f"preflight prompt visible before answering ({_answer!r})")
+        check(_want in _buf.decode("utf-8", "replace"), f"answer {_answer!r} reaches the script -> {_want}")
+
+
 print(f"\n{passed} passed, {failed} failed")
 if __name__ == "__main__":
     sys.exit(1 if failed else 0)
