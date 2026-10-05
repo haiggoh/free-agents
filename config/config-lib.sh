@@ -10,7 +10,15 @@
 # Sourced by launch-claude-agent.sh, local-llm-hotswap.sh, and csl.
 
 # Resolve the plugin root (this file is in <root>/config/).
-LA_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Handle being sourced from bash -c or similar where BASH_SOURCE[0] may be empty/unset.
+if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    _cl_src="${BASH_SOURCE[0]}"
+elif [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    _cl_src="${BASH_SOURCE[0]}"
+else
+    _cl_src="${0}"
+fi
+LA_CONFIG_DIR="$(cd "$(dirname "${_cl_src}")" && pwd)"
 LA_ROOT="$(cd "$LA_CONFIG_DIR/.." && pwd)"
 
 # --- roles: the STABLE vocabulary the routing rules refer to -------------------
