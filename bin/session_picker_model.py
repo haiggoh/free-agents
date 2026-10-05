@@ -168,15 +168,18 @@ class Settings:
     include_trials: bool = True      # interactive visibility only; direct CLI keeps its guard
     local_capable_shown: bool = False
     show_broken: bool = False        # unworking models; in-memory, like the CLI flag
-    remote_temperature: str = ""     # "" = provider default; else one of TEMPERATURES
-    local_temperature: str = ""    # "" = provider default; else one of TEMPERATURES
+    remote_temperature: str = sms.DEFAULT_TEMPERATURE["remote_api_session"]
+    local_temperature: str = sms.DEFAULT_TEMPERATURE["local_session"]
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
+    lowkey_temperature: str = sms.DEFAULT_TEMPERATURE["lowkey"]
     rate_limiter: dict = field(default_factory=dict)
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
     # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=Local Devstral always, 2=Auto)
     classifier_source: int = 2
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
+    # Called with (lane, value) when the user CONFIRMS a temperature change; persists it.
+    on_temperature_saved: Callable[[str, str], object] | None = None
     # Last launched model per lane (for R15: remember last launched)
     last_launched_model: dict = field(default_factory=lambda: {
         "local_session": None,
@@ -541,6 +544,8 @@ class LocalScreen(Screen):
     def _set_local_temp(self, value):
         s = self.settings
         s.local_temperature = value
+        if s.on_temperature_saved:
+            s.on_temperature_saved("local_session", s.local_temperature)
 
     def activate_selected(self):
         sel = self.accordion.selected_id
@@ -657,7 +662,7 @@ class RemoteScreen(Screen):
             setting("e", f"{ec.EMOJI_EFFORT_STR} Effort: {_effort_label(s.remote_effort)}",
                     effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v)),
             setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
-                    TEMPERATURES, lambda: s.remote_temperature, lambda v: setattr(s, "remote_temperature", v)),
+                    TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v)),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
             Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
@@ -699,6 +704,12 @@ class RemoteScreen(Screen):
         s.remote_effort = value
         if s.on_effort_saved:
             s.on_effort_saved("remote_api_session", s.remote_effort)
+
+    def _set_remote_temp(self, value):
+        s = self.settings
+        s.remote_temperature = value
+        if s.on_temperature_saved:
+            s.on_temperature_saved("remote_api_session", s.remote_temperature)
 
     def activate_selected(self):
         sel = self.accordion.selected_id
@@ -1042,12 +1053,20 @@ class LowkeyScreen(Screen):
         if s.on_effort_saved:
             s.on_effort_saved("lowkey", s.lowkey_effort)
 
+    def _cycle_temperature(self):
+        s = self.settings
+        s.lowkey_temperature = _next(TEMPERATURES, s.lowkey_temperature)
+        if s.on_temperature_saved:
+            s.on_temperature_saved("lowkey", s.lowkey_temperature)
+
     def actions(self):
         s = self.settings
-        acts = [Action("e", f"Effort: {s.lowkey_effort} (sent as reasoning_effort)", self._cycle_effort),
-                Action("s", f"Session name: {self.session_name or '(ephemeral)'}",
-                       lambda: Nav("prompt:session")),
-                Action("o", "One-shot prompt with the highlighted model", lambda: Nav("prompt:oneshot"))]
+        acts = [
+            Action("e", f"Effort: {s.lowkey_effort} (sent as reasoning_effort)", self._cycle_effort),
+            Action("t", f"Temperature: {s.lowkey_temperature or '<provider default>'}", self._cycle_temperature),
+            Action("s", f"Session name: {self.session_name or '(ephemeral)'}",
+                   lambda: Nav("prompt:session")),
+            Action("o", "One-shot prompt with the highlighted model", lambda: Nav("prompt:oneshot"))]
         acts += self.nav_actions()
         check_action_table(acts)
         return acts

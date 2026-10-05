@@ -121,6 +121,13 @@ declare -A LA_RAPID_SPEC_CONFIG
 # these only to the selected model's child launcher process.
 declare -A LA_SESSION_AUTO_COMPACT
 
+# Per-model local overrides (can be set in config.local.sh)
+declare -A LA_MODEL_CONTEXT_OVERRIDE LA_MODEL_AUTOCOMPACT_OVERRIDE
+
+# Derived catalogue context/autocompaction (loaded from model-catalogue-derived.psv)
+# These provide the catalogue defaults per model folder.
+declare -A LA_CATALOGUE_CONTEXT LA_CATALOGUE_AUTOCOMPACT LA_CATALOGUE_EXTENDED_CONTEXT LA_CATALOGUE_EXTENDED_AUTOCOMPACT LA_CATALOGUE_ENTRY_TYPE
+
 # la_register <alias> <subdir> <serve:mlx|rapid|vllm|mlx_lm|llama_cpp> <tool_parser> <reasoning_parser>
 #             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb] [rapid_spec_json]
 # reasoning_parser may be "" (none). The last four are OPTIONAL and additive, so pre-existing
@@ -301,6 +308,172 @@ la_role() { LA_ROLE_BINDINGS+=("$1|$2|${3:-}|${4:-both}"); }
 LA_PRESET_LABEL=(); LA_PRESET_ALIAS=(); LA_PRESET_EFFORT=()
 la_preset() { LA_PRESET_LABEL+=("$1"); LA_PRESET_ALIAS+=("$2"); LA_PRESET_EFFORT+=("$3"); }
 
+# Load derived catalogue (model-catalogue-derived.psv) if present.
+# This provides context/autocompaction defaults for registered models.
+la_load_derived_catalogue() {
+  local derived_psv="$LA_CONFIG_DIR/model-catalogue-derived.psv"
+  [ -f "$derived_psv" ] || return 0  # Optional - not an error if missing
+
+  # Parse PSV: folder|entry_type|session_model|catalogue_action|context|autocompact|ext_context|ext_autocompact|alias_target|target_model|model_family|notes
+  while IFS='|' read -r folder entry_type session_model catalogue_action ctx ac ext_ctx ext_ac alias_target target_model model_family notes; do
+    # Skip comments and empty lines
+    [[ "$folder" =~ ^#.*$ ]] && continue
+    [[ -z "$folder" ]] && continue
+    [[ "$folder" == "folder" ]] && continue  # Skip header
+
+    # Only populate for standalone models that are session-eligible
+    if [ "$session_model" = "true" ] && [ -n "$ctx" ]; then
+      LA_CATALOGUE_CONTEXT["$folder"]="$ctx"
+      [ -n "$ac" ] && LA_CATALOGUE_AUTOCOMPACT["$folder"]="$ac"
+      [ -n "$ext_ctx" ] && LA_CATALOGUE_EXTENDED_CONTEXT["$folder"]="$ext_ctx"
+      [ -n "$ext_ac" ] && LA_CATALOGUE_EXTENDED_AUTOCOMPACT["$folder"]="$ext_ac"
+      LA_CATALOGUE_ENTRY_TYPE["$folder"]="$entry_type"
+    fi
+  done < "$derived_psv"
+}
+
+# Auto-scan for models on disk that may not be in any catalogue.
+# Filters for text-capable models that can drive a Claude Code session.
+# Excludes: TTS, image generation (Flux, Stable Diffusion), depth estimation, drafters, processors.
+la_auto_scan_models() {
+  local models_dir="${LA_MODELS_DIR:-$HOME/.models}"
+  [ -d "$models_dir" ] || return 0
+
+  # Known exclusion patterns (case-insensitive folder name matching)
+  # Use word-boundary-aware patterns; escape regex metacharacters
+  local exclude_patterns=(
+    "tts" "chatterbox" "kokoro" "qwen3-tts" "qwen-tts"
+    "flux" "stable.diffusion" "sdxl" "sd."
+    "depth" "depthart"
+    "mtp" "drafter" "speculative"
+    "processor" "mmproj" "vision" "clip" "vae"
+    "ds_store"
+  )
+
+  # Build grep pattern for exclusions - escape special chars
+  local exclude_regex
+  local escaped_patterns=()
+  for p in "${exclude_patterns[@]}"; do
+    # Escape regex metacharacters: . * + ? ^ $ { } [ ] ( ) | \
+    escaped=$(printf '%s' "$p" | sed 's/[][\\.*+?^${}()|]/\\&/g')
+    escaped_patterns+=("$escaped")
+  done
+  exclude_regex=$(IFS='|'; echo "${escaped_patterns[*]}") || true
+
+  # Find directories with weight files (safetensors, gguf, or config.json)
+  # Exclude hidden directories and known non-model directories
+  find -L "$models_dir" -mindepth 1 -maxdepth 1 -type d \
+    \( -name "*.DS_Store" -o -name ".*" \) -prune -o \
+    \( \
+      -exec test -e "{}/config.json" \; -o \
+      -exec test -e "{}/model.safetensors" \; -o \
+      -exec find "{}" -maxdepth 1 -name "*.gguf" -print -quit \; \
+    \) -print 2>/dev/null | while read -r dir; do
+    local name=$(basename "$dir")
+    # Filter out excluded patterns (case-insensitive)
+    if echo "$name" | grep -qiE "$exclude_regex"; then
+      continue
+    fi
+    echo "$name"
+  done
+}
+
+# Get effective context for an alias using the precedence hierarchy:
+# 1. Explicit per-session override (LA_SESSION_AUTO_COMPACT)
+# 2. Explicit per-model local override (config.local.sh could add LA_MODEL_CONTEXT_OVERRIDE)
+# 3. Selected catalogue context mode (extended vs native)
+# 4. Catalogue default (from derived PSV)
+# 5. LA_MAX_MODEL_LEN fallback
+la_get_effective_context() {
+  local alias="$1"
+  local use_extended="${2:-false}"  # true to use extended context if available
+
+  local subdir="${LA_SUBDIR[$alias]:-}"
+  [ -n "$subdir" ] || return 1
+
+  # 1. Check per-session override
+  local session_override="${LA_SESSION_AUTO_COMPACT[$alias]:-}"
+  if [ -n "$session_override" ] && [ "$session_override" != "auto" ]; then
+    # Convert autocompaction back to effective context (approximate)
+    # autocompaction of N*100K means effective context is at least N*100K
+    local ac_val
+    ac_val=$(echo "$session_override" | sed 's/[kK]/*1000/;s/[mM]/*1000000/' | bc 2>/dev/null || echo "$session_override")
+    if [ "$ac_val" -ge 100000 ]; then
+      echo "$ac_val"
+      return 0
+    fi
+  fi
+
+  # 2. Check per-model local override (could be added to config.local.sh)
+  local model_override="${LA_MODEL_CONTEXT_OVERRIDE[$alias]:-}"
+  if [ -n "$model_override" ]; then
+    echo "$model_override"
+    return 0
+  fi
+
+  # 3-4. Catalogue context (extended or native)
+  if [ "$use_extended" = "true" ] && [ -n "${LA_CATALOGUE_EXTENDED_CONTEXT[$subdir]:-}" ]; then
+    echo "${LA_CATALOGUE_EXTENDED_CONTEXT[$subdir]}"
+    return 0
+  fi
+  if [ -n "${LA_CATALOGUE_CONTEXT[$subdir]:-}" ]; then
+    echo "${LA_CATALOGUE_CONTEXT[$subdir]}"
+    return 0
+  fi
+
+  # 5. Fallback to LA_MAX_MODEL_LEN
+  if [ "${LA_MAX_MODEL_LEN:-0}" -ge 100000 ]; then
+    echo "$LA_MAX_MODEL_LEN"
+    return 0
+  fi
+
+  return 1
+}
+
+# Get autocompaction for an alias using the same precedence
+la_get_autocompaction() {
+  local alias="$1"
+  local use_extended="${2:-false}"
+
+  local subdir="${LA_SUBDIR[$alias]:-}"
+  [ -n "$subdir" ] || return 1
+
+  # 1. Per-session override
+  local session_override="${LA_SESSION_AUTO_COMPACT[$alias]:-}"
+  if [ -n "$session_override" ] && [ "$session_override" != "auto" ]; then
+    echo "$session_override"
+    return 0
+  fi
+
+  # 2. Per-model override
+  local model_override="${LA_MODEL_AUTOCOMPACT_OVERRIDE[$alias]:-}"
+  if [ -n "$model_override" ]; then
+    echo "$model_override"
+    return 0
+  fi
+
+  # 3-4. Catalogue autocompaction
+  if [ "$use_extended" = "true" ] && [ -n "${LA_CATALOGUE_EXTENDED_AUTOCOMPACT[$subdir]:-}" ]; then
+    echo "${LA_CATALOGUE_EXTENDED_AUTOCOMPACT[$subdir]}"
+    return 0
+  fi
+  if [ -n "${LA_CATALOGUE_AUTOCOMPACT[$subdir]:-}" ]; then
+    echo "${LA_CATALOGUE_AUTOCOMPACT[$subdir]}"
+    return 0
+  fi
+
+  # 5. Derive from effective context
+  local effective=$(la_get_effective_context "$alias" "$use_extended")
+  if [ -n "$effective" ] && [ "$effective" -ge 100000 ]; then
+    local floor=$(( (effective / 100000) * 100000 ))
+    [ "$floor" -gt 1000000 ] && floor=1000000
+    echo "$floor"
+    return 0
+  fi
+
+  return 1
+}
+
 # Load config.local.sh (private) if it exists, else config.example.sh (shipped defaults).
 la_load_config() {
   if [ -f "$LA_CONFIG_DIR/config.local.sh" ]; then
@@ -467,6 +640,8 @@ la_load_config() {
   # Optional per-machine extras a user may want the agent prompt to know about (all optional):
   : "${LA_MEMORY_DIR:=}"          # absolute path to your auto-memory dir, if you want the agent told
   : "${LA_COUNCIL_NOTE:=}"        # optional extra line appended to the agent prompt (e.g. a council rule)
+  # Load derived catalogue for context/autocompaction defaults
+  la_load_derived_catalogue
   la_finalize_roles
   # Resolve every generic `serve` value to a concrete backend. Must run AFTER the defaults above,
   # since LA_DEFAULT_MLX_BACKEND is one of them. A failure here is a config error, not a warning:

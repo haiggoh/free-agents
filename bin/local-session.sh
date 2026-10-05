@@ -150,34 +150,25 @@ if [[ -n "$EFFORT_OVERRIDE" ]]; then
     esac
 fi
 
-# Apply session profile (manifest-driven autocompaction, etc.)
-# This mirrors csl's _apply_session_profile
+# Apply session profile using the unified precedence hierarchy:
+# 1. Explicit per-session override (LA_SESSION_AUTO_COMPACT)
+# 2. Explicit per-model local override (LA_MODEL_AUTOCOMPACT_OVERRIDE)
+# 3. Catalogue extended context (if LA_USE_EXTENDED_CONTEXT=1)
+# 4. Catalogue native context (from derived PSV)
+# 5. LA_MAX_MODEL_LEN fallback
 _apply_session_profile() {
     local alias="$1"
-    local explicit_override="${LA_SESSION_AUTO_COMPACT[$alias]:-}"
+    local use_extended="${LA_USE_EXTENDED_CONTEXT:-false}"
 
-    if [ -n "$explicit_override" ]; then
-        export LA_AUTO_COMPACT_WINDOW="$explicit_override"
+    # Use the new unified precedence functions from config-lib.sh
+    local autocompact
+    autocompact="$(la_get_autocompaction "$alias" "$use_extended" 2>/dev/null || true)"
+    if [ -n "$autocompact" ]; then
+        export LA_AUTO_COMPACT_WINDOW="$autocompact"
         return
     fi
 
-    # Try manifest-driven derivation
-    local manifest_json
-    manifest_json="$(la_load_manifest "$alias")"
-    if [ -n "$manifest_json" ]; then
-        local effective
-        effective="$(la_manifest_effective_context "$manifest_json")"
-        if [ -n "$effective" ]; then
-            local autocompact
-            autocompact="$(la_manifest_autocompaction "$effective")"
-            if [ -n "$autocompact" ]; then
-                export LA_AUTO_COMPACT_WINDOW="$autocompact"
-                return
-            fi
-        fi
-    fi
-
-    # Fallback to LA_MAX_MODEL_LEN
+    # Final fallback: derive from LA_MAX_MODEL_LEN
     if [ "${LA_MAX_MODEL_LEN:-0}" -ge 100000 ]; then
         local fallback_floor=$(( (LA_MAX_MODEL_LEN / 100000) * 100000 ))
         if [ "$fallback_floor" -gt 1000000 ]; then
@@ -197,16 +188,27 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "Thinking: ${LA_THINK[$ALIAS]:-?}"
     roles="$(la_roles_for_alias "$ALIAS")"
     [ -n "$roles" ] && echo "Roles: $roles" || echo "Roles: untagged"
+    # Show precedence chain
+    use_extended="${LA_USE_EXTENDED_CONTEXT:-false}"
+    ac=$(la_get_autocompaction "$ALIAS" "$use_extended" 2>/dev/null || true)
+    ctx=$(la_get_effective_context "$ALIAS" "$use_extended" 2>/dev/null || true)
+    if [ -n "$ctx" ]; then
+        echo "Effective context (precedence): $ctx"
+    fi
+    if [ -n "$ac" ]; then
+        echo "Autocompaction (precedence): $ac"
+    fi
     manifest_json="$(la_load_manifest "$ALIAS")"
     if [ -n "$manifest_json" ]; then
         effective="$(la_manifest_effective_context "$manifest_json" 2>/dev/null || echo "")"
         autocompact="$(la_manifest_autocompaction "$effective" 2>/dev/null || echo "")"
         if [ -n "$effective" ]; then
-            echo "Effective context: $effective"
-            [ -n "$autocompact" ] && echo "Autocompaction: $autocompact"
+            echo "Manifest effective context: $effective"
+            [ -n "$autocompact" ] && echo "Manifest autocompaction: $autocompact"
         fi
     fi
     echo "Autocompaction window: ${LA_AUTO_COMPACT_WINDOW:-<none>}"
+    echo "Use extended context: $use_extended"
     echo "Auto-mode: $([ "${LA_AUTO_MODE:-0}" = "1" ] && echo "ON" || echo "OFF")"
     echo "Blind-trust: $([ "${LA_BLIND_AUTO:-0}" = "1" ] && echo "ON" || echo "OFF")"
     echo "Telemetry: $([ "${LA_TELEMETRY:-0}" = "1" ] && echo "ON" || echo "OFF")"

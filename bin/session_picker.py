@@ -270,6 +270,9 @@ class Picker(App):
             local_effort=state.effort["local_session"],
             remote_effort=state.effort["remote_api_session"],
             lowkey_effort=state.effort["lowkey"],
+            local_temperature=state.temperature.get("local_session", sms.DEFAULT_TEMPERATURE["local_session"]),
+            remote_temperature=state.temperature.get("remote_api_session", sms.DEFAULT_TEMPERATURE["remote_api_session"]),
+            lowkey_temperature=state.temperature.get("lowkey", sms.DEFAULT_TEMPERATURE["lowkey"]),
             rate_limiter=dict(state.rate_limiter),
             auto_mode=int(os.environ.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
             telemetry=os.environ.get("CSL_TELEMETRY", "0") == "1",
@@ -279,6 +282,7 @@ class Picker(App):
             include_trials=not flags.exclude_trials,
             local_capable_shown=flags.local_capable_shown or os.environ.get("CSL_LOCAL_CAPABLE") == "1",
             on_effort_saved=self._save_effort,
+            on_temperature_saved=self._save_temperature,
             # "Go last": restored from the store; written when a launch request is made.
             last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
                                  **state.last_launched},
@@ -301,6 +305,11 @@ class Picker(App):
 
     def _save_effort(self, lane, value):
         warning = sms.save_effort(self._config_dir(), lane, value)
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
+
+    def _save_temperature(self, lane, value):
+        warning = sms.save_temperature(self._config_dir(), lane, value)
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
 
