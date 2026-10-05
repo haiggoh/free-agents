@@ -8,6 +8,7 @@ new RapidMLXManager class and the wrapper works correctly.
 from __future__ import annotations
 
 import importlib.util
+import os
 import stat
 import subprocess
 import sys
@@ -147,10 +148,34 @@ with tempfile.TemporaryDirectory() as temporary:
     plan = test_mgr.plan_pin_update(repo, "0.14.0")
     transaction = root / "transaction"
     test_mgr.tracked_repo_clean = lambda _repo: None
-    # Skip validation for this test - just test dry_run works
-    result = test_mgr.apply_pin_plan(plan, dry_run=True)
-    check(result["result"] == "dry_run", "pin dry-run reports correctly")
+    # A REAL promotion (the fixture repo has no launcher tests to run, so no validator).
+    result = test_mgr.apply_pin_plan(plan, validator=None, backup_root=transaction)
+    check(result["result"] == "promoted", "pin transaction reports promotion")
+    check(all(b"0.14.0" in item[0].read_bytes() for item in plan[1]), "pin transaction writes every target")
+    private = repo / rapid_mlx_module.PRIVATE_PIN_FILE
+    check(stat.S_IMODE(private.stat().st_mode) == 0o600, "private overlay remains mode 600")
+    check((transaction / "manifest.json").is_file(), "transaction manifest retained")
     check(not test_mgr.plan_pin_update(repo, "0.14.0")[1], "second promotion is an idempotent no-op")
+
+print("== a failing validator rolls every file back ==")
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    repo = create_repo(root)
+    test_mgr = RapidMLXManager(repo=repo)
+    test_mgr.tracked_repo_clean = lambda _repo: None
+    plan = test_mgr.plan_pin_update(repo, "0.14.0")
+    originals = {item[0]: item[1] for item in plan[1]}
+
+    def failing_validator(_repo, _version):
+        raise subprocess.CalledProcessError(1, ["bash", "tests/test_rapid_auto_mode.sh"])
+    try:
+        test_mgr.apply_pin_plan(plan, validator=failing_validator, backup_root=root / "tx")
+        raised = False
+    except ManagerError as exc:
+        raised = "rolled back" in str(exc)
+    check(raised, "a validator failure surfaces as a rolled-back ManagerError")
+    check(all(path.read_bytes() == data for path, data in originals.items()),
+          "every pin surface is restored byte-for-byte after a failed validation")
 
 print("== bytecode-free post-promotion validation ==")
 with tempfile.TemporaryDirectory() as temporary:
@@ -203,7 +228,12 @@ print("== wrapper help and command surface ==")
 # Test the wrapper's help
 helped = subprocess.run([sys.executable, str(MODULE_PATH), "--help"], text=True, capture_output=True)
 check(helped.returncode == 0 and "releases" in helped.stdout, "--help still documents the subcommands")
-check("--backend rapid-mlx" in " ".join(sys.argv), "wrapper translates backend argument")
+# The legacy wrapper must hand the unified CLI an explicit --backend rapid-mlx. Run it with a
+# subcommand that only manage-backend.py knows and that needs --backend, and check it worked.
+listed = subprocess.run([sys.executable, str(MODULE_PATH), "installed"], text=True, capture_output=True,
+                        env={**os.environ, "HOME": tempfile.mkdtemp()})
+check(listed.returncode == 0 and "No versioned rapid-mlx environments found" in listed.stdout,
+      "wrapper translates backend argument (installed runs as --backend rapid-mlx)")
 
 print(f"\n{passed} passed, {len(failed)} failed")
 for label in failed:
