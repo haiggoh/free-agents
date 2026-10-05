@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # session-picker — start the Free Agents session picker UI (Textual) from any entry point.
 #
-# Usage: session-picker [home|local|remote|lowkey|download|rate-limiter] [--exclude-trials]
+# Usage: session-picker [home|local|remote|lowkey|download|rate-limiter|remote_filters] [--exclude-trials]
 #                       [--local-capable-shown] [--help]
 #
 # Environment:

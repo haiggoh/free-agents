@@ -250,14 +250,15 @@ class NewFeaturesPTY(unittest.TestCase):
         self.assertEqual(self.exit_code(), 0)
 
     def test_api_keys_open_signup_page(self):
-        """API Keys screen can open provider signup page."""
+        """API Keys screen can open provider signup page via provider group."""
         self.spawn()
         self.wait_for("Claude Code Free-Agents: Session Launcher")
         self.mark()
         self.send("k")
         self.wait_for("API Keys Setup")
         self.mark()
-        self.send("o")
+        # NVIDIA is first group (expanded by default), select "Open NVIDIA signup page"
+        self.send("enter")  # Select the first item (Open NVIDIA signup page)
         # Should attempt to open browser (will fail in headless but shouldn't crash)
         self.wait_for("API Keys Setup")
         self.send("q")

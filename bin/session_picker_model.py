@@ -149,6 +149,12 @@ def tier_label(tier: str, provider: str) -> str:
 # --- settings ----------------------------------------------------------------------------
 AUTO_MODE_LABELS = {0: "blind-trust", 1: "classifier", 2: "off"}
 
+CLASSIFIER_SOURCE_LABELS = {
+    0: "NVIDIA API (fallback: Devstral)",
+    1: "Local Devstral (always)",
+    2: "Auto: local on local, remote on remote",
+}
+
 
 @dataclass
 class Settings:
@@ -163,9 +169,12 @@ class Settings:
     local_capable_shown: bool = False
     show_broken: bool = False        # unworking models; in-memory, like the CLI flag
     remote_temperature: str = ""     # "" = provider default; else one of TEMPERATURES
+    local_temperature: str = ""    # "" = provider default; else one of TEMPERATURES
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
     rate_limiter: dict = field(default_factory=dict)
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
+    # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=Local Devstral always, 2=Auto)
+    classifier_source: int = 2
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
     # Last launched model per lane (for R15: remember last launched)
@@ -183,6 +192,24 @@ class Settings:
 
 # Same presets as main's bash menu (0.21.7). "" = leave it to the provider.
 TEMPERATURES = ("", "0.0", "0.3", "0.7", "1.0", "1.5", "2.0")
+
+# Provider signup URLs from install/setup-api-keys.py
+PROVIDER_SIGNUP_URLS = {
+    "nvidia": "https://build.nvidia.com/settings/api-keys",
+    "cerebras": "https://cloud.cerebras.ai/platform/",
+    "cloudflare": "https://dash.cloudflare.com/profile/api-tokens",
+    "gemini": "https://aistudio.google.com/apikey",
+    "groq": "https://console.groq.com/keys",
+    "kilo": "https://app.kilo.ai",
+    "llm7": "https://dash.llm7.io",
+    "mistral": "https://console.mistral.ai/home?profile_dialog=api-keys",
+    "modelscope": "https://modelscope.cn/my/myaccesstoken",
+    "openrouter": "https://openrouter.ai/settings/keys",
+    "sambanova": "https://cloud.sambanova.ai/dashboard",
+    "siliconflow": "https://cloud.siliconflow.com/account/ak",
+    "vercel": "https://vercel.com/d?title=AI+Gateway+API+Keys&to=%2F%5Bteam%5D%2F~%2Fai-gateway%2Fapi-keys",
+    "zai": "https://z.ai/manage-apikey/apikey-list",
+}
 
 
 def effort_choices(lane: str) -> tuple:
@@ -319,6 +346,12 @@ def _common_toggles(s: Settings, include_watcher: bool):
     acts = [
         setting("a", f"{ec.EMOJI_AUTO_MODE_STR} Auto-mode: {AUTO_MODE_LABELS[s.auto_mode]}",
                 (0, 1, 2), lambda: s.auto_mode, lambda v: setattr(s, "auto_mode", v)),
+    ]
+    # Classifier source only relevant when auto_mode == 1 (classifier), not blind-trust or off
+    if s.auto_mode == 1:
+        acts.append(setting("z", f"Classifier: {CLASSIFIER_SOURCE_LABELS[s.classifier_source]}",
+                (0, 1, 2), lambda: s.classifier_source, lambda v: setattr(s, "classifier_source", v)))
+    acts += [
         setting("t", f"{ec.EMOJI_TELEMETRY_ON_STR} Telemetry: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry")),
         setting("p", f"{ec.EMOJI_STOP_HOOK_STR} Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
                 *_toggle(s, "stop_hook")),
@@ -329,13 +362,19 @@ def _common_toggles(s: Settings, include_watcher: bool):
     return acts
 
 
-def _tool_actions(backend: bool = True):
+def _tool_actions(backend: bool = True, local_session: bool = False, home: bool = False):
     # The backend manager drives LOCAL runtimes (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM),
     # so the Remote lane does not offer it (user, 2026-10-04).
-    acts = [Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section="tools"),
-            Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
-                   lambda: Nav("runtime_manager"), section="tools"),
-            Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section="tools")]
+    # Local session picker (local_session=True) hides API keys and NVIDIA rate limiter.
+    # Home screen (home=True) shows only API keys and Backend manager, no NVIDIA rate limiter.
+    acts = [
+        Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
+               lambda: Nav("runtime_manager"), section="tools"),
+    ]
+    if not local_session:
+        acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section="tools"))
+        if not home:
+            acts.append(Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section="tools"))
     return acts if backend else [a for a in acts if a.key != "v"]
 
 
@@ -370,11 +409,11 @@ class HomeScreen(Screen):
                    lambda: Nav("local", HOME_OWNED), section="lanes"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
-            Action("d", f"{ec.EMOJI_TOOLS_STR} Download local models", lambda: Nav("tool:download"), section="tools"),
+            Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools"),
             Action("o", f"{ec.LK_EMOJI_CONVO_STR} Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
         ]
-        acts += _tool_actions()
-        acts += _common_toggles(self.settings, include_watcher=True)
+        acts += _tool_actions(home=True)
+        # Settings like NVIDIA rate limiter, auto-mode, prompt hook, watcher are in the lanes
         acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
         check_action_table(acts)
         return acts
@@ -439,18 +478,18 @@ class LocalScreen(Screen):
 
     def actions(self):
         s = self.settings
-        mcp_ok = s.auto_mode == 0
         acts = [
             setting("e", f"{ec.EMOJI_EFFORT_STR} Effort: {s.local_effort}", effort_choices("local_session"),
                     lambda: s.local_effort, lambda v: self._set_effort(v)),
+            setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.local_temperature or '<provider default>'}",
+                    TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v)),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR}  Remote free API sessions", lambda: Nav("remote", self.owner),
                    section="hidden"),
-            setting("m", (f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}" if mcp_ok else
-                          f"{ec.EMOJI_MCP_STR}  MCPs: unavailable (local MCP allowlisting needs blind-trust auto-mode)"),
-                    *_toggle(s, "enable_mcp"), enabled=mcp_ok),
+            setting("m", f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
+                    *_toggle(s, "enable_mcp")),
         ]
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
@@ -460,7 +499,7 @@ class LocalScreen(Screen):
             acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {last_local} session",
                            lambda: self._launch_last("local_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=True)
-        acts += [a for a in _tool_actions()]
+        acts += _tool_actions(backend=True, local_session=True)
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
@@ -491,6 +530,10 @@ class LocalScreen(Screen):
         if s.on_effort_saved:
             s.on_effort_saved("local_session", s.local_effort)
 
+    def _set_local_temp(self, value):
+        s = self.settings
+        s.local_temperature = value
+
     def activate_selected(self):
         sel = self.accordion.selected_id
         if not sel or sel not in self.models:
@@ -509,10 +552,14 @@ class LocalScreen(Screen):
                "LA_TELEMETRY": "1" if s.telemetry else "0",
                "LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
                "LA_ENABLE_MCP": "1" if s.enable_mcp else "0",
+               "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
                "CSL_WATCH": "1" if s.watcher else "0"}
         # Use profile_id for the launcher if available, else alias
         launch_alias = mdl.profile_id if mdl.profile_id else mdl.alias
-        return LaunchRequest("local", ["local", launch_alias, s.local_effort], env, mdl.alias)
+        argv = ["local", launch_alias, s.local_effort]
+        if s.local_temperature:
+            argv += ["--temperature", s.local_temperature]
+        return LaunchRequest("local", argv, env, mdl.alias)
 
 
 class RemoteScreen(Screen):
@@ -606,11 +653,7 @@ class RemoteScreen(Screen):
             Action("c", self._choose_model_label(), self._toggle_choose_model),
             Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
-            self._filter("h", f"{ec.EMOJI_TRIALS_STR}  Limited trials", "include_trials"),
-            self._filter("f", f"{ec.EMOJI_LOCAL_CAPABLE_STR}  Locally-runnable models", "local_capable_shown"),
-            # u, not B: b is Back and Shift-letters are the same key in this picker.
-            self._filter("u", f"{ec.EMOJI_BROKEN_MODELS_STR} Unworking models", "show_broken"),
-            Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
+            Action("y", f"{ec.EMOJI_FILTER_STR}  Filter settings…", lambda: Nav("remote_filters", self.owner), section="tools"),
             setting("m", f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp")),
         ]
@@ -678,8 +721,52 @@ class RemoteScreen(Screen):
         if s.remote_temperature:
             argv += ["--temperature", s.remote_temperature]
         argv.append(alias)
-        env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0"}
+        env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
+               "LA_CLASSIFIER_SOURCE": str(s.classifier_source)}
         return LaunchRequest("remote", argv, env, alias)
+
+
+class RemoteFiltersScreen(Screen):
+    """Filter settings for Remote API Session Picker.
+
+    Submenu showing filter options: limited trials, locally-runnable models,
+    unworking models, and hidden-model report.
+    """
+    title = f"{ec.EMOJI_FILTER_STR} Remote Filter Settings"
+
+    def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
+        super().__init__(settings, owner)
+        # No accordion needed - this is an action-only screen
+        self.accordion = None
+
+    def actions(self):
+        s = self.settings
+        acts = [
+            Action("h", f"{ec.EMOJI_TRIALS_STR}  Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
+                   lambda: self._toggle("include_trials")),
+            Action("f", f"{ec.EMOJI_LOCAL_CAPABLE_STR}  Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
+                   lambda: self._toggle("local_capable_shown")),
+            Action("u", f"{ec.EMOJI_BROKEN_MODELS_STR}  Unworking models: {'SHOWN' if s.show_broken else 'HIDDEN'}",
+                   lambda: self._toggle("show_broken")),
+            Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
+        ]
+        acts += self.nav_actions()
+        check_action_table(acts)
+        return acts
+
+    def _toggle(self, attr):
+        setattr(self.settings, attr, not getattr(self.settings, attr))
+        # Regroup the remote screen if it's loaded (lazy loading means we can't directly access it)
+        # The change will take effect when remote screen is next opened
+        self._regroup_remote_if_loaded()
+
+    def _regroup_remote_if_loaded(self):
+        # This is a best-effort; the remote screen will regroup when next opened
+        pass
+
+    def groups(self):
+        """No accordion for this screen."""
+        return []
 
 
 class RateLimiterScreen(Screen):
@@ -784,69 +871,96 @@ class RuntimeManagerScreen(Screen):
 class APIKeysScreen(Screen):
     """API Keys Setup - manage remote API provider credentials.
 
-    Shows provider status (saved/not tested), and provides actions to add keys
-    or open signup pages. Integrates with install/setup-api-keys.py.
+    Shows provider status (saved/missing) by checking actual key files.
+    Each provider is an expandable group with two contextual actions:
+    - Open provider signup page
+    - Add provider key (launches wizard)
+    Only one provider's actions are visible at a time.
     """
     title = "API Keys Setup"
 
     # Provider list matches install/setup-api-keys.py
-    # Using unique shortcut keys for each provider (all lowercase letters)
-    # (slug, name, shortcut). Emojis come from config/emoji.sh (EMOJI_PROVIDER_<SLUG>).
-    # The rows are display-only, but their keys still share the screen's key table, so none
-    # may be `b` (Back) or `q` (Quit): SambaNova moved b -> y in 0.22.0 (it crashed the
-    # Home-owned screen with a duplicate-key error).
+    # NVIDIA first (user request), then alphabetical
+    # (slug, name, shortcut, signup_url, key_files)
     PROVIDERS = [
-        ("gemini", "Google Gemini", "g"),
-        ("groq", "Groq", "u"),
-        ("openrouter", "OpenRouter", "r"),
-        ("cloudflare", "Cloudflare Workers AI", "c"),
-        ("mistral", "Mistral", "m"),
-        ("zai", "Z.AI", "z"),
-        ("siliconflow", "SiliconFlow", "s"),
-        ("llm7", "LLM7", "l"),
-        ("kilo", "Kilo", "k"),
-        ("vercel", "Vercel AI Gateway", "v"),
-        ("sambanova", "SambaNova", "y"),
-        ("modelscope", "ModelScope", "x"),
-        ("cerebras", "Cerebras", "e"),
-        ("nvidia", "NVIDIA", "n"),
+        ("nvidia", "NVIDIA", "n", "https://build.nvidia.com/settings/api-keys", ("nvidia",)),
+        ("cerebras", "Cerebras", "e", "https://cloud.cerebras.ai/platform/", ("cerebras",)),
+        ("cloudflare", "Cloudflare Workers AI", "c", "https://dash.cloudflare.com/profile/api-tokens", ("cloudflare", "cloudflare-account-id")),
+        ("gemini", "Google Gemini", "g", "https://aistudio.google.com/apikey", ("gemini",)),
+        ("groq", "Groq", "u", "https://console.groq.com/keys", ("groq",)),
+        ("kilo", "Kilo", "k", "https://app.kilo.ai", ("kilo",)),
+        ("llm7", "LLM7", "l", "https://dash.llm7.io", ("llm7",)),
+        ("mistral", "Mistral", "m", "https://console.mistral.ai/home?profile_dialog=api-keys", ("mistral",)),
+        ("modelscope", "ModelScope", "x", "https://modelscope.cn/my/myaccesstoken", ("modelscope",)),
+        ("openrouter", "OpenRouter", "r", "https://openrouter.ai/settings/keys", ("openrouter",)),
+        ("sambanova", "SambaNova", "y", "https://cloud.sambanova.ai/dashboard", ("sambanova",)),
+        ("siliconflow", "SiliconFlow", "s", "https://cloud.siliconflow.com/account/ak", ("siliconflow",)),
+        ("vercel", "Vercel AI Gateway", "v", "https://vercel.com/d?title=AI+Gateway+API+Keys&to=%2F%5Bteam%5D%2F~%2Fai-gateway%2Fapi-keys", ("vercel",)),
+        ("zai", "Z.AI", "z", "https://z.ai/manage-apikey/apikey-list", ("zai",)),
     ]
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
-        # No accordion needed - this is an action-only screen
-        self.accordion = None
+        # Build accordion with providers as groups
+        groups = []
+        for slug, name, _shortcut, _url, key_files in self.PROVIDERS:
+            status = self._get_provider_status(slug, key_files)
+            # Each provider group has two items: Open page and Add key
+            groups.append(Group(
+                slug,
+                f"{name}: {status}",
+                [
+                    Item(f"open:{slug}", f"Open {name} signup page"),
+                    Item(f"add:{slug}", f"Add {name} key"),
+                ]
+            ))
+        self.accordion.set_groups(groups)
+        # Default expand NVIDIA (first group)
+        if groups:
+            self.accordion.open_group = groups[0].id
 
-    def _get_provider_status(self, slug: str) -> str:
-        """Get status of a provider by checking ~/.api_keys"""
+    def _get_provider_status(self, slug: str, key_files: tuple) -> str:
+        """Get status of a provider by checking actual key files in ~/.api_keys"""
         import os
         from pathlib import Path
         api_keys_dir = Path(os.environ.get("LA_API_KEYS_DIR", os.path.expanduser("~/.api_keys")))
-        # Simplified status check - in real implementation would use Store class
-        return f"{ec.EMOJI_OK_STR} Saved" if api_keys_dir.exists() else f"{ec.EMOJI_MISSING_STR} Missing"
+        if not api_keys_dir.exists():
+            return f"{ec.EMOJI_MISSING_STR} Missing"
+        # Check if all required key files exist
+        all_exist = all((api_keys_dir / name).exists() for name in key_files)
+        return f"{ec.EMOJI_OK_STR} Saved" if all_exist else f"{ec.EMOJI_MISSING_STR} Missing"
 
     def actions(self):
-        acts = []
-        # Add provider status rows (display only, not actionable)
-        for slug, name, shortcut in self.PROVIDERS:
-            emoji = ec.provider_emoji(slug)
-            status = (f"{ec.EMOJI_OK_STR} Saved" if slug in ["gemini", "groq", "nvidia"]
-                      else f"{ec.EMOJI_MISSING_STR} Missing")  # Simplified
-            # Use a no-op lambda for disabled display-only rows
-            acts.append(Action(shortcut, f"{emoji} {name}: {status}", lambda: None, enabled=False, section="providers"))
-
-        # Add action items
-        acts += [
-            Action("o", "Open provider signup page", lambda: Nav("tool:keys:open"), section="tools"),
-            Action("a", "Add API key (select provider)", lambda: Nav("prompt:keys:add"), section="tools"),
-        ]
-        acts += self.nav_actions()
+        # No static actions - all actions are via accordion items
+        acts = self.nav_actions()
         check_action_table(acts)
         return acts
 
-    def groups(self):
-        """No accordion for this screen."""
-        return []
+    def activate_selected(self):
+        """Handle activation of accordion items (Open page / Add key).
+        Returns LaunchRequest to launch the appropriate command.
+        """
+        sel = self.accordion.selected_id
+        if not sel:
+            return None
+        # sel format: "open:slug" or "add:slug"
+        if sel.startswith("open:"):
+            slug = sel[5:]
+            # Open browser directly without suspending - macOS 'open' command works async
+            import subprocess
+            url = PROVIDER_SIGNUP_URLS.get(slug)
+            if url:
+                subprocess.Popen(["open", url],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return None
+        elif sel.startswith("add:"):
+            slug = sel[4:]
+            # Launch setup wizard for this provider
+            from pathlib import Path
+            BIN = Path(__file__).resolve().parent
+            REPO = BIN.parent
+            return LaunchRequest("keys", ["python3", str(REPO / "install/setup-api-keys.py"), slug], {}, slug)
+        return None
 
 
 class RuntimeScreen(Screen):

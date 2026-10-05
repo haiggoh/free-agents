@@ -145,31 +145,54 @@ def load_catalog():
 
 # --- child commands ---------------------------------------------------------------------------
 def command_for(req: m.LaunchRequest) -> list[str]:
-    head, rest = req.argv[0], req.argv[1:]
-    if head == "local":
+    # Use req.lane to determine the command type, not argv[0]
+    # This allows API keys wizard to have argv starting with python3 while lane="keys"
+    lane = req.lane
+    if lane == "local":
         # Through csl, so the session profile and the watcher (following csl's pid, which the
         # launcher inherits via exec) behave exactly as before.
-        return [os.environ.get("CSL_SELF") or str(BIN / "csl"), "--picker-launch", *rest]
-    if head == "remote":
+        return [os.environ.get("CSL_SELF") or str(BIN / "csl"), "--picker-launch", *req.argv[1:]]
+    if lane == "remote":
         # When running as a child of csl (HOME_OWNED), pass --csl-owner and --csl-nav-file
         # so remote-session.sh returns via nav file instead of exec'ing claude directly.
         base = os.environ.get("CSL_REMOTE_LAUNCHER") or str(BIN / "remote-session.sh")
         if getattr(req, "owner", "direct_root") == "home_owned":
             import tempfile
             navfile = os.path.join(tempfile.gettempdir(), f"_csl_nav.{os.getpid()}")
-            return [base, "--csl-owner", "--csl-nav-file", navfile, *rest]
-        return [base, *rest]
-    if head == "lowkey":
+            return [base, "--csl-owner", "--csl-nav-file", navfile, *req.argv[1:]]
+        return [base, *req.argv[1:]]
+    if lane == "lowkey":
         return [sys.executable if os.environ.get("LOWKEY_USE_PICKER_PY") else "python3",
-                str(BIN / "lowkey-cli.py"), *rest]
-    if head == "download":
-        return [os.environ.get("LA_DOWNLOADER") or str(REPO / "install/download-models.sh"), *rest]
-    raise ValueError(head)
+                str(BIN / "lowkey-cli.py"), *req.argv[1:]]
+    if lane == "download":
+        return [os.environ.get("LA_DOWNLOADER") or str(REPO / "install/download-models.sh"), *req.argv[1:]]
+    if lane == "keys":
+        # API keys setup wizard - runs setup-api-keys.py with provider slug
+        return req.argv
+    raise ValueError(f"Unknown lane: {lane}")
 
 
 def _mb(backend: str, *args: str) -> list[str]:
     return ["python3", str(REPO / "install/manage-backend.py"), "--backend", backend, *args]
 
+
+# Provider signup URLs from install/setup-api-keys.py
+PROVIDER_SIGNUP_URLS = {
+    "gemini": "https://aistudio.google.com/apikey",
+    "groq": "https://console.groq.com/keys",
+    "openrouter": "https://openrouter.ai/settings/keys",
+    "cloudflare": "https://dash.cloudflare.com/profile/api-tokens",
+    "mistral": "https://console.mistral.ai/home?profile_dialog=api-keys",
+    "zai": "https://z.ai/manage-apikey/apikey-list",
+    "siliconflow": "https://cloud.siliconflow.com/account/ak",
+    "llm7": "https://dash.llm7.io",
+    "kilo": "https://app.kilo.ai",
+    "vercel": "https://vercel.com/d?title=AI+Gateway+API+Keys&to=%2F%5Bteam%5D%2F~%2Fai-gateway%2Fapi-keys",
+    "sambanova": "https://cloud.sambanova.ai/dashboard",
+    "modelscope": "https://modelscope.cn/my/myaccesstoken",
+    "cerebras": "https://cloud.cerebras.ai/platform/",
+    "nvidia": "https://build.nvidia.com/settings/api-keys",
+}
 
 TOOLS = {
     "tool:keys": lambda: ["python3", str(REPO / "install/setup-api-keys.py")],
@@ -187,7 +210,6 @@ TOOLS = {
     "tool:rt-launchd-run-once": lambda b: _mb(b, "launchd", "run-once"),
     "tool:rt-launchd-install": lambda b: _mb(b, "launchd", "install"),
     "tool:rt-launchd-uninstall": lambda b: _mb(b, "launchd", "uninstall"),
-    "tool:keys:open": lambda: ["python3", "-c", "import webbrowser; webbrowser.open('https://github.com/haiggoh/free-agents/blob/main/docs/PROVIDER_SIGNUP.md')"],
     "tool:keys:add": lambda slug: ["python3", str(REPO / "install/setup-api-keys.py"), slug],
 }
 
@@ -473,6 +495,8 @@ class Picker(App):
             self.screen_model = m.LaunchdScreen(s, nav.owner)
         elif nav.target == "api_keys":
             self.screen_model = m.APIKeysScreen(s, nav.owner)
+        elif nav.target == "remote_filters":
+            self.screen_model = m.RemoteFiltersScreen(s, nav.owner)
         else:
             raise ValueError(nav.target)
 
@@ -801,9 +825,35 @@ class Picker(App):
         if target.startswith("tool:rt-"):
             self.run_child(TOOLS[target](self.settings.runtime_backend), pause=True)
             return
+        if target.startswith("tool:keys:open:"):
+            # Open specific provider's signup page
+            slug = target.split(":", 3)[3]
+            url = PROVIDER_SIGNUP_URLS.get(slug)
+            if url:
+                import subprocess
+                subprocess.Popen(["open", url],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        if target.startswith("tool:keys:wizard:"):
+            # Open inline prompt for API key entry
+            slug = target.split(":", 3)[3]
+            self._pending_provider = slug
+            # Find provider name for the prompt
+            provider_name = slug
+            for p in PROVIDERS:
+                if p.slug == slug:
+                    provider_name = p.name
+                    break
+            self._open_prompt("prompt:keys:key")
+            # Update the prompt label with provider name
+            prompt = self.query_one("#prompt", Input)
+            label = self.PROMPTS["prompt:keys:key"].format(provider=provider_name)
+            prompt.placeholder = label
+            self.query_one("#status", Static).update("  " + label)
+            return
         if target.startswith("tool:keys:"):
-            # API keys with specific provider
-            slug = target.split(":", 2)[2]
+            # API keys with specific provider (tool:keys:add:<slug>)
+            slug = target.split(":", 3)[3] if target.count(":") >= 3 else target.split(":", 2)[2]
             self.run_child(TOOLS["tool:keys:add"](slug), pause=True)
             return
         self.run_child(TOOLS[target](), pause=True)
@@ -816,7 +866,9 @@ class Picker(App):
                "prompt:rt-validate": "Version to validate (e.g. 0.15.3; empty cancels):",
                "prompt:rt-info": "Version to show (e.g. 0.15.3; empty cancels):",
                "prompt:rt-launchd-install": "Install the weekly LaunchAgent update check? type yes:",
-               "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:"}
+               "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:",
+               "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
+               "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically; Enter skips):"}
 
     def _open_prompt(self, kind):
         self.pending_prompt = kind
@@ -827,6 +879,11 @@ class Picker(App):
             fit = "fits the disk reserve" if rv.fits else "BREACHES the disk reserve — the downloader will refuse"
             label = (f"Queue: {', '.join(rv.aliases)} · ~{rv.total_gb:g} GB · {fit}. "
                      "Type yes to download, anything else cancels:")
+        elif kind == "prompt:keys:key":
+            # Replace {provider} placeholder with actual provider name
+            provider = getattr(self, '_pending_provider', 'unknown')
+            label = label.format(provider=provider)
+            prompt.password = True  # Hidden input for API key
         prompt.placeholder = label
         prompt.value = ""
         prompt.display = True
@@ -885,6 +942,23 @@ class Picker(App):
             else:
                 self.state_warnings.append("launchd unchanged — nothing was run")
                 self.render_model()
+        elif kind == "prompt:keys:add":
+            if value:
+                self.run_child(TOOLS["tool:keys:add"](value), pause=True)
+            else:
+                self.state_warnings.append("provider slug required")
+                self.render_model()
+        elif kind == "prompt:keys:key":
+            if value:
+                provider = getattr(self, '_pending_provider', None)
+                if provider:
+                    self._save_api_key(provider, value)
+                else:
+                    self.state_warnings.append("no provider selected")
+                self.render_model()
+            else:
+                self.state_warnings.append("API key required")
+                self.render_model()
 
     # --- children ------------------------------------------------------------------------------
     def run_child(self, cmd, env=None, pause=False, cwd=None):
@@ -909,6 +983,55 @@ class Picker(App):
             self.state_warnings.append(f"last child exited {rc}")
         self.cache.pop("local", None) if isinstance(self.screen_model, m.DownloadScreen) else None
         self.render_model(keep=(f"{'g' if keep[0] == 'group' else 'i'}:{keep[1]}" if keep else None))
+
+    def _save_api_key(self, provider: str, key: str) -> None:
+        """Save API key for a provider using the Store class."""
+        import sys
+        REPO = Path(__file__).resolve().parent.parent
+        sys.path.insert(0, str(REPO / "install"))
+        try:
+            from setup_api_keys import Store, validate_value, StoreError, PROVIDERS
+        except ImportError:
+            self.state_warnings.append("Could not load setup_api_keys module")
+            return
+
+        api_keys_dir = REPO.parent / ".api_keys" if (REPO.parent / ".api_keys").exists() else Path.home() / ".api_keys"
+
+        try:
+            with Store(api_keys_dir) as store:
+                # Find provider to get required files
+                provider_obj = None
+                for p in PROVIDERS:
+                    if p.slug == provider:
+                        provider_obj = p
+                        break
+
+                if not provider_obj:
+                    self.state_warnings.append(f"Unknown provider: {provider}")
+                    return
+
+                missing = [n for n in provider_obj.files if store.state(n) == "missing"]
+                if not missing:
+                    self.state_warnings.append(f"{provider_obj.name}: key already saved")
+                    return
+
+                # Validate and save the key
+                for name in missing:
+                    try:
+                        validate_value(name, key)
+                        store.save_new(name, key)
+                        self.state_warnings.append(f"Saved {name} for {provider_obj.name}")
+                    except StoreError as exc:
+                        self.state_warnings.append(f"{name}: {exc}")
+                        return
+                    except OSError:
+                        self.state_warnings.append(f"Could not save {name}; check file status")
+                        return
+
+        except StoreError as exc:
+            self.state_warnings.append(f"Store error: {exc}")
+        except Exception as exc:
+            self.state_warnings.append(f"Error saving key: {exc}")
 
     def copy_to_clipboard(self, text: str) -> None:
         # Textual copies via OSC 52, which macOS Terminal.app ignores (Textual's own docs say
@@ -944,7 +1067,7 @@ def main(argv):
     ap = argparse.ArgumentParser(prog="session-picker",
                                  description="Free Agents session picker (arrow keys, letter shortcuts).")
     ap.add_argument("screen", nargs="?", default="home",
-                    choices=["home", "local", "remote", "lowkey", "download", "rate-limiter"])
+                    choices=["home", "local", "remote", "lowkey", "download", "rate-limiter", "remote_filters"])
     ap.add_argument("--include-trials", action="store_true", help="show trial rows (the default)")
     ap.add_argument("--exclude-trials", action="store_true", help="start with trial rows hidden")
     ap.add_argument("--local-capable-shown", action="store_true",

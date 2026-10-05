@@ -34,6 +34,8 @@ EMOJI_GO_LAUNCH="🚀"       # picker `g`: launch the last-launched model
 EMOJI_TRIALS="🔖"          # picker remote `h`: limited-trial providers shown/hidden
 EMOJI_LOCAL_CAPABLE="🏷️"   # picker remote `f`: locally-runnable models shown/hidden
 EMOJI_HIDDEN_REPORT="📋"   # hidden-model report (picker `x`, bash `R`)
+EMOJI_FILTER="🔍"           # filter submenu (picker remote `y`)
+EMOJI_DOWNLOAD="📥"         # download models (picker `d`, distinct from backend manager)
 
 # Status / progress emojis (picker)
 EMOJI_OK="✅"
