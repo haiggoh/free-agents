@@ -44,7 +44,22 @@ Model context & autocompaction catalogue integration (hybrid approach, Plan Phas
 - Session picker PTY: 3 passed + 10 skipped
 - New features: 5 passed + 16 skipped
 
-## [0.24.0] — 2026-10-05
+## [0.23.4] — 2026-10-05
+
+### Added
+- **Briefing checklist for offload-to-local skill** (`skills/offload-to-local/SKILL.md`):
+  - Common silent failure points when delegating to a local model:
+    - Ordering of returned collections (first vs last write wins, newest-first vs oldest-first)
+    - Tie-breaking / precedence rules
+    - Inclusive vs exclusive boundaries
+    - Empty / absent / malformed input handling
+    - Timezone- and locale-dependent values (assert structurally, not exact strings)
+  - **Rule: ALWAYS mutation-test offloaded tests** — a passing test can hide a blind spot (documented example from iPhone backup app: guard deletion didn't fail test because duplicate record hid behind `.first` match; test only caught it when asserting count before unwrapping)
+
+### Tests
+- Full suite: 385 passed, 0 failed, 40 skipped
+
+## [0.23.3] — 2026-10-05
 
 Quota telemetry system (Remote-First Renewable-Allowance addendum §6–12) and temperature persistence fix.
 
@@ -68,6 +83,21 @@ Quota telemetry system (Remote-First Renewable-Allowance addendum §6–12) and 
 - Full suite: 385 passed, 0 failed, 40 skipped
 - Quota telemetry: 22 tests passing, mutation-tested
 - Session menu state: 24 tests passing
+
+## [0.23.4] — 2026-10-05
+
+### Added
+- **Briefing checklist for offload-to-local skill** (`skills/offload-to-local/SKILL.md`):
+  - Common silent failure points when delegating to a local model:
+    - Ordering of returned collections (first vs last write wins, newest-first vs oldest-first)
+    - Tie-breaking / precedence rules
+    - Inclusive vs exclusive boundaries
+    - Empty / absent / malformed input handling
+    - Timezone- and locale-dependent values (assert structurally, not exact strings)
+  - **Rule: ALWAYS mutation-test offloaded tests** — a passing test can hide a blind spot (documented example from iPhone backup app: guard deletion didn't fail test because duplicate record hid behind `.first` match; test only caught it when asserting count before unwrapping)
+
+### Tests
+- Full suite: 385 passed, 0 failed, 40 skipped
 
 ## [0.23.3] — 2026-10-05
 
