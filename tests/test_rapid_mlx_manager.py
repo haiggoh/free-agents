@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "install"))
 import pytest
 
 from managers import get_manager, get_manager_instance, list_managers
-from managers.base import ManagerError
+from managers._common import ManagerError
 from managers.rapid_mlx import RapidMLXManager
 
 

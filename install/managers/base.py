@@ -14,54 +14,34 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
-@dataclass(frozen=True)
-class BackendInfo:
-    """Information about a backend installation.
-
-    Attributes:
-        name: Backend identifier (e.g., "rapid-mlx", "vllm-mlx")
-        version: Installed version string
-        path: Path to the virtual environment
-        status: Installation status ("installed", "incomplete", "validated", "error")
-        metadata: Additional backend-specific information
-    """
-    name: str
-    version: str
-    path: str
-    status: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+from ._common import (
+    BackendInfo,
+    VersionInfo,
+    ManagerError,
+)
+from .mixins import (
+    VersionParsingMixin,
+    VenvMixin,
+    PyPISourceMixin,
+    GitHubSourceMixin,
+    BinaryInstallMixin,
+)
 
 
-@dataclass(frozen=True)
-class VersionInfo:
-    """Version metadata from a package registry.
-
-    Attributes:
-        version: Version string
-        source: Registry source (e.g., "pypi", "github")
-        release_date: Release date in ISO format
-        url: Download/registry URL
-        changelog: Optional changelog URL or text
-    """
-    version: str
-    source: str
-    release_date: str
-    url: str
-    changelog: str = ""
-
-
-class ManagerError(RuntimeError):
-    """A fail-closed manager error suitable for a concise CLI message."""
-    pass
-
-
-class BackendManager(ABC):
+class BackendManager(
+    VersionParsingMixin,
+    VenvMixin,
+    PyPISourceMixin,
+    GitHubSourceMixin,
+    BinaryInstallMixin,
+    ABC,
+):
     """Abstract base class for backend managers.
 
     All backend-specific managers must inherit from this class and implement
@@ -101,31 +81,6 @@ class BackendManager(ABC):
     def home(self) -> Path:
         """Home directory for this manager."""
         return self._home
-
-    @property
-    def venv_root(self) -> Path:
-        """Root directory for versioned virtual environments."""
-        return self.home / ".venvs"
-
-    def target_for(self, version: str) -> Path:
-        """Get the target path for a specific version.
-
-        Args:
-            version: Version string
-
-        Returns:
-            Path to the virtual environment directory
-        """
-        self.require_version(version)
-        return self.venv_root / f"{self.VENV_PREFIX}-{version}"
-
-    def cache_root(self) -> Path:
-        """Cache directory for this backend."""
-        return self.home / ".cache" / "local-agents" / f"{self.BACKEND_NAME}-runtime-manager"
-
-    def receipt_path(self, version: str) -> Path:
-        """Get the receipt path for a specific version."""
-        return self.cache_root() / "receipts" / f"{self.VENV_PREFIX}-{version}.json"
 
     # ---- Abstract Methods ----
 
@@ -207,6 +162,20 @@ class BackendManager(ABC):
         """
         ...
 
+    @abstractmethod
+    def _get_latest_package_version(self, package: str) -> str:
+        """Get the latest version of a specific package.
+
+        Args:
+            package: Package name
+
+        Returns:
+            Latest version string
+        """
+        ...
+
+    # ---- Utility Methods ----
+
     def check_updates(self) -> list[tuple[str, str, str]]:
         """Check for available updates.
 
@@ -223,90 +192,6 @@ class BackendManager(ABC):
             except Exception:
                 continue  # Skip packages that can't be checked
         return outdated
-
-    @abstractmethod
-    def _get_latest_package_version(self, package: str) -> str:
-        """Get the latest version of a specific package.
-
-        Args:
-            package: Package name
-
-        Returns:
-            Latest version string
-        """
-        ...
-
-    # ---- Concrete Methods ----
-
-    def require_version(self, value: str) -> str:
-        """Validate version syntax.
-
-        Args:
-            value: Version string to validate
-
-        Returns:
-            Validated version string
-
-        Raises:
-            ManagerError: If version syntax is invalid
-        """
-        try:
-            self.version_key(value)
-        except ValueError as exc:
-            raise ManagerError(f"unsupported version syntax: {value!r}") from exc
-        return value
-
-    def version_key(self, value: str) -> tuple[int, int, int, int, str, int]:
-        """Parse version into sortable key.
-
-        Args:
-            value: Version string
-
-        Returns:
-            Tuple for sorting (major, minor, patch, is_stable, label, serial)
-        """
-        match = self.VERSION_RE.fullmatch(value)
-        if not match:
-            raise ValueError(value)
-        major, minor, patch, label, serial = match.groups()
-        return (
-            int(major), int(minor), int(patch),
-            1 if label is None else 0, label or "", int(serial or 0),
-        )
-
-    def valid_versions(self, releases: dict[str, Any], include_prereleases: bool = False) -> list[str]:
-        """Filter and sort valid versions from releases dict.
-
-        Args:
-            releases: PyPI releases dictionary
-            include_prereleases: Whether to include pre-releases
-
-        Returns:
-            Sorted list of valid version strings
-        """
-        result: list[str] = []
-        for version, files in releases.items():
-            match = self.VERSION_RE.fullmatch(version)
-            if not match or (match.group(4) and not include_prereleases):
-                continue
-            if not isinstance(files, list) or not files:
-                continue
-            if all(isinstance(item, dict) and item.get("yanked", False) for item in files):
-                continue
-            result.append(version)
-        return sorted(result, key=self.version_key, reverse=True)
-
-    def _version_newer(self, latest: str, installed: str) -> bool:
-        """Check if latest version is newer than installed.
-
-        Args:
-            latest: Latest available version
-            installed: Currently installed version
-
-        Returns:
-            True if latest is newer
-        """
-        return self.version_key(latest) > self.version_key(installed)
 
     def _get_installed_package_version(self, package: str) -> str:
         """Get installed version of a package from the backend's environment.
@@ -418,7 +303,6 @@ class BackendManager(ABC):
 
     def atomic_json(self, path: Path, payload: dict[str, Any]) -> None:
         """Write JSON atomically."""
-        import tempfile
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, name = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
         temporary = Path(name)
@@ -450,26 +334,6 @@ class BackendManager(ABC):
         pkg_normalized = self.PACKAGE_NAME.replace("_", "-")
         return clean if f"{pkg_normalized}=={version}" in normalized else None
 
-    def installed_versions(self) -> list[tuple[str, Path, str]]:
-        """List installed versioned environments.
-
-        Returns:
-            List of (version, path, status) tuples
-        """
-        root = self.venv_root
-        entries: list[tuple[str, Path, str]] = []
-        if not root.is_dir():
-            return entries
-        for path in root.glob(f"{self.VENV_PREFIX}-*"):
-            if path.is_symlink() or not path.is_dir():
-                continue
-            version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
-            if not self.VERSION_RE.fullmatch(version):
-                continue
-            state = "installed" if self._is_complete(path) else "incomplete"
-            entries.append((version, path, state))
-        return sorted(entries, key=lambda item: self.version_key(item[0]), reverse=True)
-
     def _is_complete(self, path: Path) -> bool:
         """Check if environment is complete (override for backend-specific checks)."""
         binary = path / "bin" / self.BACKEND_NAME
@@ -497,3 +361,24 @@ class BackendManager(ABC):
         return infos
 
 
+@dataclass(frozen=True)
+class VersionInfo:
+    """Version metadata from a package registry.
+
+    Attributes:
+        version: Version string
+        source: Registry source (e.g., "pypi", "github")
+        release_date: Release date in ISO format
+        url: Download/registry URL
+        changelog: Optional changelog URL or text
+    """
+    version: str
+    source: str
+    release_date: str
+    url: str
+    changelog: str = ""
+
+
+class ManagerError(RuntimeError):
+    """A fail-closed manager error suitable for a concise CLI message."""
+    pass
