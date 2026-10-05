@@ -38,9 +38,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 2
-READABLE_SCHEMAS = (1, 2)
-SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier")
+SCHEMA_VERSION = 3
+READABLE_SCHEMAS = (1, 2, 3)
+SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown")  # = remote_provider_core.TIER_CHOICES
@@ -60,6 +60,15 @@ ALLOWED_EFFORT = {
     "lowkey": LOWKEY_EFFORTS,
 }
 DEFAULT_EFFORT = {"local_session": "high", "remote_api_session": "max", "lowkey": "xhigh"}
+
+# Temperature settings: same presets as main's bash menu (0.21.7). "" = leave it to the provider.
+TEMPERATURES = ("", "0.0", "0.3", "0.7", "1.0", "1.5", "2.0")
+ALLOWED_TEMPERATURE = {
+    "local_session": TEMPERATURES,
+    "remote_api_session": TEMPERATURES,
+    "lowkey": TEMPERATURES,
+}
+DEFAULT_TEMPERATURE = {"local_session": "", "remote_api_session": "", "lowkey": ""}
 
 RATE_LIMITER_MODES = ("sliding_window", "smooth_bucket")
 # "cooldown" is the BASE cooldown of rate_limiter's 429 exponential backoff (0.20.11); the key
@@ -81,6 +90,7 @@ class State:
     rate_limiter: dict = field(default_factory=dict)
     last_launched: dict = field(default_factory=dict)
     last_launched_tier: dict = field(default_factory=dict)
+    temperature: dict = field(default_factory=lambda: dict(DEFAULT_TEMPERATURE))
     warnings: list = field(default_factory=list)
 
 
@@ -120,6 +130,13 @@ def _validate_last_launched(lane: str, alias) -> None:
         raise ValueError(f"{lane} last launched alias is not a valid alias")
 
 
+def _validate_temperature(lane: str, value) -> None:
+    if lane not in ALLOWED_TEMPERATURE:
+        raise ValueError(f"unknown lane {lane!r}")
+    if value not in ALLOWED_TEMPERATURE[lane]:
+        raise ValueError(f"{lane} temperature must be one of {', '.join(ALLOWED_TEMPERATURE[lane])}")
+
+
 def _unsafe_dir(config_dir: Path) -> str | None:
     real = Path(os.path.realpath(config_dir))
     if "/.claude/plugins/cache/" in str(real) + "/":
@@ -129,8 +146,8 @@ def _unsafe_dir(config_dir: Path) -> str | None:
     return None
 
 
-def _parse(raw: bytes) -> tuple[dict, dict, dict]:
-    """Return (effort, rate_limiter, last_launched) or raise ValueError with a short reason."""
+def _parse(raw: bytes) -> tuple[dict, dict, dict, dict]:
+    """Return (effort, rate_limiter, last_launched, temperature) or raise ValueError with a short reason."""
     if len(raw) > MAX_BYTES:
         raise ValueError("preference file is too large")
     try:
@@ -149,13 +166,16 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict]:
     effort = doc.get("effort", {})
     limiter = doc.get("rate_limiter", {})
     last = doc.get("last_launched", {})
-    if not all(isinstance(x, dict) for x in (effort, limiter, last)):
+    temperature = doc.get("temperature", {})
+    if not all(isinstance(x, dict) for x in (effort, limiter, last, temperature)):
         raise ValueError("preference sections must be JSON objects")
     for lane, value in effort.items():
         _validate_effort(lane, value)
     _validate_rate_limiter(limiter)
     for lane, alias in last.items():
         _validate_last_launched(lane, alias)
+    for lane, value in temperature.items():
+        _validate_temperature(lane, value)
     tiers = doc.get("last_launched_tier", {})
     if not isinstance(tiers, dict):
         raise ValueError("preference sections must be JSON objects")
@@ -165,7 +185,7 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict]:
     # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
     for lane, tier in tiers.items():
         last[f"{lane}:tier"] = tier
-    return effort, limiter, last
+    return effort, limiter, last, temperature
 
 
 def _read(path: Path) -> tuple[dict, dict, dict] | None:
@@ -197,11 +217,12 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.warnings.append(f"{exc}; using built-in defaults and leaving the file untouched")
         return state
     if found:
-        effort, limiter, last = found
+        effort, limiter, last, temperature = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
         state.last_launched_tier = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
+        state.temperature.update(temperature)
     return state
 
 
@@ -244,9 +265,9 @@ def _write(config_dir: Path, doc: dict) -> None:
 
 
 def _update(config_dir: Path | str, mutate) -> str | None:
-    """Apply `mutate(effort, limiter, last_launched)` under the lock. Returns a warning or None.
+    """Apply `mutate(effort, limiter, last_launched, temperature)` under the lock. Returns a warning or None.
 
-    Always writes schema 2, so a schema-1 file is migrated here (and only here), carrying every
+    Always writes schema 3, so a schema-1/2 file is migrated here (and only here), carrying every
     section it already had."""
     config_dir = Path(config_dir)
     reason = _unsafe_dir(config_dir)
@@ -255,10 +276,14 @@ def _update(config_dir: Path | str, mutate) -> str | None:
     try:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
-            effort, limiter, last = found if found else ({}, {}, {})
-            mutate(effort, limiter, last)
+            if found:
+                effort, limiter, last, temperature = found
+            else:
+                effort, limiter, last, temperature = {}, {}, {}, {}
+            mutate(effort, limiter, last, temperature)
             doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
-                   "last_launched": {k: v for k, v in last.items() if ":" not in k}}
+                   "last_launched": {k: v for k, v in last.items() if ":" not in k},
+                   "temperature": temperature}
             tiers = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
             if tiers:
                 doc["last_launched_tier"] = tiers
@@ -274,7 +299,7 @@ def _update(config_dir: Path | str, mutate) -> str | None:
 def save_effort(config_dir: Path | str, lane: str, value: str) -> str | None:
     _validate_effort(lane, value)          # a programming/user error, raised not warned
 
-    def mutate(effort, _limiter, _last):
+    def mutate(effort, _limiter, _last, _temperature):
         effort[lane] = value
     return _update(config_dir, mutate)
 
@@ -282,7 +307,7 @@ def save_effort(config_dir: Path | str, lane: str, value: str) -> str | None:
 def save_rate_limiter(config_dir: Path | str, values: dict) -> str | None:
     _validate_rate_limiter(values, allow_none=True)
 
-    def mutate(_effort, limiter, _last):
+    def mutate(_effort, limiter, _last, _temperature):
         for key, value in values.items():
             if value is None:
                 limiter.pop(key, None)
@@ -300,12 +325,20 @@ def save_last_launched(config_dir: Path | str, lane: str, alias: str,
     if tier is not None and tier not in TIERS:
         raise ValueError(f"{lane} last launched tier is not valid")
 
-    def mutate(_effort, _limiter, last):
+    def mutate(_effort, _limiter, last, _temperature):
         last[lane] = alias
         if tier is None:
             last.pop(f"{lane}:tier", None)
         else:
             last[f"{lane}:tier"] = tier
+    return _update(config_dir, mutate)
+
+
+def save_temperature(config_dir: Path | str, lane: str, value: str) -> str | None:
+    _validate_temperature(lane, value)
+
+    def mutate(_effort, _limiter, _last, temperature):
+        temperature[lane] = value
     return _update(config_dir, mutate)
 
 
@@ -321,6 +354,11 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("set", help="persist one lane's effort")
     s.add_argument("lane", choices=list(ALLOWED_EFFORT))
     s.add_argument("value")
+    gt = sub.add_parser("get-temp", help="print the saved-or-default temperature for a lane")
+    gt.add_argument("lane", choices=list(ALLOWED_TEMPERATURE))
+    st = sub.add_parser("set-temp", help="persist one lane's temperature")
+    st.add_argument("lane", choices=list(ALLOWED_TEMPERATURE))
+    st.add_argument("value")
     sub.add_parser("show", help="print the effective state as JSON")
     args = parser.parse_args(argv)
 
@@ -334,15 +372,28 @@ def main(argv: list[str]) -> int:
             print(f"session_menu_state: warning: {warning}", file=sys.stderr)
             return 1
         return 0
+    if args.cmd == "set-temp":
+        try:
+            warning = save_temperature(REPO_CONFIG_DIR, args.lane, args.value)
+        except ValueError as exc:
+            print(f"session_menu_state: {exc}", file=sys.stderr)
+            return 2
+        if warning:
+            print(f"session_menu_state: warning: {warning}", file=sys.stderr)
+            return 1
+        return 0
     state = load(REPO_CONFIG_DIR)
     for warning in state.warnings:
         print(f"session_menu_state: warning: {warning}", file=sys.stderr)
     if args.cmd == "get":
         print(state.effort[args.lane])
+    elif args.cmd == "get-temp":
+        print(state.temperature[args.lane])
     else:
         print(json.dumps({"effort": state.effort, "rate_limiter": state.rate_limiter,
                           "last_launched": state.last_launched,
-                          "last_launched_tier": state.last_launched_tier}, indent=2))
+                          "last_launched_tier": state.last_launched_tier,
+                          "temperature": state.temperature}, indent=2))
     return 0
 
 

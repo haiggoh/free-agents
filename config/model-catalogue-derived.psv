@@ -1,0 +1,49 @@
+# model-catalogue-derived.psv — GENERATED from model-catalogue-context-list.yaml
+# DO NOT EDIT DIRECTLY — run `bin/la-catalogue-generate.py generate` to regenerate
+#
+# Format: folder|entry_type|session_model|catalogue_action|context_window_tokens|autocompaction_tokens|extended_context_tokens|extended_autocompaction_tokens|alias_target|target_model|model_family|notes
+
+.DS_Store|filesystem_metadata|false|exclude||||||||
+gemma-4-31B-it-OptiQ-4bit|standalone_model|true||262144|200000|||||Gemma 4 31B IT|Text context is 262144; separate vision configuration is 131072.
+Muse-Glimmer-30B-4bit|standalone_model|true||131072|100000|||||Muse Glimmer 30B|Use 131072 as the concrete catalogue limit for the advertised 131K+ window.
+Ornith-1.5-35B-A3B-MLX-4bit|standalone_model|true||262144|200000|1000000|1000000|||Ornith 1.5 35B-A3B|The 1M mode requires explicit YaRN factor 4 and matching runtime configuration.
+_override_gemma-4-26b-a4b-it-MLX-8bit|override_alias|false|alias|262144||||gemma-4-26b-a4b-it-MLX-8bit||Gemma 4 26B-A4B IT|Retain only if the plugin uses this path as an explicit runtime override.
+agents-a1-kimi-bf16|standalone_model|true||262144|200000|||||Agents-A1-4B Kimi coding derivative|Fine-tuned on Kimi K3 coding and debugging traces.
+chatterbox-turbo-8bit|tts_model|false|exclude_from_claude_sessions||||||||
+depthart-typegpu-all|depth_estimation_model|false|exclude_from_claude_sessions||||||||
+devstral-small2-uniform4|standalone_model|true||393216|300000|||||Devstral Small 2 24B Instruct 2512|Exact local config and params.json declare 393216 with YaRN. The runtime must serve at least 300000 tokens for this setting.
+gemma-4-26b-a4b-it-MLX-8bit|standalone_model|true||262144|200000|||||Gemma 4 26B-A4B IT|Text context is 262144; separate vision configuration is 131072.
+gemma4-12b-frontierdistill|standalone_model|true||262144|200000|||||Gemma 4 12B Frontier Distill|Agentic coding and tool-use derivative; adapter is already fused.
+granite-4.0-h-tiny-6bit-MLX|standalone_model|true||131072|100000|||||IBM Granite 4.0 H Tiny|
+kat-v2.5-6bit-xl|standalone_model|true||262144|200000|1000000|1000000|||KAT-Coder V2.5 Dev|Extended mode requires explicit YaRN and runtime validation.
+kat-v2.5-oq6e|standalone_model|true||262144|200000|1000000|1000000|||KAT-Coder V2.5 Dev|
+kat-v2.5-oq8e|standalone_model|true||262144|200000|1000000|1000000|||KAT-Coder V2.5 Dev|
+Kimi-VL-A3B-Thinking-2506-6bit|standalone_model|true||131072|100000|||||Kimi-VL A3B Thinking 2506|Use the language-model context, not the tokenizer's larger sentinel value.
+Kimi-VL-A3B-Thinking-2506-8bit|standalone_model|true||131072|100000|||||Kimi-VL A3B Thinking 2506|
+Kokoro-82M-bf16|tts_model|false|exclude_from_claude_sessions||||||||
+laguna-s2.1-oq4e-fast|standalone_model|true||1048576|1000000|||||Laguna S 2.1|Use the 1M setting only when the running oMLX server exposes at least 1000000 tokens.
+ministral14-reasoning-8bit|standalone_model|true||262144|200000|||||Ministral 3 14B Reasoning 2512|
+mistral-small4-q4q5|standalone_model|true||262144|200000|||||Mistral Small 4 119B|
+nemotron-omni-4bit|standalone_model|true||262144|200000|||||Nemotron 3 Nano Omni 30B-A3B Reasoning|The 16384 processor setting is not the text decoder's total context.
+nemotron-omni-6bit|standalone_model|true||262144|200000|||||Nemotron 3 Nano Omni 30B-A3B Reasoning|
+nemotron-omni-8bit|standalone_model|true||262144|200000|||||Nemotron 3 Nano Omni 30B-A3B Reasoning|
+NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-4Bit|standalone_model|true||262144|200000|1048576|1000000|||NVIDIA Nemotron 3 Nano 30B-A3B|The local model config defaults to 262144.
+NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-6Bit|standalone_model|true||262144|200000|1048576|1000000|||NVIDIA Nemotron 3 Nano 30B-A3B|
+NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-8Bit|standalone_model|true||262144|200000|1048576|1000000|||NVIDIA Nemotron 3 Nano 30B-A3B|
+qwen-agentworld-4bit|standalone_model|true||262144|200000|||||Qwen AgentWorld 35B-A3B|Model architecture declares 262144. Confirm that the serving stack does not enforce the tokenizer's 131072 value.
+Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit|tts_model|false|exclude_from_claude_sessions||||||||
+Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16|tts_model|false|exclude_from_claude_sessions||||||||
+qwen3.6-27b-bf16|standalone_model|true||262144|200000|1010000|1000000|||Qwen3.6 27B|
+Qwen3.8-27B-4bit|standalone_model|true||262144|200000|1000000|1000000|||Qwen3.8 27B|
+Qwen3.8-27B-8bit|standalone_model|true||262144|200000|1000000|1000000|||Qwen3.8 27B|
+Qwen3.8-27B-MTP-4bit|speculative_drafter|false|attach_to_target||||||Qwen3.8-27B-4bit||
+Qwen3.8-27B-MTP-8bit|speculative_drafter|false|attach_to_target||||||Qwen3.8-27B-8bit||
+Qwen3.8-27B-oQ6|standalone_model|true||262144|200000|1000000|1000000|||Qwen3.8 27B|
+DeepSeek-R1-Distill-Qwen-32B-4bit|standalone_model|true||131072|100000|||||DeepSeek R1 Distill Qwen 32B|The model config governs; the tokenizer value is stale or restrictive metadata.
+Devstral-2-123B-Instruct-2512-4bit|standalone_model|true||262144|200000|||||Devstral 2 123B Instruct 2512|
+devstral-24b-gguf|standalone_model|true||131072|100000|||||Devstral Small 24B 2505|Identification is based on the original devstralQ4_K_M filename and download lineage. It is not Devstral Small 2.
+KAT-Coder-V2.5-Dev-OptiQ-4bit|standalone_model|true||262144|200000|1000000|1000000|||KAT-Coder V2.5 Dev|
+Llama-4-Scout-17B-16E-Instruct-4bit|standalone_model|true||10485760|1000000|||||Llama 4 Scout 17B-16E Instruct|Claude Code caps autocompaction at 1M. The inference server must always be launched with an explicit bounded context allocation.
+qwen3-next-80b-thinking-mlx|standalone_model|true||262144|200000|1010000|1000000|||Qwen3-Next 80B-A3B Thinking|Native language-model config is 262144; larger mode requires explicit scaling.
+Qwen3.6-27B-8bit|standalone_model|true||262144|200000|1010000|1000000|||Qwen3.6 27B|
+Qwen3.6-27B-UD-MLX-4bit|standalone_model|true||262144|200000|1010000|1000000|||Qwen3.6 27B|
