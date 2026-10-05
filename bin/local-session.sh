@@ -145,7 +145,7 @@ la_on_disk "$ALIAS" || { echo "local-session.sh: model '$ALIAS' is not on disk" 
 # Apply effort override if given
 if [[ -n "$EFFORT_OVERRIDE" ]]; then
     case "$EFFORT_OVERRIDE" in
-        low|medium|high|xhigh|max) LA_EFFORT[$ALIAS]="$EFFORT_OVERRIDE" ;;
+        low|medium|high|xhigh|max) LA_EFFORT["$ALIAS"]="$EFFORT_OVERRIDE" ;;
         *) echo "local-session.sh: invalid effort '$EFFORT_OVERRIDE'; use low|medium|high|xhigh|max" >&2; exit 2 ;;
     esac
 fi

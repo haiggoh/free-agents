@@ -369,7 +369,8 @@ la_auto_scan_models() {
       -exec test -e "{}/model.safetensors" \; -o \
       -exec find "{}" -maxdepth 1 -name "*.gguf" -print -quit \; \
     \) -print 2>/dev/null | while read -r dir; do
-    local name=$(basename "$dir")
+    local name
+    name=$(basename "$dir")
     # Filter out excluded patterns (case-insensitive)
     if echo "$name" | grep -qiE "$exclude_regex"; then
       continue
@@ -463,9 +464,11 @@ la_get_autocompaction() {
   fi
 
   # 5. Derive from effective context
-  local effective=$(la_get_effective_context "$alias" "$use_extended")
+  local effective
+  effective=$(la_get_effective_context "$alias" "$use_extended")
   if [ -n "$effective" ] && [ "$effective" -ge 100000 ]; then
-    local floor=$(( (effective / 100000) * 100000 ))
+    local floor
+    floor=$(( (effective / 100000) * 100000 ))
     [ "$floor" -gt 1000000 ] && floor=1000000
     echo "$floor"
     return 0
@@ -763,6 +766,101 @@ la_on_disk() {
   # a perfectly working override view is reported as having no weights. -L still rejects a farm
   # whose targets are gone, which is the behaviour we want.
   [ -n "$(find -L "$d" -type f -size +1024k -print -quit 2>/dev/null)" ]
+}
+
+# --- Manifest-driven context derivation (shared with csl) ---
+# Load manifest for an alias, returns manifest JSON or empty string
+la_load_manifest() {
+  local alias="$1"
+  local subdir="${LA_SUBDIR[$alias]:-}"
+  [ -n "$subdir" ] || return 1
+  local manifest_path="$LA_MODELS_DIR/$subdir/.local-model-manifest.json"
+  [ -f "$manifest_path" ] || return 1
+  cat "$manifest_path"
+}
+
+# Extract effective context from manifest (min of applicable limits)
+la_manifest_effective_context() {
+  local manifest_json="$1"
+  # Use python for proper JSON parsing
+  python3 -c '
+import json, sys
+try:
+    doc = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(1)
+
+caps = doc.get("capabilities") or {}
+rq = doc.get("runtime_qualification") or {}
+
+# Collect all applicable limits
+limits = []
+for key in ("configured_context_tokens", "native_context_tokens", "extended_context_tokens"):
+    val = caps.get(key)
+    if isinstance(val, int):
+        limits.append(val)
+
+# Server context from runtime qualification
+server_ctx = rq.get("server_context_tokens")
+if isinstance(server_ctx, int):
+    limits.append(server_ctx)
+
+# Tested safe context
+tested = rq.get("tested_safe_context_tokens")
+if isinstance(tested, int):
+    limits.append(tested)
+
+if not limits:
+    sys.exit(1)
+
+eff = min(limits)
+print(eff)
+' "$manifest_json"
+}
+
+# Compute autocompaction from effective context
+la_manifest_autocompaction() {
+  local effective="$1"
+  if [ -z "$effective" ] || [ "$effective" -lt 100000 ]; then
+    echo ""
+    return
+  fi
+  local floor=$(( (effective / 100000) * 100000 ))
+  if [ "$floor" -gt 1000000 ]; then
+    floor=1000000
+  fi
+  echo "$floor"
+}
+
+# Validate manifest-derived config before launch
+la_validate_manifest_config() {
+  local alias="$1"
+  local manifest_json="$2"
+  local server_ctx="$3"
+  local autocompact="$4"
+  local effective="$5"
+
+  # Check 1: server context >= autocompaction
+  if [ -n "$server_ctx" ] && [ -n "$autocompact" ] && [ "$server_ctx" -lt "$autocompact" ]; then
+    echo "FAIL: server_context_tokens ($server_ctx) < autocompaction ($autocompact)"
+    return 1
+  fi
+
+  # Check 2: autocompaction is valid 100K increment
+  if [ -n "$autocompact" ]; then
+    if [ "$((autocompact % 100000))" -ne 0 ] || [ "$autocompact" -lt 100000 ] || [ "$autocompact" -gt 1000000 ]; then
+      echo "FAIL: autocompaction ($autocompact) must be 100K increment between 100K and 1M"
+      return 1
+    fi
+  fi
+
+  # Check 3: autocompaction <= effective context
+  if [ -n "$autocompact" ] && [ -n "$effective" ] && [ "$autocompact" -gt "$effective" ]; then
+    echo "FAIL: autocompaction ($autocompact) > effective context ($effective)"
+    return 1
+  fi
+
+  return 0
 }
 
 # la_dir_present <alias> -> 0 if the model's directory exists at all, regardless of whether it holds
