@@ -1,3 +1,28 @@
+## [0.24.0] — 2026-10-05
+
+Quota telemetry system (Remote-First Renewable-Allowance addendum §6–12) and temperature persistence fix.
+
+### Added
+- **Quota telemetry module** (`bin/quota/`):
+  - `telemetry.py`: Normalized QuotaRecord schema (addendum §6) with multi-dimension tracking (requests, tokens, credits, compute_units), JSONL ledger at `~/.local/share/local-agent/remote-usage.jsonl`, derived state at `~/.local/share/local-agent/remote-quota-state.json`, statusline emission with provenance labels A/R/E/? (authoritative/reconciled/estimated/unknown) per addendum §7
+  - `providers.py`: 13 provider-specific header parsers per addendum §10 — Gemini, Groq, Mistral, OpenRouter, Cloudflare (Neurons), GitHub, Z.AI, SiliconFlow, LLM7 (rolling-24h), Kilo (shared IP), Vercel (credits), SambaNova, ModelScope
+  - `test_quota_telemetry.py`: 22 tests covering all addendum §12 fixture requirements — authoritative header parsing, daily/monthly/rolling ledgers, rolling event expiration, binding dimension calculation, no percentage when denominator unknown, partial-account marked estimated, temporary RPM vs hard daily exhaustion
+- **Temperature persistence** (schema v3 in `config/session-menu.local.json`):
+  - Per-lane temperature settings (`local_session`, `remote_api_session`, `lowkey`) with same mechanism as effort persistence
+  - `session_menu_state.py`: `save_temperature()`, `get-temp`/`set-temp` CLI, `DEFAULT_TEMPERATURE`, `ALLOWED_TEMPERATURE`
+  - `session_picker.py`: `on_temperature_saved` callback, loads temperature from state
+  - `session_picker_model.py`: Settings with `local_temperature`/`remote_temperature`/`lowkey_temperature`, `on_temperature_saved` propagation
+  - All 24 `test_session_menu_state.py` tests pass
+
+### Changed
+- **Config**: `config-lib.sh` added `la_load_derived_catalogue()` and `la_auto_scan_models()`; new `config/model-catalogue-derived.psv` derived catalogue
+- **Session menu state**: Schema bumped to v3 with `temperature` section
+
+### Tests
+- Full suite: 385 passed, 0 failed, 40 skipped
+- Quota telemetry: 22 tests passing, mutation-tested
+- Session menu state: 24 tests passing
+
 ## [0.23.2] — 2026-10-05
 
 Backend manager refactor, plus fixes for regressions it surfaced from the 0.21.0 port.
