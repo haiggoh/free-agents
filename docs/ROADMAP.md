@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.23.4`. See `CHANGELOG.md`.
+`0.25.3`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -533,9 +533,9 @@ Rapid-First Model Management.md` (1,288 lines), tracked by waypoint `local-agent
 That plan is authoritative for detail; this section is the checklist, and is deliberately terse
 enough to stay accurate.
 
-> *Detail below restored from `cba3d65^:docs/ROADMAP.md` (removed in `cba3d65` by mistake). Release
-> numbers in the prose were updated to `0.23.0`, and status marks were brought up to date against the
-> code on 2026-10-06; everything else is as it was written.*
+> *Detail below restored from `cba3d65^:docs/ROADMAP.md` (removed in `cba3d65` by mistake). Status
+> marks were brought up to date against the code on 2026-10-06, and the one body reference to
+> runtime profiles as `0.15.0` now reads `0.23.0`; everything else is as it was written.*
 
 ### The decision it supports
 
@@ -624,7 +624,12 @@ Additionally, **only if** standalone packaging ships in the same release: clean-
 passes; archive is deterministic; release manifest contains only approved files; installer avoids
 silent dotfile mutation; published assets are immutable and checksummed.
 
-### Do not confuse these with the other "profile" work
+### Do not confuse these with `0.16.0`
+
+*Numbers in this block are as originally written. Then, `0.15.0` was the runtime-profiles slot (now
+`0.23.0`) and `0.16.0` was the oMLX backend-lanes slot (now `0.24.0`), per the "Was …" chains in the
+release table above. Whether the heading's `0.16.0` was meant as the oMLX release or was already
+stale when written is not recoverable from history.*
 
 - **`0.13.3` launcher profile controls** are per-**launch** environment variables
   (`LA_CLAUDE_SETTINGS`, `LA_CLAUDE_TOOLS`, …). `0.23.0` runtime **profiles** are a resolver over

@@ -1,3 +1,23 @@
+## [0.25.3] — 2026-10-06
+
+Documentation repair: silently truncated history and spec text are back.
+
+### Fixed
+- **`CHANGELOG.md` is complete again, back to `0.1.0`.** `0a78ae8` (0.23.5 bump) cut the file to 41
+  lines and `dca664e` restored only the recent part, leaving `0.15.0` down to `0.1.0` missing. Those
+  entries are back verbatim, together with `0.14.1` and `0.17.7`, `0.18.4`, `0.18.5` (dropped by
+  later releases) and a `206-08-19` typo is corrected. The duplicated `0.23.3` and `0.23.4` entries
+  are collapsed to one each. Every version heading that ever existed in the file appears once.
+- **`docs/ROADMAP.md` regained the runtime-profiles specification** that `cba3d65` deleted (five
+  identity layers, phases A-I, hotswap contract, smallest first slice, 14 release gates). Its status
+  marks are brought up to date against the code: runtime profiles shipped as groundwork in `0.23.0`;
+  the structured hotswap result, unsafe-reuse refusal, full server-metadata identity, session schema
+  v2, packaging and resolver tests are still open.
+- **`docs/ROADMAP.md` "Current released version"** said `0.23.4`; it now follows `plugin.json`, which
+  makes `tests/test_version_consistency.sh` pass again.
+- **`README.md`**: lane 3 (remote sessions) and the lane-switch carry-over sentence are back; a
+  triplicated provider-status callout and two stale copies of lanes 2 and 3 are removed.
+
 ## [0.25.2] — 2026-10-06
 
 Testing the role router no longer needs, or touches, your real API keys.
