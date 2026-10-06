@@ -1,3 +1,61 @@
+## [0.25.0] — 2026-10-06
+
+### Added — CUDA Architecture (v3 Hardened + Dynamic HF)
+
+**Unified Registry & Hardware Detection** (`bin/la-hw-detect.sh`):
+- OS detection: macOS, Linux (with distro/version/codename), Windows (native/WSL/Cygwin/MinGW/MSYS)
+- Hardware detection: mlx (Apple Silicon), cuda (NVIDIA), rocm (AMD), opencl (Intel), cpu-only
+- VRAM detection via nvidia-smi, rocm-smi, sysctl, /proc/meminfo
+- GPU vendor/model/driver detection (NVIDIA, AMD, Intel, Apple Silicon)
+- Container (Docker/Podman/Kubernetes) and virtualization (KVM/VMware/Hyper-V) detection
+- 40+ exported environment variables for cross-platform compatibility
+
+**3-Tier CUDA Inference Routing** (`bin/local-llm-hotswap.sh`):
+- **Tier A** (VRAM ≥ 16GB): vLLM fully VRAM-resident
+- **Tier B** (VRAM ≤ 8GB): AWQ/EXL2 → vLLM with UVM/KV offload (`--swap-space`); GGUF → llama-server with dynamic `-ngl`
+- **Tier C** (CPU-only): llama-server CPU mode
+- Dynamic `--swap-space` calculation (system RAM - VRAM - 10GB headroom)
+- Dynamic `-ngl` calculation from model size (~7.5GB VRAM target)
+
+**CUDA Lifecycle Manager** (`install/manage-cuda-backend.py`):
+- Side-by-side venvs with rollback, `LA_CUDA_BIN` pointer
+- Dynamic PyTorch `--extra-index-url` based on host CUDA version
+- Strict smoke test: `torch.cuda.is_available()` + `torch.zeros(1).cuda()`
+
+**Dynamic Hugging Face Downloader** (`install/download-models.sh`):
+- `--hf-repo`, `--alias`, `--include` flags for dynamic model fetching
+- Format protection: warns if no `--include` pattern (full repo = hundreds of GB)
+- Injects into same catalog arrays as static catalog (preserves deduplication, disk checks)
+
+**CUDA Lifecycle & Diagnostics**:
+- `bin/la-vram-preflight.sh`: VRAM capacity check, tier recommendation, UVM/ngl capability checks
+- `bin/la-evict.sh`: Linux `/proc` support, CUDA backend recognition
+- `bin/la-reboot.sh`: Linux `/proc` argv capture via `/proc/PID/cmdline` + `/proc/PID/environ`
+- `bin/la-hw-detect.sh`: Comprehensive cross-platform hardware detection
+
+**Model Catalog Updates** (`config/model-catalog.psv`):
+- Added `hardware_target` field (11th field): mlx|cuda|any
+- Added CUDA models: `qwen2.5-7b-awq` (AWQ, vLLM-cuda), `nemotron-3-ultra-550b-gguf` (GGUF, llama.cpp)
+
+**Install System Updates**:
+- `install/install-backend.sh`: Hardware routing, CUDA backend support (vllm-cuda, llama-cpp-cuda)
+- `install/install-cuda-backend.sh`: CUDA installer wrapper
+- `install/manage-cuda-backend.py`: CUDA backend lifecycle manager
+- `config/model-catalog.psv`: Added CUDA example models
+
+### Changed
+- `csl` dry-run shows Intercept Agents toggle status
+- `la_on_disk()` returns success for `api`/`litellm` backends (no local weights needed)
+- `LA_SERVE_BACKENDS` includes `api`; `la_register` docs updated for new backends
+- `la_on_disk()` returns success for `api`/`litellm` backends
+
+### Tests
+- Full suite: 378 passed, 0 failed, 40 skipped
+- CloudConfigScreen: 2 new tests (structure + owner SUB nav)
+- APIKeysScreen: 24 tests passing (provider order, More providers toggle, Back nav)
+- Session menu state: 24 tests passing (schema v4 with intercept_agents)
+- All free-agents tests passing (378/376)
+
 ## [0.24.0] — 2026-10-06
 
 ### Added — Cloud Session Configuration & Native Agent Interception
