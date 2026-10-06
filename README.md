@@ -40,23 +40,32 @@ and with wrapped launchers.
 
 ## Three ways to use it
 
-**1. Offload sub-tasks from your cloud session — recommended, what most people want.**
+### 1. Offload sub-tasks from your cloud session — recommended, what most people want.
 Keep driving with your cloud model (Opus/Sonnet). Dispatch bounded sub-tasks to a local model via
 `curl` / `librarian-dispatch.py` / `hotswap` — fast (sub-second to seconds), free, private. Nothing
 about your main session changes; you're just sending the delegatable parts to local compute. This
 saves cost for **anyone**, whether or not you have a spending cap.
 
-**2. Run a full local Claude Code session — offline, private, or for long unattended runs.**
+### 2. Run a full local Claude Code session — offline, private, or for long unattended runs.
 Run an entire Claude Code session on a local model (served under a spoofed Claude id so the client
 accepts it). Zero cloud cost and nothing leaves the machine. Trade-off: interactive turns are slower
 than a free remote API, so reach for this when you are offline, when privacy is the point, or when a
 long unattended run makes throughput matter more than latency.
 
-**3. Run a full remote Claude Code session — the fastest free lane, and the usual default.**
+### 3. Run a full remote Claude Code session — the fastest free lane, and the usual default.
 No local model or Apple-Silicon hardware needed. Launch on Gemini, Groq, NVIDIA, OpenRouter free tier, Cloudflare Workers AI,
 Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, or ModelScope. Usage goes to
-the selected provider, with its own quota and billing. Add keys with `csl setup-remote` or press
-`i` in `csl`. Use `csl remote` to open the picker. See [Remote API sessions](docs/remote-session/README.md).
+the selected provider, with its own quota and billing. `remote-session.sh` is a drop-in replacement
+for Anthropic's paid gateway: LiteLLM proxies Anthropic `/v1/messages` to each provider's API. Add
+keys with `csl setup-remote` or press `i` in `csl`. Use `csl remote` to open the picker. See
+[Remote API sessions](docs/remote-session/README.md).
+
+### 4. Run a full session on NVIDIA GPUs (Linux/WSL2) — NEW in v0.25.0
+Run full local sessions on NVIDIA GPUs with a complete CUDA inference stack:
+- **Tier A** (VRAM ≥ 16 GB): vLLM fully VRAM-resident, maximum speed
+- **Tier B** (VRAM ≤ 8 GB): AWQ/EXL2 → vLLM with UVM/KV offload (`--swap-space`); GGUF → llama.cpp with dynamic `-ngl`
+- **Tier C** (CPU-only): llama.cpp CPU mode
+Auto-detects your GPU VRAM and picks the right tier. Dynamic `--swap-space` (system RAM - VRAM - 10 GB) and dynamic `-ngl` calculation.
 
 > **Provider status — proven vs untested.** Remote sessions themselves are **no longer experimental**:
 > they work, and they are *faster* than local sessions. What varies is the individual provider.
@@ -69,19 +78,121 @@ the selected provider, with its own quota and billing. Add keys with `csl setup-
 > A weak *model* is not a broken *lane*: NVIDIA's Nemotron takes shortcuts and makes mistakes on
 > long tasks, which is a model limitation (try `max` effort), not a defect in the remote path.
 
-**2. Full local mode — for offline work and long unattended runs.**
-Run an *entire* Claude Code session on a local model (served under a spoofed Claude id so the client
-accepts it). Useful mainly when you want zero cloud cost for a block of work, or you're offline.
-Trade-off: interactive turns on a local model are slower than a free remote API, so for most
-interactive work **the remote lane below is now the better default**. Local still wins when you are
-offline, when the work must not leave the machine, or for a long unattended run where hours of
-throughput matter more than per-turn latency.
+---
 
-**3. Remote cloud API sessions — zero cost via free provider tiers.**
-Run a full Claude Code session against free cloud APIs (NVIDIA, Gemini, Groq, etc.) using
-`remote-session.sh` as a drop-in replacement for Anthropic's paid gateway. Leverages LiteLLM
-proxying to translate Anthropic `/v1/messages` to provider APIs. Ideal for when local MLX models
-aren't sufficient or when you prefer cloud-based instant responsiveness. See [Remote Sessions](docs/remote-fallback/README.md) for details.
+## What's New
+
+### v0.25.0 — CUDA Architecture (NEW)
+
+**free-agents now supports NVIDIA GPUs on Linux/WSL2 with a complete CUDA inference stack.**
+
+#### Three-Tier CUDA Inference
+
+| Tier | VRAM | Strategy | Use Case |
+|------|------|----------|----------|
+| **A** | ≥ 16 GB | vLLM fully VRAM-resident | Large models, maximum speed |
+| **B** | ≤ 8 GB | AWQ/EXL2 → vLLM with UVM offload (`--swap-space`); GGUF → llama.cpp with dynamic `-ngl` | Consumer GPUs (8-16 GB) |
+| **C** | — | llama.cpp CPU mode | No NVIDIA GPU / CPU-only |
+
+The system auto-detects your GPU VRAM and picks the right tier. For Tier B, it dynamically calculates `--swap-space` (system RAM - VRAM - 10 GB headroom) and `-ngl` layers to fit ~7.5 GB in VRAM.
+
+#### 🖥️ Hardware Detection (`la-hw-detect.sh`)
+
+Auto-detects your platform and hardware:
+
+- **OS**: macOS, Linux (Ubuntu, Debian, RHEL, Arch, Alpine, WSL2), Windows (native, Cygwin, MinGW, MSYS)
+- **Hardware**: Apple Silicon MLX, NVIDIA CUDA, AMD ROCm, Intel OpenCL, CPU-only
+- **GPU**: VRAM via `nvidia-smi`/`rocm-smi`, driver version, CUDA/ROCm version
+- **CPU**: Architecture, model, cores/threads, flags (AVX2, NEON, etc.)
+- **Memory**: System RAM, swap — cross-platform
+- **Environment**: Docker/Podman/Kubernetes, VM detection (KVM/VMware/Hyper-V/WSL)
+
+Exports 40+ `LA_*` environment variables for scripts to use.
+
+#### 📦 Dynamic Hugging Face Model Downloads
+
+Fetch models directly from Hugging Face without adding them to the catalog:
+
+```bash
+./install/download-models.sh --hf-repo Qwen/Qwen2.5-7B-Instruct-AWQ --alias qwen-awq --include "*.safetensors"
+```
+
+- `--hf-repo`: Hugging Face repo ID
+- `--alias`: Your local alias
+- `--include`: **Required** — glob pattern to avoid downloading hundreds of GB of unused formats (e.g., `*.safetensors`, `*.gguf`)
+
+The model is injected into the same download engine as the static catalog — deduplication, disk checks, and resume all work.
+
+#### 🎮 CUDA Lifecycle Manager (`manage-cuda-backend.py`)
+
+```bash
+# Install vLLM with CUDA 12.4 wheels
+./install/manage-cuda-backend.py install vllm
+
+# Install llama.cpp with CUDA
+./install/manage-cuda-backend.py install llama-cpp
+
+# List available backends
+./install/manage-cuda-backend.py list
+
+# Switch active backend
+./install/manage-cuda-backend.py switch vllm
+```
+
+- Side-by-side venvs with rollback capability (`LA_CUDA_BIN` pointer)
+- Dynamic PyTorch wheel selection via `--extra-index-url` based on host CUDA version
+- Strict smoke test: `torch.cuda.is_available()` + `torch.zeros(1).cuda()`
+
+#### 🛡️ CUDA Lifecycle & Diagnostics
+
+| Script | Purpose |
+|--------|---------|
+| `la-vram-preflight.sh` | VRAM capacity check, tier recommendation, UVM/ngl capability checks |
+| `la-evict.sh` | Linux `/proc` support, CUDA backend recognition, emergency memory recovery |
+| `la-reboot.sh` | Restart crashed server on same port/argv via `/proc/PID/cmdline` + `/proc/PID/environ` |
+| `la-hw-detect.sh` | Full cross-platform hardware detection |
+
+#### 📦 Model Catalog Updates
+
+Added `hardware_target` field (11th column): `mlx` | `cuda` | `any`. The downloader auto-filters by your hardware.
+
+New CUDA models in `config/model-catalog.psv`:
+
+| Alias | Model | Type | Runtime | Role |
+|-------|-------|------|---------|------|
+| `qwen2.5-7b-awq` | Qwen2.5 7B Instruct AWQ | AWQ | vLLM-cuda | operator |
+| `nemotron-3-ultra-550b-gguf` | Nemotron 3 Ultra 550B GGUF | GGUF | llama.cpp | reasoner |
+
+### Install System Updates
+
+- `install/install-backend.sh`: Hardware-aware routing, installs CUDA backends on CUDA hardware
+- `install/install-cuda-backend.sh`: CUDA installer wrapper
+- `install/manage-cuda-backend.py`: CUDA backend lifecycle manager
+- `config/model-catalog.psv`: Added CUDA example models
+
+---
+
+### v0.24.0 — Cloud Session Configuration & Native Agent Interception
+
+### CloudConfigScreen (new `session_picker_model.py` screen, key `c` from Home):
+- **Intercept Agents toggle** (x): Deny native `Agent` tool, replace with `FreeAgent` native plugin tool
+- **Classifier Source selector** (y): NVIDIA API / Local Devstral / Auto (local on local, remote on remote)
+- **Bypass Permissions toggle** (p): Blind-trust auto mode for cloud sessions (`bypassPermissions`)
+- Both menu item and screen title use cloud + wrench emojis with space: `☁️ 🔧 Cloud Session Configuration`
+- Persists in `session-menu.local.json` (schema v4) under `intercept_agents` and `cloud_bypass_permissions`
+
+**HomeScreen**: Cloud session configuration moved to 3rd position (after Local/Remote)
+
+**APIKeysScreen** improvements:
+- Key emoji (🔑) from single source of truth
+- Provider order: NVIDIA → Google (gemini) → Groq → alphabetical
+- Empty line separator after NVIDIA
+- Back to Home at bottom (matching other menus)
+- More providers option (hidden by default, shows all providers when enabled)
+
+**remote-session.sh**: `CLOUD_BYPASS_PERMISSIONS` env var support; when enabled forces `bypassPermissions` regardless of `AUTO_MODE_STATE`
+
+---
 
 ## How it works
 
@@ -653,6 +764,13 @@ plus Enter work everywhere.
 Settings carry over when you switch lanes. Effort and the last-launched model per lane are
 remembered across runs in `config/session-menu.local.json`, which is private and gitignored. Every
 emoji the picker draws is defined in `config/emoji.sh`.
+
+From inside either lane you can return to Home (`b`) or jump straight across to the other lane
+(`s`) — all in one process, with no restart and no state loss. Auto-mode, telemetry, the watcher,
+the queued-prompt (stop) hook, and the locally-runnable filter all carry over across every switch —
+the filter included, even though only the remote lane displays it. The locally-runnable filter is
+deliberately **not** on Home: it only ever affects the *remote* roster, so it lives in the Remote
+lane as `f`.
 
 If this installed copy has no `config.local.sh` and fell back to the public `config.example.sh`, the
 home screen also prints a warning that private models are not present in this installed copy.
