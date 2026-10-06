@@ -527,6 +527,106 @@ plan for Claude Code (hardened, adversarially reviewed).md` (Phases 0–6), trac
 Rapid-First Model Management.md` (1,288 lines), tracked by waypoint `local-agents-0-14-0-runtime`.
 That plan is authoritative for detail; this section is the checklist, and is deliberately terse
 enough to stay accurate.
+
+> *Detail below restored verbatim from `cba3d65^:docs/ROADMAP.md` (removed in `cba3d65` by mistake). Version numbers inside the prose (`0.15.0`, `0.16.0`) predate the renumbering above.*
+
+### The decision it supports
+
+Separate **artifact identity** (what is on disk) from **runtime behaviour** (how it is served). Today
+one `la_register` line conflates them, which is why a model cannot have two runtime personalities
+without being registered twice — the exact duplication that forced the `qwen-3.x-rapid-*` aliases
+retired in `0.13.1`.
+
+### Identity model — five layers (§5)
+
+| Layer | Artifact | Status |
+|---|---|---|
+| Artifact identity | `config/model-catalog.psv` | ✅ exists |
+| Runtime-profile identity | `config/model-runtime-profiles.json` | ❌ not created |
+| Resource-profile identity | `config/runtime-resource-profiles.json` | ❌ not created |
+| Environment-profile identity | `config/runtime-environments.json` | ❌ not created |
+| Live-server identity | `server_<port>.meta` | 🟡 partial — exists, needs profile fields (§5.5, §12) |
+
+### Phases (§22) — strictly ordered
+
+- [ ] **A — Reconcile the live base.** Inspect branch/HEAD/tags/manifest/remote/index/worktree,
+      including ignored files. Report before mutating.
+      *Materially easier as of `0.13.5`: all four outstanding feature branches are merged to `main`,
+      so Phase A reads one consolidated base instead of five divergent branches.*
+- [ ] **B — Read-only resolver prototype.** Create only the three JSON files plus
+      `bin/la-model-profile.py`. Seed one artifact (`qwen38-27b-4bit`) and two profiles
+      (`qwen38-rapid-operator`, `qwen38-rapid-thinking`) plus one legacy fallback. Change no
+      downloader or launcher behaviour until it passes. This is the [smallest first
+      slice](#smallest-first-slice).
+- [ ] **C — Validation and legacy adaptation.** Base/local overlay loading; validate references,
+      duplicates, cycles, paths, provenance; adapt existing `la_register` entries into compatibility
+      profiles; migration preview with no writes.
+- [ ] **D — Profile-aware hotswap.** Resolve through the canonical resolver; preserve the existing
+      backend branches; emit the structured launch result (§12); expand server metadata identity;
+      verify requested vs effective `/v1/models`; refuse unsafe reuse; exercise rollback.
+- [ ] **E — Downloader adaptation.** Profile/backend/capability filters; profile→artifact resolution;
+      preserve every existing safeguard; fix registry/catalog duplication via canonical artifact
+      identity; JSON listing output.
+- [ ] **F — `csl` and roles.** Consume shared profiles; show only session-capable combinations;
+      preserve role recommendations and free composition; keep legacy aliases working.
+- [ ] **G — Dispatcher migration.** Resolve profile before hotswap; use the effective API model ID in
+      payloads; named sessions to schema v2 while still loading v1; test one-shot and conversation
+      flows on Rapid; preserve output and persistence semantics.
+- [ ] **H — Packaging preparation.** `packaging/standalone-files.txt`; deterministic builder;
+      isolated artifact tests. Do not publish until the clean-install gate passes.
+- [ ] **I — Documentation and release.** README architecture and commands; CHANGELOG with the exact
+      verified release base; document schemas, migration, profiles, fallback; align the manifest and
+      version **only after** tests pass.
+
+### Hotswap contract (§12)
+
+`SUCCESS_PORT` alone is insufficient once the user-facing profile ID differs from the API model ID
+the backend serves. Hotswap must return structured JSON (`schema_version`, `port`, `api_model_id`,
+`profile_id`, `artifact_id`, `backend`, `backend_version`, `environment_profile`, `resource_profile`,
+`reused`). `SUCCESS_PORT=` / `SUCCESS_MODEL_ID=` may continue to be emitted for compatibility, but
+consumers should migrate. **Status: ❌ not started** — hotswap emits `SUCCESS_PORT` only.
+
+### Smallest first slice
+
+Before any refactor, prove this read-only vertical slice: both profiles resolve to the same exact
+artifact; operator and thinking settings differ correctly; no network access; no change to downloader
+or launcher behaviour; all identities and provenance visible; invalid references and duplicate IDs
+fail deterministically. **Only then** may the resolver become a dependency of anything else.
+
+### Release gates (§19) — all must hold
+
+```text
+[ ] live 0.13.6 base reconciled
+[ ] artifact/profile/resource/environment schemas documented
+[ ] canonical resolver tests pass
+[ ] legacy private configuration remains usable
+[ ] profile-aware downloader regression passes
+[ ] Rapid operator/thinking profiles resolve correctly
+[ ] legacy vllm and mlx_lm behavior remains intact
+[ ] csl consumes shared profile data
+[ ] dispatcher consumes profile and API-model identity
+[ ] safe reuse compares material profile identity
+[ ] session schema migration is tested
+[ ] README, CHANGELOG, manifest, and help match behavior
+[ ] working tree and staged scope are fully understood
+[ ] rollback launch is exercised
+```
+
+Additionally, **only if** standalone packaging ships in the same release: clean-install artifact test
+passes; archive is deterministic; release manifest contains only approved files; installer avoids
+silent dotfile mutation; published assets are immutable and checksummed.
+
+### Do not confuse these with `0.16.0`
+
+- **`0.13.3` launcher profile controls** are per-**launch** environment variables
+  (`LA_CLAUDE_SETTINGS`, `LA_CLAUDE_TOOLS`, …). `0.15.0` runtime **profiles** are a resolver over
+  declared identities in JSON. Same word, different layer. Shipping the former does not advance the
+  latter.
+- **`0.13.1`'s backend resolution** (`serve=mlx` → `LA_DEFAULT_MLX_BACKEND`, `LA_SERVE_DECLARED`,
+  `la_serve_display`, `LA_MLX_BACKENDS`, `la_retired`) is the same *separation of declared from
+  effective* at the smallest scale. Phase C should **absorb and extend** these names rather than
+  build a parallel mechanism — see the waypoint for the full list.
+
 ## `0.24.0` — Backend lanes — oMLX
 
 **Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
