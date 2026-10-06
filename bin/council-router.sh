@@ -2,7 +2,8 @@
 # council-router.sh — dynamic role router for free-agents
 #
 # Accepts --role <role_name> and selects the best available model from la_role bindings.
-# Priority chain: api models first (if keys exist in ~/.api_keys/), falling back to local (MLX/CUDA)
+# Priority chain: api models first (if keys exist in $LA_API_KEYS_DIR, default ~/.api_keys/), falling
+# back to local (MLX/CUDA)
 # if API keys are missing or the API errors out.
 #
 # Usage: council-router.sh --role <role>
@@ -32,6 +33,10 @@ Selects the best available model for a role from la_role bindings.
 Priority: api models (if API keys exist) > local models (if weights on disk).
 
 Output: the selected alias (one line), or empty if none available.
+
+Environment:
+  LA_API_KEYS_DIR   credential directory checked for <provider> key files (default ~/.api_keys).
+                    Tests point this at a temp dir, so they never create or delete real keys.
 HELP
       exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
@@ -57,7 +62,7 @@ check_api_key() {
   if [[ -v API_KEY_EXISTS[$provider] ]]; then
     return "${API_KEY_EXISTS[$provider]}"
   fi
-  local key_file="$HOME/.api_keys/$provider"
+  local key_file="${LA_API_KEYS_DIR:-$HOME/.api_keys}/$provider"
   if [ -f "$key_file" ] && [ -s "$key_file" ]; then
     API_KEY_EXISTS[$provider]=0
     return 0

@@ -1,3 +1,23 @@
+## [0.25.2] — 2026-10-06
+
+Testing the role router no longer needs, or touches, your real API keys.
+
+### Fixed
+- **`council-router.sh` reads keys from `LA_API_KEYS_DIR`** (default `~/.api_keys`), like
+  `remote-keys.sh` and the session picker already did. It was the one lookup hardcoded to
+  `$HOME/.api_keys`, so the only way to test its "key present / key missing" branches was to
+  write and delete files in the real key directory. On 2026-10-05 a session did exactly that
+  (`echo test-key > ~/.api_keys/nvidia`, then `rm`) and destroyed the user's real NVIDIA key.
+  `free-agent-tool.py` calls the router, so it follows the same variable. `--help` documents it.
+- **Shared agent rules:** never write, move or delete a real credential file to test something;
+  point `LA_API_KEYS_DIR` at a temp dir instead, and add an override first where none exists.
+
+### Tests
+- `tests/test_council_router_keys_dir.sh`: 5 passed. Runs the router in a sandbox repo copy
+  with `HOME` and `LA_API_KEYS_DIR` both temp dirs: no key → local fallback, key → api model,
+  a key only under `$HOME/.api_keys` ignored when the variable points elsewhere, default
+  unchanged when unset. Mutation-checked: restoring the hardcoded path fails 2 cases.
+
 ## [0.25.1] — 2026-10-06
 
 Sessions stop editing long files from a truncated view, and free-API sessions stop running rtk.
