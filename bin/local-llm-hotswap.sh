@@ -469,9 +469,19 @@ if [ "$CUDA_TIER" = "B" ]; then
             exit 1
         fi
 
-        # Calculate swap space (GB): use system RAM - VRAM - 10GB headroom
-        # We'll default to 16GB swap if system RAM is high
-        SWAP_SPACE="${LA_VLLM_SWAP_SPACE:-16}"
+        # Calculate swap space (GB): system RAM - VRAM - 10GB headroom, minimum 4GB
+        if [ -n "${LA_VLLM_SWAP_SPACE:-}" ]; then
+            SWAP_SPACE="$LA_VLLM_SWAP_SPACE"
+        else
+            # Get total system RAM in GB
+            SYS_RAM_GB=$(free -g 2>/dev/null | awk '/Mem:/ {print $2}' || sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1024/1024/1024)}')
+            if [ -n "$SYS_RAM_GB" ] && [ "$SYS_RAM_GB" -gt 0 ] && [ -n "$LA_VRAM_GB" ]; then
+                SWAP_SPACE=$(( SYS_RAM_GB - LA_VRAM_GB - 10 ))
+                [ "$SWAP_SPACE" -lt 4 ] && SWAP_SPACE=4
+            else
+                SWAP_SPACE=16  # fallback default
+            fi
+        fi
 
         VLLM_CMD=(
             "$VLLM_BIN" serve "$MODEL_DIR"
@@ -515,10 +525,35 @@ if [ "$CUDA_TIER" = "B" ]; then
             exit 1
         fi
 
-        # Calculate -ngl (GPU layers): fill ~7.5GB VRAM
-        # Rough heuristic: each layer ~100MB for 7B, ~200MB for 13B, ~400MB for 30B+
-        # We'll use a conservative -ngl 20 for 8GB VRAM
-        NGL="${LA_LLAMA_NGL:-20}"
+        # Calculate -ngl (GPU layers): fill ~7.5GB VRAM dynamically
+        # Heuristic: estimate layers from model size, then calculate layers fitting in ~7.5GB VRAM
+        # Rough VRAM per layer: ~100MB for 7B, ~200MB for 13B, ~400MB for 30B+, ~800MB for 70B+
+        # Target: use ~7.5GB VRAM for layers, leave ~0.5GB for KV cache
+        if [[ -n "${LA_LLAMA_NGL:-}" ]]; then
+            NGL="$LA_LLAMA_NGL"
+        else
+            # Estimate model size from directory name or config
+            MODEL_SIZE_GB="${LA_SIZE[$MODEL_NAME]:-?}"
+            if [[ "$MODEL_SIZE_GB" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                SIZE_NUM=$(LC_ALL=C awk -v s="$MODEL_SIZE_GB" 'BEGIN{print s+0}')
+                # VRAM per layer in GB: ~0.1 for 7B, ~0.2 for 13B, ~0.4 for 30B, ~0.8 for 70B
+                VRAM_PER_LAYER=$(LC_ALL=C awk -v s="$SIZE_NUM" 'BEGIN{
+                    if (s <= 8) print 0.1;
+                    else if (s <= 15) print 0.2;
+                    else if (s <= 35) print 0.4;
+                    else print 0.8;
+                }')
+                # Target ~7.5GB for layers, leave 0.5GB for KV cache
+                TARGET_VRAM=7.5
+                NGL=$(LC_ALL=C awk -v v="$VRAM_PER_LAYER" -v t="$TARGET_VRAM" 'BEGIN{print int(t/v)}')
+                # Clamp to reasonable range
+                [ "$NGL" -lt 1 ] && NGL=1
+                [ "$NGL" -gt 80 ] && NGL=80
+            else
+                # Fallback: conservative default
+                NGL=20
+            fi
+        fi
 
         LLAMA_CMD=(
             "$LLAMA_SERVER"

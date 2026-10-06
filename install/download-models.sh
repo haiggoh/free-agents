@@ -132,6 +132,10 @@ CONFIG_LIB="$LA_ROOT/config/config-lib.sh"
 [[ -r $CONFIG_LIB ]] || { printf 'Missing registry loader: %s\n' "$CONFIG_LIB" >&2; exit 1; }
 # shellcheck source=/dev/null
 . "$CONFIG_LIB"
+# Source hardware detection for hardware target filtering
+HW_DETECT="$LA_ROOT/bin/la-hw-detect.sh"
+# shellcheck source=/dev/null
+. "$HW_DETECT"
 la_load_config || exit 1
 if [[ -n $TARGET_OVERRIDE ]]; then
   TARGET_DIR=$TARGET_OVERRIDE
@@ -297,7 +301,7 @@ if (( ${DYNAMIC_HF:-0} )); then
     # Continue anyway - user explicitly chose to download everything
   fi
   # Construct a pseudo-catalog entry
-  # Format: alias|label|repo|rev|sub|size|group|status|include|runtime
+  # Format: alias|label|repo|rev|sub|size|group|status|include|runtime|hardware_target
   # Use the HF repo as the subdir name (sanitized) with "dyn_" prefix to avoid conflicts
   sanitized_repo=$(printf '%s' "$DYNAMIC_HF_REPO" | sed 's|/|_|g' | sed 's|[^a-zA-Z0-9_]|_|g')
   dyn_alias="$DYNAMIC_ALIAS"
@@ -309,7 +313,10 @@ if (( ${DYNAMIC_HF:-0} )); then
   dyn_group="dynamic"
   dyn_status="dynamic"
   dyn_include="${DYNAMIC_INCLUDE:-}"
-  dyn_runtime="dynamic"
+  # The user named this repo explicitly, so it must show up on any hardware: tag it `any` and let the
+  # download itself fail loudly if the format does not suit the host. (It used to be tagged `cuda`,
+  # which made the row vanish from its own --list on Apple Silicon.)
+  dyn_runtime="dynamic|any"
   # Inject using the SAME add_entry function to preserve deduplication logic
   add_entry "$dyn_alias" "$dyn_label" "$dyn_repo" "$dyn_rev" "$dyn_sub" "$dyn_size" "$dyn_group" "$dyn_status" "$dyn_include" "$dyn_runtime"
   printf 'Injected dynamic HF repo: %s as alias %s\n' "$DYNAMIC_HF_REPO" "$DYNAMIC_ALIAS" >&2
@@ -351,6 +358,22 @@ print_entry() {
 IDX=()
 for ((i=0; i<${#A[@]}; i++)); do
   [[ -z $GROUP_FILTER ]] || group_has "$i" "$GROUP_FILTER" || continue
+  # Hardware target filtering: skip models not compatible with current hardware
+  # hardware_target is the last field after the last | in RUNTIME
+  rt="${RUNTIME[i]}"
+  hw_target="${rt##*|}"  # hardware_target is the last field after the last |
+  # Handle both old 10-field format (no hardware_target = mlx) and new 11-field format
+  if [[ "$hw_target" != "$rt" ]]; then
+    # New format with hardware_target
+    case "$LA_HARDWARE" in
+      mlx)   [[ "$hw_target" == "mlx" || "$hw_target" == "any" ]] || continue ;;
+      cuda)  [[ "$hw_target" == "cuda" || "$hw_target" == "any" ]] || continue ;;
+      cpu-only) [[ "$hw_target" == "mlx" || "$hw_target" == "any" ]] || continue ;;
+    esac
+  else
+    # Old format without hardware_target - assume mlx
+    [[ "$LA_HARDWARE" == "mlx" ]] || continue
+  fi
   IDX+=("$i")
 done
 ((${#IDX[@]})) || { printf "No entries for group '%s'.\n" "$GROUP_FILTER" >&2; exit 2; }

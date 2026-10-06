@@ -116,9 +116,12 @@ for i, line in enumerate(lines, 1):
     if not line or line.startswith('#'):
         continue
     fields = line.split('|')
-    if len(fields) != 10:
-        raise SystemExit(f"line {i}: expected 10 '|'-separated fields, got {len(fields)}: {line}")
-    alias, label, repo, rev, subdir, size_gb, group, status, include, runtime = fields
+    # 10 fields = legacy row (hardware_target defaults to mlx); 11 = with the hardware_target column.
+    if len(fields) not in (10, 11):
+        raise SystemExit(f"line {i}: expected 10 or 11 '|'-separated fields, got {len(fields)}: {line}")
+    alias, label, repo, rev, subdir, size_gb, group, status, include, runtime = fields[:10]
+    if len(fields) == 11 and fields[10] not in ("mlx", "cuda", "any"):
+        raise SystemExit(f"line {i}: hardware_target must be mlx|cuda|any, got {fields[10]!r}: {line}")
     if not alias or not repo or not subdir:
         raise SystemExit(f"line {i}: alias, repo, and subdir are required: {line}")
     try:
@@ -155,7 +158,7 @@ for line in cat_path.read_text(encoding="utf-8").splitlines():
     if not line or line.startswith('#'):
         continue
     fields = line.split('|')
-    if len(fields) == 10:
+    if len(fields) in (10, 11):
         cat_aliases.add(fields[0])
 
 # Parse registry aliases from config.example.sh

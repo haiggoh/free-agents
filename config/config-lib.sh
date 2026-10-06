@@ -351,11 +351,13 @@ la_auto_scan_models() {
 
   # Known exclusion patterns (case-insensitive folder name matching)
   # Use word-boundary-aware patterns; escape regex metacharacters
+  # Note: "mtp" (Multi-Token Prediction) is deliberately NOT excluded: an MTP build such as
+  # Qwen3.8-27B-MTP-4bit is what lets Qwen 3.8 launch with speculative decoding, which is much faster.
   local exclude_patterns=(
     "tts" "chatterbox" "kokoro" "qwen3-tts" "qwen-tts"
     "flux" "stable.diffusion" "sdxl" "sd."
     "depth" "depthart"
-    "mtp" "drafter" "speculative"
+    "drafter" "speculative"
     "processor" "mmproj" "vision" "clip" "vae"
     "ds_store"
   )

@@ -208,8 +208,58 @@ trap cleanup EXIT
 
 # shellcheck disable=SC2329  # Called at line 258 inside `if [ -n "${PID:-}" ]`
 capture_argv() {
+    # Called at line 306: `if capture_argv "$PID"; then`
     [ -n "${PID:-}" ] || return 1
-    python3 - "$1" "$ARGV_FILE" "$CONTEXT_FILE" <<'PY'
+    # OS-specific argv capture
+    if [ -r "/proc/$PID/cmdline" ]; then
+        # Linux: read from /proc/PID/cmdline (NUL-separated)
+        python3 - "$PID" "$ARGV_FILE" "$CONTEXT_FILE" <<'PY'
+import json, os, shutil, subprocess, sys
+pid = int(sys.argv[1]); out = sys.argv[2]
+try:
+    with open(f"/proc/{pid}/cmdline", "rb") as f:
+        data = f.read()
+except OSError:
+    sys.exit(1)
+# NUL-separated: argv[0]...argv[n-1] (no argc prefix like macOS)
+argv = [x for x in data.split(b"\0") if x]
+if not argv or not argv[0]:
+    sys.exit(1)
+# Keep only non-secret runtime settings
+runtime_names = ("PATH", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+                 "VLLM_MLX_ENABLE_THINKING", "VLLM_MLX_SIMPLE_ENGINE_LOCK_ADMISSION",
+                 "RAPID_MLX_TELEMETRY",
+                 "VLLM_MLX_SIMPLE_ENGINE_LOCK_ADMISSION",
+                 "LA_CUDA_BIN", "LA_VRAM_GB", "LA_HARDWARE")
+env = {}
+with open(f"/proc/{pid}/environ", "rb") as f:
+    for entry in f.read().split(b"\0"):
+        if not entry:
+            continue
+        key, _, value = entry.partition(b"=")
+        key_s = key.decode(errors="replace")
+        if key_s in runtime_names:
+            env[key_s] = value.decode(errors="replace")
+# Get cwd
+try:
+    cwd = os.readlink(f"/proc/{pid}/cwd")
+except OSError:
+    sys.exit("Cannot capture server working directory; leaving it running.")
+executable = os.fsdecode(argv[0])
+if not os.path.isabs(executable):
+    executable = (os.path.join(cwd, executable) if "/" in executable else
+                  shutil.which(executable, path=env.get("PATH", "")))
+if not executable or not os.access(executable, os.X_OK):
+    sys.exit("Original server executable is unavailable; leaving it running.")
+with open(sys.argv[3], "w") as f:
+    json.dump({"cwd": cwd, "executable": executable, "env": env,
+               "runtime_names": runtime_names}, f)
+with open(sys.argv[2], "wb") as f:
+    f.write(b"\0".join(argv))
+PY
+    else
+        # macOS: use KERN_PROCARGS2
+        python3 - "$1" "$ARGV_FILE" "$CONTEXT_FILE" <<'PY'
 import ctypes, ctypes.util, json, os, shutil, struct, subprocess, sys
 pid = int(sys.argv[1]); out = sys.argv[2]
 libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
@@ -219,7 +269,6 @@ if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0: sys.exit(1)
 buf = ctypes.create_string_buffer(size.value)
 if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0: sys.exit(1)
 argc = struct.unpack("i", buf.raw[:4])[0]
-# layout: argc, exec_path\0, padding\0*, argv[0..argc-1]\0, env...
 rest = buf.raw[4:]
 chunks = rest.split(b"\0")
 i = 0
@@ -228,8 +277,6 @@ i += 1                                  # skip exec_path
 while i < len(chunks) and chunks[i] == b"": i += 1
 args = chunks[i:i+argc]
 if len(args) != argc or not args[0]: sys.exit(1)
-# Keep only non-secret runtime settings. Never dump or persist the process's full
-# environment: an attached shell can carry provider credentials unrelated to MLX.
 runtime_names = ("PATH", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
                  "VLLM_MLX_ENABLE_THINKING", "VLLM_MLX_SIMPLE_ENGINE_LOCK_ADMISSION",
                  "RAPID_MLX_TELEMETRY")
@@ -253,6 +300,7 @@ with open(sys.argv[3], "w") as f:
 with open(out, "wb") as f:
     f.write(b"\0".join(args))
 PY
+    fi
 }
 
 if [ -n "${PID:-}" ]; then

@@ -8,9 +8,13 @@
 # Your own longer/private list goes in config/model-catalog.local.psv (gitignored) — it is
 # loaded IN ADDITION to this file, so you keep these defaults and add your own on top.
 #
-# Format — one entry per line, ten '|'-separated fields:
-#   alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+# Format — one entry per line, eleven '|'-separated fields:
+#   alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime|hardware_target
 # Full field docs: run `download-more-models.sh --help`.
+# hardware_target: mlx|cuda|any (default: mlx). Filters models by hardware platform.
+#   mlx = Apple Silicon MLX only
+#   cuda = NVIDIA CUDA only
+#   any = works on both (use with caution, model may not be compatible)
 #
 # ---------------------------------------------------------------------------------------
 # Why two models cover four roles — the double-role assignment
@@ -38,14 +42,14 @@
 #       but served via mlx_lm.server and DISPATCH-ONLY.
 # ---------------------------------------------------------------------------------------
 
-qwen36-27b-4bit|Qwen3.6 27B UD-MLX 4-bit — operator + reasoner (thinking) + utility, and the one that runs full local SESSIONS|unsloth/Qwen3.6-27B-UD-MLX-4bit|main|Qwen3.6-27B-UD-MLX-4bit|26.2|default,session,operator|primary||vllm-mlx
-deepseek-r1-32b-4bit|DeepSeek R1 Distill Qwen 32B 4-bit — independent validator/reasoner (DISPATCH-ONLY: no structured tool_calls)|mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit|main|DeepSeek-R1-Distill-Qwen-32B-4bit|18.4|default,validator|primary||vllm-mlx
+qwen36-27b-4bit|Qwen3.6 27B UD-MLX 4-bit — operator + reasoner (thinking) + utility, and the one that runs full local SESSIONS|unsloth/Qwen3.6-27B-UD-MLX-4bit|main|Qwen3.6-27B-UD-MLX-4bit|26.2|default,session,operator|primary||vllm-mlx|mlx
+deepseek-r1-32b-4bit|DeepSeek R1 Distill Qwen 32B 4-bit — independent validator/reasoner (DISPATCH-ONLY: no structured tool_calls)|mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit|main|DeepSeek-R1-Distill-Qwen-32B-4bit|18.4|default,validator|primary||vllm-mlx|mlx
 
 # --- CUDA models (for NVIDIA GPUs) -----------------------------------------------
 # These are for CUDA-enabled systems (Linux/WSL). They require the manage-cuda-backend.py
 # infrastructure and will be auto-skipped on macOS by download-models.sh.
-# Format: alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+# Format: alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime|hardware_target
 # AWQ model for Operator (fast, VRAM-efficient via --swap-space)
-qwen2.5-7b-awq|Qwen2.5 7B Instruct AWQ — operator (CUDA, AWQ quantized, vLLM with UVM offload)|Qwen/Qwen2.5-7B-Instruct-AWQ|main|Qwen2.5-7B-Instruct-AWQ|7.5|cuda,operator|primary|*.safetensors|vllm-cuda
+qwen2.5-7b-awq|Qwen2.5 7B Instruct AWQ — operator (CUDA, AWQ quantized, vLLM with UVM offload)|Qwen/Qwen2.5-7B-Instruct-AWQ|main|Qwen2.5-7B-Instruct-AWQ|7.5|cuda,operator|primary|*.safetensors|vllm-cuda|cuda
 # GGUF model for Reasoner (llama.cpp with -ngl offload)
-nemotron-3-ultra-550b-gguf|Nemotron 3 Ultra 550B GGUF — reasoner (CUDA, GGUF, llama.cpp -ngl offload)|nvidia/nemotron-3-ultra-550b-a55b-GGUF|main|nemotron-3-ultra-550b-a55b-GGUF|300|cuda,reasoner|primary|*Q4_K_M*.gguf;*mmproj*.gguf|llama.cpp
+nemotron-3-ultra-550b-gguf|Nemotron 3 Ultra 550B GGUF — reasoner (CUDA, GGUF, llama.cpp -ngl offload)|nvidia/nemotron-3-ultra-550b-a55b-GGUF|main|nemotron-3-ultra-550b-a55b-GGUF|300|cuda,reasoner|primary|*Q4_K_M*.gguf;*mmproj*.gguf|llama.cpp|cuda
