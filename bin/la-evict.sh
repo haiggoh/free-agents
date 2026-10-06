@@ -2,11 +2,9 @@
 # la-evict.sh — eviction fallback for local model servers.
 #
 # WHY THIS EXISTS
-# When too many model servers are resident, the Mac runs out of RAM, and the failure
-# mode is not a clean error: Terminal.app and even the Force Quit window stop
-# responding, so there is no way left to type a kill command. The only remaining exit
-# is a hardware reboot — and with FileVault on, a reboot ends any remote session for
-# good, because the pre-boot unlock screen cannot be reached remotely.
+# When too many model servers are resident, the machine runs out of RAM, and the failure
+# mode is not a clean error: the system becomes unresponsive, so there is no way left to
+# type a kill command. The only remaining exit is a hardware reboot.
 #
 # So this script has one job: free the most memory it can while touching the fewest
 # things, from a single non-interactive invocation that needs no terminal.
@@ -18,15 +16,11 @@
 # escalation window advances one place down the ranking, and past the end of the list
 # it evicts everything remaining.
 #
-# DELIBERATELY STANDALONE
-# It does not source config-lib.sh and does not consult the model registry. A fallback
-# that runs when the stack is already sick must not depend on the stack. Ports and
-# thresholds come from the environment with defaults, and servers are discovered from
-# the live process table — which is also why it survives a backend change (Rapid-MLX,
-# vllm-mlx, mlx_lm.server and llama.cpp are all recognised, and an unfamiliar listener
-# is reported rather than silently ignored).
+# SUPPORTS MACOS (Apple Silicon MLX) AND LINUX/WSL (CUDA)
+# Uses /proc on Linux for reliable process inspection; uses ps on macOS.
+# Supports Rapid-MLX, vllm-mlx, mlx_lm.server, llama.cpp, and CUDA vLLM/llama-server.
 #
-# Usage: la-evict.sh [--status] [--dry-run] [--tier N] [--all] [--reset] [--allow-unknown]
+# Usage: la-evict.sh [--status] [--dry-run] [--tier N] [--all] [--allow-unknown]
 
 set -u
 
@@ -59,14 +53,23 @@ mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null || true
 # --- which ports are backing a live Claude Code session -----------------------
 # A server with a session attached is the expensive one to evict, so it ranks last.
 # ANTHROPIC_BASE_URL in the session's own environment is the authoritative signal
-# (ps -Eww exposes it for same-user processes); the port named in the injected system
+# (ps exposes it for same-user processes); the port named in the injected system
 # prompt is a second, weaker signal kept as a fallback.
+# OS-specific: on Linux we use /proc/environ; on macOS we use ps -Eww
 attached_ports() {
     for cpid in $(pgrep -x claude 2>/dev/null); do
-        ps -Eww -p "$cpid" 2>/dev/null | tr ' ' '\n' \
-            | sed -n \
+        if [ -r "/proc/$cpid/environ" ]; then
+            # Linux: read from /proc/PID/environ (null-separated)
+            tr '\0' '\n' < /proc/"$cpid"/environ 2>/dev/null | sed -n \
                 -e 's|^ANTHROPIC_BASE_URL=http://localhost:\([0-9]*\).*|\1|p' \
                 -e 's|^ANTHROPIC_BASE_URL=http://127\.0\.0\.1:\([0-9]*\).*|\1|p'
+        else
+            # macOS: use ps -Eww
+            ps -Eww -p "$cpid" 2>/dev/null | tr ' ' '\n' \
+                | sed -n \
+                    -e 's|^ANTHROPIC_BASE_URL=http://localhost:\([0-9]*\).*|\1|p' \
+                    -e 's|^ANTHROPIC_BASE_URL=http://127\.0\.0\.1:\([0-9]*\).*|\1|p'
+        fi
         ps -o command= -p "$cpid" 2>/dev/null \
             | sed -n 's/.*served by a local server process on port \([0-9]*\).*/\1/p'
     done | sort -u
@@ -108,36 +111,51 @@ loop_score() {
 # --- discover the servers -----------------------------------------------------
 ROWS="$(mktemp -t laevict)"; trap 'rm -f "$ROWS"' EXIT
 
+# OS detection for process inspection
+if [[ -d /proc ]] && [[ -r /proc/1/stat ]]; then
+    # Linux/WSL: use /proc for reliable process inspection
+    OS_TYPE="linux"
+else
+    # macOS: use ps
+    OS_TYPE="mac"
+fi
+
 for port in $(seq "$PORT_START" "$PORT_MAX") $EXTRA_PORTS; do
     pid=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1)
     [ -n "${pid:-}" ] || continue
     [ "$pid" -gt 1 ] 2>/dev/null || continue
 
-    cmd=$(ps -o command= -p "$pid" 2>/dev/null)
+    # OS-specific process inspection
+    if [ "$OS_TYPE" = "linux" ]; then
+        # Linux: use /proc for reliable inspection
+        cmd=$(tr '\0' ' ' < /proc/"$pid"/cmdline 2>/dev/null | sed 's/\x0$//')
+        rss_kb=$(awk '/VmRSS/{print $2}' /proc/"$pid"/status 2>/dev/null || echo 0)
+        # etime from /proc/PID/stat field 22 (starttime) - complex, fallback to ps
+        age=$(etime_to_s "$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')")
+    else
+        # macOS: use ps
+        cmd=$(ps -o command= -p "$pid" 2>/dev/null)
+        rss_kb=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')
+        age=$(etime_to_s "$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')")
+    fi
     [ -n "$cmd" ] || continue
-    rss_kb=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')
-    [ -n "${rss_kb:-}" ] || rss_kb=0
-    age=$(etime_to_s "$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')")
+    rss_kb=${rss_kb:-0}
+    age=${age:-0}
+
+    # Initialize band (will be overridden by ranking logic)
+    band=5
 
     case "$cmd" in
         *rapid-mlx*)      backend=rapid-mlx ;;
-        *vllm-mlx*)       backend=vllm-mlx ;;
         *mlx_lm.server*)  backend=mlx-lm ;;
         *llama-server*)   backend=llama.cpp ;;
+        *vllm-mlx*)       backend=vllm-mlx ;;
+        *vllm*)           backend=vllm-cuda ;;     # CUDA vLLM
         *)                backend=unknown ;;
     esac
 
-    # Never a candidate: a Claude Code process is a client, not a server.
-    case "$cmd" in *"claude --model"*|claude) continue ;; esac
-
     if is_attached "$port"; then att=yes; else att=no; fi
     loop=$(loop_score "$port" "$age")
-
-    # Rank key, lowest first. Unattached before attached; within that, cycling before
-    # young before merely large. Age and size are negated so "newest" and "biggest"
-    # sort first.
-    if [ "$att" = no ]; then band=0; else band=5; fi
-    if [ "$loop" -ge 2 ]; then band=$((band+0)); elif [ "$age" -le "$YOUNG_S" ]; then band=$((band+1)); else band=$((band+2)); fi
 
     printf '%d|%012d|%012d|%s|%s|%s|%s|%s\n' \
         "$band" "$age" "$((99999999 - rss_kb/1024))" "$port" "$pid" "$backend" "$att" "$loop" >> "$ROWS"

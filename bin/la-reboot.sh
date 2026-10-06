@@ -135,7 +135,7 @@ PROBE_PATH=/v1/messages
 # Rapid/vllm local Claude sessions use the Anthropic endpoint. A working OpenAI
 # compatibility route alone cannot establish that the attached session can resume.
 # Older vllm launches have no backend metadata, so default to the session API.
-case "$(meta_get backend)" in mlx_lm|scout|llama_cpp) PROBE_PATH=/v1/chat/completions ;; esac
+case "$(meta_get backend)" in mlx_lm|scout|llama_cpp|vllm-cuda|llama-server) PROBE_PATH=/v1/chat/completions ;; esac
 
 if [ -z "${PID:-}" ]; then
     BROKEN=1
