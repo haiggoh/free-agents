@@ -22,6 +22,23 @@ Do not accept "it replied" or "no error" as success. Verify by **observable chan
 - **Tests:** Did the test suite pass *after* the change? If the delegate wrote new tests, **mutation-test them**: break the code intentionally and ensure the new tests fail. If they don’t, the tests are useless.
 - **Facts/Summaries:** Does the summary match the ground truth captured in step 1? Spot-check specific claims against the source.
 
+## Verify at the seam the framework reads, with a probe that fails on the old code
+A correct part is not a working integration. When a fix is wired INTO something — a framework
+driver, a plugin hook, injected config, an env var a launcher exports — assert on the object or
+behaviour the framework actually USES at runtime, not on the component the delegate wrote.
+Construct the real thing and inspect it: the live instance attribute, the environment the child
+process receives, the command the hook really emits. Measured: a delegate set a correct driver
+subclass as a CLASS attribute, the framework's constructor overwrote it on the INSTANCE, and the
+waypoint closed "done, all tests pass" because the tests checked the subclass. One probe that
+built the app and printed the instance attribute showed the default driver.
+
+Then make sure the probe can tell old from new. Run it against the code BEFORE the change and
+watch it fail; if it passes on both, it proves nothing. Prefer replaying the real failing input
+(the exact command, request or payload from the log or transcript) over a hand-written paraphrase:
+in the same audit, two hand-written probes passed on both versions of a guard hook, and only the
+replayed command told them apart. Same for a wiring test that greps the source for the right text:
+it passes while the line is commented out. Run the wired block and check what it produced.
+
 ## The retry ceiling (stop looping)
 Verification is cheap, but infinite loops are not. If a delegate fails verification:
 1. **Correct the briefing** (was the instruction ambiguous? Was the context missing?) and re-dispatch.

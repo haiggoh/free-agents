@@ -1,3 +1,18 @@
+## [0.25.4] — 2026-10-06
+
+### Changed
+- **`verify-delegated-work` skill: verify at the seam the framework reads.** New section: when a
+  delegate's fix is wired into a framework (driver, hook, injected config, launcher env), assert
+  on the object the framework uses at runtime, not on the component the delegate wrote, and only
+  trust a probe that FAILS on the code before the change (replay the real failing input rather
+  than a paraphrase). From an audit where a fix shipped inert: a correct driver subclass set as a
+  class attribute was overwritten on the instance by the framework's constructor, while tests of
+  the subclass stayed green. (Skill observation 22.)
+
+### Tests
+- `tests/test_skill_verify_delegated_work.sh`: 5 passed (frontmatter + the new rule).
+  Mutation-checked: removing the section fails 4 cases.
+
 ## [0.25.3] — 2026-10-06
 
 Documentation repair: silently truncated history and spec text are back.
