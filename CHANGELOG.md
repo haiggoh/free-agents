@@ -1,3 +1,15 @@
+## [0.25.7] — 2026-10-06
+
+### Fixed
+- **vllm-mlx launch flags fused into one word** (`bin/local-llm-hotswap.sh`): `EXTRA_ARGS` was built as a string; expanding it as `"${EXTRA_ARGS[@]}"` passed all flags as a single argv entry. Now an array; 0.25.0–0.25.6 affected.
+- **Test suite opened a real browser tab on every run** (`tests/test_api_keys_design.py`): one test activated `open:nvidia` outside the picker harness (which sets `LA_URL_OPENER` to a recorder). Added `mock.patch` on `open_url` and a suite-wide `tests/conftest.py` that defaults `LA_URL_OPENER=true`.
+- **API Keys screen separator blank line in the wrong place**: the NVIDIA header had a trailing newline, rendering the gap between the header and its items. Now a dedicated separator `Group` after NVIDIA (id `__sep__`, no items, not selectable, no arrow) renders the gap after "Add NVIDIA key" whether NVIDIA is expanded or collapsed.
+
+### Tests
+- `tests/test_new_features.py::test_reachable_from_home_nvidia_first_with_missing_status` asserts the separator renders as a disabled blank row and the following provider has its arrow on the same line.
+- `tests/test_api_keys_design.py` and `tests/fixtures/api_keys_test_data.py` updated to skip the separator group in provider-count and label checks.
+- All affected tests mutation-checked: the spacing test fails on the old code and passes on the new.
+
 ## [0.25.6] — 2026-10-06
 
 The CUDA work that 0.25.0 described but never shipped in full is now in, plus the fixes it needed.

@@ -564,6 +564,12 @@ class Picker(App):
         if show_models and has_groups:
             for kind, obj in sm.accordion.rows():
                 if kind == "group":
+                    # Separator groups (id == "__sep__"): render as blank disabled row, but
+                    # keep row_ids aligned by appending None so UI index matches row_ids index.
+                    if obj.id == "__sep__":
+                        rows.add_option(Option("", id="sep", disabled=True))
+                        self.row_ids.append(None)
+                        continue
                     mark = "▾" if obj.id == sm.accordion.open_group else "▸"
                     rows.add_option(Option(f"{mark} {obj.label}", id=f"g:{obj.id}"))
                     self.row_ids.append(("group", obj.id))

@@ -35,7 +35,8 @@ class APIKeysDesignTests(unittest.TestCase):
     def test_provider_order_nvidia_first_then_alphabetical(self):
         """Provider list has NVIDIA first, then alphabetical."""
         api_keys = m.APIKeysScreen(self.settings)
-        actual_order = [g.id for g in api_keys.groups()]
+        # Filter out separator group
+        actual_order = [g.id for g in api_keys.groups() if g.id != "__sep__"]
         self.assertEqual(actual_order, EXPECTED_PROVIDER_ORDER)
 
     def test_accordion_structure_14_providers_each_with_2_items(self):
@@ -53,6 +54,9 @@ class APIKeysDesignTests(unittest.TestCase):
         """Each group has exactly 2 items: 'open:<slug>' and 'add:<slug>'."""
         api_keys = m.APIKeysScreen(self.settings)
         for group in api_keys.groups():
+            # Skip separator group
+            if group.id == "__sep__":
+                continue
             self.assertEqual(len(group.items), 2)
             self.assertTrue(group.items[0].id.startswith("open:"))
             self.assertTrue(group.items[1].id.startswith("add:"))
@@ -99,6 +103,9 @@ class APIKeysDesignTests(unittest.TestCase):
         # For now just verify the structure
         api_keys = m.APIKeysScreen(self.settings)
         for group in api_keys.groups():
+            # Skip separator group
+            if group.id == "__sep__":
+                continue
             # Provider names are displayed as-is from PROVIDERS (e.g., "NVIDIA" not "nvidia")
             self.assertIn(": ", group.label)
             # Should have either ✅ Saved or ❌ Missing

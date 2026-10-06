@@ -225,22 +225,32 @@ def validate_accordion_structure(api_keys_screen) -> List[str]:
     errors = []
     groups = api_keys_screen.groups()
 
-    # Check provider count
-    if len(groups) != 14:
-        errors.append(f"Expected 14 provider groups, got {len(groups)}")
+    # Filter out the separator group (__sep__ has no items)
+    provider_groups = [g for g in groups if g.id != "__sep__"]
+
+    # Check provider count (14 providers + 1 separator = 15 total)
+    if len(provider_groups) != 14:
+        errors.append(f"Expected 14 provider groups, got {len(provider_groups)}")
 
     # Check NVIDIA first
-    if groups and groups[0].id != "nvidia":
-        errors.append(f"First group should be nvidia, got {groups[0].id}")
+    if provider_groups and provider_groups[0].id != "nvidia":
+        errors.append(f"First group should be nvidia, got {provider_groups[0].id}")
 
-    # Check each group has 2 items
-    for g in groups:
+    # Check each provider group has 2 items
+    for g in provider_groups:
         if len(g.items) != 2:
             errors.append(f"Group {g.id} should have 2 items, got {len(g.items)}")
         if not g.items[0].id.startswith("open:"):
             errors.append(f"Group {g.id} first item should be 'open:', got {g.items[0].id}")
         if not g.items[1].id.startswith("add:"):
             errors.append(f"Group {g.id} second item should be 'add:', got {g.items[1].id}")
+
+    # Verify separator exists
+    sep_groups = [g for g in groups if g.id == "__sep__"]
+    if len(sep_groups) != 1:
+        errors.append(f"Expected 1 separator group, got {len(sep_groups)}")
+    elif sep_groups[0].items:
+        errors.append("Separator group should have no items")
 
     return errors
 

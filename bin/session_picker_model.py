@@ -973,12 +973,11 @@ class APIKeysScreen(Screen):
         groups = []
         for i, (slug, name, _shortcut, _url, key_files) in enumerate(self.PROVIDERS):
             status = self._get_provider_status(slug, key_files)
-            # Visual separator between NVIDIA and the rest. It must lead the SECOND header, not
-            # trail NVIDIA's: a trailing newline renders between NVIDIA's header and its open
-            # items, while a leading one lands after "Add NVIDIA key" (or after the collapsed header).
             label = f"{name}: {status}"
+            # Visual separator AFTER NVIDIA (before Google): a Group with no items
+            # and an empty label renders as a blank row. Placed at index 1 (after NVIDIA).
             if i == 1:
-                label = f"\n{label}"
+                groups.append(Group("__sep__", "", []))
             # Each provider group has two items: Open page and Add key
             groups.append(Group(
                 slug,
@@ -1023,9 +1022,10 @@ class APIKeysScreen(Screen):
                 continue
             status = self._get_provider_status(slug, key_files)
             label = f"{name}: {status}"
-            # Add visual separator BEFORE this group if it's the first non-NVIDIA provider (Google)
+            # Visual separator AFTER NVIDIA (before Google): a Group with no items
+            # and an empty label renders as a blank row. Placed at index 1 (after NVIDIA).
             if i == 1:
-                label = f"\n{label}"  # Empty line before Google (after NVIDIA's Add key)
+                groups.append(Group("__sep__", "", []))
             # Each provider group has two items: Open page and Add key
             groups.append(Group(
                 slug,

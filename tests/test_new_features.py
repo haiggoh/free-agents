@@ -71,9 +71,10 @@ class APIKeysScreen(PilotCase):
             for name in ("Google Gemini", "Groq", "OpenRouter"):
                 self.assertIn(name, h.text())
             # The separator blank line sits AFTER "Add NVIDIA key", never between NVIDIA's
-            # header and its items.
+            # header and its items. It's a disabled empty row (index 3 = blank separator).
             self.assertFalse(rows[0].endswith("\n"), rows[0])
-            self.assertTrue(rows[3].lstrip("▸▾ ").startswith("\nGoogle Gemini"), rows[3])
+            self.assertEqual(rows[3], "")  # separator row (disabled, no arrow)
+            self.assertTrue(rows[4].lstrip("▸▾ ").startswith("Google Gemini"), rows[4])
         self.run_picker(s)
 
     def test_open_signup_page_uses_the_opener_not_a_real_browser(self):
