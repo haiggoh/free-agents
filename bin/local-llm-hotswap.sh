@@ -409,7 +409,7 @@ EXTRA_ARGS="--enable-auto-tool-choice --tool-call-parser $TOOLP --timeout $LA_SE
 export VLLM_MLX_ENABLE_THINKING="${VLLM_MLX_ENABLE_THINKING:-$THINK}"
 
 echo "🚀 Launching $MODEL_NAME on free port $TARGET_PORT  (🧠 thinking: $VLLM_MLX_ENABLE_THINKING)..."
-nohup "$LA_VENV/vllm-mlx" serve --models-config "$TMP_CONFIG" --port "$TARGET_PORT" $EXTRA_ARGS > "$LOG_FILE" 2>&1 &
+nohup "$LA_VENV/vllm-mlx" serve --models-config "$TMP_CONFIG" --port "$TARGET_PORT" "${EXTRA_ARGS[@]}" > "$LOG_FILE" 2>&1 &
 wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$SPOOF_PRIMARY"
 tail -n 8 "$LOG_FILE"
 _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
