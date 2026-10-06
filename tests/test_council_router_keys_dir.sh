@@ -22,7 +22,7 @@ cp "$REPO/config/config-lib.sh" "$SB/repo/config/"
 dd if=/dev/zero of="$SB/home/.models/LocalModel/model.safetensors" bs=1048576 count=2 2>/dev/null
 cat > "$SB/repo/config/config.local.sh" <<'CONFIG'
 LA_MODELS_DIR="$HOME/.models"
-la_register cloudy  nvidia      api   auto "" false "" high
+la_register cloudy  nvidia-nemotron-550b  api   auto "" false "" high
 la_register localy  LocalModel  rapid auto "" false "" high
 la_role reasoner cloudy high
 la_role reasoner localy high
@@ -42,7 +42,17 @@ check "no key in LA_API_KEYS_DIR: falls back to the local model" "$out" "localy"
 
 printf 'test-key\n' > "$SB/keys/nvidia"
 out="$(route LA_API_KEYS_DIR="$SB/keys")"
-check "key in LA_API_KEYS_DIR: picks the api model" "$out" "cloudy"
+check "provider key (nvidia) routes a model-specific subdir (nvidia-nemotron-550b)" "$out" "cloudy"
+rm "$SB/keys/nvidia"; printf 'test-key\n' > "$SB/keys/nvidia-nemotron-550b"
+out="$(route LA_API_KEYS_DIR="$SB/keys")"
+check "a per-model key named after the full subdir still routes" "$out" "cloudy"
+rm "$SB/keys/nvidia-nemotron-550b"; printf 'test-key\n' > "$SB/keys/nvidia-nemotron"
+out="$(route LA_API_KEYS_DIR="$SB/keys")"
+check "a key for a partial prefix (nvidia-nemotron) does not count" "$out" "localy"
+rm "$SB/keys/nvidia-nemotron"; : > "$SB/keys/nvidia"
+out="$(route LA_API_KEYS_DIR="$SB/keys")"
+check "an EMPTY provider key file does not count" "$out" "localy"
+rm "$SB/keys/nvidia"; printf 'test-key\n' > "$SB/keys/nvidia"
 
 # The directory decides, not $HOME: a key only under $HOME/.api_keys is ignored when the
 # variable points elsewhere, and is still found when it is unset (the default is unchanged).

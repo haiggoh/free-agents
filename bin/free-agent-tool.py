@@ -172,7 +172,10 @@ def execute_api_dispatch(_alias: str, prompt: str, subdir: str, repo: str) -> st
         "deepseek": ["--provider", "openrouter"],  # DeepSeek via OpenRouter
     }
 
-    args = provider_args.get(provider, ["--provider", "openrouter"])
+    # The subdir names the model ("nvidia-nemotron-550b"); the provider is its prefix. Matching
+    # only the full subdir sent every model-specific subdir to the OpenRouter fallback.
+    args = provider_args.get(provider) or provider_args.get(provider.split("-", 1)[0],
+                                                            ["--provider", "openrouter"])
 
     # Use remote-agent-dispatch.py
     dispatch = REPO_ROOT / "bin" / "remote-agent-dispatch.py"

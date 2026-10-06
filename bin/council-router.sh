@@ -72,13 +72,24 @@ check_api_key() {
   fi
 }
 
+# A binding's subdir names the model ("nvidia-nemotron-550b"); the key file is named after the
+# PROVIDER ("nvidia"). Try the exact subdir first (a per-model key), then the provider prefix —
+# the part before the first "-". Before 0.25.5 only the subdir was tried, so no API binding with
+# a model-specific subdir could ever route.
+check_api_key_for_subdir() {
+  local sub="$1"
+  check_api_key "$sub" && return 0
+  local prov="${sub%%-*}"
+  [ "$prov" != "$sub" ] && check_api_key "$prov"
+}
+
 # Phase 1: Try api backends with available keys (highest priority)
 for binding in "${bindings[@]}"; do
   IFS='|' read -r alias effort mode <<<"$binding"
   serve="${LA_SERVE[$alias]:-}"
   if [ "$serve" = "api" ]; then
     provider="${LA_SUBDIR[$alias]:-}"
-    if check_api_key "$provider"; then
+    if check_api_key_for_subdir "$provider"; then
       # Check if model is actually available (for api, la_on_disk just checks key)
       if la_on_disk "$alias"; then
         echo "$alias"

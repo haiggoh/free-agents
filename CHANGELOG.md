@@ -1,3 +1,26 @@
+## [0.25.5] — 2026-10-06
+
+API role bindings route again.
+
+### Fixed
+- **`council-router.sh` never routed an API binding whose subdir names the model.** It looked for
+  a key file named after the whole subdir (`nvidia-nemotron-550b`), while keys are stored per
+  provider (`~/.api_keys/nvidia`), so `nemotron-550b` and `nemotron-35b` were always skipped and
+  every role fell to a local model. It now tries the exact subdir first (a per-model key still
+  works), then the provider prefix before the first `-`. A partial prefix
+  (`nvidia-nemotron`) does not count, nor does an empty key file. **Behaviour change:** on a
+  machine with an NVIDIA key, roles bound to Nemotron now pick it (e.g. reasoner →
+  `nemotron-550b`, operator → `nemotron-35b`) instead of the local model.
+- **`free-agent-tool.py` sent those bindings to the wrong provider.** It matched the provider by
+  the whole subdir, so `nvidia-nemotron-550b` fell through to the OpenRouter default. It now
+  falls back to the prefix the same way; unknown providers still default to OpenRouter.
+
+### Tests
+- `tests/test_council_router_keys_dir.sh`: 8 passed (was 5): provider key, per-model key,
+  partial prefix rejected, empty key rejected. Reverting the router fix fails 2.
+- `tests/test_free_agent_tool_provider.py`: 3 passed, with `subprocess.run` replaced by a
+  recorder so nothing is sent. Reverting the tool fix fails 1.
+
 ## [0.25.4] — 2026-10-06
 
 ### Changed
