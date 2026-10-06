@@ -626,7 +626,7 @@ silent dotfile mutation; published assets are immutable and checksummed.
 
 ### Do not confuse these with `0.16.0`
 
-*Numbers in this block are as originally written. Then, `0.15.0` was the runtime-profiles slot (now
+*The heading is as originally written; in the first bullet `0.15.0` was updated to `0.23.0`. Then, `0.15.0` was the runtime-profiles slot (now
 `0.23.0`) and `0.16.0` was the oMLX backend-lanes slot (now `0.24.0`), per the "Was …" chains in the
 release table above. Whether the heading's `0.16.0` was meant as the oMLX release or was already
 stale when written is not recoverable from history.*
