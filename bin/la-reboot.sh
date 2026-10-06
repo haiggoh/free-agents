@@ -202,9 +202,11 @@ fi
 # word-splitting. KERN_PROCARGS2 gives the true NUL-separated vector.
 ARGV_FILE="$(mktemp -t lareboot)"
 CONTEXT_FILE="$(mktemp -t lareboot-context)"
+# shellcheck disable=SC2329  # Called via trap EXIT
 cleanup() { rm -f "$ARGV_FILE" "$CONTEXT_FILE"; }
 trap cleanup EXIT
 
+# shellcheck disable=SC2329  # Called at line 258 inside `if [ -n "${PID:-}" ]`
 capture_argv() {
     [ -n "${PID:-}" ] || return 1
     python3 - "$1" "$ARGV_FILE" "$CONTEXT_FILE" <<'PY'
