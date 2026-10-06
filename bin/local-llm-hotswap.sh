@@ -625,8 +625,8 @@ TMP_CONFIG="$CONFIG_DIR/vllm_config_${TARGET_PORT}.yaml"
   done
 } > "$TMP_CONFIG"
 
-EXTRA_ARGS="--enable-auto-tool-choice --tool-call-parser $TOOLP --timeout $LA_SERVER_TIMEOUT_S"
-[ -n "$REASONP" ] && EXTRA_ARGS="$EXTRA_ARGS --reasoning-parser $REASONP --default-temperature 0.6 --default-top-p 0.95"
+EXTRA_ARGS=(--enable-auto-tool-choice --tool-call-parser "$TOOLP" --timeout "$LA_SERVER_TIMEOUT_S")
+[ -n "$REASONP" ] && EXTRA_ARGS+=(--reasoning-parser "$REASONP" --default-temperature 0.6 --default-top-p 0.95)
 export VLLM_MLX_ENABLE_THINKING="${VLLM_MLX_ENABLE_THINKING:-$THINK}"
 
 echo "🚀 Launching $MODEL_NAME on free port $TARGET_PORT  (🧠 thinking: $VLLM_MLX_ENABLE_THINKING)..."

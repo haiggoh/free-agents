@@ -973,10 +973,12 @@ class APIKeysScreen(Screen):
         groups = []
         for i, (slug, name, _shortcut, _url, key_files) in enumerate(self.PROVIDERS):
             status = self._get_provider_status(slug, key_files)
-            # Add visual separator after NVIDIA (index 0)
+            # Visual separator between NVIDIA and the rest. It must lead the SECOND header, not
+            # trail NVIDIA's: a trailing newline renders between NVIDIA's header and its open
+            # items, while a leading one lands after "Add NVIDIA key" (or after the collapsed header).
             label = f"{name}: {status}"
-            if i == 0:
-                label = f"{label}\n"  # Empty line after NVIDIA
+            if i == 1:
+                label = f"\n{label}"
             # Each provider group has two items: Open page and Add key
             groups.append(Group(
                 slug,

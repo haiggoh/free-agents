@@ -13,6 +13,7 @@ These tests validate the specific design decisions made for the API Keys screen:
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
@@ -73,10 +74,14 @@ class APIKeysDesignTests(unittest.TestCase):
 
     def test_activate_open_item_returns_none_opens_browser(self):
         """Activating 'open:<slug>' returns None (opens browser directly)."""
+        # Patch the opener: without the picker harness LA_URL_OPENER is unset, so the real
+        # macOS `open` would launch a browser tab on every test run.
         api_keys = m.APIKeysScreen(self.settings)
         api_keys.accordion.select("open:nvidia")
-        result = api_keys.activate_selected()
+        with mock.patch.object(m, "open_url") as opener:
+            result = api_keys.activate_selected()
         self.assertIsNone(result)
+        opener.assert_called_once_with("https://build.nvidia.com/settings/api-keys")
 
     def test_activate_add_item_opens_inline_prompt_not_wizard(self):
         """Activating 'add:<slug>' asks the app for the INLINE key prompt (tool:keys:wizard:<slug>);
