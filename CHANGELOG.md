@@ -1,3 +1,48 @@
+## [0.25.6] — 2026-10-06
+
+The CUDA work that 0.25.0 described but never shipped in full is now in, plus the fixes it needed.
+
+### Added
+- **Dynamic vLLM `--swap-space` and llama.cpp `-ngl`** (`bin/local-llm-hotswap.sh`): swap space is
+  system RAM minus VRAM minus 10 GB (never below 4 GB); `-ngl` is sized from the model so about
+  7.5 GB stays in VRAM. `LA_VLLM_SWAP_SPACE` and `LA_LLAMA_NGL` still override. 0.25.0 already
+  claimed this; the code was still the static 16 and 20.
+- **Full hardware detection** (`bin/la-hw-detect.sh`, 93 to about 410 lines): OS, GPU vendor, model
+  and VRAM, CPU, memory, container and VM detection, exported as `LA_*` variables.
+- **`hardware_target` catalog column** (`config/model-catalog.psv`, 11th field: `mlx|cuda|any`) and
+  downloader filtering by the detected hardware. Rows with 10 fields keep meaning `mlx`.
+- **Hardware-aware backend install** (`install/install-backend.sh`): `vllm-cuda` and
+  `llama-cpp-cuda` route to `manage-cuda-backend.py` on CUDA hosts.
+- **Linux argv capture in `bin/la-reboot.sh`** from `/proc/PID/cmdline`; the macOS path is unchanged.
+
+### Fixed
+- **A `--hf-repo` row vanished from its own `--list` on Apple Silicon.** It was tagged
+  `dynamic|cuda`; it is now `dynamic|any`, so a repo you name explicitly is never filtered out.
+- **`install/install-backend.sh` could not run at all:** it sourced `la-hw-detect.sh` from
+  `install/` but the file lives in `bin/`, and it switched on `mac)`, a value the detector never
+  emits (it emits `mlx`). Both corrected; `rocm` and `opencl` hosts now get a clear warning.
+- **MTP models are no longer dropped by `la_auto_scan_models`** (`config/config-lib.sh`). An MTP
+  build such as `Qwen3.8-27B-MTP-4bit` is what lets Qwen 3.8 launch with speculative decoding,
+  which is much faster. On the maintainer's models directory the scan goes from 40 to 41 models.
+  Nothing calls that function yet, so this is groundwork.
+- **`tests/test_launcher_profiles.sh` rejected the 11-field catalog** and now accepts 10 or 11 and
+  validates `hardware_target`.
+- **`docs/ROADMAP.md` "Current released version" was stale** (0.25.3 while the manifest said 0.25.5),
+  which made `tests/test_version_consistency.sh` fail on `main` for several releases.
+
+### Tests
+- New `tests/test_hardware_target.sh` (12 checks) and `tests/test_auto_scan_models.sh` (7). Each
+  fix was pinned by a check that failed first and was mutation-checked afterwards. CUDA hardware is
+  faked with a stub `nvidia-smi`; the NVIDIA path has NOT been run on a real GPU.
+- `~/.local/bin/pytest -q tests`: all pass except one timing-dependent picker test
+  (`test_no_loading_flash_on_fast_quit`) that failed once in a full run and passes alone on this
+  branch and on `main`.
+
+### Known open
+- `tests/test_serve_default.sh` (8), `tests/test_session_profiles.sh` (3) and `tests/test_csl_menu.sh`
+  (67) fail on `main` before and after this release; the last two still drive the numbered menu the
+  0.22.0 picker replaced.
+
 ## [0.25.5] — 2026-10-06
 
 API role bindings route again.
