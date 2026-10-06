@@ -521,14 +521,21 @@ plan for Claude Code (hardened, adversarially reviewed).md` (Phases 0–6), trac
 > **Renumbered 2026-10-02** — `0.21.0` was spent on the unified backend manager; the session picker
 > TUI slides to `0.22.0`, runtime profiles to `0.23.0`, oMLX lanes to `0.24.0`.
 
-**Status: NOT STARTED.** No gate here is implemented. Nothing in `0.13.1`–`0.13.8` advances one.
+**Status: PARTLY SHIPPED (groundwork, `0.23.0`, verified against the code 2026-10-06).** The three
+profile JSON files, the canonical resolver `bin/la-model-profile.py`, `hotswap --profile`, the
+downloader `--profile/--backend/--capability/--recommended` filters, picker consumption and
+`--profile` through the dispatch chain exist. Still missing: the structured hotswap result, unsafe-reuse
+refusal, full server-metadata identity, session schema v2, standalone packaging (Phase H) and any test
+of the resolver itself. The per-phase and per-gate state is marked below.
 
 **Specification of record:** `~/.claude/plans/Plan — local-agents 0.14.0 Runtime Profiles and
 Rapid-First Model Management.md` (1,288 lines), tracked by waypoint `local-agents-0-14-0-runtime`.
 That plan is authoritative for detail; this section is the checklist, and is deliberately terse
 enough to stay accurate.
 
-> *Detail below restored verbatim from `cba3d65^:docs/ROADMAP.md` (removed in `cba3d65` by mistake). Version numbers inside the prose (`0.15.0`, `0.16.0`) predate the renumbering above.*
+> *Detail below restored from `cba3d65^:docs/ROADMAP.md` (removed in `cba3d65` by mistake). Release
+> numbers in the prose were updated to `0.23.0`, and status marks were brought up to date against the
+> code on 2026-10-06; everything else is as it was written.*
 
 ### The decision it supports
 
@@ -542,39 +549,39 @@ retired in `0.13.1`.
 | Layer | Artifact | Status |
 |---|---|---|
 | Artifact identity | `config/model-catalog.psv` | ✅ exists |
-| Runtime-profile identity | `config/model-runtime-profiles.json` | ❌ not created |
-| Resource-profile identity | `config/runtime-resource-profiles.json` | ❌ not created |
-| Environment-profile identity | `config/runtime-environments.json` | ❌ not created |
-| Live-server identity | `server_<port>.meta` | 🟡 partial — exists, needs profile fields (§5.5, §12) |
+| Runtime-profile identity | `config/model-runtime-profiles.json` | ✅ exists (`0.23.0`) |
+| Resource-profile identity | `config/runtime-resource-profiles.json` | ✅ exists (`0.23.0`) |
+| Environment-profile identity | `config/runtime-environments.json` | ✅ exists (`0.23.0`) |
+| Live-server identity | `server_<port>.meta` | 🟡 partial — Rapid launches write `profile_id`; still missing `artifact_id`, `backend_version`, environment/resource profile (§5.5, §12) |
 
 ### Phases (§22) — strictly ordered
 
-- [ ] **A — Reconcile the live base.** Inspect branch/HEAD/tags/manifest/remote/index/worktree,
+- [ ] **A — Reconcile the live base.** *(moved to the manifests release; see note above)* Inspect branch/HEAD/tags/manifest/remote/index/worktree,
       including ignored files. Report before mutating.
       *Materially easier as of `0.13.5`: all four outstanding feature branches are merged to `main`,
       so Phase A reads one consolidated base instead of five divergent branches.*
-- [ ] **B — Read-only resolver prototype.** Create only the three JSON files plus
+- [x] **B — Read-only resolver prototype.** *(shipped `0.23.0`)* Create only the three JSON files plus
       `bin/la-model-profile.py`. Seed one artifact (`qwen38-27b-4bit`) and two profiles
       (`qwen38-rapid-operator`, `qwen38-rapid-thinking`) plus one legacy fallback. Change no
       downloader or launcher behaviour until it passes. This is the [smallest first
       slice](#smallest-first-slice).
-- [ ] **C — Validation and legacy adaptation.** Base/local overlay loading; validate references,
+- [~] **C — Validation and legacy adaptation.** *(validate + legacy adapter + `migrate-preview` shipped `0.23.0`; no resolver tests yet)* Base/local overlay loading; validate references,
       duplicates, cycles, paths, provenance; adapt existing `la_register` entries into compatibility
       profiles; migration preview with no writes.
-- [ ] **D — Profile-aware hotswap.** Resolve through the canonical resolver; preserve the existing
+- [~] **D — Profile-aware hotswap.** *(`--profile` shipped; structured result, unsafe-reuse refusal, full meta identity and rollback exercise not done)* Resolve through the canonical resolver; preserve the existing
       backend branches; emit the structured launch result (§12); expand server metadata identity;
       verify requested vs effective `/v1/models`; refuse unsafe reuse; exercise rollback.
-- [ ] **E — Downloader adaptation.** Profile/backend/capability filters; profile→artifact resolution;
+- [~] **E — Downloader adaptation.** *(filters shipped `0.23.0`; canonical-identity dedupe and JSON listing not confirmed)* Profile/backend/capability filters; profile→artifact resolution;
       preserve every existing safeguard; fix registry/catalog duplication via canonical artifact
       identity; JSON listing output.
-- [ ] **F — `csl` and roles.** Consume shared profiles; show only session-capable combinations;
+- [~] **F — `csl` and roles.** *(picker consumes profiles `0.23.0`; roles not confirmed)* Consume shared profiles; show only session-capable combinations;
       preserve role recommendations and free composition; keep legacy aliases working.
-- [ ] **G — Dispatcher migration.** Resolve profile before hotswap; use the effective API model ID in
+- [~] **G — Dispatcher migration.** *(`--profile` through `agent-fallback.py` and `lowkey-cli.py` shipped; effective API model ID in payloads and session schema v2 not done, `lowkey-cli.py` is still schema 1)* Resolve profile before hotswap; use the effective API model ID in
       payloads; named sessions to schema v2 while still loading v1; test one-shot and conversation
       flows on Rapid; preserve output and persistence semantics.
-- [ ] **H — Packaging preparation.** `packaging/standalone-files.txt`; deterministic builder;
+- [ ] **H — Packaging preparation.** *(not started: no `packaging/`, no builder)* `packaging/standalone-files.txt`; deterministic builder;
       isolated artifact tests. Do not publish until the clean-install gate passes.
-- [ ] **I — Documentation and release.** README architecture and commands; CHANGELOG with the exact
+- [~] **I — Documentation and release.** *(CHANGELOG entry shipped `0.23.0`; schema and migration docs not confirmed)* README architecture and commands; CHANGELOG with the exact
       verified release base; document schemas, migration, profiles, fallback; align the manifest and
       version **only after** tests pass.
 
@@ -584,7 +591,7 @@ retired in `0.13.1`.
 the backend serves. Hotswap must return structured JSON (`schema_version`, `port`, `api_model_id`,
 `profile_id`, `artifact_id`, `backend`, `backend_version`, `environment_profile`, `resource_profile`,
 `reused`). `SUCCESS_PORT=` / `SUCCESS_MODEL_ID=` may continue to be emitted for compatibility, but
-consumers should migrate. **Status: ❌ not started** — hotswap emits `SUCCESS_PORT` only.
+consumers should migrate. **Status: ❌ not started** (verified 2026-10-06) — hotswap still emits `SUCCESS_PORT=` lines only; `--profile` resolves via `la-model-profile.py --json` but the result is not returned as JSON.
 
 ### Smallest first slice
 
@@ -596,18 +603,19 @@ fail deterministically. **Only then** may the resolver become a dependency of an
 ### Release gates (§19) — all must hold
 
 ```text
-[ ] live 0.13.6 base reconciled
-[ ] artifact/profile/resource/environment schemas documented
-[ ] canonical resolver tests pass
-[ ] legacy private configuration remains usable
-[ ] profile-aware downloader regression passes
-[ ] Rapid operator/thinking profiles resolve correctly
+(legend: [x] met · [~] partly · [ ] not met · [-] obsolete; checked against the code 2026-10-06)
+[-] live 0.13.6 base reconciled               (obsolete: base moved on; reconcile against current main)
+[~] artifact/profile/resource/environment schemas documented   (CHANGELOG lists them; no schema doc)
+[ ] canonical resolver tests pass            (no test references la-model-profile.py)
+[~] legacy private configuration remains usable   (legacy adapter exists; untested)
+[~] profile-aware downloader regression passes   (CHANGELOG reports suites green; no dedicated test)
+[x] Rapid operator/thinking profiles resolve correctly   (`validate` passes live)
 [ ] legacy vllm and mlx_lm behavior remains intact
-[ ] csl consumes shared profile data
-[ ] dispatcher consumes profile and API-model identity
+[x] csl consumes shared profile data
+[~] dispatcher consumes profile and API-model identity   (profile yes, API-model identity no)
 [ ] safe reuse compares material profile identity
-[ ] session schema migration is tested
-[ ] README, CHANGELOG, manifest, and help match behavior
+[ ] session schema migration is tested   (schema v2 does not exist)
+[~] README, CHANGELOG, manifest, and help match behavior   (version-consistency test fails on ROADMAP line)
 [ ] working tree and staged scope are fully understood
 [ ] rollback launch is exercised
 ```
@@ -616,10 +624,10 @@ Additionally, **only if** standalone packaging ships in the same release: clean-
 passes; archive is deterministic; release manifest contains only approved files; installer avoids
 silent dotfile mutation; published assets are immutable and checksummed.
 
-### Do not confuse these with `0.16.0`
+### Do not confuse these with the other "profile" work
 
 - **`0.13.3` launcher profile controls** are per-**launch** environment variables
-  (`LA_CLAUDE_SETTINGS`, `LA_CLAUDE_TOOLS`, …). `0.15.0` runtime **profiles** are a resolver over
+  (`LA_CLAUDE_SETTINGS`, `LA_CLAUDE_TOOLS`, …). `0.23.0` runtime **profiles** are a resolver over
   declared identities in JSON. Same word, different layer. Shipping the former does not advance the
   latter.
 - **`0.13.1`'s backend resolution** (`serve=mlx` → `LA_DEFAULT_MLX_BACKEND`, `LA_SERVE_DECLARED`,
