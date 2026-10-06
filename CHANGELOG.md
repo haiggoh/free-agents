@@ -1,3 +1,42 @@
+## [0.25.1] — 2026-10-06
+
+Sessions stop editing long files from a truncated view, and free-API sessions stop running rtk.
+
+### Fixed
+- **Long files read in full.** Free sessions rebuilt `CHANGELOG.md` and `README.md` from a view
+  that showed only the top of the file, deleting most of each. Two things cut that view, and
+  neither shows in the exit code: Claude Code caps Bash output (a large `cat` returns a short
+  preview plus "Output too large … saved to …"), and rtk, when installed as a PreToolUse hook,
+  condenses `git show <rev>:<file>` to ~150 lines plus "(+1800 lines)" (134 KB in, 8 KB out).
+  The shared agent rules (`config/shared-agent-shipping-rules.txt`, read by both lanes) now
+  say: read long files with Read, check the length, keep reading to the last line, redirect an
+  old revision to a temp file, and never edit from a view that was truncated.
+- **Free-API sessions run without rtk.** On a lane with no token bill, rtk's saving is zero
+  and its condensing cost correctness. `remote-session.sh` puts `bin/rtk-lane-shim/rtk` first
+  on `PATH` with `LA_RTK_HOOK=off`: the shim answers rtk's hook call with "no rewrite" and hands
+  every other `rtk` call to the real binary. A plugin cannot remove a hook that user settings
+  register, so answering the call is the way to switch it off per session.
+  `LA_RTK_IN_FREE_API=1` keeps rtk on. Without rtk installed, the hook call is a silent no-op.
+  Not covered: a hook registered by absolute path (`/opt/homebrew/bin/rtk hook claude`).
+
+### Added
+- **`install/setup-rtk-excludes.sh`** (optional, idempotent): adds the commands whose rtk
+  output lost content (`config/rtk/exclude-commands.txt`: `git show`, `git diff`, `cat`,
+  `head`) to rtk's `[hooks] exclude_commands`, for local and cloud sessions where rtk is
+  worth keeping. It keeps patterns you added, backs the file up, and keeps its permissions.
+  `--check` and `--dry-run`. Exits 0 without touching anything when rtk is not installed.
+
+### Tests
+- `tests/test_rtk_lane.sh`: 24 passed. Uses a fake rtk, so it needs no rtk installed. Covers
+  the shim with rtk present and absent, the `remote-session.sh` block (run, with the
+  environment it leaves checked for free-API, local and opt-out), and the setup script (merge,
+  user patterns kept, mode 600 kept, backup taken, idempotent). Mutation-checked: disabling
+  the shim's off branch, the `export`, or the opt-out condition, or widening the file mode, each
+  turns a test red.
+- Unchanged by this release (same results on `main` before it): `tests/lint.sh` reports 58
+  existing shellcheck findings, and `tests/test_shared_agent_rules.sh` fails 10 of 16 cases
+  because `launch-claude-agent.sh` aborts on unset `LA_CUR_SPOOF`.
+
 ## [0.25.0] — 2026-10-06
 
 ### Added — CUDA Architecture (v3 Hardened + Dynamic HF)

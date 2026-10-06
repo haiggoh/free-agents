@@ -1,0 +1,16 @@
+# Commands rtk must never rewrite (rtk's own `[hooks] exclude_commands` patterns, one per line).
+# install/setup-rtk-excludes.sh merges these into rtk's config.toml; it never removes patterns
+# you added yourself. rtk matches a pattern as a command prefix after stripping env prefixes,
+# so "git show" also covers `git show HEAD:README.md`.
+#
+# Why each one (measured with rtk 0.51.0, 2026-10-06):
+#   git show  `git show <rev>:<file>` of a 134 KB CHANGELOG came back as ~8 KB plus
+#             "(+1800 lines)"; models then rewrote CHANGELOG/README from that partial view.
+#   git diff  replaces the real patch with a stat summary and drops hunks (11 KB -> 6.5 KB).
+#   cat       lossless today at rtk's default level, but saves next to nothing; excluded so a
+#             full-file read never depends on rtk's filter level staying at "none".
+#   head      same reasoning as cat (`head -N f` is rewritten to `rtk read --head-lines N`).
+git show
+git diff
+cat
+head

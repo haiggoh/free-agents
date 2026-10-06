@@ -26,6 +26,7 @@
 #   LA_REMOTE_MAX_OUTPUT_TOKENS   CLAUDE_CODE_MAX_OUTPUT_TOKENS (default 8192)
 #   LA_REMOTE_KEEP_PROXY=1        leave the proxy running after the session exits
 #   LA_REMOTE_ENABLE_MCP=1        enable MCPs for free-API sessions (default: 0, disabled)
+#   LA_RTK_IN_FREE_API=1          keep rtk's Bash-output rewriting ON (default: off on this lane)
 #                                 ignored in blind-trust auto-mode (AUTO_MODE_STATE=0)
 #
 # Cost: provider quota and billing apply; see the selected tier. This session
@@ -1717,6 +1718,16 @@ fi
 # See bin/la-git-credential-env.sh and memory: git-keychain-100001-and-gh-tls-under-sandbox
 # shellcheck source=la-git-credential-env.sh
 . "$SCRIPT_DIR/la-git-credential-env.sh"
+
+# rtk OFF for free-API sessions. rtk's global PreToolUse hook (`rtk hook claude`) condenses Bash
+# output to save tokens; a free lane has no token bill, and the condensing truncated
+# `git show <rev>:<file>` badly enough that models rewrote CHANGELOG/README from a partial view.
+# The shim answers that hook with "no rewrite" and passes any other rtk call to the real binary.
+# Harmless when rtk is not installed. LA_RTK_IN_FREE_API=1 keeps rtk on. See bin/rtk-lane-shim/rtk.
+if [[ "${LA_SESSION_KIND:-}" == "free_api" && "${LA_RTK_IN_FREE_API:-0}" != "1" ]]; then
+    export LA_RTK_HOOK=off
+    export PATH="$SCRIPT_DIR/rtk-lane-shim:$PATH"
+fi
 
 # For free_api sessions, wrap claude with telemetry wrapper to capture streaming token rate
 if [[ "${LA_SESSION_KIND:-}" == "free_api" && -x "$SCRIPT_DIR/la-remote-telemetry-wrapper.sh" ]]; then

@@ -336,6 +336,10 @@ You choose which weights to fetch — large models aren't the right fit for ever
 **partial roster is fine**: whatever you download fills the roles it's tagged with; the rest of the
 work stays on the cloud model.
 
+If you use [rtk](https://github.com/rtk-ai/rtk) (an output-condensing Bash hook), also run
+`./install/setup-rtk-excludes.sh` once (`--check` to verify, `--dry-run` to preview); see
+[Troubleshooting](#troubleshooting) for why. Without rtk it does nothing.
+
 ## API keys — the free-tier setup helper
 
 The remote lane needs a provider key. `csl setup-remote` (or press **`k`** in the `csl` picker, or
@@ -1021,6 +1025,17 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   ```
   `install/hf-ipv4/sitecustomize.py` is picked up automatically by any Python on that path and
   pins address resolution to IPv4; it affects only processes you launch with it.
+- **A session edits a long file as if it only saw the top** (a CHANGELOG or README loses most of
+  its entries) — two causes, neither visible from the command's exit code. Claude Code caps Bash
+  output: a `cat` of a large file returns a short preview plus "Output too large … saved to …".
+  And if you run [rtk](https://github.com/rtk-ai/rtk) as a PreToolUse hook, it condenses some
+  commands: `git show <rev>:<file>` came back as ~150 lines plus "(+1800 lines)". Every lane's
+  prompt now tells the model to read long files with Read and check it reached the last line.
+  Free-API sessions (`csl remote`) also switch rtk's rewriting off (`bin/rtk-lane-shim/rtk`;
+  `LA_RTK_IN_FREE_API=1` keeps it on). For local and cloud sessions, where rtk's saving is
+  worth having, `install/setup-rtk-excludes.sh` adds the commands that lost content
+  (`config/rtk/exclude-commands.txt`) to rtk's `exclude_commands`, keeping any you set yourself.
+  Both do nothing if rtk isn't installed.
 - **Direct request 500s "System message must be at the beginning"** — the fork patch isn't applied;
   re-apply `vllm-mlx-local-fork-patches.patch`.
 - **Interactive turns are slow** — the cost is *prefill*, not generation, and the prompt is mostly

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# rtk — free-agents lane shim. NOT rtk itself.
+#
+# remote-session.sh puts this directory FIRST on PATH for free-API sessions and sets
+# LA_RTK_HOOK=off. rtk (rtk-ai.app) is usually registered as a global PreToolUse hook
+# (`rtk hook claude` in ~/.claude/settings.json) that rewrites Bash commands into condensed
+# output. That saves money on a metered lane; on a free-API lane it saves nothing and costs
+# correctness: `git show <rev>:<file>` comes back ~150 lines plus a "(+1800 lines)" marker,
+# and models went on to rewrite CHANGELOG/README from that partial view (2026-10-05/06).
+#
+# A plugin cannot remove a hook that user settings register, so this shim answers the hook
+# call instead: with LA_RTK_HOOK=off, `rtk hook …` drains stdin and exits 0 with no decision
+# (= no rewrite). Every other invocation is handed to the real rtk, so a model or user can
+# still run rtk by name. If no real rtk is installed, the hook call is a silent no-op and
+# any other call fails with exit 127, exactly like a missing command.
+#
+# Limitation: a hook registered by ABSOLUTE path (/opt/homebrew/bin/rtk hook claude) does not
+# go through PATH, so this shim cannot intercept it.
+
+if [ "${1:-}" = "--shim-help" ]; then
+    cat <<'EOF'
+rtk (free-agents lane shim) — suppresses rtk's Claude Code hook rewrites in free-API sessions.
+
+Usage: rtk hook <agent>     with LA_RTK_HOOK=off: read the hook payload, emit nothing, exit 0
+       rtk <anything else>  passed to the real rtk found further down PATH
+       rtk --shim-help      this help (plain --help goes to the real rtk)
+
+Environment:
+  LA_RTK_HOOK=off   set by remote-session.sh; anything else passes hook calls through too
+EOF
+    exit 0
+fi
+
+if [ "${1:-}" = "hook" ] && [ "${LA_RTK_HOOK:-}" = "off" ]; then
+    cat >/dev/null
+    exit 0
+fi
+
+SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+IFS=':'
+for d in $PATH; do
+    [ -n "$d" ] || continue
+    [ "$(cd "$d" 2>/dev/null && pwd -P)" = "$SHIM_DIR" ] && continue
+    if [ -x "$d/rtk" ] && [ ! -d "$d/rtk" ]; then
+        exec "$d/rtk" "$@"
+    fi
+done
+unset IFS
+
+if [ "${1:-}" = "hook" ]; then
+    cat >/dev/null   # rtk not installed: a hook call must never fail the tool call
+    exit 0
+fi
+echo "rtk: command not found (free-agents shim found no real rtk on PATH)" >&2
+exit 127
