@@ -831,6 +831,139 @@ thinking-model runaway heuristic (`thinking-model-runaway-fix-a`).
 
 ---
 
+## Claimed but not delivered — audit of every tag against `main` @ `0.25.7` (2026-10-08)
+
+**Why this section exists.** This file's rule is that an item leaves only by moving into
+`CHANGELOG.md`. The audit found the reverse leak: items that moved into `CHANGELOG.md` (and in
+places the README) **without** the code to back them. They belong here until they really ship.
+
+**Method.** All 124 tags' changelog entries, plus `README.md`, `PLUGIN-INSTALLER-README.md` and
+`RELEASE.md`, checked claim by claim against the code on `main` @ `cc7ec39`. Whether a feature
+existed *at release time* was deliberately not checked; the only question was whether it exists
+**now**. Every row was confirmed against the source (file:line). Rows marked "re-test" are
+probable but unconfirmed.
+
+**Out of scope here, because a branch already owns them** (re-check before starting, since these
+are moving targets):
+
+- `fix/test-fixtures-refresh`: failing and outdated test fixtures, including
+  `test_version_consistency.sh`, `test_serve_default`, `test_session_profiles` and `test_csl_menu`.
+- `fix/max-output-tokens`: the Nemotron 8192-output-token cap. `CLAUDE_CODE_MAX_OUTPUT_TOKENS`
+  beats the proxy's `max_tokens`.
+- Release-distributable work on `main` (`package-release.sh`, `install-free-agents.command`,
+  `RELEASE.md`). Two defects were found and handed over:
+  - `install-plugin.sh` runs an unguarded `cp` of a root `config.example.sh` that does not exist
+    in the repo (it lives in `config/`).
+  - `PLUGIN-INSTALLER-README.md:115` names `scripts/master-install.command`, which was renamed to
+    `install-free-agents.command`.
+- Runtime profiles, Phases C–I: already owned by
+  `~/.claude/plans/free-agents-runtime-profiles-completion-execution-plan.md`. Not repeated below.
+
+### Missing or incomplete features, grouped by the branch that will build them
+
+Each group has its own execution plan in `~/.claude/plans/`, named
+`free-agents — <branch> — execution plan (2026-10-08).md`.
+
+#### `fix/agent-interception-wiring` — 0.24.0 "Native Agent Interception (Deny & Replace)"
+
+| Claim | Reality |
+|---|---|
+| `Agent` is denied and **replaced** by a `FreeAgent` tool (`bin/free-agent-tool.py`) | **UNWIRED.** Nothing registers it: there is no plugin manifest entry, no `hooks.json` entry and no MCP config. With the toggle ON the model loses `Agent` and gets no replacement. The launcher still prints that the replacement is active. |
+| Toggle applies to all session kinds | **PARTIAL.** `bin/remote-session.sh` never reads `INTERCEPT_AGENTS`, although the picker exports it (`session_picker_model.py:575,751`). |
+| `Agent` always lands in the deny list when the toggle is on | **PARTIAL.** `launch-claude-agent.sh:614` only adds it inside `if [ -n "$LA_DENY_TOOLS" ]`, so an empty `LA_DENY_TOOLS` skips interception. |
+
+**Premise defect.** The hardened plan requires a "native plugin tool, NOT MCP". Claude Code plugins
+have no native-tool component; the only components are commands, agents, skills, hooks and MCP
+servers. The branch must choose a mechanism that exists before it writes code. See its plan.
+
+#### `feature/remote-classifier-lane` — 0.23.1 / 0.24.0 Classifier Source selector
+
+| Claim | Reality |
+|---|---|
+| NVIDIA / Devstral / Auto classifier source is honoured | **STUB on remote.** `remote-session.sh:1225-1233` exports `LA_CLASSIFIER_SOURCE`, then prints "remote classifier lane is not implemented yet — running blind-trust". |
+
+The selector is offered in a picker that runs nothing behind it. The test plan
+`Auto-mode classifier on the remote free-API lane (NVIDIA) — test plan.md` (2026-09-24) already
+exists. Its measurements gate the build.
+
+#### `fix/picker-launcher-parity` — picker settings the launchers ignore
+
+| Version | Claim | Reality |
+|---|---|---|
+| 0.21.7 / 0.22.x | Temperature on the local lane | **BROKEN.** The picker appends `--temperature X` (`session_picker_model.py:579`). `local-session.sh:91` has no case for it, so the value falls into the positional catch-all and **overwrites the effort**. |
+| 0.21.7 | `-r` key sets temperature in the remote menu | **MISSING.** The key is `o` in the picker and the flag is `--temperature`. Fix the text. |
+| 0.19.8 / 0.19.9 | `u` toggles blind-trust MCPs in `csl` | **DEAD TEXT.** `csl:465` prints "toggle with 'u'", but no handler exists. The picker uses `m`. |
+| 0.14.8 | `LA_REMOTE_CLAUDE_SETTINGS` user-supplied settings file | **MISSING.** No code reads it. |
+| 0.19.9 | Lean allowlist profiles drive blind-trust | **NOT SHIPPED.** The launchers read `~/.claude/launch-profiles/*.json` (`launch-claude-agent.sh:781`, `remote-session.sh:1238`), which the repo does not provide. `blind-trust-settings.py` treats a missing file as an empty list, so on a fresh install blind-trust is silently narrower than the README (`:969`) describes. |
+
+#### `fix/manifest-gate-wiring` — 0.20.0 / 0.23.5 / 0.25.6 manifest consumers
+
+| Claim | Reality |
+|---|---|
+| `csl` fails *before* Claude starts on an invalid manifest configuration (0.20.0) | **UNWIRED.** `la_validate_manifest_config` is defined twice (`bin/csl:224`, `config/config-lib.sh:855`) and called nowhere. |
+| Manifest functions are "shared with csl" (0.23.5) | **PARTIAL.** `bin/csl:161-224` re-defines all four functions instead of sourcing them, so the copies can drift. |
+| Downloader writes a manifest: validate temp, atomic rename, reread (0.20.0) | **PARTIAL.** `download-models.sh:599-603` calls `build --output` and only warns. There is no validate or reread step. |
+| `la_auto_scan_models` (0.23.5 / 0.25.6, "groundwork") | **DEAD.** Defined at `config-lib.sh:348`, never called. Either wire it or relabel it as not a feature. |
+
+#### `fix/backend-manager-cli-parity` — 0.15.1 / 0.19.x / 0.21.0 backend manager surface
+
+| Claim | Reality |
+|---|---|
+| `manage-backend.py check-updates`, `promote`, `remove` (0.21.0) | **UNWIRED.** Parsed (`manage-backend.py:95-102`) but never dispatched in `main()`, which falls through to help and exit 2. Conversely `updates` is dispatched but never parsed. |
+| `manage-rapid-mlx.py install X --skip-pin-update` and `smoke X` (README:288-289, :310) | **MISSING.** The shim forwards to `manage-backend.py`, which has neither option. |
+| Bare `manage-rapid-mlx.py` opens an interactive menu (0.15.1) | **MISSING.** It errors with "the following arguments are required: command". |
+| Braille spinner around venv and pip steps (0.19.3) | **MISSING** since the shim rewrite. |
+| Weekly `local-stack-update-check` job (README:269) replaced by `com.haiggoh.backend-update-check` (0.21.0) | **PARTIAL.** `install/local-stack-update-check.sh` still ships, and the README still describes it. |
+
+#### `feature/acquisition-catalogue-reader` — 0.16.0 acquisition-catalogue evidence
+
+| Claim | Reality |
+|---|---|
+| `bin/read-acquisition-catalog.py --parse/--report` | **MISSING.** Absent, with no deletion note anywhere. |
+| Local-capable filter uses the acquisition catalogues as evidence | **MISSING.** No reference in `local-capable-filter.sh`, `remote-session.sh` or `csl`. |
+| Catalogues validated at load (field count, required fields, numeric `size_gb`), failing the launcher | **MISSING.** `la-model-profile.py` only length-guards fields. |
+| Tests for acquisition-PSV validation | **MISSING.** |
+
+The PSV files and `model-catalogue-context-additions.yaml` exist. What is missing is the reader,
+the validation and the wiring.
+
+#### `docs/claims-errata` — documentation that describes code which moved
+
+These are not missing features. They are text to correct, so a future audit does not re-flag them:
+
+- `skills/free-agents/SKILL.md:38,55` and `skills/offload-to-local/SKILL.md:38,55` name
+  `bin/local-agent-dispatch.py`. The dispatcher is `bin/lowkey-cli.py` (`agent-fallback.py:62`
+  already uses it). The docstrings in `agent-fallback.py:117`, `remote-agent-dispatch.py:5` and
+  `tests/test_local_agent_dispatch.py:2` should be updated the same way.
+- 0.17.1–0.17.3: session naming via `-n` was replaced by `hooks/session-title-prefix.py` in
+  0.19.11, so the launchers' `-n` code is intentionally commented out. Add a CHANGELOG
+  supersession note.
+- 0.23.0 says `LocalScreen` consumes runtime profiles, but 0.23.1 reverted to `csl --inventory`.
+  Also, `bin/load_profile_models.py` and `bin/load-profile-models.py` are both still present.
+- 0.23.3 places the quota tests at `bin/quota/test_quota_telemetry.py`; they live in `tests/`.
+- 0.21.0 names `scripts/check-backend-updates.py`; the real file is `check_backend_updates.py`.
+- README "NEW in v0.25.0" labels are stale, and "What's New" stops at 0.25.0. Six registered
+  hooks and the `continue-on-fallback` skill are never mentioned in the README.
+- Repo-root strays: `queue_marker.py` (a duplicate of `bin/queue_marker.py`),
+  `improved-queue-stop-hook.py` (an orphan that differs from the registered hook) and
+  `local-profile.json`/`local-profile-notes.md`. Decide each, but do not delete without approval.
+- CHANGELOG structure: a misplaced `## [Unreleased]` between 0.13.12 and 0.13.11 (its contents
+  shipped), duplicated blocks (0.14.1/0.14.2, 0.18.4–0.18.6, 0.21.5–0.21.7, 0.24.0 into 0.25.0), an
+  empty 0.18.3 heading, a missing 0.21.1, and stale footer compare links.
+- `--help` gaps that *run the script* instead of printing help: `scripts/check-backend-updates.sh`,
+  `scripts/daily-package-upgrade.sh`, `install/setup-shortcuts.sh`,
+  `install/local-stack-update-check.sh`, `install/download-models-system-trust.sh`. Fixing these
+  is code, but it is small enough to ride on this branch.
+
+### Not owned by any branch yet
+
+- **`0.24.0` oMLX backend lanes**: still NOT STARTED, and its number was spent on the Cloud Session
+  Config UI. It needs a renumber note and its own execution plan; neither exists yet.
+- **Remote session watcher** (deferred in `0.14.0`): unchanged, still waiting on live-reasoning
+  visibility.
+
+---
+
 ## Deliberately deferred
 
 Not roadmap items. Recorded so they are not mistaken for oversights (§20). The `0.14.0`–`0.16.0`
