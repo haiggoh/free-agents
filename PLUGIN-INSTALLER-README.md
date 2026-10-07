@@ -2,16 +2,20 @@
 
 This archive contains the free-agents plugin packaged for manual installation from a GitHub release.
 
-## Quick Install (Standalone Master Installer — Recommended)
+## Quick Install (Standalone Installer — Recommended)
 
 **No download needed — just run this one command:**
 
 ```bash
 # Runs entirely from GitHub, downloads everything automatically
-curl -fsSL https://raw.githubusercontent.com/haiggoh/free-agents/main/scripts/master-install.command | bash
+curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | bash
 ```
 
-Or download the `.command` file and double-click it on macOS, or run `bash master-install.command` on any platform.
+Or download the **`install-free-agents.command`** file from the [latest release](https://github.com/haiggoh/free-agents/releases/latest) and:
+- **macOS**: Double-click in Finder
+- **Linux/WSL2**: `bash install-free-agents.command`
+
+> ✅ **Version-agnostic**: The installer fetches the latest plugin version from GitHub at runtime. You never need to re-download the installer when free-agents updates.
 
 The master installer:
 - Detects your platform (macOS Apple Silicon / Linux / WSL2)

@@ -6,8 +6,8 @@
 # Can be run from terminal or double-clicked in Finder on macOS (.command extension)
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/haiggoh/free-agents/main/scripts/master-install.command | bash
-#   # or download the .command file and run it directly
+#   curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | bash
+#   # or download the .command file from the latest release and run it directly
 
 set -euo pipefail
 
