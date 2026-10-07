@@ -426,21 +426,75 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Install
 
-The plugin itself (skills, hooks, the offload nudge):
+### Option A: One-Command Installer (Recommended, Easiest)
 
-```
-/plugin marketplace add haiggoh/get-haiggoh
-/plugin install free-agents@haiggoh
-```
-
-Then the local inference backend, which is what actually serves the models:
+**No git clone, no manual steps — runs entirely from GitHub:**
 
 ```bash
+# macOS / Linux / WSL2 — auto-detects hardware, installs correct backend
+curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | bash
+```
+
+Or download [`install-free-agents.command`](https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command) from the latest release and:
+- **macOS**: Double-click in Finder
+- **Linux/WSL2**: `bash install-free-agents.command`
+
+> ✅ **Version-agnostic**: Fetches the latest plugin release automatically. Never needs updating.
+
+---
+
+### Option B: Standard Marketplace Installation (Classic)
+
+```bash
+# 1. Add the haiggoh marketplace (once)
+/plugin marketplace add haiggoh/get-haiggoh
+
+# 2. Install free-agents plugin
+/plugin install free-agents@haiggoh
+
+# 3. Then install the local inference backend
 git clone https://github.com/haiggoh/free-agents && cd free-agents
-./install/install-backend.sh                       # venv + vllm-mlx + apply fork patches
-cp config/config.example.sh config/config.local.sh # your private overlay (gitignored)
-$EDITOR config/config.local.sh                     # set model dir, ports, and your model registry
-./install/download-models.sh                       # INTERACTIVE — pick which models to download
+./install/install-backend.sh
+```
+
+---
+
+### Option C: Manual from Release Tarball
+
+Download [`free-agents-<version>.tar.gz`](https://github.com/haiggoh/free-agents/releases/latest) from the latest release:
+
+```bash
+tar -xzf free-agents-*.tar.gz && cd free-agents
+./install-plugin.sh                    # copies plugin to ~/.claude/plugins/free-agents/
+claude plugin enable free-agents       # enable in settings
+/rl                                    # reload plugins (or restart Claude Code)
+./install/install-backend.sh           # install local backend
+./install/download-models.sh           # download models
+```
+
+---
+
+### Local Backend Setup (Required for All Options)
+
+After plugin installation, set up the local inference backend:
+
+```bash
+# macOS (Apple Silicon) — Rapid-MLX + vllm-mlx
+./install/install-backend.sh
+
+# Linux with NVIDIA GPU — includes CUDA backends (vllm-cuda, llama-cpp-cuda)
+./install/install-backend.sh --all
+
+# Linux CPU only
+./install/install-backend.sh --backend llama-cpp
+
+# Then configure and download models
+cp config/config.example.sh config/config.local.sh
+$EDITOR config/config.local.sh
+./install/download-models.sh
+
+# Optional: shell shortcuts (csl, local-operator, lowkey, etc.)
+./install/setup-shortcuts.sh
 ```
 
 You choose which weights to fetch — large models aren't the right fit for every machine, and a
