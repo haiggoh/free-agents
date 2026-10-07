@@ -352,7 +352,9 @@ TELEMETRY="${CSL_TELEMETRY:-0}"
 #
 # The hook only ever engages for sessions started by one of this project's launchers (they stamp
 # LA_SESSION_LAUNCHER); an ordinary cloud/gateway `claude` never runs it regardless of this setting.
-STOP_HOOK="${CSL_STOP_HOOK:-0}"
+# An already-exported LA_QUEUE_STOP_HOOK wins: the session picker passes its toggle that way to
+# `csl --picker-launch`, and re-deriving from CSL_STOP_HOOK here silently discarded it.
+STOP_HOOK="${LA_QUEUE_STOP_HOOK:-${CSL_STOP_HOOK:-0}}"
 
 # Local-capable filter state for the remote roster.
 # 0 = HIDDEN (default): local-capable models are hidden in the remote picker.
@@ -367,7 +369,9 @@ LOCAL_CAPABLE="${CSL_LOCAL_CAPABLE:-0}"
 # 1 = ON (default): deny the native Agent tool via LA_DENY_TOOLS, replacing it with FreeAgent.
 # 0 = OFF: allow the native Agent tool (paid gateway subagents).
 # State persists in config/session-menu.local.json.
-INTERCEPT_AGENTS="${CSL_INTERCEPT_AGENTS:-1}"
+# Same for INTERCEPT_AGENTS: the picker exports it, and this assignment used to overwrite it
+# (the variable is in the environment, so the assignment changed what the launcher inherited).
+INTERCEPT_AGENTS="${INTERCEPT_AGENTS:-${CSL_INTERCEPT_AGENTS:-1}}"
 
 # MCP enablement for blind-trust mode (local + remote sessions)
 # 0 = DISABLED (default), 1 = ENABLED (mcp__* allowlisted in blind-trust settings)
@@ -377,6 +381,7 @@ LA_ENABLE_MCP="${LA_ENABLE_MCP:-${CSL_ENABLE_MCP:-0}}"
 
 # Export the stop hook setting for launchers (they read LA_QUEUE_STOP_HOOK)
 export LA_QUEUE_STOP_HOOK="$STOP_HOOK"
+export INTERCEPT_AGENTS   # launch-claude-agent.sh reads it; CSL_INTERCEPT_AGENTS=0 never reached it before
 
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
