@@ -519,14 +519,14 @@ if [ -x "$LAUNCH_DIR/la-session-identity.sh" ]; then
     if [ -n "$SESSION_IDENTITY" ]; then
         export LA_SESSION_IDENTITY="$SESSION_IDENTITY"
         # Export individual fields for easy consumption by hooks/statusline
-        export LA_SESSION_KIND=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_kind":"[^"]*"' | cut -d'"' -f4)
-        export LA_ACTUAL_MODEL=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_id":"[^"]*"' | cut -d'"' -f4)
-        export LA_PROVIDER_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"provider_display":"[^"]*"' | cut -d'"' -f4)
-        export LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4)
-        export LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4)
-        export LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2)
-        export LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4)
-        export LA_SESSION_ID=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
+        LA_SESSION_KIND=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_kind":"[^"]*"' | cut -d'"' -f4); export LA_SESSION_KIND
+        LA_ACTUAL_MODEL=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_id":"[^"]*"' | cut -d'"' -f4); export LA_ACTUAL_MODEL
+        LA_PROVIDER_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"provider_display":"[^"]*"' | cut -d'"' -f4); export LA_PROVIDER_DISPLAY
+        LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4); export LA_THEME_IDENTIFIER
+        LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4); export LA_SPINNER_PROFILE
+        LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2); export LA_TRANSCRIPT_MARKER_VERSION
+        LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4); export LA_SESSION_KIND_EMOJI
+        LA_SESSION_ID=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4); export LA_SESSION_ID
     fi
 fi
 
@@ -538,6 +538,7 @@ if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-sett
         mktemp "${TMPDIR:-/tmp}/local-agents-settings.XXXXXX.json"
     )"
     chmod 600 "$SETTINGS_FILE"
+    # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
     LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
         --identity-json "$LA_SESSION_IDENTITY" \
         --output "$SETTINGS_FILE" 2>/dev/null || true

@@ -38,6 +38,7 @@ LA_HW_DETECT_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # OS kernel detection
 KERNEL_NAME="$(uname -s 2>/dev/null || echo "unknown")"
 KERNEL_RELEASE="$(uname -r 2>/dev/null || echo "unknown")"
+# shellcheck disable=SC2034  # sourced library: published for scripts that source it
 KERNEL_VERSION="$(uname -v 2>/dev/null || echo "unknown")"
 KERNEL_ARCH="$(uname -m 2>/dev/null || echo "unknown")"
 

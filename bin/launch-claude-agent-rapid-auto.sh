@@ -754,31 +754,35 @@ LA_SESSION_ID="${_ts}-${_pid}-${_alias_hash}"
 export LA_SESSION_ID
 
 # SESSION IDENTITY RESOLUTION — emit deterministic identity for consumers
-MODEL_ALIAS="$MODEL_ALIAS" \
-MODEL_SPOOF="$SESSION_MODEL_ID" \
-BACKEND="rapid" \
-BACKEND_DECLARED="rapid" \
-LA_CUR_THINK="false" \
-LA_CUR_EFFORT="$EFFORT" \
-LA_CUR_ROLES="" \
-LA_CUR_REPO="" \
-LA_CUR_SIZE="" \
-LA_CUR_RAPID_SPEC_CONFIG="" \
-LA_SESSION_LAUNCHER="launch-claude-agent-rapid-auto.sh" \
-LA_AUTO_MODE=1 \
-LA_BLIND_AUTO=1 \
-ANTHROPIC_BASE_URL="http://127.0.0.1:$LA_RAPID_AUTO_PORT" \
-SESSION_IDENTITY=$("$LAUNCH_DIR/la-session-identity.sh" 2>/dev/null || true)
+# The overrides must be an `env` prefix INSIDE the substitution: written as `VAR=x \` lines in
+# front of `SESSION_IDENTITY=$(...)` they were a plain assignment list, so the resolver never saw
+# them (it reported the registry spoof and no launcher name for every rapid-auto session).
+SESSION_IDENTITY=$(env \
+    MODEL_ALIAS="$MODEL_ALIAS" \
+    MODEL_SPOOF="$SESSION_MODEL_ID" \
+    BACKEND="rapid" \
+    BACKEND_DECLARED="rapid" \
+    LA_CUR_THINK="false" \
+    LA_CUR_EFFORT="$EFFORT" \
+    LA_CUR_ROLES="" \
+    LA_CUR_REPO="" \
+    LA_CUR_SIZE="" \
+    LA_CUR_RAPID_SPEC_CONFIG="" \
+    LA_SESSION_LAUNCHER="launch-claude-agent-rapid-auto.sh" \
+    LA_AUTO_MODE=1 \
+    LA_BLIND_AUTO=1 \
+    ANTHROPIC_BASE_URL="http://127.0.0.1:$LA_RAPID_AUTO_PORT" \
+    "$LAUNCH_DIR/la-session-identity.sh" 2>/dev/null || true)
 if [ -n "$SESSION_IDENTITY" ]; then
     export LA_SESSION_IDENTITY="$SESSION_IDENTITY"
-    export LA_SESSION_KIND=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_kind":"[^"]*"' | cut -d'"' -f4)
-    export LA_ACTUAL_MODEL=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_id":"[^"]*"' | cut -d'"' -f4)
-    export LA_PROVIDER_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"provider_display":"[^"]*"' | cut -d'"' -f4)
-    export LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4)
-    export LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4)
-    export LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2)
-    export LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4)
-    export LA_SESSION_ID=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
+    LA_SESSION_KIND=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_kind":"[^"]*"' | cut -d'"' -f4); export LA_SESSION_KIND
+    LA_ACTUAL_MODEL=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_id":"[^"]*"' | cut -d'"' -f4); export LA_ACTUAL_MODEL
+    LA_PROVIDER_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"provider_display":"[^"]*"' | cut -d'"' -f4); export LA_PROVIDER_DISPLAY
+    LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4); export LA_THEME_IDENTIFIER
+    LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4); export LA_SPINNER_PROFILE
+    LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2); export LA_TRANSCRIPT_MARKER_VERSION
+    LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4); export LA_SESSION_KIND_EMOJI
+    LA_SESSION_ID=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4); export LA_SESSION_ID
 fi
 
 # PER-SESSION SETTINGS — generate theme + spinner overlay for local sessions only.
@@ -789,6 +793,7 @@ if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-sett
         mktemp "${TMPDIR:-/tmp}/local-agents-settings.XXXXXX.json"
     )"
     chmod 600 "$SETTINGS_FILE"
+    # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
     LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
         --identity-json "$LA_SESSION_IDENTITY" \
         --output "$SETTINGS_FILE" 2>/dev/null || true

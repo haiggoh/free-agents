@@ -54,11 +54,6 @@ MAX_AGE="${LA_TELEMETRY_MAX_AGE_S:-30}"
 SESSION_ID="${LA_TELEMETRY_SESSION_ID:-}"
 SPECIFIC_PORT="${LA_TELEMETRY_PORT:-}"
 
-# Find the most recent log file with token rate data
-latest_rate=""
-latest_ts=""
-latest_port=""
-
 # If a specific session ID is provided, try to find its port from the session log
 if [ -n "$SESSION_ID" ]; then
     # Try to find the port from the session sidecar
@@ -94,7 +89,6 @@ extract_rate_from_log() {
 now=$(date +%s)
 best_rate=""
 best_ts=0
-best_port=""
 
 # Scan the vllm logs named by LOG_GLOB. A specific port (LA_TELEMETRY_PORT or the session
 # sidecar) FILTERS that same set rather than rebuilding a path under $HOME, so the glob override
@@ -111,7 +105,6 @@ EOF
         if [ "$ts" -gt "$best_ts" ]; then
             best_rate="$rate"
             best_ts="$ts"
-            best_port="$port"
         fi
     fi
 done

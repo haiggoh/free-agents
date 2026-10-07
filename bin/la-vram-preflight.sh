@@ -32,8 +32,7 @@ while (( $# > 0 )); do
             shift 2
             ;;
         --dry-run)
-            DRY_RUN=1
-            shift
+            shift   # accepted for symmetry with the launchers: this script only ever validates
             ;;
         *)
             if [ -z "$MODEL_NAME" ]; then
@@ -59,11 +58,14 @@ if [ "$USE_PROFILE" = "true" ]; then
 
     ARTIFACT_ID=$(printf '%s' "$RESOLVED_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("artifact_id",""))')
     BACKEND=$(printf '%s' "$RESOLVED_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("backend",""))')
+    # shellcheck disable=SC2034  # mirrors hotswap's resolution block; not all fields matter for VRAM
     ENV_PROFILE=$(printf '%s' "$RESOLVED_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("environment_profile",""))')
+    # shellcheck disable=SC2034  # mirrors hotswap's resolution block; not all fields matter for VRAM
     RES_PROFILE=$(printf '%s' "$RESOLVED_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("resource_profile",""))')
     THINK=$(printf '%s' "$RESOLVED_JSON" | python3 -c 'import sys,json; print(str(json.load(sys.stdin).get("thinking",False)).lower())')
     TOOLP=$(printf '%s' "$RESOLVED_JSON" | python3 -c 'import sys,json; p=json.load(sys.stdin).get("tool_parser"); print(p if p else "")')
     REASONP=$(printf '%s' "$RESOLVED_JSON" | python3 -c 'import sys,json; p=json.load(sys.stdin).get("reasoning_parser"); print(p if p else "")')
+    # shellcheck disable=SC2034  # mirrors hotswap's resolution block; not all fields matter for VRAM
     FALLBACK=$(printf '%s' "$RESOLVED_JSON" | python3 -c 'import sys,json; p=json.load(sys.stdin).get("fallback"); print(p if p else "")')
 
     # Find the registry alias that maps to this artifact_id
@@ -90,11 +92,14 @@ fi
 
 MODEL_DIR="$LA_CUR_DIR"; SPOOF_NAME="$LA_CUR_SPOOF"; SERVE="$LA_CUR_SERVE"
 TOOLP="$LA_CUR_TOOLP"; REASONP="$LA_CUR_REASONP"; THINK="$LA_CUR_THINK"
+# shellcheck disable=SC2034  # mirrors hotswap's resolution block; not all fields matter for VRAM
 RAPID_SPEC_CONFIG="$LA_CUR_RAPID_SPEC_CONFIG"
+# shellcheck disable=SC2034  # mirrors hotswap's resolution block; not all fields matter for VRAM
 SPOOF_PRIMARY="${SPOOF_NAME%%,*}"
 
 # Override with profile-resolved values if in profile mode
 if [ "$USE_PROFILE" = "true" ]; then
+    # shellcheck disable=SC2034  # mirrors hotswap's resolution block; not all fields matter for VRAM
     SERVE="$BACKEND"
     TOOLP="${TOOLP:-$LA_CUR_TOOLP}"
     REASONP="${REASONP:-$LA_CUR_REASONP}"

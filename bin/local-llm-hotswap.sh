@@ -49,8 +49,12 @@ while (( $# > 0 )); do
             shift 2
             ;;
         --dry-run)
-            DRY_RUN=1
-            shift
+            # Not implemented here. It used to set an unused flag and then START A SERVER, so a
+            # caller asking for a harmless preview got a real model load. Refuse instead; the
+            # launcher's own --dry-run (launch-claude-agent.sh --dry-run) is the preview path.
+            echo "local-llm-hotswap.sh: --dry-run is not supported (it would still load the model);" >&2
+            echo "  use launch-claude-agent.sh --dry-run <alias> to preview a launch." >&2
+            exit 2
             ;;
         *)
             if [ -z "$MODEL_NAME" ]; then

@@ -16,7 +16,6 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source config and shared emoji
 # shellcheck source=/dev/null
@@ -71,7 +70,6 @@ HELP
 }
 
 # ---- argument parsing (BEFORE any work — --help must never launch anything) ----
-MODE="launch"
 ALIAS=""
 EFFORT_OVERRIDE=""
 DRY_RUN=0

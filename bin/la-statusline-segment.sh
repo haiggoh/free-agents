@@ -68,7 +68,7 @@ elif [ "$(uname -s 2>/dev/null)" = "Darwin" ] && command -v vm_stat >/dev/null 2
 fi
 [ -n "$RAW" ] || exit 0
 
-read -r WIRED TOTAL <<EOF2
+read -r WIRED _ <<EOF2
 $RAW
 EOF2
 # Reject anything non-numeric rather than passing garbage into the renderer.

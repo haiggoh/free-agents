@@ -37,7 +37,7 @@ best_ts=0
 
 while IFS= read -r line; do
     [ -n "$line" ] || continue
-    read -r ts rate tokens <<EOF
+    read -r ts rate _ <<EOF
 $line
 EOF
     [ -n "$ts" ] && [ -n "$rate" ] || continue

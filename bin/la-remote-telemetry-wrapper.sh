@@ -48,7 +48,6 @@ trap _cleanup EXIT INT TERM HUP
 monitor_debug_file() {
     local debug_file="$1"
     local log_file="$2"
-    local session_id="$3"
 
     # Wait for debug file to be created
     local waited=0

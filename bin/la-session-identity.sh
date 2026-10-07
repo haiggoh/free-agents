@@ -67,8 +67,8 @@ case "${1:-}" in
   -h|--help)
     sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
     exit 0 ;;
-  --dry-run|--inspect) DRY_RUN=1 ;;
-  "") DRY_RUN=0 ;;
+  --dry-run|--inspect) ;;   # the resolver only prints JSON, so a preview IS a normal run
+  "") ;;
   *)
     printf 'la-session-identity.sh: unrecognised argument: %s\n' "$1" >&2
     printf "Try 'la-session-identity.sh --help'.\n" >&2
@@ -129,6 +129,7 @@ if [ -n "${MODEL_ALIAS:-}" ] && [ "$LA_REGISTRY_AVAILABLE" = "1" ]; then
     # `set -u` this line killed the script right after the lookup SUCCEEDED -- no JSON, exit
     # 0, a silent fail-open that made every consumer show the spoofed model name. Default to
     # the resolved backend so a registry without the declared map still emits valid JSON.
+    # shellcheck disable=SC2034  # kept: documents the brace trap above; not yet emitted in the JSON
     BACKEND_DECLARED="${LA_SERVE_DECLARED[$MODEL_ALIAS]:-$BACKEND}"
     LA_CUR_THINK="${LA_CUR_THINK:-false}"
     LA_CUR_EFFORT="${LA_CUR_EFFORT:-medium}"
@@ -312,7 +313,6 @@ fi
 
 schema_version=1
 
-MODEL_ALIAS_ESC=$(json_escape "${MODEL_ALIAS:-unknown}")
 MODEL_SPOOF_ESC=$(json_escape "${MODEL_SPOOF:-unknown}")
 ACTUAL_MODEL_ID_ESC=$(json_escape "$actual_model_id")
 ACTUAL_MODEL_DISPLAY_ESC=$(json_escape "$actual_model_display")
