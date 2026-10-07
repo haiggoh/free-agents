@@ -17,11 +17,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Upper bound on how long a statusline's detached cache writer may run after the renderer exits.
+STATUSLINE_WRITER_TIMEOUT_S = 5.0
 
 
 class LauncherSmokeTests(unittest.TestCase):
@@ -509,6 +512,18 @@ exit 99
         # We can't easily verify this without mocking the resolver, but we can
         # at least verify the statusline doesn't crash
         self.assertEqual(result.returncode, 0, f"statusline-render.sh failed: {result.stderr}")
+        # cost-tracker refreshes its estimate cache in a DETACHED writer that outlives the
+        # renderer (a *.lock file, then the cache ~0.5 s later). Let it land before tearDown
+        # removes the sandbox, or rmtree races it and fails with "Directory not empty".
+        self._wait_for_detached_writers(self.root / 'home' / '.claude' / 'cost-tracker')
+
+    @staticmethod
+    def _wait_for_detached_writers(directory, timeout=STATUSLINE_WRITER_TIMEOUT_S):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not any(directory.glob('*.lock')):
+                return
+            time.sleep(0.05)
 
 
 if __name__ == '__main__':
