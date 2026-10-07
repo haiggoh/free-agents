@@ -102,10 +102,9 @@ mkdir -p \
     "$SB/home/.models/SessionModel" \
     "$SB/home/.models/ClassifierModel"
 
-cp "$LAUNCHER" "$SB/bin/launch-claude-agent-omlx.sh"
-cp "$GATE" "$SB/bin/omlx-auto-prewarm-gate.sh"
-cp "$PROGRESS" "$SB/bin/omlx-progress.sh"
-cp "$REPO/config/config-lib.sh" "$SB/config/config-lib.sh"
+# Whole runtime (bin/ + config libraries), so a new `. emoji.sh`-style dependency of the
+# launcher cannot silently break this fixture again.
+. "$REPO/tests/lib/sandbox.sh"; la_test_sandbox "$SB" || { echo "sandbox build failed"; exit 1; }
 
 printf '{}\n' > "$SB/home/.models/SessionModel/config.json"
 printf '{}\n' > "$SB/home/.models/ClassifierModel/config.json"

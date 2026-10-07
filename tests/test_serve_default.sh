@@ -205,7 +205,9 @@ echo "== 16. hotswap REFUSES a GGUF registration instead of loading it into MLX 
 # The real script, unmodified, in a sandboxed HOME. Exit 3 and an actionable message, NOT a
 # fall-through into the vllm branch.
 HS="$SB/hsbox"; mkdir -p "$HS/config" "$HS/bin" "$HS/home/.models/FakeGGUF" "$HS/home/.claude/logs/local-agents-configs"
-cp "$REPO/config/config-lib.sh" "$HS/config/"; cp "$REPO/bin/local-llm-hotswap.sh" "$HS/bin/"
+# Whole runtime, not a hand-picked list: hotswap now sources la-hw-detect.sh, and a stale copy
+# list is what broke this section (it failed on the missing file, never reaching the GGUF check).
+. "$REPO/tests/lib/sandbox.sh"; la_test_sandbox "$HS" || { echo "sandbox build failed"; exit 1; }
 head -c 2097152 /dev/zero > "$HS/home/.models/FakeGGUF/model-Q5_K_M.gguf"
 cat > "$HS/config/config.local.sh" <<'CFG'
 LA_MODELS_DIR="$HOME/.models"
