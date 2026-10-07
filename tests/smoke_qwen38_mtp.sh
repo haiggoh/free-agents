@@ -6,6 +6,9 @@
 # - qwen-3.8-operator resolves to Rapid with an MTP speculative config;
 # - target and sidecar are installed locally.
 #
+# Environment:
+#   SMOKE_EXPECTED_BRANCH   refuse to run unless the checkout is on this branch (default: any)
+#
 # Verifies MTP injection, speculative response metrics, and an exact bounded
 # response marker. It deliberately leaves the server running for inspection
 # and follow-up benchmarking; use bin/la-evict.sh afterward.
@@ -13,7 +16,9 @@ set -euo pipefail
 umask 077
 
 REPO="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXPECTED_BRANCH="fix/omlx-classifier-prewarm"
+# Optional branch pin. It used to be hardcoded to fix/omlx-classifier-prewarm, a branch that has
+# since merged and gone, so the smoke refused to run anywhere. Set it to pin a candidate branch.
+EXPECTED_BRANCH="${SMOKE_EXPECTED_BRANCH:-}"
 ALIAS="qwen-3.8-operator"
 EXPECTED_SPEC='{"method":"mtp","model":"'"$HOME"'/.models/Qwen3.8-27B-MTP-4bit","num_speculative_tokens":3,"disable_auto_k":false,"continuous_batching":false,"allow_dynamic_membership":false}'
 
@@ -22,7 +27,8 @@ fail() {
     exit 1
 }
 
-[ -d "$REPO/.git" ] ||
+# -e, not -d: in a git worktree .git is a FILE pointing at the main repository.
+[ -e "$REPO/.git" ] ||
     fail "repository unavailable: $REPO"
 
 cd "$REPO"
@@ -30,7 +36,7 @@ cd "$REPO"
 branch="$(git branch --show-current)"
 status="$(git status --porcelain=v1 --untracked-files=all)"
 
-[ "$branch" = "$EXPECTED_BRANCH" ] ||
+[ -z "$EXPECTED_BRANCH" ] || [ "$branch" = "$EXPECTED_BRANCH" ] ||
     fail "expected branch $EXPECTED_BRANCH, found ${branch:-DETACHED}"
 
 [ -z "$status" ] ||
