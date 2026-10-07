@@ -24,10 +24,19 @@ grep -qF "# >>> local-agents aliases" "$RC" 2>/dev/null && ok "opening fence pre
 grep -qF "# <<< local-agents aliases <<<" "$RC" 2>/dev/null && ok "closing fence present" || bad "closing fence missing"
 
 # 2. Every advertised alias must be present (the help text and the block must not drift apart).
+#    local-dispatch was renamed to lk / lowkey (lowkey-cli.py) in 0.18.3; the old name must NOT come back.
 for a in local-menu local-operator local-fast local-xhigh local-thinking local-validator \
-         local-window local-dispatch local-roles local-disk local-logs; do
+         local-window lk lowkey local-roles local-disk local-logs; do
   grep -qE "^alias $a=" "$RC" && ok "alias $a written" || bad "alias $a MISSING from the block"
 done
+grep -qE '^alias local-dispatch=' "$RC" && bad "retired alias local-dispatch is still written" \
+  || ok "retired alias local-dispatch is not written"
+# Every alias value must be QUOTED, so an install path with a space still yields one word.
+if grep -E '^alias [a-z-]+=' "$RC" | grep -vqE '^alias [a-z-]+="'; then
+  bad "an alias value is unquoted: $(grep -E '^alias [a-z-]+=' "$RC" | grep -vE '^alias [a-z-]+="' | head -1)"
+else
+  ok "every alias value is quoted"
+fi
 
 # 3. Session aliases must name ROLES, not a hardcoded model — that is the whole point of the
 #    rewrite, and a regression would be silent (the alias would still work, on a stale model).

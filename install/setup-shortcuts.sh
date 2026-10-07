@@ -37,8 +37,8 @@ alias local-thinking=\"$BIN/launch-claude-agent.sh reasoner\"
 alias local-validator=\"$BIN/launch-claude-agent.sh validator\"
 alias local-window=\"$BIN/new-local-window.sh\"             # independent Terminal window
 # Dispatch — stateless one-shot prompts (the cheap, preferred path).
-alias lk="$BIN/lowkey-cli.py"
-alias lowkey="$BIN/lowkey-cli.py"
+alias lk=\"$BIN/lowkey-cli.py\"
+alias lowkey=\"$BIN/lowkey-cli.py\"
 # Introspection — what fills each role, what is on disk, what is running.
 alias local-roles=\"$BIN/la-roles.sh\"
 alias local-disk=\"$BIN/la-disk-inventory.sh\"

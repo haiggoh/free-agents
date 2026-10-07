@@ -173,7 +173,7 @@ la_register() {
 # "unknown alias" is a dead end: the user typed a name that worked last week and gets no route
 # forward. Registering it here keeps the OLD name discoverable — la_retired_hint prints where it
 # went, so the unknown-alias error can say "renamed" instead of "no such thing".
-declare -A LA_RETIRED
+declare -A LA_RETIRED=()
 la_retired() { LA_RETIRED[$1]="$2"; }
 
 # la_retired_hint <alias> -> prints a one-line redirect on stderr if <alias> was retired.

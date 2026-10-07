@@ -76,8 +76,13 @@ fi
 
 # 5. An alias that is registered but has NO weights must still resolve as itself (the RAM
 #    preflight and load path own that error) — resolution is naming, not availability policy.
-got="$(la_resolve_target qwen-80b-thinking 2>/dev/null)"
-check "a registered-but-absent ALIAS still resolves to itself" "$got" "qwen-80b-thinking"
+#    Uses the synthetic off-disk alias registered in 3b rather than a real roster name: the real
+#    one (qwen-80b-thinking) exists only in the private overlay, so the check failed in any
+#    checkout without it — a worktree, CI, a fresh clone — for a reason unrelated to resolution.
+ABSENT_ALIAS=_test_absent_model
+la_on_disk "$ABSENT_ALIAS" && bad "fixture: $ABSENT_ALIAS must be OFF disk for this check to mean anything"
+got="$(la_resolve_target "$ABSENT_ALIAS" 2>/dev/null)"
+check "a registered-but-absent ALIAS still resolves to itself" "$got" "$ABSENT_ALIAS"
 
 echo
 echo "passed=$pass failed=$fail"

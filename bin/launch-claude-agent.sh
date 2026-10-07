@@ -205,7 +205,7 @@ if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "0" ]; then
             # Devstral uses Rapid-MLX with mistral parser
             ;;
         2)  # Auto: local on local, remote on remote
-            if [ "${ANTHROPIC_BASE_URL:-}" = http://localhost:* ] || [ "${CLAUDE_IS_LOCAL:-0}" = "1" ]; then
+            if [[ "${ANTHROPIC_BASE_URL:-}" == http://localhost:* ]] || [ "${CLAUDE_IS_LOCAL:-0}" = "1" ]; then
                 export LA_AUTO_MODE_CLASSIFIER_BACKEND="local"
                 export LA_AUTO_MODE_RUNTIME="rapid"
             else
