@@ -96,34 +96,25 @@ best_rate=""
 best_ts=0
 best_port=""
 
-if [ -n "$SPECIFIC_PORT" ]; then
-    log_file="$HOME/.claude/logs/vllm_$SPECIFIC_PORT.log"
-    if [ -f "$log_file" ]; then
-        result=$(extract_rate_from_log "$log_file" "$SPECIFIC_PORT")
-        if [ -n "$result" ]; then
-            read -r best_rate best_ts best_port <<EOF
+# Scan the vllm logs named by LOG_GLOB. A specific port (LA_TELEMETRY_PORT or the session
+# sidecar) FILTERS that same set rather than rebuilding a path under $HOME, so the glob override
+# is honoured for both modes.
+for log_file in $LOG_GLOB; do
+    [ -f "$log_file" ] || continue
+    port=$(basename "$log_file" | sed 's/vllm_\([0-9]*\)\.log/\1/')
+    [ -z "$SPECIFIC_PORT" ] || [ "$port" = "$SPECIFIC_PORT" ] || continue
+    result=$(extract_rate_from_log "$log_file" "$port")
+    if [ -n "$result" ]; then
+        read -r rate ts port <<EOF
 $result
 EOF
+        if [ "$ts" -gt "$best_ts" ]; then
+            best_rate="$rate"
+            best_ts="$ts"
+            best_port="$port"
         fi
     fi
-else
-    # Scan all vllm logs
-    for log_file in $LOG_GLOB; do
-        [ -f "$log_file" ] || continue
-        port=$(basename "$log_file" | sed 's/vllm_\([0-9]*\)\.log/\1/')
-        result=$(extract_rate_from_log "$log_file" "$port")
-        if [ -n "$result" ]; then
-            read -r rate ts port <<EOF
-$result
-EOF
-            if [ "$ts" -gt "$best_ts" ]; then
-                best_rate="$rate"
-                best_ts="$ts"
-                best_port="$port"
-            fi
-        fi
-    done
-fi
+done
 
 [ -n "$best_rate" ] || exit 0
 
