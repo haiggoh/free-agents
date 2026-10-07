@@ -35,7 +35,7 @@ for dir in bin config install skills hooks; do
 done
 
 # Copy essential root files
-for file in README.md CHANGELOG.md VERSION config.example.sh config.local.sh.example PLUGIN-INSTALLER-README.md; do
+for file in README.md CHANGELOG.md VERSION config.example.sh config.local.sh.example PLUGIN-INSTALLER-README.md RELEASE.md; do
     if [[ -f "$REPO_ROOT/$file" ]]; then
         cp "$REPO_ROOT/$file" "$PLUGIN_DIR/"
     fi
