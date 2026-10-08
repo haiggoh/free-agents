@@ -32,6 +32,15 @@ An audit on 2026-10-08 traced every option on this screen to where its value is 
 - `docs/ROADMAP.md` said 0.25.6, so `tests/test_version_consistency.sh` was failing. It now
   matches.
 
+### Fixed — release tarballs shipped private local files
+- `scripts/package-release.sh` copied the whole working tree with `cp -r` and removed private
+  files by an explicit list, so any untracked file it did not name was shipped. The 0.25.7
+  release asset contained four: a `config.local.sh` backup, a private image-model catalog, a
+  model-catalog backup, and a lock file. A scan found no credentials in them, and the asset shows
+  0 downloads.
+- Packaging now copies **git-tracked files only**, and refuses to build (exit 1) if any packaged
+  file is git-ignored. The rm list stays in place as a second safeguard.
+
 ## [0.25.7] — 2026-10-06
 
 ### Fixed
