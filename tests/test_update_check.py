@@ -41,9 +41,15 @@ def test_format_update_report():
     assert "up to date" in report
 
 
-def test_check_all_backends():
+def test_check_all_backends(tmp_path):
     """Test check_all_backends with mocked managers."""
-    with patch('check_backend_updates.get_manager') as mock_get_mgr:
+    # The outdated branch logs and fires an osascript notification. Both must stay inside the
+    # test: unpatched, every suite run sent the user a REAL "0.15.2 -> 0.15.3" desktop
+    # notification and appended the fake OUTDATED line to ~/.claude/logs.
+    with patch('check_backend_updates.get_manager') as mock_get_mgr, \
+         patch.object(check_backend_updates, 'LOG_DIR', tmp_path), \
+         patch.object(check_backend_updates, 'LOG_FILE', tmp_path / "backend-update-check.log"), \
+         patch('subprocess.run') as mock_run:
         # Mock each backend manager
         mock_mgr = MagicMock()
         mock_mgr.check_updates.return_value = [("rapid-mlx", "0.15.2", "0.15.3")]
@@ -53,6 +59,9 @@ def test_check_all_backends():
         results = check_all_backends(["rapid-mlx"])
         assert "rapid-mlx" in results
         assert len(results["rapid-mlx"]) == 1
+        # The notification is still attempted (behaviour kept), just intercepted.
+        assert mock_run.call_args[0][0][0] == "osascript"
+        assert "0.15.2->0.15.3" in (tmp_path / "backend-update-check.log").read_text()
 
 
 if __name__ == "__main__":
