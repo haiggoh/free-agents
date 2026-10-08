@@ -156,9 +156,9 @@ CLASSIFIER_SOURCE_LABELS = {
     2: "Auto: local on local, remote on remote",
 }
 
-# Cloud-screen options that no gateway launcher reads (audit 2026-10-08). Said in the menu, so a
-# toggle cannot look as if it changed the gateway session it sits beside.
-NOT_GATEWAY_NOTE = "[local/free-API only — not gateway]"
+# Cloud-screen options that no cloud (Anthropic or gateway) session reads (audit 2026-10-08). Said
+# in the menu, so a toggle cannot look as if it changed the cloud session it sits beside.
+NOT_GATEWAY_NOTE = "[local/free-API only — not cloud]"
 
 
 @dataclass
@@ -185,10 +185,13 @@ class Settings:
     intercept_agents: bool = True
     # Bypass permissions mode for cloud sessions (blind-trust auto mode)
     cloud_bypass_permissions: bool = False
-    # security-guidance LLM reviews on GATEWAY sessions: 0=default (opus-4-7), 1=sonnet-4-6, 2=off.
-    # Persisted to config/cloud-session.local.env, which claude-cloud-lean sources.
+    # security-guidance LLM reviews in every cloud session: 0=default (opus-4-7), 1=sonnet-4-6,
+    # 2=off, -1=custom model set by hand. Kept in ~/.claude/settings.json env (cloud_session_env).
     security_review: int = 0
-    # Called with the full cloud-env dict whenever a gateway-reaching cloud setting changes.
+    security_review_custom: str | None = None
+    # Shown only when the plugin is installed+enabled, or an override of ours is still set.
+    security_review_offered: bool = False
+    # Called with {"security_review": n} when the user changes it; persists it.
     on_cloud_saved: Callable[[dict], object] | None = None
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
@@ -809,11 +812,12 @@ class RemoteFiltersScreen(Screen):
 class CloudConfigScreen(Screen):
     """Cloud session configuration settings.
 
-    Reaches GATEWAY sessions (persisted to config/cloud-session.local.env, sourced by
-    ~/.claude/scripts/claude-cloud-lean):
-    - Security Review: security-guidance plugin reviews — default / sonnet-4-6 / off
+    Reaches EVERY cloud session — native Anthropic login or an LLM gateway, any launcher — because
+    it is kept in Claude Code's own ~/.claude/settings.json `env` (bin/cloud_session_env.py):
+    - Security Review: security-guidance plugin reviews — default / sonnet-4-6 / off. Listed only
+      when that plugin is installed and enabled (or an override is still set, so it can be cleared).
 
-    Does NOT reach gateway sessions (audit 2026-10-08; labelled so in the menu):
+    Does NOT reach cloud sessions (audit 2026-10-08; labelled so in the menu):
     - Intercept Agents: replace native Agent tool with FreeAgent (local launcher only)
     - Classifier Source: NVIDIA API / Local Devstral / Auto (local + free-API only)
     - Bypass Permissions: blind-trust for free-API remote sessions (the gateway launcher hardcodes it)
@@ -827,9 +831,13 @@ class CloudConfigScreen(Screen):
 
     def actions(self):
         s = self.settings
-        acts = [
-            Action("s", f"Security Review (gateway): {cse.SECURITY_REVIEW_LABELS[s.security_review]}",
-                   lambda: self._cycle_security_review()),
+        acts = []
+        if s.security_review_offered:
+            label = (f"custom ({s.security_review_custom})" if s.security_review == -1
+                     else cse.SECURITY_REVIEW_LABELS[s.security_review])
+            acts.append(Action("s", f"Security Review (all cloud sessions): {label}",
+                               lambda: self._cycle_security_review()))
+        acts += [
             Action("x", f"{ec.EMOJI_SHIELD_STR}  Intercept Agents: {'ON (FreeAgent)' if s.intercept_agents else 'OFF (Native Agent)'}"
                         f"  {NOT_GATEWAY_NOTE}",
                    lambda: self._toggle("intercept_agents")),
@@ -852,7 +860,8 @@ class CloudConfigScreen(Screen):
 
     def _cycle_security_review(self):
         s = self.settings
-        s.security_review = (s.security_review + 1) % len(cse.SECURITY_REVIEW_LABELS)
+        s.security_review = cse.next_state(s.security_review)
+        s.security_review_custom = None
         if s.on_cloud_saved:
             s.on_cloud_saved({"security_review": s.security_review})
 

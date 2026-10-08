@@ -267,6 +267,7 @@ class Picker(App):
         self.theme = "textual-ansi"
         state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
         self.state_warnings = list(state.warnings)
+        cloud = cse.load()      # read-only; reflects ~/.claude/settings.json + installed plugins
         self.settings = m.Settings(
             local_effort=state.effort["local_session"],
             remote_effort=state.effort["remote_api_session"],
@@ -284,7 +285,9 @@ class Picker(App):
             local_capable_shown=flags.local_capable_shown or os.environ.get("CSL_LOCAL_CAPABLE") == "1",
             on_effort_saved=self._save_effort,
             on_temperature_saved=self._save_temperature,
-            security_review=cse.load(self._config_dir())["security_review"],
+            security_review=cloud["security_review"],
+            security_review_custom=cloud["custom_model"],
+            security_review_offered=cloud["plugin_active"] or cloud["override_present"],
             on_cloud_saved=self._save_cloud,
             # "Go last": restored from the store; written when a launch request is made.
             last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
@@ -317,10 +320,11 @@ class Picker(App):
             self.state_warnings.append(warning)
 
     def _save_cloud(self, values):
-        # The ONE file the gateway launcher sources (claude-cloud-lean). A failed write is shown,
-        # never swallowed: an unsaved toggle would look applied while the next session ignores it.
+        # Written to ~/.claude/settings.json env, which every cloud session applies (any login, any
+        # launcher). A failed write is shown, never swallowed: an unsaved toggle would look applied
+        # while the next session ignores it.
         try:
-            cse.save(self._config_dir(), {**cse.load(self._config_dir()), **values})
+            cse.save(values["security_review"])
         except (OSError, ValueError) as exc:
             warning = f"cloud setting not saved: {exc}"
             if warning not in self.state_warnings:
