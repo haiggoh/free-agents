@@ -1,3 +1,46 @@
+## [0.26.0] — 2026-10-08
+
+### Added — a cloud setting that reaches every cloud session
+- **New option on Cloud Session Configuration: Security Review (all cloud sessions), key `s`.**
+  It cycles the official security-guidance plugin through three modes: `default (opus-4-7)`,
+  `cheaper (sonnet-4-6)` (sets `SECURITY_REVIEW_MODEL=claude-sonnet-4-6`) and `off` (sets
+  `ENABLE_CODE_SECURITY_REVIEW=0`; the pattern warnings keep working).
+  Background: on 2026-10-07 the plugin's commit, push and Stop-hook reviews on Opus 4.7 cost about
+  $7, and none of it appeared in any session total. cost-tracker 0.11.0 now itemises it.
+- **Stored in Claude Code's own `~/.claude/settings.json` → `env`.** This is the documented place
+  for it, and every session applies it: native Anthropic login, API key or an LLM gateway, and any
+  launcher (plain `claude`, an IDE, a wrapper). This was probed on 2026-10-08 with a hook that
+  observed the values. Only these two keys are ever added or removed; the rest of the file stays
+  byte-for-byte the same, a symlinked settings file stays a symlink, and the file mode is kept.
+  `bin/cloud_session_env.py` provides `show` / `set` / `--help`. A model set by hand is shown as
+  `custom (<id>)` and left alone until you cycle the option.
+- **Only listed when the plugin is present.** The option appears when security-guidance is
+  installed and enabled, or when an override from this setting is still in place (so it can always
+  be cleared). Under Bedrock, Vertex or Foundry the `cheaper` step is skipped, because those
+  providers need provider-specific model ids.
+
+### Fixed — the Cloud Session Configuration screen claimed more than it did
+An audit on 2026-10-08 traced every option on this screen to where its value is read:
+- **None of `x` (Intercept Agents), `y` (Classifier) or `p` (Bypass Permissions) reaches a
+  cloud session**, whether it uses a gateway or a native login. `x` is only read by the local
+  launcher. `y` is passed on as
+  `LA_AUTO_MODE_CLASSIFIER_BACKEND`, but nothing reads that variable. `p` only affects free-API
+  remote sessions; the gateway launcher hardcodes `bypassPermissions`. Each label now ends with
+  `[local/free-API only — not cloud]`.
+- **None of the three was ever saved.** The 0.24.0 entry below said they were, and it now carries
+  a correction.
+- `docs/ROADMAP.md` said 0.25.6, so `tests/test_version_consistency.sh` was failing. It now
+  matches.
+
+### Fixed — release tarballs shipped private local files
+- `scripts/package-release.sh` copied the whole working tree with `cp -r` and removed private
+  files by an explicit list, so any untracked file it did not name was shipped. The 0.25.7
+  release asset contained four: a `config.local.sh` backup, a private image-model catalog, a
+  model-catalog backup, and a lock file. A scan found no credentials in them, and the asset shows
+  0 downloads.
+- Packaging now copies **git-tracked files only**, and refuses to build (exit 1) if any packaged
+  file is git-ignored. The rm list stays in place as a second safeguard.
+
 ## [0.25.7] — 2026-10-06
 
 ### Fixed
@@ -239,7 +282,7 @@ Sessions stop editing long files from a truncated view, and free-API sessions st
 - **Classifier Source selector** (y): NVIDIA API / Local Devstral / Auto (local on local, remote on remote)
 - **Bypass Permissions toggle** (p): Blind-trust auto mode for cloud sessions (`bypassPermissions`)
 - Both menu item and screen title use cloud + wrench emojis with space: `☁️ 🔧 Cloud Session Configuration`
-- Persists in `session-menu.local.json` (schema v4) under `intercept_agents` and `cloud_bypass_permissions`
+- ~~Persists in `session-menu.local.json`~~ **Correction (0.26.0): this was never true** — the picker never loaded or saved these three fields. See 0.26.0.
 
 **HomeScreen**: Cloud session configuration moved to 3rd position (after Local/Remote)
 

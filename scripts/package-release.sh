@@ -26,13 +26,27 @@ mkdir -p "$PLUGIN_DIR"
 mkdir -p "$PLUGIN_DIR/.claude-plugin"
 cp "$REPO_ROOT/.claude-plugin/plugin.json" "$PLUGIN_DIR/.claude-plugin/"
 
-# Copy core plugin directories
+# Copy core plugin directories — TRACKED FILES ONLY. `cp -r` used to copy the working tree, so
+# every untracked private file (git-ignored by the `config/*.local.*` PATTERN) shipped unless it
+# was also named in the rm list below: 0.25.7's tarball carried four (a config.local.sh backup, a
+# private model catalog and its backup, a lock file). Git is the single source of truth for what
+# is public; the rm list below stays only as a second line of defence.
 for dir in bin config install skills hooks; do
     if [[ -d "$REPO_ROOT/$dir" ]]; then
-        echo "  Copying $dir/..."
-        cp -r "$REPO_ROOT/$dir" "$PLUGIN_DIR/"
+        echo "  Copying $dir/ (tracked files only)..."
+        ( cd "$REPO_ROOT" && git ls-files -z -- "$dir" ) | while IFS= read -r -d '' f; do
+            mkdir -p "$PLUGIN_DIR/$(dirname "$f")"
+            cp -p "$REPO_ROOT/$f" "$PLUGIN_DIR/$f"
+        done
     fi
 done
+# Refuse to package anything git ignores (belt and braces: catches a tracked-then-ignored file too).
+leaked="$(cd "$PLUGIN_DIR" && find . -type f | sed 's|^\./||' | (cd "$REPO_ROOT" && git check-ignore --stdin --no-index) || true)"
+if [[ -n "$leaked" ]]; then
+    echo "ERROR: release would contain git-ignored (private) files:" >&2
+    printf '%s\n' "$leaked" | sed 's/^/  /' >&2
+    exit 1
+fi
 
 # Copy essential root files
 for file in README.md CHANGELOG.md VERSION config.example.sh config.local.sh.example PLUGIN-INSTALLER-README.md RELEASE.md; do
