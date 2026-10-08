@@ -1312,6 +1312,16 @@ elif [[ "$MODEL" == SELECT ]]; then
     MODEL="$(choose_model "$PROV")" || exit $?
 fi
 _valid_model "$MODEL" || exit 2
+
+# Cerebras: its free tier caps output at 40960 and reserves tokens from the per-minute budget
+# based on the requested max_tokens. To avoid burning 30k/min on a single 128000 request that
+# gets silently capped, lower the ceiling for Cerebras unless the user explicitly overrode it.
+if [[ "$PROV" == "cerebras" && -z "${LA_REMOTE_MAX_OUTPUT_TOKENS:-}" ]]; then
+    if (( MAX_OUT > 40960 )); then
+        MAX_OUT=40960
+    fi
+fi
+
 DISP="$(_field "$ENTRY" 4)"; TIER="$(_field "$ENTRY" 5)"
 # Extract autocompaction default from roster (7th field) — used when LA_AUTO_COMPACT_WINDOW not set
 AC_DEFAULT="$(_field "$ENTRY" 7)"

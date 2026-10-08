@@ -631,6 +631,40 @@ with open(os.environ['CLAUDE_MAXOUT_ENV'],'w') as f:
         self.assertEqual(value, '128000')
         self.assertIn('LA_REMOTE_MAX_OUTPUT_TOKENS must be a positive integer', err)
 
+    def test_cerebras_default_ceiling_is_40960(self):
+        """Cerebras silently caps at 40960 and reserves TPM based on requested max_tokens.
+
+        PROBED 2026-10-08: max_tokens=128000 drops ~16k from the 30k/min budget; max_tokens=8192
+        drops ~8k. Cerebras then serves at most 40960 output tokens. The launcher lowers the
+        default ceiling for Cerebras to 40960 so the TPM budget lasts for ~2 turns instead of
+        half a turn. An explicit LA_REMOTE_MAX_OUTPUT_TOKENS still wins.
+        """
+        self.env['CLAUDE_MAXOUT_ENV'] = str(self.root / 'maxout-env')
+        self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture all ports free"; exit 0; fi\nexit 1\n')
+        self.stub('claude', """#!/usr/bin/env python3
+import os,sys
+if '--help' in sys.argv:
+    print('Fixture Claude; CLAUDE_MAXOUT_ENV captures CLAUDE_CODE_MAX_OUTPUT_TOKENS.'); sys.exit(0)
+with open(os.environ['CLAUDE_MAXOUT_ENV'],'w') as f:
+    f.write(os.environ.get('CLAUDE_CODE_MAX_OUTPUT_TOKENS','<unset>'))
+""")
+        capture = self.root / 'maxout-env'
+
+        def child_value(*extra):
+            capture.unlink(missing_ok=True)
+            result = self.run_cli('cerebras-oss120', '--include-trials', *extra, '-p', 'fixture prompt')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(capture.exists(), 'claude was never launched')
+            return capture.read_text(), result.stderr
+
+        # Default for Cerebras is 40960, not 128000
+        self.assertEqual(child_value()[0], '40960')
+
+        # An explicit override still wins (even if above the provider's real cap).
+        self.env['LA_REMOTE_MAX_OUTPUT_TOKENS'] = '128000'
+        self.addCleanup(self.env.pop, 'LA_REMOTE_MAX_OUTPUT_TOKENS', None)
+        self.assertEqual(child_value()[0], '128000')
+
     def test_interactive_toggles_are_applied_not_merely_parsed(self):
         """Every advertised toggle must change the RESOLVED launch state.
 

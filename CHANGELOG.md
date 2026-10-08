@@ -1,3 +1,21 @@
+## [0.26.3] — 2026-10-08
+
+Cerebras free-API sessions get a realistic output ceiling.
+
+### Fixed
+- **Cerebras free tier silently caps at 40960** (`bin/remote-session.sh`): the provider's free
+  tier accepts any max_tokens in the request but serves at most 40960 output tokens. Worse, it
+  reserves the full requested max_tokens from its 30k tokens-per-minute budget, so a 128000
+  request burns ~16k/min — half the budget for a turn that never exceeds 40960. The launcher
+  now defaults Cerebras to **40960** unless the user explicitly set `LA_REMOTE_MAX_OUTPUT_TOKENS`.
+  Probed 2026-10-08: max_tokens=128000 dropped ~16k from the minute budget; max_tokens=8192
+  dropped ~8k; max_tokens=40960 dropped ~4k. Verified live: one 128000 request left 13k/min,
+  three 40960 requests left 18k/min.
+
+### Tests
+- `test_cerebras_default_ceiling_is_40960` asserts the default is 40960 and an explicit override
+  still wins.
+
 ## [0.26.2] — 2026-10-08
 
 Free-API sessions no longer stop at 8192 output tokens.
