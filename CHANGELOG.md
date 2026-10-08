@@ -1,3 +1,43 @@
+## [0.26.2] — 2026-10-08
+
+Free-API sessions no longer stop at 8192 output tokens.
+
+### Fixed
+- **"Claude's response exceeded the 8192 output token maximum"** (`bin/remote-session.sh`): Claude
+  Code sends `CLAUDE_CODE_MAX_OUTPUT_TOKENS` as `max_tokens` on every request, and LiteLLM lets the
+  request's value override the proxy config (`{**litellm_params, **kwargs}`). So the default of
+  8192 was the real ceiling for every provider and effort. The default is now **128000**, the
+  most Claude Code accepts for the spoofed `claude-opus-5`; it clamps anything higher, measured on
+  2.1.291. `LA_REMOTE_MAX_OUTPUT_TOKENS` still overrides it, and a non-integer value is refused
+  with a warning.
+- **The effort → `max_tokens` mapping from 0.21.5 was removed.** It wrote `max_tokens:
+  65536/131072/262144` into the proxy YAML, and none of it ever reached a provider (captured
+  upstream: the request's 8192 went out every time). Effort still sets `reasoning_effort` where
+  the model family takes it. The ceiling is now the maximum at every effort, because a ceiling
+  only truncates output; it does not buy deeper reasoning.
+
+### Added
+- **Per-provider output caps learned from the provider's own 400** (`bin/la_proxy_hooks.py`, fix
+  4). NIM, Gemini, Cerebras and OpenRouter accept 128000 (probed 2026-10-08). Groq rejects
+  anything above its cap, for example "`max_tokens` must be less than or equal to `16384`" for
+  qwen3.8 and 65536 for gpt-oss. The failure hook reads the cap from that error and clamps that
+  model's later requests to it. A new `router_settings.retry_policy.BadRequestErrorRetries: 1`
+  retries the failing turn once at the learned cap, so each model gets exactly its provider's
+  ceiling and never a guessed lower one. Verified end to end: Claude Code → real proxy and hook →
+  a strict upstream stub. The first turn went out at 128000, was rejected, was retried at 16384
+  and succeeded, and the second turn went straight out at 16384.
+
+### Tests
+- `test_output_ceiling_reaches_claude_and_is_not_overridden_by_effort` asserts the value in the
+  real `claude` child's environment at no effort, `low` and `max`, plus the override and the
+  malformed-value cases. Mutation-checked: restoring the 8192 default fails it.
+- `test_effort_reaches_the_request_body_per_model_family` used to assert the dead `max_tokens`
+  lines, which pinned the bug. It now asserts that they are absent and that the retry policy is
+  written.
+- `tests/test_la_proxy_hooks.py::OutputCapTests` (5 tests): Groq's real 400 text teaches the cap,
+  later requests are clamped, unrelated 400s teach nothing, the OpenAI phrasing is recognised,
+  and the NIM key normalisation still applies when a request is clamped.
+
 ## [0.26.1] — 2026-10-08
 
 Test-suite repair: the full suite (shell + pytest + picker venv) is green again on a clean

@@ -322,32 +322,32 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
 
         # Nemotron: thinking is controlled by -thinking suffix, NOT effort.
         # With no -thinking suffix, thinking defaults to false regardless of effort.
-        # But effort NOW maps to max_tokens for ALL Nemotron models (not just thinking).
         ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
         text = write('nvidia', ultra, 'high')
         self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
         self.assertNotIn('reasoning_effort', text,
                          'Nemotron does not accept reasoning_effort; sending it is the bug')
-        # With -thinking suffix OFF but high effort, max_tokens is still increased
-        self.assertIn('      max_tokens: 65536\n', text)
         # With -thinking suffix, thinking is explicitly enabled.
         text = write('nvidia', ultra, 'high', 'true')
         self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
         self.assertNotIn('reasoning_effort', text)
-        # With -thinking suffix + high effort, max_tokens=65536
-        self.assertIn('      max_tokens: 65536\n', text)
-        # With -thinking suffix + max effort, max_tokens=262144 (distinct from high)
-        text = write('nvidia', ultra, 'max', 'true')
-        self.assertIn('      max_tokens: 262144\n', text)
-        # With no effort and no -thinking suffix, thinking defaults to false.
-        # Low/medium effort don't set max_tokens (provider default used)
-        text = write('nvidia', ultra, 'low')
-        self.assertNotIn('max_tokens', text)
-        text = write('nvidia', ultra, 'medium')
-        self.assertNotIn('max_tokens', text)
         text = write('nvidia', ultra, '')
         self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
-        self.assertNotIn('max_tokens', text)
+
+        # NO per-deployment max_tokens, at any effort. 0.21.5 wrote one per effort level
+        # (65536/131072/262144); it never reached the provider, because Claude Code sends
+        # max_tokens on every request and LiteLLM lets the request's value win. A stale line
+        # here reads as a working effort->budget mapping while doing nothing -- see
+        # test_output_ceiling_reaches_claude_and_is_not_overridden_by_effort for the real knob.
+        for level in ('', 'low', 'medium', 'high', 'xhigh', 'max'):
+            for thinking in ('false', 'true'):
+                with self.subTest(effort=level, thinking=thinking):
+                    self.assertNotIn('max_tokens', write('nvidia', ultra, level, thinking))
+
+        # One BadRequest retry, so a provider that 400s on the output ceiling is retried at the
+        # cap la_proxy_hooks.py learned from that 400 instead of failing the turn.
+        self.assertIn('router_settings:\n  retry_policy:\n    BadRequestErrorRetries: 1\n',
+                      write('groq', 'qwen/qwen3.8-27b', ''))
 
         # A non-Nemotron NVIDIA model DOES take the OpenAI-compatible field.
         text = write('nvidia', 'nvidia/gpt-oss-20b', 'high')
@@ -587,6 +587,49 @@ with open(os.environ['CLAUDE_STREAM_ENV'],'w') as f:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(capture.read_text())['API_TIMEOUT_MS'], '1800000',
                          'LA_REMOTE_API_TIMEOUT_MS must override the default cap')
+
+    def test_output_ceiling_reaches_claude_and_is_not_overridden_by_effort(self):
+        """CLAUDE_CODE_MAX_OUTPUT_TOKENS in the REAL claude environment is the output ceiling.
+
+        REGRESSION GUARD. The default was 8192, and Nemotron sessions died mid-turn with
+        "Claude's response exceeded the 8192 output token maximum" even at --effort max. Claude
+        Code sends this value as max_tokens on every request and LiteLLM lets it override the
+        proxy config, so it is the ONLY setting that reaches the provider. 128000 is the most
+        Claude Code accepts for the spoofed claude-opus-5 (measured on 2.1.291: higher is
+        clamped). Asserted on the child's environment, not on the dry-run print.
+        """
+        self.env['CLAUDE_MAXOUT_ENV'] = str(self.root / 'maxout-env')
+        self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture all ports free"; exit 0; fi\nexit 1\n')
+        self.stub('claude', """#!/usr/bin/env python3
+import os,sys
+if '--help' in sys.argv:
+    print('Fixture Claude; CLAUDE_MAXOUT_ENV captures CLAUDE_CODE_MAX_OUTPUT_TOKENS.'); sys.exit(0)
+with open(os.environ['CLAUDE_MAXOUT_ENV'],'w') as f:
+    f.write(os.environ.get('CLAUDE_CODE_MAX_OUTPUT_TOKENS','<unset>'))
+""")
+        capture = self.root / 'maxout-env'
+
+        def child_value(*extra):
+            capture.unlink(missing_ok=True)
+            result = self.run_cli('nvidia-nemotron-ultra-thinking', *extra, '-p', 'fixture prompt')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(capture.exists(), 'claude was never launched')
+            return capture.read_text(), result.stderr
+
+        # The ceiling is the maximum at EVERY effort, including none: a ceiling only truncates.
+        for effort in ((), ('--effort', 'low'), ('--effort', 'max')):
+            with self.subTest(effort=effort):
+                self.assertEqual(child_value(*effort)[0], '128000')
+
+        # An explicit override still wins.
+        self.env['LA_REMOTE_MAX_OUTPUT_TOKENS'] = '32000'
+        self.addCleanup(self.env.pop, 'LA_REMOTE_MAX_OUTPUT_TOKENS', None)
+        self.assertEqual(child_value()[0], '32000')
+        # A malformed override is refused loudly rather than handed to claude.
+        self.env['LA_REMOTE_MAX_OUTPUT_TOKENS'] = '64k'
+        value, err = child_value()
+        self.assertEqual(value, '128000')
+        self.assertIn('LA_REMOTE_MAX_OUTPUT_TOKENS must be a positive integer', err)
 
     def test_interactive_toggles_are_applied_not_merely_parsed(self):
         """Every advertised toggle must change the RESOLVED launch state.

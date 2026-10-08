@@ -23,7 +23,8 @@
 # Environment:
 #   LA_API_KEYS_DIR             credential dir (default ~/.api_keys)
 #   LA_REMOTE_PROXY_PORT_MIN/MAX  proxy port scan range (default 4141-4151)
-#   LA_REMOTE_MAX_OUTPUT_TOKENS   CLAUDE_CODE_MAX_OUTPUT_TOKENS (default 8192)
+#   LA_REMOTE_MAX_OUTPUT_TOKENS   CLAUDE_CODE_MAX_OUTPUT_TOKENS (default 128000 = Claude Code's own
+#                                 ceiling for the spoofed model; the proxy clamps per provider)
 #   LA_REMOTE_KEEP_PROXY=1        leave the proxy running after the session exits
 #   LA_REMOTE_ENABLE_MCP=1        enable MCPs for free-API sessions (default: 0, disabled)
 #   LA_RTK_IN_FREE_API=1          keep rtk's Bash-output rewriting ON (default: off on this lane)
@@ -90,7 +91,18 @@ _check_claude_version() {
 }
 _check_claude_version
 
-MAX_OUT="${LA_REMOTE_MAX_OUTPUT_TOKENS:-8192}"
+# OUTPUT CEILING. Claude Code puts CLAUDE_CODE_MAX_OUTPUT_TOKENS into EVERY request as max_tokens,
+# and LiteLLM lets the request's value override anything in the proxy config ({**litellm_params,
+# **kwargs}), so THIS is the only knob that reaches the provider. The old 8192 default made long
+# turns die with "Claude's response exceeded the 8192 output token maximum" whatever effort said.
+# 128000 is the upper limit Claude Code itself accepts for the spoofed claude-opus-5 (it clamps
+# anything higher, measured on 2.1.291). Providers with a LOWER cap (Groq: 65536 gpt-oss, 16384
+# qwen) answer 400 with their number; la_proxy_hooks.py learns it and retries clamped.
+MAX_OUT="${LA_REMOTE_MAX_OUTPUT_TOKENS:-128000}"
+if ! [[ "$MAX_OUT" =~ ^[1-9][0-9]*$ ]]; then
+    echo "remote-session: LA_REMOTE_MAX_OUTPUT_TOKENS must be a positive integer, got '$MAX_OUT'; using 128000" >&2
+    MAX_OUT=128000
+fi
 INCLUDE_TRIALS=0
 : "${DRY_RUN:=0}"
 MODE="launch"
@@ -701,14 +713,15 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     #   * reasoning_effort (low|medium|high) -- the OpenAI-compatible spelling. LiteLLM
     #     translates it per provider, so it is the right default for OpenAI-compatible routes.
     #   * NVIDIA Nemotron does NOT take reasoning_effort; it gates reasoning with
-    #     enable_thinking inside chat_template_kwargs. Effort does NOT flip thinking on/off -
-    #     that is controlled explicitly by the -thinking suffix. For Nemotron WITH thinking
-    #     enabled, effort MAPS TO max_tokens (the practical effort control). For Nemotron
-    #     WITHOUT thinking, effort is ignored (8192 default is fine). Other NVIDIA models
-    #     DO accept reasoning_effort.
-    # Claude Code offers five levels; for Nemotron with thinking we map each to
-    # distinct max_tokens values. For non-Nemotron, xhigh/max fold to high for
-    # reasoning_effort (OpenAI only accepts low/medium/high).
+    #     enable_thinking inside chat_template_kwargs, controlled by the -thinking suffix,
+    #     not by effort. So effort has no request-body field to travel in for Nemotron.
+    #     Other NVIDIA models DO accept reasoning_effort.
+    # Claude Code offers five levels; xhigh/max fold to high for reasoning_effort (OpenAI
+    # only accepts low/medium/high).
+    # NOT max_tokens. 0.21.5 mapped effort to a per-deployment max_tokens here; it never took
+    # effect, because Claude Code always sends max_tokens and the request's value overrides the
+    # deployment's. The output ceiling is CLAUDE_CODE_MAX_OUTPUT_TOKENS (MAX_OUT above), and it
+    # is the maximum for every effort: a ceiling only truncates, it never buys deeper reasoning.
     local mapped_effort=""
     case "$effort" in
         low)              mapped_effort="low" ;;
@@ -720,20 +733,8 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         *)                echo "remote-session: unknown effort '\''$effort'\'', ignoring" >&2 ;;
     esac
     local effort_line=""
-    # For models with reasoning support, map effort to max_tokens (practical effort control).
-    # Only set max_tokens for high/xhigh/max to AVOID artificially lowering provider defaults.
-    # low/medium use model default; high/xhigh/max get increased budgets for deeper reasoning.
-    local max_tokens_for_effort=""
-    if [[ -n "$mapped_effort" ]]; then
-        case "$mapped_effort" in
-            high)             max_tokens_for_effort=65536 ;;     # 64k - deeper reasoning
-            xhigh)            max_tokens_for_effort=131072 ;;    # 128k - very deep reasoning
-            max)              max_tokens_for_effort=262144 ;;    # 256k - maximum practical
-        esac
-    fi
     if [[ -n "$mapped_effort" ]]; then
         # Map xhigh/max to high for reasoning_effort (OpenAI only accepts low/medium/high)
-        # but keep original mapped_effort for max_tokens mapping
         local reasoning_effort="$mapped_effort"
         case "$mapped_effort" in
             xhigh|max) reasoning_effort="high" ;;
@@ -741,7 +742,6 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         case "$prov" in
             nvidia)
                 # Nemotron reads enable_thinking, not reasoning_effort.
-                # For ALL Nemotron models, effort maps to max_tokens (set below in model loop).
                 # Other NVIDIA models DO accept reasoning_effort.
                 if [[ "$model" != *nemotron* ]]; then
                     effort_line="      reasoning_effort: $reasoning_effort"
@@ -773,10 +773,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             [[ -n "$api_base" ]] && echo "      api_base: $api_base"
             [[ -n "$think_line" ]] && echo "$think_line"
             [[ -n "$effort_line" ]] && echo "$effort_line"
-            # For models with reasoning support, map effort to max_tokens (practical effort control)
-            if [[ -n "$max_tokens_for_effort" ]]; then
-                echo "      max_tokens: $max_tokens_for_effort"
-            fi
+            # No max_tokens here: Claude Code always sends one and it overrides this (see MAX_OUT).
             # Temperature control (if provided)
             if [[ -n "$temperature" ]]; then
                 echo "      temperature: $temperature"
@@ -806,7 +803,13 @@ YAML
         echo "remote-session: NOTE proxy hooks DISABLED (LA_REMOTE_PROXY_HOOKS=0) — no NVIDIA" >&2
         echo "  rate limiting, no NIM parameter fixes, no LiteLLM stream-bug check." >&2
     fi
+    # ONE retry on HTTP 400, so a provider that rejects the output ceiling (Groq: "`max_tokens`
+    # must be less than or equal to `16384`") is retried at the cap la_proxy_hooks.py just
+    # learned from that error, instead of the turn failing. Any other 400 costs one extra call.
     cat >> "$cfg" <<'YAML'
+router_settings:
+  retry_policy:
+    BadRequestErrorRetries: 1
 general_settings:
   master_key: sk-local-agents-remote
 YAML

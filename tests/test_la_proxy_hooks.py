@@ -205,5 +205,67 @@ class Upstream429Tests(unittest.TestCase):
         self.assertEqual(self.hooks._bucket.status()["cooldown_remaining"], 0.0)
 
 
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class OutputCapTests(unittest.TestCase):
+    """Fix 4: a provider's own 400 sets its output ceiling; nothing else lowers max_tokens.
+
+    The text is Groq's REAL rejection of max_tokens=128000 (probed 2026-10-08). The failure side
+    sees the bare model id with custom_llm_provider, the pre-call side sees "groq/<id>" -- the
+    measured shapes from a live proxy, which is why both are exercised here.
+    """
+    GROQ_400 = ('GroqException - {"error": {"message": "`max_tokens` must be less than or equal '
+                'to `16384`, the maximum value for `max_tokens` is less than the `context_window` '
+                'for this model", "type": "invalid_request_error", "param": "max_tokens"}}')
+
+    def setUp(self):
+        self.mod = load_hooks()
+        self.hooks = self.mod.LAProxyHooks()
+        self.hooks._bucket = None
+
+    def _bad_request(self, text):
+        import litellm
+        return litellm.BadRequestError(message=text, model="qwen/qwen3.8-27b", llm_provider="groq")
+
+    def _fail(self, exc):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            asyncio.run(self.hooks.async_log_failure_event(
+                {"model": "qwen/qwen3.8-27b", "custom_llm_provider": "groq", "exception": exc},
+                None, None, None))
+        return err.getvalue()
+
+    def _pre(self, max_tokens, model="groq/qwen/qwen3.8-27b", provider="groq"):
+        out = asyncio.run(self.hooks.async_pre_call_deployment_hook(
+            {"model": model, "custom_llm_provider": provider, "max_tokens": max_tokens}, None))
+        return None if out is None else out["max_tokens"]
+
+    def test_nothing_is_clamped_before_the_provider_says_so(self):
+        self.assertIsNone(self._pre(128000), "no guessed cap: an unseen model keeps the full ceiling")
+
+    def test_groq_400_teaches_the_cap_and_later_requests_are_clamped(self):
+        log = self._fail(self._bad_request(self.GROQ_400))
+        self.assertIn("rejects max_tokens above 16384", log)
+        self.assertEqual(self._pre(128000), 16384)
+        self.assertIsNone(self._pre(8000), "a request already under the cap is left alone")
+        # Other models are not affected by one model's cap.
+        self.assertIsNone(self._pre(128000, model="groq/openai/gpt-oss-120b"))
+
+    def test_unrelated_400_teaches_nothing(self):
+        self._fail(self._bad_request("Unsupported parameter(s): `safeguards`"))
+        self.assertIsNone(self._pre(128000))
+
+    def test_openai_phrasing_is_recognised(self):
+        exc = self._bad_request("max_tokens is too large: 128000. This model supports at most "
+                                "4096 completion tokens, whereas you provided 128000.")
+        self.assertEqual(self.mod.output_cap_from_error(exc), 4096)
+
+    def test_nvidia_clamp_still_normalises_nim_keys(self):
+        self.mod._LEARNED_CAPS["nvidia/x"] = 1000
+        out = asyncio.run(self.hooks.async_pre_call_deployment_hook(
+            {"model": "nvidia_nim/nvidia/x", "custom_llm_provider": "nvidia_nim",
+             "max_tokens": 5000, "safeguards": 1}, None))
+        self.assertEqual(out["max_tokens"], 1000)
+        self.assertNotIn("safeguards", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

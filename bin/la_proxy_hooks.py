@@ -27,6 +27,14 @@ Bug Bash plan, W1):
    failure hook pauses EVERY proxy (Retry-After if sent, else LA_NVIDIA_429_COOLDOWN) and logs
    "NVIDIA 429 with N/40 requests in the last 60 s", the figure that locates the real limit.
 
+4. Output ceiling, ANY provider. remote-session.sh sets CLAUDE_CODE_MAX_OUTPUT_TOKENS to Claude
+   Code's own maximum (128000), and Claude Code sends that as max_tokens on every request. Most
+   free providers accept it (NIM, Gemini, Cerebras, OpenRouter: measured 2026-10-08), but some
+   reject anything above their own cap with HTTP 400 -- Groq: "`max_tokens` must be less than or
+   equal to `16384`". The failure hook reads the cap out of that error, and every later request
+   for that model is clamped to it; the proxy YAML's one BadRequest retry makes the failing turn
+   itself succeed. So each model gets exactly its provider's ceiling, never a guessed lower one.
+
 Usage:
   la_proxy_hooks.py --self-test   check the installed LiteLLM stream adapter handles mixed chunks
   la_proxy_hooks.py --help
@@ -39,6 +47,7 @@ Environment:
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -129,6 +138,56 @@ def _is_nvidia(kwargs: dict) -> bool:
     return model.startswith(NVIDIA_PREFIX) or provider == "nvidia_nim"
 
 
+# ---- fix 4: learn each provider's output ceiling from its own 400 -------------------------
+
+# The wording providers use when max_tokens is over their cap. Groq: "`max_tokens` must be less
+# than or equal to `16384`"; OpenAI-style: "max_tokens is too large: 200000. This model supports
+# at most 16384 completion tokens". Extend here when a new phrasing shows up in a proxy log.
+_CAP_PATTERNS = (
+    re.compile(r"max_tokens`?\s+must\s+be\s+less\s+than\s+or\s+equal\s+to\s+`?(\d+)", re.I),
+    re.compile(r"supports\s+at\s+most\s+(\d+)\s+completion\s+tokens", re.I),
+)
+# Learned per model for this proxy's lifetime. A proxy serves one session, so this is per session.
+_LEARNED_CAPS: dict[str, int] = {}
+
+
+def _cap_key(kwargs: dict) -> str:
+    """Same key from the pre-call side ("groq/qwen/x") and the failure side ("qwen/x")."""
+    model = str(kwargs.get("model") or "")
+    provider = str(kwargs.get("custom_llm_provider") or "")
+    return model[len(provider) + 1:] if provider and model.startswith(provider + "/") else model
+
+
+def output_cap_from_error(exc) -> int | None:
+    """The provider's max_tokens ceiling if `exc` is a rejection of max_tokens, else None."""
+    if exc is None or getattr(exc, "status_code", None) not in (400, None):
+        return None
+    text = str(exc)
+    for pat in _CAP_PATTERNS:
+        m = pat.search(text)
+        if m and int(m.group(1)) > 0:
+            return int(m.group(1))
+    return None
+
+
+def learn_output_cap(kwargs: dict) -> int | None:
+    cap = output_cap_from_error((kwargs or {}).get("exception"))
+    if cap is not None:
+        _LEARNED_CAPS[_cap_key(kwargs)] = cap
+    return cap
+
+
+def clamp_max_tokens(kwargs: dict) -> dict | None:
+    """kwargs with max_tokens lowered to the learned cap, or None when nothing changes."""
+    cap = _LEARNED_CAPS.get(_cap_key(kwargs))
+    asked = kwargs.get("max_tokens")
+    if cap is None or not isinstance(asked, int) or asked <= cap:
+        return None
+    out = dict(kwargs)
+    out["max_tokens"] = cap
+    return out
+
+
 try:
     from litellm.integrations.custom_logger import CustomLogger
 except Exception:                                      # allows --help/--self-test w/o litellm
@@ -171,8 +230,11 @@ class LAProxyHooks(CustomLogger):
             self._bucket = get_limiter()
 
     async def async_pre_call_deployment_hook(self, kwargs, call_type):
+        clamped = clamp_max_tokens(kwargs)               # fix 4: every provider
+        if clamped is not None:
+            kwargs = clamped
         if not _is_nvidia(kwargs):
-            return None
+            return clamped
         if self._bucket is not None:
             waited = await self._bucket.aacquire()
             if waited > 0:
@@ -181,6 +243,12 @@ class LAProxyHooks(CustomLogger):
         return normalize_nvidia_kwargs(kwargs)
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        # fix 4, any provider: a 400 naming the provider's max_tokens cap is remembered, so the
+        # router's BadRequest retry and every later request go out clamped to it.
+        cap = learn_output_cap(kwargs or {})
+        if cap is not None:
+            print(f"la_proxy_hooks: {_cap_key(kwargs)} rejects max_tokens above {cap}; "
+                  f"clamping its requests to {cap} for this session", file=sys.stderr)
         # Runs once per failed upstream ATTEMPT (router retries included). A 429 means our
         # window disagrees with NVIDIA's count: pause every proxy on the machine and log how
         # many requests the window held, which is the number that locates the real limit.
