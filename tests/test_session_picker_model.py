@@ -462,9 +462,16 @@ class GroupingTests(unittest.TestCase):
         self.assertIn("y", actions, "Missing Classifier toggle (y)")
         self.assertIn("p", actions, "Missing Bypass Permissions toggle (p)")
 
+        # x/y/p never reach a gateway session (audit 2026-10-08), and their labels say so;
+        # the state text is what precedes that note.
+        def state(key):
+            label = actions[key].label
+            self.assertTrue(label.endswith(m.NOT_GATEWAY_NOTE), label)
+            return label[: -len(m.NOT_GATEWAY_NOTE)].rstrip()
+
         # Intercept Agents toggle
         self.assertIn("Intercept Agents", actions["x"].label)
-        self.assertTrue(actions["x"].label.endswith("ON (FreeAgent)") or actions["x"].label.endswith("OFF (Native Agent)"))
+        self.assertTrue(state("x").endswith("ON (FreeAgent)") or state("x").endswith("OFF (Native Agent)"))
 
         # Classifier toggle
         self.assertIn("Classifier:", actions["y"].label)
@@ -472,7 +479,7 @@ class GroupingTests(unittest.TestCase):
 
         # Bypass Permissions toggle
         self.assertIn("Bypass Permissions", actions["p"].label)
-        self.assertTrue(actions["p"].label.endswith("ON") or actions["p"].label.endswith("OFF"))
+        self.assertTrue(state("p").endswith("ON") or state("p").endswith("OFF"))
 
         # Toggles actually work - test each one
         initial_intercept = s.intercept_agents

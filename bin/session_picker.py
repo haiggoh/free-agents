@@ -32,6 +32,7 @@ sys.path.insert(0, str(BIN))
 
 import emoji_constants as ec  # noqa: E402
 import session_menu_state as sms  # noqa: E402
+import cloud_session_env as cse  # noqa: E402
 import session_picker_model as m  # noqa: E402
 
 try:
@@ -266,6 +267,7 @@ class Picker(App):
         self.theme = "textual-ansi"
         state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
         self.state_warnings = list(state.warnings)
+        cloud = cse.load()      # read-only; reflects ~/.claude/settings.json + installed plugins
         self.settings = m.Settings(
             local_effort=state.effort["local_session"],
             remote_effort=state.effort["remote_api_session"],
@@ -283,6 +285,10 @@ class Picker(App):
             local_capable_shown=flags.local_capable_shown or os.environ.get("CSL_LOCAL_CAPABLE") == "1",
             on_effort_saved=self._save_effort,
             on_temperature_saved=self._save_temperature,
+            security_review=cloud["security_review"],
+            security_review_custom=cloud["custom_model"],
+            security_review_offered=cloud["plugin_active"] or cloud["override_present"],
+            on_cloud_saved=self._save_cloud,
             # "Go last": restored from the store; written when a launch request is made.
             last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
                                  **state.last_launched},
@@ -312,6 +318,17 @@ class Picker(App):
         warning = sms.save_temperature(self._config_dir(), lane, value)
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
+
+    def _save_cloud(self, values):
+        # Written to ~/.claude/settings.json env, which every cloud session applies (any login, any
+        # launcher). A failed write is shown, never swallowed: an unsaved toggle would look applied
+        # while the next session ignores it.
+        try:
+            cse.save(values["security_review"])
+        except (OSError, ValueError) as exc:
+            warning = f"cloud setting not saved: {exc}"
+            if warning not in self.state_warnings:
+                self.state_warnings.append(warning)
 
     def _save_last_launched(self, lane, alias, tier):
         try:
