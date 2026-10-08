@@ -1,3 +1,38 @@
+## [0.26.1] — 2026-10-08
+
+Test-suite repair: the full suite (shell + pytest + picker venv) is green again on a clean
+worktree, and fixing the tests surfaced real launcher bugs.
+
+### Fixed
+- **Picker toggles ignored** (`bin/csl`): `csl --picker-launch` overwrote the picker's
+  `LA_QUEUE_STOP_HOOK` / `INTERCEPT_AGENTS` with `CSL_*` defaults, so turning the queued-prompt
+  hook on or interception off in the picker did nothing. An exported value now wins.
+- **Rapid Auto sessions resolved as `unknown`** (`bin/launch-claude-agent-rapid-auto.sh`): the
+  identity overrides were a plain assignment list in front of `$(...)`, so
+  `la-session-identity.sh` never saw them. Now passed with `env` inside the substitution.
+- **`local-llm-hotswap.sh --dry-run` started a real server.** It now refuses (exit 2) and points
+  at `launch-claude-agent.sh --dry-run`.
+- **Classifier auto-detect never saw a local session** (`bin/launch-claude-agent.sh`): a
+  `[ = http://localhost:* ]` literal compare is now `[[ == ]]`.
+- **Launcher usage path aborted under bash 5.3** (`config/config-lib.sh`): an empty
+  `declare -A LA_RETIRED` is unbound under `set -u`; initialised with `=()`.
+- **`lk` / `lowkey` aliases written unquoted** (`setup-shortcuts.sh`): broke on install paths
+  with spaces.
+- **`LA_TELEMETRY_PORT` bypassed `LA_TELEMETRY_LOG_GLOB`** (`bin/la-telemetry-token-rate.sh`).
+- `bin/` is shellcheck-clean (`tests/lint.sh`); `export X=$(...)` split so failures are not masked.
+
+### Tests
+- **The suite no longer sends a real desktop notification** (`tests/test_update_check.py`): the
+  outdated-path test fired a real "Backend updates available: rapid-mlx 0.15.2->0.15.3"
+  notification and wrote to `~/.claude/logs` on every run. `subprocess.run` and the log dir are
+  now patched.
+- New `tests/lib/sandbox.sh` copies the whole runtime (never `config/*.local.*`) instead of
+  hand-picked file lists that went stale.
+- `test_csl_menu.sh` rewritten for the post-0.22 picker-based csl; `test_session_profiles.sh`
+  drives the `--picker-launch` seam; `test_shared_rules` runs the real launcher in a sandbox.
+- Telemetry and launcher-smoke tests no longer read or race real machine state; the
+  `smoke_qwen38_mtp.sh` branch pin is optional (`SMOKE_EXPECTED_BRANCH`) and worktree-safe.
+
 ## [0.26.0] — 2026-10-08
 
 ### Added — a cloud setting that reaches every cloud session
