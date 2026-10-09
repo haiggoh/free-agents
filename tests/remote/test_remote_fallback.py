@@ -23,6 +23,7 @@ import json
 import os
 import socket
 import sys
+import tempfile as _tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -51,6 +52,10 @@ def load(name, filename):
     spec.loader.exec_module(mod)
     return mod
 
+
+# Provider.key() falls back to ${LA_API_KEYS_DIR:-~/.api_keys}/<id>. Point it at an EMPTY temp
+# dir for the whole run, so "key unset" scenarios never read the user's real key files.
+os.environ["LA_API_KEYS_DIR"] = _tempfile.mkdtemp(prefix="rf-keys-")
 
 core = load("rpc", "remote_provider_core.py")
 httpmod = load("rhttp", "remote_http.py")
@@ -156,8 +161,10 @@ check(set(core.PROVIDERS) == {"gemini", "groq", "openrouter", "cloudflare",
                               "github", "cerebras", "nvidia"},
       "all seven providers are declared")
 check(core.get("cerebras").tier == core.TRIAL, "cerebras is classified TRIAL (not free)")
-check(core.IMPLEMENTED == {"gemini"},
-      "MVP: only gemini is implemented; the rest are declared, not runnable")
+check(core.IMPLEMENTED == {"gemini", "nvidia"},
+      "gemini + nvidia are implemented; the rest are declared, not runnable")
+check(core.RATE_LIMITED <= core.IMPLEMENTED and "nvidia" in core.RATE_LIMITED,
+      "nvidia dispatches go through the machine-wide limiter")
 check(not core.get("groq") and core.get("groq").tier == core.RENEWING_FREE or True,
       "groq (declared) carries its tier even while unimplemented")
 

@@ -18,6 +18,13 @@ Usage (two interfaces):
   librarian-dispatch.py --port PORT --payload BODY.json [--outdir DIR]   # primary: full JSON body
   librarian-dispatch.py --port PORT --prompt "TEXT" [--model M] [--max-tokens N] [--outdir DIR]  # convenience
 
+Remote free APIs (same streaming + watchdog, no local server):
+  librarian-dispatch.py --provider nvidia --model nvidia/nemotron-3-ultra-550b-a55b --prompt "TEXT"
+  The key comes from the provider's env var or ${LA_API_KEYS_DIR:-~/.api_keys}/<provider>, and is
+  passed to curl through a 0600 header file, never argv. Rate-limited providers (NVIDIA) take a slot
+  from the machine-wide bucket in rate_limiter.py first -- the SAME bucket every LiteLLM proxy uses --
+  so parallel dispatches queue instead of spending the live sessions' 40 RPM. A 429 pauses everyone.
+
 BODY.json is a standard chat-completions request body (this script forces stream=true), e.g.:
   {"model":"<alias-or-spoof>","max_tokens":800,
    "messages":[{"role":"user","content":"<role + task + inputs + output spec>"}]}
@@ -73,7 +80,9 @@ def main():
     ap = argparse.ArgumentParser(
         epilog="Provide EITHER --payload BODY.json (primary) OR the convenience flags "
                "--prompt/--model, which synthesize the body. --outdir defaults to a fresh temp dir.")
-    ap.add_argument("--port", required=True)
+    ap.add_argument("--port", help="local server port (required unless --provider is given)")
+    ap.add_argument("--provider", help="remote provider id instead of a local port (e.g. nvidia, gemini); "
+                                       "see remote_provider_core.PROVIDERS")
     ap.add_argument("--payload", help="JSON chat-completions body file (primary interface)")
     ap.add_argument("--outdir", help="output dir (default: a fresh temp dir, path printed on start)")
     ap.add_argument("--prompt", help="convenience: user prompt; synthesizes the body when --payload is omitted")
@@ -89,6 +98,8 @@ def main():
 
     if not a.payload and not a.prompt:
         ap.error("provide either --payload BODY.json or --prompt TEXT")
+    if bool(a.port) == bool(a.provider):
+        ap.error("give exactly one of --port (local) or --provider (remote)")
     a.outdir = a.outdir or tempfile.mkdtemp(prefix="librarian-")
     os.makedirs(a.outdir, exist_ok=True)
 
@@ -101,8 +112,10 @@ def main():
     body.setdefault("stream_options", {"include_usage": True})
     req_path = os.path.join(a.outdir, "_req.json")
     json.dump(body, open(req_path, "w"))
-    url = "http://localhost:%s/v1/chat/completions" % a.port
     print("[dispatch] outdir=%s" % a.outdir, flush=True)
+    url, header_args, limiter, cleanup = _route(a)
+    if url is None:
+        return 2
 
     out_path = os.path.join(a.outdir, "output.txt")
     out = open(out_path, "w")
@@ -124,10 +137,13 @@ def main():
                 # No new tokens for a while — but a cold prefill of a large prompt is
                 # legitimately slow (tok~0 while the engine is busy). Distinguish hung from
                 # working by the SERVER's CPU: >0 = prefilling, ~0 = genuinely stuck.
-                if st["srv_pid"] is None:
+                if st["srv_pid"] is None and a.port:
                     st["srv_pid"] = _pid_on_port(a.port)
-                cpu = _cpu_pct(st["srv_pid"])
-                if cpu is None:
+                cpu = _cpu_pct(st["srv_pid"]) if a.port else None
+                if cpu is None and a.provider:
+                    flag = "  ⏳ no data %ds from %s (remote; queueing/thinking upstream)" % (
+                        int(since), a.provider)
+                elif cpu is None:
                     flag = "  ⚠ no data %ds (possible stall; CPU unknown)" % int(since)
                 elif cpu >= CPU_BUSY:
                     flag = "  ⏳ no tokens %ds but server CPU %.0f%% (prefilling, not hung)" % (int(since), cpu)
@@ -141,7 +157,7 @@ def main():
 
     proc = subprocess.Popen(
         ["curl", "-sN", "-X", "POST", url, "-H", "Content-Type: application/json",
-         "--data-binary", "@" + req_path],
+         *header_args, "--data-binary", "@" + req_path],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     wd = threading.Thread(target=watchdog, daemon=True)
@@ -195,6 +211,7 @@ def main():
         out.close()
         rout.close()
         proc.wait()
+        cleanup()
 
     elapsed = int(time.time() - st["t0"])
     usage = st.get("usage")
@@ -203,6 +220,13 @@ def main():
                     proc.stderr.read().decode("utf-8", "replace")[:200])
         print("[dispatch] NO DATA (t=%ds). Engine/HTTP response: %s" % (elapsed, body_txt),
               flush=True)
+        if limiter is not None and _looks_like_429(body_txt):
+            try:
+                info = limiter.note_429()
+                print("[limiter] %s 429: paused every caller %.0fs" % (a.provider, info["pause"]),
+                      file=sys.stderr, flush=True)
+            except Exception:
+                pass
         return 2
     print("[dispatch] DONE t=%ds tok~%d think~%d chars=%d usage=%s" % (
         elapsed, st["ntok"], st["rtok"], st["chars"], usage), flush=True)
@@ -212,6 +236,55 @@ def main():
               open(os.path.join(a.outdir, "done"), "w"))
     _record_savings(a, body, usage, st)
     return 0
+
+
+def _looks_like_429(text):
+    low = (text or "").lower()
+    return "429" in low or "too many requests" in low or "rate limit" in low
+
+
+def _route(a):
+    """(url, extra curl args, limiter-or-None, cleanup) for a local port or a remote provider."""
+    if a.port:
+        return "http://localhost:%s/v1/chat/completions" % a.port, [], None, (lambda: None)
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+    from remote_provider_core import RATE_LIMITED, get
+    prov = get(a.provider)
+    if prov is None:
+        print("[dispatch] unknown provider %r" % a.provider, file=sys.stderr)
+        return None, [], None, (lambda: None)
+    if not prov.config_present():
+        print("[dispatch] provider %s has no key (env %s or ~/.api_keys/%s)"
+              % (prov.id, prov.key_env, prov.id), file=sys.stderr)
+        return None, [], None, (lambda: None)
+    hdr = os.path.join(a.outdir, "_headers")
+    fd = os.open(hdr, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        for k, v in prov.auth_headers().items():
+            if v:
+                fh.write("%s: %s\n" % (k, v))
+
+    def cleanup():
+        try:
+            os.unlink(hdr)
+        except OSError:
+            pass
+
+    limiter = None
+    if prov.id in RATE_LIMITED and os.environ.get("LA_REMOTE_RATE_LIMIT", "1") != "0":
+        from rate_limiter import get_limiter
+        limiter = get_limiter()
+        try:
+            waited = limiter.acquire()
+        except Exception as exc:
+            cleanup()
+            print("[limiter] no %s slot: %s" % (prov.id, exc), file=sys.stderr, flush=True)
+            return None, [], None, (lambda: None)
+        if waited > 0:
+            print("[limiter] %s bucket queued this call %.1fs" % (prov.id, waited), flush=True)
+    print("[dispatch] REMOTE provider=%s (%s, tier=%s)" % (prov.id, prov.display, prov.tier),
+          flush=True)
+    return prov.base() + prov.chat_path, ["-H", "@" + hdr], limiter, cleanup
 
 
 def _record_savings(a, body, usage, st):

@@ -715,7 +715,15 @@ curl -s http://localhost:$PORT/v1/chat/completions -H 'Content-Type: application
   -d '{"model":"my-operator","messages":[{"role":"user","content":"..."}],"max_tokens":512}'
 ```
 For long generations use `./bin/librarian-dispatch.py --port PORT --payload BODY.json --outdir DIR`
-(SSE + stall watchdog; takes a JSON body file, not `--prompt`/`--model`; text lands in `DIR/output.txt`).
+(SSE + stall watchdog; `--prompt`/`--model` also work; text lands in `DIR/output.txt`).
+
+The same dispatcher drives **free remote APIs** with `--provider` instead of `--port`, e.g.
+`./bin/librarian-dispatch.py --provider nvidia --model nvidia/nemotron-3-ultra-550b-a55b --prompt "…"`.
+The key comes from the provider's env var or `~/.api_keys/<provider>` (passed to curl in a 0600 header
+file, never on argv). **NVIDIA dispatches take a slot from the same machine-wide 40 RPM bucket every
+remote session's proxy uses** (`bin/rate_limiter.py`), so any number of parallel agents queue instead of
+draining your live sessions' quota, and a 429 pauses all of them. `remote-agent-dispatch.py` (and the
+fallback router / `free-agent-tool.py` built on it) shares that bucket too.
 
 **Supervise it.** Offloading pays off only when you verify the result: warm → route (`la-roles.sh`) →
 decide `local:`/`cloud:` per step → dispatch → **verify against ground truth** (never trust local

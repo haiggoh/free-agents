@@ -1,3 +1,39 @@
+## [0.26.4] — 2026-10-09
+
+Every free-API dispatch path to NVIDIA now goes through the machine-wide rate limiter.
+
+### Fixed
+- **Dispatchers bypassed the NVIDIA limiter.** `bin/rate_limiter.py` throttled only the LiteLLM
+  proxies (`la_proxy_hooks.py`). A direct dispatch never touched the shared 40 RPM bucket, so
+  parallel agents could drain the quota that live remote sessions were queueing for. The transport
+  `bin/remote_http.py` now takes a slot before every request to a provider in the new
+  `remote_provider_core.RATE_LIMITED` set (`nvidia`), and books a 429 there with `note_429`, which
+  pauses every caller on the machine, proxies included. A full window returns a `quota` Result
+  before any socket opens. `LA_REMOTE_RATE_LIMIT=0` opts out (tests only).
+- **NVIDIA was declared but refused by `remote-agent-dispatch.py`** ("not implemented in the MVP").
+  It is now in `IMPLEMENTED`, so `free-agent-tool.py`'s API route to Nemotron works instead of
+  failing on every call.
+
+### Added
+- **`librarian-dispatch.py --provider <id>`**: the same SSE + stall-watchdog dispatcher for free
+  remote APIs, with no local server needed. The key goes to curl through a 0600 header file (never
+  argv) that is deleted afterwards. Rate-limited providers take a slot first, and a 429 pauses
+  everyone.
+- **Provider keys fall back to `${LA_API_KEYS_DIR:-~/.api_keys}/<provider>`** when the env var is
+  unset. This is the same canonical store `remote-session.sh` reads, so dispatchers no longer need
+  the key exported.
+
+### Tests
+- `tests/test_remote_dispatch_limiter.py` (9). Covers: the key-store fallback, each transport call
+  booking a slot in the shared state file, a full window refused before any request leaves, a 429
+  setting the machine-wide cooldown, Gemini spending no NVIDIA slots, proxy and dispatch sharing one
+  bucket path, librarian `--provider` booking a slot without the key ever printed, and librarian
+  refusing on a full window. Mutation-checked: with the wiring removed, 4 tests fail.
+- `tests/remote/test_remote_fallback.py` points `LA_API_KEYS_DIR` at an empty temp dir. Without
+  that, the new key fallback let its "key unset" doctor cases read the user's real keys.
+- Live: one Nemotron 3 Ultra dispatch via `librarian-dispatch.py --provider nvidia` returned
+  `PONG`. The shared window went 0 → 1, and the header file was removed.
+
 ## [0.26.3] — 2026-10-08
 
 Cerebras free-API sessions get a realistic output ceiling.

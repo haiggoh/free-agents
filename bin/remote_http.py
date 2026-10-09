@@ -16,6 +16,7 @@ streamed text (and reasoning text) the caller persists to disk.
 import http.client
 import json
 import os
+import sys
 import time
 from urllib.parse import urlparse
 
@@ -50,6 +51,21 @@ class _CountingFD:
         if self.inner is None:
             raise AttributeError(name)
         return getattr(self.inner, name)
+
+
+def _limiter_for(provider):
+    """The machine-wide limiter for `provider`, or None when it is not rate limited.
+
+    One shared file-backed bucket (bin/rate_limiter.py) for every caller: the LiteLLM proxy
+    hooks, this transport, and therefore every dispatcher and parallel agent built on it.
+    LA_REMOTE_RATE_LIMIT=0 opts out (tests only; a real dispatch that skips it spends the
+    same 40 RPM the live sessions are queueing for).
+    """
+    from remote_provider_core import RATE_LIMITED
+    if provider.id not in RATE_LIMITED or os.environ.get("LA_REMOTE_RATE_LIMIT", "1") == "0":
+        return None
+    from rate_limiter import get_limiter
+    return get_limiter()
 
 
 def _is_loopback(url):
@@ -88,6 +104,19 @@ def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
                           method, url, _mask(provider.key_env)))
 
     started = time.time()
+    limiter = _limiter_for(provider)
+    if limiter is not None:
+        try:
+            waited = limiter.acquire()
+        except Exception as exc:          # RateLimitTimeout: the shared bucket stayed full
+            return Result(ok=False, provider=provider.id, tier=provider.tier,
+                          model_requested=body.get("model", ""), model_effective="",
+                          status=0, error_class="quota",
+                          error_reason="machine-wide %s limiter: %s" % (provider.id, exc),
+                          elapsed=time.time() - started)
+        if waited > 0:
+            print("[limiter] %s bucket queued this call %.1fs" % (provider.id, waited),
+                  file=sys.stderr, flush=True)
     headers = provider.auth_headers()
     headers["Content-Type"] = "application/json"
     # Force streaming so a cut stream is detectable, and ask for usage.
@@ -152,6 +181,13 @@ def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
         body_bytes = resp.read()
         error_text = body_bytes.decode("utf-8", "replace")[:600]
         eclass = classify(status, body=error_text)
+        if status == 429 and limiter is not None:
+            # Our window disagreed with the provider's count: pause EVERY process on the
+            # machine (proxies included), exactly as la_proxy_hooks does for its 429s.
+            try:
+                limiter.note_429(retry_after or None)
+            except Exception:
+                pass
         return Result(
             ok=False, provider=provider.id, tier=provider.tier,
             model_requested=body.get("model", ""), model_effective=model_effective,

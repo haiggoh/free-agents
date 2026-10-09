@@ -70,9 +70,24 @@ class Provider:
         """All env var names this provider needs (key + extras)."""
         return (self.key_env,) + tuple(self.extra_env)
 
+    def key(self):
+        """The API key: the environment variable if set, else the canonical key file
+        ``${LA_API_KEYS_DIR:-~/.api_keys}/<provider id>`` (the same store remote-session.sh
+        reads). Read at call time and never cached, logged or written anywhere."""
+        val = os.environ.get(self.key_env, "").strip()
+        if val:
+            return val
+        path = os.path.join(os.environ.get("LA_API_KEYS_DIR") or
+                            os.path.expanduser("~/.api_keys"), self.id)
+        try:
+            with open(path) as fh:
+                return fh.read().strip()
+        except OSError:
+            return ""
+
     def auth_headers(self):
         """The Authorization / version headers, built from the live environment."""
-        key = os.environ.get(self.key_env, "")
+        key = self.key()
         return {"Authorization": "Bearer " + key,
                 **self.static_headers}
 
@@ -85,7 +100,9 @@ class Provider:
 
     def config_present(self):
         """True iff every required env var is non-empty. Never touches the network."""
-        return all(os.environ.get(n, "").strip() != "" for n in self.required_env())
+        if not self.key():
+            return False
+        return all(os.environ.get(n, "").strip() != "" for n in self.extra_env)
 
 
 # --- the six providers -------------------------------------------------------
@@ -163,8 +180,13 @@ PROVIDERS = {
     ),
 }
 
-# Providers whose Python dispatch path is implemented in the MVP.
-IMPLEMENTED = {"gemini"}
+# Providers whose Python dispatch path is implemented.
+IMPLEMENTED = {"gemini", "nvidia"}
+
+# Providers whose requests must pass the machine-wide limiter in bin/rate_limiter.py. NVIDIA's
+# free tier is 40 RPM per KEY, shared by every proxy, dispatcher and parallel agent on this
+# machine; a dispatcher that called it directly used to bypass the bucket the proxies share.
+RATE_LIMITED = {"nvidia"}
 
 
 def get(provider_id):
