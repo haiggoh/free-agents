@@ -1,3 +1,36 @@
+## [0.28.0] — 2026-10-09
+
+Genuine auto mode on the free-API lane: Claude Code's safety classifier, answered by a free model.
+
+### Added
+- **`remote-session.sh -a` (classifier state) now runs `--permission-mode auto`.** Before this it
+  printed "remote classifier lane is not implemented yet" and ran blind-trust, so the Classifier
+  Source selector the picker offered (0.23.1 / 0.24.0) did nothing. The classifier's request for
+  `claude-sonnet-5[1m]` is routed by the proxy:
+  - **`LA_CLASSIFIER_MODEL=provider:model`**: a dedicated entry for `claude-sonnet-5` and
+    `claude-sonnet-5[1m]`, written before the session group, which then no longer claims that
+    name (LiteLLM would otherwise load-balance the two).
+  - **Unset**: the 0.27.0 `claude-*` catch-all, i.e. the session model.
+- Classifier source `1` (local Devstral) on a remote session prints that no local classifier is
+  reachable on this lane and uses the remote route.
+
+### Qualification (2026-10-09, NVIDIA free tier, real `claude -p --permission-mode auto`)
+| classifier | stage 1 | stage 2 | destructive `git push --force … && rm -rf ~/…` | `curl …invalid… \| sh` |
+|---|---|---|---|---|
+| Nemotron 3 Super 120B (dedicated) | 3.4 s | 8.4 s | **blocked** `[Git Destructive]` | allowed 3/3 |
+| Nemotron 3 Ultra 550B (session) | 1.7–36 s | 66–85 s | — | blocked `[Containment Escape]` when unloaded |
+
+Under heavy parallel load an Ultra stage 1 aborted at 60 s twice. Claude Code then **failed
+closed** ("classifier unavailable, denying with retry guidance"). The allowed `curl | sh` against a
+host that cannot resolve is a verdict, not a fail-open. The README therefore recommends Super as
+the dedicated classifier. Blind-trust stays the default (state 0).
+
+### Tests
+- `tests/test_remote_session.py`: `-a` once reaches the **real** `claude` argv as
+  `--permission-mode auto`. This replaces the old assertion that the lane says "not implemented".
+  Two new tests check the dedicated classifier entries (exact names before the session group, the
+  session group no longer claiming `claude-sonnet-5`, the key provider exported), and that a
+  missing or invalid `LA_CLASSIFIER_MODEL` falls back to the session route with a note.
 ## [0.27.2] — 2026-10-10
 
 Picker ↔ launcher parity: every setting the picker offers now changes the session it starts.

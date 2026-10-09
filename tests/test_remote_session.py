@@ -313,6 +313,25 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         self.assertIn('POOL=gemini', r.stdout)
         self.assertNotIn('fixture-not-a-real-key', text)
 
+    def test_classifier_routes_to_a_dedicated_model(self):
+        text, r = self._write_cfg({'LA_CLASSIFIER_MODEL': 'gemini:gemini-3.8-flash'})
+        head = text.split('litellm_settings:')[0]
+        for name in ('claude-sonnet-5', 'claude-sonnet-5[1m]'):
+            self.assertIn('  - model_name: "%s"\n' % name, head)
+        # Exact classifier entries come before the session group, and the session group no longer
+        # claims claude-sonnet-5 (two groups under one name would be load-balanced).
+        self.assertLess(head.index('model_name: "claude-sonnet-5"'), head.index('model_name: claude-opus-5\n'))
+        self.assertNotIn('  - model_name: claude-sonnet-5\n', head)
+        self.assertIn('      model: gemini/gemini-3.8-flash\n', head)
+        self.assertIn('POOL=gemini', r.stdout, 'the classifier provider key reaches the proxy')
+
+    def test_classifier_without_dedicated_model_uses_session_route(self):
+        text, _ = self._write_cfg()
+        self.assertIn('  - model_name: claude-sonnet-5\n', text, 'session group still answers the classifier')
+        bad, r = self._write_cfg({'LA_CLASSIFIER_MODEL': 'nope'})
+        self.assertIn('  - model_name: claude-sonnet-5\n', bad)
+        self.assertIn("not provider:model; using the session model", r.stderr)
+
     def test_same_routing_ignores_pool(self):
         text, r = self._write_cfg({'LA_SUBAGENT_POOL': 'gemini:gemini-3.8-flash'})
         self.assertEqual(text.count('model_name: "claude-*"'), 1)
@@ -844,13 +863,15 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         self.assertIn('blind-trust', default.stdout)
         self.assertIn('telemetry      : OFF', default.stdout)
 
-        # `-a` once = classifier. The lane is not implemented for remote, so it must SAY so
-        # and fall back to bypassPermissions -- silently behaving like blind-trust is the dead-switch bug.
+        # `-a` once = classifier: GENUINE auto mode since 0.28.0 (--permission-mode auto; the proxy
+        # routes claude-sonnet-5 to a free model). Asserted on the REAL argv, not just the dry-run.
         once = self.run_cli('--dry-run', '-a', 'gemini-flash')
         self.assertEqual(once.returncode, 0, once.stderr)
-        self.assertIn('--permission-mode bypassPermissions', once.stdout)
-        self.assertIn('not', once.stdout + once.stderr)
-        self.assertIn('classifier', once.stdout + once.stderr)
+        self.assertIn('--permission-mode auto', once.stdout)
+        self.assertNotIn('not implemented', once.stdout + once.stderr)
+        argv = launched_argv('-a', 'gemini-flash')
+        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'auto',
+                         'classifier state must reach claude as --permission-mode auto')
 
         # `-a` twice = off -> acceptEdits. Distinct from the other two states.
         twice = self.run_cli('--dry-run', '-a', '-a', 'gemini-flash')

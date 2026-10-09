@@ -31,6 +31,10 @@
 #                                 if both active; if set but missing, prints warning and continues)
 #   LA_RTK_IN_FREE_API=1          keep rtk's Bash-output rewriting ON (default: off on this lane)
 #                                 ignored in blind-trust auto-mode (AUTO_MODE_STATE=0)
+#   LA_CLASSIFIER_MODEL=prov:model  auto-mode classifier (-a once) on a DEDICATED free model, e.g.
+#                                 nvidia:nvidia/nemotron-3-super-120b-a12b (recommended; measured 3s/8s)
+#                                 unset = the session model answers claude-sonnet-5 (works, slower)
+#   LA_SUBAGENT_ROUTING=same|hybrid, LA_SUBAGENT_POOL=prov:model,…  subagent routing (see README)
 #
 # Cost: provider quota and billing apply; see the selected tier. This session
 # does not use the Anthropic gateway. Catalog checks consume no generation tokens.
@@ -675,6 +679,44 @@ stop_proxy() {
 #   LA_SUBAGENT_POOL_TIMEOUT=120         seconds before a pool member counts as failed (then retried)
 # Members whose key is missing are skipped with a note. NVIDIA members still pass the machine-wide
 # limiter (la_proxy_hooks), so parallel subagents queue instead of spending the session's 40 RPM.
+# CLASSIFIER (0.28.0). Auto mode's classifier requests claude-sonnet-5[1m]. Without an entry it lands
+# on the "claude-*" catch-all (the session model) -- which works, measured. LA_CLASSIFIER_MODEL
+# ("provider:model", e.g. "nvidia:nvidia/nemotron-3-super-120b-a12b") gives it a DEDICATED, usually
+# faster model, so stage-2 (measured 85s on Ultra) keeps headroom under Claude Code's 120s cap.
+# Written FIRST: an exact name beats the wildcard. Thinking off (the verdict is XML, not prose).
+CLASSIFIER_DEDICATED=0
+_write_classifier_entry() { # _write_classifier_entry <cfg> <session-provider> <session-key-env>
+    local cfg="$1" sprov="$2" member="${LA_CLASSIFIER_MODEL:-}" cprov cmodel route ckey name
+    CLASSIFIER_DEDICATED=0
+    [[ -n "$member" ]] || return 0
+    cprov="${member%%:*}"; cmodel="${member#*:}"
+    if [[ "$cprov" == "$member" || -z "$cmodel" ]] || ! _valid_model "$cmodel" 2>/dev/null; then
+        echo "remote-session: LA_CLASSIFIER_MODEL '$member' is not provider:model; using the session model" >&2
+        return 0
+    fi
+    route="$(_litellm_route "$cprov" "$cmodel")" || {
+        echo "remote-session: LA_CLASSIFIER_MODEL provider '$cprov' has no route; using the session model" >&2; return 0; }
+    "$KEYS" --check "$cprov" >/dev/null 2>&1 || {
+        echo "remote-session: LA_CLASSIFIER_MODEL skipped (no ~/.api_keys/$cprov); using the session model" >&2; return 0; }
+    ckey="$("$KEYS" --names "$cprov")" || return 0; ckey="${ckey%%$'\n'*}"
+    for name in claude-sonnet-5 'claude-sonnet-5[1m]'; do
+        {
+            echo "  - model_name: \"$name\""
+            echo "    litellm_params:"
+            echo "      model: ${route%%|*}"
+            echo "      api_key: os.environ/$ckey"
+            [[ -n "${route#*|}" ]] && echo "      api_base: ${route#*|}"
+            [[ "$cprov" == nvidia && ( "$cmodel" == *nemotron* || "$cmodel" == *glm* ) ]] && \
+                printf '      chat_template_kwargs:\n        enable_thinking: false\n'
+            echo "      num_retries: 2"
+        } >> "$cfg"
+    done
+    CLASSIFIER_DEDICATED=1
+    [[ "$cprov" != "$sprov" && " $SUBAGENT_POOL_PROVIDERS " != *" $cprov "* ]] && \
+        SUBAGENT_POOL_PROVIDERS="${SUBAGENT_POOL_PROVIDERS:+$SUBAGENT_POOL_PROVIDERS }$cprov"
+    return 0
+}
+
 _litellm_route() { # _litellm_route <provider> <model> -> "litellm_model|api_base"
     local prov="$1" model="$2" base=""
     case "$prov" in
@@ -694,7 +736,6 @@ _litellm_route() { # _litellm_route <provider> <model> -> "litellm_model|api_bas
 SUBAGENT_POOL_PROVIDERS=""   # extra providers whose keys the proxy needs (set by _write_subagent_pool)
 _write_subagent_pool() { # _write_subagent_pool <cfg> <session-provider>  (hybrid members only)
     local cfg="$1" prov="$2"
-    SUBAGENT_POOL_PROVIDERS=""
     [[ "${LA_SUBAGENT_ROUTING:-same}" == hybrid ]] || return 0
     local member mprov mmodel route mkey
     IFS=',' read -r -a _members <<< "${LA_SUBAGENT_POOL:-}"
@@ -842,8 +883,13 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     echo "model_list:" >> "$cfg"
     local spoof
     IFS=',' read -r -a _spoofs <<< "$LA_REMOTE_SPOOF_IDS"
-    # The exact spoof ids first, then the "claude-*" catch-all for subagent ids (same params).
+    SUBAGENT_POOL_PROVIDERS=""
+    _write_classifier_entry "$cfg" "$prov" "$key_env" || return 1
+    # The exact spoof ids first, then the "claude-*" catch-all for subagent ids (same params). A
+    # dedicated classifier owns claude-sonnet-5*, so the session group must not ALSO claim it:
+    # two groups under one name are load-balanced by LiteLLM, not prioritised.
     for spoof in "${_spoofs[@]}" '"claude-*"'; do
+        [[ "$CLASSIFIER_DEDICATED" == 1 && "$spoof" == claude-sonnet-5* ]] && continue
         {
             echo "  - model_name: $spoof"
             echo "    litellm_params:"
@@ -1308,11 +1354,15 @@ if [[ "$MODE" == "launch" ]]; then
     # here. We must pass --permission-mode ourselves; exporting those vars alone was the
     # original bug. They are still exported for any child that inspects them.
     # AUTO_MODE_STATE=0 (blind-trust): use bypassPermissions to BYPASS cloud classifier (measured: 0 classifier calls).
-    # AUTO_MODE_STATE=1 (classifier): not implemented yet, falls through to blind-trust behavior.
+    # AUTO_MODE_STATE=1 (classifier): GENUINE auto mode (0.28.0). Claude Code's classifier asks for
+    #   claude-sonnet-5[1m]; the proxy routes it (write_proxy_config: LA_CLASSIFIER_MODEL, else the
+    #   "claude-*" catch-all = the session model) to a free model. Measured 2026-10-09 on NVIDIA
+    #   Nemotron 3 Ultra: stage-1 ok in 11.8s, stage-2 ok in 84.9s, `curl … | sh` BLOCKED
+    #   ([Containment Escape]), a benign echo allowed. Fail-closed: an upstream error is a refusal.
     # AUTO_MODE_STATE=2 (off): acceptEdits.
     case "$AUTO_MODE_STATE" in
         0) PERMISSION_MODE="bypassPermissions"; LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
-        1) PERMISSION_MODE="bypassPermissions"; LA_AUTO_MODE=1; LA_BLIND_AUTO=1 ;;
+        1) PERMISSION_MODE="auto"; LA_AUTO_MODE=1; LA_BLIND_AUTO=0 ;;
         2) PERMISSION_MODE="acceptEdits"; LA_AUTO_MODE=0; LA_BLIND_AUTO=0 ;;
     esac
     export LA_AUTO_MODE LA_BLIND_AUTO
@@ -1335,11 +1385,14 @@ if [[ "$MODE" == "launch" ]]; then
     : "${LA_CLASSIFIER_SOURCE:=2}"
     export LA_CLASSIFIER_SOURCE
 
-    # The genuine classifier lane is not wired for remote yet. Say so rather than
-    # silently behaving like blind-trust, which is the failure mode this release fixes.
+    # Where the classifier runs. Source 1 (local Devstral) needs a local server registered under
+    # the classifier's name; a remote session has none, so say so and use the remote model instead.
     if [[ "$AUTO_MODE_STATE" -eq 1 ]]; then
-        echo "$EMOJI_WARNING  auto-mode: classifier requested, but the remote classifier lane is not"
-        echo "    implemented yet — running blind-trust (bypassPermissions) for this session. See ROADMAP."
+        if [[ "$LA_CLASSIFIER_SOURCE" == 1 ]]; then
+            echo "$EMOJI_WARNING  auto-mode: classifier source 'local Devstral' is not reachable from a free-API"
+            echo "    session (no local classifier server on this lane) — using the remote classifier route."
+        fi
+        echo "   auto-mode: classifier → ${LA_CLASSIFIER_MODEL:-the session model} (fail-closed; an upstream error refuses the action)"
     fi
 
     # Blind-trust auto mode (AUTO_MODE_STATE=0): generate settings via the single source of truth.
@@ -1521,7 +1574,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
     # values makes each switch verifiable by OUTCOME without launching anything.
     case "$AUTO_MODE_STATE" in
         0) _am_label="blind-trust (bypassPermissions + DESTRUCTIVE_DENY, no classifier)" ;;
-        1) _am_label="classifier requested → falls back to blind-trust (bypassPermissions, lane not implemented)" ;;
+        1) _am_label="classifier (--permission-mode auto; claude-sonnet-5 → ${LA_CLASSIFIER_MODEL:-session model})" ;;
         2) _am_label="off (acceptEdits)" ;;
     esac
     # MCP status

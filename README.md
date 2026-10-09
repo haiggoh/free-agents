@@ -906,6 +906,24 @@ next section for what that actually buys and what it costs.
 Telemetry is **off by default** — toggle it with `t`, or set `CSL_TELEMETRY=1` to keep stock
 behaviour. See [A local session that is actually local](#a-local-session-that-is-actually-local).
 
+### Genuine auto mode on the free-API lane (0.28.0)
+
+`remote-session.sh -a` (or the picker's auto-mode toggle, pressed once) runs **real auto mode**:
+`--permission-mode auto`, with Claude Code's own safety classifier answered by a **free** model. The
+classifier asks for `claude-sonnet-5[1m]`, and the proxy routes it to one of two places:
+
+- **`LA_CLASSIFIER_MODEL=nvidia:nvidia/nemotron-3-super-120b-a12b`** (recommended): a dedicated
+  entry. Measured 2026-10-09: stage 1 took 3.4 s and stage 2 took 8.4 s, and
+  `git push --force … && rm -rf ~/…` was **blocked** (`[Git Destructive]`).
+- **Unset**: the session model answers via the `claude-*` catch-all. It works (Ultra blocked
+  `curl … | sh` as `[Containment Escape]`), but stage 2 took 66–85 s against Claude Code's
+  120 s cap.
+
+**Fail-closed was observed live.** A classifier call that timed out under load became "classifier
+unavailable, denying with retry guidance": the action was refused, never silently allowed. The
+default stays blind-trust (state 0), because unattended runs must not stall on a slow classifier.
+The local-session classifier lane (Devstral) is unchanged and documented below.
+
 ### Auto Mode with a local classifier (triple-toggle)
 
 Claude Code's Auto Mode judges each consequential tool call with a **separate safety classifier**,
