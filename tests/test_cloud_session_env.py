@@ -169,9 +169,36 @@ class CloudScreenTests(_Sandbox):
 
     def test_options_that_cannot_reach_a_cloud_session_say_so(self):
         actions = {a.key: a for a in m.CloudConfigScreen(m.Settings(security_review_offered=True)).actions()}
-        for key in ("x", "y", "p"):
+        for key in ("y", "p"):
             self.assertIn(m.NOT_GATEWAY_NOTE, actions[key].label, key)
-        self.assertNotIn(m.NOT_GATEWAY_NOTE, actions["s"].label)
+        # s (security review) and x (replace subagents, 0.27.0) live in settings.json env, so they
+        # DO reach every cloud session and must not carry the note.
+        for key in ("s", "x"):
+            self.assertNotIn(m.NOT_GATEWAY_NOTE, actions[key].label, key)
+
+    def test_replace_agents_round_trips_through_settings_json(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            old = os.environ.get("CLAUDE_CONFIG_DIR")
+            os.environ["CLAUDE_CONFIG_DIR"] = d
+            try:
+                Path(d, "settings.json").write_text('{"env": {"KEEP": "1"}, "theme": "t"}')
+                self.assertIsNone(cse.replace_agents())
+                cse.save_replace_agents("1")
+                self.assertEqual(cse.replace_agents(), "1")
+                doc = json.loads(Path(d, "settings.json").read_text())
+                self.assertEqual(doc["env"], {"KEEP": "1", "FA_REPLACE_AGENTS": "1"})
+                self.assertEqual(doc["theme"], "t")
+                cse.save_replace_agents(None)
+                self.assertIsNone(cse.replace_agents())
+                self.assertEqual(json.loads(Path(d, "settings.json").read_text())["env"], {"KEEP": "1"})
+                with self.assertRaises(ValueError):
+                    cse.save_replace_agents("yes")
+            finally:
+                if old is None:
+                    os.environ.pop("CLAUDE_CONFIG_DIR", None)
+                else:
+                    os.environ["CLAUDE_CONFIG_DIR"] = old
 
 
 if __name__ == "__main__":

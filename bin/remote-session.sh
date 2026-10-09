@@ -654,6 +654,73 @@ stop_proxy() {
 
 # LiteLLM maps each spoofed Claude id onto the chosen remote model, so Claude
 # Code can ask for "claude-opus-5" and get the free provider underneath.
+# SUBAGENTS (0.27.0). Claude Code's Agent/Workflow subagents ask for whatever claude-* id their
+# definition names (claude-haiku-5-5, claude-sonnet-4-6, …), not only the spoofed session ids, and
+# the proxy answered every unknown id with "400 Invalid model name" — so a subagent in a free-API
+# session always failed. A "claude-*" wildcard group now catches every other Claude id.
+#   LA_SUBAGENT_ROUTING=same    (default) the group holds only the session's own model
+#   LA_SUBAGENT_ROUTING=hybrid  the group ALSO holds each LA_SUBAGENT_POOL member, and LiteLLM
+#                               spreads subagent calls across them: the council idea, several
+#                               different models answering in parallel
+#   LA_SUBAGENT_POOL="provider:model,…"  e.g. "nvidia:poolside/laguna-xs-2.1,gemini:gemini-3.8-flash"
+#   LA_SUBAGENT_POOL_TIMEOUT=120         seconds before a pool member counts as failed (then retried)
+# Members whose key is missing are skipped with a note. NVIDIA members still pass the machine-wide
+# limiter (la_proxy_hooks), so parallel subagents queue instead of spending the session's 40 RPM.
+_litellm_route() { # _litellm_route <provider> <model> -> "litellm_model|api_base"
+    local prov="$1" model="$2" base=""
+    case "$prov" in
+        gemini)     echo "gemini/$model|" ;;
+        groq)       echo "groq/$model|" ;;
+        nvidia)     echo "nvidia_nim/$model|" ;;
+        openrouter) echo "openrouter/$model|" ;;
+        cerebras)   echo "cerebras/$model|" ;;
+        cloudflare) base="$(_cloudflare_base)" || return 1; echo "openai/$model|$base" ;;
+        mistral|zai|siliconflow|llm7|kilo|vercel|sambanova|modelscope)
+                    base="$(_openai_base "$prov")" || return 1; echo "openai/$model|$base" ;;
+        *)          return 1 ;;
+    esac
+}
+
+SUBAGENT_POOL_PROVIDERS=""   # extra providers whose keys the proxy needs (set by _write_subagent_pool)
+_write_subagent_pool() { # _write_subagent_pool <cfg> <session-provider>  (hybrid members only)
+    local cfg="$1" prov="$2"
+    SUBAGENT_POOL_PROVIDERS=""
+    [[ "${LA_SUBAGENT_ROUTING:-same}" == hybrid ]] || return 0
+    local member mprov mmodel route mkey
+    IFS=',' read -r -a _members <<< "${LA_SUBAGENT_POOL:-}"
+    for member in "${_members[@]}"; do
+        member="${member// /}"; [[ -n "$member" ]] || continue
+        mprov="${member%%:*}"; mmodel="${member#*:}"
+        if [[ "$mprov" == "$member" || -z "$mmodel" ]] || ! _valid_model "$mmodel" 2>/dev/null; then
+            echo "remote-session: LA_SUBAGENT_POOL member '$member' is not provider:model; skipped" >&2
+            continue
+        fi
+        route="$(_litellm_route "$mprov" "$mmodel")" || {
+            echo "remote-session: LA_SUBAGENT_POOL provider '$mprov' has no route; skipped" >&2; continue; }
+        if ! "$KEYS" --check "$mprov" >/dev/null 2>&1; then
+            echo "remote-session: LA_SUBAGENT_POOL member $member skipped (no ~/.api_keys/$mprov)" >&2
+            continue
+        fi
+        mkey="$("$KEYS" --names "$mprov")" || continue; mkey="${mkey%%$'\n'*}"
+        {
+            echo '  - model_name: "claude-*"'
+            echo "    litellm_params:"
+            echo "      model: ${route%%|*}"
+            echo "      api_key: os.environ/$mkey"
+            [[ -n "${route#*|}" ]] && echo "      api_base: ${route#*|}"
+            [[ "$mprov" == nvidia && ( "$mmodel" == *nemotron* || "$mmodel" == *glm* ) ]] && \
+                printf '      chat_template_kwargs:\n        enable_thinking: false\n'
+            # A pool member that hangs (measured: a provider giving no byte for 60s) must not
+            # stall the subagent: time it out, and the router's retry lands on another member.
+            echo "      timeout: ${LA_SUBAGENT_POOL_TIMEOUT:-120}"
+            echo "      num_retries: 1"
+        } >> "$cfg"
+        [[ "$mprov" != "$prov" && " $SUBAGENT_POOL_PROVIDERS " != *" $mprov "* ]] && \
+            SUBAGENT_POOL_PROVIDERS="${SUBAGENT_POOL_PROVIDERS:+$SUBAGENT_POOL_PROVIDERS }$mprov"
+    done
+    return 0
+}
+
 write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking> [effort] [temperature]
     local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}" temperature="${6:-}"
     _available "$prov" || return 2
@@ -764,7 +831,8 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     echo "model_list:" >> "$cfg"
     local spoof
     IFS=',' read -r -a _spoofs <<< "$LA_REMOTE_SPOOF_IDS"
-    for spoof in "${_spoofs[@]}"; do
+    # The exact spoof ids first, then the "claude-*" catch-all for subagent ids (same params).
+    for spoof in "${_spoofs[@]}" '"claude-*"'; do
         {
             echo "  - model_name: $spoof"
             echo "    litellm_params:"
@@ -786,6 +854,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             fi
         } >> "$cfg"
     done
+    _write_subagent_pool "$cfg" "$prov" || return 1
     cat >> "$cfg" <<'YAML'
 litellm_settings:
   drop_params: true
@@ -846,11 +915,14 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
             echo "remote-session: LA_LITELLM_CMD is not executable: ${_cmd[0]}" >&2; return 1; }
         echo "remote-session: NOTE using LA_LITELLM_CMD (${_cmd[0]}) — the OS-trust wrapper is BYPASSED;" >&2
         echo "  on a TLS-inspecting network upstream HTTPS may fail with a certificate error." >&2
-        local envassign_o line_o
+        local envassign_o line_o _pp
         envassign_o="$("$KEYS" --env "$prov")" || return 1
+        for _pp in $SUBAGENT_POOL_PROVIDERS; do
+            envassign_o+=$'\n'"$("$KEYS" --env "$_pp")" || return 1
+        done
         ( _clear_provider_env
           # shellcheck disable=SC2163 # line_o is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
-          while IFS= read -r line_o; do export "$line_o"; done <<< "$envassign_o"
+          while IFS= read -r line_o; do [[ -n "$line_o" ]] && export "$line_o"; done <<< "$envassign_o"
           exec "${_cmd[@]}" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
         echo $! > "$pidf"
         local j
@@ -881,11 +953,15 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     fi
 
     # Only THIS provider's credential enters the proxy environment.
-    local envassign line
+    local envassign line _pp
     envassign="$("$KEYS" --env "$prov")" || return 1
+    # Hybrid subagent pool: its members' keys, too (one NAME=value line each; never logged).
+    for _pp in $SUBAGENT_POOL_PROVIDERS; do
+        envassign+=$'\n'"$("$KEYS" --env "$_pp")" || return 1
+    done
     ( _clear_provider_env
       # shellcheck disable=SC2163 # line is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
-      while IFS= read -r line; do export "$line"; done <<< "$envassign"
+      while IFS= read -r line; do [[ -n "$line" ]] && export "$line"; done <<< "$envassign"
       exec "$litellm_py" "$trust_wrapper" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
     echo $! > "$pidf"
 

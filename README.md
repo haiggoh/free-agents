@@ -175,7 +175,7 @@ New CUDA models in `config/model-catalog.psv`:
 ### v0.24.0 — Cloud Session Configuration & Native Agent Interception
 
 ### CloudConfigScreen (new `session_picker_model.py` screen, key `c` from Home):
-- **Intercept Agents toggle** (x): Deny native `Agent` tool, replace with `FreeAgent` native plugin tool
+- **Intercept Agents toggle** (x): *superseded in 0.27.0* — it only ever withheld `Agent`; see "Subagents in every lane" below
 - **Classifier Source selector** (y): NVIDIA API / Local Devstral / Auto (local on local, remote on remote)
 - **Bypass Permissions toggle** (p): Blind-trust auto mode for cloud sessions (`bypassPermissions`)
 - Both menu item and screen title use cloud + wrench emojis with space: `☁️ 🔧 Cloud Session Configuration`
@@ -193,6 +193,35 @@ New CUDA models in `config/model-catalog.psv`:
 **remote-session.sh**: `CLOUD_BYPASS_PERMISSIONS` env var support; when enabled forces `bypassPermissions` regardless of `AUTO_MODE_STATE`
 
 ---
+
+## Subagents in every lane (0.27.0)
+
+The native `Agent` and `Workflow` tools (parallel subagents, **ultracode**) now work in free sessions,
+and paid subagents in cloud sessions can be swapped for free ones.
+
+| Session | What subagents run on | Setting |
+|---|---|---|
+| **Free-API** (`csl remote`) | The session's own free endpoint. The proxy's `claude-*` catch-all answers every model id a subagent asks for (`claude-haiku-5-5`, `claude-sonnet-4-6`, …); before 0.27.0 each got `400 Invalid model name`. NVIDIA calls still pass the machine-wide 40 RPM limiter. | `LA_SUBAGENT_ROUTING=same` (default) or `hybrid` |
+| **Local** (`csl local`) | The same local server (Rapid serves every model name under its spoof id). Parallel subagents are capped to the server's slots. | `LA_SUBAGENT_MAX_CONCURRENT` (default `LA_RAPID_MAX_NUM_SEQS`) |
+| **Cloud** (gateway / Anthropic login) | Native Sonnet by default. **Opt-in:** replace them with free agents. | `FA_REPLACE_AGENTS` in `~/.claude/settings.json` env |
+
+**Hybrid council routing (free-API).** `LA_SUBAGENT_ROUTING=hybrid` plus
+`LA_SUBAGENT_POOL="nvidia:poolside/laguna-xs-2.1,gemini:gemini-3.8-flash"` spreads subagent calls
+across the session model and every pool member: different models answering in parallel, the
+original council idea. A member without a key in `~/.api_keys/` is skipped with a note. A member
+that hangs times out after `LA_SUBAGENT_POOL_TIMEOUT` (120 s) and is retried on another.
+
+**Cloud replacement.** When `FA_REPLACE_AGENTS=1`, the `hooks/cloud-agent-intercept.py` PreToolUse hook
+denies `Agent` and hands the model a ready-to-run command for `bin/free-agent-tool.py`, which routes
+by role through `council-router.sh` to a free model. The prompt goes through a quoted heredoc, so no
+quote in it can break the command. While the setting is unset, the hook **asks once**, the first
+time a cloud session calls `Agent`. That way the choice also surfaces outside `csl`. Change it in
+`csl` → Cloud Session Configuration → `x`, or with `bin/cloud_session_env.py set replace_agents 1|0|unset`.
+Free sessions are never touched by the hook.
+
+Measured 2026-10-09: a real `claude -p` free-API session told to use `Agent` returned the subagent's
+answer through 6 proxy calls, all `200`. The same run against a config **without** the catch-all
+logged 8 × `400` and 17 × `500` before recovering.
 
 ## How it works
 

@@ -23,9 +23,16 @@ Settings:
 The option is only OFFERED when the security-guidance plugin is installed and enabled — or when an
 override from us is still present, so it can always be cleared (a hidden leftover would be stale state).
 
+  replace_agents    FA_REPLACE_AGENTS in env, read by hooks/cloud-agent-intercept.py (PreToolUse on Agent):
+                    unset = undecided (the hook asks ONCE, the first time a cloud session calls Agent)
+                    1 = replace paid Sonnet subagents with free agents (bin/free-agent-tool.py)
+                    0 = keep native Sonnet subagents
+                    Free sessions (local, free-API) are never affected: their subagents already run free.
+
 Usage:
   cloud_session_env.py show
   cloud_session_env.py set security_review {0,1,2}
+  cloud_session_env.py set replace_agents {0,1,unset}
   cloud_session_env.py --help
 
 Environment:
@@ -45,6 +52,8 @@ SECURITY_REVIEW_LABELS = {0: "default (opus-4-7)", 1: "cheaper (sonnet-4-6)", 2:
 CHEAP_MODEL = "claude-sonnet-4-6"
 _OWNED_KEYS = ("SECURITY_REVIEW_MODEL", "ENABLE_CODE_SECURITY_REVIEW")
 _ENV_FOR = {0: {}, 1: {"SECURITY_REVIEW_MODEL": CHEAP_MODEL}, 2: {"ENABLE_CODE_SECURITY_REVIEW": "0"}}
+REPLACE_AGENTS_KEY = "FA_REPLACE_AGENTS"
+REPLACE_AGENTS_LABELS = {None: "ask once (undecided)", "1": "ON — free agents", "0": "OFF — native Sonnet"}
 _THIRD_PARTY_FLAGS = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 
 
@@ -128,6 +137,24 @@ def save(security_review: int) -> Path:
     Raises ValueError (writing nothing) on a value outside 0/1/2."""
     if security_review not in _ENV_FOR:
         raise ValueError(f"invalid security_review: {security_review!r} (allowed: 0, 1, 2)")
+    return _write_env(_OWNED_KEYS, _ENV_FOR[security_review])
+
+
+def replace_agents() -> str | None:
+    """FA_REPLACE_AGENTS from settings.json env: "1", "0", or None (undecided). Never writes."""
+    v = _env(_read_json(settings_path())).get(REPLACE_AGENTS_KEY)
+    return str(v) if v is not None and str(v) in ("0", "1") else None
+
+
+def save_replace_agents(value: str | None) -> Path:
+    """Set FA_REPLACE_AGENTS to "1"/"0", or remove it (None = undecided, the hook asks once)."""
+    if value not in (None, "0", "1"):
+        raise ValueError(f"invalid replace_agents: {value!r} (allowed: 0, 1, unset)")
+    return _write_env((REPLACE_AGENTS_KEY,), {} if value is None else {REPLACE_AGENTS_KEY: value})
+
+
+def _write_env(owned: tuple, updates: dict) -> Path:
+    """Drop `owned` env keys, apply `updates`; preserve every other byte, the mode and symlinks."""
     path = settings_path()
     real = Path(os.path.realpath(path))          # a dotfiles symlink stays a symlink
     try:
@@ -140,9 +167,9 @@ def save(security_review: int) -> Path:
         raise ValueError(f"{path} is not a JSON object; refusing to rewrite it")
     had_env = "env" in doc
     env = dict(_env(doc))
-    for k in _OWNED_KEYS:
+    for k in owned:
         env.pop(k, None)
-    env.update(_ENV_FOR[security_review])
+    env.update(updates)
     if env or had_env:
         doc["env"] = env
     body = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
@@ -181,11 +208,18 @@ def main(argv=None) -> int:
         epilog="Env: CLAUDE_CONFIG_DIR selects the Claude Code config dir (default ~/.claude).")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("show", help="print plugin status, the current mode and the env keys behind it")
-    s = sub.add_parser("set", help="set the review mode")
-    s.add_argument("key", choices=["security_review"])
-    s.add_argument("value", type=int, choices=[0, 1, 2])
+    s = sub.add_parser("set", help="set security_review {0,1,2} or replace_agents {0,1,unset}")
+    s.add_argument("key", choices=["security_review", "replace_agents"])
+    s.add_argument("value", choices=["0", "1", "2", "unset"])
     a = p.parse_args(argv)
-    if a.cmd == "set":
+    if a.cmd == "set" and a.key == "replace_agents":
+        if a.value not in ("0", "1", "unset"):
+            p.error("replace_agents takes 0, 1 or unset")
+        print(f"updated {save_replace_agents(None if a.value == 'unset' else a.value)}")
+    elif a.cmd == "set":
+        if a.value == "unset":
+            p.error("security_review takes 0, 1 or 2")
+        a.value = int(a.value)
         if a.value == 1 and third_party_provider():
             print("cloud_session_env.py: 'cheaper' needs a provider-specific model id under "
                   "Bedrock/Vertex/Foundry; set SECURITY_REVIEW_MODEL yourself", file=sys.stderr)
@@ -198,6 +232,7 @@ def main(argv=None) -> int:
     for k in _OWNED_KEYS:
         if k in env:
             print(f"  settings.json env: {k}={env[k]}")
+    print(f"replace_agents = {REPLACE_AGENTS_LABELS[replace_agents()]}")
     return 0
 
 

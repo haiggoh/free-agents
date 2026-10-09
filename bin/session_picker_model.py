@@ -181,8 +181,11 @@ class Settings:
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
     # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=Local Devstral always, 2=Auto)
     classifier_source: int = 2
-    # Intercept Agents toggle (Deny & Replace): True = ON (FreeAgent), False = OFF (Native Agent)
-    intercept_agents: bool = True
+    # Cloud sessions only: replace paid Sonnet subagents with free agents. None = undecided (the
+    # hooks/cloud-agent-intercept.py hook asks once), "1" = free agents, "0" = native Sonnet. Kept in
+    # ~/.claude/settings.json env as FA_REPLACE_AGENTS (cloud_session_env). Free sessions (local,
+    # free-API) have no toggle: their subagents already run on the free endpoint.
+    replace_agents: str | None = None
     # Bypass permissions mode for cloud sessions (blind-trust auto mode)
     cloud_bypass_permissions: bool = False
     # security-guidance LLM reviews in every cloud session: 0=default (opus-4-7), 1=sonnet-4-6,
@@ -191,7 +194,7 @@ class Settings:
     security_review_custom: str | None = None
     # Shown only when the plugin is installed+enabled, or an override of ours is still set.
     security_review_offered: bool = False
-    # Called with {"security_review": n} when the user changes it; persists it.
+    # Called with {"security_review": n} or {"replace_agents": v} when the user changes it; persists it.
     on_cloud_saved: Callable[[dict], object] | None = None
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
@@ -584,8 +587,7 @@ class LocalScreen(Screen):
                "LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
                "LA_ENABLE_MCP": "1" if s.enable_mcp else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
-               "CSL_WATCH": "1" if s.watcher else "0",
-               "INTERCEPT_AGENTS": "1" if s.intercept_agents else "0"}
+               "CSL_WATCH": "1" if s.watcher else "0"}
         # Use profile_id for the launcher if available, else alias
         launch_alias = mdl.profile_id if mdl.profile_id else mdl.alias
         argv = ["local", launch_alias, s.local_effort]
@@ -761,7 +763,6 @@ class RemoteScreen(Screen):
         argv.append(alias)
         env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
-               "INTERCEPT_AGENTS": "1" if s.intercept_agents else "0",
                "CLOUD_BYPASS_PERMISSIONS": "1" if s.cloud_bypass_permissions else "0"}
         return LaunchRequest("remote", argv, env, alias)
 
@@ -817,8 +818,10 @@ class CloudConfigScreen(Screen):
     - Security Review: security-guidance plugin reviews — default / sonnet-4-6 / off. Listed only
       when that plugin is installed and enabled (or an override is still set, so it can be cleared).
 
+    - Replace subagents with free agents: FA_REPLACE_AGENTS, read by the cloud-agent-intercept
+      PreToolUse hook. Opt-in; undecided = the hook asks once on the first Agent call.
+
     Does NOT reach cloud sessions (audit 2026-10-08; labelled so in the menu):
-    - Intercept Agents: replace native Agent tool with FreeAgent (local launcher only)
     - Classifier Source: NVIDIA API / Local Devstral / Auto (local + free-API only)
     - Bypass Permissions: blind-trust for free-API remote sessions (the gateway launcher hardcodes it)
     """
@@ -838,9 +841,9 @@ class CloudConfigScreen(Screen):
             acts.append(Action("s", f"Security Review (all cloud sessions): {label}",
                                lambda: self._cycle_security_review()))
         acts += [
-            Action("x", f"{ec.EMOJI_SHIELD_STR}  Intercept Agents: {'ON (FreeAgent)' if s.intercept_agents else 'OFF (Native Agent)'}"
-                        f"  {NOT_GATEWAY_NOTE}",
-                   lambda: self._toggle("intercept_agents")),
+            Action("x", f"{ec.EMOJI_SHIELD_STR}  Replace subagents with free agents (all cloud sessions): "
+                        f"{cse.REPLACE_AGENTS_LABELS[s.replace_agents]}",
+                   lambda: self._cycle_replace_agents()),
             Action("y", f"Classifier: {CLASSIFIER_SOURCE_LABELS[s.classifier_source]}  {NOT_GATEWAY_NOTE}",
                    lambda: self._cycle_classifier()),
             Action("p", f"{ec.EMOJI_AUTO_MODE_STR}  Bypass Permissions (blind-trust): {'ON' if s.cloud_bypass_permissions else 'OFF'}"
@@ -857,6 +860,13 @@ class CloudConfigScreen(Screen):
     def _cycle_classifier(self):
         s = self.settings
         s.classifier_source = (s.classifier_source + 1) % 3
+
+    def _cycle_replace_agents(self):
+        s = self.settings
+        order = [None, "1", "0"]
+        s.replace_agents = order[(order.index(s.replace_agents) + 1) % 3] if s.replace_agents in order else "1"
+        if s.on_cloud_saved:
+            s.on_cloud_saved({"replace_agents": s.replace_agents})
 
     def _cycle_security_review(self):
         s = self.settings

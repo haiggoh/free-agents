@@ -15,10 +15,12 @@ wants to save cost, with or without a spending cap.
 This is the single most common way this skill gets "used" without saving a cent, so it is
 stated before anything else.
 
-**Claude Code's `Agent` (Task) tool cannot dispatch to a free agent. Ever.** Its `model`
-parameter accepts only first-party paid tiers — `sonnet`, `opus`, `haiku`, `fable`. There is no
-value that routes to a local MLX model or to a free cloud API, and the org allowlist blocks
-adding one. So:
+**In a CLOUD (paid) session, Claude Code's `Agent` (Task) tool cannot dispatch to a free agent.**
+Its `model` parameter accepts only first-party paid tiers — `sonnet`, `opus`, `haiku`, `fable` —
+and the org allowlist blocks adding one. (Two exceptions, since 0.27.0: inside a FREE session, local
+or free-API, `Agent` and `Workflow` subagents already run on that session's free endpoint. And if the
+user opted into `FA_REPLACE_AGENTS=1`, a hook redirects a cloud session's `Agent` call to
+`bin/free-agent-tool.py`; follow its instructions.) So, in a cloud session:
 
 | What you do | What actually runs | Cost |
 |---|---|---|
@@ -35,9 +37,10 @@ agents and you reached for the `Agent` tool, you have not complied yet.
 **The only free routes are HTTP dispatch or a free session:**
 
 ```bash
-bin/local-agent-dispatch.py   # or plain curl to localhost   → free LOCAL model
-bin/librarian-dispatch.py     # long/streaming local generations
+bin/lowkey-cli.py             # (alias lk) or plain curl to localhost → free LOCAL model
+bin/librarian-dispatch.py     # long/streaming generations: --port (local) or --provider nvidia|gemini (remote)
 bin/remote-agent-dispatch.py  # → free REMOTE API model (bigger + smarter, see the map below)
+bin/free-agent-tool.py        # stdin {"prompt","subagent_type"} → routed by role to a free model
 bin/agent-fallback.py         # picks a lane for you, with a privacy/cost posture
 bin/csl                       # a full interactive session on either free lane
 ```
@@ -52,7 +55,7 @@ The free *remote* lane reaches models far larger than anything that fits on this
 hard thinking the free remote lane often beats the free local one outright — and costs the same
 ($0). Choose on the axes that actually differ:
 
-| | **REMOTE free API** (`remote-agent-dispatch.py`) | **LOCAL MLX** (`local-agent-dispatch.py`) |
+| | **REMOTE free API** (`remote-agent-dispatch.py`) | **LOCAL MLX** (`lowkey-cli.py`) |
 |---|---|---|
 | **Size / smarts** | up to **hundreds of B** params — genuinely frontier-adjacent | ~27–35B, 4-bit — capable but visibly smaller |
 | **Reach for it when** | the work needs *reasoning*: analysis, review, planning, tricky code, long synthesis | the work needs *volume*: extraction, classification, reformatting, mechanical edits, first drafts |

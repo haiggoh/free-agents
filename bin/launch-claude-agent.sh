@@ -611,23 +611,17 @@ esac
 # Built-in tools are the other half of the prompt, and --disallowedTools (unlike --allowedTools) drops
 # their DEFINITIONS from the payload, not just their permission to run. Withhold the ones a local
 # session cannot use anyway — see LA_DENY_TOOLS in config-lib.sh for the per-tool reasoning.
-# Intercept Agents: if enabled, ensure Agent is in the deny list (default ON). If disabled, remove Agent.
-if [ -n "${LA_DENY_TOOLS:-}" ]; then
-    # Check if intercept_agents is set (from session picker state)
-    # Default is ON (1) - deny the native Agent tool
-    INTERCEPT_AGENTS="${INTERCEPT_AGENTS:-1}"
-    if [ "$INTERCEPT_AGENTS" = "1" ]; then
-        # Ensure Agent is in LA_DENY_TOOLS
-        case ",$LA_DENY_TOOLS," in
-            *,Agent,*) ;;  # already there
-            *) LA_DENY_TOOLS="$LA_DENY_TOOLS,Agent" ;;
-        esac
-    else
-        # Remove Agent from LA_DENY_TOOLS
-        LA_DENY_TOOLS=$(echo "$LA_DENY_TOOLS" | tr ',' '\n' | grep -v '^Agent$' | tr '\n' ',' | sed 's/,$//')
-    fi
-fi
+# Subagents (0.27.0): Agent/Workflow stay available in a local session. Their requests carry other
+# claude-* model ids, which Rapid serves under its spoof id anyway, so they land on THIS server; the
+# cap keeps parallel subagents (and ultracode fan-out) within the engine's slots instead of
+# queueing extra sequences on one MLX engine.
+export CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS="${LA_SUBAGENT_MAX_CONCURRENT:-${LA_RAPID_MAX_NUM_SEQS:-2}}"
+export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-$MODEL_SPOOF}"
 
+case ",${LA_DENY_TOOLS:-}," in
+    *,Agent,*) echo "🤖 Subagents: Agent withheld by LA_DENY_TOOLS (your config)." ;;
+    *) echo "🤖 Subagents: Agent + Workflow on this server, at most $CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS in parallel." ;;
+esac
 DENY_FLAG=""
 if [ -n "${LA_DENY_TOOLS:-}" ]; then
     DENY_FLAG="--disallowedTools $LA_DENY_TOOLS"
@@ -635,11 +629,6 @@ if [ -n "${LA_DENY_TOOLS:-}" ]; then
     echo "🚫 Withholding $_deny_n built-in tool definitions this session (LA_DENY_TOOLS)."
     echo "   They are absent, not merely denied — that is the point (a definition costs prefill even"
     echo "   when unused). Set LA_DENY_TOOLS= (empty) in your config to send the full tool surface."
-    if [ "$INTERCEPT_AGENTS" = "1" ]; then
-        echo "   Intercept Agents: ON — native Agent tool denied (FreeAgent replacement active)"
-    else
-        echo "   Intercept Agents: OFF — native Agent tool allowed"
-    fi
 fi
 
 # Local-model behavior is maintained as a data template rather than embedded

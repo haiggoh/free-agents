@@ -64,13 +64,18 @@ LA_SERVER_TIMEOUT_S=3600               # passed to the backend’s `serve --time
                                        # 300s and its streaming guard enforces it SERVER-side, so a local
                                        # model that needs >5 min per turn gets its stream killed and the
                                        # client retries the whole turn. Defaults to LA_API_TIMEOUT_MS/1000.
-LA_DENY_TOOLS="Workflow,DesignSync,Artifact,Agent,SendMessage,ListAgents,Monitor,ScheduleWakeup,CronCreate,CronList,CronDelete,EnterWorktree,ExitWorktree,ReportFindings"
+LA_DENY_TOOLS="DesignSync,Artifact,SendMessage,ListAgents,Monitor,ScheduleWakeup,CronCreate,CronList,CronDelete,EnterWorktree,ExitWorktree,ReportFindings"
                                        # built-in tools withheld from local sessions via
                                        # --disallowedTools, which (unlike --allowedTools) drops the
                                        # DEFINITION from the prompt. With LA_STRICT_MCP this takes the
                                        # request from 254,045 to 83,903 chars (~68.7k -> ~22.7k tok).
                                        # Each is unusable locally or contrary to this stack; see
                                        # config-lib.sh for the per-tool reasoning. Empty = send all.
+                                       # Agent + Workflow stay available (0.27.0): subagents and
+                                       # ultracode run on this session's own server, capped below.
+LA_SUBAGENT_MAX_CONCURRENT=""          # parallel subagents in a LOCAL session; empty = the Rapid
+                                       # server's LA_RAPID_MAX_NUM_SEQS slots (never more: two extra
+                                       # requests on one MLX engine have wedged it before).
 LA_MCP_CONFIG=""                       # optional JSON naming the ONLY MCP servers to load. Composes
                                        # with LA_STRICT_MCP=true, so you can keep one cheap server
                                        # instead of choosing between all of them and none.

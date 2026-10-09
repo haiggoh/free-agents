@@ -87,7 +87,9 @@ python3 -c "import json, sys, os; json.dump(sys.argv[1:], open(os.environ['CLAUD
 exit 0
 ''')
         # Determine spoof ID count from the config
-        self.spoof_id_count = len(self._get_spoof_ids())
+        # Each model entry is written once per spoofed id PLUS once for the "claude-*" subagent
+        # catch-all (0.27.0), so a count of model lines is spoof ids + 1.
+        self.spoof_id_count = len(self._get_spoof_ids()) + 1
 
     def _get_spoof_ids(self):
         result = subprocess.run(['bash', '-c', 'source "$1"; printf "%s" "${LA_REMOTE_SPOOF_IDS}"',
@@ -263,6 +265,51 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                     key_env, base = NEW_ROUTES[provider]
                     self.assertIn('api_base: ' + base, text)
                     self.assertIn('os.environ/' + key_env, text)
+
+    def _write_cfg(self, extra_env=None, prov='nvidia', model='nvidia/nemotron-3-ultra-550b-a55b'):
+        cfg = self.root / 'proxy-sub.yaml'
+        cfg.unlink(missing_ok=True)
+        r = subprocess.run(['bash', '-c', 'source "$1"; write_proxy_config "$2" "$3" "$4" "$5"; '
+                            'echo "POOL=$SUBAGENT_POOL_PROVIDERS"',
+                            'config', str(self.root / 'bin/library.sh'), str(cfg), prov, model, 'false'],
+                           env=dict(self.env, **(extra_env or {})), text=True, capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return cfg.read_text(), r
+
+    def test_subagent_ids_are_routed_not_rejected(self):
+        """Subagents ask for claude-haiku-5-5 / claude-sonnet-4-6 / ...; before 0.27.0 the proxy
+        answered every such id with 400 Invalid model name. A claude-* group now catches them."""
+        text, _ = self._write_cfg()
+        self.assertEqual(text.count('  - model_name: "claude-*"\n'), 1, text)
+        wild = text.split('  - model_name: "claude-*"\n', 1)[1]
+        self.assertIn('      model: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b\n', wild.split('litellm_settings:')[0])
+        self.assertIn('enable_thinking: false', wild.split('litellm_settings:')[0])
+        # Effort reaches subagents too: the catch-all carries the same params as the spoof ids.
+        # The exact spoof ids stay first, so the session itself never routes through the pool.
+        self.assertLess(text.index('model_name: claude-opus-5\n'), text.index('model_name: "claude-*"'))
+
+    def test_hybrid_subagent_pool_mixes_models_and_skips_missing_keys(self):
+        (self.root / 'keys' / 'groq').unlink()
+        text, r = self._write_cfg({'LA_SUBAGENT_ROUTING': 'hybrid',
+                                   'LA_SUBAGENT_POOL': 'nvidia:poolside/laguna-xs-2.1, gemini:gemini-3.8-flash,'
+                                                       'groq:x/y,bogus,nope:m'})
+        pool = text.split('litellm_settings:')[0]
+        self.assertEqual(pool.count('  - model_name: "claude-*"\n'), 3, pool)   # session + laguna + gemini
+        self.assertIn('      model: nvidia_nim/poolside/laguna-xs-2.1\n', pool)
+        self.assertIn('      model: gemini/gemini-3.8-flash\n', pool)
+        self.assertIn('      api_key: os.environ/GEMINI_API_KEY\n', pool)
+        self.assertNotIn('groq/x/y', pool)
+        self.assertIn('skipped (no ~/.api_keys/groq)', r.stderr)
+        self.assertIn("'bogus' is not provider:model", r.stderr)
+        self.assertIn("provider 'nope' has no route", r.stderr)
+        # gemini's key must reach the proxy process; nvidia is the session provider already.
+        self.assertIn('POOL=gemini', r.stdout)
+        self.assertNotIn('fixture-not-a-real-key', text)
+
+    def test_same_routing_ignores_pool(self):
+        text, r = self._write_cfg({'LA_SUBAGENT_POOL': 'gemini:gemini-3.8-flash'})
+        self.assertEqual(text.count('model_name: "claude-*"'), 1)
+        self.assertIn('POOL=\n', r.stdout)
 
     def test_proxy_hooks_registered_and_linked_next_to_config(self):
         """The callback must be importable from the CONFIG's directory, since that is where

@@ -458,20 +458,20 @@ class GroupingTests(unittest.TestCase):
 
         # Has three toggle actions + nav
         actions = {a.key: a for a in cloud.actions()}
-        self.assertIn("x", actions, "Missing Intercept Agents toggle (x)")
+        self.assertIn("x", actions, "Missing Replace-subagents toggle (x)")
         self.assertIn("y", actions, "Missing Classifier toggle (y)")
         self.assertIn("p", actions, "Missing Bypass Permissions toggle (p)")
 
-        # x/y/p never reach a gateway session (audit 2026-10-08), and their labels say so;
-        # the state text is what precedes that note.
+        # y/p never reach a gateway session (audit 2026-10-08), and their labels say so;
+        # the state text is what precedes that note. x DOES reach every cloud session (0.27.0).
         def state(key):
             label = actions[key].label
             self.assertTrue(label.endswith(m.NOT_GATEWAY_NOTE), label)
             return label[: -len(m.NOT_GATEWAY_NOTE)].rstrip()
 
-        # Intercept Agents toggle
-        self.assertIn("Intercept Agents", actions["x"].label)
-        self.assertTrue(state("x").endswith("ON (FreeAgent)") or state("x").endswith("OFF (Native Agent)"))
+        # Replace subagents toggle: reaches every cloud session, so it carries no NOT_GATEWAY note.
+        self.assertIn("Replace subagents with free agents (all cloud sessions)", actions["x"].label)
+        self.assertFalse(actions["x"].label.endswith(m.NOT_GATEWAY_NOTE))
 
         # Classifier toggle
         self.assertIn("Classifier:", actions["y"].label)
@@ -482,9 +482,15 @@ class GroupingTests(unittest.TestCase):
         self.assertTrue(state("p").endswith("ON") or state("p").endswith("OFF"))
 
         # Toggles actually work - test each one
-        initial_intercept = s.intercept_agents
-        actions["x"].run()
-        self.assertEqual(s.intercept_agents, not initial_intercept)
+        saved = []
+        s.on_cloud_saved = saved.append
+        s.replace_agents = None
+        for want in ("1", "0", None):                 # undecided -> ON -> OFF -> undecided
+            actions = {a.key: a for a in cloud.actions()}
+            actions["x"].run()
+            self.assertEqual(s.replace_agents, want)
+            self.assertEqual(saved[-1], {"replace_agents": want}, "the change is persisted, not just shown")
+            self.assertIn(m.cse.REPLACE_AGENTS_LABELS[want], {a.key: a for a in cloud.actions()}["x"].label)
 
         initial_classifier = s.classifier_source
         actions["y"].run()

@@ -49,6 +49,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/cloud-agent-intercept.py\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
@@ -58,7 +68,7 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/local-queue-stop-hook.py\"",
             "timeout": 10,
-            "statusMessage": "Checking for queued prompts…"
+            "statusMessage": "Checking for queued prompts\u2026"
           }
         ]
       }

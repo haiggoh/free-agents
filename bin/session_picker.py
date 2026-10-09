@@ -288,6 +288,7 @@ class Picker(App):
             security_review=cloud["security_review"],
             security_review_custom=cloud["custom_model"],
             security_review_offered=cloud["plugin_active"] or cloud["override_present"],
+            replace_agents=cse.replace_agents(),
             on_cloud_saved=self._save_cloud,
             # "Go last": restored from the store; written when a launch request is made.
             last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
@@ -324,7 +325,10 @@ class Picker(App):
         # launcher). A failed write is shown, never swallowed: an unsaved toggle would look applied
         # while the next session ignores it.
         try:
-            cse.save(values["security_review"])
+            if "replace_agents" in values:
+                cse.save_replace_agents(values["replace_agents"])
+            if "security_review" in values:
+                cse.save(values["security_review"])
         except (OSError, ValueError) as exc:
             warning = f"cloud setting not saved: {exc}"
             if warning not in self.state_warnings:

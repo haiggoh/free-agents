@@ -558,17 +558,19 @@ la_load_config() {
   # --disallowedTools removes the definition from the payload — measured: 22 names dropped the
   # request from 254,045 to 82,206 chars (~68.7k -> ~22.2k tok, -68%). Each name below is either
   # unusable in a local session or contrary to how this stack works:
-  #   Workflow/Agent/SendMessage/ListAgents  multi-agent orchestration; local sub-agents go through
-  #                                          hotswap/curl, and the Agent picker rejects local models
+  #   SendMessage/ListAgents                 cross-session messaging; meaningless for a local engine
   #   DesignSync/Artifact                    claude.ai-account-coupled; a local session has no auth
   #   Cron{Create,List,Delete}               session-only schedulers; durable scheduling is launchd
   #   Enter/ExitWorktree                     isolation is driven by the supervising session, not from
   #                                          inside the local one
   #   Monitor/ScheduleWakeup                 watch/loop orchestration; heavy defs, Bash covers it
   #   ReportFindings                         host-UI plumbing for cloud code review
-  # Workflow ALONE is 21,865 chars (~5.9k tok) — more than the entire system prompt. Set empty to
-  # withhold nothing. AskUserQuestion is deliberately NOT here: a local session must be able to ask.
-  : "${LA_DENY_TOOLS:=Workflow,DesignSync,Artifact,Agent,SendMessage,ListAgents,Monitor,ScheduleWakeup,CronCreate,CronList,CronDelete,EnterWorktree,ExitWorktree,ReportFindings}"
+  # Agent and Workflow are NOT here since 0.27.0: a subagent of a local session runs on the same local
+  # server (Rapid answers every model name under its spoof id), so parallel subagents and ultracode
+  # work — capped to the server's slots by LA_SUBAGENT_MAX_CONCURRENT. They cost ~6k prefill tokens
+  # per turn (Workflow ALONE is 21,865 chars); add them back to LA_DENY_TOOLS for the leanest prompt.
+  # Set empty to withhold nothing. AskUserQuestion is deliberately NOT here: a local session must ask.
+  : "${LA_DENY_TOOLS:=DesignSync,Artifact,SendMessage,ListAgents,Monitor,ScheduleWakeup,CronCreate,CronList,CronDelete,EnterWorktree,ExitWorktree,ReportFindings}"
   # Optional: path to a JSON file declaring the ONLY MCP servers a local session should load. Composes
   # with LA_STRICT_MCP=true (which otherwise loads none), so you can keep one cheap server whose tools
   # you actually want without paying for the whole configured set. Empty = load none.

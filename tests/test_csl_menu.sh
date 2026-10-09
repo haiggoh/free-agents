@@ -123,9 +123,9 @@ SETUP_STUB
 # The launcher stub records what the launcher would RECEIVE — the contract, not menu text.
 cat > "$SB/bin/stub-launcher" <<'CSL_STUB_LAUNCHER'
 #!/usr/bin/env bash
-printf '%s|%s|auto=%s|blind=%s|telemetry=%s|stop=%s|intercept=%s|mcp=%s\n' \
+printf '%s|%s|auto=%s|blind=%s|telemetry=%s|stop=%s|mcp=%s\n' \
   "${1:-}" "${2:-}" "${LA_AUTO_MODE:-unset}" "${LA_BLIND_AUTO:-unset}" "${LA_TELEMETRY:-unset}" \
-  "${LA_QUEUE_STOP_HOOK:-unset}" "${INTERCEPT_AGENTS:-unset}" "${LA_ENABLE_MCP:-unset}" > "$CSL_TEST_RESULT"
+  "${LA_QUEUE_STOP_HOOK:-unset}" "${LA_ENABLE_MCP:-unset}" > "$CSL_TEST_RESULT"
 CSL_STUB_LAUNCHER
 chmod +x "$SB/bin/session-picker" "$SB/bin/la-roles.sh" "$SB/bin/remote-keys.sh" "$SB/bin/stub-launcher"
 
@@ -189,29 +189,29 @@ assert_grep 'Auto-mode: blind-trust' "$out" 'auto mode defaults to blind-trust (
 assert_grep 'Telemetry: OFF' "$out" 'telemetry defaults OFF (a local session stays local)'
 assert_grep 'Watcher:   OFF' "$out" 'the watcher defaults OFF'
 assert_grep 'Stop hook: OFF' "$out" 'the queued-prompt hook defaults OFF (since 0.22.3)'
-assert_grep_flexible 'Intercept Agents: ON' "$out" 'agent interception defaults ON'
+assert_grep_flexible 'Subagents: native Agent/Workflow' "$out" 'free sessions keep native subagents (0.27.0)'
+assert_no_grep 'Intercept Agents' "$out" 'no local intercept toggle any more (cloud-only setting)'
 assert_no_grep 'Using public fallback defaults' "$out" 'no fallback notice when config.local.sh exists'
 for case_ in "CSL_AUTO_MODE_STATE=1|Auto-mode: classifier" "CSL_AUTO_MODE_STATE=2|Auto-mode: off" \
-             "CSL_TELEMETRY=1|Telemetry: ON" "CSL_WATCH=1|Watcher:   ON" "CSL_STOP_HOOK=1|Stop hook: ON" \
-             "CSL_INTERCEPT_AGENTS=0|Intercept Agents: OFF"; do
+             "CSL_TELEMETRY=1|Telemetry: ON" "CSL_WATCH=1|Watcher:   ON" "CSL_STOP_HOOK=1|Stop hook: ON"; do
   var="${case_%%|*}"; want="${case_#*|}"
   assert_grep "$want" "$(csl "$var" -- --dry-run-skip-preflight)" "$var shows '$want'"
 done
 
 echo "== 4. --picker-launch hands the launcher what the picker chose =="
 # The picker always exports LA_AUTO_MODE / LA_BLIND_AUTO / LA_TELEMETRY / LA_ENABLE_MCP itself;
-# csl only owns the two toggles it re-derives (stop hook, intercept), so those are its defaults.
+# csl only owns the toggle it re-derives (stop hook), so that is its default.
 csl -- --picker-launch "$SESSION_RAPID" "$SESSION_RAPID_EFFORT" >/dev/null
 assert_grep "$SESSION_RAPID|$SESSION_RAPID_EFFORT|" "$(cat "$SB/result" 2>/dev/null)" 'the alias and effort reach the launcher'
-assert_grep '|stop=0|intercept=1|' "$(result)" 'with nothing set, csl hands the launcher hook OFF and intercept ON'
+assert_grep '|stop=0|' "$(result)" 'with nothing set, csl hands the launcher hook OFF'
 # The picker exports its toggles as the LAUNCHER's variable names. csl used to re-derive
-# LA_QUEUE_STOP_HOOK and INTERCEPT_AGENTS from CSL_* and silently drop the picker's choice.
-csl LA_AUTO_MODE=1 LA_BLIND_AUTO=0 LA_TELEMETRY=1 LA_QUEUE_STOP_HOOK=1 INTERCEPT_AGENTS=0 LA_ENABLE_MCP=1 \
+# LA_QUEUE_STOP_HOOK from CSL_* and silently drop the picker's choice.
+csl LA_AUTO_MODE=1 LA_BLIND_AUTO=0 LA_TELEMETRY=1 LA_QUEUE_STOP_HOOK=1 LA_ENABLE_MCP=1 \
   -- --picker-launch "$SESSION_VLLM" max >/dev/null
-assert_eq "$SESSION_VLLM|max|auto=1|blind=0|telemetry=1|stop=1|intercept=0|mcp=1" "$(result)" \
+assert_eq "$SESSION_VLLM|max|auto=1|blind=0|telemetry=1|stop=1|mcp=1" "$(result)" \
   'every toggle the picker exports reaches the launcher unchanged'
-csl CSL_STOP_HOOK=1 CSL_INTERCEPT_AGENTS=0 -- --picker-launch "$SESSION_RAPID" low >/dev/null
-assert_grep '|stop=1|intercept=0|' "$(result)" 'CSL_STOP_HOOK / CSL_INTERCEPT_AGENTS still set the defaults'
+csl CSL_STOP_HOOK=1 -- --picker-launch "$SESSION_RAPID" low >/dev/null
+assert_grep '|stop=1|' "$(result)" 'CSL_STOP_HOOK still sets the default'
 out="$(csl CSL_WATCH=1 -- --picker-launch "$SESSION_RAPID" high)"
 assert_grep_flexible 'watcher .*--attach [0-9]+' "$out" 'CSL_WATCH=1 offers the watcher, following the session pid'
 out="$(csl -- --picker-launch "$SESSION_RAPID" high)"

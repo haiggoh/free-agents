@@ -1,3 +1,72 @@
+## [0.27.0] — 2026-10-09
+
+Subagents work in every lane: native `Agent` / `Workflow` (and ultracode) in free sessions, and an
+opt-in replacement of paid subagents in cloud sessions.
+
+### Fixed
+- **Subagents in free-API sessions always failed.** A subagent asks for whatever `claude-*` id its
+  definition names (`claude-haiku-5-5`, `claude-sonnet-4-6`, `claude-fable-5-1`, …). The proxy knew
+  only the four spoofed session ids and answered every other id with
+  `400 Invalid model name`. `write_proxy_config` now adds a `"claude-*"` catch-all with the same
+  parameters as the session model (thinking, effort, temperature, retries), so subagents run on the
+  free endpoint and NVIDIA calls still pass the machine-wide limiter.
+  **Measured** with a real `claude -p` told to use `Agent`: 6 proxy calls, all 200, and the subagent
+  answered. The same run on a config without the catch-all logged 8 × 400 and 17 × 500.
+- **0.24.0's "Native Agent Interception (Deny & Replace)" only ever denied.** Nothing registered
+  `free-agent-tool.py` as a tool. With the toggle on (the default), local sessions simply lost
+  `Agent`, while the banner claimed a replacement was active. The local toggle is gone. A local
+  session keeps `Agent` + `Workflow`, whose requests land on the same Rapid server (it serves every
+  model name under its spoof id).
+- `skills/free-agents` and `skills/offload-to-local` named `bin/local-agent-dispatch.py`, which
+  does not exist. The dispatcher is `bin/lowkey-cli.py`. The skills also said `Agent` can never
+  reach a free model; that is still true for cloud sessions, but no longer for free sessions.
+
+### Added
+- **Hybrid "council" subagent routing** for free-API sessions: `LA_SUBAGENT_ROUTING=hybrid` with
+  `LA_SUBAGENT_POOL="provider:model,…"` (e.g. Laguna and Gemini next to the session's Nemotron).
+  LiteLLM spreads subagent calls across the members. A member without a key is skipped with a
+  note, its key reaches the proxy process only when the member is used, and a member that hangs
+  times out after `LA_SUBAGENT_POOL_TIMEOUT` (120 s) and is retried elsewhere. The default `same`
+  routes every subagent to the session model.
+- **Local subagent concurrency cap:** `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` is exported from
+  `LA_SUBAGENT_MAX_CONCURRENT`, defaulting to the Rapid server's `LA_RAPID_MAX_NUM_SEQS`, so
+  parallel subagents or an ultracode fan-out never queue more sequences than the engine has.
+  `CLAUDE_CODE_SUBAGENT_MODEL` is set to the served spoof id.
+- **Cloud-session replacement of paid subagents (opt-in):** `hooks/cloud-agent-intercept.py`, a
+  PreToolUse hook on `Agent`.
+  - `FA_REPLACE_AGENTS=1`: denies `Agent` and hands the model a ready-to-run `free-agent-tool.py`
+    command. The prompt is passed in a quoted heredoc, so any quote or `$` survives verbatim.
+  - `FA_REPLACE_AGENTS=0`: native subagents.
+  - Unset: the hook **asks once**, on the first cloud `Agent` call, so the choice surfaces outside
+    `csl` too.
+  - Free sessions are never touched. The hook fails open.
+  - The setting lives in `~/.claude/settings.json` env, so it reaches every cloud session:
+    `csl` → Cloud Session Configuration → `x`, or
+    `bin/cloud_session_env.py set replace_agents 1|0|unset`.
+
+### Changed
+- The default `LA_DENY_TOOLS` no longer withholds `Agent` / `Workflow`, which costs about 6k
+  prefill tokens per local turn. Add them back for the leanest prompt. **A `config.local.sh` that
+  sets `LA_DENY_TOOLS` explicitly keeps its own list**: remove `Agent,Workflow` from it to enable
+  local subagents.
+- The picker's cloud screen key `x` is now "Replace subagents with free agents (all cloud sessions)",
+  cycling undecided → ON → OFF and persisting to settings.json. The `INTERCEPT_AGENTS` variable and
+  `intercept_agents` picker field are retired. The saved `intercept_agents` key in
+  `session-menu.local.json` is still read for compatibility, then ignored.
+
+### Tests
+- `tests/test_cloud_agent_intercept.py` (9). Drives the real hook contract: free sessions untouched,
+  opt-out untouched, and the opt-in redirect **executed** with a hostile prompt (quotes, `$HOME`,
+  backticks) that arrives verbatim. Also covers native login counted as cloud, the ask exactly once
+  with a 0600 state file, fail-open, `--help` without reading stdin, and registration on the
+  `Agent` matcher. Mutation-checked: with an unquoted heredoc the redirect test fails.
+- `tests/test_remote_session.py` (+3): the catch-all present and carrying the session params, the
+  hybrid pool's members and skips, and `same` routing ignoring the pool. The existing per-model
+  counts now derive spoof ids + catch-all. Mutation-checked.
+- `tests/test_free_session_subagents.sh` (6). `tests/test_cloud_session_env.py` (+1 round trip).
+  `tests/test_csl_menu.sh` and `tests/test_session_picker_model.py` are updated for the retired
+  local toggle.
+
 ## [0.26.4] — 2026-10-09
 
 Every free-API dispatch path to NVIDIA now goes through the machine-wide rate limiter.
