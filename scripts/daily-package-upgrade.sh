@@ -7,7 +7,14 @@
 # Why a single agent: both brew and pipx are wall-clock maintenance tasks that
 # benefit from running together (one notification, one log line per run).
 # If either fails, the other still runs; we log each outcome separately.
+# Usage: daily-package-upgrade.sh [--help]       (no other arguments)
+# Environment: HOME  log goes to $HOME/.claude/logs/daily-package-upgrade.log
 set -uo pipefail
+case "${1:-}" in
+    "") ;;
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
+    *) echo "usage: daily-package-upgrade.sh [--help]" >&2; exit 2 ;;
+esac
 
 LOG="$HOME/.claude/logs/daily-package-upgrade.log"
 mkdir -p "$(dirname "$LOG")"

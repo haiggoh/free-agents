@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
+# download-models-system-trust.sh — run install/download-models.sh with an hf CLI that trusts the
+# macOS system keychain (for TLS-inspecting corporate networks). All arguments pass through.
+# Usage: download-models-system-trust.sh [--help] [download-models.sh options...]
+# Environment: LA_HF_SYSTEM_TRUST_CLI  path to the system-trust hf CLI
+#              (default ~/.local/hf-system-trust/bin/hf)
 set -euo pipefail
+case "${1:-}" in
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
+esac
 
 SCRIPT_DIR="$(
   cd -- "$(dirname -- "${BASH_SOURCE[0]}")"

@@ -4,7 +4,20 @@
 import urllib.request
 import json
 import os
+import sys
 import time
+
+if len(sys.argv) > 1:
+    if sys.argv[1] in ("-h", "--help"):
+        print(__doc__.strip() + """
+
+Usage: test-nvidia-models.py [--help]     (sends REAL requests to NVIDIA NIM, serially)
+Environment:
+  NVIDIA_API_KEY   key (falls back to ~/.api_keys/nvidia)
+Writes results to config/nvidia-model-probe-results.json next to this repo.""")
+        sys.exit(0)
+    print("usage: test-nvidia-models.py [--help]", file=sys.stderr)
+    sys.exit(2)
 
 url = 'https://integrate.api.nvidia.com/v1/chat/completions'
 key = os.environ.get('NVIDIA_API_KEY') or open(os.path.expanduser('~/.api_keys/nvidia')).read().strip()

@@ -196,6 +196,28 @@ class TestLibrarianProvider(Base):
         finally:
             fake.close()
 
+    def test_librarian_retries_after_a_429(self):
+        """First call 429s; the dispatch books the pause and retries instead of failing."""
+        import threading
+        import time as _tm
+        fake = _Fake(status=429, body=b'{"status":429,"title":"Too Many Requests"}')
+        ok_body = _Fake().body
+        os.environ.update(LA_NVIDIA_429_COOLDOWN="0", LA_NVIDIA_MAX_WAIT="5", LA_NVIDIA_RPM="40")
+
+        def restore():
+            while fake.hits < 1:
+                _tm.sleep(0.02)
+            fake.status, fake.body = 200, ok_body
+        threading.Thread(target=restore, daemon=True).start()
+        try:
+            res, out = self._run(fake)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertEqual(fake.hits, 2, "one 429, then one successful retry")
+            self.assertIn("retry 1", res.stderr)
+            self.assertEqual((out / "output.txt").read_text(), "hi")
+        finally:
+            fake.close()
+
     def test_librarian_refuses_when_window_full(self):
         fake = _Fake()
         try:

@@ -1,6 +1,8 @@
 #!/bin/bash
 # Integration test: Verify Copilot BYOK works end-to-end with local Qwen proxy
 # Usage: ./bin/test-copilot-byok-integration.sh
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 
 set -e
 

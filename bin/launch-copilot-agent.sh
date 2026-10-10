@@ -8,6 +8,8 @@
 # so an effort passed here was silently discarded. Copilot CLI exposes no equivalent
 # knob to map it onto, so the parameter was removed rather than faked. If Copilot ever
 # gains one, wire it through here instead of just re-declaring the variable.
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 LAUNCH_DIR="$(cd -P "$(dirname "$_s")" && pwd)"

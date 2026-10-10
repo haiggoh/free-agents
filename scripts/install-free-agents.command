@@ -8,6 +8,8 @@
 # Usage:
 #   curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | bash
 #   # or download the .command file from the latest release and run it directly
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 
 set -euo pipefail
 

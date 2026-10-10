@@ -10,6 +10,8 @@
 #
 # TTY output updates in place with an animated spinner. Redirected output and
 # tests receive timestamped lines without terminal control sequences.
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 
 _LA_PROGRESS_START=0
 _LA_PROGRESS_LAST_LINE=-1

@@ -7,7 +7,14 @@
 #
 # It does NOT modify your Claude Code settings, download models, or touch the backend. Re-run it
 # after moving this repo (it repoints the symlink and rewrites the fenced alias block in place).
+# Usage: setup-shortcuts.sh [--help]   (no other arguments)
+# Environment: HOME, SHELL  which rc file receives the alias block (~/.zshrc or ~/.bashrc)
 set -euo pipefail
+case "${1:-}" in
+    "") ;;
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
+    *) echo "usage: setup-shortcuts.sh [--help]" >&2; exit 2 ;;
+esac
 
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)"
 

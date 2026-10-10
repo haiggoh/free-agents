@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # la-telemetry-remote-tokrate.sh - free-agents remote API token rate telemetry.
+# Prints the live output-token rate of a free-API (remote) session for the status line, read from
+# that session's debug log. Usage: la-telemetry-remote-tokrate.sh [--help]
+# Environment: LA_TELEMETRY_REMOTE_LOG (debug log), LA_TELEMETRY_SESSION_ID, LA_TELEMETRY_MAX_AGE_S (staleness).
 set -uo pipefail
 
 case "${1:-}" in

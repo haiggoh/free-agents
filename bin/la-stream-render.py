@@ -19,6 +19,14 @@ Skips everything else. --raw passes unrecognised records through if you need to 
 """
 import json, sys, textwrap, shutil, re, signal
 
+if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+    print(__doc__.strip() + "\n\nUsage: tail -f <transcript.jsonl> | la-stream-render.py [--raw] [--no-color] [--help]")
+    sys.exit(0)
+_unknown = [a for a in sys.argv[1:] if a not in ("--raw", "--no-color")]
+if _unknown:
+    print("usage: la-stream-render.py [--raw] [--no-color] [--help]", file=sys.stderr)
+    sys.exit(2)
+
 # A streaming renderer is almost always on the left of a pipe (`| head`, `| less`, a closed watcher
 # window). Default Python turns that into a BrokenPipeError traceback on the user's screen; restore
 # the shell-native behaviour of just ending quietly.

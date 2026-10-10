@@ -20,6 +20,8 @@
 # delete the symlink FIRST, or you will write THROUGH it and corrupt the original:
 #   rm <dest>/config.json && vi <dest>/config.json
 # (This script refuses to run if <dest> already exists unless --force is given.)
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 set -euo pipefail
 
 SRC="${1:-}"; DEST="${2:-}"; FORCE="${3:-}"

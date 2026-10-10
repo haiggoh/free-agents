@@ -5,6 +5,8 @@
 # A separate dense classifier is exposed as claude-sonnet-5. oMLX therefore
 # routes the two request classes without a proxy while its paged prefix cache
 # reuses the growing segmented classifier transcript.
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 set -euo pipefail
 
 _s="${BASH_SOURCE[0]}"

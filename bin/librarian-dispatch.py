@@ -23,7 +23,8 @@ Remote free APIs (same streaming + watchdog, no local server):
   The key comes from the provider's env var or ${LA_API_KEYS_DIR:-~/.api_keys}/<provider>, and is
   passed to curl through a 0600 header file, never argv. Rate-limited providers (NVIDIA) take a slot
   from the machine-wide bucket in rate_limiter.py first -- the SAME bucket every LiteLLM proxy uses --
-  so parallel dispatches queue instead of spending the live sessions' 40 RPM. A 429 pauses everyone.
+  so parallel dispatches queue instead of spending the live sessions' 40 RPM. A 429 pauses everyone,
+  and this dispatch then waits the pause out and retries (LA_REMOTE_429_RETRIES, default 3).
 
 BODY.json is a standard chat-completions request body (this script forces stream=true), e.g.:
   {"model":"<alias-or-spoof>","max_tokens":800,
@@ -227,6 +228,14 @@ def main():
                       file=sys.stderr, flush=True)
             except Exception:
                 pass
+            # Wait the cooldown out and try again instead of failing the dispatch: re-exec this
+            # same command, whose limiter.acquire() blocks until the machine-wide pause ends.
+            # Bounded by LA_REMOTE_429_RETRIES (default 3) so a provider that keeps 429ing ends.
+            tries = int(os.environ.get("_LA_LIB_429_TRY", "0"))
+            if tries < int(os.environ.get("LA_REMOTE_429_RETRIES", "3")):
+                os.environ["_LA_LIB_429_TRY"] = str(tries + 1)
+                print("[limiter] retry %d after the cooldown" % (tries + 1), file=sys.stderr, flush=True)
+                os.execv(sys.executable, [sys.executable, os.path.realpath(__file__)] + sys.argv[1:])
         return 2
     print("[dispatch] DONE t=%ds tok~%d think~%d chars=%d usage=%s" % (
         elapsed, st["ntok"], st["rtok"], st["chars"], usage), flush=True)

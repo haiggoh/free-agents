@@ -95,7 +95,8 @@ _check_claude_version() {
         fi
     fi
 }
-_check_claude_version
+# --help must not run anything (it used to call `claude --version` first): skip the probe for it.
+case " $* " in *" -h "*|*" --help "*) ;; *) _check_claude_version ;; esac
 
 # OUTPUT CEILING. Claude Code puts CLAUDE_CODE_MAX_OUTPUT_TOKENS into EVERY request as max_tokens,
 # and LiteLLM lets the request's value override anything in the proxy config ({**litellm_params,

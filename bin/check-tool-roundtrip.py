@@ -57,6 +57,12 @@ def content_blocks(rec):
     return c if isinstance(c, list) else ([{"type": "text", "text": c}] if isinstance(c, str) else [])
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print(__doc__.strip() + "\n\nUsage: check-tool-roundtrip.py [--help] [TRANSCRIPT.jsonl | SESSION_ID]")
+        return 0
+    if len(sys.argv) > 1 and sys.argv[1].startswith("-"):
+        print("usage: check-tool-roundtrip.py [--help] [TRANSCRIPT.jsonl | SESSION_ID]", file=sys.stderr)
+        return 2
     path = resolve(sys.argv[1] if len(sys.argv) > 1 else None)
     if not path:
         print("FAIL: no transcript found"); sys.exit(2)
@@ -107,4 +113,4 @@ def main():
     sys.exit(0 if passed else 1)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

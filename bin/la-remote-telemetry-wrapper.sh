@@ -9,6 +9,8 @@
 # 2. Starts a background monitor that reads the debug file and extracts token rate
 # 3. Writes token rate (timestamp tok/s cumulative_tokens) to ~/.claude/logs/remote-streaming-<session_id>.log
 # 4. Cleans up on exit
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 
 set -uo pipefail
 

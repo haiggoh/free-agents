@@ -12,6 +12,8 @@
 # Usage:
 #   auto-mode-probe.sh setup            # prints the launch command + what to type + what to watch
 #   auto-mode-probe.sh analyze [dir]    # greps the debug logs (default /tmp/cc-auto-probe)
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 set -euo pipefail
 DBG="${2:-/tmp/cc-auto-probe}"
 PORT="${VLLM_PORT:-8000}"

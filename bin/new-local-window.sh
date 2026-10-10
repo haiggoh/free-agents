@@ -7,6 +7,8 @@
 # interactive `claude` that connects to it.
 #
 # Usage:  new-local-window.sh <alias> [effort]     e.g. new-local-window.sh qwen-3.6-operator
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 DIR="$(cd -P "$(dirname "$_s")" && pwd)"

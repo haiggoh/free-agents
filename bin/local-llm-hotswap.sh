@@ -5,6 +5,8 @@
 # (your private overlay) or config/config.example.sh (shipped defaults). SAFE by design — it
 # scans ports, reuses a healthy matching server, reclaims only frozen zombies, and NEVER kills a
 # healthy model already running on another port (so it can't shut down a live local session).
+# --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
 
 # Resolve symlinks so invocation via a symlink still finds this repo's config (portable).
