@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Framework-free tests for the pure helpers in bin/local-agent-dispatch.py.
+"""Framework-free tests for the pure helpers in bin/lowkey-cli.py (formerly local-agent-dispatch.py).
 
 Usage: python3 tests/test_local_agent_dispatch.py
 

@@ -1306,28 +1306,16 @@ Groundwork for moving the canonical checkout from `~/ClaudeWorkspace/local-agent
 - **Verified providers**: NVIDIA NIM, Gemini, SiliconFlow, OpenRouter accept temperature parameter. Groq/Mistral/ZAI need API access verification.
 - **Proxy config**: Temperature passed via `temperature` field in LiteLLM config for all supported providers.
 
-### Fixed — Effort now affects max_tokens for ALL Nemotron models (not just thinking variants)
 
-- **`bin/remote-session.sh`**: Extended effort-to-max_tokens mapping to Nemotron models **regardless of thinking mode**. Previously only `-thinking` variants got increased max_tokens for high/xhigh/max effort. Now:
-  - `nvidia-nemotron-ultra --effort max` = thinking OFF, 64k tokens (was 8k default)
-  - `nvidia-nemotron-ultra-thinking --effort max` = thinking ON, 256k tokens
-  - Low/medium effort don't set max_tokens (provider default used, no artificial lowering)
 
-### Fixed — OpenAI-compatible models no longer artificially lowered for low/medium effort
-
-- **`bin/remote-session.sh`**: Only high/xhigh/max effort sets max_tokens (64k/128k/256k). Low/medium effort now use model defaults instead of 8k/16k which could artificially restrict output.
-- xhigh/max still get larger token budgets (128k/256k) while both map to `reasoning_effort: high` for API compatibility.
-
-### Updated — Model roster and tests
-
-- `config/remote-agents.sh`: Status updates for Kimi/DeepSeek/GLM
-- `tests/test_remote_session.py`: Updated assertions for new behavior (Nemotron effort affects max_tokens always; low/medium don't set max_tokens)
 
 ### Tests
 
 - 232 passed, 10 failed (test infra issue with litellm stub, not implementation)
 
 ---
+
+_Changelog cleanup 2026-10-10: text repeated verbatim from 0.21.6 was removed here; it is recorded once, in that entry._
 
 ## [0.21.6] — 2026-10-02
 
@@ -1580,12 +1568,7 @@ Groundwork for moving the canonical checkout from `~/ClaudeWorkspace/local-agent
 
 ## [0.20.7] — 2026-09-30
 
-### Added — Version detection for Opus 5.5 / 1M context support
-
-- **remote-session.sh**: Added `_check_claude_version()` that runs at startup and warns if the user's Claude Code version is older than 2.1.280 (the version that added `claude-opus-5-5` with 1M context support).
-- Older versions fall back to `claude-opus-5` (200k limit), capping Nemotron 3 Ultra's 1M actual context window.
-- Warning message includes the minimum version (2.1.280), the fallback behavior, and update instructions.
-- Can be suppressed with `LA_SILENCE_CLAUDE_VERSION_WARNING=1`.
+_Changelog cleanup 2026-10-10: text repeated verbatim from 0.20.6 was removed here; it is recorded once, in that entry._
 
 ## [0.20.6] — 2026-09-30
 
@@ -1989,43 +1972,15 @@ substitution, losing the effort choice and other toggle state. See 0.19.1 for th
   model labels, conversation commands, compaction threshold, context status, EOF handling.
 - Total test coverage: 140 tests (47 pure + 45 stateful + 48 dispatch) — all passing.
 
-### Fixed — lowkey CLI dispatcher (v0.10.2) — paste-burst UX + model alias resolution
 
-- `bin/lowkey-cli.py`: Fixed paste-burst terminal presentation (Stage 2).
-  During `:paste` mode, terminal echoed each pasted line while model output from the
-  previous turn could still be streaming, creating visually interleaved input/output.
-  Now uses raw stdin (`termios`/`tty`) on TTY to suppress terminal echo during paste
-  collection, with clear visual mode banners on entry and confirmation on `:end`.
-  Non-TTY (tests, pipes) falls back to line-buffered mode automatically.
 
-### Fixed — lowkey CLI dispatcher (v0.10.1) — model alias resolution and dispatch model ID contract
-
-- `bin/lowkey-cli.py`: Fixed dispatch to use the correct model ID for each backend.
-  Previously sent the alias (e.g., `qwen-3.8-operator`) as the `model` field, but Rapid-MLX
-  only serves the spoofed Claude ID (`claude-opus-5`), while vllm-mlx serves the alias.
-  Now queries `DISPATCH_MODEL` from hotswap output (new contract) with `/v1/models` fallback.
-- `bin/local-llm-hotswap.sh`: Added `DISPATCH_MODEL` output contract.
-  - Rapid-MLX: emits `DISPATCH_MODEL=claude-opus-5` (spoof ID, only served model)
-  - vllm-mlx: emits `DISPATCH_MODEL=qwen-3.8-operator` (alias, served alongside spoof IDs)
-  - mlx_lm: emits `DISPATCH_MODEL=<model_dir>` (model directory path)
-  This allows callers to dispatch correctly without guessing which ID the backend serves.
-
-### Added — lowkey interactive picker (bin/lowkey) refinements
-
-- Emoji placement: CSL-style emojis after the letter with proper spacing (e.g., `m) 🦾 Model`)
-- One-shot emoji changed from `⚡` to `🎯` (target/direct)
-- Advanced settings in submenu; only modified (non-default) settings shown in main menu
-- Each advanced setting (Progress, Max tokens, Max history, Max file, Session continuity)
-  now appears individually in main menu only when modified
-- Session continuity toggle (was "model mismatch") with state emojis (✅ ALLOWED / 🚫 BLOCKED)
-- Empty line between settings table and menu items for visual separation
-- All lowkey emojis centralized in `config/emoji.sh` with `LK_` prefix
-- `LK_EMOJI_MODEL` links to `SESSION_EMOJI_LOCAL` (single source of truth)
 
 ### Changed
 
 - `config/emoji.sh`: Added `LK_` prefixed emoji constants for lowkey namespace
 - `bin/lowkey`: Updated to use shared emoji constants; improved menu rendering
+
+_Changelog cleanup 2026-10-10: text repeated verbatim from 0.18.4, 0.18.5 was removed here; it is recorded once, in that entry._
 
 ## [0.18.5] — 2026-09-23
 
@@ -2038,34 +1993,14 @@ substitution, losing the effort choice and other toggle state. See 0.19.1 for th
   collection, with clear visual mode banners on entry and confirmation on `:end`.
   Non-TTY (tests, pipes) falls back to line-buffered mode automatically.
 
-### Fixed — lowkey CLI dispatcher (v0.10.1) — model alias resolution and dispatch model ID contract
 
-- `bin/lowkey-cli.py`: Fixed dispatch to use the correct model ID for each backend.
-  Previously sent the alias (e.g., `qwen-3.8-operator`) as the `model` field, but Rapid-MLX
-  only serves the spoofed Claude ID (`claude-opus-5`), while vllm-mlx serves the alias.
-  Now queries `DISPATCH_MODEL` from hotswap output (new contract) with `/v1/models` fallback.
-- `bin/local-llm-hotswap.sh`: Added `DISPATCH_MODEL` output contract.
-  - Rapid-MLX: emits `DISPATCH_MODEL=claude-opus-5` (spoof ID, only served model)
-  - vllm-mlx: emits `DISPATCH_MODEL=qwen-3.8-operator` (alias, served alongside spoof IDs)
-  - mlx_lm: emits `DISPATCH_MODEL=<model_dir>` (model directory path)
-  This allows callers to dispatch correctly without guessing which ID the backend serves.
-
-### Added — lowkey interactive picker (bin/lowkey) refinements
-
-- Emoji placement: CSL-style emojis after the letter with proper spacing (e.g., `m) 🦾 Model`)
-- One-shot emoji changed from `⚡` to `🎯` (target/direct)
-- Advanced settings in submenu; only modified (non-default) settings shown in main menu
-- Each advanced setting (Progress, Max tokens, Max history, Max file, Session continuity)
-  now appears individually in main menu only when modified
-- Session continuity toggle (was "model mismatch") with state emojis (✅ ALLOWED / 🚫 BLOCKED)
-- Empty line between settings table and menu items for visual separation
-- All lowkey emojis centralized in `config/emoji.sh` with `LK_` prefix
-- `LK_EMOJI_MODEL` links to `SESSION_EMOJI_LOCAL` (single source of truth)
 
 ### Changed
 
 - `config/emoji.sh`: Added `LK_` prefixed emoji constants for lowkey namespace
 - `bin/lowkey`: Updated to use shared emoji constants; improved menu rendering
+
+_Changelog cleanup 2026-10-10: text repeated verbatim from 0.18.4 was removed here; it is recorded once, in that entry._
 
 ## [0.18.4] — 2026-09-23
 
@@ -2116,20 +2051,7 @@ substitution, losing the effort choice and other toggle state. See 0.19.1 for th
 - Log format: `timestamp(ms) tok/s cumulative_tokens`
 - Integrates with statusline renderer (cost-tracker 0.7.6+) for live token rate display
 
-### Fixed — emoji spacing after wide glyphs in menu and banner text
-
-`EMOJI_TELEMETRY_ON` (`🛰️`) and `EMOJI_EFFORT` / `EMOJI_MODEL_CHOICE` (`⚙️`) are
-two-codepoint wide glyphs (base + VARIATION SELECTOR-16) that occupy two terminal
-columns, but the single ASCII space after them occupies only one. The result was a
-visually tight join — "⚙️choose" and "🛰️telemetry" read as stuck together.
-
-- trailing space now baked into the emoji constants in `config/emoji.sh`, so every
-  consumer (csl, remote-session.sh, launch-claude-agent.sh) gets the gap for free
-- `remote-session.sh`: moved the `e) effort` menu line from after telemetry/trials
-  to right after `h) back to lane selector`, matching csl's local picker ordering
-- `launch-claude-agent.sh`: when invoked without an effort override and the alias
-  default is medium, prompts interactively for effort (mirrors remote-session.sh's
-  `e)` picker)
+_Changelog cleanup 2026-10-10: text repeated verbatim from 0.18.1 was removed here; it is recorded once, in that entry._
 
 ## [0.18.1] — 2026-09-21
 
@@ -2317,15 +2239,7 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 The blind-trust auto mode (AUTO_MODE_STATE=0) for remote free-API sessions was too restrictive — only 12 commands were allowlisted, causing every other verb to prompt even with `sandbox.enabled=true`. Expanded the allowlist to ~90 read-only and common tool commands (ls, cat, grep, find, git read-only verbs, python3, jq, etc.) while **deliberately excluding destructive verbs** (rm, sudo, kill, git push, gh release create (added in 0.17.8)). Also fixed the dry-run output to include the resolved model, provider, and cost note — this was missing and caused test failures in `test_roster_and_all_provider_dry_runs`, `test_dynamic_models_validation_and_retired_github`, and `test_trial_opt_in_and_legacy_alias`.
 
-### Changed
-
-- Added explanatory comment to blind-trust settings: `sandbox.enabled=true` changes the WRITE BOUNDARY only; it does NOT stop the classifier from being consulted, so every verb a session needs must be explicitly allowlisted.
-- Dry-run now prints: model, provider, cost note (e.g., "renewing free allocation", "trial/paid access explicitly selected", "account quota and billing unverified; do not assume free"), plus all resolved toggles.
-
-### Testing
-
-- All 21 tests in `tests/test_remote_session.py` pass.
-- Mutation-verified: reverting the allowlist to 12 commands fails the dry-run tests; removing the model/provider/cost output from dry-run fails the same tests.
+_Changelog cleanup 2026-10-10: text repeated verbatim from 0.17.7 was removed here; it is recorded once, in that entry._
 
 ## [0.17.7] — 2026-09-20
 
@@ -2828,30 +2742,7 @@ runs the default subagent at full price, and picked the remote lane for reasonin
 
 ## [0.14.2] — 2026-09-17
 
-Documentation half of the rename. `0.14.0` renamed the project; this makes the docs actually say what
-the project now is, rather than leading with "offload to local MLX" and treating the API lane as a
-bolt-on.
-
-### Added
-
-- **`## API keys` — a section for the free-tier setup helper** (`csl setup-remote`, `i` in the
-  picker, `install/setup-api-keys.py`). **Every provider it offers has a free tier — that is the
-  selection criterion.** Paid API use works if your account has credits, but nothing here requires it
-  and no provider is listed *because* it is paid. Documents the three properties that are easy to
-  miss: it makes **no API calls** (so running it cannot burn quota, and `saved / not tested` means
-  stored, not proven), it takes keys only in **hidden prompts** so they stay out of shell history, and
-  it **never overwrites** an existing key file.
-
-### Changed
-
-- **README leads with two equal lanes.** Neither is the sidekick: remote is faster and the usual
-  default for interactive work; local wins offline, when work must not leave the machine, and for
-  long unattended runs.
-- **The hardware note no longer over-claims.** It implied Apple Silicon was required for everything.
-  Only the *local* lane needs it — `csl remote` works on any machine, with no local models at all.
-- **GitHub About and topics** updated: the vllm-only framing is gone; `free-tier`, `llm-api`,
-  `gemini`, `nvidia-nim`, `groq`, `litellm` added.
-- **Marketplace entry** renamed to `free-agents` with the two-lane description.
+_Changelog cleanup 2026-10-10: text repeated verbatim from 0.14.1 was removed here; it is recorded once, in that entry._
 
 ## [0.14.1] — 2026-09-16
 
@@ -3139,7 +3030,9 @@ the `csl` picker or set `CSL_AUTO_MODE_STATE=1`. State 2 turns auto mode off ent
     first consequential action. Kept as a POINTER rather than an inlined copy — the index is
     ~11KB and re-sending it every turn would waste a quota-limited free lane.
 
-## [Unreleased]
+## [Unreleased → 0.13.12–0.14.x] — historical
+
+_Changelog cleanup 2026-10-10: this block sat between 0.13.12 and 0.13.11 as "Unreleased"; everything in it shipped in 0.13.12–0.14.x (verified against the code in the 2026-10-08 audit). Kept verbatim as the record of that work._
 
 Nothing awaiting a number.
 
@@ -4352,7 +4245,7 @@ Release commit: [`f722c55`](https://github.com/haiggoh/local-agents/commit/f722c
 - Patch bundle for the local `vllm-mlx` fork.
 - Tournament, cancellation, tool-roundtrip, direct-routing, and Auto-mode diagnostics.
 
-[Unreleased]: https://github.com/haiggoh/local-agents/compare/13bf844b6e3ef32530ef49d7c78a94cd7cd37dba...HEAD
+[Unreleased]: https://github.com/haiggoh/free-agents/compare/v0.29.0...HEAD
 [0.12.0]: https://github.com/haiggoh/local-agents/commit/13bf844b6e3ef32530ef49d7c78a94cd7cd37dba
 [0.11.0]: https://github.com/haiggoh/local-agents/commit/55f9ef00532b2254d043378abc8593773042c9d9
 [0.10.1]: https://github.com/haiggoh/local-agents/commit/584bd0b2562236db7ba2537860478da948b326a1

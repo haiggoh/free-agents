@@ -60,7 +60,7 @@ for Anthropic's paid gateway: LiteLLM proxies Anthropic `/v1/messages` to each p
 keys with `csl setup-remote` or press `i` in `csl`. Use `csl remote` to open the picker. See
 [Remote API sessions](docs/remote-session/README.md).
 
-### 4. Run a full session on NVIDIA GPUs (Linux/WSL2) — NEW in v0.25.0
+### 4. Run a full session on NVIDIA GPUs (Linux/WSL2) — since v0.25.0 (completed in 0.25.6)
 Run full local sessions on NVIDIA GPUs with a complete CUDA inference stack:
 - **Tier A** (VRAM ≥ 16 GB): vLLM fully VRAM-resident, maximum speed
 - **Tier B** (VRAM ≤ 8 GB): AWQ/EXL2 → vLLM with UVM/KV offload (`--swap-space`); GGUF → llama.cpp with dynamic `-ngl`
@@ -82,7 +82,35 @@ Auto-detects your GPU VRAM and picks the right tier. Dynamic `--swap-space` (sys
 
 ## What's New
 
-### v0.25.0 — CUDA Architecture (NEW)
+Newest first; `CHANGELOG.md` has every release in full.
+
+- **0.29.x**: acquisition-catalogue reader with load-time validation; the remote local-capable filter
+  uses exact catalogue matches as visible-only evidence.
+- **0.28.0**: genuine auto mode on the free-API lane, with Claude Code's classifier answered by a
+  free model (`LA_CLASSIFIER_MODEL`).
+- **0.27.x**: subagents and ultracode in every lane, opt-in replacement of paid cloud subagents,
+  picker ↔ launcher parity (local temperature, shipped allowlists, `LA_REMOTE_CLAUDE_SETTINGS`),
+  Streamlake and the Mistral roster.
+- **0.26.x**: the NVIDIA limiter on every dispatch path (`librarian-dispatch.py --provider`), the
+  free-API output ceiling, and the Cerebras cap.
+
+**Hooks this plugin installs** (`hooks/hooks.json`):
+
+- SessionStart: `offload-nudge.py` (free-agent routing reminder) and `transcript-identity.py`
+  (marks local and free-API transcripts).
+- UserPromptSubmit: `session-title-prefix.py` (emoji + model prefix on the auto session name).
+- PreToolUse: `guard-own-endpoint.py` (refuses killing the endpoint serving this session),
+  `guard-tool-owned-state.py` (refuses hand-edits of Claude Code's plugin registry) and
+  `cloud-agent-intercept.py` (opt-in replacement of paid subagents).
+- Stop: `bin/local-queue-stop-hook.py` (queued-prompt recovery; off unless `LA_QUEUE_STOP_HOOK=1`).
+
+**Skills:** `free-agents`, `offload-to-local`, `brief-the-delegate`, `compose-the-payload`,
+`verify-delegated-work`, `guard-shared-runtime`, `isolate-parallel-work`, and
+`continue-on-fallback` (keeps work moving on a free lane when the local model cannot serve and the
+cloud budget is spent).
+
+
+### v0.25.0 — CUDA Architecture (completed in 0.25.6)
 
 **free-agents now supports NVIDIA GPUs on Linux/WSL2 with a complete CUDA inference stack.**
 
@@ -1528,7 +1556,7 @@ so that nobody who stumbles across them mistakes them for a working feature.
 
 The aim was to let GitHub Copilot fall back to a local model once cloud quota runs out. **That does
 not work yet.** What is proven is the streaming wire format; what is not proven is Copilot actually
-running on a local engine. In its present state it overlaps `local-agent-dispatch` above, so it adds
+running on a local engine. In its present state it overlaps `lowkey-cli.py` above, so it adds
 nothing you cannot already do — and it leans on undocumented `COPILOT_PROVIDER_*` environment
 variables that may stop working without warning.
 

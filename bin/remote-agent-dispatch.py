@@ -2,7 +2,7 @@
 """remote-agent-dispatch — dispatch a prompt to a REMOTE provider over OpenAI-compatible HTTP.
 
 This is the remote half of the emergency-fallback lane. It is the mirror of
-`local-agent-dispatch.py` (the local lane) but pointed at an external provider.
+`lowkey-cli.py` (the local lane; formerly `local-agent-dispatch.py`) but pointed at an external provider.
 It exists for ONE job: keep work moving when the local model can't serve and
 the cloud budget is spent, by sending a self-contained prompt to a free /
 renewing remote allowance.

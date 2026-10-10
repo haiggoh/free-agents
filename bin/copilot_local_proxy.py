@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple local proxy translating minimal OpenAI-style requests to local-agent-dispatch.
+"""Simple local proxy translating minimal OpenAI-style requests to lowkey-cli.py (formerly local-agent-dispatch).
 
 Usage: copilot_local_proxy.py --port 8081
 
@@ -8,7 +8,7 @@ Endpoints:
   POST /v1/chat/completions       -> expects JSON {"model": "alias", "messages": [...]}
 
 This is a small proof-of-concept not for production. It calls the existing local-llm-hotswap.sh
-and local-agent-dispatch.py in the same bin directory.
+and lowkey-cli.py in the same bin directory.
 """
 
 import argparse

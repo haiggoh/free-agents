@@ -6,7 +6,7 @@ is the first lane; explicitly-approved **remote free allowances** are the
 emergency lane behind it.
 
 This is an **additive** feature. The existing local dispatch path is untouched
-(the router composes with `local-agent-dispatch.py` through a subprocess). When
+(the router composes with `lowkey-cli.py`, formerly `local-agent-dispatch.py`, through a subprocess). When
 no remote key is configured — the default — this entire lane is inert and the
 router behaves as pure `local-only`.
 

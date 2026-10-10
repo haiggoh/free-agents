@@ -114,7 +114,7 @@ def _remote_providers_for_mode(mode, requested=None, doctor_ids=None):
 
 def _run_local(prompt, files, model, max_tokens, outdir, dry_run, timeout,
                progress, profile=""):
-    """Drive local-agent-dispatch.py as a subprocess. Returns (ok, answer_text).
+    """Drive lowkey-cli.py (the local dispatcher, formerly local-agent-dispatch.py) as a subprocess. Returns (ok, answer_text).
 
     The local lane is lane-agnostic; we read its answer from stdout (its one
     output channel) and treat empty-or-nonzero-exit as "local failed". It never
