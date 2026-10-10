@@ -1,3 +1,15 @@
+## [0.28.2] — 2026-10-10
+
+### Fixed
+- **0.28.1's validator rejected six real manifests on this machine** (TTS, depth and MTP-drafter
+  models). The "must not be session-eligible" rule fired on a missing field. Manifests written
+  before 0.28.1 omit `session_eligible`, and an omitted field claims nothing, so only an explicit
+  `true` is rejected now. Found by dogfooding 0.28.1 against `~/.models`.
+
+### Tests
+- `tests/test_model_manifest_fixtures.py`: a tts_model manifest without `session_eligible` is
+  accepted. The 17 spec fixtures still agree.
+
 ## [0.28.1] — 2026-10-10
 
 The 0.20.0 manifest gate, finally on the launch path, plus a validator that matches its own spec.

@@ -173,6 +173,16 @@ def main():
         want_valid = f.name.startswith("valid-")
         check((rc == 0) == want_valid, f"real validator: {f.stem} {'accepted' if want_valid else 'rejected'}")
 
+    print("== a pre-0.28.1 manifest that OMITS session_eligible is not rejected for it ==")
+    import json as _j, tempfile as _tf
+    legacy = {"schema_version": 1, "artifact": {"kind": "tts_model", "launchable": True,
+              "directory_name": "Kokoro-82M-bf16", "format": "mlx", "payload_bytes": 1},
+              "capabilities": {}, "acquisition": {"status": "complete"}}
+    with _tf.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+        _j.dump(legacy, fh)
+    rc = subprocess.run([sys.executable, str(tool), "validate", fh.name], capture_output=True).returncode
+    check(rc == 0, "omitted session_eligible on a tts_model is accepted")
+
     print("== invalid fixtures fail, each for its OWN reason ==")
     invalid = sorted(FIXTURES.glob("invalid-*.json"))
     check(len(invalid) >= 11, f"found {len(invalid)} invalid fixtures")

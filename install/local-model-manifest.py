@@ -368,7 +368,9 @@ def validate_manifest(manifest: Dict) -> List[str]:
         if not artifact.get("target_directory_name"):
             errors.append("draft_model needs target_directory_name")
     if kind in ("draft_model", "tts_model", "depth_estimation_model", "adapter", "processor") \
-            and artifact.get("session_eligible") is not False:
+            and artifact.get("session_eligible") is True:
+        # Only an explicit claim is a lie. Manifests written before 0.28.1 omit the field, and
+        # an absent field claims nothing (measured: 6 real drafter/TTS/depth manifests).
         errors.append(f"{kind} must not be session_eligible")
     _caps = manifest.get("capabilities") or {}
     _cands = _caps.get("context_candidates") or []
