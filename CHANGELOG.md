@@ -1,4 +1,4 @@
-## [0.28.0] — 2026-10-09
+## [0.28.0] — 2026-10-10
 
 Genuine auto mode on the free-API lane: Claude Code's safety classifier, answered by a free model.
 
