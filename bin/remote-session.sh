@@ -118,6 +118,8 @@ CSL_OWNER=0
 # Blind-trust settings file (set when AUTO_MODE_STATE=0)
 BLIND_TRUST_SETTINGS_FILE=""
 TEMPERATURE_CHOICE=""
+# Show paid-only tier models: 0=hidden (default), 1=shown.
+SHOW_PAID_ONLY_MODELS=0
 
 usage() {
     sed -n '2,/^set -uo pipefail/{ /^set -uo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
@@ -158,6 +160,7 @@ _openai_base() {
         vercel) echo 'https://ai-gateway.vercel.sh/v1' ;;
         sambanova) echo 'https://api.sambanova.ai/v1' ;;
         modelscope) echo 'https://api-inference.modelscope.cn/v1' ;;
+        streamlake) echo 'https://api.streamlake.ai/v1' ;;
         *) return 2 ;;
     esac
 }
@@ -166,7 +169,7 @@ _clear_provider_env() {
     # The user's shell may still globally export keys. Keep only the selected
     # provider in the proxy; no provider secrets are needed by the Claude child.
     local name
-    for name in GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GITHUB_MODELS_TOKEN CEREBRAS_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY ZAI_API_KEY SILICONFLOW_API_KEY LLM7_API_KEY KILO_API_KEY AI_GATEWAY_API_KEY SAMBANOVA_API_KEY MODELSCOPE_API_KEY OPENAI_API_KEY; do
+    for name in GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GITHUB_MODELS_TOKEN CEREBRAS_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY ZAI_API_KEY SILICONFLOW_API_KEY LLM7_API_KEY KILO_API_KEY AI_GATEWAY_API_KEY SAMBANOVA_API_KEY MODELSCOPE_API_KEY STREAMLAKE_API_KEY OPENAI_API_KEY; do
         unset "$name"
     done
 }
@@ -246,9 +249,11 @@ _entry_for() { # _entry_for <alias>  -> the roster line, or empty
     done
     return 1
 }
-_visible() { # tier filter: hide trials unless asked
+_visible() { # tier filter: hide trials and paid_only unless asked
     local tier="$1"
-    [[ "$tier" != "trial" ]] || [[ $INCLUDE_TRIALS -eq 1 ]]
+    [[ "$tier" != "trial" ]] || [[ $INCLUDE_TRIALS -eq 1 ]] || return 1
+    [[ "$tier" != "paid_only" ]] || [[ $SHOW_PAID_ONLY_MODELS -eq 1 ]] || return 1
+    return 0
 }
 
 # _tier_label <tier> <provider> -> what the USER READS in a picker/listing.
@@ -389,6 +394,7 @@ _sync_state() {
         [[ -n "${TELEMETRY_ENABLED:-}" ]] && echo "TELEMETRY=$TELEMETRY_ENABLED"
         [[ -n "${INCLUDE_TRIALS:-}" ]] && echo "INCLUDE_TRIALS=$INCLUDE_TRIALS"
         [[ -n "${EFFORT_CHOICE:-}" ]] && echo "EFFORT_CHOICE=$EFFORT_CHOICE"
+        [[ -n "${SHOW_PAID_ONLY_MODELS:-}" ]] && echo "SHOW_PAID_ONLY_MODELS=$SHOW_PAID_ONLY_MODELS"
     } > "$navfile"
 }
 
@@ -466,6 +472,7 @@ _catalog_request() {
                     base="${base%/v1}/models/search?per_page=100" ;;
         mistral|llm7|kilo|vercel|sambanova) base="$(_openai_base "$prov")/models" ;;
         siliconflow) base="$(_openai_base "$prov")/models?type=text" ;;
+        streamlake) base="$(_openai_base "$prov")/models" ;;
         zai) echo 'remote-session: no documented ZAI catalog route; use --remote-model ID from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.' >&2; return 2 ;;
         modelscope) echo 'remote-session: no documented ModelScope catalog route; use --remote-model ID from the API-Inference model page: https://modelscope.cn/docs/model-service/API-Inference/intro' >&2; return 2 ;;
         *) echo "remote-session: no documented catalog route for $prov; choose an API model from its provider docs with --remote-model ID. Catalog verification unavailable." >&2; return 2 ;;
@@ -675,7 +682,8 @@ _litellm_route() { # _litellm_route <provider> <model> -> "litellm_model|api_bas
         openrouter) echo "openrouter/$model|" ;;
         cerebras)   echo "cerebras/$model|" ;;
         cloudflare) base="$(_cloudflare_base)" || return 1; echo "openai/$model|$base" ;;
-        mistral|zai|siliconflow|llm7|kilo|vercel|sambanova|modelscope)
+        mistral)    echo "mistral/$model|" ;;
+        zai|siliconflow|llm7|kilo|vercel|sambanova|modelscope|streamlake)
                     base="$(_openai_base "$prov")" || return 1; echo "openai/$model|$base" ;;
         *)          return 1 ;;
     esac
@@ -733,7 +741,8 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         openrouter) litellm_model="openrouter/$model" ;;
         cerebras)   litellm_model="cerebras/$model" ;;
         cloudflare) litellm_model="openai/$model"; api_base="$(_cloudflare_base)" || return 1 ;;
-        mistral|zai|siliconflow|llm7|kilo|vercel|sambanova|modelscope)
+        mistral)    litellm_model="mistral/$model" ;;
+        zai|siliconflow|llm7|kilo|vercel|sambanova|modelscope|streamlake)
                     litellm_model="openai/$model"; api_base="$(_openai_base "$prov")" || return 1 ;;
         *)          echo "remote-session: no LiteLLM prefix for provider $prov" >&2; return 1 ;;
     esac
@@ -859,6 +868,10 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
 litellm_settings:
   drop_params: true
   telemetry: false
+  # GLOBAL, not per-model (LiteLLM reads it from litellm_settings only): never bridge Anthropic
+  # /v1/messages through the OpenAI Responses API -- Mistral and most OpenAI-compatible routes 404
+  # on /v1/responses. Every route here speaks chat/completions, so it is safe for all of them.
+  disable_responses_api: true
 YAML
     # PROXY HOOKS (bin/la_proxy_hooks.py): NIM's rejected request keys (safeguards, and
     # stop_sequences on LiteLLM < 1.102.1 -> HTTP 400), the machine-wide NVIDIA 40 RPM bucket,
@@ -1001,6 +1014,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run)        DRY_RUN=1; shift ;;
         --include-trials) INCLUDE_TRIALS=1; shift ;;
         --local-capable-shown) LOCAL_CAPABLE_SHOWN=1; shift ;;
+        --show-paid-only) SHOW_PAID_ONLY_MODELS=1; shift ;;
         --effort)         [[ $# -ge 2 ]] || { echo 'remote-session: --effort needs a level' >&2; exit 2; }
                           case "$2" in low|medium|high|xhigh|max) EFFORT_CHOICE="$2" ;;
                               *) echo "remote-session: --effort must be low|medium|high|xhigh|max (omit it for the provider default)" >&2; exit 2 ;;
@@ -1130,9 +1144,10 @@ if [[ -z "$ALIAS" ]]; then
                 _box row "  k) Install/set up keys    a) Auto-mode: $(case "$AUTO_MODE_STATE" in 0) echo "blind-trust" ;; 1) echo "classifier" ;; 2) echo "off" ;; esac)"
                 _box row "  t) Telemetry: $( [[ "$TELEMETRY_ENABLED" -eq 1 ]] && echo "ON" || echo "OFF" )    l) Local-capable: $( [[ "$LOCAL_CAPABLE_SHOWN" -eq 1 ]] && echo "SHOWN" || echo "HIDDEN" )"
                 _box row "  m) MCPs: $( [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 ]] && echo "ENABLED" || echo "DISABLED" )    u) $EMOJI_BROKEN_MODELS Unworking: $( [[ "${SHOW_BROKEN_MODELS:-0}" -eq 1 ]] && echo "SHOWN" || echo "HIDDEN" )"
+                _box row "  p) Paid-only models: $( [[ "$SHOW_PAID_ONLY_MODELS" -eq 1 ]] && echo "SHOWN" || echo "HIDDEN" )"
                 _box row "  q) Quit"
                 _box bottom
-                printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/u/q): " "${#choices[@]}" >&2
+                printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/u/p/q): " "${#choices[@]}" >&2
                 read -r -p "" sel >&2 || { _nav "quit"; return 0; }
                 case "$sel" in
                     h|H) _nav "home"; return 0 ;;
@@ -1179,6 +1194,9 @@ if [[ -z "$ALIAS" ]]; then
                     # u only: b is Back in the picker and letters are case-insensitive there.
                     u|U)
                         SHOW_BROKEN_MODELS=$(( 1 - ${SHOW_BROKEN_MODELS:-0} ))
+                        continue ;;
+                    p|P)
+                        SHOW_PAID_ONLY_MODELS=$(( 1 - SHOW_PAID_ONLY_MODELS ))
                         continue ;;
                     c|C)
                         # Choose effort
@@ -1236,6 +1254,7 @@ if [[ -z "$ALIAS" ]]; then
                         TELEMETRY=*)       TELEMETRY_ENABLED="${line#*=}" ;;
                         INCLUDE_TRIALS=*)  INCLUDE_TRIALS="${line#*=}" ;;
                         EFFORT_CHOICE=*)   EFFORT_CHOICE="${line#*=}" ;;
+                        SHOW_PAID_ONLY_MODELS=*) SHOW_PAID_ONLY_MODELS="${line#*=}" ;;
                     esac
                 fi
             done < "$navfile"

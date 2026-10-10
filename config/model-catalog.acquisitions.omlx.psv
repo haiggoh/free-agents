@@ -11,3 +11,4 @@
 
 qwen38-flash-reap288-q4|Qwen3.8 Flash-Next REAP-288 MLX 4-bit — practical pruned high-tier challenger|sh0wie/Qwen3.8-Flash-Next-REAP-288-MLX-4bit|main|Qwen3.8-Flash-Next-REAP-288-MLX-4bit|68.0|acquisition,wave2,omlx,qwen,flash-next,reap,pruned|experimental||omlx
 qwen38-flash-full-oq2-mtp|Qwen3.8 Flash-Next full-expert MLX oQ2 with native MTP — aggressive low-bit comparison|Vontra/Qwen3.8-Flash-Next-MLX-oQ2-MTP|main|Qwen3.8-Flash-Next-MLX-oQ2-MTP|70.8|acquisition,wave3,omlx,qwen,flash-next,full-expert,mtp|experimental||omlx
+mistral-small4-4bit|Mistral Small 4 119B MLX 4-bit — 128-expert MoE, 256K context, multimodal|mlx-community/Mistral-Small-4-119B-2603-4bit|main|mistral-small4-119b-4bit|67.5|acquisition,wave2,omlx,mistral,small4,moe,multimodal|experimental||mlx-vlm

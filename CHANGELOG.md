@@ -1,3 +1,32 @@
+## [0.27.1] — 2026-10-10
+
+Provider additions made between runs, plus a Mistral routing fix.
+
+### Added
+- **Streamlake** provider (`STREAMLAKE_API_KEY`, `https://api.streamlake.ai/v1`): proxy route,
+  catalog route, key mapping and setup-wizard entry. There is no key on this machine yet, so the
+  route is untested.
+- **Mistral roster rows**, verified 2026-10-10: `mistral-codestral` (codestral-2508),
+  `mistral-medium` (2604) and `mistral-small` (2603), plus `mistral-large-4` under a new
+  **`paid_only`** tier. `paid_only` rows are hidden by default; show them with
+  `remote-session.sh --show-paid-only` or `p` in the remote menu. This is a separate switch from
+  `--show-broken` / `u`.
+- `config/broken-nvidia-models.json`: each entry now records a `failure_mode` and `evidence`, so
+  "broken" (timeout or not provisioned) is kept distinct from "paid only".
+- Mistral Small 4 119B MLX 4-bit (`mistral-small4-4bit`) added to the oMLX acquisition PSV and the
+  context catalogue (262K native, 1M extended).
+
+### Fixed
+- **Mistral routes 404'd.** They went through the generic `openai/` prefix with an `api_base`, and
+  LiteLLM bridged Anthropic `/v1/messages` through the OpenAI **Responses** API, which Mistral and
+  most OpenAI-compatible routes do not serve. Mistral now uses LiteLLM's native `mistral/` prefix,
+  and every proxy config sets `litellm_settings.disable_responses_api: true`. That setting is
+  global (LiteLLM ignores it per model) and safe for every route, since all of them speak
+  chat/completions.
+
+### Tests
+- `tests/test_remote_session.py` knows Streamlake and the native `mistral/` route (no `api_base`).
+
 ## [0.27.0] — 2026-10-09
 
 Subagents work in every lane: native `Agent` / `Workflow` (and ultracode) in free sessions, and an

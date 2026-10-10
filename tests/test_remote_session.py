@@ -26,7 +26,11 @@ NEW_ROUTES = {
     'vercel': ('AI_GATEWAY_API_KEY', 'https://ai-gateway.vercel.sh/v1'),
     'sambanova': ('SAMBANOVA_API_KEY', 'https://api.sambanova.ai/v1'),
     'modelscope': ('MODELSCOPE_API_KEY', 'https://api-inference.modelscope.cn/v1'),
+    'streamlake': ('STREAMLAKE_API_KEY', 'https://api.streamlake.ai/v1'),
 }
+# Providers with a NATIVE LiteLLM prefix (no api_base line); every other NEW_ROUTES entry is a generic
+# openai/ route with an explicit api_base. Mistral moved to native mistral/ in 0.28.x.
+NATIVE_PREFIX = {'mistral': 'mistral/'}
 
 
 class RemoteSessionTests(unittest.TestCase):
@@ -232,7 +236,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
     def test_proxy_config_all_models_and_thinking(self):
         prefixes = dict(gemini='gemini/', groq='groq/', nvidia='nvidia_nim/',
                         openrouter='openrouter/', cerebras='cerebras/', cloudflare='openai/',
-                        **{p: 'openai/' for p in NEW_ROUTES})
+                        **{p: NATIVE_PREFIX.get(p, 'openai/') for p in NEW_ROUTES})
         for alias, provider, model, *_ in self.roster():
             if model == 'SELECT':
                 model = 'fixture/model:version'
@@ -263,7 +267,10 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)
                 if provider in NEW_ROUTES:
                     key_env, base = NEW_ROUTES[provider]
-                    self.assertIn('api_base: ' + base, text)
+                    if provider in NATIVE_PREFIX:
+                        self.assertNotIn('api_base:', text)
+                    else:
+                        self.assertIn('api_base: ' + base, text)
                     self.assertIn('os.environ/' + key_env, text)
 
     def _write_cfg(self, extra_env=None, prov='nvidia', model='nvidia/nemotron-3-ultra-550b-a55b'):
@@ -585,8 +592,12 @@ with open(os.environ['CLAUDE_RESULT'],'w') as f:
                 self.assertTrue(child['base'].startswith('http://127.0.0.1:'))
                 self.assertEqual(child['argv'][-2:], ['-p', 'fixture prompt'])
                 cfg = (self.root / 'local-agents-remote/proxy-4141.yaml').read_text()
-                self.assertIn('api_base: ' + endpoint, cfg)
-                self.assertIn('model: openai/fixture/model:free', cfg)
+                if provider in NATIVE_PREFIX:
+                    self.assertNotIn('api_base:', cfg)
+                    self.assertIn('model: ' + NATIVE_PREFIX[provider] + 'fixture/model:free', cfg)
+                else:
+                    self.assertIn('api_base: ' + endpoint, cfg)
+                    self.assertIn('model: openai/fixture/model:free', cfg)
                 self.assertNotIn(secret, cfg + result.stdout + result.stderr)
         self.assertFalse(marker.exists())
 

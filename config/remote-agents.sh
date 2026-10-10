@@ -6,7 +6,7 @@
 #
 # Each entry:  alias|provider|model-id|display|tier|notes|autocompact_default
 # provider must have a key mapping and a remote-session.sh proxy route.
-# tier: renewing_free | trial | unknown
+# tier: renewing_free | trial | unknown | paid_only
 # autocompact_default: default LA_AUTO_COMPACT_WINDOW for this model (e.g., 1m for 1M-context models),
 #                      or "-" for no default, or empty. Only used when LA_AUTO_COMPACT_WINDOW is not set.
 # SELECT requires an explicit --remote-model ID or an interactive model choice.
@@ -106,6 +106,11 @@ LA_REMOTE_AGENTS=(
   # Provider selections intentionally pin no speculative default model. General
   # account API endpoints; ZAI Coding Plan is a distinct endpoint, not this route.
   "mistral|mistral|SELECT|Mistral (choose model)|unknown|Select a catalog model; free experiment and paid plans differ. Tool session untested.|-"
+  # Mistral: explicit working models (verified 2026-10-10)
+  "mistral-codestral|mistral|codestral-2508|Mistral Codestral 2508|unknown|WORKING - coding specialist, 256K context, tools confirmed|256k"
+  "mistral-medium|mistral|mistral-medium-2604|Mistral Medium 2604|unknown|WORKING - general purpose, 262K context, tools confirmed|256k"
+  "mistral-small|mistral|mistral-small-2603|Mistral Small 2603|unknown|Catalog listed - smaller/faster, 262K context, tools confirmed|256k"
+  "mistral-large-4|mistral|mistral-large-4-0|Mistral Large 4|paid_only|Catalog listed - flagship, 1M context, tools confirmed, requires paid subscription|1m"
   "zai|zai|SELECT|ZAI general API (choose model)|unknown|Explicit model required. General API billing; not the GLM Coding Plan endpoint. Tool session untested.|-"
   "siliconflow|siliconflow|SELECT|SiliconFlow (choose model)|unknown|International .com endpoint. Free and paid models differ; select explicitly. Tool session untested.|-"
   "llm7|llm7|SELECT|LLM7 (choose model)|unknown|Catalog contains free and paid models; inspect pricing and tools. Tool session untested.|-"
@@ -113,6 +118,7 @@ LA_REMOTE_AGENTS=(
   "vercel|vercel|SELECT|Vercel Gateway (choose model)|unknown|Credits and paid account billing apply; select explicitly. Tool session untested.|-"
   "sambanova|sambanova|SELECT|SambaNova (choose model)|unknown|Account trial, credit and paid billing vary. Tool session untested.|-"
   "modelscope|modelscope|SELECT|ModelScope (choose model)|unknown|Explicit API-Inference model required; account quota and tool use untested.|-"
+  "streamlake|streamlake|SELECT|Streamlake (choose model)|unknown|Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key. Tool session untested.|-"
 )
 
 # Which spoofed Claude ids the proxy should answer to. Claude Code asks for these

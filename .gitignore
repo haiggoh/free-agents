@@ -14,3 +14,6 @@ __pycache__/
 .pytest_cache/
 backups/
 .worktrees/
+
+# release build output (scripts/package-release.sh)
+/dist/

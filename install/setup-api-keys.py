@@ -71,6 +71,9 @@ PROVIDERS = (
     Provider("nvidia", "NVIDIA", "https://build.nvidia.com/settings/api-keys",
              "Sign in, then generate an API key. Check the account's available API credits.",
              ("nvidia",), "account credits; session available", True),
+    Provider("streamlake", "Streamlake", "https://console.streamlake.ai/console/wanqing/api-key",
+             "Sign in, open API Keys, and create a key. Check account billing.",
+             ("streamlake",), "account billing; session available", True),
 )
 
 

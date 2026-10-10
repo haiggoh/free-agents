@@ -619,3 +619,18 @@ entries:
     autocompaction_tokens: 200000
     extended_autocompaction_tokens: 1000000
     confidence: high
+
+  # 45
+  - folder: "mistral-small4-119b-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Mistral Small 4 119B"
+    base_model: "mistralai/Mistral-Small-4-119B-2603"
+    format: "MLX 4-bit"
+    modalities: [text, image]
+    context_window_tokens: 262144
+    extended_context_tokens: 1048576
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+    notes: "128-expert MoE with 4 active experts. YaRN factor 128 extends 8192 base to 1M. mlx-vlm required for vision."
