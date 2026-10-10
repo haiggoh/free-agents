@@ -1,3 +1,50 @@
+## [0.28.1] — 2026-10-10
+
+The 0.20.0 manifest gate, finally on the launch path, plus a validator that matches its own spec.
+
+### Fixed
+- **A session started on an invalid model manifest.** 0.20.0 promised that a session would fail
+  *before* Claude Code starts on an invalid manifest configuration, but `la_validate_manifest_config`
+  was defined twice and called nowhere. `launch-claude-agent.sh` now runs it after the alias
+  resolves and before hotswap, the dry run, or any `claude` exec. On an invalid manifest it prints
+  the alias, artifact/server/effective context, the selected autocompaction and the corrective
+  action, then exits 1. A *missing* manifest prints exactly one warning line and keeps the legacy
+  fallback.
+- `bin/csl` re-defined the four manifest functions instead of sourcing `config/config-lib.sh`, so
+  the two copies could drift. One copy remains.
+- **The downloader wrote unverified manifests.** It now builds to a temp file in the model directory,
+  runs `local-model-manifest.py validate`, moves the file into place (an atomic rename) and reads it
+  back with `inspect`. A failed validation leaves **no** manifest, removes the completion marker and
+  exits non-zero ("acquisition incomplete").
+- **`local-model-manifest.py validate` accepted 5 of the 11 invalid spec fixtures**: a launchable
+  drafter, a drafter without a target, a session-eligible TTS asset, unresolved context conflicts,
+  and "complete" with zero payload. Those rules from `docs/model-manifest-v1.md` are now in the real
+  validator. A drafter or TTS manifest that is *not* session-eligible stays valid; eligibility is
+  checked where a session starts.
+- `la_auto_scan_models` listed any directory holding a `config.json`, including the metadata-only
+  shells an aborted download leaves. It now applies `la_on_disk`'s weight rule (a file over 1 MB).
+
+### Added
+- **`la_auto_scan_models` is wired into model discovery** (0.25.6 "groundwork"). `csl --inventory`
+  and `local-session.sh --inventory` list on-disk models that have no registration, marked
+  `auto-scanned`. Registered aliases are unchanged and never listed twice.
+- `build` records `session_eligible` and the derived `claude_autocompact_tokens`.
+
+### Tests
+- `tests/test_manifest_gate.sh` (14): a valid manifest passes, three invalid cases exit non-zero
+  before a stub `claude`, and a missing manifest warns once. Mutation-checked: with the gate
+  disabled, 6 fail.
+- `tests/test_download_manifest_validation.sh` (9) drives the **real** downloader with a stub `hf`.
+  A valid build is validated and moved into place with no temp file left; a planted invalid build
+  leaves no manifest and no marker, and exits 1.
+- `tests/test_inventory_auto_scan.sh` (10) and `tests/test_auto_scan_models.sh` now use real weight
+  placeholders; a metadata-only shell is not listed.
+- `tests/test_model_manifest_fixtures.py` now also runs the **real** validator on all 17 fixtures
+  (60 checks). Before this, only an in-test reference copy was checked, which is how the validator's
+  5 gaps went unnoticed.
+- Drafted by a free Nemotron 3 Ultra session. Its tests had inverted checks (`check $((r != 0))`
+  passes on 1) and fixtures without weights; both were corrected on review.
+
 ## [0.28.0] — 2026-10-10
 
 Genuine auto mode on the free-API lane: Claude Code's safety classifier, answered by a free model.

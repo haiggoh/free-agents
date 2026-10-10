@@ -165,6 +165,14 @@ def main():
         errs = validate(json.loads(path.read_text()))
         check(not errs, f"{path.name} valid (got {errs})")
 
+    print("== the REAL validator (install/local-model-manifest.py validate) agrees on every fixture ==")
+    import subprocess
+    tool = pathlib.Path(__file__).resolve().parent.parent / "install" / "local-model-manifest.py"
+    for f in sorted(FIXTURES.glob("*.json")):
+        rc = subprocess.run([sys.executable, str(tool), "validate", str(f)], capture_output=True).returncode
+        want_valid = f.name.startswith("valid-")
+        check((rc == 0) == want_valid, f"real validator: {f.stem} {'accepted' if want_valid else 'rejected'}")
+
     print("== invalid fixtures fail, each for its OWN reason ==")
     invalid = sorted(FIXTURES.glob("invalid-*.json"))
     check(len(invalid) >= 11, f"found {len(invalid)} invalid fixtures")

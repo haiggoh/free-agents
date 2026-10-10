@@ -288,6 +288,34 @@ fi
 # Export MODEL_ALIAS so la-session-identity.sh can resolve the actual model name
 export MODEL_ALIAS
 
+# --- Manifest Gate: validate manifest-derived config BEFORE hotswap/server start ---
+# A MISSING manifest must NOT fail: print exactly one warning line and continue (legacy fallback)
+manifest_json="$(la_load_manifest "$MODEL_ALIAS")"
+if [ -n "$manifest_json" ]; then
+    # Extract values from manifest for validation
+    effective="$(la_manifest_effective_context "$manifest_json" 2>/dev/null || echo "")"
+    # Use the manifest's DECLARED autocompaction (claude_autocompact_tokens) for validation,
+    # not the computed one, so we catch mismatches between declared and derived values.
+    autocompact=$(echo "$manifest_json" | python3 -c 'import json,sys; doc=json.loads(sys.stdin.read()); caps=doc.get("capabilities",{}); print(caps.get("claude_autocompact_tokens") or "")' 2>/dev/null || echo "")
+    server_ctx=$(echo "$manifest_json" | python3 -c 'import json,sys; doc=json.loads(sys.stdin.read()); rq=doc.get("runtime_qualification") or {}; print(rq.get("server_context_tokens") or "")' 2>/dev/null || echo "")
+
+    # Validate
+    if ! la_validate_manifest_config "$MODEL_ALIAS" "$manifest_json" "$server_ctx" "$autocompact" "$effective"; then
+        # Print the model alias, artifact context, server/effective context, the selected autocompaction and the corrective action
+        echo "❌ Manifest validation failed for model alias: $MODEL_ALIAS"
+        artifact_ctx=$(echo "$manifest_json" | python3 -c 'import json,sys; doc=json.loads(sys.stdin.read()); art=doc.get("artifact",{}); caps=doc.get("capabilities",{}); print("kind=" + str(art.get("kind")) + ", native_ctx=" + str(caps.get("native_context_tokens")) + ", configured_ctx=" + str(caps.get("configured_context_tokens")) + ", ext_ctx=" + str(caps.get("extended_context_tokens")))')
+        echo "   Artifact context: $artifact_ctx"
+        echo "   Server context: ${server_ctx:-<none>}"
+        echo "   Effective context: ${effective:-<none>}"
+        echo "   Autocompaction: ${autocompact:-<none>}"
+        echo "   Corrective action: Fix the model manifest (see .local-model-manifest.json in the model directory) or remove it to use legacy fallback."
+        exit 1
+    fi
+else
+    # Missing manifest: print exactly one warning line and continue (legacy fallback)
+    echo "⚠️  No manifest found for $MODEL_ALIAS — using legacy fallback (LA_MAX_MODEL_LEN=${LA_MAX_MODEL_LEN})"
+fi
+
 EFFORT_FLAG="--effort $EFFORT"
 
 # Optional, validated per-launch Claude Code controls. These deliberately avoid

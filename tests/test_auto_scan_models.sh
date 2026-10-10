@@ -15,6 +15,8 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 M="$TMP/models"
 for d in Qwen3.8-27B-4bit Qwen3.8-27B-MTP-4bit kokoro-82m flux-schnell Qwen3.6-27B-drafter speculative-head mmproj-clip; do
     mkdir -p "$M/$d"; echo '{}' > "$M/$d/config.json"
+    # A real weight file (sparse, >1 MB): la_auto_scan_models applies la_on_disk's weight rule.
+    dd if=/dev/zero of="$M/$d/model.safetensors" bs=1 count=0 seek=2097152 2>/dev/null
 done
 
 OUT="$( set +u; . "$REPO/config/config-lib.sh" >/dev/null 2>&1; LA_MODELS_DIR="$M" la_auto_scan_models | sort )"

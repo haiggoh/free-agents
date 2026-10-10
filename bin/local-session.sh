@@ -108,6 +108,7 @@ fi
 # Handle inventory mode - output TSV for picker
 if [[ $INVENTORY -eq 1 ]]; then
     # TSV: alias, backend, configured effort, roles, explicit family
+    # First, registered aliases
     for a in "${LA_ALIASES[@]}"; do
         case "${LA_SERVE[$a]:-}" in
             rapid|vllm)
@@ -117,6 +118,23 @@ if [[ $INVENTORY -eq 1 ]]; then
                 ;;
         esac
     done
+    # Then, auto-scanned models (on-disk but not registered)
+    while IFS= read -r folder; do
+        [[ -n "$folder" ]] || continue
+        # Generate a sanitized alias from folder name
+        alias=$(printf '%s' "$folder" | sed 's/[^a-zA-Z0-9_-]/-/g')
+        # Skip if this folder is already registered under any alias
+        registered=0
+        for a in "${LA_ALIASES[@]}"; do
+            if [[ "${LA_SUBDIR[$a]:-}" == "$folder" ]]; then
+                registered=1
+                break
+            fi
+        done
+        [[ "$registered" == "1" ]] && continue
+        # Output auto-scanned entry: alias, backend, effort, roles, family
+        printf '%s\t%s\t%s\t%s\t%s\n' "$alias" "rapid (auto)" "medium" "auto-scanned" "$folder"
+    done < <(la_auto_scan_models)
     exit 0
 fi
 

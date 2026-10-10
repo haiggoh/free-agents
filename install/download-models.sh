@@ -596,11 +596,30 @@ for i in "${QUEUE[@]}"; do
     has_payload "$dest" || { printf '%s: download produced no payload files; not marking complete\n' "$alias" >&2; exit 1; }
     write_marker "$dest" "$repo" "$rev" "$include"
 
-    # Portable manifest: build and atomically write .local-model-manifest.json
+    # Portable manifest: build to temp file, validate, then atomically move into place
     if [[ -x "$LA_ROOT/install/local-model-manifest.py" ]]; then
-      "$LA_ROOT/install/local-model-manifest.py" build "$dest" --output "$dest/.local-model-manifest.json" \
-        && printf '%s: portable manifest written\n' "$alias" \
-        || printf '%s: WARNING - manifest generation failed\n' "$alias" >&2
+      tmp_manifest=$(mktemp "$dest/.local-model-manifest.json.tmp.XXXXXX")   # same dir: mv is an atomic rename
+      if "$LA_ROOT/install/local-model-manifest.py" build "$dest" --output "$tmp_manifest"; then
+        # Validate the manifest before committing
+        if "$LA_ROOT/install/local-model-manifest.py" validate "$tmp_manifest"; then
+          # Manifest is valid, atomically move into place
+          mv "$tmp_manifest" "$dest/.local-model-manifest.json"
+          # Re-read with inspect to confirm
+          "$LA_ROOT/install/local-model-manifest.py" inspect "$dest" >/dev/null 2>&1 || true
+          printf '%s: portable manifest written and validated\n' "$alias"
+        else
+          # Validation failed - do NOT write manifest, report acquisition incomplete
+          rm -f "$tmp_manifest"
+          printf '%s: acquisition incomplete - manifest validation failed\n' "$alias" >&2
+          # Remove the completion marker since manifest is invalid
+          rm -f "$(marker "$dest")"
+          exit 1
+        fi
+      else
+        # Build failed
+        rm -f "$tmp_manifest"
+        printf '%s: WARNING - manifest generation failed\n' "$alias" >&2
+      fi
     fi
 
     printf '%s: acquisition complete; artifact acceptance remains separate\n' "$alias"

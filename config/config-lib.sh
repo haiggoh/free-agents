@@ -11,14 +11,17 @@
 
 # Resolve the plugin root (this file is in <root>/config/).
 # Handle being sourced from bash -c or similar where BASH_SOURCE[0] may be empty/unset.
-if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
-    _cl_src="${BASH_SOURCE[0]}"
-elif [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-    _cl_src="${BASH_SOURCE[0]}"
-else
-    _cl_src="${0}"
+# Respect pre-set LA_CONFIG_DIR (e.g., from tests) to allow overriding the config location.
+if [[ -z "${LA_CONFIG_DIR:-}" ]]; then
+    if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
+        _cl_src="${BASH_SOURCE[0]}"
+    elif [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+        _cl_src="${BASH_SOURCE[0]}"
+    else
+        _cl_src="${0}"
+    fi
+    LA_CONFIG_DIR="$(cd "$(dirname "${_cl_src}")" && pwd)"
 fi
-LA_CONFIG_DIR="$(cd "$(dirname "${_cl_src}")" && pwd)"
 LA_ROOT="$(cd "$LA_CONFIG_DIR/.." && pwd)"
 
 # --- roles: the STABLE vocabulary the routing rules refer to -------------------
@@ -387,6 +390,8 @@ la_auto_scan_models() {
     if echo "$name" | grep -qiE "$exclude_regex"; then
       continue
     fi
+    # Same weight rule as la_on_disk: a config.json-only shell (an aborted download) is NOT a model.
+    [ -n "$(find -L "$dir" -maxdepth 2 -type f -size +1M -print -quit 2>/dev/null)" ] || continue
     echo "$name"
   done
 }
@@ -878,6 +883,21 @@ la_validate_manifest_config() {
   # Check 3: autocompaction <= effective context
   if [ -n "$autocompact" ] && [ -n "$effective" ] && [ "$autocompact" -gt "$effective" ]; then
     echo "FAIL: autocompaction ($autocompact) > effective context ($effective)"
+    return 1
+  fi
+
+  # Check 4: extended mode has runtime support (manifest says extended but no server context)
+  local caps_extended
+  caps_extended=$(echo "$manifest_json" | python3 -c 'import json,sys; doc=json.loads(sys.stdin.read()); print(doc.get("capabilities",{}).get("extended_context_tokens") or "")')
+  if [ -n "$caps_extended" ] && [ -z "$server_ctx" ]; then
+    echo "WARN: extended_context_tokens declared ($caps_extended) but no server_context_tokens in runtime_qualification"
+  fi
+
+  # Check 5: non-launchable blocked
+  local kind
+  kind=$(echo "$manifest_json" | python3 -c 'import json,sys; doc=json.loads(sys.stdin.read()); print(doc.get("artifact",{}).get("kind") or "")')
+  if [ "$kind" != "model" ] && [ "$kind" != "gguf_bundle" ]; then
+    echo "FAIL: artifact kind=$kind is not session-eligible"
     return 1
   fi
 

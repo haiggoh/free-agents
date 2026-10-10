@@ -260,6 +260,7 @@ def build_manifest(model_dir: Path) -> Dict:
         "artifact": {
             "kind": kind,
             "launchable": launchable,
+            "session_eligible": session_eligible,
             "directory_name": folder_name,
             "format": fmt,
             "source": {
@@ -269,10 +270,12 @@ def build_manifest(model_dir: Path) -> Dict:
             },
             "payload_bytes": get_directory_size(model_dir)
         },
+        # Derive autocompaction for Claude Code
         "capabilities": {
             "native_context_tokens": native_context,
             "configured_context_tokens": configured_context,
             "extended_context_tokens": None,  # Would need explicit opt-in evidence
+            "claude_autocompact_tokens": compute_autocompaction(native_context) if native_context else None,
             "context_source": {
                 "file": source_file or "config.json",
                 "json_pointer": json_pointer or "/text_config/max_position_embeddings"
@@ -354,11 +357,54 @@ def validate_manifest(manifest: Dict) -> List[str]:
     if artifact.get("directory_name", "").startswith("/"):
         errors.append("artifact.directory_name must not be absolute path")
 
+    # NOTE: a drafter or a TTS asset that is NOT session-eligible is a VALID manifest (docs/
+    # model-manifest-v1.md §3). Eligibility is enforced where a session is started (the launcher
+    # gate, la_validate_manifest_config), never by `validate`, which checks truthfulness only.
+    # Truthfulness rules from the spec (§3, §4, §6), mirrored by tests/test_model_manifest_fixtures.py:
+    kind = artifact.get("kind")
+    if kind == "draft_model":
+        if artifact.get("launchable") is not False:
+            errors.append("draft_model must not be launchable")
+        if not artifact.get("target_directory_name"):
+            errors.append("draft_model needs target_directory_name")
+    if kind in ("draft_model", "tts_model", "depth_estimation_model", "adapter", "processor") \
+            and artifact.get("session_eligible") is not False:
+        errors.append(f"{kind} must not be session_eligible")
+    _caps = manifest.get("capabilities") or {}
+    _cands = _caps.get("context_candidates") or []
+    if len({c.get("value") for c in _cands if isinstance(c.get("value"), int)}) > 1 \
+            and not _caps.get("context_conflict_resolution"):
+        errors.append("context candidates disagree and no context_conflict_resolution is recorded")
+    if (manifest.get("acquisition") or {}).get("status") == "complete" and artifact.get("payload_bytes") == 0:
+        errors.append("acquisition.status=complete with payload_bytes=0 (metadata-only directory)")
+
     # Context validation
     caps = manifest.get("capabilities", {})
     native = caps.get("native_context_tokens")
     configured = caps.get("configured_context_tokens")
+    extended = caps.get("extended_context_tokens")
     floor = caps.get("context_floor_100k_tokens")
+    claude_autocompact = caps.get("claude_autocompact_tokens")
+
+    # Determine effective context (minimum of all applicable limits)
+    limits = []
+    for key in ("native_context_tokens", "configured_context_tokens", "extended_context_tokens"):
+        val = caps.get(key)
+        if isinstance(val, int):
+            limits.append(val)
+
+    # Server context from runtime qualification
+    rq = manifest.get("runtime_qualification", {})
+    server_ctx = rq.get("server_context_tokens")
+    if isinstance(server_ctx, int):
+        limits.append(server_ctx)
+
+    # Tested safe context
+    tested = rq.get("tested_safe_context_tokens")
+    if isinstance(tested, int):
+        limits.append(tested)
+
+    effective = min(limits) if limits else None
 
     if native is not None:
         if not (PLAUSIBLE_MIN_CONTEXT <= native <= PLAUSIBLE_MAX_CONTEXT):
@@ -371,6 +417,16 @@ def validate_manifest(manifest: Dict) -> List[str]:
         expected = compute_autocompaction(native) if native else None
         if expected is not None and floor != expected:
             errors.append(f"context_floor_100k_tokens {floor} != derived {expected}")
+
+    # Check: claude_autocompact_tokens must not exceed effective context
+    if claude_autocompact is not None and effective is not None:
+        if claude_autocompact > effective:
+            errors.append(f"autocompact_exceeds_context: claude_autocompact_tokens ({claude_autocompact}) > effective context ({effective})")
+
+    # Check: autocompaction must be valid 100K increment
+    if claude_autocompact is not None:
+        if claude_autocompact % AUTOCOMPACTION_INCREMENT != 0 or claude_autocompact < AUTOCOMPACTION_MIN or claude_autocompact > AUTOCOMPACTION_MAX:
+            errors.append(f"claude_autocompact_tokens ({claude_autocompact}) must be 100K increment between 100K and 1M")
 
     # Profile validation
     for i, profile in enumerate(manifest.get("profiles", [])):
