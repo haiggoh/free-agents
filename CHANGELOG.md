@@ -1,3 +1,34 @@
+## [0.29.0] — 2026-10-10
+
+The acquisition-catalogue reader that 0.16.0 announced and never shipped.
+
+### Added
+- **`bin/acquisition_catalog.py`** (stdlib) parses and validates the acquisition PSVs. Fields come
+  from each file's header comment. It checks for an exact field count, the required fields, an alias
+  and repo shape, a `main` or hex revision, a positive `size_GB`, and duplicate aliases across files.
+  Every problem is reported as `file:line: reason`, and it exits 1 on any problem. It also finds
+  `foo.psv.md` / `.txt` exports.
+- **`bin/read-acquisition-catalog.py --parse/--report`** (the 0.16.0 name) and
+  **`la-catalogue-generate.py acquisitions [--json]`** are thin entry points to the same reader.
+  `la-catalogue-generate.py` no longer needs PyYAML for this subcommand.
+- **Load-time gate:** `la-model-profile.py validate` now fails on a malformed acquisition row it
+  consumes, naming file:line.
+- **Local-capable filter evidence:** in the one Python call the filter already makes, a remote model
+  with **no** policy classification that **exactly** matches an acquisition row (normalised:
+  lowercased, last path part, stacked build suffixes stripped, one vendor prefix dropped) is marked
+  `potentially-local-capable`, with the row's size and runtime as the reason. Visible-only and
+  fail-open; `LA_LC_ACQUISITION_EVIDENCE=0` and `LA_ACQUISITION_CATALOGS=a.psv:b.psv` control it.
+
+### Tests
+- `tests/test_acquisition_catalog.sh` (16): shipped catalogues are clean through all three entry
+  points; planted bad rows report each reason with file:line; `--parse` JSON; an exact match is
+  marked and stays visible while a near miss is not matched; a broken or missing catalogue leaves
+  the roster unchanged; the opt-out works; the `validate` gate exits non-zero with file:line.
+  Mutation-checked: removing the filter wiring fails the evidence check.
+- The reader was drafted by a free Nemotron 3 Ultra dispatch. Review added the multi-suffix and
+  vendor-prefix normalisation, `str` path handling, and the `foo.psv.md` lookup (the draft looked
+  for `foo.psv.md` by replacing the suffix, which never matched).
+
 ## [0.28.2] — 2026-10-10
 
 ### Fixed

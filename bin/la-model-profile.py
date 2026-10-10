@@ -237,10 +237,20 @@ def resolve_profile(profile_id: str, runtime: Dict, resource: Dict, environment:
     
     return p
 
+def acquisition_problems() -> list:
+    """Load-time gate (0.16.0's promise): every acquisition-PSV row this tool consumes is validated
+    by bin/acquisition_catalog.py; each problem is reported as file:line. Missing files are skipped."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import acquisition_catalog
+    _rows, problems = acquisition_catalog.load([c for c in CATALOG_FILES if "acquisitions" in c.name])
+    return [f"acquisition catalogue: {pr}" for pr in problems]
+
+
 def cmd_validate(args):
     runtime, resource, environment = load_all()
     catalog_artifacts = get_catalog_artifacts()
     errors = validate_schemas(runtime, resource, environment, catalog_artifacts)
+    errors += acquisition_problems()
     
     if args.legacy_adapter:
         legacy = parse_legacy_config(Path(args.legacy_adapter))

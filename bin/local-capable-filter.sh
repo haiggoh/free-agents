@@ -167,14 +167,34 @@ _emit_json() {
 }
 
 # _json_rows: TAB records on stdin -> the same one-JSON-object-per-line output as before.
+# ACQUISITION EVIDENCE (0.29.0; promised in 0.16.0). A remote model with NO policy classification that
+# EXACTLY matches a row of the acquisition catalogues (bin/acquisition_catalog.py: normalised id
+# equality, never fuzzy) is marked potentially-local-capable with the row's measured size as the
+# reason -- visible, never hidden: an acquisition row says the weights CAN be fetched, not that they
+# are on disk and qualified. A malformed or missing catalogue changes nothing (fail-open).
+# LA_LC_ACQUISITION_EVIDENCE=0 turns it off.
 _json_rows() {
-  python3 -c '
-import json,sys
+  LC_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" python3 -c '
+import json, os, sys
+rows_acq = []
+if os.environ.get("LA_LC_ACQUISITION_EVIDENCE", "1") != "0":
+    try:
+        sys.path.insert(0, os.environ["LC_BIN"])
+        import acquisition_catalog as ac
+        rows_acq, _problems = ac.load(os.environ.get("LA_ACQUISITION_CATALOGS", "").split(":") if os.environ.get("LA_ACQUISITION_CATALOGS") else None)
+    except Exception:
+        rows_acq = []
 for line in sys.stdin.read().splitlines():
     p = line.split("\t")
     if len(p) != 8: continue
+    classification, reason = p[6], p[7]
+    if not classification and rows_acq:
+        hit = ac.match(p[2], rows_acq)
+        if hit is not None:
+            classification = "potentially-local-capable"
+            reason = "acquisition catalogue: %s (%s GB, %s)" % (hit.alias, hit.fields.get("size_GB", "?"), hit.fields.get("runtime", "?"))
     print(json.dumps({"alias":p[0],"provider":p[1],"remote_model_id":p[2],"display":p[3],"tier":p[4],
-                      "visible":p[5]=="true","classification":p[6],"reason":p[7]}))'
+                      "visible":p[5]=="true","classification":classification,"reason":reason}))'
 }
 
 # ---- join + output ----------------------------------------------------------

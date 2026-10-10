@@ -13,7 +13,10 @@ Commands:
 
 import sys
 import argparse
-import yaml
+try:
+    import yaml  # needed by generate/validate/merge only; `acquisitions` is stdlib
+except ImportError:  # pragma: no cover - depends on the interpreter
+    yaml = None
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -28,7 +31,22 @@ VALID_ENTRY_TYPES = {"standalone_model", "override_alias", "speculative_drafter"
 VALID_CATALOGUE_ACTIONS = {"exclude", "exclude_from_claude_sessions", "alias", "attach_to_target"}
 
 
+def _need_yaml():
+    if yaml is None:
+        sys.exit("la-catalogue-generate: PyYAML is required for this subcommand (pip install pyyaml); "
+                 "the `acquisitions` subcommand works without it")
+
+
+def cmd_acquisitions(args):
+    """Parse + validate the acquisition PSVs (0.16.0's promised reader); exit 1 on any problem."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import acquisition_catalog
+    argv = ["--parse"] if args.json else ["--report"]
+    return acquisition_catalog.main(argv + list(args.files))
+
+
 def load_yaml_catalogue() -> List[Dict[str, Any]]:
+    _need_yaml()
     """Load and parse the YAML catalogue."""
     with open(YAML_PATH, 'r') as f:
         data = yaml.safe_load(f)
@@ -351,6 +369,11 @@ def main():
 
     p_merge = subparsers.add_parser("merge", help="Show merged YAML + config view")
     p_merge.set_defaults(func=cmd_merge)
+
+    p_acq = subparsers.add_parser("acquisitions", help="Parse + validate the acquisition PSVs (exit 1 on any problem)")
+    p_acq.add_argument("--json", action="store_true", help="print the parsed rows and problems as JSON")
+    p_acq.add_argument("files", nargs="*", help="PSV files (default: config/model-catalog.acquisitions.*.psv)")
+    p_acq.set_defaults(func=cmd_acquisitions)
 
     args = parser.parse_args()
     return args.func(args)

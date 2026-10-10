@@ -586,6 +586,29 @@ The picker groups providers by what you can expect:
 Quotas and rate limits are the provider's, not this project's — a key that stops working usually
 means a daily allowance was reached, not a bug here.
 
+## Acquisition catalogues (0.29.0)
+
+`config/model-catalog.acquisitions.{rapid,gguf,omlx}.psv` list models worth fetching. Every row is
+validated, and a problem is reported as `file:line` with its reason:
+
+- exact field count;
+- required alias, repo, revision, subdir, size and runtime;
+- revision is `main` or a commit hash;
+- size is a positive number;
+- no duplicate aliases across files.
+
+```bash
+bin/read-acquisition-catalog.py --report        # or --parse for JSON; exit 1 on any problem
+bin/la-catalogue-generate.py acquisitions       # same reader, as a subcommand
+```
+
+`la-model-profile.py validate` refuses a malformed catalogue it consumes. The remote **local-capable
+filter** uses an **exact** catalogue match (a normalised id, never fuzzy) as evidence: an
+unclassified remote model with an acquisition row is marked `potentially-local-capable`, with its
+size in the reason. It stays visible, since a catalogue row says the weights *can* be fetched, not
+that they are on disk. A broken catalogue changes nothing (fail-open); `LA_LC_ACQUISITION_EVIDENCE=0`
+turns the evidence off. A JoyIA export saved as `foo.psv.md` is found too.
+
 ## Downloading models
 
 ### Recommended full local-session model: KAT-Coder V2.5 OptiQ
