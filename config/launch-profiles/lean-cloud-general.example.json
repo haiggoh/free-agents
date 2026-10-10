@@ -1,0 +1,15 @@
+[
+  "Bash(git diff:*)",
+  "Bash(git log:*)",
+  "Bash(git show:*)",
+  "Bash(ls:*)",
+  "Bash(find:*)",
+  "Bash(cat:*)",
+  "Bash(python3:*)",
+  "Bash(pytest:*)",
+  "Bash(./bin/*)",
+  "Bash(jq:*)",
+  "Bash(yq:*)",
+  "Bash(git branch:*)",
+  "Bash(git remote:*)"
+]

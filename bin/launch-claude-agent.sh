@@ -25,6 +25,7 @@ Usage: launch-claude-agent.sh <alias> [effort-override]
        launch-claude-agent.sh --dry-run <alias> [effort-override]
        launch-claude-agent.sh --dry-run-skip-preflight <alias> [effort-override]
        launch-claude-agent.sh --enable-mcp <alias> [effort-override]
+       launch-claude-agent.sh --temperature VALUE <alias> [effort-override]
 
   <alias>           Model alias from config (e.g., qwen-3.8-operator, deepseek-r1-architect)
                     Role names also accepted: operator, reasoner, validator, utility
@@ -35,6 +36,7 @@ Flags:
   --dry-run               Validate config, show resolved model/backend/effort/port, do NOT launch
   --dry-run-skip-preflight  Dry-run without RAM preflight (quick config inspection)
   --enable-mcp            Enable MCP tools in blind-trust auto mode (sets LA_ENABLE_MCP=1)
+  --temperature VALUE     Set sampling temperature 0.0-2.0 (passed to Rapid-MLX as --default-temperature)
 
 Environment (set by csl or caller):
   LA_AUTO_MODE=1                    Enable auto mode (permission-mode=auto)
@@ -46,6 +48,7 @@ Environment (set by csl or caller):
   LA_DRY_RUN_SKIP_PREFLIGHT=1       Skip RAM preflight in --dry-run (quick config inspection)
   LA_ENABLE_MCP=1                   Enable MCP tools in blind-trust auto mode (default 0)
                                     Ignored when LA_STRICT_MCP=true (MCP servers excluded from prompt)
+  LA_TEMPERATURE=0.0-2.0            Sampling temperature for local models (Rapid-MLX --default-temperature)
 
 Examples:
   launch-claude-agent.sh qwen-3.8-operator
@@ -53,6 +56,7 @@ Examples:
   launch-claude-agent.sh --dry-run deepseek-r1-architect max
   launch-claude-agent.sh --dry-run-skip-preflight qwen-3.8-operator
   launch-claude-agent.sh --enable-mcp qwen-3.8-operator
+  launch-claude-agent.sh --temperature 0.7 qwen-3.8-operator
 HELP
     exit 0
     ;;
@@ -68,6 +72,25 @@ HELP
   --enable-mcp)
     export LA_ENABLE_MCP=1
     shift
+    ;;
+  --temperature)
+    [[ $# -ge 2 ]] || { printf 'launch-claude-agent.sh: --temperature needs a value (0.0-2.0)\n' >&2; exit 2; }
+    if ! python3 -c '
+import sys
+try:
+    v = float(sys.argv[1])
+    if 0.0 <= v <= 2.0:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+except:
+    sys.exit(1)
+' "$2"; then
+        printf 'launch-claude-agent.sh: --temperature must be a number 0.0-2.0, got '\''%s'\''\n' "$2" >&2
+        exit 2
+    fi
+    export LA_TEMPERATURE="$2"
+    shift 2
     ;;
   -?*)
     printf 'launch-claude-agent.sh: unrecognised option: %s\n' "$1" >&2
@@ -421,11 +444,12 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     [ -n "${LA_CLAUDE_TOOLS:-}" ] && echo "  Tools         : $LA_CLAUDE_TOOLS"
     [ -n "${LA_AUTO_COMPACT_WINDOW:-}" ] && echo "  Autocompact   : $LA_AUTO_COMPACT_WINDOW"
     [ -n "${LA_MCP_CONFIG:-}" ] && echo "  MCP config    : $LA_MCP_CONFIG"
+    [ -n "${LA_TEMPERATURE:-}" ] && echo "  Temperature   : $LA_TEMPERATURE"
     exit 0
 fi
 
 echo "⏳ Initializing local engine for $MODEL_ALIAS..."
-LAUNCH_OUTPUT=$("$LAUNCH_DIR/local-llm-hotswap.sh" "$MODEL_ALIAS"); echo "$LAUNCH_OUTPUT"
+LAUNCH_OUTPUT=$("$LAUNCH_DIR/local-llm-hotswap.sh" "$MODEL_ALIAS" ${LA_TEMPERATURE:+--temperature "$LA_TEMPERATURE"}); echo "$LAUNCH_OUTPUT"
 VLLM_PORT=$(echo "$LAUNCH_OUTPUT" | grep -o "SUCCESS_PORT=[0-9]*" | cut -d'=' -f2)
 [ -z "$VLLM_PORT" ] && { echo "❌ Could not determine the server port."; exit 1; }
 
@@ -768,8 +792,17 @@ if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "1" ]; then
     _AUTO_MODE_APPEND="You are running in LOCAL auto mode with blind-trust (bypassPermissions + DESTRUCTIVE_DENY). Every consequential action is allowed without waiting for a safety check."
     # Generate settings via the single source of truth (blind-trust-settings.py)
     BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings-local-$$.json"
+    # Resolve allowlist files: user file in ~/.claude/launch-profiles/ if exists, else shipped example
     _MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
+    if [ ! -f "$_MASTER_ALLOWLIST_FILE" ]; then
+        _MASTER_ALLOWLIST_FILE="$LAUNCH_DIR/../config/launch-profiles/allowlist-master.example.json"
+        echo "📋 Using example allowlist-master (copy to ~/.claude/launch-profiles/ to customize)" >&2
+    fi
     _PROFILE_ALLOWLIST_FILE="${LA_CLAUDE_SETTINGS:-$HOME/.claude/launch-profiles/lean-local-general.json}"
+    if [ ! -f "$_PROFILE_ALLOWLIST_FILE" ]; then
+        _PROFILE_ALLOWLIST_FILE="$LAUNCH_DIR/../config/launch-profiles/lean-local-general.example.json"
+        echo "📋 Using example lean-local-general (copy to ~/.claude/launch-profiles/ to customize)" >&2
+    fi
     MCP_FLAG=()
     [ "${LA_ENABLE_MCP:-0}" = "1" ] && MCP_FLAG=(--enable-mcp)
     python3 "$LAUNCH_DIR/blind-trust-settings.py" \

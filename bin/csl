@@ -463,7 +463,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   printf "  Watcher:   %s (toggle with 'w')\n" "$([ "$WATCH" = "1" ] && echo ON || echo OFF)"
   printf "  Stop hook: %s (toggle with 's')\n" "$([ "$STOP_HOOK" = "1" ] && echo ON || echo OFF)"
   if [ "$AUTO_MODE_STATE" = "0" ]; then
-    printf "  MCPs (blind-trust): %s (toggle with 'u')\n" "$([ "$LA_ENABLE_MCP" = "1" ] && echo ENABLED || echo DISABLED)"
+    printf "  MCPs (blind-trust): %s (toggle with 'm')\n" "$([ "$LA_ENABLE_MCP" = "1" ] && echo ENABLED || echo DISABLED)"
   fi
   printf "  Subagents: native Agent/Workflow on the free endpoint (cloud replacement: Cloud Session Configuration)\n"
   echo

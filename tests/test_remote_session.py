@@ -1022,6 +1022,147 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         result = self.run_cli('--dry-run', 'gemini-flash')
         self.assertNotIn('can only be used in a function', result.stdout + result.stderr)
 
+    def test_la_remote_claude_settings_merged_with_blind_trust(self):
+        """LA_REMOTE_CLAUDE_SETTINGS is merged with blind-trust settings when both active."""
+        shutil.copy2(ROOT / 'bin/merge-settings.py', self.root / 'bin/merge-settings.py')
+        # Create a custom settings file
+        custom_settings = self.root / 'custom-settings.json'
+        custom_settings.write_text(json.dumps({
+            "permissions": {
+                "allow": ["Bash(custom:*)"],
+                "deny": ["Bash(dangerous:*)"]
+            }
+        }))
+
+        # Set LA_REMOTE_CLAUDE_SETTINGS and run with blind-trust (default)
+        self.env['LA_REMOTE_CLAUDE_SETTINGS'] = str(custom_settings)
+        self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture all ports free"; exit 0; fi\nexit 1\n')
+        self.stub('litellm', '''#!/bin/sh
+exec python3 -c "
+import http.server
+import socketserver
+import sys
+import os
+
+class HealthHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health/liveliness':
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    def log_message(self, format, *args):
+        pass
+
+port = 4141
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+    if args[i] == '--port' and i + 1 < len(args):
+        port = int(args[i + 1])
+        break
+    i += 1
+
+print(f'LITELLM: Starting proxy on port {port}', flush=True)
+with socketserver.TCPServer(('', port), HealthHandler) as httpd:
+    print(f'LITELLM: Proxy ready on port {port}', flush=True)
+    httpd.serve_forever()
+" litellm "$@"
+''')
+        self.env['CLAUDE_ARGV'] = str(self.root / 'claude-argv')
+        self.stub('claude', """#!/usr/bin/env python3
+import json,os,sys
+if '--help' in sys.argv:
+    print('Fixture Claude; CLAUDE_ARGV captures argv.'); sys.exit(0)
+if '--version' in sys.argv:
+    print('2.1.286'); sys.exit(0)
+with open(os.environ['CLAUDE_ARGV'], 'a') as f:
+    f.write(json.dumps(sys.argv[1:]) + '\\n')
+""")
+
+        capture = self.root / 'claude-argv'
+        capture.unlink(missing_ok=True)
+        result = self.run_cli('gemini-flash', '-p', 'test')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(capture.exists(), 'claude was never launched')
+
+        # Check that the settings file was passed (merged)
+        lines = capture.read_text().strip().split('\n')
+        last_argv = json.loads(lines[-1])
+        self.assertIn('--settings', last_argv)
+        settings_idx = last_argv.index('--settings')
+        settings_file = last_argv[settings_idx + 1]
+        self.assertIn('free-agents-merged-settings', os.path.basename(settings_file))
+        # The merged file should contain both blind-trust and custom settings
+        with open(settings_file) as f:
+            merged = json.load(f)
+        self.assertIn("Bash(custom:*)", merged["permissions"]["allow"])
+        self.assertIn("Bash(dangerous:*)", merged["permissions"]["deny"])
+        # Should also have DESTRUCTIVE_DENY from blind-trust
+        self.assertTrue(any("sudo" in d for d in merged["permissions"]["deny"]))
+
+    def test_la_remote_claude_settings_warning_when_missing(self):
+        """LA_REMOTE_CLAUDE_SETTINGS warns when file missing but continues."""
+        self.env['LA_REMOTE_CLAUDE_SETTINGS'] = str(self.root / 'nonexistent.json')
+        result = self.run_cli('--dry-run', 'gemini-flash')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('warning', result.stderr.lower())
+        self.assertIn('not found', result.stderr.lower())
+
+    def test_la_remote_claude_settings_without_blind_trust(self):
+        """LA_REMOTE_CLAUDE_SETTINGS works without blind-trust (AUTO_MODE_STATE=2)."""
+        custom_settings = self.root / 'custom-settings.json'
+        custom_settings.write_text(json.dumps({
+            "permissions": {"allow": ["Bash(standalone:*)"]}
+        }))
+
+        self.env['LA_REMOTE_CLAUDE_SETTINGS'] = str(custom_settings)
+        self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture all ports free"; exit 0; fi\nexit 1\n')
+        self.stub('litellm', '''#!/bin/sh
+exec python3 -c "
+import http.server, socketserver, sys, os
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health/liveliness":
+            self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+        else: self.send_response(404); self.end_headers()
+    def log_message(self, *a): pass
+port = 4141
+for i, a in enumerate(sys.argv[1:]):
+    if a == "--port" and i + 1 < len(sys.argv):
+        port = int(sys.argv[i + 2]); break
+print(f"LITELLM: Starting proxy on port {port}", flush=True)
+with socketserver.TCPServer(('', port), H) as httpd:
+    print(f"LITELLM: Proxy ready on port {port}", flush=True)
+    httpd.serve_forever()
+" litellm "$@"
+''')
+        self.env['CLAUDE_ARGV'] = str(self.root / 'claude-argv')
+        self.stub('claude', """#!/usr/bin/env python3
+import json,os,sys
+if '--help' in sys.argv: print('Fixture'); sys.exit(0)
+if '--version' in sys.argv: print('2.1.286'); sys.exit(0)
+with open(os.environ['CLAUDE_ARGV'], 'a') as f:
+    f.write(json.dumps(sys.argv[1:]) + '\\n')
+""")
+
+        capture = self.root / 'claude-argv'
+        capture.unlink(missing_ok=True)
+        # Run with -a -a to get to acceptEdits (no blind-trust)
+        result = self.run_cli('-a', '-a', 'gemini-flash', '-p', 'test')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(capture.exists())
+        lines = capture.read_text().strip().split('\n')
+        last_argv = json.loads(lines[-1])
+        self.assertIn('--settings', last_argv)
+        settings_idx = last_argv.index('--settings')
+        settings_file = last_argv[settings_idx + 1]
+        with open(settings_file) as f:
+            merged = json.load(f)
+        self.assertIn("Bash(standalone:*)", merged["permissions"]["allow"])
+
     def test_nvidia_quota_truth_replaces_unknown_in_launcher_output(self):
         """NVIDIA's real constraint is stated, instead of a bare "unknown".
 

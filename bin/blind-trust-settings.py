@@ -37,7 +37,8 @@ DESTRUCTIVE_DENY = [
 
 def load_allowlist(path: str) -> list[str]:
     """Load allowlist from JSON file. Returns empty list on any error.
-    Supports both array format and object format with permissions.allow."""
+    Supports both array format and object format with permissions.allow.
+    Prints a warning to stderr when file is missing or invalid."""
     try:
         with open(path, "r") as f:
             data = json.load(f)
@@ -45,8 +46,15 @@ def load_allowlist(path: str) -> list[str]:
             return data
         if isinstance(data, dict) and isinstance(data.get("permissions", {}).get("allow"), list):
             return data["permissions"]["allow"]
-    except Exception:
-        pass
+    except FileNotFoundError:
+        print(f"blind-trust-settings: warning: allowlist file not found: {path}", file=sys.stderr)
+        return []
+    except json.JSONDecodeError as e:
+        print(f"blind-trust-settings: warning: invalid JSON in {path}: {e}", file=sys.stderr)
+        return []
+    except Exception as e:
+        print(f"blind-trust-settings: warning: failed to load {path}: {e}", file=sys.stderr)
+        return []
     return []
 
 

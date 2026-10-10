@@ -223,6 +223,19 @@ Measured 2026-10-09: a real `claude -p` free-API session told to use `Agent` ret
 answer through 6 proxy calls, all `200`. The same run against a config **without** the catch-all
 logged 8 × `400` and 17 × `500` before recovering.
 
+### Picker settings that reach the session (0.27.2)
+
+- **Local temperature** (`o` on the Local screen) travels as `LA_TEMPERATURE`, and hotswap passes it
+  to Rapid-MLX as `--default-temperature`. It is part of the server-reuse identity: a running server
+  started at another temperature is not reused. Before this, the picker sent a trailing
+  `--temperature` that `local-session.sh` did not parse, and the value could land in the effort
+  slot.
+- **`LA_REMOTE_CLAUDE_SETTINGS=<file>`** adds your own settings file to every free-API session. It
+  is merged with blind-trust and the theme overlay, and its `deny` rules are **added to**
+  blind-trust's destructive-command denials, never substituted for them. A missing file prints a
+  warning.
+- The `csl` dry run names the real MCP toggle key (`m`).
+
 ## How it works
 
 Claude Code talks to an Anthropic-compatible endpoint. A local MLX backend exposes one
@@ -1003,8 +1016,9 @@ that isn't explicitly allowlisted would prompt. To make MCP tools work without p
 - `--enable-mcp` flag or `LA_REMOTE_ENABLE_MCP=1`
 - `csl` Remote lane: press `m` to toggle MCPs (works in ALL auto-mode states including blind-trust)
 
-**How it works:** A master allowlist (`~/.claude/launch-profiles/allowlist-master.json`, 87 Bash
-commands) is merged with the active lean profile (`lean-local-general.json` or
+**How it works:** A master allowlist (`~/.claude/launch-profiles/allowlist-master.json`; when absent,
+the shipped `config/launch-profiles/allowlist-master.example.json`, a modest non-destructive set,
+is used and the launcher says so) is merged with the active lean profile (`lean-local-general.json` or
 `lean-cloud-general.json`) at runtime. The profiles add the `mcp__*` wildcard, which admits **any**
 MCP tool (current: blender, davinci-resolve, joyia, adobe-for-creativity, filesystem, github — and
 any future ones). This replaces the previous inline 400+ line allowlist duplicated in each launcher.

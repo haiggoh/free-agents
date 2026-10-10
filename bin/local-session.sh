@@ -45,6 +45,7 @@ Flags:
   --dry-run               Validate config, show resolved model/backend/effort/port, do NOT launch
   --dry-run-skip-preflight  Dry-run without RAM preflight (quick config inspection)
   --enable-mcp            Enable MCP tools in blind-trust auto mode (sets LA_ENABLE_MCP=1)
+  --temperature VALUE     Set sampling temperature 0.0-2.0 (passed to Rapid-MLX as --default-temperature)
   --inventory             Print session-capable local models as TSV for the picker, then exit
 
 Environment (set by csl or caller):
@@ -57,6 +58,7 @@ Environment (set by csl or caller):
   LA_DRY_RUN_SKIP_PREFLIGHT=1       Skip RAM preflight in --dry-run (quick config inspection)
   LA_ENABLE_MCP=1                   Enable MCP tools in blind-trust auto mode (default 0)
                                     Ignored when LA_STRICT_MCP=true (MCP servers excluded from prompt)
+  LA_TEMPERATURE=0.0-2.0            Sampling temperature for local models (Rapid-MLX --default-temperature)
 
 Examples:
   local-session.sh
@@ -65,6 +67,7 @@ Examples:
   local-session.sh --dry-run deepseek-r1-architect max
   local-session.sh --dry-run-skip-preflight qwen-3.8-operator
   local-session.sh --enable-mcp qwen-3.8-operator
+  local-session.sh --temperature 0.7 qwen-3.8-operator
 
 HELP
 }
@@ -74,6 +77,7 @@ ALIAS=""
 EFFORT_OVERRIDE=""
 DRY_RUN=0
 INVENTORY=0
+LA_TEMPERATURE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -85,10 +89,21 @@ while [[ $# -gt 0 ]]; do
             shift ;;
         --enable-mcp)     export LA_ENABLE_MCP=1; shift ;;
         --inventory)      INVENTORY=1; shift ;;
+        --temperature)    [[ $# -ge 2 ]] || { echo "local-session.sh: --temperature needs a value (0.0-2.0)" >&2; exit 2; }
+                          LA_TEMPERATURE="$2"; shift 2 ;;
         -?*)              echo "local-session.sh: unrecognised option: $1; use --help" >&2; exit 2 ;;
         *)                if [[ -z "$ALIAS" ]]; then ALIAS="$1"; else EFFORT_OVERRIDE="$1"; fi; shift ;;
     esac
 done
+
+# Validate temperature if provided
+if [[ -n "$LA_TEMPERATURE" ]]; then
+    if ! python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if 0.0<=v<=2.0 else 1)" "$LA_TEMPERATURE" 2>/dev/null; then
+        echo "local-session.sh: --temperature must be a number 0.0-2.0, got '$LA_TEMPERATURE'" >&2
+        exit 2
+    fi
+    export LA_TEMPERATURE
+fi
 
 # Handle inventory mode - output TSV for picker
 if [[ $INVENTORY -eq 1 ]]; then
@@ -212,9 +227,12 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "Telemetry: $([ "${LA_TELEMETRY:-0}" = "1" ] && echo "ON" || echo "OFF")"
     echo "Stop hook: $([ "${LA_QUEUE_STOP_HOOK:-0}" = "1" ] && echo "ON" || echo "OFF")"
     echo "MCPs: $([ "${LA_ENABLE_MCP:-0}" = "1" ] && echo "ENABLED" || echo "DISABLED")"
+    echo "Temperature   : ${LA_TEMPERATURE:-<model default>}"
     echo "Launcher: $SCRIPT_DIR/launch-claude-agent.sh"
     exit 0
 fi
 
 # Direct launch - delegate to launch-claude-agent.sh
+# LA_TEMPERATURE (exported above) reaches the launcher and hotswap through the environment; the
+# launcher takes its options only BEFORE the alias, so it is not appended to this argv.
 exec "$SCRIPT_DIR/launch-claude-agent.sh" "$ALIAS" "${LA_EFFORT[$ALIAS]}"

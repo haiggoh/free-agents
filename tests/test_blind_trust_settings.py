@@ -57,6 +57,20 @@ with tempfile.TemporaryDirectory() as td:
                         "--out", str(outp)], capture_output=True, text=True)
     check(r.returncode == 0 and outp.exists(), "missing allowlist files degrade to empty lists, still writes")
     check(stat.S_IMODE(outp.stat().st_mode) == 0o600, "settings file is mode 600")
+    # Test 4b: warning printed to stderr for missing master file
+    check("warning" in r.stderr.lower() and "not found" in r.stderr.lower(), "warning on stderr for missing master")
+    # Test 4c: warning printed to stderr for missing profile file (two warnings)
+    check(r.stderr.count("warning") >= 2, "warning on stderr for both missing files")
+
+# Test 4d: invalid JSON prints warning
+with tempfile.TemporaryDirectory() as td:
+    bad_master = Path(td) / "bad.json"
+    bad_master.write_text("{invalid json")
+    outp = Path(td) / "s.json"
+    r = subprocess.run([sys.executable, str(SCRIPT), "--master", str(bad_master), "--profile", "/nonexistent",
+                        "--out", str(outp)], capture_output=True, text=True)
+    check(r.returncode == 0 and outp.exists(), "invalid JSON degrades to empty list, still writes")
+    check("warning" in r.stderr.lower() and "invalid json" in r.stderr.lower(), "warning on stderr for invalid JSON")
 
     # Test 5: unknown flag exits non-zero
     bad = subprocess.run([sys.executable, str(SCRIPT), "--bogus"], capture_output=True, text=True)

@@ -37,6 +37,7 @@ def merge_settings(base: dict, overlay: dict) -> dict:
 
     Merge strategy:
     - permissions: deep merge, combine 'allow' arrays (dedup)
+    - permissions.deny: union (base first) — an overlay can add denials, never remove them
     - sandbox: take from base (blind-trust settings)
     - network: take from base (blind-trust settings)
     - spinnerVerbs: take from overlay (per-session settings)
@@ -62,9 +63,20 @@ def merge_settings(base: dict, overlay: dict) -> dict:
         elif 'allow' in overlay_perms:
             merged_perms['allow'] = overlay_perms['allow']
 
+        # deny is a UNION, never replaced: an overlay (a per-session theme file, or the user's
+        # LA_REMOTE_CLAUDE_SETTINGS) must not be able to drop blind-trust's DESTRUCTIVE_DENY.
+        if 'deny' in base_perms or 'deny' in overlay_perms:
+            seen = set()
+            merged_deny = []
+            for item in list(base_perms.get('deny', [])) + list(overlay_perms.get('deny', [])):
+                if item not in seen:
+                    seen.add(item)
+                    merged_deny.append(item)
+            merged_perms['deny'] = merged_deny
+
         # Other permission keys: overlay wins
         for k, v in overlay_perms.items():
-            if k != 'allow':
+            if k not in ('allow', 'deny'):
                 merged_perms[k] = v
 
         result['permissions'] = merged_perms

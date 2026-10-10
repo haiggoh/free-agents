@@ -564,6 +564,27 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(env["LA_QUEUE_STOP_HOOK"], "0")
         self.assertEqual(env["LA_ENABLE_MCP"], "1")
 
+    def test_local_temperature_reaches_the_launcher_through_env(self):
+        # csl --picker-launch execs the launcher as "<alias> <effort>"; the launcher parses options
+        # only BEFORE the alias, so a trailing --temperature in argv was silently dropped. The value
+        # must travel in env (LA_TEMPERATURE), which hotswap reads.
+        s = m.Settings(local_temperature="0.7")
+        lane = m.LocalScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        lane.accordion.select("gemma-4-26b")
+        req = lane.activate_selected()
+        self.assertEqual(req.lane, "local")
+        self.assertEqual(req.env.get("LA_TEMPERATURE"), "0.7")
+        self.assertNotIn("--temperature", req.argv)
+        self.assertEqual(req.argv[1:3], ["gemma-4-26b", "high"], "effort is never displaced")
+
+    def test_local_temperature_absent_when_default(self):
+        s = m.Settings(local_temperature="")
+        lane = m.LocalScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        lane.accordion.select("gemma-4-26b")
+        req = lane.activate_selected()
+        self.assertNotIn("LA_TEMPERATURE", req.env)
+        self.assertEqual(req.argv[1:3], ["gemma-4-26b", "high"])
+
     def test_effort_cycle_lists_provider_default_only_for_remote(self):
         self.assertIn("provider_default", m.effort_choices("remote_api_session"))
         self.assertNotIn("provider_default", m.effort_choices("local_session"))

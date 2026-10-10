@@ -27,6 +27,8 @@
 #                                 ceiling for the spoofed model; the proxy clamps per provider)
 #   LA_REMOTE_KEEP_PROXY=1        leave the proxy running after the session exits
 #   LA_REMOTE_ENABLE_MCP=1        enable MCPs for free-API sessions (default: 0, disabled)
+#   LA_REMOTE_CLAUDE_SETTINGS     path to per-session settings JSON (merged with blind-trust settings
+#                                 if both active; if set but missing, prints warning and continues)
 #   LA_RTK_IN_FREE_API=1          keep rtk's Bash-output rewriting ON (default: off on this lane)
 #                                 ignored in blind-trust auto-mode (AUTO_MODE_STATE=0)
 #
@@ -1285,6 +1287,17 @@ fi
 # `_launch()` helper that was NEVER CALLED, so `-a` and `-t` silently did nothing while
 # the picker advertised them. Anything that resolves a toggle must therefore sit on the
 # live path (the exec near the bottom of this file), not in a helper.
+# LA_REMOTE_CLAUDE_SETTINGS (0.26.5; claimed in 0.14.8): a user settings file for free-API sessions.
+# Resolved BEFORE any launch or dry-run, so a missing file is reported in both.
+REMOTE_CLAUDE_SETTINGS_FILE=""
+if [[ -n "${LA_REMOTE_CLAUDE_SETTINGS:-}" ]]; then
+    if [[ -f "$LA_REMOTE_CLAUDE_SETTINGS" ]]; then
+        REMOTE_CLAUDE_SETTINGS_FILE="$LA_REMOTE_CLAUDE_SETTINGS"
+    else
+        echo "remote-session: warning: LA_REMOTE_CLAUDE_SETTINGS set but file not found: $LA_REMOTE_CLAUDE_SETTINGS" >&2
+    fi
+fi
+
 if [[ "$MODE" == "launch" ]]; then
     # Auto-mode state -> the flag `claude` actually reads.
     #   0 = blind-trust  -> --permission-mode auto   (DEFAULT; no classifier in the loop)
@@ -1332,8 +1345,17 @@ if [[ "$MODE" == "launch" ]]; then
     # Blind-trust auto mode (AUTO_MODE_STATE=0): generate settings via the single source of truth.
     if [[ "$AUTO_MODE_STATE" -eq 0 ]]; then
         BLIND_TRUST_SETTINGS_FILE="${TMPDIR:-/tmp}/claude-blind-trust-settings-remote-$$.json"
+        # Resolve allowlist files: user file in ~/.claude/launch-profiles/ if exists, else shipped example
         MASTER_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/allowlist-master.json"
+        if [[ ! -f "$MASTER_ALLOWLIST_FILE" ]]; then
+            MASTER_ALLOWLIST_FILE="$SCRIPT_DIR/../config/launch-profiles/allowlist-master.example.json"
+            echo "remote-session: using example allowlist-master (copy to ~/.claude/launch-profiles/ to customize)" >&2
+        fi
         PROFILE_ALLOWLIST_FILE="$HOME/.claude/launch-profiles/lean-cloud-general.json"
+        if [[ ! -f "$PROFILE_ALLOWLIST_FILE" ]]; then
+            PROFILE_ALLOWLIST_FILE="$SCRIPT_DIR/../config/launch-profiles/lean-cloud-general.example.json"
+            echo "remote-session: using example lean-cloud-general (copy to ~/.claude/launch-profiles/ to customize)" >&2
+        fi
         MCP_FLAG=()
         [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 ]] && MCP_FLAG=(--enable-mcp)
         python3 "$SCRIPT_DIR/blind-trust-settings.py" \
@@ -1771,27 +1793,66 @@ claude_cmd+=(--permission-mode "$PERMISSION_MODE")
 
 # Handle settings merge: if both blind-trust and per-session settings exist, merge them.
 # Claude Code only accepts ONE --settings file (last wins), so we must merge.
+# LA_REMOTE_CLAUDE_SETTINGS: if set and file exists, use as per-session settings file
+# (merged like SETTINGS_FILE via merge-settings.py if blind-trust is also active).
+# If set but missing, print warning and continue without it.
+
 FINAL_SETTINGS_FILE=""
-if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" && -f "$BLIND_TRUST_SETTINGS_FILE" ]] && \
-   [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -n "${SETTINGS_FILE:-}" ] && [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
-    # Both exist — merge them
-    FINAL_SETTINGS_FILE="$(
-        mktemp "${TMPDIR:-/tmp}/free-agents-merged-settings.XXXXXX.json"
-    )"
-    chmod 600 "$FINAL_SETTINGS_FILE"
-    LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/merge-settings.py" \
-        --base "$BLIND_TRUST_SETTINGS_FILE" \
-        --overlay "$SETTINGS_FILE" \
-        --output "$FINAL_SETTINGS_FILE" 2>/dev/null || true
-    if [ -f "$FINAL_SETTINGS_FILE" ] && [ -s "$FINAL_SETTINGS_FILE" ]; then
-        claude_cmd+=(--settings "$FINAL_SETTINGS_FILE")
+# Three-way merge priority: blind-trust (base) -> LA_REMOTE_CLAUDE_SETTINGS -> generated SETTINGS_FILE
+if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" && -f "$BLIND_TRUST_SETTINGS_FILE" ]]; then
+    # Start with blind-trust as base
+    _base_settings="$BLIND_TRUST_SETTINGS_FILE"
+    _overlay_settings=""
+
+    # Add LA_REMOTE_CLAUDE_SETTINGS as first overlay if present
+    if [[ -n "$REMOTE_CLAUDE_SETTINGS_FILE" ]]; then
+        _overlay_settings="$REMOTE_CLAUDE_SETTINGS_FILE"
+    fi
+
+    # Add generated SETTINGS_FILE as second overlay if present
+    if [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -n "${SETTINGS_FILE:-}" ] && [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
+        if [[ -n "$_overlay_settings" ]]; then
+            # Two overlays: merge blind-trust + remote settings first, then add generated
+            _tmp_merge="$(
+                mktemp "${TMPDIR:-/tmp}/free-agents-merged-settings1.XXXXXX.json"
+            )"
+            chmod 600 "$_tmp_merge"
+            LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/merge-settings.py" \
+                --base "$_base_settings" \
+                --overlay "$_overlay_settings" \
+                --output "$_tmp_merge" 2>/dev/null || true
+            if [ -f "$_tmp_merge" ] && [ -s "$_tmp_merge" ]; then
+                _base_settings="$_tmp_merge"
+            fi
+            _overlay_settings="$SETTINGS_FILE"
+        else
+            _overlay_settings="$SETTINGS_FILE"
+        fi
+    fi
+
+    # Apply final overlay if any
+    if [[ -n "$_overlay_settings" ]]; then
+        FINAL_SETTINGS_FILE="$(
+            mktemp "${TMPDIR:-/tmp}/free-agents-merged-settings.XXXXXX.json"
+        )"
+        chmod 600 "$FINAL_SETTINGS_FILE"
+        LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/merge-settings.py" \
+            --base "$_base_settings" \
+            --overlay "$_overlay_settings" \
+            --output "$FINAL_SETTINGS_FILE" 2>/dev/null || true
+        if [ -f "$FINAL_SETTINGS_FILE" ] && [ -s "$FINAL_SETTINGS_FILE" ]; then
+            claude_cmd+=(--settings "$FINAL_SETTINGS_FILE")
+        else
+            # Fallback: use blind-trust only
+            claude_cmd+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
+        fi
     else
-        # Fallback: use blind-trust only
+        # Only blind-trust settings
         claude_cmd+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
     fi
-elif [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" && -f "$BLIND_TRUST_SETTINGS_FILE" ]]; then
-    # Only blind-trust settings
-    claude_cmd+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
+elif [[ -n "$REMOTE_CLAUDE_SETTINGS_FILE" ]]; then
+    # Only LA_REMOTE_CLAUDE_SETTINGS (no blind-trust)
+    claude_cmd+=(--settings "$REMOTE_CLAUDE_SETTINGS_FILE")
 elif [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -n "${SETTINGS_FILE:-}" ] && [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
     # Only per-session settings
     claude_cmd+=(--settings "$SETTINGS_FILE")

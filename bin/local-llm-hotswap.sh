@@ -40,6 +40,7 @@ USE_PROFILE=false
 PROFILE_ID=""
 MODEL_NAME=""
 EFFORT_OVERRIDE=""
+LA_TEMPERATURE="${LA_TEMPERATURE:-}"   # from the environment (launcher) or --temperature below
 
 while (( $# > 0 )); do
     case "$1" in
@@ -56,6 +57,25 @@ while (( $# > 0 )); do
             echo "  use launch-claude-agent.sh --dry-run <alias> to preview a launch." >&2
             exit 2
             ;;
+        --temperature)
+            [[ $# -ge 2 ]] || { echo "local-llm-hotswap.sh: --temperature needs a value (0.0-2.0)" >&2; exit 2; }
+            if ! python3 -c '
+import sys
+try:
+    v = float(sys.argv[1])
+    if 0.0 <= v <= 2.0:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+except:
+    sys.exit(1)
+' "$2"; then
+                echo "local-llm-hotswap.sh: --temperature must be a number 0.0-2.0, got '$2'" >&2
+                exit 2
+            fi
+            LA_TEMPERATURE="$2"
+            shift 2
+            ;;
         *)
             if [ -z "$MODEL_NAME" ]; then
                 MODEL_NAME="$1"
@@ -66,6 +86,12 @@ while (( $# > 0 )); do
             ;;
     esac
 done
+
+# Canonical form (0.600 -> 0.6), so the server-reuse identity compares VALUES, not spellings.
+if [ -n "$LA_TEMPERATURE" ]; then
+    LA_TEMPERATURE=$(python3 -c 'import sys; print(format(float(sys.argv[1]), "g"))' "$LA_TEMPERATURE" 2>/dev/null) || {
+        echo "local-llm-hotswap.sh: LA_TEMPERATURE is not a number: $LA_TEMPERATURE" >&2; exit 2; }
+fi
 
 # If using profile mode, resolve the profile and find the corresponding registry alias
 if [ "$USE_PROFILE" = "true" ]; then
@@ -232,12 +258,14 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             _meta_alias=$(awk -F= '$1=="alias"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_model=$(awk -F= '$1=="model_dir"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_spec=$(awk -F= '$1=="spec_config_sha256"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _meta_temp=$(awk -F= '$1=="temperature"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_pid=$(awk -F= '$1=="pid"{print $2}' "$_meta" 2>/dev/null)
             if [ "${LA_HOTSWAP_FORCE_FRESH:-0}" != "1" ] &&
                [ "$_meta_backend" = "rapid" ] &&
                [ "$_meta_alias" = "$MODEL_NAME" ] &&
                [ "$_meta_model" = "$MODEL_DIR" ] &&
                [ "$_meta_spec" = "$RAPID_SPEC_CONFIG_SHA256" ] &&
+               [ "$_meta_temp" = "${LA_TEMPERATURE:-}" ] &&
                [ -n "$_listener_pid" ] &&
                [ "$_listener_pid" = "$_meta_pid" ] &&
                printf '%s\n' "$CURRENT_IDS" | grep -qxF "$SPOOF_PRIMARY"; then
@@ -366,9 +394,19 @@ if [ "$SERVE" = "rapid" ]; then
 
     if [ "$THINK" = "true" ]; then
         RAPID_CMD+=(--reasoning-parser "${REASONP:-qwen3}")
-        RAPID_CMD+=(--default-temperature 0.6 --default-top-p 0.95)
+        # Use LA_TEMPERATURE if set, otherwise default to 0.6 for thinking models
+        if [ -n "${LA_TEMPERATURE:-}" ]; then
+            RAPID_CMD+=(--default-temperature "$LA_TEMPERATURE")
+        else
+            RAPID_CMD+=(--default-temperature 0.6)
+        fi
+        RAPID_CMD+=(--default-top-p 0.95)
     else
         RAPID_CMD+=(--no-thinking --no-reasoning-parser)
+        # For non-thinking models, still apply temperature if explicitly set
+        if [ -n "${LA_TEMPERATURE:-}" ]; then
+            RAPID_CMD+=(--default-temperature "$LA_TEMPERATURE")
+        fi
     fi
 
     echo "🚀 Launching $MODEL_NAME via Rapid-MLX on free port $TARGET_PORT  (🧠 thinking: $THINK)..."
@@ -381,6 +419,7 @@ if [ "$SERVE" = "rapid" ]; then
         echo "model_dir=$MODEL_DIR"
         echo "served_id=$SPOOF_PRIMARY"
         echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
+        [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
         echo "pid=$RAPID_PID"
         [ "$USE_PROFILE" = "true" ] && echo "profile_id=$PROFILE_ID"
     } > "$RAPID_META_TMP"

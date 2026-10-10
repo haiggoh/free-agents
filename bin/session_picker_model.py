@@ -591,8 +591,12 @@ class LocalScreen(Screen):
         # Use profile_id for the launcher if available, else alias
         launch_alias = mdl.profile_id if mdl.profile_id else mdl.alias
         argv = ["local", launch_alias, s.local_effort]
+        # Through the ENVIRONMENT, like every other toggle: csl --picker-launch execs the launcher
+        # with "<alias> <effort>", and the launcher reads options only before the alias, so a
+        # trailing --temperature would be silently dropped. Hotswap passes it to Rapid as
+        # --default-temperature and counts it in the server-reuse identity.
         if s.local_temperature:
-            argv += ["--temperature", s.local_temperature]
+            env["LA_TEMPERATURE"] = s.local_temperature
         return LaunchRequest("local", argv, env, mdl.alias)
 
 

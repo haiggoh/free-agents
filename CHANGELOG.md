@@ -1,3 +1,45 @@
+## [0.27.2] — 2026-10-10
+
+Picker ↔ launcher parity: every setting the picker offers now changes the session it starts.
+
+### Fixed
+- **Local temperature did nothing, or overwrote the effort.** The picker appended
+  `--temperature X`. `local-session.sh` had no such option, and `csl --picker-launch` execs the
+  launcher as `<alias> <effort>`, so the value was dropped or misread. It now travels as
+  `LA_TEMPERATURE` (picker → csl → `local-session.sh --temperature` → launcher → hotswap). Hotswap
+  passes it to Rapid-MLX as `--default-temperature`, records `temperature=` in `server_<port>.meta`
+  in canonical form (0.600 = 0.6), and refuses to reuse a server started at a different
+  temperature.
+- **`merge-settings.py` let an overlay drop blind-trust's `DESTRUCTIVE_DENY`.** Every
+  `permissions` key except `allow` was replaced by the overlay's, so any overlay with its own
+  `deny` list removed `Bash(sudo:*)`, `git push --force`, `rm -rf ~` and the rest. `deny` is now a
+  union.
+- `csl`'s dry run told users to toggle MCPs with `u`, a key that does nothing. It now names `m`.
+- **Blind-trust on a fresh install ran with an empty allowlist.** The launchers read
+  `~/.claude/launch-profiles/*.json`, which the repo never shipped, and `blind-trust-settings.py`
+  silently returned `[]`. Shipped defaults now live in `config/launch-profiles/*.example.json`
+  (non-destructive: no rm, push, reset, curl or pip); the user's own files still win. Both the
+  fallback and a missing or invalid file are reported on stderr.
+
+### Added
+- **`LA_REMOTE_CLAUDE_SETTINGS`** (claimed in 0.14.8, never implemented until now): a user settings
+  file for free-API sessions. It is merged after blind-trust and before the theme overlay, and a
+  missing file is warned about in both the dry run and the launch.
+- `local-session.sh --temperature VALUE` and `launch-claude-agent.sh --temperature VALUE`, each
+  validated as 0.0–2.0.
+
+### Tests
+- `tests/test_local_temperature.sh` (parsing/validation) and `tests/test_local_temperature_path.sh`
+  (env survives `csl --picker-launch` with the effort argument untouched; hotswap's serve flag,
+  meta and reuse identity; normalisation).
+- `tests/test_merge_settings.py`: deny union. Mutation-checked: the old merge fails 2 of 4.
+- `tests/test_blind_trust_settings.py` (missing/invalid → warning), `tests/test_remote_session.py`
+  (three `LA_REMOTE_CLAUDE_SETTINGS` cases), and `tests/test_session_picker_model.py` (the local
+  launch request carries `LA_TEMPERATURE` in env, never in argv).
+- Implementation drafted by a free Nemotron 3 Ultra session and reviewed by a second Nemotron
+  dispatch (it found the temperature-spelling reuse bug). The env hand-off, deny union and
+  dry-run warning were corrected on review.
+
 ## [0.27.1] — 2026-10-10
 
 Provider additions made between runs, plus a Mistral routing fix.
