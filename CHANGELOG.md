@@ -1,3 +1,40 @@
+## [0.29.1] — 2026-10-11
+
+Backend-manager CLI parity: every subcommand the parser, README or CHANGELOG names now works.
+
+### Fixed
+- **`check-updates`, `promote` and `remove` were parsed but never dispatched** (0.21.0). They fell
+  through to the help text with exit 2, while `updates` was dispatched but never parsed.
+  `check-updates` is canonical, `updates` is an alias, and every registered subcommand dispatches.
+  A backend lacking an operation prints `not supported for <backend>` and exits 2, instead of
+  printing the help text.
+- **`manage-rapid-mlx.py install X --skip-pin-update` and `smoke X`**, shown in the README, did not
+  exist after the 0.21.0 shim rewrite. Both are back, through the shim and through
+  `manage-backend.py --backend rapid-mlx`.
+- **The 0.15.1 interactive menu is rebuilt** (ported from git history). A bare
+  `manage-rapid-mlx.py` on a TTY opens list / install / promote / snapshot / remove; without a TTY
+  it prints usage and exits 2.
+- **The 0.19.3 braille spinner** is back around venv creation and pip installs, in
+  `install/managers/_common.py`, and draws only when stderr is a TTY.
+- `RapidMLXManager.install_version` was defined twice, so the second definition silently shadowed
+  the first (found by a free Nemotron review). The dead copy is removed.
+- Pin-reference detection matches the venv name as a whole token, so `rapid-mlx-0.15.3` no longer
+  blocks removal because `rapid-mlx-0.15.30` is pinned.
+- **Retired `install/local-stack-update-check.sh`** (replaced by the `backend-update-check` launchd
+  job in 0.21.0). The README now describes that job and how to install it.
+
+### Tests
+- New: `test_manage_backend_parity.py` (derives the subcommand list from argparse; mutation removes
+  a dispatch and it fails), `test_backend_unsupported_ops.py`, `test_manage_rapid_mlx_wrapper.py`,
+  `test_braille_spinner.py`, `test_readme_drift.py` (every `manage-*.py <sub>` in the README is a
+  registered subcommand) and `test_deleted_script_references.py`.
+- `test_backend_unsupported_ops.py` registers its fake backend in a fixture. Registering it at
+  import time leaked it into the global registry and broke another test in full-suite order.
+- `test_cli_releases` / `test_cli_check_updates` call PyPI for real (60 s / 180 s measured) and now
+  run only with `FA_NETWORK_TESTS=1`, which keeps the suite offline and about 2 minutes long.
+- Implementation by two free Nemotron 3 Ultra sessions plus a Nemotron review dispatch; the
+  shadowed method, the registry leak and missing test imports were fixed on cloud review.
+
 ## [0.29.0] — 2026-10-10
 
 The acquisition-catalogue reader that 0.16.0 announced and never shipped.

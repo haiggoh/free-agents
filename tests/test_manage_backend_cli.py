@@ -34,12 +34,23 @@ def test_cli_list_backends():
     assert exit_code == 0
 
 
+import os as _os
+import pytest as _pytest
+
+# These two call PyPI for real (measured 60 s and 180 s on a slow network). The suite is otherwise
+# offline; set FA_NETWORK_TESTS=1 to run them.
+_network = _pytest.mark.skipif(_os.environ.get("FA_NETWORK_TESTS") != "1",
+                               reason="network test; set FA_NETWORK_TESTS=1")
+
+
+@_network
 def test_cli_releases():
     """Test releases command."""
     exit_code, stdout, stderr = run_cli("--backend", "rapid-mlx", "releases", "--limit", "5")
     assert exit_code == 0
 
 
+@_network
 def test_cli_check_updates():
     """Test check-updates command."""
     exit_code, stdout, stderr = run_cli("--backend", "rapid-mlx", "check-updates")

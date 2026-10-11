@@ -60,6 +60,9 @@ Examples:
   manage-backend.py --backend omlx install 0.7.0
   manage-backend.py --backend rapid-mlx check-updates
   manage-backend.py --backend rapid-mlx promote 0.15.3
+  manage-backend.py --backend rapid-mlx smoke 0.15.3
+  manage-backend.py --backend rapid-mlx snapshot 0.15.3
+  manage-backend.py --backend rapid-mlx remove 0.15.3
   manage-backend.py --backend litellm install 1.60.0
         """.strip(),
     )
@@ -86,22 +89,38 @@ Examples:
     inst_p.add_argument("--python", help="base Python executable")
     inst_p.add_argument("--refresh-deps", action="store_true", help="ignore existing lock file")
     inst_p.add_argument("--source", choices=["pypi", "github"], default="pypi", help="install source (vllm-mlx)")
+    inst_p.add_argument("--skip-pin-update", action="store_true", help="install/validate without promoting repository/private active pins (rapid-mlx)")
 
     # validate command
     val_p = sub.add_parser("validate", help="validate an installed version")
     val_p.add_argument("version")
 
-    # check-updates command
-    chk_p = sub.add_parser("check-updates", help="check for package updates")
+    # check-updates command (alias: updates)
+    chk_p = sub.add_parser("check-updates", help="check for package updates", aliases=["updates"])
 
     # promote command (for backends that support pin promotion)
     prom_p = sub.add_parser("promote", help="promote pins to a version")
     prom_p.add_argument("version")
+    prom_p.add_argument("--repo", type=Path, help="local-agents repository (default: script repository)")
 
     # remove command
     rem_p = sub.add_parser("remove", help="remove an installed version")
     rem_p.add_argument("version")
     rem_p.add_argument("--yes", action="store_true", help="skip confirmation")
+    rem_p.add_argument("--repo", type=Path, help="local-agents repository (default: script repository)")
+
+    # smoke command (validate package and CLI surfaces without starting a server)
+    smoke_p = sub.add_parser("smoke", help="validate package and CLI surfaces without starting a server")
+    smoke_p.add_argument("version")
+
+    # snapshot command (save an exact recreation receipt)
+    snap_p = sub.add_parser("snapshot", help="save an exact recreation receipt")
+    snap_p.add_argument("version")
+
+    # inspect command (capture CLI/package evidence)
+    inspect_p = sub.add_parser("inspect", help="capture CLI/package evidence")
+    inspect_p.add_argument("version")
+    inspect_p.add_argument("--output", type=Path)
 
     # info command
     info_p = sub.add_parser("info", help="show detailed info about a version")
@@ -206,12 +225,19 @@ def cmd_install(args: argparse.Namespace) -> int:
             }, indent=2))
             return 0
 
-        info = mgr.install_version(
-            version,
-            python=args.python,
-            refresh_deps=args.refresh_deps,
-            dry_run=False,
-        )
+        # Pass skip_pin_update for rapid-mlx
+        install_kwargs = {
+            "version": version,
+            "python": args.python,
+            "refresh_deps": args.refresh_deps,
+            "dry_run": False,
+        }
+        if hasattr(mgr, 'install_version') and 'skip_pin_update' in mgr.install_version.__code__.co_varnames:
+            install_kwargs["skip_pin_update"] = getattr(args, 'skip_pin_update', False)
+        if hasattr(mgr, 'install_version') and 'repo' in mgr.install_version.__code__.co_varnames:
+            install_kwargs["repo"] = getattr(args, 'repo', None)
+
+        info = mgr.install_version(**install_kwargs)
         print(json.dumps({
             "name": info.name,
             "version": info.version,
@@ -282,6 +308,95 @@ def cmd_info(args: argparse.Namespace) -> int:
             "status": info.status,
             "metadata": info.metadata,
         }, indent=2))
+    except ManagerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_promote(args: argparse.Namespace) -> int:
+    """Promote pins to a version."""
+    mgr = _require_backend(args)
+    try:
+        if hasattr(mgr, 'promote_pins'):
+            # For rapid-mlx, we need to set the repo on the manager
+            repo = getattr(args, 'repo', None)
+            if repo is not None and hasattr(mgr, '_repo'):
+                mgr._repo = repo
+            result = mgr.promote_pins(args.version, dry_run=args.dry_run)
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(f"ERROR: promote not supported for {mgr.BACKEND_NAME}", file=sys.stderr)
+            return 2
+    except ManagerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_remove(args: argparse.Namespace) -> int:
+    """Remove an installed version."""
+    mgr = _require_backend(args)
+    try:
+        if hasattr(mgr, 'remove_version'):
+            repo = getattr(args, 'repo', None)
+            mgr.remove_version(args.version, yes=args.yes, repo=repo, dry_run=args.dry_run)
+            action = "would remove" if args.dry_run else "removed"
+            print(f"{action} {mgr.target_for(args.version)}")
+        else:
+            print(f"ERROR: remove not supported for {mgr.BACKEND_NAME}", file=sys.stderr)
+            return 2
+    except ManagerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_smoke(args: argparse.Namespace) -> int:
+    """Smoke test an environment."""
+    mgr = _require_backend(args)
+    try:
+        if hasattr(mgr, 'smoke_environment'):
+            if args.dry_run:
+                print(json.dumps({"result": "dry_run", "would_smoke": args.version}, indent=2))
+            else:
+                result = mgr.smoke_environment(args.version)
+                print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(f"ERROR: smoke not supported for {mgr.BACKEND_NAME}", file=sys.stderr)
+            return 2
+    except ManagerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_snapshot(args: argparse.Namespace) -> int:
+    """Save a recreation receipt."""
+    mgr = _require_backend(args)
+    try:
+        if hasattr(mgr, 'snapshot_environment'):
+            path = mgr.snapshot_environment(args.version, dry_run=args.dry_run)
+            print(path)
+        else:
+            print(f"ERROR: snapshot not supported for {mgr.BACKEND_NAME}", file=sys.stderr)
+            return 2
+    except ManagerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    """Capture CLI/package evidence."""
+    mgr = _require_backend(args)
+    try:
+        if hasattr(mgr, 'inspect_environment'):
+            path = mgr.inspect_environment(args.version, output=args.output, dry_run=args.dry_run)
+            print(path)
+        else:
+            print(f"ERROR: inspect not supported for {mgr.BACKEND_NAME}", file=sys.stderr)
+            return 2
     except ManagerError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -383,8 +498,18 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_install(args)
     elif args.command == "validate":
         return cmd_validate(args)
-    elif args.command == "updates":
+    elif args.command in ("check-updates", "updates"):
         return cmd_updates(args)
+    elif args.command == "promote":
+        return cmd_promote(args)
+    elif args.command == "remove":
+        return cmd_remove(args)
+    elif args.command == "smoke":
+        return cmd_smoke(args)
+    elif args.command == "snapshot":
+        return cmd_snapshot(args)
+    elif args.command == "inspect":
+        return cmd_inspect(args)
     elif args.command == "info":
         return cmd_info(args)
     elif args.command == "launchd":

@@ -113,7 +113,6 @@ rm -rf "$PLUGIN_DIR/docs/planning" 2>/dev/null || true
 rm -f "$PLUGIN_DIR/docs/releases/TAG-REPAIR-2026-09-16.md" 2>/dev/null || true
 
 # Remove install scripts that are development-only
-rm -f "$PLUGIN_DIR/install/local-stack-update-check.sh" 2>/dev/null || true
 rm -f "$PLUGIN_DIR/install/session-picker-requirements.txt" 2>/dev/null || true
 
 # Create a simple installer script for the release package

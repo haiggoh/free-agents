@@ -308,8 +308,7 @@ choice is not "venv vs no venv" — it is *who pins the venv*. Three reasons it 
 `LA_RAPID_BIN` is therefore normally **pinned** to a qualified version, and upgrades are built
 **side by side** (`~/.venvs/rapid-mlx-<new>`) and promoted after qualification. Left unset, it
 auto-discovers brew → `PATH` → newest `~/.venvs/rapid-mlx-*`, so a machine that prefers the brew
-install still works. The weekly `local-stack-update-check` launchd job watches PyPI for new Rapid
-releases and only *notifies* — it never installs.
+install still works. The weekly `backend-update-check` launchd job (installed via `manage-backend.py --backend rapid-mlx launchd install`) watches PyPI for all backend releases (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) and only *notifies* — it never installs.
 
 **What does install is `install/manage-rapid-mlx.py`**, the runtime lifecycle manager. Before it
 existed, the notify half had no counterpart: you were told a release was out and then hand-rolled

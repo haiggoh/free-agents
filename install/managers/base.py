@@ -174,6 +174,101 @@ class BackendManager(
         """
         ...
 
+    # ---- Optional Methods (override in subclasses that support them) ----
+
+    def promote_pins(self, version: str, *, dry_run: bool = False) -> dict[str, Any]:
+        """Promote pins to a version.
+
+        Args:
+            version: Version to promote
+            dry_run: Print plan without executing
+
+        Returns:
+            Dict with promotion results
+
+        Raises:
+            ManagerError: If promotion is not supported or fails
+        """
+        raise ManagerError(f"promote not supported for {self.BACKEND_NAME}")
+
+    def remove_version(
+        self,
+        version: str,
+        *,
+        yes: bool = False,
+        repo: Path | None = None,
+        home: Path | None = None,
+        dry_run: bool = False,
+    ) -> None:
+        """Remove an installed version.
+
+        Args:
+            version: Version to remove
+            yes: Skip confirmation
+            repo: Repository path (for pin checking)
+            home: Home directory override
+            dry_run: Print plan without executing
+
+        Raises:
+            ManagerError: If removal is not supported or fails
+        """
+        raise ManagerError(f"remove not supported for {self.BACKEND_NAME}")
+
+    def smoke_environment(self, version: str, home: Path | None = None) -> dict[str, Any]:
+        """Smoke test an environment (package import + CLI --help, no server).
+
+        Args:
+            version: Version to test
+            home: Home directory override
+
+        Returns:
+            Dict with smoke test results
+
+        Raises:
+            ManagerError: If smoke test is not supported or fails
+        """
+        raise ManagerError(f"smoke not supported for {self.BACKEND_NAME}")
+
+    def snapshot_environment(self, version: str, home: Path | None = None, *, dry_run: bool = False) -> Path:
+        """Save an exact recreation receipt.
+
+        Args:
+            version: Version to snapshot
+            home: Home directory override
+            dry_run: Print plan without executing
+
+        Returns:
+            Path to the receipt file
+
+        Raises:
+            ManagerError: If snapshot is not supported or fails
+        """
+        raise ManagerError(f"snapshot not supported for {self.BACKEND_NAME}")
+
+    def inspect_environment(
+        self,
+        version: str,
+        output: Path | None = None,
+        home: Path | None = None,
+        *,
+        dry_run: bool = False,
+    ) -> Path:
+        """Capture CLI/package evidence.
+
+        Args:
+            version: Version to inspect
+            output: Output file path
+            home: Home directory override
+            dry_run: Print plan without executing
+
+        Returns:
+            Path to the inspection file
+
+        Raises:
+            ManagerError: If inspect is not supported or fails
+        """
+        raise ManagerError(f"inspect not supported for {self.BACKEND_NAME}")
+
     # ---- Utility Methods ----
 
     def check_updates(self) -> list[tuple[str, str, str]]:
@@ -382,3 +477,14 @@ class VersionInfo:
 class ManagerError(RuntimeError):
     """A fail-closed manager error suitable for a concise CLI message."""
     pass
+
+
+def repository_root(explicit: Path | None = None) -> Path:
+    """The free-agents checkout this manager runs from (two levels above install/managers/).
+
+    A worktree has a `.git` FILE, not a directory, so `exists()` (not `is_dir()`) is the test.
+    """
+    candidate = (explicit or Path(__file__).resolve().parent.parent.parent).expanduser().resolve()
+    if not (candidate / ".git").exists():
+        raise ManagerError(f"not a free-agents Git repository: {candidate}")
+    return candidate

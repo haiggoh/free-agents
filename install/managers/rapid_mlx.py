@@ -21,6 +21,8 @@ from typing import Any
 
 from . import register_manager
 from .base import BackendInfo, BackendManager, ManagerError
+from ._common import braille_spinner
+from .base import repository_root
 
 PACKAGE = "rapid-mlx"
 PYPI_URL = "https://pypi.org/pypi/rapid-mlx/json"
@@ -124,63 +126,6 @@ class RapidMLXManager(BackendManager):
             raise ManagerError(f"could not retrieve {package} releases: {exc}") from exc
         return payload.get("info", {}).get("version", "")
 
-    def install_version(
-        self,
-        version: str,
-        *,
-        python: str | None = None,
-        refresh_deps: bool = False,
-        dry_run: bool = False,
-    ) -> BackendInfo:
-        target = self.target_for(version)
-        if dry_run:
-            lock = None if refresh_deps else self._locked_requirements(version)
-            return BackendInfo(
-                name=self.BACKEND_NAME,
-                version=version,
-                path=str(target),
-                status="dry_run",
-                metadata={"installation_mode": "locked_recreation" if lock else "fresh_resolution"},
-            )
-
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists() or target.is_symlink():
-            receipt = self.validate_environment(version)
-            receipt.metadata["result"] = "already_complete"
-            self._save_receipt(version, receipt.metadata)
-            return receipt
-
-        base_python = self.choose_python(python)
-        log = self.cache_root() / "logs" / f"install-{version}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}.log"
-
-        try:
-            self.run_command([str(base_python), "-m", "venv", str(target)], log=log)
-            child = target / "bin" / "python"
-            lock = None if refresh_deps else self._locked_requirements(version)
-            if lock:
-                lock_path = target / ".rapid-runtime-lock.txt"
-                lock_path.write_text("\n".join(lock) + "\n", encoding="utf-8")
-                self.run_command([str(child), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(lock_path)], log=log)
-                lock_path.unlink()
-                mode = "locked_recreation"
-            else:
-                self.run_command([str(child), "-m", "pip", "install", "--disable-pip-version-check", f"{PACKAGE}=={version}"], log=log)
-                mode = "fresh_resolution"
-
-            receipt = self.validate_environment(version)
-            receipt.metadata.update({
-                "result": "installed",
-                "installation_mode": mode,
-                "base_python": str(base_python),
-                "install_log": str(log),
-            })
-            self._save_receipt(version, receipt.metadata)
-            return receipt
-        except Exception:
-            if target.exists() and not target.is_symlink():
-                shutil.rmtree(target)
-            raise
-
     def validate_environment(self, version: str) -> BackendInfo:
         target = self.target_for(version)
         if target.is_symlink() or not target.is_dir():
@@ -278,9 +223,6 @@ print(json.dumps(out, sort_keys=True))
         clean = [line for line in lines if isinstance(line, str) and line.strip()]
         normalized = {line.casefold().replace("_", "-") for line in clean}
         return clean if f"rapid-mlx=={version}" in normalized else None
-
-    def _cache_root(self) -> Path:
-        return self.home / ".cache" / "local-agents" / "rapid-runtime-manager"
 
     def _save_receipt(self, version: str, data: dict[str, Any]) -> None:
         path = self.receipt_path(version)
@@ -395,7 +337,7 @@ print(json.dumps(out, sort_keys=True))
         self.tracked_repo_clean(repo)
 
         transaction = backup_root or (
-            self.cache_root() / "pin-transactions" /
+            self._cache_root() / "pin-transactions" /
             (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{os.getpid()}"))
         transaction.mkdir(parents=True, exist_ok=False)
         os.chmod(transaction, 0o700)
@@ -461,3 +403,444 @@ print(json.dumps(out, sort_keys=True))
                 raise ManagerError(f"pin promotion failed ({exc}); rollback also failed:\n"
                                    + "\n".join(rollback_errors)) from exc
             raise ManagerError(f"pin promotion failed and was rolled back: {exc}") from exc
+
+    def remove_version(
+        self,
+        version: str,
+        *,
+        yes: bool = False,
+        repo: Path | None = None,
+        home: Path | None = None,
+        dry_run: bool = False,
+    ) -> None:
+        """Remove an inactive, unpinned, reproducible venv."""
+        target = self.target_for(version, home or self.home)
+        if target.is_symlink() or not target.is_dir():
+            raise ManagerError(f"refusing removal: not a real managed directory: {target}")
+        self.validate_environment(version)
+        if not self._locked_requirements(version):
+            raise ManagerError(f"refusing removal without a valid recreation receipt; run snapshot {version}")
+        try:
+            Path(sys.executable).resolve().relative_to(target.resolve())
+        except ValueError:
+            pass
+        else:
+            raise ManagerError("refusing to remove the environment running this manager")
+
+        running = self._running_references(target)
+        if running:
+            raise ManagerError("environment is referenced by running process(es):\n" + "\n".join(running))
+        references = self._referenced_paths(repo or self._repo, target)
+        if references:
+            raise ManagerError("environment is still pinned:\n" + "\n".join(references))
+        if dry_run:
+            print(f"would remove {target}")
+            return
+        if not yes:
+            if not sys.stdin.isatty():
+                raise ManagerError("removal requires a TTY or --yes")
+            if input(f"Permanently remove {target}? Type 'delete {version}': ") != f"delete {version}":
+                raise ManagerError("removal cancelled")
+        shutil.rmtree(target)
+        if target.exists() or target.is_symlink():
+            raise ManagerError(f"removal verification failed: {target}")
+
+    def _referenced_paths(self, repo: Path | None, target: Path) -> list[str]:
+        """Find pinned references to the target in the repository."""
+        if not repo:
+            return []
+        matches: list[str] = []
+        all_files = PIN_FILES + OPTIONAL_PIN_FILES + (PRIVATE_PIN_FILE,)
+        for relative in all_files:
+            path = repo / relative
+            if not path.is_file() or path.is_symlink():
+                continue
+            for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                if re.search(r"(?<![\w.-])" + re.escape(target.name) + r"(?![\w.-])", line) or str(target) in line:
+                    matches.append(f"{path}:{number}:{line.strip()}")
+        return matches
+
+    def _running_references(self, target: Path) -> list[str]:
+        """Find running processes referencing the target."""
+        import psutil
+        matches: list[str] = []
+        own_pid = os.getpid()
+        try:
+            for proc in psutil.process_iter(['pid', 'cmdline']):
+                try:
+                    pid = proc.info['pid']
+                    cmdline = proc.info['cmdline']
+                    if not pid or pid == own_pid or not cmdline:
+                        continue
+                    command = " ".join(cmdline)
+                    if str(target) in command:
+                        matches.append(f"PID {pid}: {command}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass  # psutil might not be available
+        return matches
+
+    def snapshot_environment(self, version: str, home: Path | None = None, *, dry_run: bool = False) -> Path:
+        """Save an exact recreation receipt."""
+        target = self.target_for(version, home or self.home)
+        path = self.receipt_path(version, home or self.home)
+        if dry_run:
+            print(f"would write recreation receipt: {path}")
+            return path
+        receipt = self.validate_environment(version)
+        receipt.metadata["result"] = "snapshot"
+        self._save_receipt(version, receipt.metadata)
+        return path
+
+    def smoke_environment(self, version: str, home: Path | None = None) -> dict[str, Any]:
+        """Validate package and CLI surfaces without starting a server."""
+        target = self.target_for(version, home or self.home)
+        receipt = self.validate_environment(version)
+        binary = target / "bin" / "rapid-mlx"
+        top_help = self.run_command([str(binary), "--help"], capture=True).stdout
+        serve_help = self.run_command([str(binary), "serve", "--help"], capture=True).stdout
+        if "serve" not in top_help or "--host" not in serve_help:
+            raise ManagerError("Rapid CLI smoke test did not find expected serve/help surfaces")
+        return {"result": "smoke_pass", "version": version, "binary_sha256": receipt.metadata["rapid_binary_sha256"], "model_server_started": False}
+
+    def inspect_environment(
+        self,
+        version: str,
+        output: Path | None = None,
+        home: Path | None = None,
+        *,
+        dry_run: bool = False,
+    ) -> Path:
+        """Capture CLI/package evidence."""
+        target = self.target_for(version, home or self.home)
+        destination = (output or self._cache_root() / "inspections" / f"rapid-mlx-{version}.txt").expanduser()
+        if dry_run:
+            print(f"would inspect {target} and write {destination}")
+            return destination
+        receipt = self.validate_environment(version)
+        binary = target / "bin" / "rapid-mlx"
+        sections = [
+            "=== RECEIPT ===\n" + json.dumps(receipt.metadata, indent=2, sort_keys=True),
+            "=== TOP-LEVEL HELP ===\n" + self.run_command([str(binary), "--help"], capture=True).stdout,
+            "=== SERVE HELP ===\n" + self.run_command([str(binary), "serve", "--help"], capture=True).stdout,
+        ]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("\n\n".join(sections).rstrip() + "\n", encoding="utf-8")
+        os.chmod(destination, 0o600)
+        return destination
+
+    def install_version(
+        self,
+        version: str,
+        *,
+        python: str | None = None,
+        refresh_deps: bool = False,
+        dry_run: bool = False,
+        skip_pin_update: bool = False,
+        repo: Path | None = None,
+        home: Path | None = None,
+    ) -> BackendInfo:
+        """Install a specific version with optional pin promotion."""
+        # Check pin promotion restriction
+        if not skip_pin_update and home is not None and home.resolve() != Path.home().resolve():
+            raise ManagerError(
+                "pin promotion is disabled with the test-only --home override; "
+                "pass --skip-pin-update"
+            )
+
+        target = self.target_for(version, home)
+        if dry_run:
+            lock = None if refresh_deps else self._locked_requirements(version)
+            receipt = BackendInfo(
+                name=self.BACKEND_NAME,
+                version=version,
+                path=str(target),
+                status="dry_run",
+                metadata={"installation_mode": "locked_recreation" if lock else "fresh_resolution"},
+            )
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() or target.is_symlink():
+                receipt = self.validate_environment(version)
+                receipt.metadata["result"] = "already_complete"
+                self._save_receipt(version, receipt.metadata)
+            else:
+                base_python = self.choose_python(python)
+                log = self._cache_root(home) / "logs" / f"install-{version}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}.log"
+
+                try:
+                    with braille_spinner("Creating virtual environment..."):
+                        self.run_command([str(base_python), "-m", "venv", str(target)], log=log)
+                    child = target / "bin" / "python"
+                    lock = None if refresh_deps else self._locked_requirements(version)
+                    if lock:
+                        lock_path = target / ".rapid-runtime-lock.txt"
+                        lock_path.write_text("\n".join(lock) + "\n", encoding="utf-8")
+                        with braille_spinner("Installing locked dependencies..."):
+                            self.run_command([str(child), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(lock_path)], log=log)
+                        lock_path.unlink()
+                        mode = "locked_recreation"
+                    else:
+                        with braille_spinner(f"Installing {PACKAGE}=={version}..."):
+                            self.run_command([str(child), "-m", "pip", "install", "--disable-pip-version-check", f"{PACKAGE}=={version}"], log=log)
+                        mode = "fresh_resolution"
+
+                    receipt = self.validate_environment(version)
+                    receipt.metadata.update({
+                        "result": "installed",
+                        "installation_mode": mode,
+                        "base_python": str(base_python),
+                        "install_log": str(log),
+                    })
+                    self._save_receipt(version, receipt.metadata)
+                except Exception:
+                    if target.exists() and not target.is_symlink():
+                        shutil.rmtree(target)
+                    raise
+
+        receipt.metadata["pin_update"] = "skipped" if skip_pin_update else "pending"
+        if skip_pin_update:
+            return receipt
+        try:
+            if hasattr(self, 'promote_pins') and repo is not None:
+                receipt.metadata["pin_promotion"] = self.promote_pins(version, dry_run=dry_run)
+                receipt.metadata["pin_update"] = "dry_run" if dry_run else "promoted"
+        except Exception:
+            receipt.metadata["pin_update"] = "failed_rolled_back"
+            if not dry_run:
+                self._save_receipt(version, receipt.metadata)
+            raise
+        if not dry_run:
+            self._save_receipt(version, receipt.metadata)
+        return receipt
+
+    def target_for(self, version: str, home: Path | None = None) -> Path:
+        """Get target path for a version."""
+        self.require_version(version)
+        return (home or self.home) / ".venvs" / f"{self.VENV_PREFIX}-{version}"
+
+    @property
+    def venv_root(self) -> Path:
+        """Get venv root directory (property for backward compatibility)."""
+        return self.home / ".venvs"
+
+    def _venv_root(self, home: Path | None = None) -> Path:
+        """Get venv root directory with optional home override."""
+        return (home or self.home) / ".venvs"
+
+    @property
+    def cache_root(self) -> Path:
+        """Get cache root directory (property for backward compatibility)."""
+        return self.home / ".cache" / "local-agents" / "rapid-runtime-manager"
+
+    def _cache_root(self, home: Path | None = None) -> Path:
+        """Get cache root directory with optional home override."""
+        return (home or self.home) / ".cache" / "local-agents" / "rapid-runtime-manager"
+
+    def receipt_path(self, version: str, home: Path | None = None) -> Path:
+        """Get receipt path for a version."""
+        return self._cache_root(home) / "receipts" / f"{self.VENV_PREFIX}-{version}.json"
+
+    def installed_versions(self, home: Path | None = None) -> list[tuple[str, Path, str]]:
+        """List installed versions."""
+        root = self._venv_root(home)
+        entries: list[tuple[str, Path, str]] = []
+        if not root.is_dir():
+            return entries
+        for path in root.glob(f"{self.VENV_PREFIX}-*"):
+            if path.is_symlink() or not path.is_dir():
+                continue
+            version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
+            if not VERSION_RE.fullmatch(version):
+                continue
+            binary = path / "bin" / "rapid-mlx"
+            state = "complete" if binary.is_file() and os.access(binary, os.X_OK) else "incomplete"
+            entries.append((version, path, state))
+        return sorted(entries, key=lambda item: self.version_key(item[0]), reverse=True)
+
+    def run_interactive_menu(self, repo: Path | None = None) -> int:
+        """Run the interactive menu (requires TTY)."""
+        if not sys.stdin.isatty():
+            print("Interactive menu requires a TTY", file=sys.stderr)
+            return 2
+
+        # If repo not set, try to find it
+        if repo is None:
+            try:
+                repo = repository_root()
+            except ManagerError:
+                repo = None
+
+        while True:
+            print("\n=== Rapid-MLX Runtime Manager ===")
+            print("1. List releases (PyPI)")
+            print("2. List installed versions")
+            print("3. Install a version")
+            print("4. Promote pins to a version")
+            print("5. Snapshot a version")
+            print("6. Remove a version")
+            print("7. Quit")
+
+            try:
+                choice = input("\nChoose an option (1-7): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nGoodbye!")
+                return 0
+
+            if choice == "1":
+                self._menu_list_releases()
+            elif choice == "2":
+                self._menu_list_installed()
+            elif choice == "3":
+                self._menu_install()
+            elif choice == "4":
+                self._menu_promote(repo)
+            elif choice == "5":
+                self._menu_snapshot()
+            elif choice == "6":
+                self._menu_remove(repo)
+            elif choice == "7":
+                print("Goodbye!")
+                return 0
+            else:
+                print("Invalid choice. Please enter 1-7.")
+
+    def _menu_list_releases(self) -> None:
+        """List available releases."""
+        try:
+            versions = self.get_available_versions()
+            print("\nAvailable Rapid-MLX releases:")
+            for i, version in enumerate(versions[:20], 1):
+                print(f"  {i:2}. {version}")
+        except ManagerError as exc:
+            print(f"ERROR: {exc}")
+
+    def _menu_list_installed(self) -> None:
+        """List installed versions."""
+        entries = self.installed_versions()
+        if entries:
+            print("\nInstalled Rapid-MLX environments:")
+            for version, path, status in entries:
+                print(f"  {version:14} {status:10} {path}")
+        else:
+            print("\nNo versioned Rapid-MLX environments found.")
+
+    def _menu_install(self) -> None:
+        """Install a version."""
+        try:
+            versions = self.get_available_versions()
+            print("\nAvailable Rapid-MLX releases:")
+            for i, version in enumerate(versions[:30], 1):
+                print(f"  {i:2}. {version}")
+            raw = input("\nChoose version number (or enter version): ").strip()
+            if not raw:
+                return
+            if raw.isdigit():
+                idx = int(raw) - 1
+                if 0 <= idx < len(versions):
+                    version = versions[idx]
+                else:
+                    print("Invalid selection")
+                    return
+            else:
+                self.require_version(raw)
+                version = raw
+
+            # Ask about pin promotion
+            skip_pin = input("Skip pin promotion? (y/N): ").strip().lower() == 'y'
+            receipt = self.install_version(version, skip_pin_update=skip_pin, repo=self._repo)
+            print(json.dumps(receipt.metadata, indent=2, sort_keys=True))
+        except ManagerError as exc:
+            print(f"ERROR: {exc}")
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled")
+
+    def _menu_promote(self, repo: Path | None) -> None:
+        """Promote pins to a version."""
+        if repo is None:
+            print("Repository required for pin promotion (not found)")
+            return
+        try:
+            entries = self.installed_versions()
+            if not entries:
+                print("No installed versions to promote")
+                return
+            print("\nInstalled versions:")
+            for i, (version, _, status) in enumerate(entries, 1):
+                print(f"  {i:2}. {version} ({status})")
+            raw = input("\nChoose version number to promote: ").strip()
+            if not raw.isdigit():
+                print("Invalid selection")
+                return
+            idx = int(raw) - 1
+            if not 0 <= idx < len(entries):
+                print("Invalid selection")
+                return
+            version = entries[idx][0]
+
+            result = self.promote_pins(version, dry_run=False)
+            print(json.dumps(result, indent=2, sort_keys=True))
+        except ManagerError as exc:
+            print(f"ERROR: {exc}")
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled")
+
+    def _menu_snapshot(self) -> None:
+        """Snapshot a version."""
+        try:
+            entries = self.installed_versions()
+            if not entries:
+                print("No installed versions to snapshot")
+                return
+            print("\nInstalled versions:")
+            for i, (version, _, status) in enumerate(entries, 1):
+                print(f"  {i:2}. {version} ({status})")
+            raw = input("\nChoose version number to snapshot: ").strip()
+            if not raw.isdigit():
+                print("Invalid selection")
+                return
+            idx = int(raw) - 1
+            if not 0 <= idx < len(entries):
+                print("Invalid selection")
+                return
+            version = entries[idx][0]
+
+            path = self.snapshot_environment(version)
+            print(f"Snapshot saved to: {path}")
+        except ManagerError as exc:
+            print(f"ERROR: {exc}")
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled")
+
+    def _menu_remove(self, repo: Path | None) -> None:
+        """Remove a version."""
+        try:
+            entries = self.installed_versions()
+            if not entries:
+                print("No installed versions to remove")
+                return
+            print("\nInstalled versions:")
+            for i, (version, _, status) in enumerate(entries, 1):
+                print(f"  {i:2}. {version} ({status})")
+            raw = input("\nChoose version number to remove: ").strip()
+            if not raw.isdigit():
+                print("Invalid selection")
+                return
+            idx = int(raw) - 1
+            if not 0 <= idx < len(entries):
+                print("Invalid selection")
+                return
+            version = entries[idx][0]
+
+            confirm = input(f"Type 'delete {version}' to confirm: ").strip()
+            if confirm != f"delete {version}":
+                print("Removal cancelled")
+                return
+
+            self.remove_version(version, yes=False, repo=repo)
+            print(f"Removed {self.target_for(version)}")
+        except ManagerError as exc:
+            print(f"ERROR: {exc}")
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled")
