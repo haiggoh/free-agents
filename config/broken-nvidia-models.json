@@ -1,6 +1,6 @@
 {
   "description": "NVIDIA models that are known to be non-functional on NVIDIA NIM API. Distinction: 'broken' = model endpoint fails (timeout/404) regardless of account tier; 'paid_only' = model works but requires paid subscription (separate tier in remote-agents.sh). These models are hidden by default via --show-broken / 'u' toggle, NOT by --show-paid-only / 'p' toggle.",
-  "last_updated": "2026-10-10",
+  "last_updated": "2026-10-13",
   "models": [
     {
       "model_id": "moonshotai/kimi-k3",
@@ -8,7 +8,7 @@
       "reason": "TIMEOUT on all configurations (180s) — NVIDIA API capacity/availability issue. Model listed in catalog but backend does not respond. Same catalog metadata (no pricing/tier) as working Nemotron models. NOT a paid-tier restriction.",
       "status": "broken",
       "failure_mode": "timeout",
-      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10."
+      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10 and 2026-10-13 (session test timeout)."
     },
     {
       "model_id": "moonshotai/kimi-k2.6",
@@ -24,7 +24,7 @@
       "reason": "TIMEOUT on all configurations (180s) — NVIDIA API capacity/availability issue. Model listed in catalog but backend does not respond. Old v4-flash-0731 is 410 Gone. NOT a paid-tier restriction.",
       "status": "broken",
       "failure_mode": "timeout",
-      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10."
+      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10 and 2026-10-13 (session test timeout)."
     },
     {
       "model_id": "deepseek-ai/deepseek-coder-6.7b-instruct",
@@ -33,6 +33,54 @@
       "status": "broken",
       "failure_mode": "not_provisioned",
       "evidence": "Catalog shows model but generation returns 404. Confirmed 2026-10-03."
+    },
+    {
+      "model_id": "openai/gpt-oss-20b",
+      "alias": "nvidia-gptoss",
+      "reason": "HTTP 200 but empty completion — returns no content on direct API probes. Full session test also timed out. Not reliably usable.",
+      "status": "broken",
+      "failure_mode": "empty_response",
+      "evidence": "3/5 probes returned empty content (2026-10-11). Session test 2026-10-13 timed out without response."
+    },
+    {
+      "model_id": "google/gemma-4-31b-it",
+      "alias": "nvidia-gemma4",
+      "reason": "TIMEOUT on all configurations (180s) — NVIDIA API capacity/availability issue.",
+      "status": "broken",
+      "failure_mode": "timeout",
+      "evidence": "HTTP 200 on health checks, generation requests hang until timeout. Confirmed 2026-10-11."
+    },
+    {
+      "model_id": "meta/muse-glimmer-30b",
+      "alias": "nvidia-muse-glimmer",
+      "reason": "HTTP 200 but empty completion + HTTP 500 errors — inconsistent backend.",
+      "status": "broken",
+      "failure_mode": "empty_response",
+      "evidence": "2/5 probes empty, 1/5 HTTP 500. Confirmed 2026-10-11."
+    },
+    {
+      "model_id": "nvidia/nemotron-nano-3-30b-a3b",
+      "alias": "nvidia-nano3",
+      "reason": "HTTP 404 Not Found — function not provisioned for this NVIDIA account.",
+      "status": "broken",
+      "failure_mode": "not_provisioned",
+      "evidence": "3/5 probes HTTP 404. Confirmed 2026-10-11."
+    },
+    {
+      "model_id": "nvidia/nemotron-4-340b-instruct",
+      "alias": "nvidia-nemotron4",
+      "reason": "HTTP 404 Not Found — function not provisioned for this NVIDIA account.",
+      "status": "broken",
+      "failure_mode": "not_provisioned",
+      "evidence": "1/5 probes HTTP 404. Confirmed 2026-10-11."
+    },
+    {
+      "model_id": "nvidia/minitron-12b",
+      "alias": "nvidia-minitron",
+      "reason": "HTTP 404 Not Found — function not provisioned for this NVIDIA account.",
+      "status": "broken",
+      "failure_mode": "not_provisioned",
+      "evidence": "1/5 probes HTTP 404. Confirmed 2026-10-11."
     }
   ]
 }
