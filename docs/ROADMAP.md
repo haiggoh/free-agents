@@ -831,6 +831,35 @@ thinking-model runaway heuristic (`thinking-model-runaway-fix-a`).
 
 ---
 
+## Claimed but not delivered — audit of every tag against `main` @ `0.25.7` (2026-10-08)
+
+The 2026-10-08 audit checked all 124 tags' changelog entries (and the README) against the code and
+found features that had been announced but never built. This file's rule is that an item leaves only
+by shipping, so here is where each one landed. The full audit tables and the per-branch execution
+plans live in the `docs/roadmap-unshipped-audit` branch history and in
+`~/.claude/plans/_ARCHIVED/` on the maintainer's machine.
+
+| Group | Shipped in | What became true |
+|---|---|---|
+| NVIDIA limiter on every dispatch path (added as M0) | `0.26.4` | `librarian-dispatch.py --provider`, `remote_http` and `free-agent-tool.py` share the proxies' 40 RPM bucket |
+| 0.24.0 interception, reshaped to "subagents in every lane" | `0.27.0` | the `claude-*` catch-all routes subagent ids in free-API sessions; local Agent/Workflow capped to slots; opt-in cloud replacement hook |
+| Picker ↔ launcher parity | `0.27.2` | local temperature reaches Rapid and the reuse identity; shipped allowlists; `LA_REMOTE_CLAUDE_SETTINGS`; deny-union merge |
+| Remote classifier lane | `0.28.0` | `-a` runs genuine `--permission-mode auto`; `LA_CLASSIFIER_MODEL`; qualified live on NVIDIA |
+| Manifest gate wiring | `0.28.1`, `0.28.2` | gate on the launch path; verified downloader writes; validator matches the spec; `la_auto_scan_models` in discovery |
+| Acquisition-catalogue reader (0.16.0) | `0.29.0` | reader + load-time gate + filter evidence |
+| Docs and claims errata | `0.29.2` | stale references, root strays, `--help` on every script (a structural test), changelog dedupe |
+| Backend-manager CLI parity | `0.29.1` | dispatch parity, `smoke`, `--skip-pin-update`, rebuilt menu, spinner |
+
+**Still open, owned by no release yet:**
+
+- **`0.24.0` oMLX backend lanes**: NOT STARTED. Its number was spent on the Cloud Session Config
+  UI; it will take the next free minor number when work starts.
+- **Hybrid classifier lane** (a local session with an NVIDIA classifier) needs a split-routing proxy
+  in front of Rapid. It was deferred out of `0.28.0`.
+- **Remote session watcher** (deferred in `0.14.0`): still waiting on live-reasoning visibility.
+
+---
+
 ## Deliberately deferred
 
 Not roadmap items. Recorded so they are not mistaken for oversights (§20). The `0.14.0`–`0.16.0`
