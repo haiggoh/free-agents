@@ -51,7 +51,34 @@ warn() { printf '%s⚠ %s%s\n' "$C_WARN" "$1" "$C_0"; }
 err()  { printf '%s✗ %s%s\n' "$C_ERR" "$1" "$C_0" >&2; }
 info() { printf '%s  %s%s\n' "$C_DIM" "$1" "$C_0"; }
 
-usage() { awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$1"; }
+# The help text lives in a function, not only in the header comment: under `curl … | bash` there is
+# no file on disk to read the header from.
+usage() {
+    cat <<'HELP'
+install-free-agents.sh — standalone installer for free-agents (macOS, Linux, WSL2).
+
+Installs the plugin through Claude Code's own CLI (the haiggoh marketplace), puts csl, lowkey and lk
+on your PATH as wrappers that always run the newest installed plugin copy, then optionally sets up the
+remote lane (LiteLLM, picker UI, API keys) and local inference.
+
+Usage:
+  curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.sh | bash
+  curl -fsSL …/install-free-agents.sh | bash -s -- --remote-only --yes
+  bash install-free-agents.sh [options]
+
+Options:
+  --remote-only   skip local inference (backend + model downloads)
+  --local         include local inference without asking
+  --yes           accept every default without prompting (no local setup unless --local)
+  --bin-dir DIR   where the PATH wrappers go (default ~/.local/bin)
+  --no-wrappers   do not write csl/lowkey/lk wrappers
+  --help          print this help and exit
+
+Environment:
+  CLAUDE_CONFIG_DIR   Claude Code config dir (default ~/.claude); the plugin cache is read from it
+  FREE_AGENTS_ROOT    honoured by the wrappers: run that checkout instead of the plugin cache
+HELP
+}
 
 HAVE_TTY=0
 if [ -r /dev/tty ] && { : </dev/tty; } 2>/dev/null; then HAVE_TTY=1; fi
@@ -213,7 +240,7 @@ setup_local() {
 main() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            -h|--help) usage "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "see https://github.com/$REPO#install"; exit 0 ;;
+            -h|--help) usage; exit 0 ;;
             --remote-only) MODE_LOCAL=no ;;
             --local) MODE_LOCAL=yes ;;
             --yes|-y) ASSUME_YES=1 ;;

@@ -1,3 +1,10 @@
+## [0.29.4] — 2026-10-12
+
+### Fixed
+- `curl … | bash -s -- --help` printed only a link. The installer read its help from its own header
+  comment, and a piped script has no file on disk to read it from. The help text is now built into the
+  script. Found by running the published 0.29.3 one-liner.
+
 ## [0.29.3] — 2026-10-12
 
 The standalone installer works, and is now a `.sh`.
@@ -4360,7 +4367,8 @@ Release commit: [`f722c55`](https://github.com/haiggoh/local-agents/commit/f722c
 - Patch bundle for the local `vllm-mlx` fork.
 - Tournament, cancellation, tool-roundtrip, direct-routing, and Auto-mode diagnostics.
 
-[Unreleased]: https://github.com/haiggoh/free-agents/compare/v0.29.3...HEAD
+[Unreleased]: https://github.com/haiggoh/free-agents/compare/v0.29.4...HEAD
+[0.29.4]: https://github.com/haiggoh/free-agents/compare/v0.29.3...v0.29.4
 [0.29.3]: https://github.com/haiggoh/free-agents/compare/v0.29.2...v0.29.3
 [0.29.2]: https://github.com/haiggoh/free-agents/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/haiggoh/free-agents/compare/v0.29.0...v0.29.1
