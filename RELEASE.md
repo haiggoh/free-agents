@@ -111,6 +111,19 @@ curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/insta
 curl -sL https://github.com/haiggoh/free-agents/releases/download/v0.25.8/free-agents-0.25.8.tar.gz | tar -tz | head -5
 ```
 
+### 8. Bump the Homebrew formula
+
+`haiggoh/homebrew-tap` pins one release tarball (`Formula/free-agents.rb`: `url` + `sha256`), so every
+release must bump it or `brew install haiggoh/tap/free-agents` keeps serving the old version:
+
+```bash
+V=0.25.8
+sha=$(curl -sL https://github.com/haiggoh/free-agents/releases/download/v$V/free-agents-$V.tar.gz | shasum -a 256 | cut -d' ' -f1)
+# in a clone of haiggoh/homebrew-tap, on a branch: set url to .../v$V/free-agents-$V.tar.gz and sha256 to $sha
+brew style Formula/free-agents.rb && brew install --build-from-source ./Formula/free-agents.rb && brew test free-agents
+# open a PR against haiggoh/homebrew-tap and merge it
+```
+
 ---
 
 ## Release Checklist
@@ -126,6 +139,7 @@ curl -sL https://github.com/haiggoh/free-agents/releases/download/v0.25.8/free-a
 - [ ] `free-agents-X.Y.Z.tar.gz` uploaded
 - [ ] `install-free-agents.command` uploaded
 - [ ] Release verified (assets present, downloads work)
+- [ ] Homebrew formula bumped in `haiggoh/homebrew-tap` (url + sha256)
 
 ---
 

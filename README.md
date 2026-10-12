@@ -1,226 +1,205 @@
 # free-agents
 
-**Run Claude Code work on free inference — two equal lanes: local MLX models on Apple Silicon, and
-free-tier cloud APIs.**
+**Run Claude Code work on free inference: local models on your own hardware, or free-tier cloud
+APIs.**
 
-Neither lane is the sidekick. **Local** keeps everything on your machine and works offline.
-**Remote** runs against a free provider tier (Gemini, NVIDIA, Groq, and a dozen more) and is
-*faster* — for most interactive work it is now the better default. Local wins when you are offline,
-when the work must not leave the machine, or for a long unattended run where hours of throughput
-matter more than per-turn latency.
+The main use: from your normal Claude Code session (Opus or Sonnet, direct or through a gateway),
+**hand bulk, mechanical sub-tasks to a free model** (searches, summaries, bounded transforms,
+first-pass reviews). Your capable model keeps the hard reasoning. You save cost without changing
+your workflow.
 
-The main use of either: from your normal Claude Code session — running a capable paid model like
-Opus or Sonnet, whether you connect to Anthropic directly or through a gateway — **dispatch
-delegatable sub-tasks to a free model**. You keep your capable model driving the hard reasoning and
-hand off bulk/mechanical work (searches, summaries, bounded transforms, first-pass reviews) — saving
-cost without changing your workflow or your main model.
+You can also run a **whole Claude Code session** on a free model:
 
-Every provider in the key-setup helper has a **free tier**; that is why it is on the list. Paid API
-use works too if your account has credits, but nothing here requires it. See
-[API keys](#api-keys--the-free-tier-setup-helper).
+- **Remote** sessions run on a free provider tier (NVIDIA, Gemini, Groq and a dozen more). They
+  need only a provider key, no local models, and for interactive work they are the faster lane.
+- **Local** sessions run on a model served on your machine. Inference stays on the machine and works
+  offline. They are slower per turn, which suits privacy-sensitive work and long unattended runs.
 
-It's an **additive overlay**: your private paths, keys, and model layout live in a gitignored
-`config.local.sh`, and your `~/.claude/settings.json` is never touched. Works with plain `claude`
-and with wrapped launchers.
+Every provider in the key-setup helper has a free tier; that is why it is on the list. Free tiers
+differ: some are renewable daily allowances, others are trials or conditional credits (see
+[API keys](#api-keys--the-free-tier-setup-helper)). Paid use works too if your account has credits,
+but nothing here requires it.
 
-> The **local** lane requires an Apple-Silicon Mac with enough unified memory for your models (the
-> reference stack targets a 128 GB M4 Max). The **remote** lane has no such requirement — it needs
-> only a provider key, so `csl remote` works on any machine, including one with no local models at
-> all. This is power-user tooling, not a one-click app.
-
----
+This is power-user tooling, not a one-click app.
 
 ## Project documentation
 
-- [Changelog](CHANGELOG.md) — release history and current unreleased work
-- [Remote API sessions](docs/remote-session/README.md) — launch full Claude Code sessions on 14+ free cloud APIs (Gemini, Groq, NVIDIA, etc.)
-- [Remote API key setup](docs/remote-session/setup.md) — guided credential installation
-- [Remote emergency fallback](docs/remote-fallback/README.md) — keep working when the daily budget is exhausted
-- [Roadmap](docs/ROADMAP.md) — specced but not shipped; release gates; deliberately deferred
+- [Changelog](CHANGELOG.md): every release in full
+- [Roadmap](docs/ROADMAP.md): specced but not shipped, release gates, deliberately deferred
+- [Remote API sessions](docs/remote-session/README.md) and [key setup](docs/remote-session/setup.md)
+- [Remote emergency fallback](docs/remote-fallback/README.md): keep working when the daily budget is spent
+- [NVIDIA GPUs on Linux/WSL2](docs/CUDA.md): the CUDA tiers, backends and their test status
+- [Backend runtime manager](docs/RAPID_RUNTIME_MANAGER.md) and [read-only inventory](docs/READONLY_INVENTORY.md)
 
-## Three ways to use it
+## Platforms and prerequisites
 
-### 1. Offload sub-tasks from your cloud session — recommended, what most people want.
-Keep driving with your cloud model (Opus/Sonnet). Dispatch bounded sub-tasks to a local model via
-`curl` / `librarian-dispatch.py` / `hotswap` — fast (sub-second to seconds), free, private. Nothing
-about your main session changes; you're just sending the delegatable parts to local compute. This
-saves cost for **anyone**, whether or not you have a spending cap.
+| You want | Needs | Status |
+|---|---|---|
+| **Offload to free cloud APIs, or run remote sessions** | macOS or Linux (WSL2 works), Claude Code, Python 3, `litellm` (for sessions), one provider key | Works on any machine. NVIDIA and Gemini are proven live; the other providers are untested (see [below](#provider-status)). |
+| **Local sessions and local dispatch on a Mac** | Apple Silicon, enough unified memory for your models (the reference stack is a 128 GB M4 Max), Homebrew Bash 4+ | The reference platform. |
+| **Local inference on an NVIDIA GPU** | Linux or WSL2, an NVIDIA driver with CUDA | Built and unit-tested with a faked `nvidia-smi`; **not yet run on a real GPU**. See [docs/CUDA.md](docs/CUDA.md). |
+| **CPU-only local inference** | Linux, llama.cpp | Same status as the NVIDIA route. |
+| **Native Windows** | | Not supported. Hardware detection recognises Windows, but the launchers are Bash and need WSL2. |
 
-### 2. Run a full local Claude Code session — offline, private, or for long unattended runs.
-Run an entire Claude Code session on a local model (served under a spoofed Claude id so the client
-accepts it). Zero cloud cost and nothing leaves the machine. Trade-off: interactive turns are slower
-than a free remote API, so reach for this when you are offline, when privacy is the point, or when a
-long unattended run makes throughput matter more than latency.
+Local inference is **optional**. If you only want remote sessions or remote dispatch, skip every
+backend and model-download step below.
 
-### 3. Run a full remote Claude Code session — the fastest free lane, and the usual default.
-No local model or Apple-Silicon hardware needed. Launch on Gemini, Groq, NVIDIA, OpenRouter free tier, Cloudflare Workers AI,
-Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, or ModelScope. Usage goes to
-the selected provider, with its own quota and billing. `remote-session.sh` is a drop-in replacement
-for Anthropic's paid gateway: LiteLLM proxies Anthropic `/v1/messages` to each provider's API. Add
-keys with `csl setup-remote` or press `i` in `csl`. Use `csl remote` to open the picker. See
+## Install
+
+Pick **one** of these. They are listed in order of preference.
+
+### A. Claude Code marketplace (recommended)
+
+Inside Claude Code (these are slash commands, typed at the Claude Code prompt):
+
+```text
+/plugin marketplace add haiggoh/get-haiggoh
+/plugin install free-agents@haiggoh
+```
+
+Or the same from a terminal: `claude plugin marketplace add haiggoh/get-haiggoh`, then
+`claude plugin install free-agents@haiggoh`. Restart Claude Code (or run `/reload-plugins`) and the
+skills and hooks are active. Update later with `claude plugin update free-agents@haiggoh`.
+
+This installs the plugin into Claude Code's versioned plugin cache. To put `csl` and the `local-*`
+aliases on your PATH, run the shortcut installer from the installed copy:
+
+```bash
+"$(ls -d ~/.claude/plugins/cache/haiggoh/free-agents/*/ | sort -V | tail -1)install/setup-shortcuts.sh"
+```
+
+The symlink points at that version's directory, so **re-run it after a plugin update**. Option B
+avoids that, because its wrappers always find the newest installed copy.
+
+### B. Homebrew
+
+```bash
+brew install haiggoh/tap/free-agents
+free-agents-install          # runs `claude plugin install` for you (once per user)
+```
+
+Homebrew puts `csl`, `lowkey` and `lk` on your PATH. They run the **newest** free-agents release that
+Claude Code has installed; before the plugin is installed they fall back to Homebrew's own copy.
+`FREE_AGENTS_ROOT` points them at any checkout instead. After `brew upgrade free-agents`, also run
+`claude plugin update free-agents@haiggoh` so both stay on the same release. A command of the same
+name earlier on your PATH (for example `~/.local/bin/csl`) still wins.
+
+### C. Standalone bootstrap (not recommended yet)
+
+`install-free-agents.command` is attached to every release. **Known problems, so prefer A or B:**
+
+- macOS Gatekeeper blocks the unsigned file when you download it in a browser and double-click it.
+  Getting past that means an override in System Settings → Privacy & Security. Renaming it to `.sh`
+  does not help.
+- Its plugin-install and backend steps do not match the current marketplace layout, so the run can
+  stop part-way. Option A does the same work correctly.
+
+If you still want it, run it from Terminal rather than double-clicking it. A file fetched with
+`curl` carries no quarantine flag, so Gatekeeper does not block it:
+
+```bash
+curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | bash
+```
+
+Each release also ships `free-agents-<version>.tar.gz`, the same files as the plugin, for offline
+inspection.
+
+## First run
+
+Commands below run in an **ordinary terminal**, not at the Claude Code prompt. `csl` is on your PATH
+after the shortcut installer (A) or Homebrew (B); from a source checkout use `./bin/csl`.
+
+### Remote only (no local models)
+
+```bash
+pipx install 'litellm[proxy]'               # the proxy remote sessions run through
+"$FA/install/setup-session-picker.sh"       # one-time: the picker's own venv (Textual)
+csl setup-remote                            # store a provider key; makes no API calls
+csl remote                                  # pick a provider and model, then launch
+```
+
+`$FA` here is the plugin directory (the `ls -d` line in option A prints it; with Homebrew it is
+`$(brew --prefix free-agents)/libexec`). `csl remote <alias>` launches directly without the picker,
+so it does not need the picker venv.
+
+To **offload** from your normal session without a full remote session, no proxy is needed:
+
+```bash
+"$FA/bin/librarian-dispatch.py" --provider nvidia \
+  --model nvidia/nemotron-3-ultra-550b-a55b --prompt "Summarise this diff: …"
+```
+
+### Local (Apple Silicon)
+
+```bash
+"$FA/install/install-backend.sh"                       # Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM venvs
+cp "$FA/config/config.example.sh" "$FA/config/config.local.sh" && $EDITOR "$FA/config/config.local.sh"
+"$FA/install/download-models.sh" --list                # pick what fits your memory and disk
+"$FA/install/download-models.sh" --select kat-coder-optiq  # you need not fetch them all
+csl                                                    # Home → l Local sessions
+```
+
+`config.local.sh` is where your model directory and model registry live; it is gitignored and
+never published ([the overlay](#the-overlay-public-tooling-private-config)). It sits inside the
+directory you copied it into. In a plugin-cache install, keep a copy elsewhere, because a new
+version arrives in a new directory. On Linux, `install-backend.sh --all` adds the CUDA backends and
+`--backend llama-cpp` gives a CPU-only install (see [docs/CUDA.md](docs/CUDA.md)).
+
+A **partial roster is fine**: whatever you download fills the roles it is tagged with, and the rest
+of the work stays on your cloud model.
+
+If you use [rtk](https://github.com/rtk-ai/rtk) (an output-condensing Bash hook), also run
+`install/setup-rtk-excludes.sh` once (`--check` verifies, `--dry-run` previews); see
+[Troubleshooting](#troubleshooting). Without rtk it does nothing.
+
+## Choose a workflow
+
+### Offload sub-tasks from your cloud session (recommended)
+
+Keep driving with your cloud model. Send bounded sub-tasks to a free model, either local (`curl`,
+`librarian-dispatch.py --port`, `lowkey`) or remote (`librarian-dispatch.py --provider`). Your main
+session does not change. The `offload-to-local` skill teaches the model when and how to do this, and
+the [Usage](#usage) section has the commands.
+
+### A full remote session: the fastest free lane
+
+`csl remote` launches Claude Code against a free provider. LiteLLM translates Claude Code's
+Anthropic `/v1/messages` calls into each provider's API: NVIDIA, Gemini, Groq, OpenRouter free
+tier, Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova,
+ModelScope or Streamlake. Usage counts against that provider's quota. See
 [Remote API sessions](docs/remote-session/README.md).
 
-### 4. Run a full session on NVIDIA GPUs (Linux/WSL2) — since v0.25.0 (completed in 0.25.6)
-Run full local sessions on NVIDIA GPUs with a complete CUDA inference stack:
-- **Tier A** (VRAM ≥ 16 GB): vLLM fully VRAM-resident, maximum speed
-- **Tier B** (VRAM ≤ 8 GB): AWQ/EXL2 → vLLM with UVM/KV offload (`--swap-space`); GGUF → llama.cpp with dynamic `-ngl`
-- **Tier C** (CPU-only): llama.cpp CPU mode
-Auto-detects your GPU VRAM and picks the right tier. Dynamic `--swap-space` (system RAM - VRAM - 10 GB) and dynamic `-ngl` calculation.
-
-> **Provider status — proven vs untested.** Remote sessions themselves are **no longer experimental**:
-> they work, and they are *faster* than local sessions. What varies is the individual provider.
+<a id="provider-status"></a>
+> **Provider status: proven vs untested.** Remote sessions work, and they are faster than local
+> ones. What varies is the individual provider.
 >
 > | Status | Providers | What it means |
 > |---|---|---|
-> | **Proven** | Gemini, NVIDIA | Real working sessions have run on these, including tool use. NVIDIA leads the roster: generous limits, no known daily quota. |
-> | **Untested** | Groq, OpenRouter free tier, Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, ModelScope | Offline fixture coverage and provider-key isolation tests, but no live quota-qualification or real tool-use smoke test yet. |
+> | **Proven** | NVIDIA, Gemini | Real working sessions, including tool use. NVIDIA leads the roster: generous limits, no known daily quota. |
+> | **Untested** | Groq, OpenRouter free tier, Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, ModelScope, Streamlake | Offline fixture coverage and provider-key isolation tests, but no live quota qualification or real tool-use smoke test yet. |
 >
 > A weak *model* is not a broken *lane*: NVIDIA's Nemotron takes shortcuts and makes mistakes on
 > long tasks, which is a model limitation (try `max` effort), not a defect in the remote path.
 
----
+### A full local session: offline and private
 
-## What's New
+The whole session runs on a local model, served under a Claude model id so the client accepts it.
+There is no inference cost and no inference leaves the machine (what else can still reach the
+network is covered in [A local session that is actually local](#a-local-session-that-is-actually-local)).
+Turns are slower than a remote API. Apple Silicon is the reference platform; NVIDIA and CPU-only
+Linux are the same idea on other backends ([docs/CUDA.md](docs/CUDA.md)).
 
-Newest first; `CHANGELOG.md` has every release in full.
+## Recent releases
 
-- **0.29.x**: acquisition-catalogue reader with load-time validation; the remote local-capable filter
-  uses exact catalogue matches as visible-only evidence.
-- **0.28.0**: genuine auto mode on the free-API lane, with Claude Code's classifier answered by a
-  free model (`LA_CLASSIFIER_MODEL`).
+Newest first. `CHANGELOG.md` has every release in full.
+
+- **0.29.x**: acquisition-catalogue reader with load-time validation; backend-manager CLI parity
+  (every documented subcommand dispatches); a Homebrew formula.
+- **0.28.x**: genuine auto mode on the free-API lane, with Claude Code's classifier answered by a
+  free model (`LA_CLASSIFIER_MODEL`); the manifest gate wired onto the launch path.
 - **0.27.x**: subagents and ultracode in every lane, opt-in replacement of paid cloud subagents,
-  picker ↔ launcher parity (local temperature, shipped allowlists, `LA_REMOTE_CLAUDE_SETTINGS`),
-  Streamlake and the Mistral roster.
-- **0.26.x**: the NVIDIA limiter on every dispatch path (`librarian-dispatch.py --provider`), the
-  free-API output ceiling, and the Cerebras cap.
-
-**Hooks this plugin installs** (`hooks/hooks.json`):
-
-- SessionStart: `offload-nudge.py` (free-agent routing reminder) and `transcript-identity.py`
-  (marks local and free-API transcripts).
-- UserPromptSubmit: `session-title-prefix.py` (emoji + model prefix on the auto session name).
-- PreToolUse: `guard-own-endpoint.py` (refuses killing the endpoint serving this session),
-  `guard-tool-owned-state.py` (refuses hand-edits of Claude Code's plugin registry) and
-  `cloud-agent-intercept.py` (opt-in replacement of paid subagents).
-- Stop: `bin/local-queue-stop-hook.py` (queued-prompt recovery; off unless `LA_QUEUE_STOP_HOOK=1`).
-
-**Skills:** `free-agents`, `offload-to-local`, `brief-the-delegate`, `compose-the-payload`,
-`verify-delegated-work`, `guard-shared-runtime`, `isolate-parallel-work`, and
-`continue-on-fallback` (keeps work moving on a free lane when the local model cannot serve and the
-cloud budget is spent).
-
-
-### v0.25.0 — CUDA Architecture (completed in 0.25.6)
-
-**free-agents now supports NVIDIA GPUs on Linux/WSL2 with a complete CUDA inference stack.**
-
-#### Three-Tier CUDA Inference
-
-| Tier | VRAM | Strategy | Use Case |
-|------|------|----------|----------|
-| **A** | ≥ 16 GB | vLLM fully VRAM-resident | Large models, maximum speed |
-| **B** | ≤ 8 GB | AWQ/EXL2 → vLLM with UVM offload (`--swap-space`); GGUF → llama.cpp with dynamic `-ngl` | Consumer GPUs (8-16 GB) |
-| **C** | — | llama.cpp CPU mode | No NVIDIA GPU / CPU-only |
-
-The system auto-detects your GPU VRAM and picks the right tier. For Tier B, it dynamically calculates `--swap-space` (system RAM - VRAM - 10 GB headroom) and `-ngl` layers to fit ~7.5 GB in VRAM.
-
-#### 🖥️ Hardware Detection (`la-hw-detect.sh`)
-
-Auto-detects your platform and hardware:
-
-- **OS**: macOS, Linux (Ubuntu, Debian, RHEL, Arch, Alpine, WSL2), Windows (native, Cygwin, MinGW, MSYS)
-- **Hardware**: Apple Silicon MLX, NVIDIA CUDA, AMD ROCm, Intel OpenCL, CPU-only
-- **GPU**: VRAM via `nvidia-smi`/`rocm-smi`, driver version, CUDA/ROCm version
-- **CPU**: Architecture, model, cores/threads, flags (AVX2, NEON, etc.)
-- **Memory**: System RAM, swap — cross-platform
-- **Environment**: Docker/Podman/Kubernetes, VM detection (KVM/VMware/Hyper-V/WSL)
-
-Exports 40+ `LA_*` environment variables for scripts to use.
-
-#### 📦 Dynamic Hugging Face Model Downloads
-
-Fetch models directly from Hugging Face without adding them to the catalog:
-
-```bash
-./install/download-models.sh --hf-repo Qwen/Qwen2.5-7B-Instruct-AWQ --alias qwen-awq --include "*.safetensors"
-```
-
-- `--hf-repo`: Hugging Face repo ID
-- `--alias`: Your local alias
-- `--include`: **Required** — glob pattern to avoid downloading hundreds of GB of unused formats (e.g., `*.safetensors`, `*.gguf`)
-
-The model is injected into the same download engine as the static catalog — deduplication, disk checks, and resume all work.
-
-#### 🎮 CUDA Lifecycle Manager (`manage-cuda-backend.py`)
-
-```bash
-# Install vLLM with CUDA 12.4 wheels
-./install/manage-cuda-backend.py install vllm
-
-# Install llama.cpp with CUDA
-./install/manage-cuda-backend.py install llama-cpp
-
-# List available backends
-./install/manage-cuda-backend.py list
-
-# Switch active backend
-./install/manage-cuda-backend.py switch vllm
-```
-
-- Side-by-side venvs with rollback capability (`LA_CUDA_BIN` pointer)
-- Dynamic PyTorch wheel selection via `--extra-index-url` based on host CUDA version
-- Strict smoke test: `torch.cuda.is_available()` + `torch.zeros(1).cuda()`
-
-#### 🛡️ CUDA Lifecycle & Diagnostics
-
-| Script | Purpose |
-|--------|---------|
-| `la-vram-preflight.sh` | VRAM capacity check, tier recommendation, UVM/ngl capability checks |
-| `la-evict.sh` | Linux `/proc` support, CUDA backend recognition, emergency memory recovery |
-| `la-reboot.sh` | Restart crashed server on same port/argv via `/proc/PID/cmdline` + `/proc/PID/environ` |
-| `la-hw-detect.sh` | Full cross-platform hardware detection |
-
-#### 📦 Model Catalog Updates
-
-Added `hardware_target` field (11th column): `mlx` | `cuda` | `any`. The downloader auto-filters by your hardware.
-
-New CUDA models in `config/model-catalog.psv`:
-
-| Alias | Model | Type | Runtime | Role |
-|-------|-------|------|---------|------|
-| `qwen2.5-7b-awq` | Qwen2.5 7B Instruct AWQ | AWQ | vLLM-cuda | operator |
-| `nemotron-3-ultra-550b-gguf` | Nemotron 3 Ultra 550B GGUF | GGUF | llama.cpp | reasoner |
-
-### Install System Updates
-
-- `install/install-backend.sh`: Hardware-aware routing, installs CUDA backends on CUDA hardware
-- `install/install-cuda-backend.sh`: CUDA installer wrapper
-- `install/manage-cuda-backend.py`: CUDA backend lifecycle manager
-- `config/model-catalog.psv`: Added CUDA example models
-
----
-
-### v0.24.0 — Cloud Session Configuration & Native Agent Interception
-
-### CloudConfigScreen (new `session_picker_model.py` screen, key `c` from Home):
-- **Intercept Agents toggle** (x): *superseded in 0.27.0* — it only ever withheld `Agent`; see "Subagents in every lane" below
-- **Classifier Source selector** (y): NVIDIA API / Local Devstral / Auto (local on local, remote on remote)
-- **Bypass Permissions toggle** (p): Blind-trust auto mode for cloud sessions (`bypassPermissions`)
-- Both menu item and screen title use cloud + wrench emojis with space: `☁️ 🔧 Cloud Session Configuration`
-- Persists in `session-menu.local.json` (schema v4) under `intercept_agents` and `cloud_bypass_permissions`
-
-**HomeScreen**: Cloud session configuration moved to 3rd position (after Local/Remote)
-
-**APIKeysScreen** improvements:
-- Key emoji (🔑) from single source of truth
-- Provider order: NVIDIA → Google (gemini) → Groq → alphabetical
-- Empty line separator after NVIDIA
-- Back to Home at bottom (matching other menus)
-- More providers option (hidden by default, shows all providers when enabled)
-
-**remote-session.sh**: `CLOUD_BYPASS_PERMISSIONS` env var support; when enabled forces `bypassPermissions` regardless of `AUTO_MODE_STATE`
-
----
+  picker ↔ launcher parity, Streamlake and the Mistral roster.
+- **0.26.x**: the NVIDIA limiter on every dispatch path, the free-API output ceiling, the Cerebras cap.
 
 ## Subagents in every lane (0.27.0)
 
@@ -267,8 +246,8 @@ logged 8 × `400` and 17 × `500` before recovering.
 ## How it works
 
 Claude Code talks to an Anthropic-compatible endpoint. A local MLX backend exposes one
-(`/v1/messages`) and serves a local model. For dispatch (way 1) you just `curl` that endpoint. For
-full local mode (way 2) the model is served under a spoofed Claude model id and
+(`/v1/messages`) and serves a local model. For dispatch you just `curl` that endpoint. For
+a full local session the model is served under a spoofed Claude model id and
 `ANTHROPIC_BASE_URL` points Claude Code at it; direct routing keeps native transcripts +
 `history.jsonl` working (an earlier proxy approach suppressed them).
 
@@ -338,19 +317,22 @@ choice is not "venv vs no venv" — it is *who pins the venv*. Three reasons it 
 auto-discovers brew → `PATH` → newest `~/.venvs/rapid-mlx-*`, so a machine that prefers the brew
 install still works. The weekly `backend-update-check` launchd job (installed via `manage-backend.py --backend rapid-mlx launchd install`) watches PyPI for all backend releases (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) and only *notifies* — it never installs.
 
-**What does install is `install/manage-rapid-mlx.py`**, the runtime lifecycle manager. Before it
-existed, the notify half had no counterpart: you were told a release was out and then hand-rolled
-the venv. It closes that loop without ever starting a model server:
+**What does install is `install/manage-backend.py`**, the unified runtime lifecycle manager for
+every backend (`--backend rapid-mlx|vllm-mlx|omlx|llama-cpp|litellm`). It closes the notify loop
+without ever starting a model server. In `csl` it is `v` (Backend manager).
 
-Run it with **no arguments** for an interactive menu — this is also what `m` in `csl` opens:
+```bash
+./install/manage-backend.py --backend rapid-mlx releases
+./install/manage-backend.py --backend rapid-mlx installed
+./install/manage-backend.py --backend rapid-mlx install 0.14.0
+./install/manage-backend.py --backend litellm check-updates
+```
+
+`install/manage-rapid-mlx.py` is kept as a **compatibility wrapper** for Rapid-MLX: the same
+subcommands without `--backend`, plus an interactive menu when run bare on a TTY.
 
 ```bash
 ./install/manage-rapid-mlx.py                       # interactive menu (needs a TTY)
-```
-
-Or drive it by subcommand:
-
-```bash
 ./install/manage-rapid-mlx.py releases              # what PyPI offers
 ./install/manage-rapid-mlx.py installed             # what this machine has, and which pin is active
 ./install/manage-rapid-mlx.py install 0.14.0        # build ~/.venvs/rapid-mlx-0.14.0, validate, promote pins
@@ -393,7 +375,7 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   model onto a free port, sets direct-routing env, and renders the external local-session prompt
   template with actual model/backend/port metadata).
 - **`bin/launch-local-auto-mode.sh`** — the standalone harness for
-  [Auto Mode with a local classifier](#auto-mode-with-a-local-classifier): it warms a server that has
+  [Auto Mode with a local classifier](#auto-mode-with-a-local-classifier-triple-toggle): it warms a server that has
   a free slot for the classifier, launches straight into `--permission-mode auto`, and hands the
   session a first action deliberately chosen to exercise the classifier, so a run either proves local
   routing or fails closed. Opt-in (`JOYIA_LOCAL_AUTO_CLASSIFIER=1`) because it is a probe; for
@@ -478,7 +460,7 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - **`config/model-catalog.psv`** — the default download list (data, not code); your private one goes
   in `config/model-catalog.local.psv`.
 - **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
-- **skills (7)** — two entry points plus five that each own one phase of a delegation:
+- **skills (8)** — two entry points, five that each own one phase of a delegation, and a fallback:
   - `free-agents` — drive local and remote free sessions & dispatch.
   - `offload-to-local` — the habit-forming trigger to delegate bulk/mechanical work to a local model to
     save cost. The plugin's main idea.
@@ -492,87 +474,15 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
     (including the wedge whose health check still returns 200).
   - `verify-delegated-work` — after it returns: judge by observable outcome change, never "no error",
     and stop at the retry ceiling.
-
-## Install
-
-### Option A: One-Command Installer (Recommended, Easiest)
-
-**No git clone, no manual steps — runs entirely from GitHub:**
-
-```bash
-# macOS / Linux / WSL2 — auto-detects hardware, installs correct backend
-curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | bash
-```
-
-Or download [`install-free-agents.command`](https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command) from the latest release and:
-- **macOS**: Double-click in Finder
-- **Linux/WSL2**: `bash install-free-agents.command`
-
-> ✅ **Version-agnostic**: Fetches the latest plugin release automatically. Never needs updating.
-
----
-
-### Option B: Standard Marketplace Installation (Classic)
-
-```bash
-# 1. Add the haiggoh marketplace (once)
-/plugin marketplace add haiggoh/get-haiggoh
-
-# 2. Install free-agents plugin
-/plugin install free-agents@haiggoh
-
-# 3. Then install the local inference backend
-git clone https://github.com/haiggoh/free-agents && cd free-agents
-./install/install-backend.sh
-```
-
----
-
-### Option C: Manual from Release Tarball
-
-Download [`free-agents-<version>.tar.gz`](https://github.com/haiggoh/free-agents/releases/latest) from the latest release:
-
-```bash
-tar -xzf free-agents-*.tar.gz && cd free-agents
-./install-plugin.sh                    # copies plugin to ~/.claude/plugins/free-agents/
-claude plugin enable free-agents       # enable in settings
-/rl                                    # reload plugins (or restart Claude Code)
-./install/install-backend.sh           # install local backend
-./install/download-models.sh           # download models
-```
-
----
-
-### Local Backend Setup (Required for All Options)
-
-After plugin installation, set up the local inference backend:
-
-```bash
-# macOS (Apple Silicon) — Rapid-MLX + vllm-mlx
-./install/install-backend.sh
-
-# Linux with NVIDIA GPU — includes CUDA backends (vllm-cuda, llama-cpp-cuda)
-./install/install-backend.sh --all
-
-# Linux CPU only
-./install/install-backend.sh --backend llama-cpp
-
-# Then configure and download models
-cp config/config.example.sh config/config.local.sh
-$EDITOR config/config.local.sh
-./install/download-models.sh
-
-# Optional: shell shortcuts (csl, local-operator, lowkey, etc.)
-./install/setup-shortcuts.sh
-```
-
-You choose which weights to fetch — large models aren't the right fit for every machine, and a
-**partial roster is fine**: whatever you download fills the roles it's tagged with; the rest of the
-work stays on the cloud model.
-
-If you use [rtk](https://github.com/rtk-ai/rtk) (an output-condensing Bash hook), also run
-`./install/setup-rtk-excludes.sh` once (`--check` to verify, `--dry-run` to preview); see
-[Troubleshooting](#troubleshooting) for why. Without rtk it does nothing.
+  - `continue-on-fallback` — keeps work moving on a free lane when the local model cannot serve and
+    the cloud budget is spent.
+- **hooks** (`hooks/hooks.json`) — SessionStart `offload-nudge.py` (routing reminder) and
+  `transcript-identity.py` (marks local and free-API transcripts); UserPromptSubmit
+  `session-title-prefix.py` (emoji + model on the session name); PreToolUse `guard-own-endpoint.py`
+  (refuses killing the endpoint serving this session), `guard-tool-owned-state.py` (refuses
+  hand-edits of Claude Code's plugin registry) and `cloud-agent-intercept.py` (opt-in replacement of
+  paid subagents); Stop `local-queue-stop-hook.py` (queued-prompt recovery, off unless
+  `LA_QUEUE_STOP_HOOK=1`).
 
 ## API keys — the free-tier setup helper
 
@@ -638,41 +548,20 @@ turns the evidence off. A JoyIA export saved as `foo.psv.md` is found too.
 
 ## Downloading models
 
-### Recommended full local-session model: KAT-Coder V2.5 OptiQ
+### Which model to run a full local session on
 
-The current recommendation for a **full local Claude Code session** is the
-`kat-coder-optiq` alias, backed by:
+**KAT-Coder V2.5 OptiQ** (`kat-coder-optiq`, about 20 GB, Rapid-MLX, `qwen` tool-call parser,
+non-thinking) is the preferred model for running a whole Claude Code session locally. This comes
+from day-to-day use, not a controlled benchmark.
 
-- Hugging Face repository:
-  `mlx-community/KAT-Coder-V2.5-Dev-OptiQ-4bit`
-- approximate download size: 20 GB
-- backend: Rapid-MLX (`--tool-call-parser qwen`, no reasoning parser)
-- mode: non-thinking
+```bash
+./install/download-models.sh --select kat-coder-optiq   # download-models-system-trust.sh on a TLS-inspecting network
+./bin/launch-claude-agent.sh kat-coder-optiq
+```
 
-Download it through the normal downloader:
-
-    ./install/download-models.sh --select kat-coder-optiq
-
-On a machine that needs the native operating-system TLS trust store, use:
-
-    ./install/download-models-system-trust.sh --select kat-coder-optiq
-
-Then launch it directly or select it from `csl`, where it is the first row and the
-Enter-default:
-
-    ./bin/launch-claude-agent.sh kat-coder-optiq
-    ./bin/csl
-
-This recommendation comes from lived use rather than benchmarks: Qwen 3.8 was too slow to
-drive a session, and `ornith-1.5-35b` — the previous recommendation here — degrades over a long
-one, with its reasoning drifting. Both remain registered and selectable.
-In that early operational use, non-thinking Ornith was noticeably faster than
-Qwen 3.8 and was the best-performing full-session model tried so far. This is
-not yet a controlled benchmark or complete qualification result.
-
-Only the **non-thinking** Ornith mode has been tested successfully. The
-thinking variant remains untested and is therefore not registered or
-recommended in the public example configuration yet.
+**Qwen3.8 27B with MTP** is the operator / reasoner workhorse and also drives a session. Fetch both
+`qwen38-27b-4bit` and its 0.3 GB draft head `qwen38-27b-mtp`. The registration enables multi-token
+prediction (speculative decoding), and that is what makes it fast enough to drive a session.
 
 Two artifacts, and only one of them is code:
 
@@ -685,14 +574,25 @@ config/model-catalog.psv     the CATALOG   — this is where models are listed
 knows how to pin revisions, resume, deduplicate, select individual files out of a multi-quant GGUF
 repo, and tell four acquisition states apart. You get all of that by *not* touching it.
 
-A shipped `config/model-catalog.psv` gives you two proven models that cover every role between
-them — Qwen3.6 27B (operator, reasoner via thinking, utility, and the only one here that drives a
-**full local session**) and DeepSeek R1 Distill 32B (an independent validator; dispatch-only, as it
-does not emit structured tool calls). Roughly 45 GB for the pair.
+**You do not need to download the whole catalogue.** Every row stands alone. Fetch what fits your
+memory and disk, and whatever you have fills the roles it is registered for; the rest of the work
+stays on your cloud model. The shipped `config/model-catalog.psv` (MLX rows):
+
+| Alias | Size | What it is for |
+|---|---:|---|
+| `kat-coder-optiq` | 20 GB | the preferred full local **session** model |
+| `qwen38-27b-4bit` + `qwen38-27b-mtp` | 16 + 0.3 GB | operator / reasoner (thinking), MTP-accelerated; also drives a session |
+| `devstral-small2` | 15 GB | the qualified local **Auto Mode classifier** (passed genuine Stage 2 with the Mistral alternation adapter); used by the dedicated classifier routes via `LA_RAPID_AUTO_MODEL_DIR` / `LA_OMLX_CLASSIFIER_MODEL_DIR`. Only needed for classifier auto mode (state 1). |
+| `mistral-small4` | 67.5 GB | Mistral Small 4 119B, MLX build (not the GGUF), 256K context; needs about 70 GB free memory |
+| `deepseek-r1-32b-4bit` | 18 GB | an independent validator; **dispatch-only**, since it emits no structured tool calls |
+| `qwen36-27b-4bit` | 26 GB | the previous all-rounder, for machines that already have it |
+
+`--group default` fetches KAT plus Qwen3.8 with its MTP head (about 36 GB). The two CUDA rows are
+covered in [docs/CUDA.md](docs/CUDA.md).
 
 ```bash
 install/download-models.sh --list                    # what's available, and its state on disk
-install/download-models.sh --select qwen36-27b-4bit   # fetch one thing
+install/download-models.sh --select kat-coder-optiq   # fetch one thing
 install/download-models.sh --group default            # fetch a whole group
 install/download-models.sh --all --dry-run            # resolve everything, write nothing
 ```
@@ -702,11 +602,14 @@ addition* to the shipped defaults, so a private roster never has to fork the pub
 arbitrary file with `--catalog FILE`, or several with `$LA_MODEL_CATALOG` (`:`-separated); either
 replaces the search entirely.
 
-Catalog format is ten `|`-separated fields; `--help` documents each one:
+Catalog format is eleven `|`-separated fields; `--help` documents each one:
 
 ```text
-alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime|hardware_target
 ```
+
+`hardware_target` (`mlx`, `cuda` or `any`) was added in 0.25.0. A ten-field row from an older file
+still loads and is treated as `mlx`.
 
 Two fields earn their keep. `revision` takes a commit SHA — pin it whenever the artifact matters,
 because `main` moves. `include_patterns` takes `;`-separated globs, so one entry can take exactly
@@ -768,7 +671,10 @@ directly (it is executable and self-bootstrapping); do not `source` it into zsh.
 **model registry** (`la_register` lines mapping an alias to a model dir + parser + spoof + effort).
 It's gitignored, so this repo can be public without exposing your setup. The scripts fall back to
 `config.example.sh` if no local config exists, so a fresh clone still runs and shows you what to edit.
-Nothing here modifies `~/.claude/settings.json` or any other plugin's config.
+Launches pass their settings per launch (`--settings`, environment variables), so `~/.claude/settings.json`
+is not written by any launcher or by installing the plugin. Two explicit operations do write its `env`
+block, and only their own keys: the Cloud Session Configuration screen (`csl` → `c`) and
+`bin/cloud_session_env.py set …` (replace-agents, security-review model). No other plugin's config is touched.
 
 Register your models like this (see `config.example.sh` for the full column reference):
 
@@ -798,7 +704,7 @@ Resolve roles → the models you actually have on disk:
 
 ## Usage
 
-**Way 1 — dispatch a sub-task to a local model (the main use).** Free, fast (sub-second to seconds),
+**Dispatch a sub-task to a local model (the main use).** Free, fast (sub-second to seconds),
 private. Do this from anywhere, including inside your normal cloud Claude Code session:
 
 ```bash
@@ -822,11 +728,10 @@ decide `local:`/`cloud:` per step → dispatch → **verify against ground truth
 output blind) → correct/re-dispatch. The `offload-to-local` skill documents this loop in full. (Landing
 the change afterwards is ordinary shipping discipline, so this plugin deliberately doesn't specify it.)
 
-**Way 2 — full local session** (a local model as the session engine):
+**Full local session** (a local model as the session engine):
 
-The current recommendation is `kat-coder-optiq` (see
-[Recommended full local-session model](#recommended-full-local-session-model-kat-coder-v25-optiq)).
-It is the first row in `csl` and the Enter-default.
+See [Which model to run a full local session on](#which-model-to-run-a-full-local-session-on).
+In `csl`, `g` relaunches the model this lane last ran.
 
 ```bash
 ./bin/launch-claude-agent.sh my-operator                  # interactive local session
@@ -893,7 +798,7 @@ __LA_HOTSWAP_PATH__
 Machine-local `LA_MEMORY_DIR` and `LA_COUNCIL_NOTE` additions are appended afterward when configured.
 
 These controls do not change the permission-mode boundary, which is owned by the launcher and by the
-`csl` auto-mode toggle (see [Auto Mode with a local classifier](#auto-mode-with-a-local-classifier)),
+`csl` auto-mode toggle (see [Auto Mode with a local classifier](#auto-mode-with-a-local-classifier-triple-toggle)),
 never by argument forwarding. Enabling the `Agent` tool does not by itself change how Auto Mode's
 classifier is routed or how good its verdicts are — those stay separate questions.
 
@@ -901,19 +806,25 @@ classifier is routed or how good its verdicts are — those stay separate questi
 
 `csl` (no arguments) opens the **session picker**, a Textual UI (one-time setup:
 `install/setup-session-picker.sh`). It replaces the numbered bash menus. Every screen is a list of
-single-letter actions. Letters are case-insensitive, digits never launch anything, and arrow keys
-plus Enter work everywhere.
+single-letter actions, shown in capitals but typed lowercase (Shift+letter is ignored). Digits never
+launch anything, and arrow keys plus Enter work everywhere.
 
-- **Home:** `l` Local sessions · `r` Remote free-API sessions · `d` download models · `o` Lowkey
-  dispatch chat · `k` API keys · `v` backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp,
-  LiteLLM; the launchd update checks live in there) · `n` NVIDIA rate limiter · the session-wide
-  toggles `a` auto-mode, `t` telemetry, `p` queued-prompt hook, `w` watcher · `q` quit.
+- **Home:** `l` Local sessions · `r` Remote free-API sessions · `c` Cloud session configuration ·
+  `d` download models · `o` Lowkey dispatch chat · `k` API keys · `v` backend manager (Rapid-MLX,
+  vllm-mlx, oMLX, llama.cpp, LiteLLM; the launchd update checks live in there) · `q` quit.
 - **Both lanes:** `g` **Go launch** starts the model this lane last launched, without loading any
   model list. `c` **Choose model…** opens the list below the menu, grouped and collapsed, and
-  loaded only when asked for. `e` sets effort, `s` switches to the other lane, `m` toggles MCPs,
-  `b` goes back to Home (or `q` quits when the lane was opened directly).
-- **Remote only:** `o` 🌡️ temperature · `h` limited trials · `f` locally-runnable models ·
-  `u` 🚧 unworking models (`config/broken-nvidia-models.json`) · `x` hidden-model report.
+  loaded only when asked for. `e` effort, `o` 🌡️ temperature, `m` MCPs, `s` switch to the other
+  lane, then the session toggles `a` auto-mode (`z` classifier source when it is on classifier),
+  `t` telemetry and `p` queued-prompt hook. `b` goes back to Home (or `q` quits when the lane was
+  opened directly).
+- **Local only:** `w` watcher, `v` backend manager.
+- **Remote only:** `k` API keys, `n` NVIDIA rate limiter, and `y` **Filter settings…**: `h` limited
+  trials, `f` locally-runnable models, `u` 🚧 unworking models (`config/broken-nvidia-models.json`),
+  `x` hidden-model report.
+- **Cloud session configuration** (`c` on Home) writes Claude Code's own `settings.json` `env`, so it
+  applies to ordinary cloud sessions: `x` replace subagents with free agents, `s` security-review
+  model, `y` classifier source, `p` bypass permissions.
 
 Settings carry over when you switch lanes. Effort and the last-launched model per lane are
 remembered across runs in `config/session-menu.local.json`, which is private and gitignored. Every
@@ -950,8 +861,9 @@ selectable, while custom effort composition remains reachable through `c`.
 The watcher is **off by default**, so an ordinary selection opens only the requested session. Toggle
 it with `w` in the picker, or set `CSL_WATCH=1` to opt in by default.
 
-Auto mode is **on by default** — toggle it with `a`, or set `CSL_AUTO_MODE=0` to opt out. See the
-next section for what that actually buys and what it costs.
+Auto mode starts in **blind-trust** (state 0) — cycle it with `a`, or set `CSL_AUTO_MODE_STATE` to
+`0`, `1` or `2`. See [the three states](#auto-mode-with-a-local-classifier-triple-toggle) for what each
+one buys and costs.
 
 Telemetry is **off by default** — toggle it with `t`, or set `CSL_TELEMETRY=1` to keep stock
 behaviour. See [A local session that is actually local](#a-local-session-that-is-actually-local).
@@ -986,18 +898,17 @@ server, the classifier request follows it and is answered locally, for free.
 
 | State | Key | Behavior | Use case |
 |---|---|---|---|
-| **0 = blind-trust** (DEFAULT) | `a` cycles here, or `b` jumps here | `--permission-mode auto`, NO classifier in the loop. Every consequential call is routed directly to auto. | Default — gives auto-mode behaviour immediately without waiting for a classifier server. The genuine classifier path is not yet reliable. |
-| **1 = classifier** | `a` cycles here | `--permission-mode auto`, boots a second local model to judge auto-mode calls. | The real auto mode — requires the classifier warm-up path. |
-| **2 = off** | `a` cycles here | `--permission-mode acceptEdits`. No auto-mode behaviour. | Turn auto mode off entirely. |
+| **0 = blind-trust** (DEFAULT) | `a` | `--permission-mode bypassPermissions` plus a destructive-command deny list. No classifier runs at all (measured: 0 classifier calls). | Default — no waiting on a classifier server; unattended runs never stall. |
+| **1 = classifier** | `a` | `--permission-mode auto`, boots a second local model to judge auto-mode calls. | The real auto mode — requires the classifier warm-up path. |
+| **2 = off** | `a` | `--permission-mode acceptEdits`. No auto-mode behaviour. | Turn auto mode off entirely. |
 
 Environment override: `CSL_AUTO_MODE_STATE=0|1|2` sets the initial state directly.
 The launcher maps state→env: `0` → `LA_AUTO_MODE=1 LA_BLIND_AUTO=1`, `1` →
 `LA_AUTO_MODE=1 LA_BLIND_AUTO=0`, `2` → `LA_AUTO_MODE=0`.
 
-⚠️ **Blind-trust is the NEW DEFAULT.** It gives auto-mode behaviour immediately without waiting
-for a classifier server — every consequential call is routed directly to auto. This is the default
-because the genuine classifier emulation path is not yet reliable. If you want the classifier in
-the loop, toggle to state 1 (`classifier`) in the `csl` picker or set `CSL_AUTO_MODE_STATE=1`.
+⚠️ **Blind-trust is the default, and it is not auto mode.** Nothing judges the calls: everything
+is allowed except what the deny list blocks. Choose it knowingly. The classifier description below
+applies to **state 1 only** — toggle to it with `a`, or set `CSL_AUTO_MODE_STATE=1`.
 
 **Verified 2026-09-05**, on `kat-coder-optiq` served by Rapid-MLX: the local server logged the
 classifier arriving under its own model identity and being answered by the loaded engine —
@@ -1134,7 +1045,7 @@ still caps it server-side.
 
 ## Monitoring a running local session
 
-`csl` starts a watcher for you by default (above). To attach one by hand — including to a session that
+`csl` starts a watcher only when you turn it on (`w`, or `CSL_WATCH=1`). To attach one by hand — including to a session that
 has only just started and has not taken its first turn yet:
 
 ```bash
@@ -1284,8 +1195,9 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 - **Auto Mode, with its classifier routed locally — and a limit worth reading.** Auto Mode judges
   consequential calls with a *separate* classifier; because a local session points
   `ANTHROPIC_BASE_URL` at your own server, that request is served locally and for free
-  ([details and evidence](#auto-mode-with-a-local-classifier)). `csl` defaults to it, and `a` /
-  `CSL_AUTO_MODE=0` falls back to `acceptEdits` (edits auto-apply; other tools prompt). But routing is
+  ([details and evidence](#auto-mode-with-a-local-classifier-triple-toggle)). That is state 1. `csl`
+  **defaults to state 0, blind-trust, where no classifier runs**; state 2 falls back to `acceptEdits`
+  (edits auto-apply; other tools prompt). But routing is
   not equivalence: **a local model is not Anthropic's safety classifier**, its verdicts have not been
   scored against it, and a long `permissions.allow` list means many calls are never judged at all. For
   genuinely high-risk actions, keep human approval. The failure mode is at least the safe one — no

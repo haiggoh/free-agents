@@ -1,3 +1,72 @@
+## [0.29.2] — 2026-10-12
+
+Docs and claims errata. Documentation is corrected wherever it described code that moved, was
+renamed or never existed, so a later audit does not flag it again. No feature changes. The only
+code changes are `--help` handling and one dispatch retry.
+
+### Changed
+- **README rewritten for newcomers.** Platforms and prerequisites now sit at the top, then Install,
+  then a short first run (including a remote-only path with no local models), then the workflows.
+  Install routes are listed in order of preference: **marketplace**, then **Homebrew**
+  (`haiggoh/tap/free-agents`), then the standalone `.command` bootstrap. That last one is marked
+  not recommended, because Gatekeeper blocks it after a browser download and its plugin-path steps
+  are stale.
+- Contradictions fixed against the code: the watcher is **off** by default; auto mode starts in
+  **blind-trust** (`bypassPermissions` plus a deny list, with no classifier), so the classifier text
+  applies to state 1 only; what writes `~/.claude/settings.json` (only the Cloud Session
+  Configuration screen and `cloud_session_env.py`, and only their own `env` keys); the picker's
+  real per-screen keys (lowercase only); the catalogue has **eleven** fields (`hardware_target`,
+  and ten-field rows still load).
+- **Shipped model catalogue and example registry updated.** `kat-coder-optiq` (the preferred full
+  local session model), `qwen38-27b-4bit` plus its `qwen38-27b-mtp` draft head (MTP speculative
+  decoding), `devstral-small2` (the local Auto Mode classifier that passed genuine Stage 2 with the
+  Mistral alternation adapter) and `mistral-small4` (the MLX build, not the GGUF) are now shipped.
+  Qwen3.6 27B is kept as optional, and DeepSeek R1 32B remains the validator. Ornith is no longer in
+  the public example. `--group default` fetches KAT plus Qwen3.8 + MTP (about 36 GB). The catalogue,
+  README and example config all state that downloading the whole catalogue is not required. The
+  Qwen3.8 revision is pinned in `LA_REV`, so registry and catalogue rows agree.
+- The CUDA material moved to `docs/CUDA.md`. Tier B is "below 16 GB", not "≤ 8 GB" (the code has no
+  8 GB boundary). `--swap-space` is described as vLLM's KV swap space, not as weight/UVM offload. The
+  EXL2 routing is flagged, since upstream vLLM does not load EXL2. The tier table also states the
+  path has not been run on a real GPU.
+- The README describes `manage-backend.py` as the runtime manager, and `manage-rapid-mlx.py` as its
+  compatibility wrapper.
+- `RELEASE.md` gains step 8, the Homebrew formula bump.
+- `bin/librarian-dispatch.py --provider`: after a 429 it now waits out the machine-wide cooldown and
+  retries (`LA_REMOTE_429_RETRIES`, default 3), instead of failing the dispatch.
+
+### Fixed
+- **`--help` on every script.** Five scripts ran their real work when given `--help` (including
+  `daily-package-upgrade.sh` and `setup-shortcuts.sh`), and several more had no help. Every
+  executable in `bin/`, `scripts/` and `install/` now parses its arguments first. `--help` exits 0,
+  and an unknown flag exits 2 with usage on stderr.
+- Stale references: `bin/local-agent-dispatch.py` (never existed) is now `bin/lowkey-cli.py` in the
+  skills, docstrings and `docs/remote-fallback/README.md`.
+- Repo-root strays: the root `queue_marker.py` (a duplicate of `bin/queue_marker.py`) and
+  `improved-queue-stop-hook.py` (diffed against `bin/local-queue-stop-hook.py`; the registered hook
+  is newer) were removed. `local-profile.json` and `local-profile-notes.md` moved to
+  `docs/local-profile/`. `bin/load-profile-models.py` is now a symlink to `load_profile_models.py`,
+  the copy the callers import.
+
+### Errata (claims in earlier entries)
+- **0.17.1–0.17.3**: session naming via `-n` was superseded in 0.19.11 by
+  `hooks/session-title-prefix.py`.
+- **0.23.0** says LocalScreen uses runtime profiles; 0.23.1 reverted that.
+- Quota tests live at `tests/test_quota_telemetry.py`, not `bin/quota/`.
+- `scripts/check-backend-updates.py` is named `check_backend_updates.py`.
+- **0.25.0** README claims the `.command` installer "never needs updating" and that a double-click
+  gets past macOS security. Neither is true (see above).
+- CHANGELOG structure (2026-10-10): verbatim duplicate blocks were removed and noted in place, the
+  misplaced `[Unreleased]` between 0.13.12 and 0.13.11 was retitled, and the footer compare links
+  were refreshed. The meaning of each entry is unchanged.
+
+### Tests
+- New `tests/test_every_script_has_help.sh`. It globs `bin/`, `scripts/` and `install/` and runs each
+  `--help` in a sandboxed `HOME`, with `brew`/`pipx`/`launchctl`/`curl`/`hf` stubbed as
+  marker-writing fakes. Each script must exit 0, print "usage" and write no marker (79 pass, 10
+  exempt). New `tests/test_remote_dispatch_limiter.py` cases cover the 429 retry.
+- Full suite: 459 passed, 47 skipped.
+
 ## [0.29.1] — 2026-10-11
 
 Backend-manager CLI parity: every subcommand the parser, README or CHANGELOG names now works.
@@ -4245,7 +4314,9 @@ Release commit: [`f722c55`](https://github.com/haiggoh/local-agents/commit/f722c
 - Patch bundle for the local `vllm-mlx` fork.
 - Tournament, cancellation, tool-roundtrip, direct-routing, and Auto-mode diagnostics.
 
-[Unreleased]: https://github.com/haiggoh/free-agents/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/haiggoh/free-agents/compare/v0.29.2...HEAD
+[0.29.2]: https://github.com/haiggoh/free-agents/compare/v0.29.1...v0.29.2
+[0.29.1]: https://github.com/haiggoh/free-agents/compare/v0.29.0...v0.29.1
 [0.12.0]: https://github.com/haiggoh/local-agents/commit/13bf844b6e3ef32530ef49d7c78a94cd7cd37dba
 [0.11.0]: https://github.com/haiggoh/local-agents/commit/55f9ef00532b2254d043378abc8593773042c9d9
 [0.10.1]: https://github.com/haiggoh/local-agents/commit/584bd0b2562236db7ba2537860478da948b326a1

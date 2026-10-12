@@ -1,8 +1,9 @@
-# model-catalog.psv — the DEFAULT download list shipped with local-agents.
+# model-catalog.psv — the DEFAULT download list shipped with free-agents.
 #
-# Deliberately SMALL. These are models proven to work on the reference stack, chosen so that
-# TWO downloads cover every archetypal role. Nothing here is aspirational: this is not the
-# tournament roster, it is a working starting point.
+# You do NOT need to download everything here. Each row is independent: fetch the ones that fit
+# your memory and disk (`download-models.sh --select ALIAS`), and whatever you have fills the roles
+# it is registered for. The rest of the work stays on your cloud model. `--group default` fetches
+# the recommended starting pair only.
 #
 # This file is DATA. Adding a model is an edit HERE, never a change to the downloader script.
 # Your own longer/private list goes in config/model-catalog.local.psv (gitignored) — it is
@@ -10,46 +11,35 @@
 #
 # Format — one entry per line, eleven '|'-separated fields:
 #   alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime|hardware_target
-# Full field docs: run `download-more-models.sh --help`.
+# Full field docs: run `download-models.sh --help`.
 # hardware_target: mlx|cuda|any (default: mlx). Filters models by hardware platform.
 #   mlx = Apple Silicon MLX only
 #   cuda = NVIDIA CUDA only
 #   any = works on both (use with caution, model may not be compatible)
 #
 # ---------------------------------------------------------------------------------------
-# Why two models cover four roles — the double-role assignment
+# What each MLX row is for (aliases match config.example.sh registrations)
 # ---------------------------------------------------------------------------------------
-#   Qwen3.6 27B    operator   the broad default for delegated work
-#                  reasoner   SAME WEIGHTS, thinking enabled — a second download is not needed
-#                  utility    same weights at low effort, and it is already multimodal
-#                  SESSION    the one model here that can drive a FULL local Claude Code
-#                             session (it emits structured tool_calls), not just dispatches
-#   DeepSeek R1    validator  an INDEPENDENT reasoner for review/critique. Different family
-#                  reasoner   on purpose: a second opinion from the same weights is not one.
+#   KAT-Coder V2.5 OptiQ   the preferred model for a FULL local Claude Code session
+#   Qwen3.8 27B + MTP      operator / reasoner (thinking) workhorse; the MTP draft (~0.3 GB) gives
+#                          speculative decoding, which makes it fast enough to drive a session
+#   Devstral Small 2 24B   the local Auto Mode CLASSIFIER (passed genuine Stage 2, 5/5, with the
+#                          Mistral alternation adapter) — needed only for classifier auto mode;
+#                          point LA_RAPID_AUTO_MODEL_DIR / LA_OMLX_CLASSIFIER_MODEL_DIR at it
+#   Mistral Small 4 119B   large MoE (MLX build, not GGUF), 256K context; needs ~70 GB free memory
+#   Qwen3.6 27B            the previous all-rounder, kept for machines that already have it
+#   DeepSeek R1 32B        an INDEPENDENT validator. DISPATCH-ONLY: it does not emit structured
+#                          tool_calls, so it cannot drive an interactive session.
 #
-#   ⚠️ DeepSeek R1 Distill does NOT emit structured tool_calls, so it is DISPATCH-ONLY —
-#      excellent for curl-dispatched reasoning and review, unusable as an interactive driver.
-#      That is exactly why the pair is Qwen (session-capable) + DeepSeek (validator).
-#
-# Sizes below are MEASURED download sizes (hf dry-run, 2026-08-21), not estimates.
-# Both together ≈ 45 GB. The downloader reserves 100 GB of free space by default; see
+# Sizes are download sizes in GB. The downloader reserves 100 GB of free space by default; see
 # --headroom-gb and --target if that does not suit your disk.
-#
-# Optional additions once these two work — add them yourself rather than shipping them:
-#   mlx-community/Kimi-VL-A3B-Thinking-2506-6bit  ~13 GB  a dedicated vision model. Usually
-#       redundant: Qwen3.6 27B already handles images.
-#   mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit  ~57 GB  cheap high-volume utility work,
-#       but served via mlx_lm.server and DISPATCH-ONLY.
-# ---------------------------------------------------------------------------------------
 
-qwen36-27b-4bit|Qwen3.6 27B UD-MLX 4-bit — operator + reasoner (thinking) + utility, and the one that runs full local SESSIONS|unsloth/Qwen3.6-27B-UD-MLX-4bit|main|Qwen3.6-27B-UD-MLX-4bit|26.2|default,session,operator|primary||vllm-mlx|mlx
-deepseek-r1-32b-4bit|DeepSeek R1 Distill Qwen 32B 4-bit — independent validator/reasoner (DISPATCH-ONLY: no structured tool_calls)|mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit|main|DeepSeek-R1-Distill-Qwen-32B-4bit|18.4|default,validator|primary||vllm-mlx|mlx
-
-# --- CUDA models (for NVIDIA GPUs) -----------------------------------------------
-# These are for CUDA-enabled systems (Linux/WSL). They require the manage-cuda-backend.py
-# infrastructure and will be auto-skipped on macOS by download-models.sh.
-# Format: alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime|hardware_target
-# AWQ model for Operator (fast, VRAM-efficient via --swap-space)
+kat-coder-optiq|KAT-Coder V2.5 Dev OptiQ 4-bit — preferred full local SESSION model (Rapid, qwen tool parser, non-thinking)|mlx-community/KAT-Coder-V2.5-Dev-OptiQ-4bit|main|KAT-Coder-V2.5-Dev-OptiQ-4bit|20|default,session|primary||rapid-mlx|mlx
+qwen38-27b-4bit|Qwen3.8 27B MLX 4-bit — operator + reasoner (thinking); pair with the MTP draft below|mlx-community/Qwen3.8-27B-4bit|3e6447f082e89cc7f0bc6e5441afd38dfce760ff|Qwen3.8-27B-4bit|16.1|default,session,operator,reasoner|primary||rapid-mlx|mlx
+qwen38-27b-mtp|Qwen3.8 27B MTP draft head — speculative decoding for qwen38-27b-4bit (useless on its own)|mlx-community/Qwen3.8-27B-MTP-4bit|b643c01b6d3b094e325edb6ebd832e16c486c575|Qwen3.8-27B-MTP-4bit|0.3|default,session,operator,reasoner|primary||rapid-mlx|mlx
+devstral-small2|Devstral Small 2 24B MLX 4-bit — local Auto Mode classifier (passed Stage 2 with the alternation adapter)|mlx-community/mistralai_Devstral-Small-2-24B-Instruct-2512-MLX-4Bit|main|Devstral-Small-2-24B-4bit|15.1|classifier|primary||rapid-mlx|mlx
+mistral-small4|Mistral Small 4 119B MLX 4-bit — 128-expert MoE, 256K context (MLX build, not GGUF)|mlx-community/Mistral-Small-4-119B-2603-4bit|main|mistral-small4-119b-4bit|67.5|large|optional||rapid-mlx|mlx
+qwen36-27b-4bit|Qwen3.6 27B UD-MLX 4-bit — previous all-rounder (operator, thinking reasoner, session)|unsloth/Qwen3.6-27B-UD-MLX-4bit|main|Qwen3.6-27B-UD-MLX-4bit|26.2|optional,session,operator|optional||vllm-mlx|mlx
+deepseek-r1-32b-4bit|DeepSeek R1 Distill Qwen 32B 4-bit — independent validator/reasoner (DISPATCH-ONLY: no structured tool_calls)|mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit|main|DeepSeek-R1-Distill-Qwen-32B-4bit|18.4|validator|primary||vllm-mlx|mlx
 qwen2.5-7b-awq|Qwen2.5 7B Instruct AWQ — operator (CUDA, AWQ quantized, vLLM with UVM offload)|Qwen/Qwen2.5-7B-Instruct-AWQ|main|Qwen2.5-7B-Instruct-AWQ|7.5|cuda,operator|primary|*.safetensors|vllm-cuda|cuda
-# GGUF model for Reasoner (llama.cpp with -ngl offload)
 nemotron-3-ultra-550b-gguf|Nemotron 3 Ultra 550B GGUF — reasoner (CUDA, GGUF, llama.cpp -ngl offload)|nvidia/nemotron-3-ultra-550b-a55b-GGUF|main|nemotron-3-ultra-550b-a55b-GGUF|300|cuda,reasoner|primary|*Q4_K_M*.gguf;*mmproj*.gguf|llama.cpp|cuda

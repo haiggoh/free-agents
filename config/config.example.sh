@@ -146,18 +146,16 @@ LA_COUNCIL_NOTE=""
 # NOTE: the `roles` field (arg 9) is left "" here — roles are defined ONCE below via `la_role`
 # (the single source that drives both the resolver and the csl menu). The `roles` tag still works as
 # a legacy shortcut (auto-promoted to bindings if you declare no la_role lines), but don't set both.
-# Current full-session recommendation: non-thinking Ornith. This exact
-# artifact completed a real Claude Code session successfully and was
-# noticeably faster than Qwen 3.8 in early operational use. This is not a
-# controlled benchmark. Ornith thinking remains untested and is intentionally
-# absent from this public example.
-la_register ornith-1.5-35b         Ornith-1.5-35B-A3B-MLX-4bit        rapid  hermes ""          false ""           high  ""  ornith-ai/Ornith-1.5-35B-A3B-MLX-4bit              19.5
+# Full local SESSION: KAT-Coder V2.5 OptiQ is the preferred model (day-to-day use, not a benchmark).
+la_register kat-coder-optiq        KAT-Coder-V2.5-Dev-OptiQ-4bit      mlx    qwen  ""          false ""           high  ""  mlx-community/KAT-Coder-V2.5-Dev-OptiQ-4bit         20
 la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  ""          false ""           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
 la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  qwen3       true  ""           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
 la_register qwen-3.8-operator      Qwen3.8-27B-4bit                   mlx    qwen  ""          false ""           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
 la_register qwen-3.8-thinking      Qwen3.8-27B-4bit                   mlx    qwen  qwen3       true  ""           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
 la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  mlx    qwen  deepseek_r1 true  ""           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
 la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false "$LA_SPOOF_UTILITY"      low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
+# Mistral Small 4 119B (MLX build — not the GGUF): large MoE, 256K context, needs ~70 GB free memory.
+la_register mistral-small4         mistral-small4-119b-4bit           mlx    mistral ""        false ""           high  ""  mlx-community/Mistral-Small-4-119B-2603-4bit        67.5
 
 # --- Free-API remote models (api backend) -------------------------------------
 # These use the 'api' serve backend and do NOT require local weights.
@@ -179,19 +177,18 @@ la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm ll
 # UNCOMMENT when proxy is configured.
 # la_register nemotron-550b-litellm  nemotron-550b                      litellm auto  ""         false ""           high  "reasoner"           nvidia/nemotron-3-ultra-550b-a55b 550
 
-# --- Classifier qualification candidate (Auto Mode) --------------------------
-# Devstral Small 2 24B — leading candidate for local Auto Mode classifier.
+# --- Local Auto Mode classifier ----------------------------------------------
+# Devstral Small 2 24B — passed genuine Stage 2 (5/5) with the Mistral alternation adapter.
 # Dense/non-hybrid → trimmable cache (98.86% reuse, LCP 37,808, 436 re-prefilled).
-# Needs Mistral alternation adapter (adjacent user messages merge).
-# UNCOMMENT when model is downloaded and you want to run qualification:
-# la_register devstral-small2        Devstral-Small-2-24B-4bit          rapid  mistral ""      false ""           high  ""  mlx-community/mistralai_Devstral-Small-2-24B-Instruct-2512-MLX-4Bit 15.1
+# The classifier route reads LA_RAPID_AUTO_MODEL_DIR; point it here to use this model:
+#   LA_RAPID_AUTO_MODEL_DIR="$LA_MODELS_DIR/Devstral-Small-2-24B-4bit"
+la_register devstral-small2        Devstral-Small-2-24B-4bit          rapid  mistral ""      false ""           high  ""  mlx-community/mistralai_Devstral-Small-2-24B-Instruct-2512-MLX-4Bit 15.1
 
-
-# Pinned acquisition revision for the recommended Ornith artifact.
-# config-lib loads this file inside la_load_config; -g keeps the optional
-# revision map visible to download-models.sh after that function returns.
+# Optional pinned acquisition revisions (alias -> commit). config-lib loads this file inside
+# la_load_config; -g keeps the map visible to download-models.sh after that function returns.
 declare -gA LA_REV
-LA_REV["ornith-1.5-35b"]=19504d912fa8fc7622bf6b1de3db5d5d890b1f02
+LA_REV["qwen-3.8-operator"]=3e6447f082e89cc7f0bc6e5441afd38dfce760ff
+LA_REV["qwen-3.8-thinking"]=3e6447f082e89cc7f0bc6e5441afd38dfce760ff
 
 # --- role bindings (SINGLE SOURCE OF TRUTH for roles; drives la-roles.sh AND the csl menu) -----
 # la_role <role> <alias> <effort> [mode:dispatch|session|both]. The SAME weights fill different roles
@@ -205,7 +202,7 @@ la_role reasoner  qwen-3.8-thinking     high   both      # MTP-backed thinking f
 la_role reasoner  deepseek-r1-architect max    both      # A/B reasoner — strongest local reasoner
 la_role validator deepseek-r1-architect max    dispatch  # independent review — dispatch (no tool_calls)
 la_role utility   llama-scout           low    dispatch  # cheap classification — dispatch-only
-# la_role utility   devstral-small2       medium dispatch  # Auto Mode classifier — dispatch-only (enable after qualification)
+la_role utility   devstral-small2       medium dispatch  # Auto Mode classifier model — also cheap classification
 
 # Example API model role bindings (UNCOMMENT when API keys are configured in ~/.api_keys/):
 # la_role reasoner  nemotron-550b         high   dispatch  # NVIDIA Nemotron 550B — big reasoner via API
