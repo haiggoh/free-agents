@@ -27,7 +27,7 @@ Usage: launch-claude-agent.sh <alias> [effort-override]
        launch-claude-agent.sh --enable-mcp <alias> [effort-override]
        launch-claude-agent.sh --temperature VALUE <alias> [effort-override]
 
-  <alias>           Model alias from config (e.g., qwen-3.8-operator, deepseek-r1-architect)
+  <alias>           Model alias from config (e.g., qwen-3.8-operator, qwen-3.8-thinking)
                     Role names also accepted: operator, reasoner, validator, utility
   [effort-override] Optional: low | medium | high | xhigh | max (overrides config default)
 
@@ -53,7 +53,7 @@ Environment (set by csl or caller):
 Examples:
   launch-claude-agent.sh qwen-3.8-operator
   launch-claude-agent.sh operator high
-  launch-claude-agent.sh --dry-run deepseek-r1-architect max
+  launch-claude-agent.sh --dry-run qwen-3.8-thinking max
   launch-claude-agent.sh --dry-run-skip-preflight qwen-3.8-operator
   launch-claude-agent.sh --enable-mcp qwen-3.8-operator
   launch-claude-agent.sh --temperature 0.7 qwen-3.8-operator

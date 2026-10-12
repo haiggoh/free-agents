@@ -120,7 +120,7 @@ If the user hasn't done setup, point them to the README rather than guessing pat
 
 ## Interactive local session
 ```
-./bin/launch-claude-agent.sh <alias> [effort-override]   # e.g. qwen-3.6-operator, or ... deepseek-r1-architect max
+./bin/launch-claude-agent.sh <alias> [effort-override]   # e.g. qwen-3.6-operator, or ... qwen-3.8-thinking max
 ./bin/csl                                                # menu built from the configured aliases
 ```
 The launcher hotswaps the model onto a free port, exports direct-routing env, and starts `claude`.

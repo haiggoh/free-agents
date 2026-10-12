@@ -1,3 +1,49 @@
+## [0.29.3] — 2026-10-12
+
+The standalone installer works, and is now a `.sh`.
+
+### Fixed
+- **`install-free-agents.command` → `scripts/install-free-agents.sh`, rewritten.** The old script
+  copied a release tarball into a directory Claude Code never reads (the top of its plugins folder),
+  then looked for every later script there, and also used the wrong marketplace source. Claude Code
+  installs plugins into its versioned plugin cache, so every step after the copy failed. It also
+  looked for `config.example.sh` at the plugin root rather than `config/`. The new installer:
+  - installs through `claude plugin marketplace add haiggoh/get-haiggoh` and
+    `claude plugin install free-agents@haiggoh`, then finds the copy in the plugin cache;
+  - writes `csl`, `lowkey` and `lk` wrappers to `~/.local/bin` (or `--bin-dir`) that run the newest
+    installed copy, the same rule as the Homebrew wrappers, and never replaces a command it did not
+    write;
+  - offers LiteLLM, the picker venv and an API key, with local inference opt-in last;
+  - reads its prompts from `/dev/tty`, so they work under `curl … | bash`;
+  - runs everything from a final `main "$@"` line, so a truncated download executes nothing.
+  Flags: `--remote-only`, `--local`, `--yes`, `--bin-dir`, `--no-wrappers`, `--help`.
+- The `.command` extension was only there to allow a Finder double-click, and Gatekeeper blocks that
+  anyway, so the file is a plain executable `.sh` (mode 755). Releases also upload the same file as
+  `install-free-agents.command`, so existing links keep working.
+- **`tests/test_role_resolution.sh` no longer depends on which models are downloaded here.** A role
+  with nothing bound on disk must resolve to nothing. The default-binding check runs only when
+  Qwen3.8 is present. The "off-disk binding is skipped" positive case uses a planted temporary model,
+  not a real roster model. Mutation-checked: dropping the on-disk filter from `la_resolve_target`
+  still fails it.
+
+- **0.29.2 regression: the downloader stopped with `Catalog conflict for subdir 'Qwen3.8-27B-4bit'`**
+  for anyone whose own config registers Qwen3.8 at `main`, which is every config written before
+  0.29.2. The shipped catalogue had pinned a revision that a user registry does not carry. The shipped
+  Qwen3.8 and MTP rows go back to `main`, and the matching `LA_REV` pins are dropped from the example.
+
+### Changed
+- **DeepSeek R1 Distill 32B is no longer shipped.** The dense distill is superseded by newer MoE models.
+  The catalogue row and example registration are removed. The default `validator`, and the second
+  `reasoner` A/B binding, are now `mistral-small4`, a non-Qwen second opinion. Help-text examples use
+  `qwen-3.8-thinking`.
+- README option C documents the working one-liner. `PLUGIN-INSTALLER-README.md` and `RELEASE.md` are
+  updated to match.
+
+### Tests
+- The installer was run end to end through a pipe (`cat … | bash -s -- --remote-only --yes`) against a
+  throwaway `CLAUDE_CONFIG_DIR` and `HOME`: real marketplace add, real plugin install into the temporary
+  cache, wrappers written, and `csl --help` served from the installed copy.
+
 ## [0.29.2] — 2026-10-12
 
 Docs and claims errata. Documentation is corrected wherever it described code that moved, was
@@ -4314,7 +4360,8 @@ Release commit: [`f722c55`](https://github.com/haiggoh/local-agents/commit/f722c
 - Patch bundle for the local `vllm-mlx` fork.
 - Tournament, cancellation, tool-roundtrip, direct-routing, and Auto-mode diagnostics.
 
-[Unreleased]: https://github.com/haiggoh/free-agents/compare/v0.29.2...HEAD
+[Unreleased]: https://github.com/haiggoh/free-agents/compare/v0.29.3...HEAD
+[0.29.3]: https://github.com/haiggoh/free-agents/compare/v0.29.2...v0.29.3
 [0.29.2]: https://github.com/haiggoh/free-agents/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/haiggoh/free-agents/compare/v0.29.0...v0.29.1
 [0.12.0]: https://github.com/haiggoh/local-agents/commit/13bf844b6e3ef32530ef49d7c78a94cd7cd37dba

@@ -36,7 +36,7 @@ Usage:
   local-session.sh --inventory          # Print session-capable local models as TSV
 
 Positional arguments:
-  <alias>          Model alias from config (e.g., qwen-3.8-operator, deepseek-r1-architect)
+  <alias>          Model alias from config (e.g., qwen-3.8-operator, qwen-3.8-thinking)
                    Role names also accepted: operator, reasoner, validator, utility
   [effort]         Optional: low | medium | high | xhigh | max (overrides config default)
 
@@ -64,7 +64,7 @@ Examples:
   local-session.sh
   local-session.sh qwen-3.8-operator
   local-session.sh operator high
-  local-session.sh --dry-run deepseek-r1-architect max
+  local-session.sh --dry-run qwen-3.8-thinking max
   local-session.sh --dry-run-skip-preflight qwen-3.8-operator
   local-session.sh --enable-mcp qwen-3.8-operator
   local-session.sh --temperature 0.7 qwen-3.8-operator

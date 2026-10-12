@@ -84,22 +84,22 @@ Claude Code has installed; before the plugin is installed they fall back to Home
 `claude plugin update free-agents@haiggoh` so both stay on the same release. A command of the same
 name earlier on your PATH (for example `~/.local/bin/csl`) still wins.
 
-### C. Standalone bootstrap (not recommended yet)
-
-`install-free-agents.command` is attached to every release. **Known problems, so prefer A or B:**
-
-- macOS Gatekeeper blocks the unsigned file when you download it in a browser and double-click it.
-  Getting past that means an override in System Settings → Privacy & Security. Renaming it to `.sh`
-  does not help.
-- Its plugin-install and backend steps do not match the current marketplace layout, so the run can
-  stop part-way. Option A does the same work correctly.
-
-If you still want it, run it from Terminal rather than double-clicking it. A file fetched with
-`curl` carries no quarantine flag, so Gatekeeper does not block it:
+### C. One-line installer
 
 ```bash
-curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | bash
+curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.sh | bash
 ```
+
+Run it in Terminal. Nothing is saved to disk first, so macOS Gatekeeper never sees a downloaded file.
+It needs only Claude Code and Python 3. It installs the plugin through `claude plugin install` (so it
+lands exactly where option A puts it), writes `csl`, `lowkey` and `lk` wrappers to `~/.local/bin` that
+always run the newest installed copy, then offers LiteLLM, the picker UI and an API key. Local
+inference is offered last and is off unless you say yes. `--remote-only`, `--local`, `--yes`,
+`--bin-dir DIR` and `--help` work through the pipe: `curl … | bash -s -- --remote-only --yes`. It
+never replaces a `csl`, `lowkey` or `lk` that it did not write.
+
+Downloading the file in a browser and double-clicking it still trips Gatekeeper (an override in
+System Settings → Privacy & Security), so use the one-liner, or `bash install-free-agents.sh`.
 
 Each release also ships `free-agents-<version>.tar.gz`, the same files as the plugin, for offline
 inspection.
@@ -583,8 +583,7 @@ stays on your cloud model. The shipped `config/model-catalog.psv` (MLX rows):
 | `kat-coder-optiq` | 20 GB | the preferred full local **session** model |
 | `qwen38-27b-4bit` + `qwen38-27b-mtp` | 16 + 0.3 GB | operator / reasoner (thinking), MTP-accelerated; also drives a session |
 | `devstral-small2` | 15 GB | the qualified local **Auto Mode classifier** (passed genuine Stage 2 with the Mistral alternation adapter); used by the dedicated classifier routes via `LA_RAPID_AUTO_MODEL_DIR` / `LA_OMLX_CLASSIFIER_MODEL_DIR`. Only needed for classifier auto mode (state 1). |
-| `mistral-small4` | 67.5 GB | Mistral Small 4 119B, MLX build (not the GGUF), 256K context; needs about 70 GB free memory |
-| `deepseek-r1-32b-4bit` | 18 GB | an independent validator; **dispatch-only**, since it emits no structured tool calls |
+| `mistral-small4` | 67.5 GB | Mistral Small 4 119B, MLX build (not the GGUF), 256K context; needs about 70 GB free memory. Also the default validator (a non-Qwen second opinion). |
 | `qwen36-27b-4bit` | 26 GB | the previous all-rounder, for machines that already have it |
 
 `--group default` fetches KAT plus Qwen3.8 with its MTP head (about 36 GB). The two CUDA rows are
@@ -735,7 +734,7 @@ In `csl`, `g` relaunches the model this lane last ran.
 
 ```bash
 ./bin/launch-claude-agent.sh my-operator                  # interactive local session
-./bin/launch-claude-agent.sh deepseek-r1-architect max    # optional effort override
+./bin/launch-claude-agent.sh qwen-3.8-thinking max        # optional effort override
 ./bin/csl                                                 # interactive picker (see below)
 ./bin/new-local-window.sh my-operator                     # open it in a NEW, independent Terminal window (macOS)
 ```

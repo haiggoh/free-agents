@@ -55,9 +55,9 @@ for file in README.md CHANGELOG.md VERSION config.example.sh config.local.sh.exa
     fi
 done
 
-# Copy master installer (renamed to install-free-agents.command)
-if [[ -f "$REPO_ROOT/scripts/install-free-agents.command" ]]; then
-    cp "$REPO_ROOT/scripts/install-free-agents.command" "$PLUGIN_DIR/"
+# Copy the standalone installer (mode preserved, so it stays executable)
+if [[ -f "$REPO_ROOT/scripts/install-free-agents.sh" ]]; then
+    cp -p "$REPO_ROOT/scripts/install-free-agents.sh" "$PLUGIN_DIR/"
 fi
 
 # Create config.local.sh.example from config.example.sh if it doesn't exist

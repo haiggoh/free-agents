@@ -21,11 +21,15 @@ echo "la_resolve_target:"
 got="$(la_resolve_target qwen-3.6-operator)"
 check "an existing alias resolves to itself" "$got" "qwen-3.6-operator"
 
-got="$(la_resolve_target operator)"
-check "operator defaults to Qwen3.8 MTP" "$got" "qwen-3.8-operator"
-
-got="$(la_resolve_target reasoner)"
-check "reasoner defaults to Qwen3.8 MTP" "$got" "qwen-3.8-thinking"
+# The shipped defaults bind Qwen3.8 MTP first; that only shows when its weights are downloaded here.
+if la_on_disk qwen-3.8-operator; then
+  got="$(la_resolve_target operator)"
+  check "operator defaults to Qwen3.8 MTP" "$got" "qwen-3.8-operator"
+  got="$(la_resolve_target reasoner)"
+  check "reasoner defaults to Qwen3.8 MTP" "$got" "qwen-3.8-thinking"
+else
+  ok "Qwen3.8 not on disk here: default-binding check skipped (registration is checked below)"
+fi
 
 la_lookup qwen-3.8-operator || {
   bad "qwen-3.8-operator lookup failed"
@@ -39,8 +43,18 @@ case "${LA_CUR_RAPID_SPEC_CONFIG:-}" in
     ;;
 esac
 
-# 2. A role name resolves to an ON-DISK alias bound to that role.
+# 2. A role name resolves to an ON-DISK alias bound to that role — or, when nothing bound to it is
+#    downloaded on THIS machine, fails rather than inventing one. Which models are on disk is machine
+#    state, so the expectation is derived from it instead of assuming a particular roster is present
+#    (a deleted model used to fail this test on a correct resolver). 3b plants the positive case.
 for role in operator reasoner validator utility; do
+  any_on_disk=0
+  while IFS='|' read -r _a _e _m; do [ -n "$_a" ] && la_on_disk "$_a" && any_on_disk=1; done < <(la_role_bindings_for "$role")
+  if [ "$any_on_disk" = 0 ]; then
+    if got="$(la_resolve_target "$role" 2>/dev/null)"; then bad "role '$role' has nothing on disk but resolved to '$got'"
+    else ok "role '$role': nothing bound is on disk, so it resolves to nothing (correct)"; fi
+    continue
+  fi
   got="$(la_resolve_target "$role")" || { bad "role '$role' resolved to nothing"; continue; }
   if [ -z "$got" ]; then bad "role '$role' resolved to empty"; continue; fi
   la_lookup "$got"   || { bad "role '$role' -> '$got' which is not a registered alias"; continue; }
@@ -61,11 +75,18 @@ ok "no role returns an off-disk alias"
 #     Without this, the suite cannot detect a missing on-disk filter at all — every real role's
 #     first binding happens to be on disk, so dropping the filter changes nothing observable.
 #     (Verified by mutation: removing `la_on_disk` from la_resolve_target passed 8/8 before this.)
-la_register _test_absent_model  _test_absent_dir_does_not_exist  mlx qwen "" false claude-opus-5 high "" "" 1
-la_role _testrole _test_absent_model  high both      # off disk, bound FIRST
-la_role _testrole qwen-3.6-operator   high both      # on disk, bound second
+#     The on-disk model is a planted fixture (a temp models dir holding one weight file), so this
+#     runs on any machine rather than only where a particular real model happens to be downloaded.
+_PLANT="$(mktemp -d)"; trap 'rm -rf "$_PLANT"' EXIT
+mkdir -p "$_PLANT/_test_present_dir"; dd if=/dev/zero of="$_PLANT/_test_present_dir/model.safetensors" bs=1 count=0 seek=2097152 2>/dev/null  # la_on_disk wants a file > 1 MB
+_REAL_MODELS_DIR="$LA_MODELS_DIR"; LA_MODELS_DIR="$_PLANT"
+la_register _test_absent_model   _test_absent_dir_does_not_exist  mlx qwen "" false claude-opus-5 high "" "" 1
+la_register _test_present_model  _test_present_dir                mlx qwen "" false claude-opus-5 high "" "" 1
+la_role _testrole _test_absent_model   high both      # off disk, bound FIRST
+la_role _testrole _test_present_model  high both      # on disk, bound second
 got="$(la_resolve_target _testrole 2>/dev/null)"
-check "an off-disk binding is skipped for the on-disk one" "$got" "qwen-3.6-operator"
+check "an off-disk binding is skipped for the on-disk one" "$got" "_test_present_model"
+LA_MODELS_DIR="$_REAL_MODELS_DIR"
 
 # 4. Unknown input fails, and does NOT silently fall back to some default.
 if got="$(la_resolve_target definitely-not-a-model 2>/dev/null)"; then

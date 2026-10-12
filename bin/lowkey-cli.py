@@ -15,7 +15,7 @@ config/config.local.sh model registry.
 
 Examples:
     lowkey --prompt "What does this module do?" --files src/main.py
-    lowkey --model deepseek-r1-architect --prompt "Review this plan and find risks"
+    lowkey --model qwen-3.8-thinking --prompt "Review this plan and find risks"
     lowkey --model qwen-3.6-thinking --prompt "Summarize key changes" --files diff.txt
     lowkey --model devstral-2-123b --prompt "Refactor this function" --files utils.py --max-tokens 2048
 
@@ -861,7 +861,7 @@ def main():
     parser.add_argument(
         "--model",
         default="qwen-3.8-operator",
-        help="Local model alias (e.g. qwen-3.8-operator, deepseek-r1-architect, gemma-4-26b)",
+        help="Local model alias (e.g. qwen-3.8-operator, qwen-3.8-thinking, gemma-4-26b)",
     )
     parser.add_argument(
         "--profile",

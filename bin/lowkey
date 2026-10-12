@@ -163,7 +163,7 @@ Examples:
     lowkey                                      # Start convo with default model
     lowkey qwen-3.8-operator                    # Start convo with specific model
     lowkey --prompt "Explain this" --files a.py # Single shot
-    lowkey --model deepseek-r1-architect --prompt "Review this plan"
+    lowkey --model qwen-3.8-thinking --prompt "Review this plan"
     lowkey picker                               # Interactive model picker
     lowkey roles                                # Show model roles
 EOF

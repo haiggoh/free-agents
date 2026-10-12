@@ -2,27 +2,20 @@
 
 This archive contains the free-agents plugin packaged for manual installation from a GitHub release.
 
-## Quick Install (Standalone Installer — Recommended)
+## Quick Install
 
-**No download needed — just run this one command:**
+The recommended routes are the Claude Code marketplace or Homebrew; see the
+[README](https://github.com/haiggoh/free-agents#install). The standalone installer does the same from one
+terminal command, with no download first:
 
 ```bash
-# Runs entirely from GitHub, downloads everything automatically
-curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | bash
+curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.sh | bash
 ```
 
-Or download the **`install-free-agents.command`** file from the [latest release](https://github.com/haiggoh/free-agents/releases/latest) and:
-- **macOS**: Double-click in Finder
-- **Linux/WSL2**: `bash install-free-agents.command`
-
-> ✅ **Version-agnostic**: The installer fetches the latest plugin version from GitHub at runtime. You never need to re-download the installer when free-agents updates.
-
-The master installer:
-- Detects your platform (macOS Apple Silicon / Linux / WSL2)
-- Fetches the latest plugin release from GitHub
-- Installs & enables the plugin
-- Installs the correct local inference backend (MLX for Mac, CUDA for NVIDIA GPU)
-- Guides you through model download and shortcut setup
+It installs the plugin through `claude plugin install`, puts `csl`, `lowkey` and `lk` on your PATH (in
+`~/.local/bin`) as wrappers that always run the newest installed copy, then offers the remote-lane setup
+(LiteLLM, the picker UI, an API key) and, only if you say yes, local inference. `--remote-only`, `--local`,
+`--yes` and `--help` are available: `curl … | bash -s -- --remote-only --yes`.
 
 ---
 
@@ -112,4 +105,4 @@ The standard (and recommended) way to install free-agents:
 
 - Issues: https://github.com/haiggoh/free-agents/issues
 - Documentation: https://github.com/haiggoh/free-agents/blob/main/README.md
-- Master installer source: https://github.com/haiggoh/free-agents/blob/main/scripts/master-install.command
+- Master installer source: https://github.com/haiggoh/free-agents/blob/main/scripts/install-free-agents.sh

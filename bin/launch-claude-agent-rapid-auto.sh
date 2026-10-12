@@ -63,7 +63,7 @@ Environment (set by csl or caller):
 
 Examples:
   launch-claude-agent-rapid-auto.sh qwen-3.6-thinking
-  launch-claude-agent-rapid-auto.sh --dry-run deepseek-r1-architect max
+  launch-claude-agent-rapid-auto.sh --dry-run qwen-3.8-thinking max
 HELP
     exit 0
     ;;

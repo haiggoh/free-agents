@@ -152,7 +152,6 @@ la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            mlx    qwe
 la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  qwen3       true  ""           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
 la_register qwen-3.8-operator      Qwen3.8-27B-4bit                   mlx    qwen  ""          false ""           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
 la_register qwen-3.8-thinking      Qwen3.8-27B-4bit                   mlx    qwen  qwen3       true  ""           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
-la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  mlx    qwen  deepseek_r1 true  ""           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
 la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false "$LA_SPOOF_UTILITY"      low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
 # Mistral Small 4 119B (MLX build — not the GGUF): large MoE, 256K context, needs ~70 GB free memory.
 la_register mistral-small4         mistral-small4-119b-4bit           mlx    mistral ""        false ""           high  ""  mlx-community/Mistral-Small-4-119B-2603-4bit        67.5
@@ -187,8 +186,6 @@ la_register devstral-small2        Devstral-Small-2-24B-4bit          rapid  mis
 # Optional pinned acquisition revisions (alias -> commit). config-lib loads this file inside
 # la_load_config; -g keeps the map visible to download-models.sh after that function returns.
 declare -gA LA_REV
-LA_REV["qwen-3.8-operator"]=3e6447f082e89cc7f0bc6e5441afd38dfce760ff
-LA_REV["qwen-3.8-thinking"]=3e6447f082e89cc7f0bc6e5441afd38dfce760ff
 
 # --- role bindings (SINGLE SOURCE OF TRUTH for roles; drives la-roles.sh AND the csl menu) -----
 # la_role <role> <alias> <effort> [mode:dispatch|session|both]. The SAME weights fill different roles
@@ -199,8 +196,8 @@ la_role operator  qwen-3.8-operator     medium both      # MTP-backed workhorse 
 la_role operator  qwen-3.8-operator     high   both      # deeper operator (same MTP server)
 la_role operator  qwen-3.8-operator     xhigh  both      # deepest operator
 la_role reasoner  qwen-3.8-thinking     high   both      # MTP-backed thinking flavor
-la_role reasoner  deepseek-r1-architect max    both      # A/B reasoner — strongest local reasoner
-la_role validator deepseek-r1-architect max    dispatch  # independent review — dispatch (no tool_calls)
+la_role reasoner  mistral-small4        high   both      # A/B reasoner — different family, 128-expert MoE
+la_role validator mistral-small4        high   dispatch  # independent review — a non-Qwen second opinion
 la_role utility   llama-scout           low    dispatch  # cheap classification — dispatch-only
 la_role utility   devstral-small2       medium dispatch  # Auto Mode classifier model — also cheap classification
 

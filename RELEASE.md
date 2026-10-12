@@ -11,7 +11,7 @@ Each release produces **two distribution assets** on GitHub:
 | Asset | Source | Purpose |
 |-------|--------|---------|
 | `free-agents-X.Y.Z.tar.gz` | `scripts/package-release.sh` | Full plugin source + installers for manual installation |
-| `install-free-agents.command` | `scripts/install-free-agents.command` | Standalone 19 KB installer (version-agnostic) |
+| `install-free-agents.sh` | `scripts/install-free-agents.sh` | Standalone installer (version-agnostic; mode 755) |
 
 ---
 
@@ -54,7 +54,7 @@ git commit -m "chore: release 0.25.8 — <one-line summary>"
 # This creates dist/free-agents-0.25.8.tar.gz with:
 # - Full plugin source (bin, config, install, skills, hooks)
 # - README.md, CHANGELOG.md, VERSION, PLUGIN-INSTALLER-README.md
-# - install-free-agents.command (copied from scripts/)
+# - install-free-agents.sh (copied from scripts/)
 # - install-plugin.sh (for manual tarball installation)
 ./scripts/package-release.sh
 ```
@@ -62,7 +62,7 @@ git commit -m "chore: release 0.25.8 — <one-line summary>"
 **What `package-release.sh` does:**
 - Copies plugin directories (bin, config, install, skills, hooks)
 - Copies root files (README, CHANGELOG, VERSION, config.example.sh, PLUGIN-INSTALLER-README.md)
-- Copies `scripts/install-free-agents.command` → `install-free-agents.command` in tarball
+- Copies `scripts/install-free-agents.sh` → `install-free-agents.sh` in tarball
 - Strips test files, dev artifacts, local configs, .DS_Store
 - Creates `install-plugin.sh` for manual installation
 
@@ -93,10 +93,10 @@ gh release create v0.25.8 \
 
 # Upload both assets
 gh release upload v0.25.8 dist/free-agents-0.25.8.tar.gz --clobber
-gh release upload v0.25.8 dist/install-free-agents.command --clobber
+gh release upload v0.25.8 dist/install-free-agents.sh --clobber
 ```
 
-> **Note**: The `install-free-agents.command` in `dist/` is just a copy of `scripts/install-free-agents.command`. The script is version-agnostic (fetches latest release at runtime), so the same file works for all future releases.
+> **Note**: The `install-free-agents.sh` in `dist/` is just a copy of `scripts/install-free-agents.sh`. The script is version-agnostic (fetches latest release at runtime), so the same file works for all future releases.
 
 ### 7. Verify Release
 
@@ -105,7 +105,7 @@ gh release upload v0.25.8 dist/install-free-agents.command --clobber
 gh release view v0.25.8 --json assets
 
 # Test installer download
-curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.command | head -5
+curl -fsSL https://github.com/haiggoh/free-agents/releases/latest/download/install-free-agents.sh | head -5
 
 # Test tarball download
 curl -sL https://github.com/haiggoh/free-agents/releases/download/v0.25.8/free-agents-0.25.8.tar.gz | tar -tz | head -5
@@ -137,7 +137,7 @@ brew style Formula/free-agents.rb && brew install --build-from-source ./Formula/
 - [ ] Commit + tag pushed to origin
 - [ ] GitHub release created
 - [ ] `free-agents-X.Y.Z.tar.gz` uploaded
-- [ ] `install-free-agents.command` uploaded
+- [ ] `install-free-agents.sh` uploaded
 - [ ] Release verified (assets present, downloads work)
 - [ ] Homebrew formula bumped in `haiggoh/homebrew-tap` (url + sha256)
 
@@ -151,7 +151,7 @@ brew style Formula/free-agents.rb && brew install --build-from-source ./Formula/
 | `.claude-plugin/plugin.json` | Plugin manifest version | ✅ Yes |
 | `CHANGELOG.md` | Release notes | ✅ Yes |
 | `scripts/package-release.sh` | Builds tarball | ❌ No (stable) |
-| `scripts/install-free-agents.command` | Standalone installer | ❌ No (version-agnostic) |
+| `scripts/install-free-agents.sh` | Standalone installer | ❌ No (version-agnostic) |
 | `PLUGIN-INSTALLER-README.md` | Manual install guide | ❌ Rarely |
 | `README.md` | Installation docs | ❌ Rarely |
 
@@ -159,21 +159,10 @@ brew style Formula/free-agents.rb && brew install --build-from-source ./Formula/
 
 ## Version-Agnostic Installer Design
 
-The `install-free-agents.command` script is **intentionally version-agnostic**:
-
-```bash
-# It queries GitHub API at runtime:
-RELEASE_API="https://api.github.com/repos/haiggoh/free-agents/releases/latest"
-RELEASE_VERSION=$(curl -fsSL "$RELEASE_API" | jq -r '.tag_name' | sed 's/^v//')
-
-# Then downloads:
-https://github.com/haiggoh/free-agents/releases/download/v${RELEASE_VERSION}/free-agents-${RELEASE_VERSION}.tar.gz
-```
-
-**This means:**
-- The same `install-free-agents.command` file works for ALL future releases
-- Users never need to re-download the installer
-- Just re-upload the same file to each new release (or don't — it's also available at `scripts/install-free-agents.command` in the repo)
+`install-free-agents.sh` contains no version number. It installs through Claude Code's own CLI
+(`claude plugin install free-agents@haiggoh`), which always fetches the marketplace's current release, so
+the same file works for every release. Re-upload it with each release anyway, so that the
+`releases/latest/download/install-free-agents.sh` URL keeps resolving.
 
 ---
 
@@ -215,4 +204,4 @@ Follow the checklist above. The key insight is that **only 3 files change per re
 - `README.md` — User-facing installation instructions (3 options)
 - `PLUGIN-INSTALLER-README.md` — Manual tarball installation guide
 - `scripts/package-release.sh` — Packaging script
-- `scripts/install-free-agents.command` — Standalone installer source
+- `scripts/install-free-agents.sh` — Standalone installer source
