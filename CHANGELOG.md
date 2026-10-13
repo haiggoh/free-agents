@@ -1,3 +1,37 @@
+## [0.33.0] — 2026-10-14
+
+### Changed — the spoofed identity is now Opus 5.5 (Opus 5 demoted to compat fallback)
+
+`remote-session.sh` hardcoded `claude --model claude-opus-5` at the launch sites, so the
+`claude-opus-5-5` entry added to `LA_REMOTE_SPOOF_IDS` for 1M context support was never
+actually requested: every remote session carried Opus 5's rate card and Claude Code's 200k
+ceiling, and the phantom cost model priced free sessions ~25% high (cost-tracker's PRICING
+comment, 2026-09). The launch flag, the `__LA_REMOTE_SPOOF__` prompt substitution and the
+version warning now share one version-gated selection (`_select_spoof_primary`): the primary
+is **claude-opus-5-5** on Claude Code ≥ 2.1.280; **claude-opus-5** remains only as the
+compatibility fallback, including when the version cannot be probed — an unprovable upgrade
+must never break a session that worked.
+
+- `remote-session.sh --print-spoof` prints the id claude will be launched with and exits —
+  the observability seam the new contract tests (`tests/remote/test_spoof_primary.py`) drive.
+- The version comparator now strips non-numeric suffixes from the patch segment: real
+  version strings carry a 4th segment (`2.1.296.b9d` on this machine), and arithmetic on
+  `296.b9d` was a syntax error that silently misclassified a capable Claude Code as too old
+  (the pre-0.33.0 warning had the same defect).
+- The version warning moved to stderr — it is a diagnostic, and `--print-spoof`'s stdout is
+  a contract; a dry run now also prints the resolved `spoof` line.
+- `savings-ledger.py` prices dispatches against the primary spoof too: the default
+  counterfactual moves from the retired claude-opus-5 card ($5/$25) to claude-opus-5-5
+  ($4/$20), so "saved" figures stop overstating by ~25%. Opus 5 stays in the table as the
+  explicit compat choice.
+- `config/shared-agent-shipping-rules.txt` (both lanes' system prompts) gains the commit-
+  attribution rule: establish the running model, add its verbatim `Co-Authored-By` trailer
+  below the harness line, derive-and-propose for models not in the table, and no
+  `🤖 Generated with [Claude Code]` trailer in release notes.
+
+Versioning note: the 0.32.x line (0.32.0 through 0.32.3) belongs to the mainline, released
+by concurrent sessions while this branch was parked; this branch numbers itself past it.
+
 ## [0.32.3] — 2026-10-14
 
 ### Changed — ModelScope removed from the API-key setup flow
