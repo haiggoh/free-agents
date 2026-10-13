@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""tests/test_session_menu_state.py — the repo-local session-menu preference store.
+"""tests/test_session_menu_state.py — the session-menu preference store.
 
 What this protects: the picker remembers effort (and the NVIDIA rate-limiter settings)
-in config/session-menu.local.json. That file is written by several entry points, may be
-read while another picker writes it, and must never leak, clobber, or silently fall back
-to a second store. Each test names the production change that would make it fail.
+in a user-owned persistent location (default: ~/.claude/free-agents/session-menu/).
+That file is written by several entry points, may be read while another picker writes it,
+and must never leak, clobber, or silently fall back to a second store. Each test names
+the production change that would make it fail.
+
+Tests can override the config directory via LA_SESSION_MENU_CONFIG_DIR environment variable.
 """
 import json
 import multiprocessing

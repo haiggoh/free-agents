@@ -11,10 +11,10 @@ derives a small rollup a status line can read without parsing a growing log.
     savings-ledger.py rates                      # print the rate table and its as-of date
 
 Store (outside this plugin, so updates never touch your data; override the directory with
-$LOCAL_AGENTS_LEDGER_DIR):
+$FREE_AGENTS_LEDGER_DIR):
 
-    ~/.claude/local-agents/savings.jsonl   append-only event log, one JSON object per line
-    ~/.claude/local-agents/rollup.json     DERIVED — regenerate it, never hand-edit it
+    ~/.claude/free-agents/savings.jsonl   append-only event log, one JSON object per line
+    ~/.claude/free-agents/rollup.json     DERIVED — regenerate it, never hand-edit it
 
 THE CENTRAL HONESTY RULE: a model this table doesn't know is priced as **null**, never as
 zero. A zero saving is a claim that the work was free; null says "not priced". Silently
@@ -53,9 +53,9 @@ DEFAULT_PRICED_AGAINST = "claude-opus-5"
 
 
 def ledger_dir():
-    d = os.environ.get("LOCAL_AGENTS_LEDGER_DIR")
+    d = os.environ.get("FREE_AGENTS_LEDGER_DIR")
     if not d:
-        d = os.path.join(os.path.expanduser("~"), ".claude", "local-agents")
+        d = os.path.join(os.path.expanduser("~"), ".claude", "free-agents")
     return d
 
 

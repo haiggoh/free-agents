@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """lowkey — universal local MLX model dispatcher
 
-Dispatch a prompt to any registered local MLX model in your local-agents
+Dispatch a prompt to any registered local MLX model in your free-agents
 stack (vllm-mlx / local-llm-hotswap.sh) from ANY context: terminal, script,
 editor or agent session, Claude Code session, or CI pipeline. No cloud model
 or API key required for the dispatched work.

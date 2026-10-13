@@ -172,7 +172,7 @@ def ensure_private_directory(path: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Generate blind-trust settings JSON for local-agents launchers",
+        description="Generate blind-trust settings JSON for free-agents launchers",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment: none

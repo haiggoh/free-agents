@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""session_menu_state.py — repo-local preferences for the session picker.
+"""session_menu_state.py — session picker preferences storage.
 
 Stores ONLY confirmed menu choices (effort per lane, NVIDIA rate-limiter settings, the alias each
-lane last STARTED) in config/session-menu.local.json next to the source checkout. No secrets,
-paths or history.
+lane last STARTED) in a user-owned persistent location. No secrets, paths or history.
+
+The config dir is resolved per free-agents-resolve.sh pattern:
+  1. $FREE_AGENTS_CONFIG_DIR environment variable (developer override)
+  2. ~/.claude/free-agents/session-menu/ (default persistent location)
 
 Schema 2 (0.22.0) adds `last_launched`. A schema-1 file loads unchanged and is migrated only by
 the next confirmed write, which keeps every validated effort and rate-limiter value. A file with
@@ -16,7 +19,7 @@ Safety rules, each covered by tests/test_session_menu_state.py:
     and left byte-for-byte untouched — defaults are used in memory instead;
   * writes take an advisory lock, re-read, change one field, then mkstemp + fchmod 0600 +
     fsync + os.replace in the same directory;
-  * an installed plugin-cache copy is never written, and there is no second fallback store.
+  * config dir is user-owned and persistent across plugin version updates.
 
 CLI (used by the Bash entry points; read-only unless you call `set`):
   session_menu_state.py get <lane>            print the saved-or-default effort
@@ -85,7 +88,16 @@ DEFAULT_INTERCEPT_AGENTS = "1"
 # A launcher alias: what csl / remote-session.sh / lowkey accept as a model name.
 _ALIAS_RE = __import__("re").compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}")
 
-REPO_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+# Resolve the session menu config directory for this installation.
+# Priority: environment variable > plugin cache location > source checkout.
+# The config dir uses a user-owned persistent location so state survives plugin updates.
+_FREE_AGENTS_CONFIG_DIR_ENV = os.environ.get("FREE_AGENTS_CONFIG_DIR")
+if _FREE_AGENTS_CONFIG_DIR_ENV:
+    REPO_CONFIG_DIR = Path(_FREE_AGENTS_CONFIG_DIR_ENV)
+else:
+    # Default to user-owned location for persistent state across plugin versions
+    # Using "free-agents" directory name since the plugin is now named free-agents
+    REPO_CONFIG_DIR = Path.home() / ".claude" / "free-agents" / "session-menu"
 
 
 @dataclass
@@ -143,11 +155,10 @@ def _validate_temperature(lane: str, value) -> None:
 
 
 def _unsafe_dir(config_dir: Path) -> str | None:
+    # Check if trying to write to an installed plugin cache copy (bad)
     real = Path(os.path.realpath(config_dir))
     if "/.claude/plugins/cache/" in str(real) + "/":
         return "preferences are not stored in an installed plugin copy"
-    if not real.is_dir():
-        return "config directory is missing"
     return None
 
 
@@ -235,8 +246,69 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
     return state
 
 
+def migrate_old_config() -> bool:
+    """Migrate session-menu.local.json from old location to new persistent location.
+
+    The old location was: ~/.claude/plugins/cache/haiggoh/free-agents/<version>/config/
+    The new location is: ~/.claude/free-agents/session-menu/
+
+    Returns True if migration happened, False otherwise.
+    This function is called once on first load of the new code.
+    """
+    old_config = Path.home() / ".claude" / "plugins" / "cache" / "haiggoh" / "free-agents"
+    if not old_config.is_dir():
+        return False
+
+    old_file = None
+    for version_dir in sorted(old_config.iterdir(), key=lambda p: p.name):
+        if version_dir.is_dir():
+            candidate = version_dir / "config" / PREFS_NAME
+            if candidate.is_file() and not candidate.is_symlink():
+                old_file = candidate
+                break
+
+    if old_file is None:
+        return False
+
+    new_config_dir = REPO_CONFIG_DIR
+    new_file = new_config_dir / PREFS_NAME
+
+    if new_file.exists():
+        return False
+
+    try:
+        content = old_file.read_text()
+        doc = json.loads(content)
+
+        if doc.get("schema_version") not in READABLE_SCHEMAS:
+            return False
+
+        new_config_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(new_file, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, sort_keys=True)
+            f.write("\n")
+
+        os.chmod(new_file, 0o600)
+
+        try:
+            old_file.unlink()
+        except OSError:
+            pass
+
+        return True
+    except (ValueError, OSError, json.JSONDecodeError):
+        return False
+
+
+# Run migration on module load (result used for any future logging if needed)
+migrate_old_config()
+
+
 @contextmanager
 def _locked(config_dir: Path):
+    # Ensure the config directory exists before creating the lock file
+    config_dir.mkdir(parents=True, exist_ok=True)
     lock_path = config_dir / LOCK_NAME
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:

@@ -54,7 +54,7 @@ here, so they now outlive the menu. Precedence: explicit argument > LA_NVIDIA_* 
 variable > saved picker setting > built-in default.
 
 Environment:
-  LA_NVIDIA_THROTTLE_STATE    state file (default ~/.claude/local-agents/.nvidia_throttle_state)
+  LA_NVIDIA_THROTTLE_STATE    state file (default ~/.claude/free-agents/.nvidia_throttle_state)
   LA_NVIDIA_RPM               requests allowed per minute (default 40)
   LA_NVIDIA_MODE              "sliding_window" (default) or "smooth_bucket"
   LA_NVIDIA_BUCKET_CAPACITY   burst capacity for smooth_bucket mode (default 6)
@@ -63,7 +63,7 @@ Environment:
   LA_NVIDIA_429_MAX_COOLDOWN  max cooldown seconds (cap for exponential backoff, default 300)
   LA_NVIDIA_429_BACKOFF_MULTIPLIER  exponential backoff multiplier (default 2.0)
   LA_NVIDIA_429_MAX_RETRIES   max retry attempts before giving up (default 5)
-  LA_SESSION_MENU_CONFIG_DIR  where the saved picker settings live (default: this repo's config/)
+  LA_SESSION_MENU_CONFIG_DIR  where the saved picker settings live (default: ~/.claude/free-agents/session-menu/)
 
 Exit codes: 0 ok; 2 usage error; 3 timed out waiting for a slot.
 """
@@ -78,7 +78,7 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_STATE = Path.home() / ".claude" / "local-agents" / ".nvidia_throttle_state"
+DEFAULT_STATE = Path.home() / ".claude" / "free-agents" / ".nvidia_throttle_state"
 WINDOW_SECONDS = 60.0
 DEFAULT_BUCKET_CAPACITY = 6  # Small capacity for smooth limiting
 
