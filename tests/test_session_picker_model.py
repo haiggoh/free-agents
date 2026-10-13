@@ -212,8 +212,17 @@ class GroupingTests(unittest.TestCase):
     def test_family_classifier(self):
         cases = {"codestral-25": "Mistral", "devstral-2-123b": "Mistral",
                  "mistral-small-4": "Mistral", "qwen-3.8-operator": "Qwen",
-                 "deepseek-r1-architect": "DeepSeek", "gemma-4-26b": "Gemma",
+                 "deepseek-r1-architect": "DeepSeek", "gemma-4-26b": "Google Gemma",
                  "mystery-model": "Other", "ornith-1.5-35b": "Ornith", "llama-4-scout": "Llama"}
+        for alias, family in cases.items():
+            with self.subTest(alias=alias):
+                self.assertEqual(m.family_for(alias), family)
+
+    def test_family_renames_and_new_families(self):
+        cases = {"kimi-vl-thinking": "Moonshot Kimi", "kimi-k3": "Moonshot Kimi",
+                 "nemotron-550b": "Nvidia", "minitron-8b": "Nvidia",
+                 "agentworld-35b": "Nvidia", "kat-coder-optiq": "Kat Coder",
+                 "muse-glimmer-30b": "Meta", "granite-4.2-30b": "Granite"}
         for alias, family in cases.items():
             with self.subTest(alias=alias):
                 self.assertEqual(m.family_for(alias), family)
@@ -224,6 +233,26 @@ class GroupingTests(unittest.TestCase):
 
     def test_explicit_family_overrides_classifier(self):
         self.assertEqual(m.family_for("mystery-model", explicit="Acme"), "Acme")
+
+    def test_self_named_and_auto_family_derive(self):
+        """`csl --inventory` emits the DISPLAY name as the family of its auto-scanned
+        rows (separator variants of the alias), and registered profiles can carry the
+        literal "auto" — neither carries grouping information, so both derive from the
+        alias instead of fragmenting into one-model groups."""
+        self.assertEqual(m.family_for("Muse-Glimmer-30B-4bit",
+                                      explicit="Muse-Glimmer-30B-4bit"), "Meta")
+        self.assertEqual(m.family_for("Qwen3-8-27B-MTP-4bit",
+                                      explicit="Qwen3.8-27B-MTP-4bit"), "Qwen")
+        self.assertEqual(m.family_for("granite-4-2-3b-MLX-4bit",
+                                      explicit="granite-4.2-3b-MLX-4bit"), "Granite")
+        self.assertEqual(m.family_for("kat-v2-5-6bit-xl",
+                                      explicit="kat-v2.5-6bit-xl"), "Kat Coder")
+        self.assertEqual(m.family_for("kimi-vl-thinking", explicit="auto"), "Moonshot Kimi")
+
+    def test_qwen_agentworld_is_nvidia_not_qwen(self):
+        # Identity (agentworld, an Nvidia line) wins over the Qwen base architecture,
+        # which is why the Nvidia rule sits above Qwen.
+        self.assertEqual(m.family_for("qwen-agentworld-4bit"), "Nvidia")
 
     def test_remote_groups_by_provider_after_filters_with_counts(self):
         s = m.Settings()

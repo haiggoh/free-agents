@@ -110,20 +110,39 @@ class RemoteAgent:
 _FAMILY_RULES = [
     ("DeepSeek", r"deepseek"),
     ("Mistral", r"mistral|codestral|devstral|magistral|ministral|mixtral"),
+    # Nvidia BEFORE Qwen: "qwen-agentworld-4bit" is an agentworld (Nvidia) model on a
+    # Qwen base — identity wins over architecture, same principle as DeepSeek distills.
+    ("Nvidia", r"nemotron|minitron|agentworld"),
     ("Qwen", r"qwen|qwq"),
-    ("Gemma", r"gemma"),
+    ("Google Gemma", r"gemma"),
     ("Llama", r"llama"),
     ("GLM", r"glm"),
-    ("Kimi", r"kimi"),
+    ("Moonshot Kimi", r"kimi"),
     ("Phi", r"\bphi"),
-    ("Nemotron", r"nemotron|minitron"),
     ("gpt-oss", r"gpt-oss"),
     ("Ornith", r"ornith"),
+    ("Kat Coder", r"kat[-_ ]|\bkat\b"),
+    ("Meta", r"muse|glimmer"),
+    ("Granite", r"granite"),
 ]
 
 
+def _norm_token(s: str) -> str:
+    """Lowercase alphanumerics only — the inventory's auto-scanned rows carry the
+    DISPLAY name as their family (`granite-4.2-3b-MLX-4bit`) while the alias is the
+    sanitized id (`granite-4-2-3b-MLX-4bit`); separator-identical strings are the
+    same name, not grouping information."""
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
 def family_for(alias: str, explicit: str = "") -> str:
-    if explicit:
+    # An explicit family that names the model itself is what `csl --inventory` emits
+    # for its auto-scanned rows — it carries no grouping information, and honoring it
+    # fragmented every rapid-discovered model into a one-model group (measured on the
+    # live inventory 2026-10-13: "Qwen3.8-27B-MTP-4bit", "kat-v2.5-*", the Gemma and
+    # Muse rows). "auto" is the same story from the registered profiles. All of them
+    # mean "derive from the alias" (0.34.0).
+    if explicit and explicit != "auto" and _norm_token(explicit) != _norm_token(alias):
         return explicit
     name = alias.lower()
     for family, pattern in _FAMILY_RULES:
