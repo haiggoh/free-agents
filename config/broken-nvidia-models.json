@@ -8,7 +8,7 @@
       "reason": "TIMEOUT on all configurations (180s) — NVIDIA API capacity/availability issue. Model listed in catalog but backend does not respond. Same catalog metadata (no pricing/tier) as working Nemotron models. NOT a paid-tier restriction.",
       "status": "broken",
       "failure_mode": "timeout",
-      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10 and 2026-10-13 (session test timeout)."
+      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10 and 2026-10-13; re-confirmed 2026-10-13 with the fixed probe (max_tokens 512): read timeout at 90s."
     },
     {
       "model_id": "moonshotai/kimi-k2.6",
@@ -24,7 +24,7 @@
       "reason": "TIMEOUT on all configurations (180s) — NVIDIA API capacity/availability issue. Model listed in catalog but backend does not respond. Old v4-flash-0731 is 410 Gone. NOT a paid-tier restriction.",
       "status": "broken",
       "failure_mode": "timeout",
-      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10 and 2026-10-13 (session test timeout)."
+      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10 and 2026-10-13; re-confirmed 2026-10-13 with the fixed probe (max_tokens 512): read timeout at 90s."
     },
     {
       "model_id": "deepseek-ai/deepseek-coder-6.7b-instruct",
@@ -37,26 +37,10 @@
     {
       "model_id": "openai/gpt-oss-20b",
       "alias": "nvidia-gptoss",
-      "reason": "HTTP 200 but empty completion — returns no content on direct API probes. Full session test also timed out. Not reliably usable.",
-      "status": "broken",
-      "failure_mode": "empty_response",
-      "evidence": "3/5 probes returned empty content (2026-10-11). Session test 2026-10-13 timed out without response."
-    },
-    {
-      "model_id": "google/gemma-4-31b-it",
-      "alias": "nvidia-gemma4",
-      "reason": "TIMEOUT on all configurations (180s) — NVIDIA API capacity/availability issue.",
+      "reason": "Connection-level timeouts — the deployment is unresponsive for generation. The 2026-10-11 'empty completion' verdicts were partly the probe's max_tokens=24 artifact (see docs/nvidia-nim-serving-notes.md); with a 512 budget the route now times out at connect instead, so the deployment itself is degraded, not the probe.",
       "status": "broken",
       "failure_mode": "timeout",
-      "evidence": "HTTP 200 on health checks, generation requests hang until timeout. Confirmed 2026-10-11."
-    },
-    {
-      "model_id": "meta/muse-glimmer-30b",
-      "alias": "nvidia-muse-glimmer",
-      "reason": "HTTP 200 but empty completion + HTTP 500 errors — inconsistent backend.",
-      "status": "broken",
-      "failure_mode": "empty_response",
-      "evidence": "2/5 probes empty, 1/5 HTTP 500. Confirmed 2026-10-11."
+      "evidence": "2026-10-11: 3/5 probes empty at max_tokens 24; session test timed out. 2026-10-13 re-audit with fixed probe: URLError Errno 60 operation timed out."
     },
     {
       "model_id": "nvidia/nemotron-nano-3-30b-a3b",
