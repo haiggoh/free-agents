@@ -39,7 +39,7 @@ class APIKeysDesignTests(unittest.TestCase):
         actual_order = [g.id for g in api_keys.groups() if g.id != "__sep__"]
         self.assertEqual(actual_order, EXPECTED_PROVIDER_ORDER)
 
-    def test_accordion_structure_14_providers_each_with_2_items(self):
+    def test_accordion_has_every_wizard_provider_each_with_2_items(self):
         """Each provider is an accordion group with exactly 2 items (open, add)."""
         api_keys = m.APIKeysScreen(self.settings)
         errors = validate_accordion_structure(api_keys)

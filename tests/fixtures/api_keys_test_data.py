@@ -94,11 +94,22 @@ ACCORDION_FIXTURES = {
 
 
 # Provider ordering: NVIDIA first, then Google, then Groq, then alphabetical
-EXPECTED_PROVIDER_ORDER = [
-    "nvidia", "gemini", "groq", "cerebras", "cloudflare", "kilo",
-    "llm7", "mistral", "modelscope", "openrouter", "sambanova",
-    "siliconflow", "vercel", "zai"
-]
+def _wizard_providers():
+    """(slug, name) pairs from install/setup-api-keys.py — the canonical provider table. Expectations
+    are DERIVED from it, so adding a provider there cannot leave a stale hardcoded list behind (a
+    hand-copied list is exactly how Streamlake went missing from the picker in 0.27.1)."""
+    import importlib.util
+    path = Path(__file__).resolve().parents[2] / "install" / "setup-api-keys.py"
+    spec = importlib.util.spec_from_file_location("setup_api_keys_fixture", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return [(p.slug, p.name) for p in mod.PROVIDERS]
+
+
+_FIRST = ["nvidia", "gemini", "groq"]
+# NVIDIA, Gemini, Groq first; everything else alphabetical by display name.
+EXPECTED_PROVIDER_ORDER = _FIRST + [slug for slug, name in sorted(_wizard_providers(), key=lambda p: p[1].lower())
+                                    if slug not in _FIRST]
 
 
 # Inline prompt fixtures
@@ -228,9 +239,9 @@ def validate_accordion_structure(api_keys_screen) -> List[str]:
     # Filter out the separator group (__sep__ has no items)
     provider_groups = [g for g in groups if g.id != "__sep__"]
 
-    # Check provider count (14 providers + 1 separator = 15 total)
-    if len(provider_groups) != 14:
-        errors.append(f"Expected 14 provider groups, got {len(provider_groups)}")
+    # One group per provider the key wizard knows (the separator is filtered out above).
+    if len(provider_groups) != len(EXPECTED_PROVIDER_ORDER):
+        errors.append(f"Expected {len(EXPECTED_PROVIDER_ORDER)} provider groups, got {len(provider_groups)}")
 
     # Check NVIDIA first
     if provider_groups and provider_groups[0].id != "nvidia":

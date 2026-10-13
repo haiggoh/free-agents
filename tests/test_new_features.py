@@ -256,6 +256,11 @@ class LoadingLine(PTYCase):
     def test_no_loading_flash_on_fast_quit(self):
         self.spawn()
         self.wait_for("Claude Code Free-Agents: Session Launcher")
+        # The FIRST frame legitimately carries the startup hourglass. Wait until that frame is
+        # complete (the action list ends in Quit) before clearing, or a first frame split across
+        # two PTY reads leaves its own hourglass after the clear and reads as a flash (flaked ~1/3).
+        self.wait_for("Quit")
+        self.pump(0.3)
         self.buf = ""
         self.send("q")
         self.assertEqual(self.exit_code(), 0)

@@ -160,23 +160,7 @@ def _mb(backend: str, *args: str) -> list[str]:
     return ["python3", str(REPO / "install/manage-backend.py"), "--backend", backend, *args]
 
 
-# Provider signup URLs from install/setup-api-keys.py
-PROVIDER_SIGNUP_URLS = {
-    "gemini": "https://aistudio.google.com/apikey",
-    "groq": "https://console.groq.com/keys",
-    "openrouter": "https://openrouter.ai/settings/keys",
-    "cloudflare": "https://dash.cloudflare.com/profile/api-tokens",
-    "mistral": "https://console.mistral.ai/home?profile_dialog=api-keys",
-    "zai": "https://z.ai/manage-apikey/apikey-list",
-    "siliconflow": "https://cloud.siliconflow.com/account/ak",
-    "llm7": "https://dash.llm7.io",
-    "kilo": "https://app.kilo.ai",
-    "vercel": "https://vercel.com/d?title=AI+Gateway+API+Keys&to=%2F%5Bteam%5D%2F~%2Fai-gateway%2Fapi-keys",
-    "sambanova": "https://cloud.sambanova.ai/dashboard",
-    "modelscope": "https://modelscope.cn/my/myaccesstoken",
-    "cerebras": "https://cloud.cerebras.ai/platform/",
-    "nvidia": "https://build.nvidia.com/settings/api-keys",
-}
+PROVIDER_SIGNUP_URLS = m.PROVIDER_SIGNUP_URLS   # one table: install/setup-api-keys.py
 
 TOOLS = {
     "tool:keys": lambda: ["python3", str(REPO / "install/setup-api-keys.py")],
