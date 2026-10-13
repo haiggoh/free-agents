@@ -1,3 +1,22 @@
+## [0.31.0] — 2026-10-13
+
+### Fixed
+- **The route probe was blind to thinking models.** `remote-probe-log.py` sent `max_tokens: 24`, smaller
+  than a reasoning model's minimum reasoning spend (GLM uses 32-80 reasoning tokens even on "Reply OK"),
+  so the budget died inside `reasoning_content`, content came back empty, and healthy routes were
+  recorded as broken. Probes now send 512, record `finish_reason`, reasoning length, `reasoning_tokens`
+  and elapsed, and nvidia probes route through the shared machine-wide limiter in `bin/rate_limiter.py`
+  like the live-session proxies do. Regression-tested and mutation-checked in `tests/test_remote_probe_log.py`.
+  Full findings and the re-test recipe: `docs/nvidia-nim-serving-notes.md`.
+- **Re-audit with the fixed probe (2026-10-13):** muse-glimmer and gemma-4 restored — their "empty"/
+  "timeout" verdicts were probe artifacts or transient capacity; gpt-oss, kimi-k3 and deepseek-v4 stay
+  broken with mechanism evidence (connect/read timeouts at a 512 budget).
+- **GLM session configs carried a dead knob.** `enable_thinking` is inert on NIM GLM in every shape
+  (measured 2026-10-13, 4-shape controlled test), so the `-thinking` alias differed from the base only
+  by a kwarg that did nothing. GLM configs now carry no `chat_template_kwargs`; the `-thinking` suffix
+  maps to `reasoning_effort: high`, the base alias to `low` (0 reasoning tokens on NIM), and an
+  explicit `--effort` still wins.
+
 ## [0.30.0] — 2026-10-13
 
 ### Changed
