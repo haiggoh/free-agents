@@ -10,9 +10,12 @@ pure model/constant checks need no UI at all.
 Run: ~/.local/share/free-agents/picker-venv/bin/python -m pytest tests/test_new_features.py
 """
 import os
+import re
 import stat
 import sys
+import time
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from picker_harness import ROOT, PilotCase, PTYCase  # noqa: E402
@@ -256,15 +259,45 @@ class LoadingLine(PTYCase):
     def test_no_loading_flash_on_fast_quit(self):
         self.spawn()
         self.wait_for("Claude Code Free-Agents: Session Launcher")
-        # The FIRST frame legitimately carries the startup hourglass. Wait until that frame is
-        # complete (the action list ends in Quit) before clearing, or a first frame split across
-        # two PTY reads leaves its own hourglass after the clear and reads as a flash (flaked ~1/3).
+        # The startup label legitimately animates until the background prefetch lands. Wait for
+        # it to go quiet (half a second with no hourglass written), THEN check quitting adds none.
+        # Waiting for the title alone flaked ~1/7: the rest of the first frame still carried it.
         self.wait_for("Quit")
-        self.pump(0.3)
+        for _ in range(20):
+            self.buf = ""
+            self.pump(0.5)
+            if "⏳" not in self.screen() and "⌛" not in self.screen():
+                break
         self.buf = ""
         self.send("q")
         self.assertEqual(self.exit_code(), 0)
         self.assertNotIn("⏳", self.screen())
+
+
+class StartupLoadingAnimates(PTYCase):
+    """The subtitle's startup label used to be drawn once and never updated, so it looked frozen."""
+
+    def test_startup_label_animates_until_prefetch_lands(self):
+        stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
+        slow = stub.with_name("slow-remote.sh")
+        slow.write_text(f'#!/bin/sh\nsleep 3\nexec "{stub}" "$@"\n')
+        slow.chmod(0o755)
+        self.env["CSL_REMOTE_LAUNCHER"] = str(slow)
+        self.spawn()
+        self.wait_for("Claude Code Free-Agents: Session Launcher")
+        self.pump(2.0)
+        frames = set(re.findall(r"free cloud APIs\s+(⏳|⌛️?) loading(\.+)", self.screen()))
+        self.assertEqual({g[:1] for g, _ in frames}, {"⏳", "⌛"}, f"hourglass must flip: {frames}")
+        self.assertGreaterEqual(len({d for _, d in frames}), 2, f"dots must step: {frames}")
+        deadline = time.time() + 10           # then it goes away once the slow load lands
+        while time.time() < deadline:
+            self.buf = ""
+            self.pump(0.6)
+            if "loading" not in self.screen():
+                break
+        self.assertNotIn("loading", self.screen(), "label must clear after the prefetch")
+        self.send("q")
+        self.assertEqual(self.exit_code(), 0)
 
 
 class EmojiConstants(unittest.TestCase):

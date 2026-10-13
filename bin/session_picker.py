@@ -415,6 +415,10 @@ class Picker(App):
 
     def _loaded(self, kind, data, err):
         self._loading.discard(kind)
+        if not self._loading & self.STARTUP_KINDS:
+            self._startup_loading = False     # startup prefetch done: drop the label even if no re-render follows
+            if self.screen_model is not None:
+                self.query_one("#policy", Static).update(getattr(self.screen_model, "policy", ""))
         self.cache[kind] = data
         if err and err not in self.state_warnings:
             self.state_warnings.append(err)
@@ -437,8 +441,24 @@ class Picker(App):
         if not getattr(self, "pending_prompt", None):
             self._rerender_keep_focus()
 
+    STARTUP_KINDS = {"local", "remote"}
+
+    def _startup_pending(self):
+        """True while the startup prefetch is still running (drives the subtitle's loading label)."""
+        if not self._startup_loading:
+            return False
+        loading = getattr(self, "_loading", None)
+        return loading is None or bool(loading & self.STARTUP_KINDS)   # None: prefetch not started yet
+
+    def _startup_policy(self):
+        return getattr(self.screen_model, "policy", "") + "  " + loading_label(self._loading_frame)
+
     def _startup_tick(self):
-        return False
+        """Animate the subtitle's startup label: hourglass flips and dots step, like the status line."""
+        if not self._startup_pending():
+            return False
+        self.query_one("#policy", Static).update(self._startup_policy())
+        return True
 
     def _waiting_for(self):
         """The inventory the visible screen is waiting on, if any (drives the loading line)."""
@@ -453,11 +473,12 @@ class Picker(App):
         return None
 
     def _tick_loading(self):
-        if self._waiting_for():
-            self._loading_frame += 1
+        waiting = self._waiting_for()
+        if waiting or self._startup_pending():
+            self._loading_frame += 1          # one shared beat, so the two labels stay in step
+        if waiting:
             self.query_one("#status", Static).update("  " + loading_label(self._loading_frame, "loading models"))
-        elif self._startup_tick():
-            pass
+        self._startup_tick()                  # independent of the status line: both can be animating
 
     def _rerender_keep_focus(self):
         actions_list = self.query_one("#actions", OptionList)
@@ -542,11 +563,9 @@ class Picker(App):
     def render_model(self, keep: str | None = None):
         sm = self.screen_model
         self.query_one("#title", Static).update(Text(sm.title, style="bold"))
-        policy = getattr(sm, "policy", "")
-        # Show loading text - immediately on startup, after delay for lazy operations
-        if self._startup_loading:
-            policy += "  " + loading_label(self._loading_frame)
-            self._startup_loading = False  # Only show immediate loading on first render
+        # Startup: the label shows at once and animates (_startup_tick) until the prefetch lands.
+        # It used to be drawn on the first render only and never updated, so it looked frozen.
+        policy = self._startup_policy() if self._startup_pending() else getattr(sm, "policy", "")
         self.query_one("#policy", Static).update(policy)
         rows = self.query_one("#rows", OptionList)
         rows.clear_options()
