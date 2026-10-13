@@ -1,3 +1,12 @@
+## [0.32.3] — 2026-10-14
+
+### Changed — ModelScope removed from the API-key setup flow
+
+`setup-api-keys.py` no longer offers ModelScope as a provider (user decision 2026-10-14).
+Existing ModelScope keys keep working: the routing table, roster, and picker are untouched —
+only the interactive key-setup flow stops offering it. New users pick from the remaining
+providers; a ModelScope key can still be added by hand if ever needed.
+
 ## [0.32.2] — 2026-10-14
 
 ### Fixed

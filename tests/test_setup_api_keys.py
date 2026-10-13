@@ -125,7 +125,6 @@ class SetupTests(unittest.TestCase):
             self.assertNotIn("groq", missing)
             self.assertNotIn("github", missing)
             self.assertNotIn("cerebras", missing)
-            self.assertNotIn("modelscope", missing)
             with self.assertRaises(setup.StoreError):
                 setup.select("1,invalid", store)
 
