@@ -1,3 +1,10 @@
+## [0.32.1] — 2026-10-14
+
+### Changed
+- **Session preferences now persist across plugin updates.** Session menu config is stored in
+  `~/.claude/free-agents/session-menu/` instead of the version-specific plugin cache directory.
+  Added `bin/free-agents-resolve.sh` helper for finding the plugin root at runtime.
+
 ## [0.32.0] — 2026-10-13
 
 ### Changed
