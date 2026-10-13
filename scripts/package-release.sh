@@ -49,7 +49,7 @@ if [[ -n "$leaked" ]]; then
 fi
 
 # Copy essential root files
-for file in README.md CHANGELOG.md VERSION config.example.sh config.local.sh.example PLUGIN-INSTALLER-README.md RELEASE.md; do
+for file in README.md CHANGELOG.md VERSION config.example.sh config.local.sh.example PLUGIN-INSTALLER-README.md RELEASE.md ruff.toml; do
     if [[ -f "$REPO_ROOT/$file" ]]; then
         cp "$REPO_ROOT/$file" "$PLUGIN_DIR/"
     fi
@@ -212,6 +212,11 @@ echo "     $TARGET_DIR/bin/csl"
 INSTALL_EOF
 
 chmod +x "$PLUGIN_DIR/install-plugin.sh"
+
+# Standalone installer asset — RELEASE.md step 6 uploads it alongside the tarball.
+# Version-agnostic, so the same file serves every release; re-emit each time so the
+# releases/latest/download/install-free-agents.sh URL keeps resolving.
+cp -p "$REPO_ROOT/scripts/install-free-agents.sh" "$DIST_DIR/install-free-agents.sh"
 
 # Create tarball
 cd "$DIST_DIR"
