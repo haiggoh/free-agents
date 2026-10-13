@@ -21,8 +21,13 @@
    - Stage 2 fixture: `max_tokens=8192`, single message (capture separately)
 
 3. **Candidate model** downloaded and registered
-   - Current leading candidate: **Devstral Small 2 24B** (`devstral-small2`)
-   - Registration: `serve=rapid`, `tool_parser=mistral`, `thinking=false`
+   - Current leading candidate (2026-10-13 campaign, qualified on the 0.15.3 pin):
+     **granite-4.2-30b** — `DIRECT_PASS`, 99.065% changed-prefix reuse. Devstral Small 2
+     24B's earlier qualification is void on 0.15.3 (engine change #3836; see
+     `docs/classifier-campaign-2026-10-13.md` for the full campaign, the engine findings,
+     and the fallback tier).
+   - Registration: `serve=mlx`, `tool_parser=qwen` (the classifier serve block overrides
+     parsers/thinking for every candidate uniformly)
 
 ---
 
