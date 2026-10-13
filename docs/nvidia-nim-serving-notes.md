@@ -28,8 +28,8 @@ confound section).
 - **`reasoning_effort` (API-layer field) IS honored**: `"low"` → 0 reasoning tokens,
   content immediate; `"high"` (the session generator's current default) → reasoning
   volume that dominates session turn time on complex turns.
-- **Session math**: turn ≈ door charge (~1 min, fixed) + prefill of an uncached
-  ~100k-token context (rate unmeasured) + reasoning and output at ~15–40 tok/s.
+- **Session math**: turn ≈ door charge (~1 min, fixed) + prefill (near-zero marginal,
+  measured to ~76k) + reasoning and output at ~15–40 tok/s.
   No configuration makes this deployment sub-minute. Use it for deliberate deep work;
   see the roster notes in `config/remote-agents.sh` for the fast alternatives.
 
@@ -58,10 +58,10 @@ Consequences for `config/broken-nvidia-models.json` (re-audit pending):
 - 404 "not provisioned for account" verdicts (kimi-k26, nano3, nemotron4, minitron)
   are unaffected by this confound.
 
-Probe tool needs (pending fix): `max_tokens >= 512` for reasoning models; record
-`finish_reason`, reasoning length, and elapsed; route through the shared rate
-limiter in `bin/rate_limiter.py` (it currently self-paces *outside* the machine-wide
-bucket — uncounted calls make the shared ledger lie to every co-resident process).
+Probe tool — fixed in 0.31.0: `max_tokens` 512, records `finish_reason`, reasoning
+length and elapsed, and nvidia probes route through the shared rate limiter in
+`bin/rate_limiter.py` (uncounted calls make the shared ledger lie to every
+co-resident process).
 
 ## Working set (measured)
 
@@ -70,11 +70,25 @@ bucket — uncounted calls make the shared ledger lie to every co-resident proce
 - **laguna**: capacity-constrained, NOT fast-lane — ~half of probes 503
   ("worker local total request limit reached 66/32").
 
-## Caching
+## Caching and prefill at session scale (measured 2026-10-13, n=1 per condition)
 
-`cached_tokens: 0` on repeated identical 19-token prompts (2026-10-13). Session-scale
-prefill rate and prefix caching at ~100k tokens: **unmeasured** — the remaining
-unknown in the 5-minute-turn decomposition.
+Two identical ~76k-token streaming requests to z-ai/glm-5.3:
+
+- Run 1 (cold): first chunk at 73.5s, total 88.3s, `cached_tokens: 0`.
+- Run 2 (repeat): first chunk at **251s**, total 253.1s, `cached_tokens: 76,416/76,435`
+  (99.97% — a genuine cache hit).
+
+Findings, each n=1: **(1) prefill at session scale is cheap** — the 76k-token cold
+request's first chunk arrived within door-charge variance of a 19-token request
+(~5-10s marginal), so prefill is not a meaningful session cost on this deployment.
+**(2) Prefix caching exists but did not help**: a 99.97% hit was 3.4x SLOWER to first
+chunk than the cold run. Plausible mechanisms: KV offloaded to slower storage where
+re-hydration outcosts fresh prefill at datacenter speeds, or queue variance. Either
+way `cached_tokens` is a mechanism readout, not a speedup guarantee.
+
+Final session-turn decomposition: ~60-75s door charge + near-zero marginal prefill
+(measured to ~76k) + reasoning/output volume at ~15-40 tok/s. The only real speed
+lever is `reasoning_effort`.
 
 ## Re-test recipe (stay inside the shared 40 RPM budget)
 
