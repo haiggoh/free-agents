@@ -1,3 +1,26 @@
+## [0.30.1] — 2026-10-13
+
+### Fixed
+- **The startup loading indicator in the session picker now animates.** The `⏳ loading.` next to
+  the subtitle was drawn once and never updated, so it looked frozen (the user had seen this since
+  it was added). It now runs on the same 0.4 s beat as the status-line indicator: the dots step
+  `.` `..` `...` on every beat and the hourglass flips every two beats, so the dots still show
+  motion even though the two hourglass glyphs look almost the same at terminal size. It goes away
+  once the startup model lists have loaded.
+- **The remote model list shows only providers you have a key for.** A model whose provider has
+  no saved key can't launch, so it's no longer listed with a "no key" tag. With no key at all, the
+  list shows one row, "Press K (API keys) to set one up", and pressing Enter opens API key setup.
+- **The API Keys screen lists every provider the key wizard knows**, including Streamlake, which
+  had been missing since 0.27.1. The picker used to keep two hand-copied provider tables; both now
+  come from `install/setup-api-keys.py`.
+
+### Tests
+- New PTY test `test_startup_label_animates_until_prefetch_lands`: it fails on the old code (one
+  frame only) and passes on the new code. New `tests/test_remote_key_gating.py` (7 tests): removing
+  the key check makes 3 of them fail.
+- `test_no_loading_flash_on_fast_quit` is no longer flaky: it waits for the startup label to stop
+  changing before it checks. Measured: 6 failures in 40 runs before, 0 in 15 after.
+
 ## [0.30.0] — 2026-10-13
 
 ### Changed
