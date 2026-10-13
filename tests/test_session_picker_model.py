@@ -362,7 +362,7 @@ class GroupingTests(unittest.TestCase):
         lane = m.RemoteScreen(s, remote_agents(), owner=m.HOME_OWNED)
         acts = {a.key: a for a in lane.actions()}
         # Main screen settings rows
-        for key in ("a", "t", "p", "m", "e", "o"):
+        for key in ("a", "t", "p", "d", "m", "e", "o"):
             self.assertIsNotNone(acts[key].step, f"{key} must be a settings row")
         self.assertNotIn("v", acts, "the Remote lane does not offer the (local) backend manager")
         # Navigation keys (c, s, k, n, b, y) - x is in filter submenu
@@ -374,6 +374,8 @@ class GroupingTests(unittest.TestCase):
         acts["e"].step(+1); self.assertNotEqual(s.remote_effort, start)
         acts["e"].step(-1); self.assertEqual(s.remote_effort, start)
         acts["t"].step(-1); self.assertTrue(s.telemetry, "a boolean flips either way")
+        acts["d"].step(+1); self.assertTrue(s.deny_gh_release, "blind-trust gh-release deny toggles on")
+        acts["d"].step(-1); self.assertFalse(s.deny_gh_release, "and back off")
 
     def test_defaults_and_icons_requested_2026_10_04(self):
         s = m.Settings()

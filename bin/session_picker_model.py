@@ -428,7 +428,9 @@ def _common_toggles(s: Settings, include_watcher: bool):
         setting("t", f"{ec.EMOJI_TELEMETRY_ON_STR} Telemetry: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry")),
         setting("p", f"{ec.EMOJI_STOP_HOOK_STR} Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
                 *_toggle(s, "stop_hook")),
-        setting("g", f"Deny 'gh release create' in blind-trust: {'ON' if s.deny_gh_release else 'OFF'}",
+        # Key 'd': 'g' is the dynamic Go-launch key and 'h' belongs to the remote filter
+        # submenu (FilterSubmenuTests) — keep this row off both.
+        setting("d", f"Deny 'gh release create' in blind-trust: {'ON' if s.deny_gh_release else 'OFF'}",
                 *_toggle(s, "deny_gh_release")),
     ]
     if include_watcher:
