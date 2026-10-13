@@ -97,8 +97,8 @@ def main():
         print(f"  stream test error: {type(e).__name__}: {e}")
     fu, st = trivial_latency(port)
     print(f"  -> follow-up latency: {fu:.2f}s ({st})")
-    print(f"     interpretation: ~baseline = disconnect retired the work; "
-          f"much larger = orphaned generation still running\n")
+    print("     interpretation: ~baseline = disconnect retired the work; "
+          "much larger = orphaned generation still running\n")
 
     print("VERDICT GUIDE (Part 2 §6.4 admission gate):")
     print("  follow-ups ~= baseline  -> cancellation/timeout retires MLX work; `wait` admission is safe")

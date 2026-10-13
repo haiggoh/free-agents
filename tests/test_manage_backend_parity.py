@@ -143,7 +143,7 @@ def test_dispatch_calls():
                 print(f"FAIL: {cmd} did not call {func_name}")
                 return False
 
-    print(f"PASS: All subcommands dispatch correctly")
+    print("PASS: All subcommands dispatch correctly")
     return True
 
 

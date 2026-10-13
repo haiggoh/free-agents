@@ -248,7 +248,8 @@ class GroupingTests(unittest.TestCase):
         agents = remote_agents() + [m.RemoteAgent("nvidia-dead", "nvidia", "NVIDIA dead", "unknown",
                                                   broken=True)]
         lane = m.RemoteScreen(m.Settings(), agents, owner=m.DIRECT_ROOT)
-        ids = lambda: {i.id for g in lane.groups() for i in g.items}
+        def ids():
+            return {i.id for g in lane.groups() for i in g.items}
         self.assertNotIn("nvidia-dead", ids())
         # Navigate to filter submenu and toggle show_broken
         filter_obj = m.RemoteFiltersScreen(lane.settings, owner=m.DIRECT_ROOT)

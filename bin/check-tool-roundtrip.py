@@ -104,7 +104,7 @@ def main():
     print(f"[{ok(c3)}] final assistant answer after result" + (f" (rec {final_answer_idx})" if c3 else ""))
     print(f"[{ok(c4)}] no reasoning/markup leakage")
     if leaks:
-        for l in leaks[:8]: print(f"        leak: {l}")
+        for leak in leaks[:8]: print(f"        leak: {leak}")
     print(f"[{ok(c5)}] history.jsonl fresh (<60 min) — native persistence")
 
     passed = all([c1, c2, c3, c4])

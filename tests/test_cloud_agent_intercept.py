@@ -57,10 +57,10 @@ class Hook(unittest.TestCase):
         reason = out["permissionDecisionReason"]
         # Execute the exact command lines the model is told to run (the heredoc block).
         lines = reason.splitlines()
-        start = next(i for i, l in enumerate(lines) if "free-agent-tool.py" in l)
+        start = next(i for i, ln in enumerate(lines) if "free-agent-tool.py" in ln)
         delim = lines[start].rsplit("<<'", 1)[1].rstrip("'")
         end = lines.index(delim, start + 1)
-        cmd = "\n".join(l.strip() if i == 0 else l for i, l in enumerate(lines[start:end + 1]))
+        cmd = "\n".join(ln.strip() if i == 0 else ln for i, ln in enumerate(lines[start:end + 1]))
         subprocess.run(["bash", "-c", cmd], check=True, timeout=10)
         sent = json.loads(self.got.read_text())
         self.assertEqual(sent["prompt"], self.AGENT["tool_input"]["prompt"], "prompt passed verbatim")

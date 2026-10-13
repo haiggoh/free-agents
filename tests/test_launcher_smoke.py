@@ -418,7 +418,7 @@ exit 99
         """
         # Create a session ID and effort file
         import time
-        session_id = f"20260924-120000-12345-abcdef"
+        session_id = "20260924-120000-12345-abcdef"
         effort_file = f"/tmp/claude-effort-{session_id}"
         Path(effort_file).write_text('xhigh')
 
@@ -445,7 +445,7 @@ exit 99
     def test_resolver_falls_back_to_env_when_no_session_file(self):
         """Test that resolver falls back to LA_CUR_EFFORT when no session file exists."""
         # Use a session ID that has no effort file
-        session_id = f"20260924-120000-12345-nonexistent"
+        session_id = "20260924-120000-12345-nonexistent"
         env = dict(self.env, LA_SESSION_ID=session_id, LA_CUR_EFFORT='high')
 
         result = subprocess.run(
@@ -459,7 +459,7 @@ exit 99
 
     def test_resolver_defaults_to_valid_effort_when_no_source(self):
         """Test that resolver defaults to a valid effort value when no session file and no env."""
-        session_id = f"20260924-120000-12345-nodefault"
+        session_id = "20260924-120000-12345-nodefault"
         env = dict(self.env, LA_SESSION_ID=session_id)
         # No LA_CUR_EFFORT set
 

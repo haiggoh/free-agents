@@ -43,7 +43,7 @@ def test_spinner_enabled_when_tty():
 
     # Should produce some output (the spinner frames and clearing)
     output = fake_stderr.getvalue()
-    assert len(output) > 0, f"Expected output when TTY, got empty"
+    assert len(output) > 0, "Expected output when TTY, got empty"
     # Should contain the clear sequence
     assert "\r" in output, "Expected carriage return for spinner animation"
     print("PASS: Spinner produces output when stderr is a TTY")
@@ -75,7 +75,7 @@ def test_spinner_explicit_enabled():
             pass
 
     output = fake_stderr.getvalue()
-    assert len(output) > 0, f"Expected output when explicitly enabled"
+    assert len(output) > 0, "Expected output when explicitly enabled"
     print("PASS: Explicit enabled=True enables spinner on non-TTY")
     return True
 

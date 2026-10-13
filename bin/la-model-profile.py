@@ -98,7 +98,7 @@ def get_catalog_artifacts() -> set:
         for line in result.stdout.strip().split('\n'):
             if line.strip():
                 artifacts.add(line.strip())
-    except:
+    except Exception:
         pass
     return artifacts
 

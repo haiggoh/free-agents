@@ -44,7 +44,7 @@ class StrayPDriver(unittest.TestCase):
         r = subprocess.run([str(VENV_PY), "-c", PROBE, str(ROOT / "bin")], env=env,
                            text=True, capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 0, r.stderr)
-        lines = dict(l.split(" ", 1) for l in r.stdout.splitlines() if " " in l)
+        lines = dict(line.split(" ", 1) for line in r.stdout.splitlines() if " " in line)
         return lines["DRIVER"], lines["BYTES"]
 
     def test_apple_terminal_instance_gets_the_safe_driver_and_emits_no_decrqm(self):

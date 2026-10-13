@@ -1002,7 +1002,8 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
                                text=True, capture_output=True, timeout=60)
             return r.stdout + r.stderr  # the menu renders on stderr
         row = r'\d+\) Broken One\b'
-        last = lambda out: out.split('Remote cloud-API agents')[-1]
+        def last(out):
+            return out.split('Remote cloud-API agents')[-1]
         first = menu('q\n')
         self.assertNotRegex(first, row)
         self.assertIn('u) 🚧 Unworking: HIDDEN', first)
