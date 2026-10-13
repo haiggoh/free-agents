@@ -12,6 +12,10 @@
   The package also ships `ruff.toml`, so installed copies keep policy-aligned hook findings.
 - **RELEASE.md extraction commands run on macOS/BSD** — `sed '$d'` replaces GNU-only `head -n -1`,
   which BSD head refuses exactly when a release is being cut.
+- **The savings-ledger test drives the renamed `FREE_AGENTS_LEDGER_DIR`** — 0.32.1 renamed the
+  override but the test still passed the old `LOCAL_AGENTS_LEDGER_DIR`, so its `record` subprocesses
+  wrote into the real ledger and module-level collection failed (0.32.1 shipped with a red suite).
+  Test events can no longer leak into the real ledger.
 
 ## [0.32.1] — 2026-10-14
 
