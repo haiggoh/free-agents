@@ -30,7 +30,9 @@ def check(cond, label):
 
 
 def run(argv, ledger_dir):
-    env = dict(os.environ, LOCAL_AGENTS_LEDGER_DIR=ledger_dir)
+    # FREE_AGENTS_LEDGER_DIR since 0.32.1 — the old LOCAL_AGENTS_LEDGER_DIR name is no longer
+    # read, and driving the subprocess with it silently recorded test events in the real ledger.
+    env = dict(os.environ, FREE_AGENTS_LEDGER_DIR=ledger_dir)
     return subprocess.run([sys.executable, SCRIPT] + argv, capture_output=True,
                           text=True, env=env)
 

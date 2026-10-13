@@ -8,7 +8,7 @@ normalized QuotaRecord. Per addendum §10.
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .telemetry import (
@@ -517,12 +517,19 @@ def parse_kilo(headers: dict, usage: dict) -> QuotaRecord:
         record.reset_at = datetime.fromtimestamp(reset_ts, timezone.utc).isoformat()
     else:
         # Rolling hour - next hour boundary
-        now = datetime.now(timezone.utc)
-        next_hour = datetime(now.year, now.month, now.day, now.hour + 1, tzinfo=timezone.utc)
-        record.reset_at = next_hour.isoformat()
+        record.reset_at = _next_hour_boundary(datetime.now(timezone.utc)).isoformat()
 
     record._recompute_binding()
     return record
+
+
+def _next_hour_boundary(now: datetime) -> datetime:
+    """The next UTC hour boundary after `now`.
+
+    Hour 23 must roll to midnight of the NEXT day — `datetime(..., now.hour + 1, ...)`
+    raises ValueError the moment the clock reads 23 (a 23:00-23:59 UTC crash).
+    """
+    return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
 
 
 def parse_vercel(headers: dict, usage: dict) -> QuotaRecord:

@@ -106,7 +106,7 @@ def save_json_report(results: dict[str, list[tuple[str, str, str]]]) -> None:
     data = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "backends": {
-            b: [{"package": p, "installed": i, "latest": l} for p, i, l in u]
+            b: [{"package": p, "installed": i, "latest": latest} for p, i, latest in u]
             for b, u in results.items()
         }
     }
@@ -125,7 +125,7 @@ def main() -> int:
 
     if args.json:
         print(json.dumps({
-            b: [{"package": p, "installed": i, "latest": l} for p, i, l in u]
+            b: [{"package": p, "installed": i, "latest": latest} for p, i, latest in u]
             for b, u in results.items()
         }, indent=2))
     else:

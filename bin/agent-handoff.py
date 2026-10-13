@@ -170,7 +170,7 @@ def collect(repo, task_text, verify_text, title, recent_n):
     files["verify.txt"] = verify_text
 
     # HANDOFF.md — the readable resume note.
-    changed = [l[3:].strip().strip('"') for l in git_status.splitlines() if l.strip()]
+    changed = [line[3:].strip().strip('"') for line in git_status.splitlines() if line.strip()]
     handoff = []
     handoff.append("# Handoff: %s\n" % (title or "continued task"))
     handoff.append("Generated: %s\n" % datetime.now(timezone.utc).isoformat())

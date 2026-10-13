@@ -456,29 +456,6 @@ class BackendManager(
         return infos
 
 
-@dataclass(frozen=True)
-class VersionInfo:
-    """Version metadata from a package registry.
-
-    Attributes:
-        version: Version string
-        source: Registry source (e.g., "pypi", "github")
-        release_date: Release date in ISO format
-        url: Download/registry URL
-        changelog: Optional changelog URL or text
-    """
-    version: str
-    source: str
-    release_date: str
-    url: str
-    changelog: str = ""
-
-
-class ManagerError(RuntimeError):
-    """A fail-closed manager error suitable for a concise CLI message."""
-    pass
-
-
 def repository_root(explicit: Path | None = None) -> Path:
     """The free-agents checkout this manager runs from (two levels above install/managers/).
 

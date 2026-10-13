@@ -56,8 +56,9 @@ def mismatches(chunks):
     return errors, text, thinking
 
 
-MIXED = lambda: [ch(reasoning="plan"), ch(content="Hi", reasoning=" done"),
-                 ch(content="!"), ch(finish="stop")]
+def MIXED():
+    return [ch(reasoning="plan"), ch(content="Hi", reasoning=" done"),
+            ch(content="!"), ch(finish="stop")]
 
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")

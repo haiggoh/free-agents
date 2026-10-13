@@ -97,61 +97,61 @@ def run_tests():
         model_results = {}
 
         # Test 1: thinking=false, no streaming, no effort
-        print(f'  thinking=false, stream=false, no effort...', end=' ', flush=True)
+        print('  thinking=false, stream=false, no effort...', end=' ', flush=True)
         r = test_model(model, thinking=False, streaming=False)
         model_results['thinking_false_stream_false'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")
 
         # Test 2: thinking=true, no streaming, no effort
-        print(f'  thinking=true,  stream=false, no effort...', end=' ', flush=True)
+        print('  thinking=true,  stream=false, no effort...', end=' ', flush=True)
         r = test_model(model, thinking=True, streaming=False)
         model_results['thinking_true_stream_false'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")
 
         # Test 3: thinking=false, streaming, no effort
-        print(f'  thinking=false, stream=true, no effort...', end=' ', flush=True)
+        print('  thinking=false, stream=true, no effort...', end=' ', flush=True)
         r = test_model(model, thinking=False, streaming=True)
         model_results['thinking_false_stream_true'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s, {r.get('chunks',0)} chunks)")
 
         # Test 5: thinking=false, stream=false, effort=low
-        print(f'  thinking=false, stream=false, effort=low...', end=' ', flush=True)
+        print('  thinking=false, stream=false, effort=low...', end=' ', flush=True)
         r = test_model(model, thinking=False, streaming=False, effort='low')
         model_results['thinking_false_stream_false_effort_low'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")
 
         # Test 6: thinking=true, stream=false, effort=low
-        print(f'  thinking=true,  stream=false, effort=low...', end=' ', flush=True)
+        print('  thinking=true,  stream=false, effort=low...', end=' ', flush=True)
         r = test_model(model, thinking=True, streaming=False, effort='low')
         model_results['thinking_true_stream_false_effort_low'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")
 
         # Test 7: thinking=false, stream=false, effort=max
-        print(f'  thinking=false, stream=false, effort=max...', end=' ', flush=True)
+        print('  thinking=false, stream=false, effort=max...', end=' ', flush=True)
         r = test_model(model, thinking=False, streaming=False, effort='max')
         model_results['thinking_false_stream_false_effort_max'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")
 
         # Test 8: thinking=true, stream=false, effort=max
-        print(f'  thinking=true,  stream=false, effort=max...', end=' ', flush=True)
+        print('  thinking=true,  stream=false, effort=max...', end=' ', flush=True)
         r = test_model(model, thinking=True, streaming=False, effort='max')
         model_results['thinking_true_stream_false_effort_max'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")
 
         # Test 9: temperature=0.0, thinking=false, stream=false
-        print(f'  temp=0.0, thinking=false, stream=false...', end=' ', flush=True)
+        print('  temp=0.0, thinking=false, stream=false...', end=' ', flush=True)
         r = test_model(model, thinking=False, streaming=False, temperature=0.0)
         model_results['temp_0.0_thinking_false_stream_false'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")
 
         # Test 10: temperature=1.5, thinking=false, stream=false
-        print(f'  temp=1.5, thinking=false, stream=false...', end=' ', flush=True)
+        print('  temp=1.5, thinking=false, stream=false...', end=' ', flush=True)
         r = test_model(model, thinking=False, streaming=False, temperature=1.5)
         model_results['temp_1.5_thinking_false_stream_false'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")
 
         # Test 11: temperature=0.0, thinking=true, stream=false
-        print(f'  temp=0.0, thinking=true, stream=false...', end=' ', flush=True)
+        print('  temp=0.0, thinking=true, stream=false...', end=' ', flush=True)
         r = test_model(model, thinking=True, streaming=False, temperature=0.0)
         model_results['temp_0.0_thinking_true_stream_false'] = r
         print(f"ok={r.get('ok')} ({r.get('elapsed',0):.1f}s) - {r.get('error') or r.get('content') or r.get('reasoning')}")

@@ -135,7 +135,7 @@ def hotswap_get_port(model_alias: str) -> tuple[int, str]:
         return port, dispatch_model
 
     # Fallback for older hotswap versions without DISPATCH_MODEL: query /v1/models
-    print(f"[!] Hotswap output lacks DISPATCH_MODEL; querying /v1/models as fallback", file=sys.stderr)
+    print("[!] Hotswap output lacks DISPATCH_MODEL; querying /v1/models as fallback", file=sys.stderr)
     served_model_id = get_served_model_id(port, model_alias)
     return port, served_model_id
 

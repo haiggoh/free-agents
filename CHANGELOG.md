@@ -1,3 +1,26 @@
+## [0.32.2] — 2026-10-14
+
+### Fixed
+- **Pinned ruff rule set (`ruff.toml`)** — the check-code hook and editors now report repo policy
+  instead of ruff's ~400 factory-default rules. Style families the tree evidences are ignored with
+  rationale (E401/E402/E701/E702); unused-import/variable baselines (F401/F841) are explicitly
+  DEFERRED to a dedicated cleanup patch. Genuine findings the pin surfaced are fixed: stray f-prefixes
+  (F541), ambiguous `l` names (E741), lambda assignments (E731), one bare except (E722), and two stale
+  duplicate class definitions in `install/managers/base.py` (F811, byte-identical to `_common`'s).
+- **`package-release.sh` now emits `dist/install-free-agents.sh`** — RELEASE.md step 6 uploads it,
+  but the script only placed the installer inside the tarball; 0.32.0 and 0.32.1 copied it by hand.
+  The package also ships `ruff.toml`, so installed copies keep policy-aligned hook findings.
+- **RELEASE.md extraction commands run on macOS/BSD** — `sed '$d'` replaces GNU-only `head -n -1`,
+  which BSD head refuses exactly when a release is being cut.
+- **The savings-ledger test drives the renamed `FREE_AGENTS_LEDGER_DIR`** — 0.32.1 renamed the
+  override but the test still passed the old `LOCAL_AGENTS_LEDGER_DIR`, so its `record` subprocesses
+  wrote into the real ledger and module-level collection failed (0.32.1 shipped with a red suite).
+  Test events can no longer leak into the real ledger.
+- **Quota telemetry no longer crashes during UTC 23:00–23:59** — the Kilo rolling-hour reset
+  computed `now.hour + 1`, which builds hour 24 and raises; the boundary now rolls to midnight of
+  the next day, with a regression test that pins hour-23 inputs instead of depending on when the
+  suite happens to run (the old tests only caught this when run during that hour).
+
 ## [0.32.1] — 2026-10-14
 
 ### Changed

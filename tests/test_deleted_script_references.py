@@ -37,7 +37,7 @@ def test_no_code_references():
         code_references.append(line)
 
     if code_references:
-        print(f"FAIL: Code references found:\n" + "\n".join(code_references))
+        print("FAIL: Code references found:\n" + "\n".join(code_references))
         return False
 
     print("PASS: No code references to local-stack-update-check (only docs/history)")
