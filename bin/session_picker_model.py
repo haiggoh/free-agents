@@ -136,7 +136,7 @@ PROVIDER_LABELS = {"nvidia": "NVIDIA", "gemini": "Gemini", "groq": "Groq",
                    "openrouter": "OpenRouter", "cloudflare": "Cloudflare", "cerebras": "Cerebras",
                    "mistral": "Mistral", "zai": "Z.ai", "siliconflow": "SiliconFlow",
                    "llm7": "LLM7", "kilo": "Kilo", "vercel": "Vercel", "sambanova": "SambaNova",
-                   "modelscope": "ModelScope"}
+                   "modelscope": "ModelScope", "streamlake": "Streamlake"}
 
 
 def tier_label(tier: str, provider: str) -> str:
@@ -216,23 +216,42 @@ class Settings:
 # Same presets as main's bash menu (0.21.7). "" = leave it to the provider.
 TEMPERATURES = ("", "0.0", "0.3", "0.7", "1.0", "1.5", "2.0")
 
-# Provider signup URLs from install/setup-api-keys.py
-PROVIDER_SIGNUP_URLS = {
-    "nvidia": "https://build.nvidia.com/settings/api-keys",
-    "cerebras": "https://cloud.cerebras.ai/platform/",
-    "cloudflare": "https://dash.cloudflare.com/profile/api-tokens",
-    "gemini": "https://aistudio.google.com/apikey",
-    "groq": "https://console.groq.com/keys",
-    "kilo": "https://app.kilo.ai",
-    "llm7": "https://dash.llm7.io",
-    "mistral": "https://console.mistral.ai/home?profile_dialog=api-keys",
-    "modelscope": "https://modelscope.cn/my/myaccesstoken",
-    "openrouter": "https://openrouter.ai/settings/keys",
-    "sambanova": "https://cloud.sambanova.ai/dashboard",
-    "siliconflow": "https://cloud.siliconflow.com/account/ak",
-    "vercel": "https://vercel.com/d?title=AI+Gateway+API+Keys&to=%2F%5Bteam%5D%2F~%2Fai-gateway%2Fapi-keys",
-    "zai": "https://z.ai/manage-apikey/apikey-list",
-}
+def _load_key_providers():
+    """The provider table of install/setup-api-keys.py — the ONE list of providers a key can be set
+    up for. The picker used to keep two hand-copied tables, and a provider added to the wizard
+    (Streamlake, 0.27.1) never reached them. Loaded by path because the file name is hyphenated."""
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "install" / "setup-api-keys.py"
+    spec = importlib.util.spec_from_file_location("setup_api_keys", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.PROVIDERS
+
+
+KEY_PROVIDERS = _load_key_providers()
+
+
+def _key_provider_order():
+    """NVIDIA, Gemini, Groq first (the proven and most-used), then the rest alphabetically."""
+    first = ("nvidia", "gemini", "groq")
+    return sorted(KEY_PROVIDERS, key=lambda p: (first.index(p.slug) if p.slug in first else len(first),
+                                                p.name.lower()))
+PROVIDER_SIGNUP_URLS = {p.slug: p.url for p in KEY_PROVIDERS}
+
+
+def api_keys_dir():
+    import os
+    from pathlib import Path
+    return Path(os.environ.get("LA_API_KEYS_DIR", os.path.expanduser("~/.api_keys")))
+
+
+def provider_has_key(slug: str) -> bool:
+    """True when every key file this provider needs is saved. Presence only, never the value.
+    A provider the wizard does not know (none today) falls back to a file named after the slug."""
+    files = next((p.files for p in KEY_PROVIDERS if p.slug == slug), (slug,))
+    d = api_keys_dir()
+    return all((d / f).exists() for f in files)
 
 
 def open_url(url: str) -> None:
@@ -640,14 +659,20 @@ class RemoteScreen(Screen):
             buckets.setdefault(agent.provider, []).append(agent)
         groups = []
         for prov in order:
-            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}"
-                          + ("" if a.has_key else "  · no key")) for a in buckets[prov]]
+            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}") for a in buckets[prov]]
             groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
+        if not groups and not any(a.has_key for a in self.agents):
+            # No provider key at all: the list is an instruction, not a roster of unusable models.
+            groups = [Group("__nokeys__", f"{ec.EMOJI_KEY_STR} No API key saved yet",
+                            [Item("__nokeys__:k", "Press K (API keys) to set one up — every listed provider has a free tier")])]
         self.accordion.set_groups(groups)
         self._models_loaded = True
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings
+        # A model whose provider has no saved key cannot launch, so it is not listed at all.
+        if not agent.has_key:
+            return False
         if agent.tier == "trial" and not s.include_trials:
             return False
         if agent.local_capable and not s.local_capable_shown:
@@ -738,6 +763,8 @@ class RemoteScreen(Screen):
 
     def activate_selected(self):
         sel = self.accordion.selected_id
+        if sel == "__nokeys__:k":
+            return Nav("api_keys", self.owner)
         agent = next((a for a in self.agents if a.alias == sel and self._visible(a)), None)
         if agent is None:
             return None
@@ -994,25 +1021,10 @@ class APIKeysScreen(Screen):
     """
     title = f"{ec.EMOJI_KEY_STR} API Keys Setup"
 
-    # Provider list: NVIDIA first, then Google, then Groq, then alphabetical
-    # (slug, name, shortcut, signup_url, key_files)
-    PROVIDERS = [
-        ("nvidia", "NVIDIA", "n", "https://build.nvidia.com/settings/api-keys", ("nvidia",)),
-        # --- gap ---
-        ("gemini", "Google Gemini", "g", "https://aistudio.google.com/apikey", ("gemini",)),
-        ("groq", "Groq", "u", "https://console.groq.com/keys", ("groq",)),
-        ("cerebras", "Cerebras", "e", "https://cloud.cerebras.ai/platform/", ("cerebras",)),
-        ("cloudflare", "Cloudflare Workers AI", "c", "https://dash.cloudflare.com/profile/api-tokens", ("cloudflare", "cloudflare-account-id")),
-        ("kilo", "Kilo", "k", "https://app.kilo.ai", ("kilo",)),
-        ("llm7", "LLM7", "l", "https://dash.llm7.io", ("llm7",)),
-        ("mistral", "Mistral", "m", "https://console.mistral.ai/home?profile_dialog=api-keys", ("mistral",)),
-        ("modelscope", "ModelScope", "x", "https://modelscope.cn/my/myaccesstoken", ("modelscope",)),
-        ("openrouter", "OpenRouter", "r", "https://openrouter.ai/settings/keys", ("openrouter",)),
-        ("sambanova", "SambaNova", "y", "https://cloud.sambanova.ai/dashboard", ("sambanova",)),
-        ("siliconflow", "SiliconFlow", "s", "https://cloud.siliconflow.com/account/ak", ("siliconflow",)),
-        ("vercel", "Vercel AI Gateway", "v", "https://vercel.com/d?title=AI+Gateway+API+Keys&to=%2F%5Bteam%5D%2F~%2Fai-gateway%2Fapi-keys", ("vercel",)),
-        ("zai", "Z.AI", "z", "https://z.ai/manage-apikey/apikey-list", ("zai",)),
-    ]
+    # Provider list: NVIDIA first, then Google, then Groq, then alphabetical — built from the key
+    # wizard's table, so a provider added there appears here with no second edit.
+    # (slug, name, shortcut, signup_url, key_files); the shortcut is unused (rows are accordion items).
+    PROVIDERS = [(p.slug, p.name, "", p.url, tuple(p.files)) for p in _key_provider_order()]
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
@@ -1041,14 +1053,7 @@ class APIKeysScreen(Screen):
 
     def _get_provider_status(self, slug: str, key_files: tuple) -> str:
         """Get status of a provider by checking actual key files in ~/.api_keys"""
-        import os
-        from pathlib import Path
-        api_keys_dir = Path(os.environ.get("LA_API_KEYS_DIR", os.path.expanduser("~/.api_keys")))
-        if not api_keys_dir.exists():
-            return f"{ec.EMOJI_MISSING_STR} Missing"
-        # Check if all required key files exist
-        all_exist = all((api_keys_dir / name).exists() for name in key_files)
-        return f"{ec.EMOJI_OK_STR} Saved" if all_exist else f"{ec.EMOJI_MISSING_STR} Missing"
+        return f"{ec.EMOJI_OK_STR} Saved" if provider_has_key(slug) else f"{ec.EMOJI_MISSING_STR} Missing"
 
     def actions(self):
         # No static actions - all actions are via accordion items
