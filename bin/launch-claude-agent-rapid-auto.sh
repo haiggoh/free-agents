@@ -23,14 +23,16 @@
 # reuse is unavailable. A live Auto Mode session grows its prefix every turn, so
 # that is the case that matters.
 #
-# Devstral Small 2 24B is the current leading candidate — dense/non-hybrid, so it
-# genuinely trims (98.86% reuse, LCP 37,808, 436 tokens re-prefilled), and it
-# passed genuine Stage 2 at 5/5 contract with 100% warm reuse under the 45s
-# deadline. It needs a Stage-1 adjacent-user-role adapter (Mistral alternation),
-# whose production correctness across other Mistral traffic is unproven.
+# Granite 4.2 30B is the qualified classifier (2026-10-13 campaign,
+# docs/classifier-campaign-2026-10-13.md): DIRECT_PASS on the pinned rapid-mlx —
+# trimmable KVCache layers, 99.065% changed-prefix reuse, changed request 6.7s,
+# contract clean, no adapter. Devstral Small 2 24B previously held this role; its
+# qualification is void on rapid-mlx >= 0.15.3 (upstream #3836 anchored hybrid
+# checkpoints at message boundaries: 73.476% reuse, 73s changed request).
 #
-# So the model pin below is deliberately NOT called qualified, and repointing it
-# is expected work — see tests/test_rapid_auto_mode.sh for the guards that keep
+# The model dir below resolves through bin/local-classifier-default.sh — granite
+# first, then the campaign-tested latency tier — and repointing it stays
+# expected work; see tests/test_rapid_auto_mode.sh for the guards that keep
 # this route opt-in until a real end-to-end smoke test passes.
 set -euo pipefail
 umask 077
@@ -136,8 +138,8 @@ selected_model_dir="$(
 SESSION_MODEL_ID="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 
-: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.15.3/bin/rapid-mlx}"
-: "${LA_RAPID_AUTO_MODEL_DIR:=$HOME/.models/Qwen3.6-35B-A3B-4bit}"
+: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.16.1/bin/rapid-mlx}"
+: "${LA_RAPID_AUTO_MODEL_DIR:=$("$(dirname "${BASH_SOURCE[0]}")/local-classifier-default.sh" --dir-only 2>/dev/null || echo "$HOME/.models/granite-4.2-30b-q4-mlx")}"
 : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
 : "${LA_RAPID_AUTO_PORT:=8002}"
 : "${LA_RAPID_AUTO_CACHE_ROOT:=$HOME/.cache/local-agents/rapid-auto}"
@@ -154,8 +156,8 @@ EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 }
 
 rapid_auto_version="$("$LA_RAPID_AUTO_BIN" --version 2>/dev/null || true)"
-[ "$rapid_auto_version" = "rapid-mlx 0.15.3" ] || {
-    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 0.15.3, got %s\n' \
+[ "$rapid_auto_version" = "rapid-mlx 0.16.1" ] || {
+    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 0.16.1, got %s\n' \
         "${rapid_auto_version:-<unavailable>}" >&2
     exit 2
 }
@@ -176,15 +178,19 @@ rapid_auto_model_dir="$(
 }
 
 [ -n "$rapid_auto_model_dir" ] && [ -f "$rapid_auto_model_dir/config.json" ] || {
-    echo "ERROR: pinned Rapid Auto Mode model is unavailable: $LA_RAPID_AUTO_MODEL_DIR" >&2
+    echo "ERROR: no classifier-capable local model is installed — Auto Mode needs one." >&2
+    echo "  Resolved to: $LA_RAPID_AUTO_MODEL_DIR" >&2
+    echo "  Install the recommended model: install/download-models.sh --select granite-4.2-30b" >&2
+    echo "  Or run blind-trust mode (auto mode off) until one is installed." >&2
     exit 2
 }
 
 if [ "$selected_model_dir" != "$rapid_auto_model_dir" ]; then
     printf '%s\n' \
         "ERROR: Rapid Auto Mode currently supports only its single pinned model." \
-        "       (pinned for the dual-identity demonstration; NOT a qualified" \
-        "        classifier — it fails changed-prefix reuse.)" \
+        "       (dual-identity route: one weights dir serves session + classifier.)" \
+        "       The default resolves via bin/local-classifier-default.sh; override" \
+        "       LA_RAPID_AUTO_MODEL_DIR to pin a different model." \
         "       selected: $selected_model_dir" \
         "       pinned:   $rapid_auto_model_dir" >&2
     exit 2

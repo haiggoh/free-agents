@@ -7,6 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "install"))
+from managers.rapid_mlx import RapidMLXManager  # noqa: E402  (DEFAULT_VERSION: the version source of truth)
+
 
 def test_bare_no_tty_prints_usage_exits_2():
     """Bare manage-rapid-mlx.py with no TTY and no args prints usage and exits 2."""
@@ -22,7 +25,7 @@ def test_bare_no_tty_prints_usage_exits_2():
 def test_smoke_command_works():
     """smoke <version> works through the wrapper."""
     MODULE_PATH = Path(__file__).resolve().parent.parent / "install" / "manage-rapid-mlx.py"
-    result = subprocess.run([sys.executable, str(MODULE_PATH), "smoke", "0.15.3"],
+    result = subprocess.run([sys.executable, str(MODULE_PATH), "smoke", RapidMLXManager.DEFAULT_VERSION],
                           capture_output=True, text=True)
     assert result.returncode == 0, f"Expected exit code 0, got {result.returncode}: {result.stderr}"
     assert "smoke_pass" in result.stdout
@@ -36,7 +39,7 @@ def test_install_skip_pin_update_works():
     # Use dry-run to avoid actual installation
     # Note: wrapper doesn't pass --dry-run, so we can't test dry-run through wrapper
     # But we can test that --skip-pin-update is accepted
-    result = subprocess.run([sys.executable, str(MODULE_PATH), "install", "--skip-pin-update", "0.15.3", "--dry-run"],
+    result = subprocess.run([sys.executable, str(MODULE_PATH), "install", "--skip-pin-update", RapidMLXManager.DEFAULT_VERSION, "--dry-run"],
                           capture_output=True, text=True)
     # The wrapper doesn't pass --dry-run, so this will fail
     # Let's just verify --skip-pin-update is recognized (no "unrecognized argument" error)

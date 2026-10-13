@@ -150,9 +150,31 @@ def tier_label(tier: str, provider: str) -> str:
 # --- settings ----------------------------------------------------------------------------
 AUTO_MODE_LABELS = {0: "blind-trust", 1: "classifier", 2: "off"}
 
+
+def _default_local_classifier_alias() -> str:
+    """The alias bin/local-classifier-default.sh would pick right now. Static
+    fallback if the helper is missing or nothing is installed — the helper's own
+    launch-time warning covers the nothing-installed case, so the label never
+    names a model the machinery would not select."""
+    import os
+    import subprocess
+    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "local-classifier-default.sh")
+    try:
+        r = subprocess.run(["bash", helper, "--alias"], capture_output=True,
+                           text=True, timeout=10)
+        if r.returncode == 0:
+            return r.stdout.strip() or "granite-4.2-30b"
+    except Exception:
+        pass
+    return "granite-4.2-30b"
+
+
+_DEFAULT_CLASSIFIER_ALIAS = _default_local_classifier_alias()
+
 CLASSIFIER_SOURCE_LABELS = {
-    0: "NVIDIA API (fallback: Devstral)",
-    1: "Local Devstral (always)",
+    0: f"NVIDIA API (fallback: {_DEFAULT_CLASSIFIER_ALIAS})",
+    1: f"Local {_DEFAULT_CLASSIFIER_ALIAS} (always)",
     2: "Auto: local on local, remote on remote",
 }
 
@@ -173,13 +195,14 @@ class Settings:
     include_trials: bool = True      # interactive visibility only; direct CLI keeps its guard
     local_capable_shown: bool = False
     show_broken: bool = False        # unworking models; in-memory, like the CLI flag
+    deny_gh_release: bool = False    # re-add "Bash(gh release create:*)" to the blind-trust deny list (off since 0.32.0)
     remote_temperature: str = sms.DEFAULT_TEMPERATURE["remote_api_session"]
     local_temperature: str = sms.DEFAULT_TEMPERATURE["local_session"]
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
     lowkey_temperature: str = sms.DEFAULT_TEMPERATURE["lowkey"]
     rate_limiter: dict = field(default_factory=dict)
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
-    # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=Local Devstral always, 2=Auto)
+    # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=local default classifier always, 2=Auto)
     classifier_source: int = 2
     # Cloud sessions only: replace paid Sonnet subagents with free agents. None = undecided (the
     # hooks/cloud-agent-intercept.py hook asks once), "1" = free agents, "0" = native Sonnet. Kept in
@@ -405,6 +428,10 @@ def _common_toggles(s: Settings, include_watcher: bool):
         setting("t", f"{ec.EMOJI_TELEMETRY_ON_STR} Telemetry: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry")),
         setting("p", f"{ec.EMOJI_STOP_HOOK_STR} Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
                 *_toggle(s, "stop_hook")),
+        # Key 'd': 'g' is the dynamic Go-launch key and 'h' belongs to the remote filter
+        # submenu (FilterSubmenuTests) — keep this row off both.
+        setting("d", f"Deny 'gh release create' in blind-trust: {'ON' if s.deny_gh_release else 'OFF'}",
+                *_toggle(s, "deny_gh_release")),
     ]
     if include_watcher:
         acts.append(setting("w", f"{ec.EMOJI_WATCHER_STR} Watcher: {'ON' if s.watcher else 'OFF'}",
@@ -604,6 +631,7 @@ class LocalScreen(Screen):
                "LA_BLIND_AUTO": "1" if s.auto_mode == 0 else "0",
                "LA_TELEMETRY": "1" if s.telemetry else "0",
                "LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
+               "LA_DENY_GH_RELEASE": "1" if s.deny_gh_release else "0",
                "LA_ENABLE_MCP": "1" if s.enable_mcp else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
                "CSL_WATCH": "1" if s.watcher else "0"}
@@ -793,6 +821,7 @@ class RemoteScreen(Screen):
             argv += ["--temperature", s.remote_temperature]
         argv.append(alias)
         env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
+               "LA_DENY_GH_RELEASE": "1" if s.deny_gh_release else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
                "CLOUD_BYPASS_PERMISSIONS": "1" if s.cloud_bypass_permissions else "0"}
         return LaunchRequest("remote", argv, env, alias)
@@ -853,7 +882,7 @@ class CloudConfigScreen(Screen):
       PreToolUse hook. Opt-in; undecided = the hook asks once on the first Agent call.
 
     Does NOT reach cloud sessions (audit 2026-10-08; labelled so in the menu):
-    - Classifier Source: NVIDIA API / Local Devstral / Auto (local + free-API only)
+    - Classifier Source: NVIDIA API / local default classifier / Auto (local + free-API only)
     - Bypass Permissions: blind-trust for free-API remote sessions (the gateway launcher hardcodes it)
     """
     title = f"{ec.EMOJI_CLOUD_CONFIG_STR} {ec.EMOJI_TOOLS_STR} Cloud Session Configuration"

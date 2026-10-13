@@ -52,7 +52,7 @@ _DEFAULT_VALIDATOR = object()
 class RapidMLXManager(BackendManager):
     BACKEND_NAME = "rapid-mlx"
     VENV_PREFIX = "rapid-mlx"
-    DEFAULT_VERSION = "0.15.3"
+    DEFAULT_VERSION = "0.16.1"
     PACKAGE_NAME = "rapid-mlx"
     PYPI_URL = PYPI_URL
 

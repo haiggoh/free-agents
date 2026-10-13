@@ -23,9 +23,11 @@
 #   KAT-Coder V2.5 OptiQ   the preferred model for a FULL local Claude Code session
 #   Qwen3.8 27B + MTP      operator / reasoner (thinking) workhorse; the MTP draft (~0.3 GB) gives
 #                          speculative decoding, which makes it fast enough to drive a session
-#   Devstral Small 2 24B   the local Auto Mode CLASSIFIER (passed genuine Stage 2, 5/5, with the
-#                          Mistral alternation adapter) — needed only for classifier auto mode;
-#                          point LA_RAPID_AUTO_MODEL_DIR / LA_OMLX_CLASSIFIER_MODEL_DIR at it
+#   Granite 4.2 30B        the local Auto Mode CLASSIFIER (DIRECT_PASS, 2026-10-13 campaign:
+#                          99.065% changed-prefix reuse on the pinned rapid-mlx) — needed only
+#                          for classifier auto mode; the default for LA_RAPID_AUTO_MODEL_DIR,
+#                          resolved via bin/local-classifier-default.sh (tested fallback tier).
+#                          MLX-only: CUDA machines run blind-trust (no qualified CUDA classifier).
 #   Mistral Small 4 119B   large MoE (MLX build, not GGUF), 256K context; needs ~70 GB free memory.
 #                          Also the default validator: a non-Qwen second opinion.
 #   Qwen3.6 27B            the previous all-rounder, kept for machines that already have it
@@ -36,7 +38,7 @@
 kat-coder-optiq|KAT-Coder V2.5 Dev OptiQ 4-bit — preferred full local SESSION model (Rapid, qwen tool parser, non-thinking)|mlx-community/KAT-Coder-V2.5-Dev-OptiQ-4bit|main|KAT-Coder-V2.5-Dev-OptiQ-4bit|20|default,session|primary||rapid-mlx|mlx
 qwen38-27b-4bit|Qwen3.8 27B MLX 4-bit — operator + reasoner (thinking); pair with the MTP draft below|mlx-community/Qwen3.8-27B-4bit|main|Qwen3.8-27B-4bit|16.1|default,session,operator,reasoner|primary||rapid-mlx|mlx
 qwen38-27b-mtp|Qwen3.8 27B MTP draft head — speculative decoding for qwen38-27b-4bit (useless on its own)|mlx-community/Qwen3.8-27B-MTP-4bit|main|Qwen3.8-27B-MTP-4bit|0.3|default,session,operator,reasoner|primary||rapid-mlx|mlx
-devstral-small2|Devstral Small 2 24B MLX 4-bit — local Auto Mode classifier (passed Stage 2 with the alternation adapter)|mlx-community/mistralai_Devstral-Small-2-24B-Instruct-2512-MLX-4Bit|main|Devstral-Small-2-24B-4bit|15.1|classifier|primary||rapid-mlx|mlx
+granite-4.2-30b|Granite 4.2 30B MLX 4-bit — local Auto Mode classifier (DIRECT_PASS, 2026-10-13 campaign: 99.065% changed-prefix reuse, trimmable KVCache)|ibm-granite/granite-4.2-30b-q4-mlx|main|granite-4.2-30b-q4-mlx|18|classifier|primary||rapid-mlx|mlx
 mistral-small4|Mistral Small 4 119B MLX 4-bit — 128-expert MoE, 256K context (MLX build, not GGUF)|mlx-community/Mistral-Small-4-119B-2603-4bit|main|mistral-small4-119b-4bit|67.5|large|optional||rapid-mlx|mlx
 qwen36-27b-4bit|Qwen3.6 27B UD-MLX 4-bit — previous all-rounder (operator, thinking reasoner, session)|unsloth/Qwen3.6-27B-UD-MLX-4bit|main|Qwen3.6-27B-UD-MLX-4bit|26.2|optional,session,operator|optional||vllm-mlx|mlx
 qwen2.5-7b-awq|Qwen2.5 7B Instruct AWQ — operator (CUDA, AWQ quantized, vLLM with UVM offload)|Qwen/Qwen2.5-7B-Instruct-AWQ|main|Qwen2.5-7B-Instruct-AWQ|7.5|cuda,operator|primary|*.safetensors|vllm-cuda|cuda

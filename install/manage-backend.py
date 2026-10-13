@@ -59,10 +59,10 @@ Examples:
   manage-backend.py --backend vllm-mlx releases --limit 10
   manage-backend.py --backend omlx install 0.7.0
   manage-backend.py --backend rapid-mlx check-updates
-  manage-backend.py --backend rapid-mlx promote 0.15.3
-  manage-backend.py --backend rapid-mlx smoke 0.15.3
-  manage-backend.py --backend rapid-mlx snapshot 0.15.3
-  manage-backend.py --backend rapid-mlx remove 0.15.3
+  manage-backend.py --backend rapid-mlx promote 0.16.1
+  manage-backend.py --backend rapid-mlx smoke 0.16.1
+  manage-backend.py --backend rapid-mlx snapshot 0.16.1
+  manage-backend.py --backend rapid-mlx remove 0.16.1
   manage-backend.py --backend litellm install 1.60.0
         """.strip(),
     )

@@ -1419,11 +1419,14 @@ if [[ "$MODE" == "launch" ]]; then
         fi
         MCP_FLAG=()
         [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 ]] && MCP_FLAG=(--enable-mcp)
+        EXTRA_BT_FLAGS=()
+        [[ "${LA_DENY_GH_RELEASE:-0}" -eq 1 ]] && EXTRA_BT_FLAGS+=(--deny-gh-release)
         python3 "$SCRIPT_DIR/blind-trust-settings.py" \
             --master "$MASTER_ALLOWLIST_FILE" \
             --profile "$PROFILE_ALLOWLIST_FILE" \
             --out "$BLIND_TRUST_SETTINGS_FILE" \
             "${MCP_FLAG[@]}" \
+            "${EXTRA_BT_FLAGS[@]}" \
             --mechanism bypass || {
             echo "remote-session: failed to generate blind-trust settings" >&2; exit 1; }
     fi

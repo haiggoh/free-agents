@@ -30,7 +30,7 @@ LA_DEFAULT_MLX_BACKEND=rapid
 # config edit. Set it explicitly only to PIN a known version — for an A/B against recorded
 # measurements, or as a rollback target.
 #   brew install rapid-mlx
-# LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-0.15.3/bin/rapid-mlx"
+# LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-0.16.1/bin/rapid-mlx"
 LA_RAPID_CACHE_MEMORY_MB=2048          # conservative shipped ceiling; tune to workload/RAM
 LA_RAPID_HYBRID_CACHE_ENTRIES=2        # retained recurrent/sliding-window snapshots
 
@@ -177,11 +177,12 @@ la_register mistral-small4         mistral-small4-119b-4bit           mlx    mis
 # la_register nemotron-550b-litellm  nemotron-550b                      litellm auto  ""         false ""           high  "reasoner"           nvidia/nemotron-3-ultra-550b-a55b 550
 
 # --- Local Auto Mode classifier ----------------------------------------------
-# Devstral Small 2 24B — passed genuine Stage 2 (5/5) with the Mistral alternation adapter.
-# Dense/non-hybrid → trimmable cache (98.86% reuse, LCP 37,808, 436 re-prefilled).
-# The classifier route reads LA_RAPID_AUTO_MODEL_DIR; point it here to use this model:
-#   LA_RAPID_AUTO_MODEL_DIR="$LA_MODELS_DIR/Devstral-Small-2-24B-4bit"
-la_register devstral-small2        Devstral-Small-2-24B-4bit          rapid  mistral ""      false ""           high  ""  mlx-community/mistralai_Devstral-Small-2-24B-Instruct-2512-MLX-4Bit 15.1
+# Granite 4.2 30B — DIRECT_PASS in the 2026-10-13 campaign on the pinned rapid-mlx
+# (99.065% changed-prefix reuse, trimmable KVCache, changed request 6.7s). The default
+# for LA_RAPID_AUTO_MODEL_DIR resolves via bin/local-classifier-default.sh (granite
+# first, then the tested fallback tier). Override the primary candidate with:
+#   LA_LOCAL_CLASSIFIER_ALIAS="granite-4.2-30b"
+la_register granite-4.2-30b        granite-4.2-30b-q4-mlx            mlx    qwen3_coder "" false ""           high  ""  ibm-granite/granite-4.2-30b-q4-mlx 18.0
 
 # Optional pinned acquisition revisions (alias -> commit). config-lib loads this file inside
 # la_load_config; -g keeps the map visible to download-models.sh after that function returns.
