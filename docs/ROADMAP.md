@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.31.0`. See `CHANGELOG.md`.
+`0.32.0`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -878,13 +878,15 @@ No single release may become several releases at once.
   selective-scan kernel, so any Mamba-based model benefits. The Mamba surface is growing on both ends:
   **Nemotron 3.5 Lightning** and **Granite 4.2 30B Q4** both arrive in acquisition Wave 1 and Granite 4.0
   H-Tiny is already on disk — so one kernel win compounds across several workstreams. It stays *gated*.
-  (Corrected 2026-09-10: Granite was previously listed here as "the leading classifier-engine candidate
-  for locally routed Auto Mode". It is not. Granite was rejected as a classifier — it generates
-  reasoning-like text after the closed thinking section, which breaks the verdict contract — and is
-  retained only for main-model testing. **Devstral Small 2 24B** is the current leading classifier
-  candidate: dense/non-hybrid, so it genuinely trims a changed prefix, where Qwen3.6's hybrid
-  non-trimmable cache does not. Note the Granite rejection is NOT a Rapid bug: `--no-thinking` does
-  correctly propagate to `enable_thinking=False`, so do not report the thinking toggle as broken.)
+  (Corrected 2026-09-10, superseded 2026-10-13: the earlier Granite rejection — reasoning-like
+  text after the closed thinking section, breaking the verdict contract — was a different
+  variant/stack point. **Granite 4.2 30B** passed the full 2026-10-13 qualification campaign on
+  the current pinned rapid-mlx: DIRECT_PASS, 99.065% changed-prefix reuse (trimmable KVCache),
+  changed request 6.7s, contract clean — see docs/classifier-campaign-2026-10-13.md. Devstral
+  Small 2 24B held this role before, but its qualification is void on rapid-mlx >= 0.15.3
+  (upstream #3836 anchored hybrid checkpoints at message boundaries: 73.476% reuse, 73s changed
+  request). The 2026-09-10 mechanism note stays valid: `--no-thinking` does propagate correctly,
+  so a thinking-toggle report on any Granite is a config question, not a Rapid bug.)
   See [K-Search](#k-search) for what it actually is, which is not what its previous one-word listing
   implied. Tracked by `nemotron-3-nano-granite-4-0-h`, whose title now badly understates its scope.
 - **"Qualifying every roster model" is narrowed, not revived.** A *bounded* tournament with fixed tiers

@@ -156,7 +156,7 @@ install_backend() {
     elif [[ $DRY_RUN -eq 1 ]]; then
         # Use a default version for dry-run to avoid interactive prompt
         case "$backend" in
-            rapid-mlx) extra_args+=("0.15.3") ;;
+            rapid-mlx) extra_args+=("0.16.1") ;;
             vllm-mlx) extra_args+=("0.5.0") ;;
             litellm) extra_args+=("1.60.0") ;;
             llama-cpp) extra_args+=("b5000") ;;

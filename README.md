@@ -582,7 +582,7 @@ stays on your cloud model. The shipped `config/model-catalog.psv` (MLX rows):
 |---|---:|---|
 | `kat-coder-optiq` | 20 GB | the preferred full local **session** model |
 | `qwen38-27b-4bit` + `qwen38-27b-mtp` | 16 + 0.3 GB | operator / reasoner (thinking), MTP-accelerated; also drives a session |
-| `devstral-small2` | 15 GB | the qualified local **Auto Mode classifier** (passed genuine Stage 2 with the Mistral alternation adapter); used by the dedicated classifier routes via `LA_RAPID_AUTO_MODEL_DIR` / `LA_OMLX_CLASSIFIER_MODEL_DIR`. Only needed for classifier auto mode (state 1). |
+| `granite-4.2-30b` | 18 GB | the qualified local **Auto Mode classifier** (DIRECT_PASS in the 2026-10-13 campaign: 99.065% changed-prefix reuse on the pinned rapid-mlx, trimmable KVCache — `docs/classifier-campaign-2026-10-13.md`). The default for `LA_RAPID_AUTO_MODEL_DIR`, resolved via `bin/local-classifier-default.sh` with a tested fallback tier. MLX-only: CUDA machines should run blind-trust mode (no qualified CUDA classifier yet). Disk-tight alternative: a second instance of `kat-coder-optiq` as classifier — cache-blind, but its ~36s full re-prefill fits the 45s deadline. |
 | `mistral-small4` | 67.5 GB | Mistral Small 4 119B, MLX build (not the GGUF), 256K context; needs about 70 GB free memory. Also the default validator (a non-Qwen second opinion). |
 | `qwen36-27b-4bit` | 26 GB | the previous all-rounder, for machines that already have it |
 
@@ -883,7 +883,7 @@ classifier asks for `claude-sonnet-5[1m]`, and the proxy routes it to one of two
 **Fail-closed was observed live.** A classifier call that timed out under load became "classifier
 unavailable, denying with retry guidance": the action was refused, never silently allowed. The
 default stays blind-trust (state 0), because unattended runs must not stall on a slow classifier.
-The local-session classifier lane (Devstral) is unchanged and documented below.
+The local-session classifier lane (granite-4.2-30b by default; see the campaign report) is documented below.
 
 ### Auto Mode with a local classifier (triple-toggle)
 

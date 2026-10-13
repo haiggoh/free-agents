@@ -623,14 +623,13 @@ la_load_config() {
   # Opt-in Rapid Auto Mode qualification runtime. It remains unwired from the
   # default launcher until a real Claude Code smoke test passes. One engine
   # accepts claude-opus-5 as its served name and claude-sonnet-5 as a retained
-  # local model-path identity — that dual-identity route is proven. The MODEL
-  # pinned below is not: Qwen3.6's hybrid cache is non_trimmable, so it fails
-  # changed-prefix reuse (a growing prefix is what a live session produces).
-  # Devstral Small 2 24B is the current leading candidate; see the launcher
-  # header for the measured evidence. Cache and fixtures are isolated from
-  # generic Rapid sessions and from oMLX.
-  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.15.3/bin/rapid-mlx}"
-  : "${LA_RAPID_AUTO_MODEL_DIR:=$LA_MODELS_DIR/Qwen3.6-35B-A3B-4bit}"
+  # local model-path identity — that dual-identity route is proven. The default
+  # model below resolves through bin/local-classifier-default.sh: granite-4.2-30b
+  # (the qualified classifier, 2026-10-13 campaign) first, then the campaign-
+  # tested latency tier. Cache and fixtures are isolated from generic Rapid
+  # sessions and from oMLX.
+  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.16.1/bin/rapid-mlx}"
+  : "${LA_RAPID_AUTO_MODEL_DIR:=$("$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bin/local-classifier-default.sh" --dir-only 2>/dev/null || echo "$LA_MODELS_DIR/granite-4.2-30b-q4-mlx")}"
   : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
   : "${LA_RAPID_AUTO_PORT:=8002}"
   : "${LA_RAPID_AUTO_CACHE_ROOT:=$HOME/.cache/local-agents/rapid-auto}"

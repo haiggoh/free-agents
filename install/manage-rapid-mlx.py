@@ -2,8 +2,8 @@
 """Backward compatibility wrapper for manage-rapid-mlx.py
 
 This wrapper translates the old CLI to the new unified CLI:
-- Old: manage-rapid-mlx.py install 0.15.3
-- New: manage-backend.py --backend rapid-mlx install 0.15.3
+- Old: manage-rapid-mlx.py install 0.16.1
+- New: manage-backend.py --backend rapid-mlx install 0.16.1
 
 With no arguments and a TTY, opens the interactive menu.
 """

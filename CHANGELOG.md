@@ -1,3 +1,19 @@
+## [0.32.0] — 2026-10-13
+
+### Changed
+- **rapid-mlx pin: 0.15.3 → 0.16.1** everywhere (launcher default + exact-version check, config-lib,
+  config example/local, installer defaults incl. the backend manager's DEFAULT_VERSION, picker
+  prompts, inventory probe). Granite-4.2-30b re-verified DIRECT_PASS on 0.16.1 before the pin moved
+  (99.065% changed-prefix reuse, changed request 6.7s, contract 3/3).
+- **Default local Auto Mode classifier: granite-4.2-30b**, resolved through the new
+  `bin/local-classifier-default.sh` — granite first, then the campaign-tested latency tier
+  (kat-coder-optiq, qwen-3.6-35b-a3b, ornith-1.5-35b, nemotron35-lightning, agentworld-35b) — so a
+  machine without granite falls back instead of erroring, and nothing installed produces a clear
+  warning with the install command plus the blind-trust recommendation. The session picker's
+  classifier-source labels now name the live default alias instead of hardcoding Devstral.
+  Devstral Small 2's qualification is void on rapid-mlx >= 0.15.3 (see the campaign report);
+  CUDA machines have no qualified classifier — run blind-trust mode there.
+
 ## [0.31.0] — 2026-10-13
 
 ### Fixed
