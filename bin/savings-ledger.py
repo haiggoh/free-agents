@@ -5,7 +5,7 @@ Every local dispatch is work that would otherwise have gone to a metered cloud m
 This records each one as an append-only event, prices it against a named cloud rate, and
 derives a small rollup a status line can read without parsing a growing log.
 
-    savings-ledger.py record --model qwen --in 9123 --out 412 [--priced-against claude-opus-5]
+    savings-ledger.py record --model qwen --in 9123 --out 412 [--priced-against claude-opus-5-5]
     savings-ledger.py rollup                     # regenerate the derived rollup from events
     savings-ledger.py report [--today|--week|--month|--since YYYY-MM-DD] [--json]
     savings-ledger.py rates                      # print the rate table and its as-of date
@@ -40,6 +40,7 @@ RATES_AS_OF = "2026-06-24"
 DEFAULT_RATES = {
     "claude-fable-5":   {"in": 10.0, "out": 50.0},
     "claude-mythos-5":  {"in": 10.0, "out": 50.0},
+    "claude-opus-5-5":  {"in": 4.0,  "out": 20.0},
     "claude-opus-5":    {"in": 5.0,  "out": 25.0},
     "claude-opus-4-8":  {"in": 5.0,  "out": 25.0},
     "claude-opus-4-7":  {"in": 5.0,  "out": 25.0},
@@ -49,7 +50,11 @@ DEFAULT_RATES = {
     "claude-haiku-4-5": {"in": 1.0,  "out": 5.0},
 }
 
-DEFAULT_PRICED_AGAINST = "claude-opus-5"
+# 0.33.0: the default counterfactual tracks the PRIMARY spoof (claude-opus-5-5, see
+# remote-session.sh _select_spoof_primary) — pricing dispatches against the retired
+# Opus 5 card overstated every "saved" figure by ~25%. Opus 5 stays in the table as
+# the explicit compat choice.
+DEFAULT_PRICED_AGAINST = "claude-opus-5-5"
 
 
 def ledger_dir():

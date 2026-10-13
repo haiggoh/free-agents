@@ -88,6 +88,17 @@ for key in ("ts", "session", "model", "input_tokens", "output_tokens", "priced_a
 check(e["priced_against"] == "claude-opus-5", "priced_against is stored normalized")
 check(e["ts"].endswith("Z"), "timestamp is UTC (Z-suffixed), so day grouping is unambiguous")
 
+print("== record: the DEFAULT counterfactual is the primary spoof (0.33.0) ==")
+d5 = tempfile.mkdtemp()
+r5 = run(["record", "--model", "local-op", "--in", "1000000", "--out", "1000000",
+          "--session", "S9"], d5)
+check(r5.returncode == 0, "record without --priced-against exits 0")
+e5 = json.loads(open(os.path.join(d5, "savings.jsonl")).read().strip().splitlines()[0])
+check(e5["priced_against"] == "claude-opus-5-5",
+      "the default is claude-opus-5-5 — the primary spoof, not the retired opus-5")
+check(e5["saved_usd"] == 24.0,
+      "1M in + 1M out at 5-5 rates = $4 + $20 = $24 (opus-5 would say $30)")
+
 run(["record", "--model", "local-op", "--in", "1", "--out", "1", "--session", "S1"], d)
 check(len(open(os.path.join(d, "savings.jsonl")).read().strip().splitlines()) == 2,
       "a second record APPENDS rather than replacing")
@@ -127,7 +138,8 @@ check(before == after, "rollup is idempotent — rebuilding does not double-coun
 
 print("== rollup: unpriced events are counted separately, not folded into the total ==")
 d4 = tempfile.mkdtemp()
-run(["record", "--model", "m", "--in", "1000000", "--out", "0", "--session", "X"], d4)
+run(["record", "--model", "m", "--in", "1000000", "--out", "0", "--session", "X",
+     "--priced-against", "claude-opus-5"], d4)
 run(["record", "--model", "m", "--in", "1000000", "--out", "0", "--session", "X",
      "--priced-against", "nope"], d4)
 run(["rollup"], d4)
@@ -140,7 +152,8 @@ check(row["input_tokens"] == 2_000_000, "but its TOKENS still count")
 
 print("== report: period windows come from the same lines ==")
 d5 = tempfile.mkdtemp()
-run(["record", "--model", "m", "--in", "1000000", "--out", "1000000", "--session", "S"], d5)
+run(["record", "--model", "m", "--in", "1000000", "--out", "1000000", "--session", "S",
+     "--priced-against", "claude-opus-5"], d5)
 out = json.loads(run(["report", "--json"], d5).stdout)
 check(out["saved_usd"] == 30.0 and out["events"] == 1, "all-time report totals correctly")
 check(json.loads(run(["report", "--today", "--json"], d5).stdout)["events"] == 1,
