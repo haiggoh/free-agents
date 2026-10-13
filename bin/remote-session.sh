@@ -71,28 +71,60 @@ source "$ROSTER"
 # shellcheck source=../config/emoji.sh
 source "$SCRIPT_DIR/../config/emoji.sh"
 
-# Detect Claude Code version and warn if older than 2.1.280 (Opus 5.5 / 1M context support).
-# Nemotron 3 Ultra has 1M actual context, but older Claude Code enforces the spoofed model's
-# limit. claude-opus-5 has 200k hardcoded; claude-opus-5-5 has 1M support.
+# Claude Code VERSION PROBE + the spoofed identity it can carry (0.32.0).
+# Nemotron 3 Ultra has 1M actual context, but Claude Code enforces the SPOOFED model's
+# limit. claude-opus-5 has 200k hardcoded; claude-opus-5-5 has 1M support and is the
+# current generation (its cheaper rate card is what the phantom cost model should use).
 # Minimum version for Opus 5.5: 2.1.280 (see Anthropic changelog).
+# The version is probed ONCE and cached: the warning, --print-spoof and the launch flag
+# must not drift apart by probing at different moments (derive, don't duplicate).
+_CC_VERSION=""
+_cc_probe() {
+    [ -n "$_CC_VERSION" ] || _CC_VERSION="$(claude --version 2>/dev/null | awk '{print $1}')"
+}
+_cc_at_least() {  # _cc_at_least MIN -> exit 0 when the probed version >= MIN
+    _cc_probe
+    [ -n "$_CC_VERSION" ] || return 1   # unprobed: support is never CONFIRMED
+    local min_version="$1"
+    local IFS=.
+    local c_major c_minor c_patch m_major m_minor m_patch
+    read -r c_major c_minor c_patch <<< "$_CC_VERSION"
+    read -r m_major m_minor m_patch <<< "$min_version"
+    # Real version strings carry a 4th segment (this machine reports "2.1.296.b9d");
+    # arithmetic on "296.b9d" is a syntax error that silently misclassifies a capable
+    # CC as too old, so compare only the numeric prefix of the patch segment.
+    c_patch="${c_patch%%[!0-9]*}"
+    : "${c_major:=0}" "${c_minor:=0}" "${c_patch:=0}"
+    if (( c_major < m_major )) || (( c_major == m_major && c_minor < m_minor )) || (( c_major == m_major && c_minor == m_minor && c_patch < m_patch )); then
+        return 1
+    fi
+}
+# The PRIMARY spoofed identity (0.32.0): claude-opus-5-5 when Claude Code supports it,
+# with claude-opus-5 kept ONLY as the compatibility fallback (old or unprobed CC). Before
+# 0.32.0 the launch flag was hardcoded to claude-opus-5, so the roster's claude-opus-5-5
+# entry (added for 1M context) was never actually requested: sessions carried Opus 5's
+# rate card and Claude Code's 200k ceiling. An unknown version falls back rather than
+# forward on purpose: requesting an id an old Claude Code cannot carry would break
+# sessions that worked.
+_select_spoof_primary() {
+    if _cc_at_least "2.1.280"; then
+        printf 'claude-opus-5-5'
+    else
+        printf 'claude-opus-5'
+    fi
+}
 _check_claude_version() {
-    local min_version="2.1.280"
-    local current_version
-    current_version=$(claude --version 2>/dev/null | awk '{print $1}')
-    if [[ -n "$current_version" ]]; then
-        # Compare version strings (major.minor.patch)
-        local IFS=.
-        read -r c_major c_minor c_patch <<< "$current_version"
-        read -r m_major m_minor m_patch <<< "$min_version"
-        if (( c_major < m_major )) || (( c_major == m_major && c_minor < m_minor )) || (( c_major == m_major && c_minor == m_minor && c_patch < m_patch )); then
-            echo
-            echo "$EMOJI_WARNING  Your Claude Code version ($current_version) is older than $min_version."
-            echo "    Opus 5.5 (claude-opus-5-5) with 1M context support requires $min_version or newer."
-            echo "    Nemotron 3 Ultra (1M actual context) will fall back to Opus 5 (200k limit)."
-            echo "    Update with: brew upgrade claude-code  (or your package manager)"
-            echo "    To suppress: export LA_SILENCE_CLAUDE_VERSION_WARNING=1"
-            echo
-        fi
+    _cc_probe
+    if ! _cc_at_least "2.1.280"; then
+        [ -n "$_CC_VERSION" ] || return 0   # nothing probed -> nothing to warn about
+        # stderr: this is a diagnostic, and --print-spoof's stdout is a contract.
+        echo >&2
+        echo "$EMOJI_WARNING  Your Claude Code version ($_CC_VERSION) is older than 2.1.280." >&2
+        echo "    Opus 5.5 (claude-opus-5-5) with 1M context support requires 2.1.280 or newer." >&2
+        echo "    The session will run as the compatibility spoof claude-opus-5 (200k limit)." >&2
+        echo "    Update with: brew upgrade claude-code  (or your package manager)" >&2
+        echo "    To suppress: export LA_SILENCE_CLAUDE_VERSION_WARNING=1" >&2
+        echo >&2
     fi
 }
 # --help must not run anything (it used to call `claude --version` first): skip the probe for it.
@@ -139,6 +171,7 @@ usage() {
     echo "  --temperature VALUE   Set temperature (0.0-2.0, controls randomness/creativity)"
     echo "  --show-broken         Show unworking models (config/broken-nvidia-models.json) in picker (default: hidden; menu key u)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
+    echo "  --print-spoof         Print the spoofed model id claude will be launched with, then exit"
 }
 
 _valid_model() {
@@ -1061,6 +1094,7 @@ PERMISSION_MODE="auto"   # resolved from AUTO_MODE_STATE below
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)        usage; exit 0 ;;
+        --print-spoof)    printf '%s\n' "$(_select_spoof_primary)"; exit 0 ;;
         --list)           MODE="list"; shift ;;
         --stop)           MODE="stop"; shift ;;
         --verify)         MODE="verify"; ALIAS="${2:-}"; shift 2 || shift ;;
@@ -1573,10 +1607,12 @@ case "$TIER" in
            COST_NOTE='account quota and billing unverified; do not assume free'
        fi ;;
 esac
+SPOOF_PRIMARY="$(_select_spoof_primary)"
 if [[ $DRY_RUN -eq 1 ]]; then
     echo "   DRY RUN  : would start a LiteLLM proxy and exec claude against it."
     echo "              nothing started, no network call made."
     echo "     model          : $MODEL"
+    echo "     spoof          : $SPOOF_PRIMARY"
     echo "     provider       : $PROV"
     echo "     cost note      : $COST_NOTE"
     # Print the RESOLVED toggle state and the flags claude would actually receive.
@@ -1776,7 +1812,7 @@ AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_PROVIDER__/$PROV}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_PORT__/$PORT}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_PORT_MIN__/$LA_REMOTE_PROXY_PORT_MIN}
 AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_PORT_MAX__/$LA_REMOTE_PROXY_PORT_MAX}
-AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_SPOOF__/claude-opus-5}
+AGENT_PROMPT=${AGENT_PROMPT//__LA_REMOTE_SPOOF__/$SPOOF_PRIMARY}
 
 # SHARED shipping/verification rules, from the SAME file the local launcher appends. They are
 # lane-independent — about how to verify and ship, not about where inference runs — so one file
@@ -1848,10 +1884,10 @@ trap _teardown EXIT INT TERM HUP
 # by default since the sandbox allowlist doesn't include MCP tools.
 if [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 && "${AUTO_MODE_STATE:-0}" -ne 0 ]]; then
     # MCPs enabled for free-API non-blind-trust sessions
-    claude_cmd=(claude --model claude-opus-5 --append-system-prompt "$AGENT_PROMPT")
+    claude_cmd=(claude --model "$SPOOF_PRIMARY" --append-system-prompt "$AGENT_PROMPT")
 else
     # Default: disable MCPs (original behavior for cost savings)
-    claude_cmd=(claude --model claude-opus-5 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
+    claude_cmd=(claude --model "$SPOOF_PRIMARY" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
 fi
 claude_cmd+=(--permission-mode "$PERMISSION_MODE")
 
