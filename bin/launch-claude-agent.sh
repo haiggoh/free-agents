@@ -833,11 +833,21 @@ if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "1" ]; then
     fi
     MCP_FLAG=()
     [ "${LA_ENABLE_MCP:-0}" = "1" ] && MCP_FLAG=(--enable-mcp)
+    EXTRA_BT_FLAGS=()
+    [ "${LA_DENY_GH_RELEASE:-0}" = "1" ] && EXTRA_BT_FLAGS+=(--deny-gh-release)
+    # No classifier-capable local model installed -> hide native auto mode from the
+    # Shift+Tab cycle (bypass stays reachable; auto cannot be cycled into a dead
+    # classifier). Same resolver that picks the default classifier model.
+    if ! bash "$LAUNCH_DIR/local-classifier-default.sh" --dir-only >/dev/null 2>&1; then
+        EXTRA_BT_FLAGS+=(--disable-auto-mode)
+        echo "⚠️ No classifier-capable local model installed — auto mode hidden from the cycle; blind-trust + deny list active." >&2
+    fi
     python3 "$LAUNCH_DIR/blind-trust-settings.py" \
         --master "$_MASTER_ALLOWLIST_FILE" \
         --profile "$_PROFILE_ALLOWLIST_FILE" \
         --out "$BLIND_TRUST_SETTINGS_FILE" \
         "${MCP_FLAG[@]}" \
+        "${EXTRA_BT_FLAGS[@]}" \
         --mechanism bypass || {
         echo "❌ Failed to generate blind-trust settings" >&2; exit 1; }
     CLAUDE_EXTRA_ARGS+=(--settings "$BLIND_TRUST_SETTINGS_FILE")

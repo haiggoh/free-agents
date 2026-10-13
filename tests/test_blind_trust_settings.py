@@ -80,6 +80,16 @@ with tempfile.TemporaryDirectory() as td:
     hl = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True)
     check(hl.returncode == 0 and "--mechanism" in hl.stdout, "--help documents flags")
 
+# Test 5: gh-release deny toggle (off by default since 0.32.0, re-addable via --deny-gh-release)
+check(bts.GH_RELEASE_DENY not in s["permissions"]["deny"], "gh release create NOT denied by default")
+g = bts.build_settings([], [], "bypass", False, deny_gh_release=True)
+check(bts.GH_RELEASE_DENY in g["permissions"]["deny"], "--deny-gh-release re-adds the deny entry")
+
+# Test 6: disableAutoMode emission (--disable-auto-mode)
+check("disableAutoMode" not in s, "disableAutoMode absent by default")
+d = bts.build_settings([], [], "bypass", False, disable_auto_mode=True)
+check(d.get("disableAutoMode") == "disable", "--disable-auto-mode emits disableAutoMode=disable")
+
 print(f"\n{PASSES} passed, {len(FAILURES)} failed")
 if __name__ == "__main__":
     raise SystemExit(1 if FAILURES else 0)

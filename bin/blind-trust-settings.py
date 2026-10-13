@@ -12,6 +12,12 @@ The generator produces settings that:
 - Drop mcp__* rules unless --enable-mcp
 - Write mode 600
 - Never include a sandbox key (decided by launch profile, now off)
+- Optionally re-add "Bash(gh release create:*)" to the deny list (--deny-gh-release,
+  wired to the csl blind-trust toggle; OFF by default since 0.32.0 — releases are a
+  normal ship step and the user decides what runs unattended)
+- Optionally remove Claude Code's native auto mode from the Shift+Tab cycle
+  (--disable-auto-mode -> "disableAutoMode": "disable") for sessions with no
+  classifier available, so bypass stays reachable but auto cannot be cycled into
 """
 
 from __future__ import annotations
@@ -28,11 +34,15 @@ DESTRUCTIVE_DENY = [
     "Bash(sudo:*)",
     "Bash(git push --force:*)", "Bash(git push -f:*)",
     "Bash(git reset --hard:*)",
-    "Bash(gh release create:*)",
     "Bash(rm -rf /:*)", "Bash(rm -rf ~:*)", "Bash(rm -rf $HOME:*)",
     "Edit(~/.claude/settings.json)", "Edit(~/.claude/settings.local.json)",
     "Edit(~/.claude/plugins/**)",
 ]
+
+# Off the base deny list since 0.32.0: releases are a normal ship step, and the deny
+# rule blocked attended sessions from completing their own shipping loop. Cautious
+# setups re-add it with --deny-gh-release (the csl blind-trust toggle).
+GH_RELEASE_DENY = "Bash(gh release create:*)"
 
 
 def load_allowlist(path: str) -> list[str]:
@@ -63,6 +73,8 @@ def build_settings(
     profile_allow: list[str],
     mechanism: str = "bypass",
     enable_mcp: bool = False,
+    deny_gh_release: bool = False,
+    disable_auto_mode: bool = False,
 ) -> dict[str, Any]:
     """Build blind-trust settings dict.
 
@@ -85,14 +97,23 @@ def build_settings(
                 continue
             merged_allow.append(item)
 
+    deny = list(DESTRUCTIVE_DENY)
+    if deny_gh_release:
+        deny.append(GH_RELEASE_DENY)
+
     if mechanism == "bypass":
-        return {
+        settings: dict[str, Any] = {
             "permissions": {
                 "defaultMode": "bypassPermissions",
                 "allow": merged_allow,
-                "deny": DESTRUCTIVE_DENY,
+                "deny": deny,
             }
         }
+        if disable_auto_mode:
+            # Removes native auto mode from the Shift+Tab cycle; a session that would
+            # start in auto starts in default instead (settings-reference: disableAutoMode).
+            settings["disableAutoMode"] = "disable"
+        return settings
     elif mechanism == "hook":
         # Hook mechanism keeps auto mode but installs an allow-all PreToolUse hook
         hook_command = 'printf \'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"blind-trust"}}\''
@@ -100,7 +121,7 @@ def build_settings(
             "permissions": {
                 "defaultMode": "auto",
                 "allow": merged_allow,
-                "deny": DESTRUCTIVE_DENY,
+                "deny": deny,
                 "hooks": {
                     "PreToolUse": [{
                         "matcher": "*",
@@ -167,13 +188,21 @@ Examples:
     ap.add_argument("--enable-mcp", action="store_true", help="Keep mcp__* allow rules")
     ap.add_argument("--mechanism", choices=["bypass", "hook"], default="bypass",
                     help="Permission mechanism (default: bypass - measured winner)")
+    ap.add_argument("--deny-gh-release", action="store_true",
+                    help='Re-add "Bash(gh release create:*)" to the deny list '
+                         "(off by default since 0.32.0; wired to the csl blind-trust toggle)")
+    ap.add_argument("--disable-auto-mode", action="store_true",
+                    help='Emit "disableAutoMode": "disable" — removes native auto mode '
+                         "from the Shift+Tab cycle (for sessions with no classifier available)")
 
     args = ap.parse_args()
 
     master_allow = load_allowlist(args.master)
     profile_allow = load_allowlist(args.profile)
 
-    settings = build_settings(master_allow, profile_allow, args.mechanism, args.enable_mcp)
+    settings = build_settings(master_allow, profile_allow, args.mechanism, args.enable_mcp,
+                              deny_gh_release=args.deny_gh_release,
+                              disable_auto_mode=args.disable_auto_mode)
     write_settings(settings, Path(args.out))
 
     print(args.out)

@@ -13,6 +13,14 @@
   classifier-source labels now name the live default alias instead of hardcoding Devstral.
   Devstral Small 2's qualification is void on rapid-mlx >= 0.15.3 (see the campaign report);
   CUDA machines have no qualified classifier — run blind-trust mode there.
+- **`gh release create` is off the blind-trust deny list by default**, re-addable from csl
+  (Settings → "Deny 'gh release create' in blind-trust"; the generated settings then pass
+  `--deny-gh-release`). The rule used to block attended sessions from completing their own
+  shipping loop.
+- **Auto mode is hidden from the Shift+Tab cycle when no classifier is available**: the local
+  launcher's settings generation emits `"disableAutoMode": "disable"` when the classifier
+  resolver finds nothing installed — bypass stays reachable, auto cannot be cycled into a dead
+  classifier. README's Auto Mode section rewritten for the current architecture.
 
 ## [0.31.0] — 2026-10-13
 

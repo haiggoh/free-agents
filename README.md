@@ -898,7 +898,7 @@ server, the classifier request follows it and is answered locally, for free.
 | State | Key | Behavior | Use case |
 |---|---|---|---|
 | **0 = blind-trust** (DEFAULT) | `a` | `--permission-mode bypassPermissions` plus a destructive-command deny list. No classifier runs at all (measured: 0 classifier calls). | Default — no waiting on a classifier server; unattended runs never stall. |
-| **1 = classifier** | `a` | `--permission-mode auto`, boots a second local model to judge auto-mode calls. | The real auto mode — requires the classifier warm-up path. |
+| **1 = classifier** | `a` | `--permission-mode auto`; the classifier request is answered by the local dual-identity server. Default **granite-4.2-30b** (DIRECT_PASS in the 2026-10-13 campaign), resolved via `bin/local-classifier-default.sh` with a tested fallback tier. | The real auto mode — requires a classifier-capable local model. |
 | **2 = off** | `a` | `--permission-mode acceptEdits`. No auto-mode behaviour. | Turn auto mode off entirely. |
 
 Environment override: `CSL_AUTO_MODE_STATE=0|1|2` sets the initial state directly.
@@ -908,6 +908,18 @@ The launcher maps state→env: `0` → `LA_AUTO_MODE=1 LA_BLIND_AUTO=1`, `1` →
 ⚠️ **Blind-trust is the default, and it is not auto mode.** Nothing judges the calls: everything
 is allowed except what the deny list blocks. Choose it knowingly. The classifier description below
 applies to **state 1 only** — toggle to it with `a`, or set `CSL_AUTO_MODE_STATE=1`.
+
+**How the classifier model is chosen (since 0.32.0).** `bin/local-classifier-default.sh`
+resolves the default: granite-4.2-30b first, then the campaign-tested latency tier
+(kat-coder-optiq, qwen-3.6-35b-a3b, ornith-1.5-35b, nemotron35-lightning, agentworld-35b) —
+the first model whose weights are installed wins. If NOTHING classifier-capable is installed,
+launch prints a warning with the install command (`install/download-models.sh --select
+granite-4.2-30b`), recommends blind-trust, and hides native auto mode from the Shift+Tab cycle
+entirely (`"disableAutoMode": "disable"` in the generated settings): bypass stays reachable, but
+you cannot cycle into a mode whose classifier is dead. CUDA machines: the qualification campaign
+was MLX-only — run blind-trust mode there. Classifier settings stay per-lane (gateway cloud /
+local / free-API remote). The blind-trust deny list is shared across lanes; `gh release create`
+is on it only if you re-enable the toggle in csl (off by default since 0.32.0).
 
 **Verified 2026-09-05**, on `kat-coder-optiq` served by Rapid-MLX: the local server logged the
 classifier arriving under its own model identity and being answered by the loaded engine —

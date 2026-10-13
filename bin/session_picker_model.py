@@ -195,6 +195,7 @@ class Settings:
     include_trials: bool = True      # interactive visibility only; direct CLI keeps its guard
     local_capable_shown: bool = False
     show_broken: bool = False        # unworking models; in-memory, like the CLI flag
+    deny_gh_release: bool = False    # re-add "Bash(gh release create:*)" to the blind-trust deny list (off since 0.32.0)
     remote_temperature: str = sms.DEFAULT_TEMPERATURE["remote_api_session"]
     local_temperature: str = sms.DEFAULT_TEMPERATURE["local_session"]
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
@@ -427,6 +428,8 @@ def _common_toggles(s: Settings, include_watcher: bool):
         setting("t", f"{ec.EMOJI_TELEMETRY_ON_STR} Telemetry: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry")),
         setting("p", f"{ec.EMOJI_STOP_HOOK_STR} Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
                 *_toggle(s, "stop_hook")),
+        setting("g", f"Deny 'gh release create' in blind-trust: {'ON' if s.deny_gh_release else 'OFF'}",
+                *_toggle(s, "deny_gh_release")),
     ]
     if include_watcher:
         acts.append(setting("w", f"{ec.EMOJI_WATCHER_STR} Watcher: {'ON' if s.watcher else 'OFF'}",
@@ -626,6 +629,7 @@ class LocalScreen(Screen):
                "LA_BLIND_AUTO": "1" if s.auto_mode == 0 else "0",
                "LA_TELEMETRY": "1" if s.telemetry else "0",
                "LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
+               "LA_DENY_GH_RELEASE": "1" if s.deny_gh_release else "0",
                "LA_ENABLE_MCP": "1" if s.enable_mcp else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
                "CSL_WATCH": "1" if s.watcher else "0"}
@@ -815,6 +819,7 @@ class RemoteScreen(Screen):
             argv += ["--temperature", s.remote_temperature]
         argv.append(alias)
         env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
+               "LA_DENY_GH_RELEASE": "1" if s.deny_gh_release else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
                "CLOUD_BYPASS_PERMISSIONS": "1" if s.cloud_bypass_permissions else "0"}
         return LaunchRequest("remote", argv, env, alias)
