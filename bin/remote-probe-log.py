@@ -26,6 +26,11 @@ measured at 40/min. So probing many routes must be PACED, never parallel and nev
 burst: this tool sleeps between attempts and refuses a delay that could exceed the
 ceiling. A burst does not merely get throttled, it poisons the evidence - a 429 recorded
 against a model says nothing about that model, only about our own request rate.
+Every nvidia probe ALSO passes through the machine-wide limiter in bin/rate_limiter.py
+-- the same shared bucket the live-session proxies fill -- so probe traffic and session
+traffic count against ONE 40 RPM ceiling instead of the probe's sleep being the only
+brake. A probe outside the bucket undercounts the key's real consumption and paces
+every co-resident process against a ledger that lies.
 
 Environment:
   LA_PROBE_LOG        history file (default ~/.claude/logs/remote-probe-history.jsonl)
@@ -33,11 +38,24 @@ Environment:
   LA_PROBE_DELAY_S    seconds between attempts (default 2.0; floor 1.5 = 40/min)
   LA_PROBE_RPM_LIMIT  provider requests-per-minute ceiling to respect (default 40)
   LA_API_KEYS_DIR     credential dir (default ~/.api_keys)
+  LA_REMOTE_RATE_LIMIT  set 0 to bypass the machine-wide limiter (tests only)
 
-Cost: each probe spends a HANDFUL of tokens on the provider's free allowance (max_tokens
-is deliberately tiny). It spends no Anthropic gateway budget.
+Cost: each probe spends a handful of tokens on the provider's free allowance. max_tokens
+is 512, NOT tiny: reasoning models spend their budget on reasoning_content BEFORE any
+content, so a 24-token probe truncates mid-reasoning and records a false "empty" (the
+2026-10-13 confound that nearly condemned glm-5.3-flash and gpt-oss -- see
+docs/nvidia-nim-serving-notes.md). It spends no Anthropic gateway budget.
 """
-import argparse, datetime, json, os, pathlib, subprocess, sys, time, urllib.error, urllib.request
+import argparse
+import datetime
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 ROSTER = REPO / "config" / "remote-agents.sh"
@@ -56,6 +74,20 @@ ENDPOINTS = {   # provider -> (url, key-file, auth style)
     "groq":   ("https://api.groq.com/openai/v1/chat/completions", "groq", "bearer"),
     "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "gemini", "bearer"),
 }
+
+# Providers whose requests must also pass the machine-wide limiter in bin/rate_limiter.py
+# -- the same shared bucket the live-session proxies fill. LA_REMOTE_RATE_LIMIT=0 opts
+# out (tests only; a real probe that skips it spends the same 40 RPM the sessions do).
+RATE_LIMITED_PROVIDERS = {"nvidia"}
+
+def _limiter_for(provider):
+    """The machine-wide limiter for `provider`, or None when it is not rate limited."""
+    if provider not in RATE_LIMITED_PROVIDERS or \
+            os.environ.get("LA_REMOTE_RATE_LIMIT", "1") == "0":
+        return None
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from rate_limiter import get_limiter
+    return get_limiter()
 
 def roster():
     """Rows from the shell roster, so this tool never keeps a second copy of the list."""
@@ -89,11 +121,29 @@ def probe_one(row, want_tools=False, timeout=90):
     if not key:
         rec.update(ok=False, status="nokey", detail=f"no credential at {keyfile}")
         return rec
-    body = {"model": row["model"], "max_tokens": 24, "temperature": 0,
+    # Machine-wide bucket FIRST, OUTSIDE the elapsed clock: limiter wait is our pacing,
+    # not the provider's latency, and the record must be able to tell them apart.
+    try:
+        limiter = _limiter_for(prov)
+        if limiter is not None:
+            limiter.acquire()
+    except Exception as e:                     # RateLimitTimeout: bucket stayed full
+        rec.update(ok=False, status="rate_limited",
+                   detail=f"machine-wide {prov} limiter: {e}"[:200])
+        return rec
+    started = time.time()
+    # max_tokens must EXCEED the model's minimum reasoning budget: reasoning models
+    # spend it on reasoning_content BEFORE content, so a tiny cap truncates mid-reasoning
+    # and records a false "empty" (finish=length). 512 spans every observed minimum --
+    # GLM spent 32-80 reasoning tokens on a one-word prompt (measured 2026-10-13).
+    body = {"model": row["model"], "max_tokens": 512, "temperature": 0,
             "messages": [{"role": "user", "content": "Reply with the single word: OK"}]}
     if prov == "nvidia":
         # NIM reasoning models return reasoning_content, which is not an Anthropic thinking
         # block; the session-side fix disables it, so probe the same configuration we ship.
+        # (For Nemotron this kwarg works; for GLM it is inert in every shape -- measured
+        # 2026-10-13, docs/nvidia-nim-serving-notes.md -- which is exactly why max_tokens
+        # must be 512: the reasoning fires regardless and the content needs budget left.)
         body["chat_template_kwargs"] = {"enable_thinking": False}
     if want_tools:
         body["messages"] = [{"role": "user", "content": "Call the ping tool with value 1."}]
@@ -116,18 +166,40 @@ def probe_one(row, want_tools=False, timeout=90):
             pass
         # A 429 is a statement about OUR request rate, not about this model. Tag it
         # distinctly so `report` can exclude it from a route's success rate instead of
-        # letting our own pacing mistake look like a broken model.
+        # letting our own pacing mistake look like a broken model. Also tell the shared
+        # machine-wide limiter, so it pauses every process exactly as the proxies do.
         status = "rate_limited" if e.code == 429 else f"http{e.code}"
-        rec.update(ok=False, status=status, detail=str(detail)[:200])
+        if status == "rate_limited" and limiter is not None:
+            try:
+                ra = e.headers.get("Retry-After") if getattr(e, "headers", None) else None
+                limiter.note_429(float(ra) if ra else None)
+            except Exception:
+                pass
+        rec.update(ok=False, status=status, detail=str(detail)[:200],
+                   elapsed=round(time.time() - started, 2))
         return rec
     except Exception as e:                     # timeout, DNS, TLS, malformed body
-        rec.update(ok=False, status="error", detail=f"{type(e).__name__}: {e}"[:200])
+        rec.update(ok=False, status="error", detail=f"{type(e).__name__}: {e}"[:200],
+                   elapsed=round(time.time() - started, 2))
         return rec
     try:
         msg = payload["choices"][0]["message"]
     except (KeyError, IndexError, TypeError):
         rec.update(ok=False, status="badshape", detail=str(payload)[:200])
         return rec
+    # The fields the old probe was blind to: finish distinguishes "the model said
+    # nothing" (stop) from "the budget died inside the reasoning" (length), and the
+    # reasoning fields expose a thinking model that answered into reasoning_content.
+    # Without them, "empty" condemned models that were fine (2026-10-13).
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+    details = usage.get("completion_tokens_details")
+    rec.update(elapsed=round(time.time() - started, 2),
+               finish=payload["choices"][0].get("finish_reason"),
+               reasoning_len=len(msg.get("reasoning_content") or ""))
+    if isinstance(details, dict) and details.get("reasoning_tokens") is not None:
+        rec["reasoning_tokens"] = details["reasoning_tokens"]
     if want_tools:
         calls = msg.get("tool_calls") or []
         rec.update(ok=bool(calls), status="toolcall" if calls else "notoolcall",
