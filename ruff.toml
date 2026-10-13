@@ -1,0 +1,18 @@
+# free-agents pinned ruff rule set — the check-code hook and editors auto-discover this
+# file, so findings match repo policy instead of ruff's ~400 defaults.
+# Validated against: ruff 0.17.0. Baseline taken 2026-10-14 (pre-0.32.2 tree).
+#
+# Ignores below are each either (a) style the existing tree evidences as policy, or
+# (b) a DEFERRED baseline with an unignore instruction. No silent silencing.
+line-length = 132
+
+[lint]
+select = ["E4", "E7", "E9", "F"]  # pycodestyle core errors + pyflakes
+ignore = [
+    "E401",  # multiple-imports-on-one-line: long-standing script style in bin/
+    "E402",  # bin/ scripts and conftest bootstrap sys.path before repo imports — by design
+    "E701",  # compact one-liner style is repo policy (21+ instances across bin/)
+    "E702",  # `step(); assert` contract-test idiom + script one-liners (28 outside tests)
+    "F401",  # DEFERRED: 51 unused imports at baseline — dedicated cleanup patch, then unignore
+    "F841",  # DEFERRED: 28 unused variables at baseline — dedicated cleanup patch, then unignore
+]
