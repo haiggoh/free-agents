@@ -1,3 +1,16 @@
+## [0.30.0] — 2026-10-13
+
+### Changed
+- **Model downloads give way to other apps.** On macOS, `install/download-models.sh` now runs each
+  `hf download` under `taskpolicy -b` (Darwin background QoS). The kernel then lets browsers,
+  OneDrive and other apps use the network first, and the download uses whatever is left. This is
+  not a fixed percentage cap: on an idle link the download still runs at full speed, and it backs
+  off only while other traffic needs the bandwidth. Disk IO and CPU get background priority too.
+  This was chosen over a measured 95% cap because `hf`/xet has no rate-limit option, and a hard
+  cap would mean turning off xet's parallel transfers or running `dnctl` with sudo on every run.
+  Opt out with `--full-speed` or `LA_DOWNLOAD_BACKGROUND=0`. Off macOS (no `taskpolicy`)
+  nothing changes.
+
 ## [0.29.4] — 2026-10-12
 
 ### Fixed

@@ -21,6 +21,13 @@
 #   download-models.sh --target DIR         # download somewhere else (another volume)
 #   download-models.sh --headroom-gb N      # disk reserve to keep free (default 100)
 #   download-models.sh --allow-tight        # proceed even if the reserve is breached
+#   download-models.sh --full-speed         # don't run hf at background priority (see below)
+#
+# Network courtesy: on macOS each `hf download` runs under `taskpolicy -b` (Darwin
+# background QoS), so the kernel lets browsers, OneDrive etc. take the link first while
+# the download soaks up whatever is left. There's no fixed cap, so on an idle link it
+# still runs at full speed. Disk IO and CPU are de-prioritised the same way.
+# Turn it off with --full-speed or LA_DOWNLOAD_BACKGROUND=0. Elsewhere it does nothing.
 #
 # Disk preflight: before downloading, the queued selection is summed against free space
 # on the target volume, minus a reserve (default 100 GB, or $LA_DISK_HEADROOM_GB). If it
@@ -61,6 +68,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 
+BACKGROUND_QOS=${LA_DOWNLOAD_BACKGROUND:-1}
 FORCE=0; LIST_ONLY=0; DRY_RUN=0; CHECK_AUTH=0; NON_AUTH_ACTION=0; ALL=0; ALLOW_TIGHT=0
 GROUP_FILTER=""; SELECTED=(); CATALOG_OVERRIDE=(); TARGET_OVERRIDE=""
 HEADROOM_GB=${LA_DISK_HEADROOM_GB:-100}
@@ -87,7 +95,8 @@ while (($#)); do
     --alias) (($# >= 2)) || { echo '--alias needs an alias' >&2; exit 2; }; DYNAMIC_ALIAS=$2; NON_AUTH_ACTION=1; shift 2 ;;
     --include) (($# >= 2)) || { echo '--include needs a pattern' >&2; exit 2; }; DYNAMIC_INCLUDE=$2; NON_AUTH_ACTION=1; shift 2 ;;
     --json) JSON_OUTPUT=1; NON_AUTH_ACTION=1; shift ;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    --full-speed) BACKGROUND_QOS=0; NON_AUTH_ACTION=1; shift ;;
+    -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
@@ -583,6 +592,9 @@ for i in "${QUEUE[@]}"; do
   cmd=(hf download "$repo" --revision "$rev" --local-dir "$local_dest")
   if [[ -n $include ]]; then IFS=';' read -r -a patterns <<<"$include"; for pattern in "${patterns[@]}"; do cmd+=(--include "$pattern"); done; fi
   ((FORCE)) && cmd+=(--force-download); ((DRY_RUN)) && cmd+=(--dry-run)
+  # Background QoS: macOS throttles sockets the process opens AFTER it goes background, and
+  # taskpolicy sets that before exec, so every hf connection gets it. No-op off macOS.
+  if [[ $BACKGROUND_QOS != 0 ]] && command -v taskpolicy >/dev/null 2>&1; then cmd=(taskpolicy -b "${cmd[@]}"); fi
   # Field note: on some networks the HF CDN (CloudFront) IPv6 endpoints black-hole and hf hangs in
   # SYN_SENT. If a download stalls at 0 bytes, force IPv4 (a sitecustomize shim on PYTHONPATH) or
   # switch network. See the README troubleshooting section.
