@@ -1,3 +1,18 @@
+## [0.32.2] — 2026-10-14
+
+### Fixed
+- **Pinned ruff rule set (`ruff.toml`)** — the check-code hook and editors now report repo policy
+  instead of ruff's ~400 factory-default rules. Style families the tree evidences are ignored with
+  rationale (E401/E402/E701/E702); unused-import/variable baselines (F401/F841) are explicitly
+  DEFERRED to a dedicated cleanup patch. Genuine findings the pin surfaced are fixed: stray f-prefixes
+  (F541), ambiguous `l` names (E741), lambda assignments (E731), one bare except (E722), and two stale
+  duplicate class definitions in `install/managers/base.py` (F811, byte-identical to `_common`'s).
+- **`package-release.sh` now emits `dist/install-free-agents.sh`** — RELEASE.md step 6 uploads it,
+  but the script only placed the installer inside the tarball; 0.32.0 and 0.32.1 copied it by hand.
+  The package also ships `ruff.toml`, so installed copies keep policy-aligned hook findings.
+- **RELEASE.md extraction commands run on macOS/BSD** — `sed '$d'` replaces GNU-only `head -n -1`,
+  which BSD head refuses exactly when a release is being cut.
+
 ## [0.32.1] — 2026-10-14
 
 ### Changed
