@@ -120,9 +120,17 @@ release must bump it or `brew install haiggoh/tap/free-agents` keeps serving the
 V=0.25.8
 sha=$(curl -sL https://github.com/haiggoh/free-agents/releases/download/v$V/free-agents-$V.tar.gz | shasum -a 256 | cut -d' ' -f1)
 # in a clone of haiggoh/homebrew-tap, on a branch: set url to .../v$V/free-agents-$V.tar.gz and sha256 to $sha
-brew style Formula/free-agents.rb && brew install --build-from-source ./Formula/free-agents.rb && brew test free-agents
-# open a PR against haiggoh/homebrew-tap and merge it
+brew style Formula/free-agents.rb
+# open a PR against haiggoh/homebrew-tap and merge it, then test the merged formula through the tap:
+brew update && brew upgrade haiggoh/tap/free-agents && brew list --versions free-agents   # expect $V
+brew test haiggoh/tap/free-agents
 ```
+
+Current Homebrew (checked on 7.0.9) refuses to install a formula from a file path ("Homebrew requires formulae
+to be in a tap, rejecting: …"), so `brew install ./Formula/free-agents.rb` no longer works as a check
+before merging. The checks you can still run before merging are `brew style` and confirming that
+`$sha` matches `shasum -a 256 dist/free-agents-$V.tar.gz`. The install itself can only be tested
+after the merge. If it fails, fix it with another tap PR.
 
 ---
 
