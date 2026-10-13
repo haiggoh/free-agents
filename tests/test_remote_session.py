@@ -252,16 +252,26 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 self.assertEqual(cfg.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn('fixture-not-a-real-key', text)
                 self.assertEqual('      thinking:' in text, provider == 'gemini' and thinking == 'false')
-                # NVIDIA NIM reasoning models (Nemotron) must have reasoning disabled at the
-                # backend, or the Anthropic translation layer 500s the session.
-                # Only Nemotron models get enable_thinking: false; other NVIDIA models
-                # (Kimi, DeepSeek, GLM, etc.) have different behavior.
-                # GLM models also get enable_thinking explicitly set (true/false based on thinking flag).
+                # NVIDIA NEMOTRON reasoning must be disabled at the backend or the Anthropic
+                # translation layer 500s the session (enable_thinking works for Nemotron).
+                # GLM is different and now measured: enable_thinking is INERT on NIM GLM in
+                # every shape (2026-10-13, docs/nvidia-nim-serving-notes.md), so GLM gets
+                # NO chat_template_kwargs -- the -thinking suffix expresses itself as a
+                # reasoning_effort default instead: low for the base alias, high for -thinking.
                 is_nemotron = provider == 'nvidia' and 'nemotron' in model
                 is_glm = provider == 'nvidia' and 'glm' in model
-                expected_false_count = self.spoof_id_count if (is_nemotron or is_glm) and thinking == 'false' else 0
+                expected_false_count = self.spoof_id_count if is_nemotron and thinking == 'false' else 0
                 self.assertEqual(text.count('        enable_thinking: false\n'),
                                  expected_false_count)
+                if provider == 'nvidia' and not is_nemotron:
+                    if is_glm:
+                        self.assertNotIn('enable_thinking', text)
+                        want_effort = 'high' if thinking == 'true' else 'low'
+                        self.assertEqual(text.count('      reasoning_effort: ' + want_effort + '\n'),
+                                         self.spoof_id_count)
+                    else:
+                        # Other NVIDIA models with no explicit effort: provider default stands.
+                        self.assertNotIn('reasoning_effort', text)
                 if provider == 'cloudflare':
                     self.assertIn('/accounts/' + 'a' * 32 + '/ai/v1', text)
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)
@@ -436,6 +446,19 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
 
         # No effort chosen => no reasoning_effort at all (provider default stands).
         self.assertNotIn('reasoning_effort', write('groq', 'some/model', ''))
+
+        # GLM is the measured exception (2026-10-13): enable_thinking is inert on NIM GLM,
+        # so with no explicit effort the alias variant itself supplies the default --
+        # reasoning_effort low for the base alias, high for -thinking -- and an explicit
+        # --effort still wins over the alias default.
+        for thinking, expected in (('false', 'low'), ('true', 'high')):
+            with self.subTest(glm_default=thinking):
+                text = write('nvidia', 'z-ai/glm-5.3', '', thinking)
+                self.assertNotIn('enable_thinking', text)
+                self.assertEqual(text.count('      reasoning_effort: ' + expected + '\n'),
+                                 self.spoof_id_count)
+        text = write('nvidia', 'z-ai/glm-5.3', 'medium', 'true')
+        self.assertEqual(text.count('      reasoning_effort: medium\n'), self.spoof_id_count)
 
         # An unknown level is refused loudly, not silently written into the config.
         cfg = self.root / 'proxy.yaml'

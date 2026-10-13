@@ -813,18 +813,14 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         enable_thinking: false'
         fi
     fi
-    # GLM models (z-ai/glm-*) also need enable_thinking: true when -thinking suffix used
-    # They return reasoning_content instead of content; non-streaming fails with 'NoneType' error
-    # Streaming + thinking enabled works reliably
-    if [[ "$prov" == "nvidia" && "$model" == *glm* ]]; then
-        if [[ "$thinking" == "true" ]]; then
-            think_line='      chat_template_kwargs:
-        enable_thinking: true'
-        else
-            think_line='      chat_template_kwargs:
-        enable_thinking: false'
-        fi
-    fi
+    # GLM on NIM: enable_thinking is INERT -- measured 2026-10-13 with a 4-shape
+    # controlled test (enable_thinking: false, {"type":"disabled"} dict, boolean false,
+    # absent): reasoning fires identically in all four, so the -thinking suffix used to
+    # differ from the base alias only by a kwarg that did nothing. GLM's thinking dial
+    # is the API-layer reasoning_effort (low -> 0 reasoning tokens), set in the effort
+    # block below. No chat_template_kwargs for GLM. See docs/nvidia-nim-serving-notes.md.
+    # (The old 'needs enable_thinking: true' note was a misattribution: the same v0.21.4
+    # fix also raised max_tokens, which is what did the work.)
 
     # EFFORT. Claude Code's own --effort flag is meaningless to a third-party provider: it is
     # interpreted by Anthropic's models, so passing it to `claude` while the request is proxied
@@ -852,6 +848,17 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         "")               mapped_effort="" ;;
         *)                echo "remote-session: unknown effort '\''$effort'\'', ignoring" >&2 ;;
     esac
+    # GLM on NIM has no chat_template thinking control (inert in every shape, measured
+    # 2026-10-13), so the -thinking suffix must express itself through reasoning_effort:
+    # default high for -thinking, low for the base alias (low -> 0 reasoning tokens on
+    # NIM, verified direct). An explicit --effort still wins.
+    if [[ "$prov" == "nvidia" && "$model" == *glm* && -z "$mapped_effort" ]]; then
+        if [[ "$thinking" == "true" ]]; then
+            mapped_effort="high"
+        else
+            mapped_effort="low"
+        fi
+    fi
     local effort_line=""
     if [[ -n "$mapped_effort" ]]; then
         # Map xhigh/max to high for reasoning_effort (OpenAI only accepts low/medium/high)
