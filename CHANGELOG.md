@@ -16,6 +16,10 @@
   override but the test still passed the old `LOCAL_AGENTS_LEDGER_DIR`, so its `record` subprocesses
   wrote into the real ledger and module-level collection failed (0.32.1 shipped with a red suite).
   Test events can no longer leak into the real ledger.
+- **Quota telemetry no longer crashes during UTC 23:00–23:59** — the Kilo rolling-hour reset
+  computed `now.hour + 1`, which builds hour 24 and raises; the boundary now rolls to midnight of
+  the next day, with a regression test that pins hour-23 inputs instead of depending on when the
+  suite happens to run (the old tests only caught this when run during that hour).
 
 ## [0.32.1] — 2026-10-14
 

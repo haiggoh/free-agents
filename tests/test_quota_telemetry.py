@@ -4,6 +4,7 @@
 import json
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,23 @@ from quota.telemetry import (
     DIM_CREDITS,
     DIM_COMPUTE_UNITS,
 )
-from quota.providers import parse_provider
+from quota.providers import parse_provider, _next_hour_boundary
+
+
+class TestHourBoundaryRegression:
+    """Regression: the next-hour arithmetic crashed during UTC 23:00-23:59 (hour 24).
+
+    The old tests only caught this when RUN during that hour — pass-by-luck. These pin
+    the boundary with fixed inputs instead of the wall clock.
+    """
+
+    def test_rolling_hour_reset_rolls_over_midnight(self):
+        late = datetime(2026, 10, 14, 23, 42, tzinfo=timezone.utc)
+        assert _next_hour_boundary(late) == datetime(2026, 10, 15, 0, 0, tzinfo=timezone.utc)
+
+    def test_rolling_hour_reset_within_day(self):
+        mid = datetime(2026, 10, 14, 14, 5, tzinfo=timezone.utc)
+        assert _next_hour_boundary(mid) == datetime(2026, 10, 14, 15, 0, tzinfo=timezone.utc)
 
 
 class TestQuotaRecord:
