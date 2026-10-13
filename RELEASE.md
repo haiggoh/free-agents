@@ -70,7 +70,7 @@ git commit -m "chore: release 0.25.8 — <one-line summary>"
 
 ```bash
 # Create annotated tag with release notes from CHANGELOG
-git tag -a v0.25.8 -m "$(sed -n '/^## \[0.25.8\]/,/^## \[/p' CHANGELOG.md | head -n -1)"
+git tag -a v0.25.8 -m "$(sed -n '/^## \[0.25.8\]/,/^## \[/p' CHANGELOG.md | sed '$d')"
 # Or manually: git tag -a v0.25.8 -m "free-agents 0.25.8
 
 # ...release notes from CHANGELOG..."
@@ -89,7 +89,7 @@ git push origin v0.25.8
 # Create release (uses tag, generates release notes from commits)
 gh release create v0.25.8 \
   --title "free-agents 0.25.8 — <one-line summary>" \
-  --notes-file <(sed -n '/^## \[0.25.8\]/,/^## \[/p' CHANGELOG.md | head -n -1)
+  --notes-file <(sed -n '/^## \[0.25.8\]/,/^## \[/p' CHANGELOG.md | sed '$d')
 
 # Upload both assets
 gh release upload v0.25.8 dist/free-agents-0.25.8.tar.gz --clobber
