@@ -1,3 +1,12 @@
+## [0.34.2] — 2026-10-14
+
+### Fixed — the version list opens ready to choose
+
+0.34.1's version lists opened with the keyboard focus still on the action rows and the
+highlight on the group header, so Enter collapsed the list instead of choosing a version
+(found dogfooding the installed release against the real manager). The list now takes focus
+when it loads and starts on the first version: arrows, then Enter.
+
 ## [0.34.1] — 2026-10-14
 
 ### Fixed — the Backend manager regained the old menu's operations, picked from a list
