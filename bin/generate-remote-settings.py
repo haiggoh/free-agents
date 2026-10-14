@@ -89,6 +89,8 @@ def build_theme_file(config_dir):
     theme = theme_data.get('theme', {})
     fallback = theme_data.get('fallback', {})
     accent = theme.get('accent_color') or fallback.get('accent_color') or '#ADFF2F'
+    # The prompt outline uses a MUTED accent: full strength around the input was too distracting.
+    border = theme.get('border_color') or accent
     return {
         "name": theme.get('identity_label') or 'Free API session',
         "base": "dark",
@@ -102,8 +104,11 @@ def build_theme_file(config_dir):
             # The prompt input's outline (user request 2026-10-14). The CLI draws the border
             # with promptBorder and animates it with promptBorderShimmer; overriding only one
             # would flash the default grey on every shimmer frame.
-            "promptBorder": accent,
-            "promptBorderShimmer": accent,
+            "promptBorder": border,
+            "promptBorderShimmer": border,
+            # The welcome-screen mascot. Without it the theme file a main-line launch rewrites
+            # dropped the green mascot that the identity branch had written (0.34.5).
+            "clawd_body": accent,
         },
     }
 

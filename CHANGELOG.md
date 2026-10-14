@@ -1,3 +1,18 @@
+## [0.34.5] — 2026-10-14
+
+### Fixed — local sessions with a temperature could not launch; remote mascot lost its green
+
+- **Every temperature was rejected**, including valid ones like `1.0`: the validators in
+  `launch-claude-agent.sh` and `local-llm-hotswap.sh` wrapped `sys.exit(0)` in a bare
+  `except:`, which also catches `SystemExit`, so a valid value exited 1. Since the picker always
+  passes the saved temperature, no local session launched from it ("Could not determine the
+  server port"). Only `float()` is guarded now; `nan`/`inf` are rejected. The old tests only
+  grepped the source; `tests/test_temperature_validation.sh` RUNS both validators with 13 values.
+- **Muted prompt outline**: the input border uses `border_color` from `remote-theme.json`
+  (`#75A22F`, the accent muted toward grey). The full accent was too distracting there.
+- **Remote mascot**: the theme file now sets `clawd_body`, so the welcome-screen mascot keeps
+  the accent. 0.34.4's rewrite of `free-lime.json` had dropped it.
+
 ## [0.34.4] — 2026-10-14
 
 ### Changed — remote theme: prompt outline in the accent, a more yellowish green
