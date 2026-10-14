@@ -128,8 +128,11 @@ out = subprocess.run([sys.executable, f"{root}/bin/generate-remote-settings.py",
                       "--emit-theme-file"], capture_output=True, text=True).stdout
 d = json.loads(out or "{}")
 ov = d.get("overrides", {})
-print("ok" if (d.get("base") and ov and all(v == accent for v in ov.values()) and "claude" in ov
-              and "promptBorder" in ov and "promptBorderShimmer" in ov)
+border = json.load(open(f"{root}/config/remote-theme.json"))["theme"].get("border_color", accent)
+borders = {"promptBorder", "promptBorderShimmer"}
+print("ok" if (d.get("base") and ov and "claude" in ov and "clawd_body" in ov
+              and all(v == accent for k, v in ov.items() if k not in borders)
+              and all(ov.get(k) == border for k in borders) and border != accent)
       else f"bad:{out[:120]}")
 PY2
 )

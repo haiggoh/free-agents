@@ -62,15 +62,15 @@ while (( $# > 0 )); do
         --temperature)
             [[ $# -ge 2 ]] || { echo "local-llm-hotswap.sh: --temperature needs a value (0.0-2.0)" >&2; exit 2; }
             if ! python3 -c '
-import sys
+import math, sys
+# No try/except around sys.exit: a bare `except:` also catches SystemExit, which turned the
+# sys.exit(0) of every VALID value into exit 1 (0.34.5) — no local session with a temperature
+# could launch. float() is the only call that can raise, so only it is guarded.
 try:
     v = float(sys.argv[1])
-    if 0.0 <= v <= 2.0:
-        sys.exit(0)
-    else:
-        sys.exit(1)
-except:
+except ValueError:
     sys.exit(1)
+sys.exit(0 if math.isfinite(v) and 0.0 <= v <= 2.0 else 1)
 ' "$2"; then
                 echo "local-llm-hotswap.sh: --temperature must be a number 0.0-2.0, got '$2'" >&2
                 exit 2

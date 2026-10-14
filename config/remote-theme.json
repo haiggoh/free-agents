@@ -24,7 +24,8 @@
       "suggestion",
       "thinking",
       "promptBorder",
-      "promptBorderShimmer"
+      "promptBorderShimmer",
+      "clawd_body"
     ],
     "_roles_deliberately_untouched": [
       "success",
@@ -34,7 +35,9 @@
       "inverseText",
       "diffAdded",
       "diffRemoved"
-    ]
+    ],
+    "border_color": "#75A22F",
+    "_border_color_note": "Prompt-input outline: the accent muted 55/45 toward #303030 (user: full accent too distracting, 2026-10-14)."
   },
   "fallback": {
     "theme_identifier": "unknown",
