@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -156,6 +157,22 @@ PROVIDER_LABELS = {"nvidia": "NVIDIA", "gemini": "Gemini", "groq": "Groq",
                    "mistral": "Mistral", "zai": "Z.ai", "siliconflow": "SiliconFlow",
                    "llm7": "LLM7", "kilo": "Kilo", "vercel": "Vercel", "sambanova": "SambaNova",
                    "modelscope": "ModelScope", "streamlake": "Streamlake"}
+
+
+_MODEL_NOTES_PATH = Path(__file__).resolve().parent.parent / "config" / "remote-model-notes.json"
+
+
+def model_note(alias: str, path: Path | None = None) -> str:
+    """Short-form note for the remote info box, or "" when none is written. A "-thinking"
+    variant shares its base model's note (same weights, different mode). A missing or
+    malformed file yields "" — the box is an aid, never a reason the picker fails."""
+    import json
+    try:
+        notes = json.loads((path or _MODEL_NOTES_PATH).read_text())
+    except (OSError, ValueError):
+        return ""
+    note = notes.get(alias) or notes.get(alias.removesuffix("-thinking"))
+    return note if isinstance(note, str) else ""
 
 
 def tier_label(tier: str, provider: str) -> str:
@@ -714,6 +731,16 @@ class RemoteScreen(Screen):
                             [Item("__nokeys__:k", "Press K (API keys) to set one up — every listed provider has a free tier")])]
         self.accordion.set_groups(groups)
         self._models_loaded = True
+
+    def info_text(self, item_id: str | None) -> str:
+        """The info box under the model list: the model's display name and its short-form
+        note (config/remote-model-notes.json), or a hint when nothing is pointed at. Only
+        models get a box — group headers and the no-keys instruction get the hint."""
+        agent = next((a for a in self.agents if a.alias == item_id), None)
+        if agent is None:
+            return "Hover or highlight a model to see notes about it."
+        note = model_note(agent.alias)
+        return f"{agent.display}\n{note}" if note else f"{agent.display}\nNo notes for this model yet."
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings

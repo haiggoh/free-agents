@@ -202,5 +202,27 @@ class PickerTerminalEdge(PTYCase):
         self.assertEqual(self.exit_code(), 0)
 
 
+class RemoteInfoBox(PilotCase):
+    def test_info_box_follows_highlight_and_hides_with_list(self):
+        async def s(app, pilot, h):
+            info = app.query_one("#info")
+            self.assertFalse(info.display)                    # model list closed: no box
+            await h.press("c")
+            await h.settle()
+            self.assertTrue(info.display)
+            rows = app.query_one("#rows")
+            rows.focus()
+            idx = next(i for i, r in enumerate(app.row_ids) if r and r[0] == "item")
+            rows.highlighted = idx
+            await pilot.pause(0.2)
+            self.assertIn(app.screen_model.agents[0].display, str(info.render()))
+            app.on_hover_option_list_hovered(app.query_one("#rows").Hovered(0))   # group header
+            self.assertIn("Hover or highlight", str(info.render()))
+            await h.press("c")                                 # hide the list again
+            self.assertFalse(info.display)
+            await h.press("q")
+        self.run_picker(s, start="remote")
+
+
 if __name__ == "__main__":
     unittest.main()

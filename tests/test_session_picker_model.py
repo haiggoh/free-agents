@@ -726,5 +726,34 @@ class DownloadTests(unittest.TestCase):
         self.assertNotIn("q", {a.key for a in owned.actions()})
 
 
+class RemoteInfoBoxTests(unittest.TestCase):
+    """The remote info box: short-form notes keyed by alias (config/remote-model-notes.json)."""
+
+    def test_every_note_key_is_a_real_roster_alias(self):
+        # A typo'd key would silently never show; the roster is the source of aliases.
+        import json, re
+        notes = json.loads(m._MODEL_NOTES_PATH.read_text())
+        roster = (Path(__file__).resolve().parent.parent / "config" / "remote-agents.sh").read_text()
+        for alias in (k for k in notes if not k.startswith("_")):
+            self.assertRegex(roster, rf"(?m)\b{re.escape(alias)}\b", alias)
+
+    def test_thinking_variant_falls_back_to_base_note(self):
+        self.assertTrue(m.model_note("nvidia-glm53"))
+        self.assertEqual(m.model_note("nvidia-glm53-thinking"), m.model_note("nvidia-glm53"))
+
+    def test_unknown_alias_and_unreadable_file_yield_empty(self):
+        self.assertEqual(m.model_note("no-such-model"), "")
+        self.assertEqual(m.model_note("nvidia-glm53", Path("/nonexistent/notes.json")), "")
+
+    def test_info_text_for_model_group_and_unnoted(self):
+        agents = [m.RemoteAgent("nvidia-laguna", "nvidia", "NVIDIA Laguna XS 2.1", "unknown"),
+                  m.RemoteAgent("gemini-flash", "gemini", "Gemini Flash", "renewing_free")]
+        lane = m.RemoteScreen(m.Settings(), agents, owner=m.DIRECT_ROOT)
+        self.assertIn("Laguna XS 2.1 (Poolside)", lane.info_text("nvidia-laguna"))
+        self.assertIn("No notes", lane.info_text("gemini-flash"))
+        self.assertIn("Hover or highlight", lane.info_text("nvidia"))      # a group id
+        self.assertIn("Hover or highlight", lane.info_text(None))
+
+
 if __name__ == "__main__":
     unittest.main()

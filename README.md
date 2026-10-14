@@ -187,6 +187,8 @@ The NVIDIA route is where most full remote sessions run, and the models differ m
 temperament than in the roster lines suggest. These are the maintainer's working
 observations from real sessions (2026-10-13) — subjective, but the practical details are
 the kind that cost a session to rediscover.
+A short form of each note appears in the remote picker's info box when you hover or
+highlight the model (`config/remote-model-notes.json`).
 
 **Nemotron 3 Ultra** — `nvidia-nemotron-ultra` / `nvidia-nemotron-ultra-thinking`
 Capable on clearly-instructed work, relatively fast, 1M context. Tends to think for long

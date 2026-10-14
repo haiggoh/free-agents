@@ -15,6 +15,16 @@ differ exactly in their separators.
 - Renames: Kimi → **Moonshot Kimi**, Gemma → **Google Gemma**, Nemotron → **Nvidia**,
   with agentworld joining it — the Nvidia rule sits above Qwen so `qwen-agentworld-4bit`
   groups by identity, the same principle as the DeepSeek-distill rule.
+- **Remote info box**: with the remote model list open, a framed box under it shows a
+  short-form note for the model under the mouse pointer (hover) or, failing that, the
+  keyboard highlight — temperament, speed, cautions. Notes live in
+  `config/remote-model-notes.json` keyed by roster alias (a `-thinking` variant shares its
+  base model's note); a missing or malformed file just shows "no notes", never an error.
+  A test asserts every note key is a real roster alias, so a typo cannot hide a note.
+- Fixed: `pytest -q tests` (the RELEASE.md gate) collected **zero tests** since 0.33.0 —
+  `tests/remote/test_spoof_primary.py` ran its checks and `sys.exit()`ed at import time,
+  aborting collection of the whole suite. It is now a proper test function (still runnable
+  as a script).
 - README: a "NVIDIA model field notes" section — per-model maintainer observations for
   full remote sessions (temperament, speed, the GLM 5.3 /resume caution, queued-prompt
   nudging), written from the picker aliases.
