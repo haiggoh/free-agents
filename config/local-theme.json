@@ -3,7 +3,7 @@
   "_contract": "Theme accent color #00BFFF (sky blue). Provides session-scoped identity markers for launcher to inject via --settings.",
   "theme": {
     "name": "local-sky",
-    "accent_color": "#EE2B2B",
+    "accent_color": "#66F298",
     "session_emoji": "🦾",
     "identity_label": "Local inference session",
     "supported_surfaces": [
@@ -15,7 +15,7 @@
       "native_ascii_artwork",
       "managed_announcements"
     ],
-    "border_color": "#CB4E4E",
+    "border_color": "#7EDA9F",
     "_border_color_note": "Prompt-input outline: the accent at the SAME lightness, saturation 55% (user 2026-10-14: as bright as the accent, less saturated, not dark)."
   },
   "fallback": {

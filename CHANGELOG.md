@@ -1,3 +1,17 @@
+## [0.34.13] — 2026-10-14
+
+### Fixed — Theme color picker with left/right/Enter cycling (Nemotron Ultra)
+
+- ThemeConfigScreen now uses a simple cycle-based color picker instead of accordion UI
+- Left/right arrows and Enter key cycle through color presets bidirectionally
+- Removed accordion-based UI in favor of simple cycle-based selection
+- Enter key cycles forward (same as right arrow)
+- Left/right arrows cycle through presets bidirectionally
+- Fixed handle_key in ThemeConfigScreen to properly handle left/right/enter
+- Removed accordion UI and _build_accordion method
+- Fixed session_picker.py to delegate left/right/Enter to ThemeConfigScreen.handle_key
+- Added Enter key support in ThemeConfigScreen.handle_key
+
 ## [0.34.11] — 2026-10-14
 
 ### Changed — Fire Red is the default local session accent color
