@@ -71,8 +71,11 @@ class BackendManagerScreen(PilotCase):
             await h.press("x")
             await h.wait_screen("VersionsScreen")
             await h.wait_for(lambda: "0.15.3" in h.text(), "installed versions listed")
-            app.query_one("#rows").focus()
-            await h.goto_row("item", "0.15.3")
+            # Opens ON the first version with the list focused: plain arrows + Enter, no header.
+            self.assertIs(app.focused, app.query_one("#rows"))
+            self.assertEqual(app._highlighted(), ("item", "0.16.1"))
+            await h.press("down")
+            self.assertEqual(app._highlighted(), ("item", "0.15.3"))
             await h.press("enter")
             await h.wait_text("Type 'delete 0.15.3'")
             await h.press(*"delete 0.16.1", "enter")             # wrong version: cancelled

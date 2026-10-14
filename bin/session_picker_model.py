@@ -1107,6 +1107,10 @@ class VersionsScreen(Screen):
             items = [Item(e.version, f"{e.version:14} {e.status}") for e in entries]
             label = f"Installed versions ({len(items)})"
         self.accordion.set_groups([Group(source, label, items)] if items else [])
+        # The list IS the screen: start on the first version, never on the group header,
+        # where Enter would collapse the only group instead of choosing a version.
+        if items and self.accordion.selected_id is None:
+            self.accordion.select(items[0].id)
 
     def activate_selected(self):
         v = self.accordion.selected_id

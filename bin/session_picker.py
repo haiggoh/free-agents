@@ -476,6 +476,10 @@ class Picker(App):
             sm._models_loaded = True
         elif isinstance(sm, m.VersionsScreen) and kind == sm.inventory_kind:
             sm.set_entries(data)
+            if not getattr(self, "pending_prompt", None):
+                self.render_model()
+                self.query_one("#rows", OptionList).focus()   # arrows move through versions at once
+            return
         elif isinstance(sm, m.DownloadScreen) and kind == "catalog" and not sm.entries:
             entries, free, head = data if data else ([], 0.0, 100.0)
             self.screen_model = m.DownloadScreen(self.settings, entries, free, head, sm.owner)
