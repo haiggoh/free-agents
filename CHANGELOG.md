@@ -1,3 +1,17 @@
+## [0.34.9] — 2026-10-14
+
+### Added — Expanded color palette in Theme Colors picker
+
+- Added three new red variants: Deep Red (#990000), Coral Red (#F55F50), Fire Red (#EE2B2B)
+- Added Mint Green (#66F298) between Cyan and Deep Red
+- Renamed Gold → Yellow (#FFD700), Medium Spring Green → Spring Green (#00FA9A)
+- Total: 11 presets per lane (was 8) for finer color selection
+
+### Changed — Color order reorganized for logical visual progression
+
+- Colors now flow: Sky Blue → Cyan → Mint Green → Deep Red → Coral Red → Fire Red → Orange Red → Yellow → Magenta → Medium Purple → Spring Green
+- Better visual flow from cool to warm tones
+
 ## [0.34.7] — 2026-10-14
 
 ### Added — Theme color configuration in the session picker (press `h` on Home)

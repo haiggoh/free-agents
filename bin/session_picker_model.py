@@ -1042,16 +1042,19 @@ class ThemeConfigScreen(Screen):
     
     def _build_accordion(self):
         """Build accordion with color presets for local and remote themes."""
-        # Color presets
+        # Color presets - ordered for good visual progression
         presets = [
             ("#00BFFF", "Sky Blue"),
             ("#00FFFF", "Cyan"),
-            ("#FF00FF", "Magenta"),
-            ("#FFD700", "Gold"),
-            ("#32CD32", "Lime Green"),
+            ("#66F298", "Mint Green"),
+            ("#990000", "Deep Red"),
+            ("#F55F50", "Coral Red"),
+            ("#EE2B2B", "Fire Red"),
             ("#FF4500", "Orange Red"),
+            ("#FFD700", "Yellow"),
+            ("#FF00FF", "Magenta"),
             ("#9370DB", "Medium Purple"),
-            ("#00FA9A", "Medium Spring Green"),
+            ("#00FA9A", "Spring Green"),
         ]
         
         # Build local color items
