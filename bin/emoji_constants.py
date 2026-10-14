@@ -6,6 +6,11 @@ as Python variables. This ensures a single source of truth for all emojis
 used across the session picker.
 """
 
+# Postponed annotations: the backend manager loads this module under whatever python3 is first
+# on PATH, and a standalone run (no launcher env) gets macOS's /usr/bin/python3 3.9, where the
+# `dict[...] | None` annotation below raised TypeError at import.
+from __future__ import annotations
+
 import re
 from pathlib import Path
 
@@ -212,6 +217,9 @@ EMOJI_RELEASES_STR = _EMOJIS.get("EMOJI_RELEASES", "📜")
 EMOJI_INSTALL_STR = _EMOJIS.get("EMOJI_INSTALL", "📦")
 EMOJI_VALIDATE_STR = _EMOJIS.get("EMOJI_VALIDATE", "🩺")
 EMOJI_INFO_STR = _EMOJIS.get("EMOJI_INFO", "ℹ️")
+EMOJI_SNAPSHOT_STR = _EMOJIS.get("EMOJI_SNAPSHOT", "🧾")
+EMOJI_PROMOTE_STR = _EMOJIS.get("EMOJI_PROMOTE", "📌")
+EMOJI_REMOVE_STR = _EMOJIS.get("EMOJI_REMOVE", "🗑️")
 EMOJI_BACK_STR = _EMOJIS.get("EMOJI_BACK", "↩️")
 
 # Lowkey string versions

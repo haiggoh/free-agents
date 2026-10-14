@@ -1050,6 +1050,126 @@ class RateLimiterScreen(Screen):
 
 # install/manage-backend.py --backend choices; tests compare this against its registry.
 RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm")
+# Per-version operations beyond install/validate/info, by backend: only the ones that backend's
+# manager actually implements (the base class raises "not supported"), so the menu never offers
+# a row that can only fail. Tests compare this against the managers' real overrides.
+BACKEND_VERSION_OPS = {"rapid-mlx": ("snapshot", "promote", "remove")}
+
+
+@dataclass
+class VersionEntry:
+    version: str
+    status: str = ""          # installed: complete/incomplete; releases: "installed" or ""
+
+
+class VersionsScreen(Screen):
+    """Pick a version from a LIST (arrows/click, like the model list), then run one operation
+    on it. Replaces the typed-version prompts: the old manage-rapid-mlx.py menu listed the
+    versions to act on, and 0.22's picker port asked the user to type them instead."""
+    OPS = {   # op -> (label, which list it picks from)
+        "install": ("Install a release", "releases"),
+        "validate": ("Validate an installed version", "installed"),
+        "info": ("Show info for an installed version", "installed"),
+        "snapshot": ("Snapshot an installed version (recreation receipt)", "installed"),
+        "promote": ("Promote pins to an installed version", "installed"),
+        "remove": ("Remove an installed version", "installed"),
+    }
+
+    def __init__(self, settings: Settings, op: str, entries: list[VersionEntry] | None = None,
+                 owner: str = SUB):
+        super().__init__(settings, owner)
+        self.op = op
+        self.backend = settings.runtime_backend
+        self.title = f"{VERSION_OP_EMOJI[op]} {self.OPS[op][0]} — {self.backend}"
+        self.entries: list[VersionEntry] | None = None
+        self.promote_after_install = True
+        if entries is not None:
+            self.set_entries(entries)
+
+    @property
+    def inventory_kind(self) -> str:
+        return f"versions:{self.backend}:{self.OPS[self.op][1]}"
+
+    @property
+    def policy(self):
+        if self.entries is None:
+            return ""
+        return "↑↓ choose a version · Enter/click runs it" if self.entries else ""
+
+    def set_entries(self, entries: list[VersionEntry]):
+        self.entries = entries
+        source = self.OPS[self.op][1]
+        if source == "releases":
+            items = [Item(e.version, e.version + ("  (installed)" if e.status == "installed" else ""))
+                     for e in entries]
+            label = f"Releases incl. prereleases ({len(items)})"
+        else:
+            items = [Item(e.version, f"{e.version:14} {e.status}") for e in entries]
+            label = f"Installed versions ({len(items)})"
+        self.accordion.set_groups([Group(source, label, items)] if items else [])
+
+    def activate_selected(self):
+        v = self.accordion.selected_id
+        if not v:
+            return None
+        if self.op == "remove":
+            return Nav("prompt:rt-remove", self.owner)       # typed 'delete <v>' first
+        return Nav(f"tool:rt-op:{self.op}:{v}", self.owner)
+
+    def argv_for(self, version: str) -> list[str]:
+        """manage-backend.py arguments (after --backend) for running this op on `version`."""
+        if self.op == "install":
+            return ["install", version] + ([] if self.promote_after_install or self.backend != "rapid-mlx"
+                                           else ["--skip-pin-update"])
+        if self.op == "remove":
+            # --yes only AFTER the picker's own typed confirmation; the manager still enforces
+            # its gates (inactive, unpinned, reproducible) and refuses otherwise.
+            return ["remove", version, "--yes"]
+        return [self.op, version]
+
+    def actions(self):
+        acts = []
+        if self.op == "install" and self.backend == "rapid-mlx":
+            acts.append(setting("p", f"Promote pins after install: {'ON' if self.promote_after_install else 'OFF'}",
+                                (True, False), lambda: self.promote_after_install,
+                                lambda v: setattr(self, "promote_after_install", v)))
+        acts.append(Action("b", f"{ec.EMOJI_BACK_STR} Back to Backend manager", lambda: BACK, section="nav"))
+        check_action_table(acts)
+        return acts
+
+    def handle_key(self, key: str):
+        if key == "escape":
+            return BACK
+        return super().handle_key(key)
+
+
+VERSION_OP_EMOJI = {"install": ec.EMOJI_INSTALL_STR, "validate": ec.EMOJI_VALIDATE_STR,
+                    "info": ec.EMOJI_INFO_STR, "snapshot": ec.EMOJI_SNAPSHOT_STR,
+                    "promote": ec.EMOJI_PROMOTE_STR, "remove": ec.EMOJI_REMOVE_STR}
+
+
+def runtime_actions(screen) -> list:
+    """The Backend manager rows, shared by both entry screens (Home `v` and Launchd's Back)."""
+    b = screen.settings.runtime_backend
+    pick = lambda op: (lambda: Nav(f"runtime_versions:{op}", screen.owner))   # noqa: E731
+    acts = [
+        Action("c", f"{ec.EMOJI_BACKEND_STR} Backend: {b}", screen._cycle_backend),
+        Action("r", f"{ec.EMOJI_RELEASES_STR} List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
+        Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", pick("install"), section="tools"),
+        Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", pick("validate"), section="tools"),
+        Action("f", f"{ec.EMOJI_INFO_STR} Show info for an installed version", pick("info"), section="tools"),
+    ]
+    ops = BACKEND_VERSION_OPS.get(b, ())
+    for key, op, label in (("s", "snapshot", "Snapshot an installed version"),
+                           ("p", "promote", "Promote pins to an installed version"),
+                           ("x", "remove", "Remove an installed version")):
+        if op in ops:
+            acts.append(Action(key, f"{VERSION_OP_EMOJI[op]} {label}", pick(op), section="tools"))
+    acts.append(Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", screen.owner),
+                       section="tools"))
+    acts += screen.nav_actions()
+    check_action_table(acts)
+    return acts
 
 
 class RuntimeManagerScreen(Screen):
@@ -1066,19 +1186,7 @@ class RuntimeManagerScreen(Screen):
         self.settings.runtime_backend = _next(RUNTIME_BACKENDS, self.settings.runtime_backend)
 
     def actions(self):
-        b = self.settings.runtime_backend
-        acts = [
-            Action("c", f"{ec.EMOJI_BACKEND_STR} Backend: {b}", self._cycle_backend),
-            Action("r", f"{ec.EMOJI_RELEASES_STR} List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
-            Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", lambda: Nav("tool:rt-install"), section="tools"),
-            Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", lambda: Nav("prompt:rt-validate"), section="tools"),
-            Action("f", f"{ec.EMOJI_INFO_STR} Show info for an installed version", lambda: Nav("prompt:rt-info"), section="tools"),
-            Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", self.owner),
-                   section="tools"),
-        ]
-        acts += self.nav_actions()
-        check_action_table(acts)
-        return acts
+        return runtime_actions(self)
 
     def groups(self):
         """No accordion for this screen."""
@@ -1205,9 +1313,9 @@ class APIKeysScreen(Screen):
 class RuntimeScreen(Screen):
     """Front end for install/manage-backend.py (0.21.0's unified backend manager).
 
-    Every row maps to a subcommand that main's parser accepts AND dispatches; the old
-    manage-rapid-mlx.py rows smoke/snapshot/reset/inspect/installed no longer exist there, and
-    promote/remove/check-updates parse but are not dispatched, so they are not offered.
+    Every row maps to a subcommand that main's parser accepts AND dispatches. Version-taking
+    rows open a VersionsScreen (pick from a list); snapshot/promote/remove are offered only for
+    backends whose manager implements them (BACKEND_VERSION_OPS).
     """
     title = f"{ec.EMOJI_TOOLS_STR} Backend manager"
 
@@ -1215,19 +1323,7 @@ class RuntimeScreen(Screen):
         self.settings.runtime_backend = _next(RUNTIME_BACKENDS, self.settings.runtime_backend)
 
     def actions(self):
-        b = self.settings.runtime_backend
-        acts = [
-            Action("c", f"{ec.EMOJI_BACKEND_STR} Backend: {b}", self._cycle_backend),
-            Action("r", f"{ec.EMOJI_RELEASES_STR} List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
-            Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", lambda: Nav("tool:rt-install"), section="tools"),
-            Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", lambda: Nav("prompt:rt-validate"), section="tools"),
-            Action("f", f"{ec.EMOJI_INFO_STR} Show info for an installed version", lambda: Nav("prompt:rt-info"), section="tools"),
-            Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", self.owner),
-                   section="tools"),
-        ]
-        acts += self.nav_actions()
-        check_action_table(acts)
-        return acts
+        return runtime_actions(self)
 
 
 class LaunchdScreen(Screen):
