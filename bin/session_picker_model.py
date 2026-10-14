@@ -23,6 +23,14 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
+# Optional rich import for color swatches in theme config
+try:
+    from rich.text import Text
+    RICH_AVAILABLE = True
+except ImportError:
+    Text = None
+    RICH_AVAILABLE = False
+
 import session_menu_state as sms
 import emoji_constants as ec
 import cloud_session_env as cse
@@ -1031,14 +1039,29 @@ class ThemeConfigScreen(Screen):
 
     def actions(self):
         acts = []
-        # Local theme color picker
+        # Local theme color picker - show colored block as background (persists through highlight)
         local_accent = self.local_theme["theme"]["accent_color"]
-        acts.append(Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR} Local accent: {local_accent}",
-                           lambda: self._pick_color("local")))
+        if RICH_AVAILABLE:
+            # Use background color for the swatch so it persists through selection highlight
+            local_swatch = Text("  ", style=f"on {local_accent}")
+            local_label = Text.assemble(
+                f"{ec.SESSION_EMOJI_LOCAL_STR} Local accent: {local_accent} ",
+                local_swatch
+            )
+        else:
+            local_label = f"{ec.SESSION_EMOJI_LOCAL_STR} Local accent: {local_accent}"
+        acts.append(Action("l", local_label, lambda: self._pick_color("local")))
         # Remote theme color picker
         remote_accent = self.remote_theme["theme"]["accent_color"]
-        acts.append(Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote accent: {remote_accent}",
-                           lambda: self._pick_color("remote")))
+        if RICH_AVAILABLE:
+            remote_swatch = Text("  ", style=f"on {remote_accent}")
+            remote_label = Text.assemble(
+                f"{ec.SESSION_EMOJI_FREE_API_STR} Remote accent: {remote_accent} ",
+                remote_swatch
+            )
+        else:
+            remote_label = f"{ec.SESSION_EMOJI_FREE_API_STR} Remote accent: {remote_accent}"
+        acts.append(Action("r", remote_label, lambda: self._pick_color("remote")))
         acts.append(Action("d", "Restore defaults",
                            lambda: self._restore_defaults()))
         acts += self.nav_actions()
