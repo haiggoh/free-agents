@@ -9,8 +9,12 @@ to Claude Code via --settings. It does NOT write to the user's persistent
 Usage:
   generate-remote-settings.py --identity-json <json> [--output <file>]
 
+  generate-remote-settings.py --emit-model-words --identity-json <json>
+
 Environment:
-  LAUNCH_DIR — directory containing this script (auto-detected if unset)
+  LAUNCH_DIR       — directory containing this script (auto-detected if unset)
+  LA_MOD_ATTACHED  — "1" when the launcher attached the session-identity mod: spinnerVerbs
+                     then APPENDS to Claude Code's own words instead of replacing them
 """
 
 import json
@@ -121,6 +125,9 @@ def main():
     parser.add_argument('--emit-theme-file', action='store_true',
                         help='Print the custom THEME FILE (for ~/.claude/themes/<slug>.json) '
                              'instead of a session settings overlay, and exit')
+    parser.add_argument('--emit-model-words', action='store_true',
+                        help='Print the model-punning word pool for this identity as a JSON '
+                             'array (read by the session-identity mod), and exit')
     args = parser.parse_args()
 
     # Determine launch directory (needed by both modes)
@@ -164,6 +171,13 @@ def main():
     actual_model_id = identity.get('actual_model_id', 'unknown')
     spinner_profile_id = identity.get('spinner_profile_id', 'unknown')
 
+    if args.emit_model_words:
+        words = []
+        if session_kind == 'free_api':
+            words = select_spinner_verbs(get_provider_family(provider_display), spinner_data)
+        print(json.dumps(words))
+        return 0
+
     # Only apply remote theme for free_api sessions
     if session_kind != 'free_api':
         # Return minimal settings for non-remote sessions
@@ -189,7 +203,10 @@ def main():
         # empty list is omitted entirely: sending mode=replace with no verbs would strip
         # Claude Code's own vocabulary and leave the spinner blank.
         if spinner_verbs:
-            settings["spinnerVerbs"] = {"mode": "replace", "verbs": spinner_verbs}
+            # append when the session-identity mod is attached: it needs Claude Code's own
+            # words to keep on the turns it leaves alone (see generate-local-settings.py).
+            mode = "append" if os.environ.get('LA_MOD_ATTACHED') == '1' else "replace"
+            settings["spinnerVerbs"] = {"mode": mode, "verbs": spinner_verbs}
 
         # ★ THE LIME ACCENT IS NOW REALLY EMITTED (2026-09-21).
         #
@@ -204,9 +221,11 @@ def main():
         # --safe-mode disables. So this is a documented feature, not a guess.
         #
         # Per-session via --settings, so the user's persistent theme is never touched.
-        # The value needs the `custom:` PREFIX (found 2026-10-13 on 2.1.296): startup only loads
-        # ~/.claude/themes when the theme setting startsWith("custom:"); a bare slug is treated
-        # as an unknown built-in theme and silently ignored.
+        #
+        # ★ The value needs the `custom:` PREFIX (found 2026-10-13, 2.1.296): startup only calls
+        # loadCustomThemes when the theme setting startsWith("custom:"). A bare slug is an
+        # unknown built-in name and falls back silently, which is why no remote session ever
+        # showed the lime accent between 0.17.7 and 0.31.0 although the file was installed.
         theme_slug = theme.get('name') or 'free-lime'
         settings["theme"] = "custom:" + theme_slug
 
