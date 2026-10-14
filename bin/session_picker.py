@@ -892,6 +892,12 @@ class Picker(App):
                     self._step_action(idx, +1 if key == "right" else -1)
                     event.stop()
                     return
+                else:
+                    # No step for this action - delegate to screen model for color cycling
+                    if hasattr(sm, 'handle_key'):
+                        if sm.handle_key(key):
+                            event.stop()
+                            return
         # Handle group expand/collapse when on a group row (only when rows list is focused)
         if key in ("left", "right"):
             rows_list = self.query_one("#rows", OptionList)
@@ -908,14 +914,28 @@ class Picker(App):
                         self.render_model(keep=f"g:{h[1]}")
                         event.stop()
                         return
-                elif h and h[0] == "item" and sm.accordion is not None and sm.accordion.open_group:
-                    # Left arrow on item with open group: collapse the group
-                    if key == "left":
+                elif h and h[0] == "item" and sm.accordion is not None:
+                    # For items, delegate left/right to screen model for cycling colors
+                    # Left arrow on item with open group also collapses the group
+                    if key == "left" and sm.accordion.open_group:
                         g = sm.accordion.open_group
                         sm.accordion.collapse()
                         self.render_model(keep=f"g:{g}")
                         event.stop()
                         return
+                    else:
+                        # Delegate to screen model's handle_key for cycling colors
+                        if hasattr(sm, 'handle_key'):
+                            if sm.handle_key(key):
+                                event.stop()
+                                return
+
+                else:
+                    # Delegate to screen model's handle_key for cycling colors
+                    if hasattr(sm, 'handle_key'):
+                        if sm.handle_key(key):
+                            event.stop()
+                            return
 
         if key == "escape" or (len(key) == 1 and key.isalpha() and key.islower()):
             keep = self._highlighted()

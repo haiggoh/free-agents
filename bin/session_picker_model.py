@@ -998,9 +998,9 @@ class CloudConfigScreen(Screen):
 class ThemeConfigScreen(Screen):
     """Theme color configuration for local and remote sessions.
 
-    Lets the user pick a main accent color by cycling through presets.
-    The prompt-input border is automatically derived as a paler version of the accent
-    (same lightness, 55% saturation).
+    Lets the user pick a main accent color by cycling through presets with left/right arrows
+    or Enter/mouse click. The prompt-input border is automatically derived as a paler version
+    of the accent (same lightness, 55% saturation).
     """
     title = f"{ec.EMOJI_THEME_STR} Theme Colors"
 
@@ -1013,9 +1013,6 @@ class ThemeConfigScreen(Screen):
         self.local_theme = json.loads((Path(__file__).parent.parent / "config" / "local-theme.json").read_text())
         self.remote_theme = json.loads((Path(__file__).parent.parent / "config" / "remote-theme.json").read_text())
         self._selected_lane = "local"  # which lane is currently selected for cycling
-        self._build_accordion()
-        if self.accordion:
-            self.accordion.expand("local")
 
     def _current_presets(self):
         """Return the current preset list with Fire Red first for local."""
@@ -1026,7 +1023,6 @@ class ThemeConfigScreen(Screen):
             ("#66F298", "Mint Green"),
             ("#990000", "Deep Red"),
             ("#F55F50", "Coral Red"),
-            ("#EE2B2B", "Fire Red"),
             ("#FF4500", "Orange Red"),
             ("#FFD700", "Yellow"),
             ("#FF00FF", "Magenta"),
@@ -1041,119 +1037,12 @@ class ThemeConfigScreen(Screen):
         else:
             return self.remote_theme["theme"]["accent_color"]
 
-    def _set_accent(self, color: str):
-        """Set the accent color for the selected lane and persist."""
-        if self._selected_lane == "local":
-            self.local_theme["theme"]["accent_color"] = color
-            self._recompute_border(self.local_theme)
-            self._save_theme("local")
-        else:
-            self.remote_theme["theme"]["accent_color"] = color
-            self._recompute_border(self.remote_theme)
-            self._save_theme("remote")
-
-    
-    def _build_accordion(self):
-        """Build accordion with color presets for local and remote themes."""
-        presets = [
-            ("#EE2B2B", "Fire Red"),
-            ("#00BFFF", "Sky Blue"),
-            ("#00FFFF", "Cyan"),
-            ("#66F298", "Mint Green"),
-            ("#990000", "Deep Red"),
-            ("#F55F50", "Coral Red"),
-            ("#EE2B2B", "Fire Red"),
-            ("#FF4500", "Orange Red"),
-            ("#FFD700", "Yellow"),
-            ("#FF00FF", "Magenta"),
-            ("#9370DB", "Medium Purple"),
-            ("#00FA9A", "Spring Green"),
-        ]
-        
-        # Build local color items
-        local_items = []
-        local_accent = self.local_theme["theme"]["accent_color"]
-        for color, name in presets:
-            if RICH_AVAILABLE:
-                swatch = Text("  ", style=f"on {color}")
-                label = Text.assemble(f"{color} ({name}) ", Text("  ", style=f"on {color}"))
-            else:
-                label = f"{color} ({name})"
-            is_current = color == self.local_theme["theme"]["accent_color"]
-            prefix = "● " if is_current else "○ "
-            if RICH_AVAILABLE:
-                full_label = Text.assemble(prefix, label)
-            else:
-                full_label = prefix + (label if isinstance(label, str) else str(label))
-            local_items.append(Item(f"local:{color}", full_label))
-        
-        # Build remote color items
-        remote_items = []
-        remote_accent = self.remote_theme["theme"]["accent_color"]
-        for color, name in presets:
-            if RICH_AVAILABLE:
-                swatch = Text("  ", style=f"on {color}")
-                label = Text.assemble(f"{color} ({name}) ", Text("  ", style=f"on {color}"))
-            else:
-                label = f"{color} ({name})"
-            is_current = color == self.remote_theme["theme"]["accent_color"]
-            prefix = "● " if is_current else "○ "
-            if RICH_AVAILABLE:
-                full_label = Text.assemble(prefix, label)
-            else:
-                full_label = prefix + (label if isinstance(label, str) else str(label))
-            remote_items.append(Item(f"remote:{color}", full_label))
-        
-        # Create accordion groups
-        self.accordion = Accordion()
-        self.accordion.set_groups([
-            Group("local", f"{ec.SESSION_EMOJI_LOCAL_STR} Local Colors ({len(local_items)})", local_items),
-            Group("remote", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote Colors ({len(remote_items)})", remote_items),
-        ])
-        # Expand local by default
-        self.accordion.expand("local")
-
-
-    def actions(self):
-        acts = []
-        # Show current colors with swatches
-        local_accent = self.local_theme["theme"]["accent_color"]
-        remote_accent = self.remote_theme["theme"]["accent_color"]
-        
-        if RICH_AVAILABLE:
-            local_swatch = Text("  ", style=f"on {local_accent}")
-            local_label = Text.assemble(
-                f"{ec.SESSION_EMOJI_LOCAL_STR} Local: {local_accent} ",
-                local_swatch
-            )
-            remote_swatch = Text("  ", style=f"on {remote_accent}")
-            remote_label = Text.assemble(
-                f"{ec.SESSION_EMOJI_FREE_API_STR} Remote: {remote_accent} ",
-                remote_swatch
-            )
-        else:
-            local_label = f"{ec.SESSION_EMOJI_LOCAL_STR} Local: {local_accent}"
-            remote_label = f"{ec.SESSION_EMOJI_FREE_API_STR} Remote: {remote_accent}"
-        
-        # Select local or remote lane
-        acts.append(Action("l", local_label, lambda: self._select_lane("local")))
-        acts.append(Action("r", remote_label, lambda: self._select_lane("remote")))
-        acts.append(Action("d", "Restore defaults",
-                           lambda: self._restore_defaults()))
-        acts += self.nav_actions()
-        check_action_table(acts)
-        return acts
-
-    def _select_lane(self, lane: str):
-        """Select which lane (local/remote) to cycle colors for."""
-        self._selected_lane = lane
-
     def _cycle_preset(self, which: str):
         """Cycle through presets for the given theme."""
         presets = [
             "#EE2B2B", "#00BFFF", "#00FFFF", "#66F298",
-            "#990000", "#F55F50", "#EE2B2B", "#FF4500",
-            "#FFD700", "#FF00FF", "#9370DB", "#00FA9A",
+            "#990000", "#F55F50", "#FF4500", "#FFD700",
+            "#FF00FF", "#9370DB", "#00FA9A",
         ]
         theme = self.local_theme if which == "local" else self.remote_theme
         current = theme["theme"]["accent_color"]
@@ -1167,12 +1056,26 @@ class ThemeConfigScreen(Screen):
         self._save_theme("local" if which == "local" else "remote")
 
     def handle_key(self, key: str):
-        """Handle left/right arrow keys for cycling through presets."""
+        """Handle left/right arrow keys and Enter for cycling through presets."""
         if key == "left":
             # Cycle backwards
-            self._cycle_preset(self._selected_lane)
+            presets = [
+                "#EE2B2B", "#00BFFF", "#00FFFF", "#66F298",
+                "#990000", "#F55F50", "#FF4500", "#FFD700",
+                "#FF00FF", "#9370DB", "#00FA9A",
+            ]
+            theme = self.local_theme if self._selected_lane == "local" else self.remote_theme
+            current = theme["theme"]["accent_color"]
+            try:
+                idx = presets.index(current)
+            except ValueError:
+                idx = 0
+            prev_color = presets[(presets.index(current) - 1) % len(presets)]
+            theme["theme"]["accent_color"] = prev_color
+            self._recompute_border(theme if self._selected_lane == "local" else self.remote_theme)
+            self._save_theme("local" if self._selected_lane == "local" else "remote")
             return True
-        elif key == "right":
+        elif key == "right" or key == "enter":
             # Cycle forwards
             self._cycle_preset(self._selected_lane)
             return True
@@ -1208,58 +1111,49 @@ class ThemeConfigScreen(Screen):
         self._save_theme("local")
         self._save_theme("remote")
 
-    def groups(self):
-        """Return color presets as groups for display."""
-        presets = [
-            ("#EE2B2B", "Fire Red"),
-            ("#00BFFF", "Sky Blue"),
-            ("#00FFFF", "Cyan"),
-            ("#66F298", "Mint Green"),
-            ("#990000", "Deep Red"),
-            ("#F55F50", "Coral Red"),
-            ("#EE2B2B", "Fire Red"),
-            ("#FF4500", "Orange Red"),
-            ("#FFD700", "Yellow"),
-            ("#FF00FF", "Magenta"),
-            ("#9370DB", "Medium Purple"),
-            ("#00FA9A", "Spring Green"),
-        ]
-        local_items = []
+    def actions(self):
+        acts = []
+        # Show current colors with swatches
         local_accent = self.local_theme["theme"]["accent_color"]
-        for color, name in presets:
-            if RICH_AVAILABLE:
-                swatch = Text("  ", style=f"on {color}")
-                label = Text.assemble(f"{color} ({name}) ", Text("  ", style=f"on {color}"))
-            else:
-                label = f"{color} ({name})"
-            is_current = color == self.local_theme["theme"]["accent_color"]
-            prefix = "● " if is_current else "○ "
-            if RICH_AVAILABLE:
-                full_label = Text.assemble(prefix, label)
-            else:
-                full_label = prefix + (label if isinstance(label, str) else str(label))
-            local_items.append(Item(f"local:{color}", full_label))
-        
-        remote_items = []
         remote_accent = self.remote_theme["theme"]["accent_color"]
-        for color, name in presets:
-            if RICH_AVAILABLE:
-                swatch = Text("  ", style=f"on {color}")
-                label = Text.assemble(f"{color} ({name}) ", Text("  ", style=f"on {color}"))
-            else:
-                label = f"{color} ({name})"
-            is_current = color == self.remote_theme["theme"]["accent_color"]
-            prefix = "● " if is_current else "○ "
-            if RICH_AVAILABLE:
-                full_label = Text.assemble(prefix, label)
-            else:
-                full_label = prefix + (label if isinstance(label, str) else str(label))
-            remote_items.append(Item(f"remote:{color}", full_label))
         
-        return [
-            Group("local", f"{ec.SESSION_EMOJI_LOCAL_STR} Local Colors ({len(local_items)})", local_items),
-            Group("remote", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote Colors ({len(remote_items)})", remote_items),
-        ]
+        if RICH_AVAILABLE:
+            local_swatch = Text("        ", style=f"on {self.local_theme['theme']['accent_color']}")
+            local_label = Text.assemble(
+                f"{ec.SESSION_EMOJI_LOCAL_STR} Local: {self.local_theme['theme']['accent_color']} ",
+                Text("        ", style=f"on {self.local_theme['theme']['accent_color']}")
+            )
+            remote_swatch = Text("        ", style=f"on {self.remote_theme['theme']['accent_color']}")
+            remote_label = Text.assemble(
+                f"{ec.SESSION_EMOJI_FREE_API_STR} Remote: {self.remote_theme['theme']['accent_color']} ",
+                Text("        ", style=f"on {self.remote_theme['theme']['accent_color']}")
+            )
+        else:
+            local_label = f"{ec.SESSION_EMOJI_LOCAL_STR} Local: {self.local_theme['theme']['accent_color']}"
+            remote_label = f"{ec.SESSION_EMOJI_FREE_API_STR} Remote: {self.remote_theme['theme']['accent_color']}"
+        
+        # Select local or remote lane
+        acts.append(Action("l", local_label, lambda: self._select_lane("local")))
+        acts.append(Action("r", remote_label, lambda: self._select_lane("remote")))
+        acts.append(Action("d", "Restore defaults",
+                           lambda: self._restore_defaults()))
+        acts += self.nav_actions()
+        check_action_table(acts)
+        return acts
+
+    def _select_lane(self, lane: str):
+        """Select which lane (local/remote) to cycle colors for."""
+        self._selected_lane = lane
+
+    
+    
+    
+    
+    
+    def groups(self):
+        return []
+
+
 
 class RateLimiterScreen(Screen):
     """NVIDIA rate limiter settings, persisted in session-menu.local.json (rate_limiter).
