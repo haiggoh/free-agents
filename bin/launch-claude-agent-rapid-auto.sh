@@ -814,7 +814,7 @@ if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-sett
     )"
     chmod 600 "$SETTINGS_FILE"
     # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
-    LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
+    LA_SPOOF_MODEL_ID="$SESSION_MODEL_ID" CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
         --identity-json "$LA_SESSION_IDENTITY" \
         --output "$SETTINGS_FILE" 2>/dev/null || true
     if [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then

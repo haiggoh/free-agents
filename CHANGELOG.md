@@ -1,3 +1,21 @@
+## [0.34.6] — 2026-10-14
+
+### Fixed — local session billing label; model name in welcome banner; provider display on remote
+
+- **Local sessions**: `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` is now set for local
+  launches, so the welcome banner shows "Cloud gateway" instead of "API Usage Billing"
+  (the gateway env var was already being passed to the settings generator but never to
+  the actual `claude` process).
+- **Welcome banner model name**: both local and remote generators now emit a
+  `modelPicker` row whose label is the running model's display name (e.g. "kat-coder-optiq",
+  "nvidia-glm53 → glm-5.3-flash") so the welcome banner shows the real model instead of
+  the spoofed "Opus 5.5". The label is read from `LA_BANNER_MODEL_LABEL` (set by the
+  launchers from the identity resolver's `actual_model_display`).
+- **Remote provider display**: the remote banner now shows the resolved provider display
+  (e.g. "NVIDIA GLM 5.3 Flash") instead of the alias.
+- All changes are backwards compatible: a hand run without the launcher env simply
+  falls back to the identity resolver's `actual_model_display`.
+
 ## [0.34.5] — 2026-10-14
 
 ### Fixed — local sessions with a temperature could not launch; remote mascot lost its green

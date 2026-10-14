@@ -114,6 +114,22 @@ def build_theme_file(config_dir):
     }
 
 
+
+def model_picker_label(label):
+    """Show the RUNNING model's name in the welcome banner (next to Clawd) instead of the
+    spoofed Claude id's name ("Opus 5.5"). Claude Code labels a model from a modelPicker row
+    whose `model` matches the session's model id (verified on 2.1.296: the banner read the
+    row's label). The id and label come from the launcher's environment: LA_SPOOF_MODEL_ID is
+    the id claude is started with, LA_BANNER_MODEL_LABEL the name the statusline shows.
+    behavesAs keeps the CLI treating the id as the Claude model it is spoofing. Empty when
+    either is missing, so a hand run never gets a mislabelled picker."""
+    model = os.environ.get('LA_SPOOF_MODEL_ID', '').strip()
+    label = (label or '').strip()
+    if not model or not label or label == 'unknown':
+        return None
+    return {"options": [{"model": model, "label": label, "behavesAs": model}]}
+
+
 def main():
     parser = argparse.ArgumentParser(description='Generate per-session settings for local sessions')
     parser.add_argument('--identity-json', help='Session identity JSON from la-session-identity.sh')
@@ -194,6 +210,9 @@ def main():
             settings["spinnerVerbs"] = {"mode": mode, "verbs": spinner_verbs}
         # Custom themes are selected as "custom:<slug>"; a bare slug never loads the file.
         settings["theme"] = "custom:" + (theme.get('name') or 'local-sky')
+        picker = model_picker_label(os.environ.get('LA_BANNER_MODEL_LABEL') or actual_model_display)
+        if picker:
+            settings["modelPicker"] = picker
 
         # Add session name for terminal title (uses -n/--name in Claude Code)
         # This is handled by the launcher via -n flag, not settings
