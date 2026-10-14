@@ -1,3 +1,28 @@
+## [0.34.3] — 2026-10-14
+
+### Fixed — themes silently dropped, and removing a Rapid-MLX version crashed
+
+- **Settings temp files collided after the first launch.** BSD `mktemp` (macOS) randomises only
+  TRAILING Xs, so `mktemp "$TMPDIR/name.XXXXXX.json"` created a file literally named
+  `name.XXXXXX.json`. The first launch worked; every later launch failed with "File exists",
+  the settings path came back empty, and the per-session overlay (theme + spinner words) was
+  silently skipped. All five call sites in the local, rapid-auto and remote launchers now use
+  `la_mktemp_json`, which randomises first and adds `.json` after.
+- **Remote sessions never got their theme.** `generate-remote-settings.py` lost its executable
+  bit in 41d4698 (2026-09-20), and the launcher gates the whole theme block on `[ -x ]`, so it
+  was skipped without a message. The bit is restored, and a test now checks every generator a
+  launcher gates on.
+- **The theme setting is now `custom:free-lime`.** Claude Code only loads `~/.claude/themes/`
+  when the setting starts with `custom:`; a bare slug is ignored.
+- **Removing a Rapid-MLX version** no longer crashes with `ModuleNotFoundError: psutil`: the
+  running-process check uses `ps`, and a failed check refuses the removal instead of allowing it.
+  `remove` had no test at all; it has four now.
+- **Removal flow** (user decision): select the version, answer yes/no, then an "are you sure?"
+  yes/no. The typed `delete <version>` is gone.
+- **The last Rapid-MLX version is never removed**: the picker refuses before asking, and the
+  manager refuses too. Rapid-MLX is a core dependency of free-agents (it runs local models).
+  Only complete versions count as "another version".
+
 ## [0.34.2] — 2026-10-14
 
 ### Fixed — the version list opens ready to choose

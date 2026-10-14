@@ -70,6 +70,20 @@ source "$ROSTER"
 # Load shared emoji constants (single source of truth)
 # shellcheck source=../config/emoji.sh
 source "$SCRIPT_DIR/../config/emoji.sh"
+# la_mktemp_json STEM -> a unique, mode-600 temp file ending in .json. BSD mktemp only
+# randomises TRAILING Xs, so "name.XXXXXX.json" was one literal file: the first launch
+# worked, every later one hit "File exists" and silently lost its settings overlay
+# (the theme). Inlined, not sourced: a missing helper must never break a launch.
+la_mktemp_json() {
+    local stem="$1" tmp
+    tmp="$(mktemp "${stem}.XXXXXX")" || return 1
+    if mv "$tmp" "$tmp.json" 2>/dev/null; then
+        chmod 600 "$tmp.json" 2>/dev/null
+        printf '%s\n' "$tmp.json"
+    else
+        rm -f "$tmp"; return 1
+    fi
+}
 
 # Claude Code VERSION PROBE + the spoofed identity it can carry (0.32.0).
 # Nemotron 3 Ultra has 1M actual context, but Claude Code enforces the SPOOFED model's
@@ -1741,7 +1755,7 @@ fi
 # persistent ~/.claude/settings.json. Only applied for free_api sessions (session_kind=free_api).
 if [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -x "$SCRIPT_DIR/generate-remote-settings.py" ]; then
     SETTINGS_FILE="$(
-        mktemp "${TMPDIR:-/tmp}/free-agents-settings.XXXXXX.json"
+        la_mktemp_json "${TMPDIR:-/tmp}/free-agents-settings"
     )"
     chmod 600 "$SETTINGS_FILE"
     LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
@@ -1914,7 +1928,7 @@ if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" && -f "$BLIND_
         if [[ -n "$_overlay_settings" ]]; then
             # Two overlays: merge blind-trust + remote settings first, then add generated
             _tmp_merge="$(
-                mktemp "${TMPDIR:-/tmp}/free-agents-merged-settings1.XXXXXX.json"
+                la_mktemp_json "${TMPDIR:-/tmp}/free-agents-merged-settings1"
             )"
             chmod 600 "$_tmp_merge"
             LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/merge-settings.py" \
@@ -1933,7 +1947,7 @@ if [[ "$AUTO_MODE_STATE" -eq 0 && -n "$BLIND_TRUST_SETTINGS_FILE" && -f "$BLIND_
     # Apply final overlay if any
     if [[ -n "$_overlay_settings" ]]; then
         FINAL_SETTINGS_FILE="$(
-            mktemp "${TMPDIR:-/tmp}/free-agents-merged-settings.XXXXXX.json"
+            la_mktemp_json "${TMPDIR:-/tmp}/free-agents-merged-settings"
         )"
         chmod 600 "$FINAL_SETTINGS_FILE"
         LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/merge-settings.py" \
