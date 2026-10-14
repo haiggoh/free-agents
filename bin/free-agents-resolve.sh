@@ -80,4 +80,27 @@ _d_ge() {
     [ "$_a" -ge "$_b" ]
 }
 
+# Parse arguments BEFORE resolving: `--help` used to be ignored, so probing the script printed a
+# path and exited 0 as if it were help (0.34.4). An unknown flag is an error, never a silent run.
+case "${1:-}" in
+    -h|--help)
+        cat <<'EOF'
+free-agents-resolve.sh — print the absolute path of this plugin's directory, then exit 0.
+
+Usage: free-agents-resolve.sh [--help]
+
+Resolution order: $FREE_AGENTS_PLUGIN (must contain .claude-plugin/plugin.json), then the
+highest installed version in the plugin cache (under $CLAUDE_PLUGIN_ROOT when set), then this
+script's own checkout. Read-only: creates and modifies nothing.
+
+Environment:
+  FREE_AGENTS_PLUGIN   explicit plugin dir (an invalid one is an error, exit 1)
+  CLAUDE_PLUGIN_ROOT   plugin cache root to search
+  FREE_AGENTS_DEBUG    non-empty: trace with set -x
+EOF
+        exit 0 ;;
+    "") ;;
+    *) printf 'free-agents-resolve.sh: unknown argument: %s (try --help)\n' "$1" >&2; exit 2 ;;
+esac
+
 resolve

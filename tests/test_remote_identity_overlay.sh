@@ -128,7 +128,8 @@ out = subprocess.run([sys.executable, f"{root}/bin/generate-remote-settings.py",
                       "--emit-theme-file"], capture_output=True, text=True).stdout
 d = json.loads(out or "{}")
 ov = d.get("overrides", {})
-print("ok" if (d.get("base") and ov and all(v == accent for v in ov.values()) and "claude" in ov)
+print("ok" if (d.get("base") and ov and all(v == accent for v in ov.values()) and "claude" in ov
+              and "promptBorder" in ov and "promptBorderShimmer" in ov)
       else f"bad:{out[:120]}")
 PY2
 )

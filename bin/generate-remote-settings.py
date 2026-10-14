@@ -88,7 +88,7 @@ def build_theme_file(config_dir):
     theme_data = load_json_file(config_dir / 'remote-theme.json')
     theme = theme_data.get('theme', {})
     fallback = theme_data.get('fallback', {})
-    accent = theme.get('accent_color') or fallback.get('accent_color') or '#7CFC00'
+    accent = theme.get('accent_color') or fallback.get('accent_color') or '#ADFF2F'
     return {
         "name": theme.get('identity_label') or 'Free API session',
         "base": "dark",
@@ -99,6 +99,11 @@ def build_theme_file(config_dir):
             "bashBorder": accent,
             "suggestion": accent,
             "thinking": accent,
+            # The prompt input's outline (user request 2026-10-14). The CLI draws the border
+            # with promptBorder and animates it with promptBorderShimmer; overriding only one
+            # would flash the default grey on every shimmer frame.
+            "promptBorder": accent,
+            "promptBorderShimmer": accent,
         },
     }
 
