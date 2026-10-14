@@ -341,6 +341,12 @@ EFFORT_FLAG="--effort $EFFORT"
 : "${LA_AUTO_COMPACT_WINDOW:=}"
 
 CLAUDE_EXTRA_ARGS=()
+# Every settings file this launch wants, folded into ONE --settings at the end. Claude Code
+# keeps only the LAST --settings it is given (measured on 2.1.296: a statusLine in the first
+# of two files never ran), so appending several flags silently dropped all but one -- in
+# blind-trust mode that was the theme + spinner overlay. Base first, then layers in order.
+LA_SETTINGS_BASE=""
+LA_SETTINGS_LAYERS=()
 
 if [ ! -r "$LA_AGENT_PROMPT_FILE" ]; then
     echo "❌ Local agent prompt file is not readable: $LA_AGENT_PROMPT_FILE"
@@ -362,7 +368,7 @@ if [ -n "$LA_CLAUDE_SETTINGS" ]; then
         echo "❌ LA_CLAUDE_SETTINGS is not valid JSON: $LA_CLAUDE_SETTINGS"
         exit 1
     fi
-    CLAUDE_EXTRA_ARGS+=(--settings "$LA_CLAUDE_SETTINGS")
+    LA_SETTINGS_LAYERS+=("$LA_CLAUDE_SETTINGS")
 fi
 
 if [ -n "$LA_CLAUDE_TOOLS" ]; then
@@ -596,6 +602,20 @@ if [ -x "$LAUNCH_DIR/la-session-identity.sh" ]; then
     fi
 fi
 
+# SESSION-IDENTITY MOD — model-weighted spinner words (mods/session-identity). The helper
+# prints the mod folder only for a local/free session on a CLI with the mods API, so a gateway
+# session never loads it. Runs BEFORE the settings generator, which switches spinnerVerbs to
+# append (keeping Claude Code's own words for the turns the mod leaves alone) when it is on.
+LA_MOD_DIR="$("$LAUNCH_DIR/la-mod-attach.sh" 2>/dev/null || true)"
+if [ -n "$LA_MOD_DIR" ]; then
+    # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
+    LA_MODEL_SPINNER_WORDS="$(LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
+        --emit-model-words --identity-json "${LA_SESSION_IDENTITY:-{\}}" 2>/dev/null || echo '[]')"
+    export LA_MODEL_SPINNER_WORDS
+    LA_MOD_ATTACHED=1; export LA_MOD_ATTACHED
+    CLAUDE_EXTRA_ARGS+=(--plugin-dir "$LA_MOD_DIR")
+fi
+
 # PER-SESSION SETTINGS — generate theme + spinner overlay for local sessions only.
 # This creates a transient settings file passed via --settings, NOT written to user's
 # persistent ~/.claude/settings.json. Only applied for local sessions (session_kind=local).
@@ -609,7 +629,23 @@ if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-sett
         --identity-json "$LA_SESSION_IDENTITY" \
         --output "$SETTINGS_FILE" 2>/dev/null || true
     if [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
-        CLAUDE_EXTRA_ARGS+=(--settings "$SETTINGS_FILE")
+        LA_SETTINGS_LAYERS+=("$SETTINGS_FILE")
+    fi
+
+    # THE THEME FILE the overlay's "theme":"custom:local-sky" selects. Same convention as
+    # remote-session.sh: a persistent, user-visible file in ~/.claude/themes, written only
+    # when absent or changed, so a hand-edited colour survives until our content differs.
+    LA_THEME_DIR="$HOME/.claude/themes"
+    LA_THEME_FILE="$LA_THEME_DIR/local-sky.json"
+    if mkdir -p "$LA_THEME_DIR" 2>/dev/null; then
+        # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
+        LA_THEME_NEW="$(LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
+            --emit-theme-file 2>/dev/null || true)"
+        if [ -n "$LA_THEME_NEW" ]; then
+            if [ ! -f "$LA_THEME_FILE" ] || [ "$LA_THEME_NEW" != "$(cat "$LA_THEME_FILE" 2>/dev/null)" ]; then
+                printf '%s' "$LA_THEME_NEW" > "$LA_THEME_FILE" || true
+            fi
+        fi
     fi
 fi
 
@@ -864,7 +900,7 @@ if [ "${LA_AUTO_MODE:-0}" = "1" ] && [ "${LA_BLIND_AUTO:-0}" = "1" ]; then
         "${EXTRA_BT_FLAGS[@]}" \
         --mechanism bypass || {
         echo "❌ Failed to generate blind-trust settings" >&2; exit 1; }
-    CLAUDE_EXTRA_ARGS+=(--settings "$BLIND_TRUST_SETTINGS_FILE")
+    LA_SETTINGS_BASE="$BLIND_TRUST_SETTINGS_FILE"
     echo "🔌 Blind-trust mode: bypassPermissions + DESTRUCTIVE_DENY (no classifier, measured 0 calls)"
 else
     _PERM_MODE="acceptEdits"
@@ -881,5 +917,25 @@ fi
 if [ "${LA_SESSION_KIND:-}" = "local" ]; then
     printf '%s Local inference session — %s (via %s)\n' "$SESSION_EMOJI_LOCAL" "${MODEL_ALIAS}" "${BACKEND_DISPLAY}"
 fi
+
+# FOLD THE SETTINGS into one file (see LA_SETTINGS_LAYERS above). merge-settings.py keeps
+# blind-trust's permissions/sandbox (deny is a union, never dropped) and lets each later layer
+# win for everything else, so the theme and spinner overlay survive alongside bypass mode.
+LA_SETTINGS_FINAL="$LA_SETTINGS_BASE"
+for _layer in ${LA_SETTINGS_LAYERS[@]+"${LA_SETTINGS_LAYERS[@]}"}; do
+    if [ -z "$LA_SETTINGS_FINAL" ]; then
+        LA_SETTINGS_FINAL="$_layer"
+        continue
+    fi
+    _merged="$(la_mktemp_json "${TMPDIR:-/tmp}/local-agents-merged-settings")"
+    chmod 600 "$_merged"
+    if python3 "$LAUNCH_DIR/merge-settings.py" --base "$LA_SETTINGS_FINAL" --overlay "$_layer" \
+        --output "$_merged" 2>/dev/null && [ -s "$_merged" ]; then
+        LA_SETTINGS_FINAL="$_merged"
+    else
+        echo "⚠️  could not merge settings layer $_layer; continuing without it" >&2
+    fi
+done
+[ -n "$LA_SETTINGS_FINAL" ] && CLAUDE_EXTRA_ARGS+=(--settings "$LA_SETTINGS_FINAL")
 
 claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode "$_PERM_MODE" --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"

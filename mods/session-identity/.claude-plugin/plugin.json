@@ -1,0 +1,8 @@
+{
+  "name": "session-identity",
+  "version": "0.1.0",
+  "description": "free-agents: spinner words that name the model actually running a local / free-API session",
+  "author": {
+    "name": "haiggoh"
+  }
+}

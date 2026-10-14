@@ -1750,6 +1750,16 @@ if [ -x "$SCRIPT_DIR/la-session-identity.sh" ]; then
     fi
 fi
 
+# SESSION-IDENTITY MOD — model-weighted spinner words (mods/session-identity); see the same
+# block in launch-claude-agent.sh. Before the settings generator, which reads LA_MOD_ATTACHED.
+LA_MOD_DIR="$("$SCRIPT_DIR/la-mod-attach.sh" 2>/dev/null || true)"
+if [ -n "$LA_MOD_DIR" ]; then
+    LA_MODEL_SPINNER_WORDS="$(LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
+        --emit-model-words --identity-json "${LA_SESSION_IDENTITY:-{\}}" 2>/dev/null || echo '[]')"
+    export LA_MODEL_SPINNER_WORDS
+    LA_MOD_ATTACHED=1; export LA_MOD_ATTACHED
+fi
+
 # PER-SESSION SETTINGS — generate theme + spinner overlay for remote sessions only.
 # This creates a transient settings file passed via --settings, NOT written to user's
 # persistent ~/.claude/settings.json. Only applied for free_api sessions (session_kind=free_api).
@@ -1904,6 +1914,7 @@ else
     claude_cmd=(claude --model "$SPOOF_PRIMARY" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
 fi
 claude_cmd+=(--permission-mode "$PERMISSION_MODE")
+[ -n "${LA_MOD_DIR:-}" ] && claude_cmd+=(--plugin-dir "$LA_MOD_DIR")
 
 # Handle settings merge: if both blind-trust and per-session settings exist, merge them.
 # Claude Code only accepts ONE --settings file (last wins), so we must merge.
