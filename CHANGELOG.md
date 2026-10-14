@@ -1,3 +1,21 @@
+## [0.34.11] — 2026-10-14
+
+### Changed — Fire Red is the default local session accent color
+
+- Local theme default changed from Sky Blue (#00BFFF) to Fire Red (#EE2B2B)
+- Remote theme restored to green-yellow (#ADFF2F) from Coral Red (#F55F50)
+- Default border colors updated to match (local: #CB4E4E, remote: #A3D05E)
+
+### Fixed — Remote theme session emoji and fallback
+
+- `remote-theme.json` session_emoji is now 📡 (matching `SESSION_EMOJI_FREE_API` from emoji.sh)
+- Fallback entry correctly uses ❓ for unknown sessions
+
+### Fixed — Theme Colors picker accordion UI
+
+- Accordion now properly initializes and expands local colors by default
+- Color swatches use background color (on #HEX) for highlight persistence
+
 ## [0.34.10] — 2026-10-14
 
 ### Fixed — Remote theme uses correct session emoji (📡)
