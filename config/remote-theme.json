@@ -3,8 +3,8 @@
   "_contract": "Theme accent #ADFF2F (green-yellow; #7CFC00 lawn green until 0.34.4, user asked for a more yellowish green). SHIPPED 2026-09-21 via a CUSTOM THEME FILE at ~/.claude/themes/free-lime.json (shape {name,base,overrides}) selected by the ordinary `theme` setting in the per-session overlay. The earlier verdict that this was an unconfirmable upstream limitation probed a `themes` SETTINGS MAP — the wrong mechanism. Verified against CLI 2.1.278: loader path userConfigDir(\"themes\",[slug]), a [theme] watcher for hot reload, and `claude --help` listing \"custom themes\". generate-remote-settings.py is the single source of truth for both halves.",
   "theme": {
     "name": "free-lime",
-    "accent_color": "#ADFF2F",
-    "session_emoji": "🌐",
+    "accent_color": "#F55F50",
+    "session_emoji": "📡",
     "identity_label": "Free API session",
     "supported_surfaces": [
       "session_title",
@@ -36,7 +36,7 @@
       "diffAdded",
       "diffRemoved"
     ],
-    "border_color": "#A3D05E",
+    "border_color": "#D57970",
     "_border_color_note": "Prompt-input outline: the accent at the SAME lightness, saturation 55% (user 2026-10-14: as bright as the accent, less saturated, not dark)."
   },
   "fallback": {

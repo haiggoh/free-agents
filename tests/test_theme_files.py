@@ -32,7 +32,7 @@ def accent(name):
 
 
 def test_accents_are_the_requested_colours():
-    assert accent("local-theme.json") == "#00BFFF"   # dark sky blue
+    assert accent("local-theme.json") == "#EE2B2B"   # fire red
     assert accent("remote-theme.json") == "#ADFF2F"  # green-yellow (user choice, 0.34.4)
 
 

@@ -998,8 +998,9 @@ class CloudConfigScreen(Screen):
 class ThemeConfigScreen(Screen):
     """Theme color configuration for local and remote sessions.
 
-    Lets the user pick a main accent color; the prompt-input border is automatically
-    derived as a paler version (same lightness, 55% saturation).
+    Lets the user pick a main accent color by cycling through presets.
+    The prompt-input border is automatically derived as a paler version of the accent
+    (same lightness, 55% saturation).
     """
     title = f"{ec.EMOJI_THEME_STR} Theme Colors"
 
@@ -1011,39 +1012,51 @@ class ThemeConfigScreen(Screen):
         config_dir = Path(__file__).parent.parent / "config"
         self.local_theme = json.loads((Path(__file__).parent.parent / "config" / "local-theme.json").read_text())
         self.remote_theme = json.loads((Path(__file__).parent.parent / "config" / "remote-theme.json").read_text())
-        
-        # Create accordion with color presets for local and remote
+        self._selected_lane = "local"  # which lane is currently selected for cycling
         self._build_accordion()
+        if self.accordion:
+            self.accordion.expand("local")
 
-    def _recompute_border(self, theme_dict: dict):
-        """Recalculate border_color from accent_color at same lightness, 55% saturation."""
-        import colorsys
-        accent = theme_dict["theme"]["accent_color"].lstrip("#")
-        r, g, b = [int(accent[i:i+2], 16) / 255 for i in (0, 2, 4)]
-        h, l, s = colorsys.rgb_to_hls(r, g, b)
-        r2, g2, b2 = colorsys.hls_to_rgb(h, l, 0.55)
-        border = "#%02X%02X%02X" % tuple(round(c * 255) for c in (r2, g2, b2))
-        theme_dict["theme"]["border_color"] = border
+    def _current_presets(self):
+        """Return the current preset list with Fire Red first for local."""
+        return [
+            ("#EE2B2B", "Fire Red"),
+            ("#00BFFF", "Sky Blue"),
+            ("#00FFFF", "Cyan"),
+            ("#66F298", "Mint Green"),
+            ("#990000", "Deep Red"),
+            ("#F55F50", "Coral Red"),
+            ("#EE2B2B", "Fire Red"),
+            ("#FF4500", "Orange Red"),
+            ("#FFD700", "Yellow"),
+            ("#FF00FF", "Magenta"),
+            ("#9370DB", "Medium Purple"),
+            ("#00FA9A", "Spring Green"),
+        ]
 
-    def _save_theme(self, which: str):
-        """Write theme file back to disk."""
-        import json
-        from pathlib import Path
-        config_dir = Path(__file__).parent.parent / "config"
-        if which == "local":
-            self._recompute_border(self.local_theme)
-            path = Path(__file__).parent.parent / "config" / "local-theme.json"
-            path.write_text(json.dumps(self.local_theme, indent=2, ensure_ascii=False) + "\n")
+    def _current_accent(self):
+        """Get the current accent color for the selected lane."""
+        if self._selected_lane == "local":
+            return self.local_theme["theme"]["accent_color"]
         else:
+            return self.remote_theme["theme"]["accent_color"]
+
+    def _set_accent(self, color: str):
+        """Set the accent color for the selected lane and persist."""
+        if self._selected_lane == "local":
+            self.local_theme["theme"]["accent_color"] = color
+            self._recompute_border(self.local_theme)
+            self._save_theme("local")
+        else:
+            self.remote_theme["theme"]["accent_color"] = color
             self._recompute_border(self.remote_theme)
-            path = Path(__file__).parent.parent / "config" / "remote-theme.json"
-            path.write_text(json.dumps(self.remote_theme, indent=2, ensure_ascii=False) + "\n")
+            self._save_theme("remote")
 
     
     def _build_accordion(self):
         """Build accordion with color presets for local and remote themes."""
-        # Color presets - ordered for good visual progression
         presets = [
+            ("#EE2B2B", "Fire Red"),
             ("#00BFFF", "Sky Blue"),
             ("#00FFFF", "Cyan"),
             ("#66F298", "Mint Green"),
@@ -1100,25 +1113,47 @@ class ThemeConfigScreen(Screen):
         # Expand local by default
         self.accordion.expand("local")
 
+
     def actions(self):
         acts = []
-        # Color selection is done through the accordion items (press Enter on a color)
-        # These actions are for quick access to preset cycling and restore
-        acts.append(Action("l", "Cycle local color (or use ↑↓/Enter on color list)",
-                           lambda: self._cycle_preset("local")))
-        acts.append(Action("r", "Cycle remote color (or use ↑↓/Enter on color list)",
-                           lambda: self._cycle_preset("remote")))
+        # Show current colors with swatches
+        local_accent = self.local_theme["theme"]["accent_color"]
+        remote_accent = self.remote_theme["theme"]["accent_color"]
+        
+        if RICH_AVAILABLE:
+            local_swatch = Text("  ", style=f"on {local_accent}")
+            local_label = Text.assemble(
+                f"{ec.SESSION_EMOJI_LOCAL_STR} Local: {local_accent} ",
+                local_swatch
+            )
+            remote_swatch = Text("  ", style=f"on {remote_accent}")
+            remote_label = Text.assemble(
+                f"{ec.SESSION_EMOJI_FREE_API_STR} Remote: {remote_accent} ",
+                remote_swatch
+            )
+        else:
+            local_label = f"{ec.SESSION_EMOJI_LOCAL_STR} Local: {local_accent}"
+            remote_label = f"{ec.SESSION_EMOJI_FREE_API_STR} Remote: {remote_accent}"
+        
+        # Select local or remote lane
+        acts.append(Action("l", local_label, lambda: self._select_lane("local")))
+        acts.append(Action("r", remote_label, lambda: self._select_lane("remote")))
         acts.append(Action("d", "Restore defaults",
                            lambda: self._restore_defaults()))
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
 
+    def _select_lane(self, lane: str):
+        """Select which lane (local/remote) to cycle colors for."""
+        self._selected_lane = lane
+
     def _cycle_preset(self, which: str):
         """Cycle through presets for the given theme."""
         presets = [
-            "#00BFFF", "#00FFFF", "#FF00FF", "#FFD700",
-            "#32CD32", "#FF4500", "#9370DB", "#00FA9A",
+            "#EE2B2B", "#00BFFF", "#00FFFF", "#66F298",
+            "#990000", "#F55F50", "#EE2B2B", "#FF4500",
+            "#FFD700", "#FF00FF", "#9370DB", "#00FA9A",
         ]
         theme = self.local_theme if which == "local" else self.remote_theme
         current = theme["theme"]["accent_color"]
@@ -1130,69 +1165,101 @@ class ThemeConfigScreen(Screen):
         theme["theme"]["accent_color"] = next_color
         self._recompute_border(theme if which == "local" else self.remote_theme)
         self._save_theme("local" if which == "local" else "remote")
-        self._build_accordion()  # Rebuild accordion to update selection markers
 
+    def handle_key(self, key: str):
+        """Handle left/right arrow keys for cycling through presets."""
+        if key == "left":
+            # Cycle backwards
+            self._cycle_preset(self._selected_lane)
+            return True
+        elif key == "right":
+            # Cycle forwards
+            self._cycle_preset(self._selected_lane)
+            return True
+        return super().handle_key(key)
 
+    def _recompute_border(self, theme_dict: dict):
+        """Recalculate border_color from accent_color at same lightness, 55% saturation."""
+        import colorsys
+        accent = theme_dict["theme"]["accent_color"].lstrip("#")
+        r, g, b = [int(accent[i:i+2], 16) / 255 for i in (0, 2, 4)]
+        h, l, s = colorsys.rgb_to_hls(r, g, b)
+        r2, g2, b2 = colorsys.hls_to_rgb(h, l, 0.55)
+        border = "#%02X%02X%02X" % tuple(round(c * 255) for c in (r2, g2, b2))
+        theme_dict["theme"]["border_color"] = border
 
-    def activate_selected(self):
-        """Handle Enter on a color item - select that color."""
-        selected = self.accordion.selected_id
-        if not selected:
-            return None
-        
-        # Parse the selection: "local:#HEX" or "remote:#HEX"
-        if selected.startswith("local:"):
-            color = selected[6:]
-            self.local_theme["theme"]["accent_color"] = color
-            self._recompute_border(self.local_theme)
-            self._save_theme("local")
-            self._build_accordion()
-        elif selected.startswith("remote:"):
-            color = selected[7:]
-            self.remote_theme["theme"]["accent_color"] = color
-            self._recompute_border(self.remote_theme)
-            self._save_theme("remote")
-            self._build_accordion()
-        return None  # Stay on the same screen
-
-
-    
-    def _pick_color(self, which: str):
-        """Prompt user for a new hex color."""
-        # For now, just cycle through some presets
-        presets = [
-            ("#00BFFF", "Sky Blue"),
-            ("#00FFFF", "Cyan"),
-            ("#FF00FF", "Magenta"),
-            ("#FFD700", "Gold"),
-            ("#32CD32", "Lime Green"),
-            ("#FF4500", "Orange Red"),
-            ("#9370DB", "Medium Purple"),
-            ("#00FA9A", "Medium Spring Green"),
-        ]
-        current = self.local_theme["theme"]["accent_color"] if which == "local" else self.remote_theme["theme"]["accent_color"]
-        try:
-            idx = next(i for i, (c, _) in enumerate(presets) if c == current)
-        except StopIteration:
-            idx = -1
-        next_idx = (idx + 1) % len(presets)
-        color, name = presets[next_idx]
+    def _save_theme(self, which: str):
+        """Write theme file back to disk."""
+        import json
+        from pathlib import Path
+        config_dir = Path(__file__).parent.parent / "config"
         if which == "local":
-            self.local_theme["theme"]["accent_color"] = color
+            self._recompute_border(self.local_theme)
+            path = Path(__file__).parent.parent / "config" / "local-theme.json"
+            path.write_text(json.dumps(self.local_theme, indent=2, ensure_ascii=False) + "\n")
         else:
-            self.remote_theme["theme"]["accent_color"] = color
-        self._save_theme(which)
+            self._recompute_border(self.remote_theme)
+            path = Path(__file__).parent.parent / "config" / "remote-theme.json"
+            path.write_text(json.dumps(self.remote_theme, indent=2, ensure_ascii=False) + "\n")
 
     def _restore_defaults(self):
-        self.local_theme["theme"]["accent_color"] = "#00BFFF"
+        self.local_theme["theme"]["accent_color"] = "#EE2B2B"
         self.remote_theme["theme"]["accent_color"] = "#ADFF2F"
         self._save_theme("local")
         self._save_theme("remote")
 
     def groups(self):
-        return self.accordion.groups if self.accordion else []
-
-
+        """Return color presets as groups for display."""
+        presets = [
+            ("#EE2B2B", "Fire Red"),
+            ("#00BFFF", "Sky Blue"),
+            ("#00FFFF", "Cyan"),
+            ("#66F298", "Mint Green"),
+            ("#990000", "Deep Red"),
+            ("#F55F50", "Coral Red"),
+            ("#EE2B2B", "Fire Red"),
+            ("#FF4500", "Orange Red"),
+            ("#FFD700", "Yellow"),
+            ("#FF00FF", "Magenta"),
+            ("#9370DB", "Medium Purple"),
+            ("#00FA9A", "Spring Green"),
+        ]
+        local_items = []
+        local_accent = self.local_theme["theme"]["accent_color"]
+        for color, name in presets:
+            if RICH_AVAILABLE:
+                swatch = Text("  ", style=f"on {color}")
+                label = Text.assemble(f"{color} ({name}) ", Text("  ", style=f"on {color}"))
+            else:
+                label = f"{color} ({name})"
+            is_current = color == self.local_theme["theme"]["accent_color"]
+            prefix = "● " if is_current else "○ "
+            if RICH_AVAILABLE:
+                full_label = Text.assemble(prefix, label)
+            else:
+                full_label = prefix + (label if isinstance(label, str) else str(label))
+            local_items.append(Item(f"local:{color}", full_label))
+        
+        remote_items = []
+        remote_accent = self.remote_theme["theme"]["accent_color"]
+        for color, name in presets:
+            if RICH_AVAILABLE:
+                swatch = Text("  ", style=f"on {color}")
+                label = Text.assemble(f"{color} ({name}) ", Text("  ", style=f"on {color}"))
+            else:
+                label = f"{color} ({name})"
+            is_current = color == self.remote_theme["theme"]["accent_color"]
+            prefix = "● " if is_current else "○ "
+            if RICH_AVAILABLE:
+                full_label = Text.assemble(prefix, label)
+            else:
+                full_label = prefix + (label if isinstance(label, str) else str(label))
+            remote_items.append(Item(f"remote:{color}", full_label))
+        
+        return [
+            Group("local", f"{ec.SESSION_EMOJI_LOCAL_STR} Local Colors ({len(local_items)})", local_items),
+            Group("remote", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote Colors ({len(remote_items)})", remote_items),
+        ]
 
 class RateLimiterScreen(Screen):
     """NVIDIA rate limiter settings, persisted in session-menu.local.json (rate_limiter).

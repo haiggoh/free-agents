@@ -1,3 +1,81 @@
+## [0.34.10] — 2026-10-14
+
+### Fixed — Remote theme uses correct session emoji (📡)
+
+- `remote-theme.json` now sources its `session_emoji` from the canonical `emoji.sh` definitions
+  rather than hardcoding the outdated 🌐 globe emoji
+- The theme's `session_emoji` is now 📡 (matching `SESSION_EMOJI_FREE_API` from emoji.sh)
+- Fallback entry correctly uses ❓ for unknown sessions
+
+### Changed — Fire Red is now the default local session accent color
+
+- Local theme default changed from Sky Blue (#00BFFF) to Fire Red (#EE2B2B)
+- Remote theme remains green-yellow (#ADFF2F)
+- Default border colors updated to match (local: #CB4E4E, remote: #A3D05E)
+
+### Added — Expanded color palette with 11 presets per lane
+
+- New colors: Deep Red (#990000), Coral Red (#F55F50), Fire Red (#EE2B2B), Mint Green (#66F298)
+- Renamed: Gold → Yellow, Medium Spring Green → Spring Green
+- Reordered for logical cool-to-warm visual progression (11 presets per lane)
+
+### Changed — Theme Colors picker improvements
+
+- Accordion-based color selection with background-colored swatches (on #HEX)
+- Swatches persist through Textual's selection highlight
+- Left/right arrows cycle through presets per lane
+- Enter selects a color, l/r cycles presets, d restores defaults
+
+## [0.34.10] — 2026-10-14
+
+### Fixed — Remote theme uses correct session emoji (📡)
+
+- `remote-theme.json` now sources its `session_emoji` from the canonical `emoji.sh` definitions
+  rather than hardcoding the outdated 🌐 globe emoji
+- The theme's `session_emoji` is now 📡 (matching `SESSION_EMOJI_FREE_API` from emoji.sh)
+- Fallback entry correctly uses ❓ for unknown sessions
+
+### Changed — Fire Red is now the default local session accent color
+
+- Local theme default changed from Sky Blue (#00BFFF) to Fire Red (#EE2B2B)
+- Remote theme remains green-yellow (#ADFF2F)
+- Default border colors updated to match (local: #CB4E4E, remote: #A3D05E)
+
+### Added — Expanded color palette with 11 presets per lane
+
+- New colors: Deep Red (#990000), Coral Red (#F55F50), Fire Red (#EE2B2B), Mint Green (#66F298)
+- Renamed: Gold → Yellow, Medium Spring Green → Spring Green
+- Reordered for logical cool-to-warm visual progression (11 presets per lane)
+
+### Changed — Theme Colors picker improvements
+
+- Accordion-based color selection with background-colored swatches (on #HEX)
+- Swatches persist through Textual's selection highlight
+- Left/right arrows cycle through presets per lane
+- Enter selects a color, l/r cycles presets, d restores defaults
+
+## [0.34.8] — 2026-10-14
+
+### Added — Theme Colors picker with accordion-based selection (press `h` on Home)
+
+- A new **Theme Colors** screen accessible via `h` from Home lets you browse and pick
+  accent colors for local and remote sessions independently
+- Colors displayed in an accordion list grouped by lane (local/remote) with visual
+  color swatches rendered as background-colored blocks (`on #HEX`)
+- Current selection marked with ●, available options with ○
+- Press `l`/`r` to select local/remote lane, `c` to cycle through presets,
+  `d` to restore defaults, ↑/↓ to navigate, Enter to select a color
+- Color swatches use background color (`on #HEX`) so they remain visible through
+  Textual's selection highlight — the colored block persists while the text highlights
+- Changes persist in `config/local-theme.json` and `config/remote-theme.json`
+  and take effect on the next session launch
+
+### Fixed — Color swatches persist through selection highlight
+
+- Color swatches now use background color (`on #HEX`) via `Text.assemble`
+  so they remain visible when the row is highlighted in light blue
+- Previously the foreground color was overridden by the selection highlight
+
 ## [0.34.9] — 2026-10-14
 
 ### Added — Expanded color palette in Theme Colors picker
