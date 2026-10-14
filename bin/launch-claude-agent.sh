@@ -105,6 +105,20 @@ _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" &&
 LAUNCH_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/../config/config-lib.sh"
+# la_mktemp_json STEM -> a unique, mode-600 temp file ending in .json. BSD mktemp only
+# randomises TRAILING Xs, so "name.XXXXXX.json" was one literal file: the first launch
+# worked, every later one hit "File exists" and silently lost its settings overlay
+# (the theme). Inlined, not sourced: a missing helper must never break a launch.
+la_mktemp_json() {
+    local stem="$1" tmp
+    tmp="$(mktemp "${stem}.XXXXXX")" || return 1
+    if mv "$tmp" "$tmp.json" 2>/dev/null; then
+        chmod 600 "$tmp.json" 2>/dev/null
+        printf '%s\n' "$tmp.json"
+    else
+        rm -f "$tmp"; return 1
+    fi
+}
 # Load shared emoji constants (single source of truth)
 # shellcheck source=../config/emoji.sh
 . "$LAUNCH_DIR/../config/emoji.sh"
@@ -587,7 +601,7 @@ fi
 # persistent ~/.claude/settings.json. Only applied for local sessions (session_kind=local).
 if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-settings.py" ]; then
     SETTINGS_FILE="$(
-        mktemp "${TMPDIR:-/tmp}/local-agents-settings.XXXXXX.json"
+        la_mktemp_json "${TMPDIR:-/tmp}/local-agents-settings"
     )"
     chmod 600 "$SETTINGS_FILE"
     # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional

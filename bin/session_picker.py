@@ -943,6 +943,10 @@ class Picker(App):
         if target.startswith("prompt:"):
             self._open_prompt(target)
             return
+        if target.startswith("warn:"):
+            self.state_warnings.append(target[5:])
+            self.render_model(keep=keep_id)
+            return
         if result is m.BACK or target == "back":
             self._go_back()
             return
@@ -1017,7 +1021,8 @@ class Picker(App):
                "prompt:oneshot": "One-shot prompt:",
                "prompt:download-review": "",
                "prompt:rl-reset": "Really delete the shared limiter state file? type yes:",
-               "prompt:rt-remove": "Permanently remove {version}? Type 'delete {version}' (anything else cancels):",
+               "prompt:rt-remove": "Remove Rapid-MLX {version}? yes/no:",
+               "prompt:rt-remove-sure": "Are you sure? {version} is deleted permanently. yes/no:",
                "prompt:rt-launchd-install": "Install the weekly LaunchAgent update check? type yes:",
                "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
@@ -1038,7 +1043,7 @@ class Picker(App):
             label = label.format(provider=next((name for s_, name, *_ in m.APIKeysScreen.PROVIDERS if s_ == slug), slug))
             prompt.password = True  # Hidden input for API key
             prompt.submit_on_paste = True
-        elif kind == "prompt:rt-remove":
+        elif kind in ("prompt:rt-remove", "prompt:rt-remove-sure"):
             label = label.format(version=self.screen_model.accordion.selected_id)
         prompt.placeholder = ""   # the label is shown once, in #status below the input
         prompt.value = ""
@@ -1084,13 +1089,16 @@ class Picker(App):
                                 "import rate_limiter as r,os;p=r.DEFAULT_STATE if not os.environ.get('LA_NVIDIA_THROTTLE_STATE') else r.Path(os.environ['LA_NVIDIA_THROTTLE_STATE']);p.unlink(missing_ok=True);print('state file reset')"],
                                pause=True, cwd=str(BIN))
 
-        elif kind == "prompt:rt-remove":
+        elif kind in ("prompt:rt-remove", "prompt:rt-remove-sure"):
+            # Select, yes, then an "are you sure" yes: the highlighted row names the version.
             v = sm.accordion.selected_id if isinstance(sm, m.VersionsScreen) else None
-            if v and value == f"delete {v}":
-                self.run_tool(f"tool:rt-op:remove:{v}")
-            else:
+            if not (v and value.lower() in ("y", "yes")):
                 self.state_warnings.append("removal cancelled — nothing was deleted")
                 self.render_model()
+            elif kind == "prompt:rt-remove":
+                self._open_prompt("prompt:rt-remove-sure")
+            else:
+                self.run_tool(f"tool:rt-op:remove:{v}")
         elif kind in ("prompt:rt-launchd-install", "prompt:rt-launchd-uninstall"):
             if value.lower() == "yes":
                 self.run_child(TOOLS["tool:" + kind.split(":", 1)[1]](self.settings.runtime_backend), pause=True)

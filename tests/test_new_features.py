@@ -63,7 +63,7 @@ class BackendManagerScreen(PilotCase):
         sp._mb = lambda backend, *a: [str(stub), "--backend", backend, *a]
         self.addCleanup(setattr, sp, "_mb", real)
 
-    def test_remove_picks_from_list_and_needs_typed_confirmation(self):
+    def test_remove_picks_from_list_and_asks_twice(self):
         self._stub_manager()
         async def s(app, pilot, h):
             await h.press("v")
@@ -77,16 +77,39 @@ class BackendManagerScreen(PilotCase):
             await h.press("down")
             self.assertEqual(app._highlighted(), ("item", "0.15.3"))
             await h.press("enter")
-            await h.wait_text("Type 'delete 0.15.3'")
-            await h.press(*"delete 0.16.1", "enter")             # wrong version: cancelled
+            await h.wait_text("Remove Rapid-MLX 0.15.3? yes/no")
+            await h.press(*"no", "enter")                            # first question: no
+            await h.wait_text("removal cancelled")
+            await h.goto_row("item", "0.15.3")
+            await h.press("enter")
+            await h.wait_text("Remove Rapid-MLX 0.15.3? yes/no")
+            await h.press(*"yes", "enter")
+            await h.wait_text("Are you sure? 0.15.3")
+            await h.press(*"no", "enter")                            # second question: no
             await h.wait_text("removal cancelled")
             self.assertEqual(self.launches(), [])
             await h.goto_row("item", "0.15.3")
             await h.press("enter")
-            await h.wait_text("Type 'delete 0.15.3'")
-            await h.press(*"delete 0.15.3", "enter")
+            await h.wait_text("Remove Rapid-MLX 0.15.3? yes/no")
+            await h.press(*"yes", "enter")
+            await h.wait_text("Are you sure? 0.15.3")
+            await h.press("y", "enter")
             await h.wait_for(lambda: self.launches(), "the remove child")
             self.assertEqual(self.launches()[-1]["argv"], ["--backend", "rapid-mlx", "remove", "0.15.3", "--yes"])
+        self.run_picker(s)
+
+    def test_last_rapid_mlx_version_is_never_offered_for_removal(self):
+        self._stub_manager(installed="0.16.1         complete   /x/rapid-mlx-0.16.1\n")
+        async def s(app, pilot, h):
+            await h.press("v")
+            await h.wait_screen("RuntimeManagerScreen")
+            await h.press("x")
+            await h.wait_screen("VersionsScreen")
+            await h.wait_for(lambda: "0.16.1" in h.text(), "the one installed version")
+            await h.press("enter")
+            await h.wait_text("core dependency of free-agents")
+            self.assertFalse(app.query_one("#prompt").display)      # no prompt was even opened
+            self.assertEqual(self.launches(), [])
         self.run_picker(s)
 
     def test_install_picks_a_release_from_the_list(self):

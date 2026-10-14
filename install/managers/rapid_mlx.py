@@ -417,6 +417,13 @@ print(json.dumps(out, sort_keys=True))
         target = self.target_for(version, home or self.home)
         if target.is_symlink() or not target.is_dir():
             raise ManagerError(f"refusing removal: not a real managed directory: {target}")
+        # Another COMPLETE version must remain: an incomplete venv cannot run local models either.
+        others = [v for v, _, st in self.installed_versions(home or self.home)
+                  if v != version and st == "complete"]
+        if not others:
+            raise ManagerError(
+                f"refusing removal: {version} is the only installed Rapid-MLX version. Rapid-MLX is a "
+                "core dependency of free-agents (it runs local models); install another version first.")
         self.validate_environment(version)
         if not self._locked_requirements(version):
             raise ManagerError(f"refusing removal without a valid recreation receipt; run snapshot {version}")
@@ -461,24 +468,22 @@ print(json.dumps(out, sort_keys=True))
         return matches
 
     def _running_references(self, target: Path) -> list[str]:
-        """Find running processes referencing the target."""
-        import psutil
-        matches: list[str] = []
-        own_pid = os.getpid()
+        """Find running processes referencing the target.
+
+        Uses `ps`, not psutil: the manager runs under whatever python3 is on PATH, and a missing
+        psutil crashed `remove` with a raw traceback (2026-10-14). A guard that cannot run must
+        refuse, never wave the removal through, so a failed `ps` is an error, not "no matches"."""
         try:
-            for proc in psutil.process_iter(['pid', 'cmdline']):
-                try:
-                    pid = proc.info['pid']
-                    cmdline = proc.info['cmdline']
-                    if not pid or pid == own_pid or not cmdline:
-                        continue
-                    command = " ".join(cmdline)
-                    if str(target) in command:
-                        matches.append(f"PID {pid}: {command}")
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception:
-            pass  # psutil might not be available
+            out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True,
+                                 text=True, timeout=10, check=True).stdout
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ManagerError(f"cannot check running processes (ps failed: {exc}); refusing removal") from exc
+        own_pid = os.getpid()
+        matches: list[str] = []
+        for line in out.splitlines():
+            pid, _, command = line.strip().partition(" ")
+            if pid.isdigit() and int(pid) != own_pid and str(target) in command:
+                matches.append(f"PID {pid}: {command.strip()}")
         return matches
 
     def snapshot_environment(self, version: str, home: Path | None = None, *, dry_run: bool = False) -> Path:

@@ -1062,6 +1062,10 @@ class VersionEntry:
     status: str = ""          # installed: complete/incomplete; releases: "installed" or ""
 
 
+RAPID_CORE_REFUSAL = ("{version} is the only installed Rapid-MLX version — not removed. Rapid-MLX is a "
+                      "core dependency of free-agents (it runs local models).")
+
+
 class VersionsScreen(Screen):
     """Pick a version from a LIST (arrows/click, like the model list), then run one operation
     on it. Replaces the typed-version prompts: the old manage-rapid-mlx.py menu listed the
@@ -1117,7 +1121,12 @@ class VersionsScreen(Screen):
         if not v:
             return None
         if self.op == "remove":
-            return Nav("prompt:rt-remove", self.owner)       # typed 'delete <v>' first
+            # The picker's own guard, before any prompt: the last complete Rapid-MLX version is
+            # never offered for removal (the manager refuses it too — this is the friendly half).
+            if self.backend == "rapid-mlx" and not any(
+                    e.version != v and e.status == "complete" for e in (self.entries or [])):
+                return Nav("warn:" + RAPID_CORE_REFUSAL.format(version=v), self.owner)
+            return Nav("prompt:rt-remove", self.owner)       # yes/no, then "are you sure"
         return Nav(f"tool:rt-op:{self.op}:{v}", self.owner)
 
     def argv_for(self, version: str) -> list[str]:

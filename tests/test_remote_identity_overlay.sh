@@ -116,7 +116,7 @@ check "$empty_ok" "ok" "an unresolvable provider never emits mode=replace with z
 # accent has to come from remote-theme.json so the data file stays the single source of truth.
 lime=$(overlay 4142 nvidia)
 check "$(printf '%s' "$lime" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("theme","MISSING"))')" \
-      "free-lime" "a remote session selects the custom lime theme by slug"
+      "custom:free-lime" "a remote session selects the custom lime theme as custom:<slug> (a bare slug never loads)"
 
 # The theme FILE must be installable and must carry the accent from the data file, not a
 # hardcoded literal -- assert they agree rather than asserting the colour twice.

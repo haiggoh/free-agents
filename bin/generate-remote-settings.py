@@ -194,8 +194,11 @@ def main():
         # --safe-mode disables. So this is a documented feature, not a guess.
         #
         # Per-session via --settings, so the user's persistent theme is never touched.
+        # The value needs the `custom:` PREFIX (found 2026-10-13 on 2.1.296): startup only loads
+        # ~/.claude/themes when the theme setting startsWith("custom:"); a bare slug is treated
+        # as an unknown built-in theme and silently ignored.
         theme_slug = theme.get('name') or 'free-lime'
-        settings["theme"] = theme_slug
+        settings["theme"] = "custom:" + theme_slug
 
         _ = (accent, emoji, label, theme_identifier, provider_display,
              actual_model_id, spinner_profile_id)  # retained for the banner/statusline path
