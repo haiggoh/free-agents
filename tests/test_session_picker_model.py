@@ -212,8 +212,17 @@ class GroupingTests(unittest.TestCase):
     def test_family_classifier(self):
         cases = {"codestral-25": "Mistral", "devstral-2-123b": "Mistral",
                  "mistral-small-4": "Mistral", "qwen-3.8-operator": "Qwen",
-                 "deepseek-r1-architect": "DeepSeek", "gemma-4-26b": "Gemma",
+                 "deepseek-r1-architect": "DeepSeek", "gemma-4-26b": "Google Gemma",
                  "mystery-model": "Other", "ornith-1.5-35b": "Ornith", "llama-4-scout": "Llama"}
+        for alias, family in cases.items():
+            with self.subTest(alias=alias):
+                self.assertEqual(m.family_for(alias), family)
+
+    def test_family_renames_and_new_families(self):
+        cases = {"kimi-vl-thinking": "Moonshot Kimi", "kimi-k3": "Moonshot Kimi",
+                 "nemotron-550b": "Nvidia", "minitron-8b": "Nvidia",
+                 "agentworld-35b": "Nvidia", "kat-coder-optiq": "Kat Coder",
+                 "muse-glimmer-30b": "Meta", "granite-4.2-30b": "Granite"}
         for alias, family in cases.items():
             with self.subTest(alias=alias):
                 self.assertEqual(m.family_for(alias), family)
@@ -224,6 +233,26 @@ class GroupingTests(unittest.TestCase):
 
     def test_explicit_family_overrides_classifier(self):
         self.assertEqual(m.family_for("mystery-model", explicit="Acme"), "Acme")
+
+    def test_self_named_and_auto_family_derive(self):
+        """`csl --inventory` emits the DISPLAY name as the family of its auto-scanned
+        rows (separator variants of the alias), and registered profiles can carry the
+        literal "auto" — neither carries grouping information, so both derive from the
+        alias instead of fragmenting into one-model groups."""
+        self.assertEqual(m.family_for("Muse-Glimmer-30B-4bit",
+                                      explicit="Muse-Glimmer-30B-4bit"), "Meta")
+        self.assertEqual(m.family_for("Qwen3-8-27B-MTP-4bit",
+                                      explicit="Qwen3.8-27B-MTP-4bit"), "Qwen")
+        self.assertEqual(m.family_for("granite-4-2-3b-MLX-4bit",
+                                      explicit="granite-4.2-3b-MLX-4bit"), "Granite")
+        self.assertEqual(m.family_for("kat-v2-5-6bit-xl",
+                                      explicit="kat-v2.5-6bit-xl"), "Kat Coder")
+        self.assertEqual(m.family_for("kimi-vl-thinking", explicit="auto"), "Moonshot Kimi")
+
+    def test_qwen_agentworld_is_nvidia_not_qwen(self):
+        # Identity (agentworld, an Nvidia line) wins over the Qwen base architecture,
+        # which is why the Nvidia rule sits above Qwen.
+        self.assertEqual(m.family_for("qwen-agentworld-4bit"), "Nvidia")
 
     def test_remote_groups_by_provider_after_filters_with_counts(self):
         s = m.Settings()
@@ -695,6 +724,35 @@ class DownloadTests(unittest.TestCase):
         owned = m.DownloadScreen(m.Settings(), catalog(), 200, 100, owner=m.HOME_OWNED)
         self.assertIn("b", {a.key for a in owned.actions()})
         self.assertNotIn("q", {a.key for a in owned.actions()})
+
+
+class RemoteInfoBoxTests(unittest.TestCase):
+    """The remote info box: short-form notes keyed by alias (config/remote-model-notes.json)."""
+
+    def test_every_note_key_is_a_real_roster_alias(self):
+        # A typo'd key would silently never show; the roster is the source of aliases.
+        import json, re
+        notes = json.loads(m._MODEL_NOTES_PATH.read_text())
+        roster = (Path(__file__).resolve().parent.parent / "config" / "remote-agents.sh").read_text()
+        for alias in (k for k in notes if not k.startswith("_")):
+            self.assertRegex(roster, rf"(?m)\b{re.escape(alias)}\b", alias)
+
+    def test_thinking_variant_falls_back_to_base_note(self):
+        self.assertTrue(m.model_note("nvidia-glm53"))
+        self.assertEqual(m.model_note("nvidia-glm53-thinking"), m.model_note("nvidia-glm53"))
+
+    def test_unknown_alias_and_unreadable_file_yield_empty(self):
+        self.assertEqual(m.model_note("no-such-model"), "")
+        self.assertEqual(m.model_note("nvidia-glm53", Path("/nonexistent/notes.json")), "")
+
+    def test_info_text_for_model_group_and_unnoted(self):
+        agents = [m.RemoteAgent("nvidia-laguna", "nvidia", "NVIDIA Laguna XS 2.1", "unknown"),
+                  m.RemoteAgent("gemini-flash", "gemini", "Gemini Flash", "renewing_free")]
+        lane = m.RemoteScreen(m.Settings(), agents, owner=m.DIRECT_ROOT)
+        self.assertIn("Laguna XS 2.1 (Poolside)", lane.info_text("nvidia-laguna"))
+        self.assertIn("No notes", lane.info_text("gemini-flash"))
+        self.assertIn("Hover or highlight", lane.info_text("nvidia"))      # a group id
+        self.assertIn("Hover or highlight", lane.info_text(None))
 
 
 if __name__ == "__main__":

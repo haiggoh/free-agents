@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -110,20 +111,39 @@ class RemoteAgent:
 _FAMILY_RULES = [
     ("DeepSeek", r"deepseek"),
     ("Mistral", r"mistral|codestral|devstral|magistral|ministral|mixtral"),
+    # Nvidia BEFORE Qwen: "qwen-agentworld-4bit" is an agentworld (Nvidia) model on a
+    # Qwen base — identity wins over architecture, same principle as DeepSeek distills.
+    ("Nvidia", r"nemotron|minitron|agentworld"),
     ("Qwen", r"qwen|qwq"),
-    ("Gemma", r"gemma"),
+    ("Google Gemma", r"gemma"),
     ("Llama", r"llama"),
     ("GLM", r"glm"),
-    ("Kimi", r"kimi"),
+    ("Moonshot Kimi", r"kimi"),
     ("Phi", r"\bphi"),
-    ("Nemotron", r"nemotron|minitron"),
     ("gpt-oss", r"gpt-oss"),
     ("Ornith", r"ornith"),
+    ("Kat Coder", r"kat[-_ ]|\bkat\b"),
+    ("Meta", r"muse|glimmer"),
+    ("Granite", r"granite"),
 ]
 
 
+def _norm_token(s: str) -> str:
+    """Lowercase alphanumerics only — the inventory's auto-scanned rows carry the
+    DISPLAY name as their family (`granite-4.2-3b-MLX-4bit`) while the alias is the
+    sanitized id (`granite-4-2-3b-MLX-4bit`); separator-identical strings are the
+    same name, not grouping information."""
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
 def family_for(alias: str, explicit: str = "") -> str:
-    if explicit:
+    # An explicit family that names the model itself is what `csl --inventory` emits
+    # for its auto-scanned rows — it carries no grouping information, and honoring it
+    # fragmented every rapid-discovered model into a one-model group (measured on the
+    # live inventory 2026-10-13: "Qwen3.8-27B-MTP-4bit", "kat-v2.5-*", the Gemma and
+    # Muse rows). "auto" is the same story from the registered profiles. All of them
+    # mean "derive from the alias" (0.34.0).
+    if explicit and explicit != "auto" and _norm_token(explicit) != _norm_token(alias):
         return explicit
     name = alias.lower()
     for family, pattern in _FAMILY_RULES:
@@ -137,6 +157,22 @@ PROVIDER_LABELS = {"nvidia": "NVIDIA", "gemini": "Gemini", "groq": "Groq",
                    "mistral": "Mistral", "zai": "Z.ai", "siliconflow": "SiliconFlow",
                    "llm7": "LLM7", "kilo": "Kilo", "vercel": "Vercel", "sambanova": "SambaNova",
                    "modelscope": "ModelScope", "streamlake": "Streamlake"}
+
+
+_MODEL_NOTES_PATH = Path(__file__).resolve().parent.parent / "config" / "remote-model-notes.json"
+
+
+def model_note(alias: str, path: Path | None = None) -> str:
+    """Short-form note for the remote info box, or "" when none is written. A "-thinking"
+    variant shares its base model's note (same weights, different mode). A missing or
+    malformed file yields "" — the box is an aid, never a reason the picker fails."""
+    import json
+    try:
+        notes = json.loads((path or _MODEL_NOTES_PATH).read_text())
+    except (OSError, ValueError):
+        return ""
+    note = notes.get(alias) or notes.get(alias.removesuffix("-thinking"))
+    return note if isinstance(note, str) else ""
 
 
 def tier_label(tier: str, provider: str) -> str:
@@ -695,6 +731,16 @@ class RemoteScreen(Screen):
                             [Item("__nokeys__:k", "Press K (API keys) to set one up — every listed provider has a free tier")])]
         self.accordion.set_groups(groups)
         self._models_loaded = True
+
+    def info_text(self, item_id: str | None) -> str:
+        """The info box under the model list: the model's display name and its short-form
+        note (config/remote-model-notes.json), or a hint when nothing is pointed at. Only
+        models get a box — group headers and the no-keys instruction get the hint."""
+        agent = next((a for a in self.agents if a.alias == item_id), None)
+        if agent is None:
+            return "Hover or highlight a model to see notes about it."
+        note = model_note(agent.alias)
+        return f"{agent.display}\n{note}" if note else f"{agent.display}\nNo notes for this model yet."
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings

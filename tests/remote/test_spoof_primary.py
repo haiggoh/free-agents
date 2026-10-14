@@ -57,23 +57,36 @@ def spoof_with(claude_version, failing=False):
                           text=True, env=env, timeout=120)
 
 
-out = spoof_with("2.1.291 (Claude Code)")
-check(out.returncode == 0 and out.stdout.strip() == "claude-opus-5-5",
-      "CC >= 2.1.280 requests claude-opus-5-5 (1M support), got %r" % out.stdout.strip())
+def test_spoof_primary():
+    """pytest entry: the checks below ran at import time (with a sys.exit) until 0.34.0,
+    which aborted collection of the WHOLE suite — `pytest -q tests` ran zero tests."""
+    global passed, failed
+    passed = failed = 0
+    out = spoof_with("2.1.291 (Claude Code)")
+    check(out.returncode == 0 and out.stdout.strip() == "claude-opus-5-5",
+          "CC >= 2.1.280 requests claude-opus-5-5 (1M support), got %r" % out.stdout.strip())
 
-out = spoof_with("2.1.296.b9d (Claude Code)")
-check(out.returncode == 0 and out.stdout.strip() == "claude-opus-5-5",
-      "a 4-segment version string (this machine's real output) still reads as capable, got %r"
-      % out.stdout.strip())
+    out = spoof_with("2.1.296.b9d (Claude Code)")
+    check(out.returncode == 0 and out.stdout.strip() == "claude-opus-5-5",
+          "a 4-segment version string (this machine's real output) still reads as capable, got %r"
+          % out.stdout.strip())
 
-out = spoof_with("2.1.100 (Claude Code)")
-check(out.returncode == 0 and out.stdout.strip() == "claude-opus-5",
-      "old CC keeps the claude-opus-5 compatibility fallback, got %r" % out.stdout.strip())
+    out = spoof_with("2.1.100 (Claude Code)")
+    check(out.returncode == 0 and out.stdout.strip() == "claude-opus-5",
+          "old CC keeps the claude-opus-5 compatibility fallback, got %r" % out.stdout.strip())
 
-out = spoof_with(None, failing=True)
-check(out.returncode == 0 and out.stdout.strip() == "claude-opus-5",
-      "an unprobeable version also falls back (never breaks a working session), got %r"
-      % out.stdout.strip())
+    out = spoof_with(None, failing=True)
+    check(out.returncode == 0 and out.stdout.strip() == "claude-opus-5",
+          "an unprobeable version also falls back (never breaks a working session), got %r"
+          % out.stdout.strip())
 
-print("passed %d, failed %d" % (passed, failed))
-sys.exit(1 if failed else 0)
+    assert failed == 0, "%d spoof check(s) failed" % failed
+
+
+if __name__ == "__main__":
+    try:
+        test_spoof_primary()
+    except AssertionError:
+        pass
+    print("passed %d, failed %d" % (passed, failed))
+    sys.exit(1 if failed else 0)

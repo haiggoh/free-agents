@@ -1,3 +1,34 @@
+## [0.34.0] — 2026-10-14
+
+### Changed — the local picker groups models by family, not by inventory noise
+
+`csl --inventory` emits its rapid-discovered ("auto-scanned") rows with the DISPLAY name
+as the family field, so every such model landed in a one-model group ("Qwen3.8-27B-MTP-4bit",
+"kat-v2.5-*", the Gemma and Muse rows) beside the real families. `family_for` now treats a
+family that names the model itself — or the literal "auto" — as "derive from the alias",
+comparing normalized (separator-insensitive) forms, because the display name and the alias
+differ exactly in their separators.
+
+- Regroups the live inventory: Granite (2), Kat Coder (4, incl. kat-v2.5-*), Qwen (9,
+  incl. the MTP draft model), Google Gemma (4), Moonshot Kimi (3), Nvidia (3, agentworld
+  included), Meta (muse-glimmer); only genuinely unclassifiable models stay in Other.
+- Renames: Kimi → **Moonshot Kimi**, Gemma → **Google Gemma**, Nemotron → **Nvidia**,
+  with agentworld joining it — the Nvidia rule sits above Qwen so `qwen-agentworld-4bit`
+  groups by identity, the same principle as the DeepSeek-distill rule.
+- **Remote info box**: with the remote model list open, a framed box under it shows a
+  short-form note for the model under the mouse pointer (hover) or, failing that, the
+  keyboard highlight — temperament, speed, cautions. Notes live in
+  `config/remote-model-notes.json` keyed by roster alias (a `-thinking` variant shares its
+  base model's note); a missing or malformed file just shows "no notes", never an error.
+  A test asserts every note key is a real roster alias, so a typo cannot hide a note.
+- Fixed: `pytest -q tests` (the RELEASE.md gate) collected **zero tests** since 0.33.0 —
+  `tests/remote/test_spoof_primary.py` ran its checks and `sys.exit()`ed at import time,
+  aborting collection of the whole suite. It is now a proper test function (still runnable
+  as a script).
+- README: a "NVIDIA model field notes" section — per-model maintainer observations for
+  full remote sessions (temperament, speed, the GLM 5.3 /resume caution, queued-prompt
+  nudging), written from the picker aliases.
+
 ## [0.33.0] — 2026-10-14
 
 ### Changed — the spoofed identity is now Opus 5.5 (Opus 5 demoted to compat fallback)

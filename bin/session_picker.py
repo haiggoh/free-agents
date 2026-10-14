@@ -40,6 +40,7 @@ try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Vertical
+    from textual.message import Message
     from textual.widgets import Input, OptionList, Static
     from textual.widgets.option_list import Option
 except ImportError:  # pragma: no cover - the wrapper checks first; keep a clear message anyway
@@ -209,6 +210,26 @@ class PromptInput(Input):
         # calling it here too inserted every paste twice.
 
 
+class HoverOptionList(OptionList):
+    """OptionList that reports which row the mouse is over, so the info box can follow the
+    pointer as well as the keyboard highlight. Textual tracks hover only for styling."""
+
+    class Hovered(Message):
+        def __init__(self, index: int | None):
+            super().__init__()
+            self.index = index
+
+    def _on_mouse_move(self, event):
+        before = self._mouse_hovering_over
+        super()._on_mouse_move(event)
+        if self._mouse_hovering_over != before:
+            self.post_message(self.Hovered(self._mouse_hovering_over))
+
+    def _on_leave(self, event):
+        super()._on_leave(event)
+        self.post_message(self.Hovered(None))
+
+
 class Picker(App):
     # R5: no painted background. The `textual-ansi` theme maps background/foreground to the
     # terminal's own defaults (ANSI 39/49) and ansi_color=True keeps them ANSI instead of
@@ -223,6 +244,8 @@ class Picker(App):
     #rows.visible { display: block; }
     /* Secondary text is grey (ANSI bright-black): readable on light AND dark terminals.
        Only background and main text are the terminal's own defaults. */
+    /* Remote info box: model notes for the hovered/highlighted row, framed like a tooltip. */
+    #info { height: auto; display: none; border: round ansi_bright_black; padding: 0 1; margin: 0 1; color: ansi_default; }
     #status { height: auto; padding: 0 1; color: ansi_bright_black; }
     #prompt { display: none; }
     OptionList { background: ansi_default; color: ansi_default; border: none; }
@@ -382,7 +405,8 @@ class Picker(App):
             yield Static("", id="title")
             yield Static("", id="policy")
             yield OptionList(id="actions")
-            yield OptionList(id="rows")
+            yield HoverOptionList(id="rows")
+            yield Static("", id="info")
             yield PromptInput(id="prompt")
             yield Static("", id="status")
 
@@ -636,6 +660,28 @@ class Picker(App):
         if self.state_warnings:
             status += f"\n  {ec.EMOJI_WARNING_STR} " + self.state_warnings[-1]
         self.query_one("#status", Static).update(status)
+        self._update_info()
+
+    def _update_info(self, item_id: str | None = None, from_hover: bool = False):
+        """Show the remote info box while the model list is open; it describes the hovered
+        row (mouse) or else the highlighted one (keyboard)."""
+        info = self.query_one("#info", Static)
+        sm = self.screen_model
+        if not (isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and sm._models_loaded):
+            info.display = False
+            return
+        if not from_hover:
+            h = self._highlighted()
+            item_id = h[1] if h and h[0] == "item" else None
+        info.update(sm.info_text(item_id))
+        info.display = True
+
+    def on_hover_option_list_hovered(self, event):
+        if event.index is None or event.index >= len(self.row_ids):
+            self._update_info()                  # pointer left: fall back to the highlight
+            return
+        row = self.row_ids[event.index]
+        self._update_info(row[1] if row and row[0] == "item" else None, from_hover=True)
 
     # --- keys ------------------------------------------------------------------------------
     def _highlighted(self):
@@ -651,6 +697,7 @@ class Picker(App):
             h = self._highlighted()
             if h and h[0] == "item":
                 self.screen_model.accordion.selected_id = h[1]
+            self._update_info()
         elif event.option_list.id == "actions":
             # Update status to show action description
             pass

@@ -181,6 +181,47 @@ ModelScope or Streamlake. Usage counts against that provider's quota. See
 > A weak *model* is not a broken *lane*: NVIDIA's Nemotron takes shortcuts and makes mistakes on
 > long tasks, which is a model limitation (try `max` effort), not a defect in the remote path.
 
+### NVIDIA model field notes
+
+The NVIDIA route is where most full remote sessions run, and the models differ more in
+temperament than in the roster lines suggest. These are the maintainer's working
+observations from real sessions (2026-10-13) — subjective, but the practical details are
+the kind that cost a session to rediscover.
+A short form of each note appears in the remote picker's info box when you hover or
+highlight the model (`config/remote-model-notes.json`).
+
+**Nemotron 3 Ultra** — `nvidia-nemotron-ultra` / `nvidia-nemotron-ultra-thinking`
+Capable on clearly-instructed work, relatively fast, 1M context. Tends to think for long
+stretches before reporting in. Two habits make it pleasant: the thinking blocks are
+readable as they stream, and **interjecting a queued prompt while it is still thinking
+nudges the ongoing work in a new direction** without losing the run.
+
+**Nemotron 3 Super** — `nvidia-nemotron3` / `nvidia-nemotron3-thinking`
+Extremely fast, but takes the path of least resistance and declares goals fulfilled
+prematurely. Good for quick, well-scoped asks; check its "done".
+
+**GLM 5.3** — `nvidia-glm53-full` / `nvidia-glm53-full-thinking`
+Very smart reasoning model, excellent at understanding context and finding problems and
+solutions on its own — comparatively slow, ideal for unattended overnight work. 1M
+context. Thinking and output are well balanced; queued-prompt nudging works well here
+too. One caution: **don't `/resume` a long GLM session cold** — start the session with a
+throwaway prompt (e.g. "hello"), wait for the first response, and only then use
+`/resume-interrupted`. The first prompt of a GLM 5.3 session takes unusually long; once
+the session is going it speeds up and produces significant work. (The `-full` aliases
+carry a ~1-minute NVIDIA-side door charge before the first token — payload-independent.)
+
+**GLM 5.3 Flash** — `nvidia-glm53` / `nvidia-glm53-thinking`
+Significantly faster (fewer parameters) than GLM 5.3, but still surprisingly smart —
+good at investigating and understanding the context it is working in. Thinking and
+output well balanced. The everyday driver among the reasoning models.
+
+**Laguna XS 2.1** — `nvidia-laguna`
+Promising and specialized for coding. Slow on the first prompt, then picks up speed —
+overall slower than Nemotron Ultra. Capable tool use under Claude Code. Known wart: its
+reasoning output may not surface as thinking blocks, and a stray closing think-tag can
+occasionally appear in the text — a formatting issue, no observed impact on the work
+itself, and likely patchable.
+
 ### A full local session: offline and private
 
 The whole session runs on a local model, served under a Claude model id so the client accepts it.
