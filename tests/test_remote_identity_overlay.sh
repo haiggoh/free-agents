@@ -72,7 +72,8 @@ done
 overlay() { # overlay <port> [provider]
     local id
     id=$(ANTHROPIC_BASE_URL="http://127.0.0.1:$1" LA_REMOTE_PROVIDER="${2:-}" "$ROOT/bin/la-session-identity.sh" 2>/dev/null)
-    LAUNCH_DIR="$ROOT/bin" python3 "$ROOT/bin/generate-remote-settings.py" --identity-json "$id"
+    # Explicitly unset LA_MOD_ATTACHED to test the default behavior (mod not attached)
+    LAUNCH_DIR="$ROOT/bin" LA_MOD_ATTACHED="" python3 "$ROOT/bin/generate-remote-settings.py" --identity-json "$id"
 }
 nv=$(overlay 4142 nvidia)
 check "$(printf '%s' "$nv" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["spinnerVerbs"]["verbs"]))')" "3" \

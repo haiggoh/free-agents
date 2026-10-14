@@ -18,6 +18,7 @@ SESSION_EMOJI_UNKNOWN="❓"      # was 🧭 (compass) — reserved for waypoints
 
 # Explicit cloud session configuration emoji (for UI)
 EMOJI_CLOUD_CONFIG="☁️"
+EMOJI_THEME="🎨"
 
 # Telemetry / feature emojis (not session kinds, but shared across scripts)
 EMOJI_TELEMETRY_ON="🛰️ "

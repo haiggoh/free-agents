@@ -613,6 +613,8 @@ class Picker(App):
             self.screen_model = m.RemoteFiltersScreen(s, nav.owner)
         elif nav.target == "cloud_config":
             self.screen_model = m.CloudConfigScreen(s, nav.owner)
+        elif nav.target == "theme_config":
+            self.screen_model = m.ThemeConfigScreen(s, nav.owner)
         else:
             raise ValueError(nav.target)
 

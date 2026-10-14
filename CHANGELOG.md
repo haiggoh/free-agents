@@ -1,3 +1,26 @@
+## [0.34.7] — 2026-10-14
+
+### Added — Theme color configuration in the session picker (press `h` on Home)
+
+- A new **Theme Colors** screen (`h` from Home) lets you pick the main accent color for
+  local and remote sessions independently. The prompt-input border is automatically
+  derived as a paler version of the accent (same lightness, 55% saturation) — not dark,
+  just less saturated — so it stays visible without being distracting.
+- Presets cycle through Sky Blue, Cyan, Magenta, Gold, Lime Green, Orange Red,
+  Medium Purple, and Medium Spring Green; `d` restores the shipped defaults
+  (local `#00BFFF`, remote `#ADFF2F`).
+- Changes persist in `config/local-theme.json` and `config/remote-theme.json` and take
+  effect on the next session launch.
+
+### Fixed — Local session billing label
+
+- Reverted `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` for local sessions — it was
+  incorrectly showing "Cloud gateway" in the billing line. Local sessions now use the
+  default (no gateway env var), which correctly shows "API Usage Billing" — the statusline
+  shows "running on FREE local inference" via the la-statusline-segment.sh contribution.
+- Remote sessions keep their provider-accurate display name in the welcome banner
+  (e.g. "nvidia-glm53 → glm-5.3-flash").
+
 ## [0.34.6] — 2026-10-14
 
 ### Fixed — local session billing label; model name in welcome banner; provider display on remote
