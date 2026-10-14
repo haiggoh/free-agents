@@ -36,8 +36,8 @@
       "diffAdded",
       "diffRemoved"
     ],
-    "border_color": "#75A22F",
-    "_border_color_note": "Prompt-input outline: the accent muted 55/45 toward #303030 (user: full accent too distracting, 2026-10-14)."
+    "border_color": "#A3D05E",
+    "_border_color_note": "Prompt-input outline: the accent at the SAME lightness, saturation 55% (user 2026-10-14: as bright as the accent, less saturated, not dark)."
   },
   "fallback": {
     "theme_identifier": "unknown",

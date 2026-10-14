@@ -102,12 +102,15 @@ def build_theme_file(config_dir):
     theme_data = load_json_file(config_dir / 'local-theme.json')
     theme = theme_data.get('theme', {})
     accent = theme.get('accent_color') or '#00BFFF'
+    border = theme.get('border_color') or accent      # softer prompt outline, same as remote
+    overrides = {role: accent for role in (
+        "claude", "permission", "planMode", "bashBorder", "suggestion", "thinking",
+        "clawd_body")}
+    overrides.update(promptBorder=border, promptBorderShimmer=border)
     return {
         "name": theme.get('identity_label') or 'Local inference session',
         "base": "dark",
-        "overrides": {role: accent for role in (
-            "claude", "permission", "planMode", "bashBorder", "suggestion", "thinking",
-            "clawd_body")},
+        "overrides": overrides,
     }
 
 

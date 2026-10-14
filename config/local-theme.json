@@ -14,7 +14,9 @@
     "unsupported_surfaces": [
       "native_ascii_artwork",
       "managed_announcements"
-    ]
+    ],
+    "border_color": "#39A2C6",
+    "_border_color_note": "Prompt-input outline: the accent at the SAME lightness, saturation 55% (user 2026-10-14: as bright as the accent, less saturated, not dark)."
   },
   "fallback": {
     "theme_identifier": "unknown",

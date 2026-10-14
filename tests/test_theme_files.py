@@ -33,7 +33,7 @@ def accent(name):
 
 def test_accents_are_the_requested_colours():
     assert accent("local-theme.json") == "#00BFFF"   # dark sky blue
-    assert accent("remote-theme.json") == "#32CD32"  # lime green
+    assert accent("remote-theme.json") == "#ADFF2F"  # green-yellow (user choice, 0.34.4)
 
 
 def test_both_theme_files_tint_the_mascot_and_spare_semantic_colours():
@@ -45,6 +45,21 @@ def test_both_theme_files_tint_the_mascot_and_spare_semantic_colours():
         assert t["overrides"]["claude"] == accent(data)
         for semantic in ("error", "warning", "success"):
             assert semantic not in t["overrides"]
+
+
+def test_prompt_outline_is_the_accent_desaturated_at_the_same_lightness():
+    # User 2026-10-14: as bright as the accent, less saturated, not dark.
+    import colorsys
+    def hls(h): return colorsys.rgb_to_hls(*(int(h[i:i+2], 16) / 255 for i in (1, 3, 5)))
+    for script, data in (("generate-local-settings.py", "local-theme.json"),
+                         ("generate-remote-settings.py", "remote-theme.json")):
+        ov = json.loads(run(script, "--emit-theme-file"))["overrides"]
+        border = ov["promptBorder"]
+        assert ov["promptBorderShimmer"] == border
+        (ah, al, as_), (bh, bl, bs) = hls(accent(data)), hls(border)
+        assert abs(al - bl) < 0.02, (data, al, bl)     # not darker
+        assert bs < as_ - 0.2, (data, as_, bs)         # clearly less saturated
+        assert abs(ah - bh) < 0.02                     # same green / same blue
 
 
 def test_local_session_selects_local_sky_with_prefix():
