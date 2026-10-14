@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from picker_harness import ROOT, PilotCase, PTYCase  # noqa: E402
+from picker_harness import RECORDER, ROOT, PilotCase, PTYCase  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "bin"))
 
@@ -38,17 +38,68 @@ class BackendManagerScreen(PilotCase):
             await h.wait_screen("HomeScreen")
         self.run_picker(s)
 
-    def test_backend_cycles_and_info_prompt_rejects_bad_version(self):
+    def test_backend_cycles_and_hides_ops_its_manager_lacks(self):
         async def s(app, pilot, h):
             await h.press("v")
             await h.wait_screen("RuntimeManagerScreen")
+            self.assertIn("Remove an installed version", h.text())      # rapid-mlx has remove
             await h.press("c")
             await h.wait_for(lambda: "Backend: rapid-mlx" not in h.text(), "backend to cycle")
-            await h.press("f")                        # inline version prompt, no child yet
-            await h.wait_text("Version to show")
-            await h.press(*"1;rm", "enter")
-            await h.wait_text("version rejected")
+            self.assertNotIn("Remove an installed version", h.text())
+        self.run_picker(s)
+
+    def _stub_manager(self, installed="0.16.1         complete   /x/rapid-mlx-0.16.1\n"
+                                       "0.15.3         complete   /x/rapid-mlx-0.15.3\n"):
+        """Point the picker's manage-backend.py calls at a recorder that answers `installed`
+        and `releases` with fixed lists and records every other call."""
+        import session_picker as sp
+        stub = Path(self.tmp.name) / "stubs" / "manage-backend"
+        stub.write_text("#!/bin/sh\n"
+                        "case \"$3\" in installed) printf '" + installed.replace("\n", "\\n") + "'; exit 0;;\n"
+                        "releases) printf '0.17.0\\n0.16.1\\n'; exit 0;; esac\n"
+                        + RECORDER.split("\n", 1)[1])
+        stub.chmod(0o755)
+        real = sp._mb
+        sp._mb = lambda backend, *a: [str(stub), "--backend", backend, *a]
+        self.addCleanup(setattr, sp, "_mb", real)
+
+    def test_remove_picks_from_list_and_needs_typed_confirmation(self):
+        self._stub_manager()
+        async def s(app, pilot, h):
+            await h.press("v")
+            await h.wait_screen("RuntimeManagerScreen")
+            await h.press("x")
+            await h.wait_screen("VersionsScreen")
+            await h.wait_for(lambda: "0.15.3" in h.text(), "installed versions listed")
+            app.query_one("#rows").focus()
+            await h.goto_row("item", "0.15.3")
+            await h.press("enter")
+            await h.wait_text("Type 'delete 0.15.3'")
+            await h.press(*"delete 0.16.1", "enter")             # wrong version: cancelled
+            await h.wait_text("removal cancelled")
             self.assertEqual(self.launches(), [])
+            await h.goto_row("item", "0.15.3")
+            await h.press("enter")
+            await h.wait_text("Type 'delete 0.15.3'")
+            await h.press(*"delete 0.15.3", "enter")
+            await h.wait_for(lambda: self.launches(), "the remove child")
+            self.assertEqual(self.launches()[-1]["argv"], ["--backend", "rapid-mlx", "remove", "0.15.3", "--yes"])
+        self.run_picker(s)
+
+    def test_install_picks_a_release_from_the_list(self):
+        self._stub_manager()
+        async def s(app, pilot, h):
+            await h.press("v")
+            await h.wait_screen("RuntimeManagerScreen")
+            await h.press("i")
+            await h.wait_screen("VersionsScreen")
+            await h.wait_for(lambda: "0.17.0" in h.text(), "releases listed")
+            self.assertIn("0.16.1  (installed)", h.text())
+            app.query_one("#rows").focus()
+            await h.goto_row("item", "0.17.0")
+            await h.press("enter")
+            await h.wait_for(lambda: self.launches(), "the install child")
+            self.assertEqual(self.launches()[-1]["argv"], ["--backend", "rapid-mlx", "install", "0.17.0"])
         self.run_picker(s)
 
 

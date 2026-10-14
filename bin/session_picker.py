@@ -161,6 +161,25 @@ def _mb(backend: str, *args: str) -> list[str]:
     return ["python3", str(REPO / "install/manage-backend.py"), "--backend", backend, *args]
 
 
+def load_versions(kind: str) -> list[m.VersionEntry]:
+    """kind = "versions:<backend>:installed|releases" -> the list a VersionsScreen picks from,
+    read from manage-backend.py's own text output (never a second source of truth)."""
+    _, backend, source = kind.split(":", 2)
+    inst = _run(_mb(backend, "installed"))
+    installed = [m.VersionEntry(p[0], p[1]) for p in (ln.split() for ln in inst.stdout.splitlines())
+                 if len(p) >= 2 and p[0][:1].isdigit()]
+    if source == "installed":
+        if inst.returncode != 0:
+            raise RuntimeError((inst.stderr or inst.stdout).strip() or f"exit {inst.returncode}")
+        return installed
+    rel = _run(_mb(backend, "releases", "--pre", "--limit", "30"))
+    if rel.returncode != 0:
+        raise RuntimeError((rel.stderr or rel.stdout).strip() or f"exit {rel.returncode}")
+    have = {e.version for e in installed}
+    return [m.VersionEntry(v, "installed" if v in have else "")
+            for v in (ln.strip() for ln in rel.stdout.splitlines()) if v]
+
+
 PROVIDER_SIGNUP_URLS = m.PROVIDER_SIGNUP_URLS   # one table: install/setup-api-keys.py
 
 TOOLS = {
@@ -169,12 +188,10 @@ TOOLS = {
     "tool:report": lambda: ["bash", str(BIN / "local-capable-filter.sh"), "--report",
                             str(REPO / "config/local-capable-remote-models.psv"), "--roster",
                             str(REPO / "config/remote-agents.sh")],
-    # Backend manager (install/manage-backend.py): (backend[, version]) -> argv. "tool:rl-reset" is
+    # Backend manager (install/manage-backend.py): backend -> argv. Version-taking operations
+    # (install/validate/info/snapshot/promote/remove) go through VersionsScreen.argv_for. "tool:rl-reset" is
     # the RATE LIMITER state reset; it is handled as a typed-confirm prompt, never run directly.
     "tool:rt-releases": lambda b: _mb(b, "releases", "--pre"),
-    "tool:rt-install": lambda b: _mb(b, "install"),
-    "tool:rt-validate": lambda b, v: _mb(b, "validate", v),
-    "tool:rt-info": lambda b, v: _mb(b, "info", v),
     "tool:rt-launchd-status": lambda b: _mb(b, "launchd", "status"),
     "tool:rt-launchd-run-once": lambda b: _mb(b, "launchd", "run-once"),
     "tool:rt-launchd-install": lambda b: _mb(b, "launchd", "install"),
@@ -432,7 +449,10 @@ class Picker(App):
 
     def _load_in_thread(self, kind):
         try:
-            data, err = globals()[self.LOADERS[kind]](), None
+            if kind.startswith("versions:"):
+                data, err = load_versions(kind), None
+            else:
+                data, err = globals()[self.LOADERS[kind]](), None
         except Exception as exc:              # surfaced as a status warning, never swallowed
             data, err = [], f"{kind} model list failed to load: {exc}"
         self.call_from_thread(self._loaded, kind, data, err)
@@ -454,6 +474,8 @@ class Picker(App):
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data)
             sm._models_loaded = True
+        elif isinstance(sm, m.VersionsScreen) and kind == sm.inventory_kind:
+            sm.set_entries(data)
         elif isinstance(sm, m.DownloadScreen) and kind == "catalog" and not sm.entries:
             entries, free, head = data if data else ([], 0.0, 100.0)
             self.screen_model = m.DownloadScreen(self.settings, entries, free, head, sm.owner)
@@ -494,6 +516,8 @@ class Picker(App):
             return "local"
         if isinstance(sm, m.DownloadScreen) and "catalog" in loading:
             return "catalog"
+        if isinstance(sm, m.VersionsScreen) and sm.inventory_kind in loading:
+            return "versions"
         return None
 
     def _tick_loading(self):
@@ -501,7 +525,8 @@ class Picker(App):
         if waiting or self._startup_pending():
             self._loading_frame += 1          # one shared beat, so the two labels stay in step
         if waiting:
-            self.query_one("#status", Static).update("  " + loading_label(self._loading_frame, "loading models"))
+            what = "loading versions" if waiting == "versions" else "loading models"
+            self.query_one("#status", Static).update("  " + loading_label(self._loading_frame, what))
         self._startup_tick()                  # independent of the status line: both can be animating
 
     def _rerender_keep_focus(self):
@@ -574,6 +599,12 @@ class Picker(App):
             self.screen_model = m.LaunchdScreen(s, nav.owner)
         elif nav.target == "api_keys":
             self.screen_model = m.APIKeysScreen(s, nav.owner)
+        elif nav.target.startswith("runtime_versions:"):
+            # Always a fresh list: an install/remove a moment ago changes what is there.
+            sm = m.VersionsScreen(s, nav.target.split(":", 1)[1], owner=m.SUB)
+            self.cache.pop(sm.inventory_kind, None)
+            self._prefetch((sm.inventory_kind,))
+            self.screen_model = sm
         elif nav.target == "remote_filters":
             self.screen_model = m.RemoteFiltersScreen(s, nav.owner)
         elif nav.target == "cloud_config":
@@ -654,7 +685,10 @@ class Picker(App):
         status = "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies"
         waiting = self._waiting_for() if hasattr(self, "_loading") else None
         if waiting:
-            status = "  " + loading_label(self._loading_frame, "loading models")
+            status = "  " + loading_label(self._loading_frame, "loading versions" if waiting == "versions" else "loading models")
+        elif isinstance(sm, m.VersionsScreen) and sm.entries == []:
+            status = "  nothing to choose: " + ("no releases found" if sm.OPS[sm.op][1] == "releases"
+                                               else f"no installed {sm.backend} versions")
         if isinstance(sm, m.DownloadScreen):
             status = "  ↑↓ move · Space/Enter queue · c review"
         if self.state_warnings:
@@ -911,7 +945,7 @@ class Picker(App):
         owner = result.owner
         # Tool/settings screens are sub-screens of whatever opened them: Back returns there
         # (Home or the exact lane), never Quit — even when the lane itself was a direct root.
-        if target in self.SUB_TARGETS:
+        if target in self.SUB_TARGETS or target.startswith("runtime_versions:"):
             self.nav_stack.append(self.nav)
             caller = self.screen_model
             self.goto(m.Nav(target, m.SUB))
@@ -942,6 +976,14 @@ class Picker(App):
         if target == "tool:rl-reset":
             self._open_prompt("prompt:rl-reset")
             return
+        if target.startswith("tool:rt-op:"):
+            _, _, op, version = target.split(":", 3)
+            sm = self.screen_model
+            self.run_child(_mb(sm.backend, *sm.argv_for(version)), pause=True)
+            self.cache.pop(sm.inventory_kind, None)          # install/remove changed the list
+            if op in ("install", "remove", "snapshot"):
+                self._prefetch((sm.inventory_kind,))
+            return
         if target.startswith("tool:rt-"):
             self.run_child(TOOLS[target](self.settings.runtime_backend), pause=True)
             return
@@ -971,8 +1013,7 @@ class Picker(App):
                "prompt:oneshot": "One-shot prompt:",
                "prompt:download-review": "",
                "prompt:rl-reset": "Really delete the shared limiter state file? type yes:",
-               "prompt:rt-validate": "Version to validate (e.g. 0.16.1; empty cancels):",
-               "prompt:rt-info": "Version to show (e.g. 0.16.1; empty cancels):",
+               "prompt:rt-remove": "Permanently remove {version}? Type 'delete {version}' (anything else cancels):",
                "prompt:rt-launchd-install": "Install the weekly LaunchAgent update check? type yes:",
                "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
@@ -993,6 +1034,8 @@ class Picker(App):
             label = label.format(provider=next((name for s_, name, *_ in m.APIKeysScreen.PROVIDERS if s_ == slug), slug))
             prompt.password = True  # Hidden input for API key
             prompt.submit_on_paste = True
+        elif kind == "prompt:rt-remove":
+            label = label.format(version=self.screen_model.accordion.selected_id)
         prompt.placeholder = ""   # the label is shown once, in #status below the input
         prompt.value = ""
         prompt.display = True
@@ -1037,16 +1080,13 @@ class Picker(App):
                                 "import rate_limiter as r,os;p=r.DEFAULT_STATE if not os.environ.get('LA_NVIDIA_THROTTLE_STATE') else r.Path(os.environ['LA_NVIDIA_THROTTLE_STATE']);p.unlink(missing_ok=True);print('state file reset')"],
                                pause=True, cwd=str(BIN))
 
-        elif kind in ("prompt:rt-validate", "prompt:rt-info"):
-            import re
-            if not value:
-                self.render_model()
-            elif not re.fullmatch(r"[0-9][0-9A-Za-z.]{0,31}", value):
-                self.state_warnings.append("version rejected: digits, letters and dots only")
-                self.render_model()
+        elif kind == "prompt:rt-remove":
+            v = sm.accordion.selected_id if isinstance(sm, m.VersionsScreen) else None
+            if v and value == f"delete {v}":
+                self.run_tool(f"tool:rt-op:remove:{v}")
             else:
-                tool = "tool:rt-" + kind.rsplit("-", 1)[1]
-                self.run_child(TOOLS[tool](self.settings.runtime_backend, value), pause=True)
+                self.state_warnings.append("removal cancelled — nothing was deleted")
+                self.render_model()
         elif kind in ("prompt:rt-launchd-install", "prompt:rt-launchd-uninstall"):
             if value.lower() == "yes":
                 self.run_child(TOOLS["tool:" + kind.split(":", 1)[1]](self.settings.runtime_backend), pause=True)

@@ -1,3 +1,31 @@
+## [0.34.1] — 2026-10-14
+
+### Fixed — the Backend manager regained the old menu's operations, picked from a list
+
+The picker's Backend manager (Home `v`) asked for version numbers in a typed text field and had
+no way to remove, snapshot or promote a version at all — all three were in the pre-picker
+`manage-rapid-mlx.py` menu (which still has them) and the unified `manage-backend.py` dispatches
+them, but the picker port never offered them.
+
+- **Choose from a list**: install, validate, info, snapshot, promote and remove each open a
+  version list (arrows or click, like the model list) — installed versions for the per-version
+  operations, releases incl. prereleases for install, with already-installed ones marked. Both
+  lists come from `manage-backend.py`'s own `installed`/`releases` output, loaded in the
+  background with the usual loading indicator, and refreshed after an install/remove/snapshot.
+- **Remove** keeps the old menu's typed confirmation: the picker asks for `delete <version>`
+  before calling the manager, and the manager's own gates (inactive, unpinned, reproducible)
+  still refuse what they refused before.
+- **Install** keeps the old menu's pin choice: "Promote pins after install" (Rapid-MLX), OFF
+  passes `--skip-pin-update`.
+- Snapshot / promote / remove rows appear only for backends whose manager implements them
+  (`BACKEND_VERSION_OPS`, today Rapid-MLX); a test compares the table against the managers'
+  real overrides, so a row can never be offered that can only answer "not supported".
+- **Standalone emoji**: `python install/manage-rapid-mlx.py` run outside any launcher (e.g.
+  through Claude Code's `!`) printed its menu without emoji. They now resolve from
+  `config/emoji.sh` by the script's own path; and `bin/emoji_constants.py` no longer crashes on
+  macOS's system Python 3.9 (`dict[...] | None` annotation at import), which a bare `python3`
+  outside the venvs picks.
+
 ## [0.34.0] — 2026-10-14
 
 ### Changed — the local picker groups models by family, not by inventory noise

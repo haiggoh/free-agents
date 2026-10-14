@@ -128,8 +128,13 @@ class BackendManagerContractTests(unittest.TestCase):
         import session_picker as sp
         for name, fn in sp.TOOLS.items():
             if name.startswith("tool:rt-"):
-                argv = fn("rapid-mlx", "0.15.3") if name in ("tool:rt-validate", "tool:rt-info") else fn("rapid-mlx")
-                yield name, argv[2:]
+                yield name, fn("rapid-mlx")[2:]
+        # Version-taking rows: every op the VersionsScreen can run, on every backend offering it.
+        for backend in m.RUNTIME_BACKENDS:
+            ops = ("install", "validate", "info") + m.BACKEND_VERSION_OPS.get(backend, ())
+            for op in ops:
+                vs = m.VersionsScreen(m.Settings(runtime_backend=backend), op, [])
+                yield f"{backend}:{op}", ["--backend", backend, *vs.argv_for("0.15.3")]
 
     def test_backend_list_matches_registry(self):
         self.assertEqual(sorted(m.RUNTIME_BACKENDS), sorted(self.mb.list_managers()))
@@ -146,6 +151,41 @@ class BackendManagerContractTests(unittest.TestCase):
             with self.subTest(tool=name):
                 args = parser.parse_args(argv)
                 self.assertIn(args.command, self.dispatched)
+
+    def test_version_ops_table_matches_the_managers_real_overrides(self):
+        # A row for an op the backend's manager does not implement can only fail ("not
+        # supported"); a missing row is the 0.34.1 regression (remove vanished from the menu).
+        import sys as _s
+        _s.path.insert(0, str(ROOT / "install"))
+        from managers.base import BackendManager
+        import managers
+        method = {"snapshot": "snapshot_environment", "promote": "promote_pins", "remove": "remove_version"}
+        for backend in m.RUNTIME_BACKENDS:
+            cls = managers.get_manager(backend)
+            real = {op for op, name in method.items()
+                    if getattr(cls, name) is not getattr(BackendManager, name)}
+            self.assertEqual(set(m.BACKEND_VERSION_OPS.get(backend, ())), real, backend)
+
+    def test_versions_screen_lists_and_routes_remove_through_confirmation(self):
+        s = m.Settings()
+        entries = [m.VersionEntry("0.16.1", "complete"), m.VersionEntry("0.15.3", "complete")]
+        vs = m.VersionsScreen(s, "remove", entries)
+        self.assertEqual([i.id for g in vs.accordion.groups for i in g.items], ["0.16.1", "0.15.3"])
+        vs.accordion.select("0.15.3")
+        self.assertEqual(vs.activate_selected(), m.Nav("prompt:rt-remove", m.SUB))
+        self.assertEqual(vs.argv_for("0.15.3"), ["remove", "0.15.3", "--yes"])
+        val = m.VersionsScreen(s, "validate", entries)
+        val.accordion.select("0.16.1")
+        self.assertEqual(val.activate_selected(), m.Nav("tool:rt-op:validate:0.16.1", m.SUB))
+        self.assertEqual(val.handle_key("escape"), m.BACK)
+
+    def test_install_offers_the_pin_choice_old_menu_had(self):
+        vs = m.VersionsScreen(m.Settings(), "install", [m.VersionEntry("0.17.0")])
+        self.assertEqual(vs.argv_for("0.17.0"), ["install", "0.17.0"])
+        vs.handle_key("p")
+        self.assertEqual(vs.argv_for("0.17.0"), ["install", "0.17.0", "--skip-pin-update"])
+        other = m.VersionsScreen(m.Settings(runtime_backend="omlx"), "install", [])
+        self.assertNotIn("p", {a.key for a in other.actions()})
 
     def test_runtime_screens_have_back_and_unique_keys(self):
         for owner in (m.HOME_OWNED, m.DIRECT_ROOT):

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+import unittest
 import sys
 from pathlib import Path
 
@@ -49,6 +50,27 @@ def test_install_skip_pin_update_works():
     print(f"Stderr: {result.stderr[:200]}")
     # The wrapper adds --backend rapid-mlx, so --dry-run should be passed through
     return True
+
+
+class StandaloneMenuEmoji(unittest.TestCase):
+    """0.34.1: `!python install/manage-rapid-mlx.py` runs with no launcher env, often under
+    macOS's /usr/bin/python3 (3.9). The menu must still show its emoji, resolved by path."""
+
+    def test_menu_emoji_without_launcher_env_on_system_python(self):
+        import os, subprocess
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        pys = [p for p in ("/usr/bin/python3", sys.executable) if Path(p).exists()]
+        for py in dict.fromkeys(pys):
+            with self.subTest(python=py):
+                r = subprocess.run(
+                    [py, "-c", "import sys; sys.path.insert(0, sys.argv[1]);"
+                     "from managers.rapid_mlx import RapidMLXManager as M; print(M._menu_emoji()['remove'])",
+                     str(root / "install")],
+                    env={"HOME": os.environ.get("HOME", "/tmp"), "PATH": "/usr/bin:/bin"},
+                    capture_output=True, text=True, timeout=60, cwd="/")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertTrue(r.stdout.strip(), "emoji resolved to empty: " + r.stderr)
 
 
 if __name__ == "__main__":

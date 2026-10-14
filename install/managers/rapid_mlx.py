@@ -659,6 +659,25 @@ print(json.dumps(out, sort_keys=True))
             entries.append((version, path, state))
         return sorted(entries, key=lambda item: self.version_key(item[0]), reverse=True)
 
+    @staticmethod
+    def _menu_emoji() -> dict[str, str]:
+        """The picker's emoji for the same rows, from config/emoji.sh located by THIS file's
+        path, never by environment: a standalone run (`!python install/manage-rapid-mlx.py`)
+        has no launcher env, and the menu used to print bare labels there. Empty on failure."""
+        import importlib.util
+        path = Path(__file__).resolve().parents[2] / "bin" / "emoji_constants.py"
+        try:
+            spec = importlib.util.spec_from_file_location("_fa_emoji_constants", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except (OSError, ImportError, AttributeError, SyntaxError, TypeError):
+            return {}
+        names = {"releases": "EMOJI_RELEASES_STR", "installed": "EMOJI_VALIDATE_STR",
+                 "install": "EMOJI_INSTALL_STR", "promote": "EMOJI_PROMOTE_STR",
+                 "snapshot": "EMOJI_SNAPSHOT_STR", "remove": "EMOJI_REMOVE_STR",
+                 "quit": "EMOJI_BACK_STR", "title": "EMOJI_TOOLS_STR"}
+        return {k: getattr(mod, v, "") for k, v in names.items()}
+
     def run_interactive_menu(self, repo: Path | None = None) -> int:
         """Run the interactive menu (requires TTY)."""
         if not sys.stdin.isatty():
@@ -672,15 +691,17 @@ print(json.dumps(out, sort_keys=True))
             except ManagerError:
                 repo = None
 
+        e = self._menu_emoji()
+        mark = lambda k: f"{e[k]} " if e.get(k) else ""   # noqa: E731
         while True:
-            print("\n=== Rapid-MLX Runtime Manager ===")
-            print("1. List releases (PyPI)")
-            print("2. List installed versions")
-            print("3. Install a version")
-            print("4. Promote pins to a version")
-            print("5. Snapshot a version")
-            print("6. Remove a version")
-            print("7. Quit")
+            print(f"\n=== {mark('title')}Rapid-MLX Runtime Manager ===")
+            print(f"1. {mark('releases')}List releases (PyPI)")
+            print(f"2. {mark('installed')}List installed versions")
+            print(f"3. {mark('install')}Install a version")
+            print(f"4. {mark('promote')}Promote pins to a version")
+            print(f"5. {mark('snapshot')}Snapshot a version")
+            print(f"6. {mark('remove')}Remove a version")
+            print(f"7. {mark('quit')}Quit")
 
             try:
                 choice = input("\nChoose an option (1-7): ").strip()

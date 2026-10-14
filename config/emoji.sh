@@ -71,6 +71,9 @@ EMOJI_RELEASES="📜"         # list installable releases
 EMOJI_INSTALL="📦"          # install a release
 EMOJI_VALIDATE="🩺"         # validate an installed version
 EMOJI_INFO="ℹ️"             # show info for an installed version
+EMOJI_SNAPSHOT="🧾"         # save a recreation receipt for an installed version
+EMOJI_PROMOTE="📌"          # promote repository pins to an installed version
+EMOJI_REMOVE="🗑️"           # remove an installed version (typed confirmation)
 EMOJI_BACK="↩️"             # generic Back (to the screen that opened this one); Home uses EMOJI_HOME
 
 # NVIDIA rate limiter emoji
