@@ -927,7 +927,7 @@ for _layer in ${LA_SETTINGS_LAYERS[@]+"${LA_SETTINGS_LAYERS[@]}"}; do
         LA_SETTINGS_FINAL="$_layer"
         continue
     fi
-    _merged="$(mktemp "${TMPDIR:-/tmp}/local-agents-merged-settings.XXXXXX.json")"
+    _merged="$(la_mktemp_json "${TMPDIR:-/tmp}/local-agents-merged-settings")"
     chmod 600 "$_merged"
     if python3 "$LAUNCH_DIR/merge-settings.py" --base "$LA_SETTINGS_FINAL" --overlay "$_layer" \
         --output "$_merged" 2>/dev/null && [ -s "$_merged" ]; then
