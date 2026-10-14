@@ -1,3 +1,18 @@
+## [0.34.4] — 2026-10-14
+
+### Changed — remote theme: prompt outline in the accent, a more yellowish green
+
+- The prompt input's outline now takes the session accent too (`promptBorder` +
+  `promptBorderShimmer`, both, or the default grey flashes on every shimmer frame).
+- Remote accent `#7CFC00` (lawn green) → `#ADFF2F` (green-yellow), per user preference.
+  `~/.claude/themes/free-lime.json` is rewritten on the next remote launch.
+
+### Fixed
+
+- `free-agents-resolve.sh --help` printed a path and exited 0 instead of help (the
+  every-script-has-help test failed on main). It now parses arguments first: `--help` prints
+  usage and environment, an unknown flag exits 2.
+
 ## [0.34.3] — 2026-10-14
 
 ### Fixed — themes silently dropped, and removing a Rapid-MLX version crashed
