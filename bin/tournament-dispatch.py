@@ -28,6 +28,12 @@ SAFETY (safe to run unattended, watchable via CC Live):
 USAGE:
   tournament-dispatch.py                     # safe subset (<=LARGE_GB), reuse operator on 8000
   tournament-dispatch.py --only kat-coder    # one model
+BACKENDS (per-candidate "serve" field): vllm (vllm-mlx), mlx_lm, rapid (Rapid-MLX 0.16.1 —
+  the primary session backend), omlx (oMLX, Homebrew). The same weights may be entered twice
+  under different aliases to A/B backends (qwen-3.6-operator vs qwen-3.6-operator-rapid).
+  The engines do NOT share a serve contract: rapid takes a positional model ID resolved
+  under an env-isolated HOME (no --model-dir), oMLX takes --model-dir + paged/hot cache
+  flags. Each launch function mirrors its launcher's real invocation.
   tournament-dispatch.py --include-large      # also Devstral-123B + Scout (SUPERVISED — heavy)
   tournament-dispatch.py --scratch-port 8002  # where to launch non-operator models
 
@@ -67,10 +73,21 @@ MODELS = [
     dict(alias="llama-scout", dir="Llama-4-Scout-17B-16E-Instruct-4bit", serve="mlx_lm",
          tool_parser=None, reasoning_parser=None, thinking=None, large=True,
          role="utility (dispatch-only via mlx_lm.server; served under model-dir id)"),
-    dict(alias="laguna-fast", dir="laguna-s2.1-oq4e-fast", serve="mlx_lm",
+    dict(alias="laguna-fast", dir="laguna-s2.1-oq4e-fast", serve="omlx",
          tool_parser=None, reasoning_parser=None, thinking="true", large=True,
          role="strongest local contender so far (118B MoE / 8B active; suspected thinking — "
               "the API route shows stray think-tags; parsers UNKNOWN, probe raw output)"),
+    dict(alias="laguna-fast-rapid", dir="laguna-s2.1-oq4e-fast", serve="rapid",
+         tool_parser=None, reasoning_parser=None, thinking="true", large=True,
+         role="same weights on Rapid-MLX — the oQ4e quant is oMLX-flavoured, so whether rapid "
+              "loads it at all is an OPEN question; a failed load is a finding (runtime "
+              "doctrine: rapid-first for MLX unless proven incompatible)"),
+    dict(alias="qwen-3.6-operator-rapid", dir="Qwen3.6-27B-UD-MLX-4bit", serve="rapid",
+         tool_parser=None, rapid_parser="qwen3_coder_xml", reasoning_parser=None,
+         thinking="false",
+         role="the incumbent operator's weights on the Rapid-MLX backend — the vllm-vs-rapid "
+              "backend A/B (rapid is the primary session backend); rapid_parser is a TEST "
+              "CANDIDATE, not a settled fact"),
 ]
 
 def now(): return time.monotonic()
@@ -165,6 +182,78 @@ def launch_mlx_lm(m, port):
     logf = f"{LOG_BASE}_tourney_{port}.log"
     with open(logf, "w") as lf:
         p = subprocess.Popen(args, stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
+    return p, logf
+
+def launch_rapid(m, port):
+    """Rapid-MLX 0.16.1 (the primary session backend). OWN serve CLI — positional model ID
+    resolved under an env-isolated HOME with a symlinked view, NOT --model-dir (the oMLX
+    flags do not exist here). Mirrors launch-claude-agent-rapid-auto.sh's invocation with
+    the launcher's cache defaults: 16384 MB prefix cache / 8 hybrid entries / 32 GB resident
+    (raised to 48 to match the vllm memory budget — models here are bigger than the
+    classifier). --no-reasoning-parser is passed ALWAYS so reasoning stays in the visible
+    content — the tournament OBSERVES raw reasoning rather than parsing it away. Caveat
+    carried from the local stack: --cache-memory-mb does not bound Metal pressure."""
+    rbin = os.environ.get("LA_TOURNEY_RAPID_BIN", f"{HOME}/.venvs/rapid-mlx-0.16.1/bin/rapid-mlx")
+    mdir = os.path.realpath(f"{MODELS_DIR}/{m['dir']}")
+    runtime = f"{CONFIG_DIR}/tourney_{port}_rapid"
+    serve_root = f"{runtime}/serve"
+    for d in (serve_root, f"{runtime}/hf", f"{runtime}/tmp"):
+        os.makedirs(d, exist_ok=True)
+    view = f"{serve_root}/{m['alias']}"
+    if not os.path.lexists(view):
+        os.symlink(mdir, view)
+    args = [rbin, "--no-telemetry", "serve", m["alias"],
+            "--served-model-name", m["alias"],
+            "--host", "127.0.0.1", "--port", str(port), "--log-level", "INFO",
+            "--max-num-seqs", "2", "--max-concurrent-requests", "2",
+            "--enable-prefix-cache", "--prefix-cache-index", "radix",
+            "--cache-memory-mb", "16384",
+            "--hybrid-cache-entries", "8",
+            "--idle-cache-clear-seconds", "0", "--response-cache-entries", "0",
+            "--resident-memory-limit-gb", "48",
+            "--no-mllm", "--no-spec-decode", "--pflash", "off",
+            "--pin-system-prompt", "--relocate-mid-conversation-system"]
+    if m.get("rapid_parser"):
+        args += ["--enable-auto-tool-choice", "--tool-call-parser", m["rapid_parser"]]
+    if m.get("thinking") != "true":
+        args += ["--no-thinking"]
+    args += ["--no-reasoning-parser"]
+    env = dict(os.environ, HOME=runtime, XDG_CACHE_HOME=f"{runtime}/.cache",
+               HF_HOME=f"{runtime}/hf", TMPDIR=f"{runtime}/tmp",
+               PYTHONUNBUFFERED="1", RAPID_MLX_TELEMETRY="0",
+               HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+    logf = f"{LOG_BASE}_tourney_{port}.log"
+    with open(logf, "w") as lf:
+        p = subprocess.Popen(args, stdout=lf, stderr=subprocess.STDOUT, env=env,
+                             start_new_session=True, cwd=serve_root)
+    return p, logf
+
+def launch_omlx(m, port):
+    """oMLX (Homebrew binary; own CLI: --model-dir + paged/hot cache + --base-path runtime
+    root). Minimal scratch configuration — engine defaults for cache sizing, isolated
+    runtime root + scratch paged-SSD cache so tournament runs never touch the operator's
+    100 GB shared cache ceiling. Mirrors launch-claude-agent-omlx.sh's invocation."""
+    obin = os.environ.get("LA_TOURNEY_OMLX_BIN", "/opt/homebrew/bin/omlx")
+    mdir = os.path.realpath(f"{MODELS_DIR}/{m['dir']}")
+    runtime = f"{CONFIG_DIR}/tourney_{port}_omlx"
+    base = f"{runtime}/base"
+    cache = f"{runtime}/paged-ssd"
+    for d in (base, cache):
+        os.makedirs(d, exist_ok=True)
+    args = [obin, "serve",
+            "--base-path", base,
+            "--model-dir", mdir,
+            "--no-hf-cache",
+            "--host", "127.0.0.1", "--port", str(port),
+            "--log-level", "info",
+            "--max-concurrent-requests", "2",
+            "--memory-guard", "balanced",
+            "--paged-ssd-cache-dir", cache,
+            "--initial-cache-blocks", "256"]
+    logf = f"{LOG_BASE}_tourney_{port}.log"
+    with open(logf, "w") as lf:
+        p = subprocess.Popen(args, stdout=lf, stderr=subprocess.STDOUT,
+                             start_new_session=True)
     return p, logf
 
 def kill_port(port):
@@ -268,6 +357,12 @@ def run_one(m, operator_port, scratch_port):
         if m["serve"] == "mlx_lm":
             p, logf = launch_mlx_lm(m, scratch_port)
             expect_id = mdir
+        elif m["serve"] == "rapid":
+            p, logf = launch_rapid(m, scratch_port)
+            expect_id = m["alias"]
+        elif m["serve"] == "omlx":
+            p, logf = launch_omlx(m, scratch_port)
+            expect_id = m["alias"]
         else:
             p, logf = launch_vllm(m, scratch_port)
             expect_id = m["alias"]
