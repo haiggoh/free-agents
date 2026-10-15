@@ -552,10 +552,19 @@ class LaunchRequest:
     argv: list
     env: dict
     selected_id: str
+    # An auto-scanned row (on disk, not in the registry) cannot launch as-is: the launcher
+    # refuses unregistered aliases. The driver turns this flag into an offer to append a
+    # managed la_register block to config.local.sh, then launches the original request.
+    needs_register: bool = False
+    register_folder: str = ""   # the on-disk folder to register (may differ from the alias)
 
 
 class LocalScreen(Screen):
     title = f"{ec.SESSION_EMOJI_LOCAL_STR} Local Session Picker"
+    # Registered aliases whose weights are gone from disk (csl --inventory reports them as
+    # "#missing<TAB>alias<TAB>subdir"). The picker offers ONCE per session to move them to the
+    # removed-models tombstone; an empty list means nothing to offer.
+    missing: list = None
 
     @property
     def policy(self):

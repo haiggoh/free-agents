@@ -13,9 +13,10 @@ import os
 import sys
 import termios
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from picker_harness import ROOT, PilotCase, PTYCase  # noqa: E402
+from picker_harness import ROOT, PilotCase, PTYCase, inventory_stub  # noqa: E402
 
 
 class PickerNavigation(PilotCase):
@@ -128,6 +129,87 @@ class PickerLaunch(PilotCase):
             await h.wait_text("Gemini")
             self.assertNotIn("Cerebras (1)", h.text())
         self.run_picker(s, start="remote")
+
+
+AUTO_ROW = "auto-dream-7b\trapid (auto)\tmedium\tauto-scanned\tauto-dream-7b"
+HYGIENE_INV = "\n".join([
+    "qwen-3.8-operator\trapid\thigh\t\t",
+    AUTO_ROW,
+    "#missing\tgone-model\tgone-model-v2",       # registered, weights deleted from disk
+]) + "\n"
+
+
+class PickerRegistryOffers(PilotCase):
+    """Selecting an auto-scanned (on-disk, unregistered) row offers registration instead of
+    bouncing; entering the local lane offers to move registered-but-missing models to the
+    removed-models tombstone. Both flows drive csl subcommands through the recorder stub."""
+
+    def setUp(self):
+        super().setUp()
+        Path(self.env["CSL_SELF"]).write_text(inventory_stub(HYGIENE_INV))
+
+    def _prompt_offers_register(self, h, alias="auto-dream-7b"):
+        return h.wait_text(f"Register {alias}")
+
+    def test_register_decline_launches_nothing(self):
+        async def s(app, pilot, h):
+            await h.wait_text("missing from disk")      # cleanup offer is open first; decline it
+            await h.press("enter")
+            await h.wait_text("kept 1 missing model")
+            await h.press("c")
+            await h.wait_text("auto-dream-7b")
+            await h.goto_row("item", "auto-dream-7b")
+            await h.press("enter")
+            await self._prompt_offers_register(h)
+            await h.press(*"no", "enter")
+            await h.wait_text("not registered")
+            self.assertEqual(self.launches(), [])       # recorder logs every stub call: NONE ran
+        self.run_picker(s, start="local")
+
+    def test_register_accept_runs_register_then_launch(self):
+        async def s(app, pilot, h):
+            await h.wait_text("missing from disk")
+            await h.press("enter")
+            await h.wait_text("kept 1 missing model")
+            await h.press("c")
+            await h.wait_text("auto-dream-7b")
+            await h.goto_row("item", "auto-dream-7b")
+            await h.press("enter")
+            await self._prompt_offers_register(h)
+            await h.press(*"yes", "enter")
+            await h.wait_for(lambda: len(self.launches()) >= 2, "register + launch recorded")
+            recs = self.launches()
+            self.assertEqual([rec["prog"] for rec in recs], ["csl", "csl"])
+            self.assertEqual(recs[0]["argv"], ["--register-model", "auto-dream-7b"])
+            self.assertEqual(recs[1]["argv"][0], "--picker-launch")
+            self.assertEqual(recs[1]["argv"][1], "auto-dream-7b")
+        self.run_picker(s, start="local")
+
+    def test_cleanup_accept_moves_missing_model_to_tombstone(self):
+        async def s(app, pilot, h):
+            await h.wait_text("gone-model")
+            await h.press(*"yes", "enter")
+            await h.wait_for(lambda: self.launches(), "the unregister call")
+            rec = self.launches()[0]
+            self.assertEqual(rec["prog"], "csl")
+            self.assertEqual(rec["argv"], ["--unregister-model", "gone-model"])
+        self.run_picker(s, start="local")
+
+    def test_cleanup_offered_once_per_session(self):
+        async def s(app, pilot, h):
+            from textual.widgets import Input
+            await h.wait_text("gone-model")
+            await h.press("enter")                      # decline
+            await h.wait_text("kept 1 missing model")
+            await h.press("b")                          # home
+            await h.wait_screen("HomeScreen")
+            await h.press("l")                          # local again
+            await h.wait_screen("LocalScreen")
+            await h.settle(1.0)
+            prompt = app.query_one("#prompt", Input)
+            self.assertFalse(prompt.display, "cleanup offer must not reopen within a session")
+            self.assertEqual(self.launches(), [])
+        self.run_picker(s, start="local")
 
 
 class PickerTools(PilotCase):

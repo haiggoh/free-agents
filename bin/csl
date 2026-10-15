@@ -104,6 +104,9 @@ HELP
     --picker-launch)
       break   # internal: picker -> local session; handled after config load
       ;;
+    --register-model|--unregister-model)
+      break   # internal: picker registry hygiene; handled after config load
+      ;;
     -?*)
       printf 'csl: unrecognised option: %s\n' "$1" >&2
       printf "Try 'csl --help'.\n" >&2
@@ -152,6 +155,132 @@ fi
 # shellcheck source=../config/emoji.sh
 . "$CSL_DIR/../config/emoji.sh"
 la_load_config || exit 1
+
+# --- registry hygiene: picker-offered registration and removal -------------------------------
+# The picker lists on-disk models the registry does not know (auto-scan) and needs a way to
+# make them launchable, and a way to retire registrations whose weights are gone from disk.
+# Both commands write ONLY $LA_CONFIG_DIR/config.local.sh (+ the tombstone), keep a timestamped
+# backup next to it, and verify the result — restoring the backup when the rewritten config
+# would not parse, so a broken write can never strand the user's model list.
+_LA_CFG="$LA_CONFIG_DIR/config.local.sh"
+_cfg_mode() { stat -f '%Lp' "$1" 2>/dev/null; }
+_register_model_cmd() {
+  local folder="${1:-}"
+  if [ -z "$folder" ]; then
+    echo "usage: csl --register-model <model-folder>" >&2
+    return 2
+  fi
+  local a
+  for a in "${LA_ALIASES[@]}"; do
+    if [ "${LA_SUBDIR[$a]:-}" = "$folder" ]; then
+      echo "folder '$folder' is already registered as '$a' — nothing to do"
+      return 0
+    fi
+  done
+  local alias
+  alias=$(printf '%s' "$folder" | sed 's/[^a-zA-Z0-9_-]/-/g')
+  if la_lookup "$alias" >/dev/null 2>&1; then
+    echo "alias '$alias' already registered — nothing to do"
+    return 0
+  fi
+  if [ ! -f "$_LA_CFG" ]; then
+    echo "no config.local.sh at $_LA_CFG" >&2
+    return 1
+  fi
+  local backup
+  backup=$(_autoreg_backup_name)
+  cp "$_LA_CFG" "$backup" || return 1
+  local mode; mode=$(_cfg_mode "$_LA_CFG")
+  local line="la_register $alias $folder mlx auto \"\" false \"\" medium \"\" \"\" \"\" \"\""
+  local block_start="# >>> csl auto-registered (from on-disk scan) >>>"
+  local block_end="# <<< csl auto-registered <<<"
+  local tmp; tmp=$(mktemp) || return 1
+  if grep -qF "$block_start" "$_LA_CFG"; then
+    awk -v endmarker="$block_end" -v newline="$line" '
+      !done && $0 == endmarker { print newline; done = 1 }
+      { print }
+    ' "$_LA_CFG" > "$tmp"
+  else
+    # APPEND the block to the existing content — never replace the file with it.
+    { cat "$_LA_CFG"; printf '\n%s\n%s\n%s\n' "$block_start" "$line" "$block_end"; } > "$tmp"
+  fi
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  mv "$tmp" "$_LA_CFG"
+  # The write is only done when the line actually registers: reload and check, else restore.
+  if ! ( set +u; . "${LA_CONFIG_DIR%/}/../config/config-lib.sh" 2>/dev/null || . "$CSL_DIR/../config/config-lib.sh"
+        la_load_config >/dev/null 2>&1; la_lookup "$alias" >/dev/null 2>&1 ); then
+    mv "$backup" "$_LA_CFG"
+    echo "registering '$alias' produced an invalid config — restored the backup" >&2
+    return 1
+  fi
+  echo "registered '$alias' (folder $folder) in config.local.sh"
+  return 0
+}
+_autoreg_backup_name() {
+  printf '%s.bak-autoregister-%s' "$_LA_CFG" "$(date +%Y%m%d-%H%M%S)"
+}
+_unregister_backup_name() {
+  printf '%s.bak-unregister-%s' "$_LA_CFG" "$(date +%Y%m%d-%H%M%S)"
+}
+_unregister_model_cmd() {
+  if [ "$#" -eq 0 ]; then
+    echo "usage: csl --unregister-model <alias> [<alias>...]" >&2
+    return 2
+  fi
+  local a
+  for a in "$@"; do            # validate everything BEFORE touching anything
+    if ! la_lookup "$a" >/dev/null 2>&1; then
+      echo "'$a' is not a registered alias — nothing moved" >&2
+      la_retired_hint "$a" 2>/dev/null || true
+      return 1
+    fi
+  done
+  if [ ! -f "$_LA_CFG" ]; then
+    echo "no config.local.sh at $_LA_CFG" >&2
+    return 1
+  fi
+  local backup
+  backup=$(_unregister_backup_name)
+  cp "$_LA_CFG" "$backup" || return 1
+  local mode; mode=$(_cfg_mode "$_LA_CFG")
+  local tmp; tmp=$(mktemp) || return 1
+  cp "$_LA_CFG" "$tmp"
+  for a in "$@"; do
+    # Exact-field match, not grep patterns: an alias is data, and a regex-flavoured alias
+    # (dots, pluses) must not widen the match to neighbouring registrations.
+    awk -v alias="$a" '
+      $1 == "la_register" && $2 == alias { next }
+      $1 == "la_role" && $3 == alias     { next }
+      { print }
+    ' "$tmp" > "$tmp.next" && mv "$tmp.next" "$tmp"
+  done
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  mv "$tmp" "$_LA_CFG"
+  local tomb="$LA_CONFIG_DIR/removed-models.local.psv"
+  for a in "$@"; do
+    printf '%s|%s|%s|%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$a" "${LA_SUBDIR[$a]:-}" \
+      "weights removed from disk; retired via csl" >> "$tomb"
+  done
+  # Retired means gone: reload and confirm the alias no longer resolves, else restore.
+  if ( set +u; . "$CSL_DIR/../config/config-lib.sh" 2>/dev/null
+       la_load_config >/dev/null 2>&1; la_lookup "$1" >/dev/null 2>&1 ); then
+    mv "$backup" "$_LA_CFG"
+    echo "unregistering '$1' did not take effect — restored the backup" >&2
+    return 1
+  fi
+  echo "moved to removed-models list: $* (backup: $(basename "$backup"))"
+  return 0
+}
+if [ "${1:-}" = "--register-model" ]; then
+  shift
+  _register_model_cmd "$@"
+  exit $?
+fi
+if [ "${1:-}" = "--unregister-model" ]; then
+  shift
+  _unregister_model_cmd "$@"
+  exit $?
+fi
 
 EFFORTS=(low medium high xhigh max)     # claude --effort <level>
 # Watcher defaults OFF: ordinary selection should open only the requested local session.
@@ -371,7 +500,14 @@ if [ "${INVENTORY:-0}" = "1" ]; then
   for a in "${LA_ALIASES[@]}"; do
     case "${LA_SERVE[$a]:-}" in
       rapid|vllm|omlx)
-        la_on_disk "$a" || continue
+        # Registered but its weights are gone: hidden from the launchable list, but REPORTED
+        # as #missing so the picker can offer to move it to the removed-models tombstone
+        # (user decision 2026-10-15: hiding is right for an intentional deletion, but the
+        # registry should not keep the entry forever).
+        if ! la_on_disk "$a"; then
+          printf '#missing\t%s\t%s\n' "$a" "${LA_SUBDIR[$a]:-}"
+          continue
+        fi
         printf '%s\t%s\t%s\t%s\t%s\n' "$a" "$(la_serve_display "$a")" "${LA_EFFORT[$a]:-}" \
           "$(la_roles_for_alias "$a")" ""
         ;;
