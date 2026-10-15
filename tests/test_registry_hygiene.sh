@@ -24,9 +24,24 @@ cat > "$MODELS_DIR/registered-model/config.json" <<'EOF'
 EOF
 dd if=/dev/zero of="$MODELS_DIR/registered-model/model.safetensors" bs=1 count=0 seek=2097152 2>/dev/null
 cat > "$MODELS_DIR/auto-dream-7b/config.json" <<'EOF'
-{"architectures": ["LlamaForCausalLM"]}
+{"architectures": ["LlamaForCausalLM"], "model_type": "llama"}
 EOF
 dd if=/dev/zero of="$MODELS_DIR/auto-dream-7b/model.safetensors" bs=1 count=0 seek=2097152 2>/dev/null
+# Backend detection (bin/la-detect-backend.py): stub ENGINE interpreters, never the real venvs.
+# rapid knows llama; oMLX additionally knows laguna. A laguna folder must register as omlx, an
+# unknown architecture must be refused, and a GGUF folder must register as llama_cpp.
+mkdir -p "$MODELS_DIR/laguna-only" "$MODELS_DIR/alien-arch" "$MODELS_DIR/q-gguf" "$TMP/stub"
+echo '{"model_type": "laguna"}' > "$MODELS_DIR/laguna-only/config.json"
+echo '{"model_type": "alien_arch"}' > "$MODELS_DIR/alien-arch/config.json"
+echo '{"model_type": "llama"}' > "$MODELS_DIR/q-gguf/config.json"
+for d in laguna-only alien-arch; do
+  dd if=/dev/zero of="$MODELS_DIR/$d/model.safetensors" bs=1 count=0 seek=2097152 2>/dev/null
+done
+dd if=/dev/zero of="$MODELS_DIR/q-gguf/model-Q4_K_M.gguf" bs=1 count=0 seek=2097152 2>/dev/null
+printf '#!/bin/sh\necho %s\n' "'{\"mlx_lm\": [\"llama\", \"qwen3\"]}'" > "$TMP/stub/rapid-py"
+printf '#!/bin/sh\necho %s\n' "'{\"mlx_lm\": [\"llama\", \"qwen3\", \"laguna\"]}'" > "$TMP/stub/omlx-py"
+chmod +x "$TMP/stub/rapid-py" "$TMP/stub/omlx-py"
+export LA_DETECT_RAPID_PY="$TMP/stub/rapid-py" LA_DETECT_OMLX_PY="$TMP/stub/omlx-py"
 
 # registered-model: on disk. gone-model: registered but its weights were deleted (the
 # deepseek-r1-architect case) — it also carries la_role bindings that must move with it.
@@ -72,6 +87,30 @@ LA_CONFIG_DIR="$TMP" LA_MODELS_DIR="$MODELS_DIR" "$REPO/bin/csl" --register-mode
 check $? "registering an already-registered folder is a no-op success"
 lines_final=$(wc -l < "$TMP/config.local.sh" | tr -d ' ')
 check $(( lines_final == lines_after ? 0 : 1 )) "no-op register did not write"
+
+# --- register-model picks the backend from evidence (user 2026-10-15) ---------------------------
+out=$(LA_CONFIG_DIR="$TMP" LA_MODELS_DIR="$MODELS_DIR" "$REPO/bin/csl" --register-model laguna-only 2>&1)
+check $? "registering an oMLX-only architecture succeeds"
+grep -q '^la_register laguna-only laguna-only omlx ' "$TMP/config.local.sh"
+check $? "oMLX-only architecture is registered serve=omlx"
+printf '%s' "$out" | grep -q 'omlx'
+check $? "the register message names the detected backend"
+LA_CONFIG_DIR="$TMP" LA_MODELS_DIR="$MODELS_DIR" "$REPO/bin/csl" --register-model q-gguf >/dev/null 2>&1
+grep -q '^la_register q-gguf q-gguf llama_cpp ' "$TMP/config.local.sh"
+check $? "GGUF folder is registered serve=llama_cpp"
+lines_pre_alien=$(wc -l < "$TMP/config.local.sh" | tr -d ' ')
+out=$(LA_CONFIG_DIR="$TMP" LA_MODELS_DIR="$MODELS_DIR" "$REPO/bin/csl" --register-model alien-arch 2>&1); r=$?
+check $(( r != 0 ? 0 : 1 )) "an architecture no backend supports is refused (non-zero exit)"
+printf '%s' "$out" | grep -q 'alien_arch'
+check $? "the refusal names the unsupported model_type"
+check $(( $(wc -l < "$TMP/config.local.sh" | tr -d ' ') == lines_pre_alien ? 0 : 1 )) "a refused registration writes nothing"
+inv=$(LA_CONFIG_DIR="$TMP" LA_MODELS_DIR="$MODELS_DIR" "$REPO/bin/csl" --inventory 2>&1)
+printf '%s\n' "$inv" | grep -q "^laguna-only${TAB}omlx"
+check $? "the registered oMLX model is listed as launchable on omlx"
+# Leave the later unregister arithmetic exactly as written: remove what this block added.
+for a in laguna-only q-gguf; do
+  awk -v a="$a" '!($1 == "la_register" && $2 == a)' "$TMP/config.local.sh" > "$TMP/c.tmp" && cat "$TMP/c.tmp" > "$TMP/config.local.sh"
+done
 
 # --- unregister-model: lines move to the tombstone, lookup fails, backup kept ---------------
 lines_before_unreg=$(wc -l < "$TMP/config.local.sh" | tr -d ' ')

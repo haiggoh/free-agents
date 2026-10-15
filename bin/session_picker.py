@@ -91,12 +91,29 @@ def load_local_models() -> list[m.LocalModel]:
     csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
     r = _run(["bash", csl, "--inventory"])
     models = []
+    missing = []
     for line in r.stdout.splitlines():
         parts = line.split("\t")
+        if parts and parts[0] == "#missing":
+            # Registered, weights gone (csl reports "#missing<TAB>alias<TAB>subdir"): not
+            # launchable, collected for the once-per-session cleanup offer.
+            if len(parts) >= 2 and parts[1] and parts[1] not in missing:
+                missing.append(parts[1])
+            continue
         if len(parts) >= 4 and parts[0]:
+            auto = parts[3] == "auto-scanned"
             models.append(m.LocalModel(alias=parts[0], backend=parts[1], effort=parts[2],
-                                       roles=parts[3], family=parts[4] if len(parts) > 4 else ""))
+                                       roles=parts[3], family=parts[4] if len(parts) > 4 else "",
+                                       auto_scanned=auto,
+                                       folder=(parts[4] if auto and len(parts) > 4 else "")))
+    # REPLACE, never append: the inventory is loaded more than once per picker run (startup
+    # prefetch, then again after a registration), and appending double-counted every model.
+    MISSING_MODELS[:] = missing
     return models
+
+
+# Filled by load_local_models() from the "#missing" inventory rows; read once by the picker.
+MISSING_MODELS: list[str] = []
 
 
 def load_remote_agents() -> list[m.RemoteAgent]:
@@ -474,6 +491,8 @@ class Picker(App):
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data)
             sm._models_loaded = True
+        if isinstance(sm, m.LocalScreen) and kind == "local":
+            self._offer_cleanup()
         elif isinstance(sm, m.VersionsScreen) and kind == sm.inventory_kind:
             sm.set_entries(data)
             if not getattr(self, "pending_prompt", None):
@@ -620,6 +639,10 @@ class Picker(App):
 
         self.nav = nav
         self.render_model()
+        # Entering Local with the inventory ALREADY cached (it loaded while Home was showing)
+        # must offer the cleanup too; _loaded() only covers an inventory that lands on Local.
+        if nav.target == "local" and "local" in self.cache:
+            self._offer_cleanup()
 
     def render_model(self, keep: str | None = None):
         sm = self.screen_model
@@ -847,7 +870,7 @@ class Picker(App):
         if isinstance(req, m.Nav):      # API Keys "Add key" -> inline prompt via run_tool
             self.dispatch(req)
         elif req:
-            self.run_child(command_for(req), env=req.env)
+            self.launch(req)
 
     def on_key(self, event):
         prompt = self.query_one("#prompt", Input)
@@ -950,7 +973,7 @@ class Picker(App):
             self.exit(0)
             return
         if isinstance(result, m.LaunchRequest):     # a shortcut that launches (Go last `g`)
-            self.run_child(command_for(result), env=result.env)
+            self.launch(result)
             return
         target = result.target
         if target.startswith("tool:"):
@@ -1041,6 +1064,8 @@ class Picker(App):
                "prompt:rt-remove-sure": "Are you sure? {version} is deleted permanently. yes/no:",
                "prompt:rt-launchd-install": "Install the weekly LaunchAgent update check? type yes:",
                "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:",
+               "prompt:register": "{alias} is on disk but not registered. Register {alias} (backend: {backend}) and launch it? yes/no:",
+               "prompt:cleanup-missing": "{n} registered model(s) missing from disk: {names}. Move them to the removed-models list? yes/no:",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
                "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically, or type it and press Enter; empty Enter skips):"}
 
@@ -1061,6 +1086,13 @@ class Picker(App):
             prompt.submit_on_paste = True
         elif kind in ("prompt:rt-remove", "prompt:rt-remove-sure"):
             label = label.format(version=self.screen_model.accordion.selected_id)
+        elif kind == "prompt:register":
+            req = self._pending_launch
+            mdl = getattr(self.screen_model, "models", {}).get(req.selected_id)
+            backend = (mdl.backend if mdl else "").replace(" (auto)", "") or "rapid"
+            label = label.format(alias=req.selected_id, backend=backend)
+        elif kind == "prompt:cleanup-missing":
+            label = label.format(n=len(self._missing), names=", ".join(self._missing))
         prompt.placeholder = ""   # the label is shown once, in #status below the input
         prompt.value = ""
         prompt.display = True
@@ -1121,6 +1153,39 @@ class Picker(App):
             else:
                 self.state_warnings.append("launchd unchanged — nothing was run")
                 self.render_model()
+        elif kind == "prompt:register":
+            req, self._pending_launch = self._pending_launch, None
+            if value.lower() not in ("y", "yes"):
+                self.state_warnings.append(f"{req.selected_id} not registered — nothing launched")
+                self.render_model()
+                return
+            csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
+            r = subprocess.run([csl, "--register-model", req.register_folder],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                msg = (r.stderr or r.stdout).strip().splitlines()
+                self.state_warnings.append(f"could not register {req.selected_id}: "
+                                           + (msg[-1] if msg else f"exit {r.returncode}"))
+                self.render_model()
+                return
+            self.cache.pop("local", None)          # the registry changed: reload on next view
+            self._prefetch(("local",))
+            req.needs_register = False
+            self.launch(req)
+        elif kind == "prompt:cleanup-missing":
+            names, self._missing = self._missing, []
+            if value.lower() in ("y", "yes"):
+                csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
+                r = subprocess.run([csl, "--unregister-model", *names], capture_output=True, text=True)
+                if r.returncode == 0:
+                    MISSING_MODELS.clear()
+                    self.state_warnings.append(f"moved {len(names)} missing model(s) to the removed-models list")
+                else:
+                    msg = (r.stderr or r.stdout).strip().splitlines()
+                    self.state_warnings.append("cleanup failed: " + (msg[-1] if msg else f"exit {r.returncode}"))
+            else:
+                self.state_warnings.append(f"kept {len(names)} missing model(s) in the registry")
+            self.render_model()
         elif kind == "prompt:keys:add":
             if value:
                 self.run_child(TOOLS["tool:keys:add"](value), pause=True)
@@ -1143,8 +1208,30 @@ class Picker(App):
                 self.state_warnings.append("skipped — no key saved")
                 self.render_model()
 
+    # --- launches ------------------------------------------------------------------------------
+    def launch(self, req):
+        """Start a session. An unregistered (auto-scanned) model is offered for registration first;
+        a launch that FAILS keeps its output on screen until Enter instead of being painted over
+        (user 2026-10-15: deepseek-v4 bounced back to the menu with no message at all)."""
+        if getattr(req, "needs_register", False):
+            self._pending_launch = req
+            self._open_prompt("prompt:register")
+            return
+        self.run_child(command_for(req), env=req.env, pause_on_error=True)
+
+    def _offer_cleanup(self):
+        """Once per picker session: registered models whose weights are gone may move to the
+        removed-models tombstone (csl --unregister-model). Declining keeps them, quietly."""
+        if getattr(self, "_cleanup_offered", False) or not MISSING_MODELS:
+            return
+        if getattr(self, "pending_prompt", None):
+            return
+        self._cleanup_offered = True
+        self._missing = list(MISSING_MODELS)
+        self._open_prompt("prompt:cleanup-missing")
+
     # --- children ------------------------------------------------------------------------------
-    def run_child(self, cmd, env=None, pause=False, cwd=None):
+    def run_child(self, cmd, env=None, pause=False, cwd=None, pause_on_error=False):
         """Hand the real terminal to `cmd`, then resume this exact screen."""
         full_env = dict(os.environ)
         full_env.update(env or {})
@@ -1156,7 +1243,7 @@ class Picker(App):
             except (OSError, KeyboardInterrupt) as exc:
                 rc = getattr(exc, "errno", 130) or 130
                 print(f"\n[picker] could not run {Path(cmd[0]).name}: {exc}")
-            if pause:
+            if pause or (pause_on_error and rc not in (0, None)):
                 try:
                     input(f"\n[picker] finished (exit {rc}). Press Enter to return…")
                 except (EOFError, KeyboardInterrupt):

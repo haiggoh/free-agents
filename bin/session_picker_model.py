@@ -102,6 +102,8 @@ class LocalModel:
     thinking: bool = False
     tool_parser: str = ""
     reasoning_parser: str = ""
+    auto_scanned: bool = False   # on disk but not registered: selecting it offers registration
+    folder: str = ""             # on-disk folder of an auto-scanned row (csl --inventory column 5)
 
 
 @dataclass
@@ -677,7 +679,13 @@ class LocalScreen(Screen):
         if not sel or sel not in self.models:
             return None
         mdl = self.models[sel]
-        return self._request_for(mdl.profile_id or mdl.alias, mdl)
+        req = self._request_for(mdl.profile_id or mdl.alias, mdl)
+        if mdl.auto_scanned:
+            # The launcher refuses unregistered aliases; the driver asks first, registers, then
+            # launches this same request (user 2026-10-15: offer registration in the picker).
+            req.needs_register = True
+            req.register_folder = mdl.folder or mdl.alias
+        return req
 
     def _request_for(self, profile_id: str, mdl: LocalModel):
         s = self.settings

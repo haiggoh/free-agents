@@ -96,6 +96,32 @@ class PickerLaunch(PilotCase):
             self.assertEqual(h.screen(), "LocalScreen")
         self.run_picker(s, start="local")
 
+    def test_failed_launch_pauses_so_its_error_stays_readable(self):
+        """User 2026-10-15 (the deepseek-v4 silent bounce): a launch that fails must NOT be painted
+        over by the menu. The child's output stays on screen until Enter, like a tool's."""
+        os.environ["STUB_RC"] = "7"
+        self.addCleanup(os.environ.pop, "STUB_RC", None)
+        import builtins
+        prompts = []
+
+        async def s(app, pilot, h):
+            builtins.input = lambda *a, **k: prompts.append(a[0] if a else "") or ""
+            await self._launch_first_local(h)
+            await h.wait_text("last child exited 7")
+        self.run_picker(s, start="local")
+        self.assertTrue(any("exit 7" in p for p in prompts), f"no pause after the failed launch: {prompts}")
+
+    def test_successful_launch_does_not_pause(self):
+        import builtins
+        prompts = []
+
+        async def s(app, pilot, h):
+            builtins.input = lambda *a, **k: prompts.append(a[0] if a else "") or ""
+            await self._launch_first_local(h)
+            await h.settle(0.5)
+        self.run_picker(s, start="local")
+        self.assertEqual(prompts, [], "a session that exits cleanly returns straight to the menu")
+
     def test_remote_provider_default_omits_effort_and_is_persisted(self):
         async def s(app, pilot, h):
             await h.wait_text("Effort: max")
@@ -157,7 +183,8 @@ class PickerRegistryOffers(PilotCase):
             await h.press("enter")
             await h.wait_text("kept 1 missing model")
             await h.press("c")
-            await h.wait_text("auto-dream-7b")
+            await h.settle(0.5)
+            await h.open_group("Other")                 # family_for() has no rule for it
             await h.goto_row("item", "auto-dream-7b")
             await h.press("enter")
             await self._prompt_offers_register(h)
@@ -172,7 +199,8 @@ class PickerRegistryOffers(PilotCase):
             await h.press("enter")
             await h.wait_text("kept 1 missing model")
             await h.press("c")
-            await h.wait_text("auto-dream-7b")
+            await h.settle(0.5)
+            await h.open_group("Other")                 # family_for() has no rule for it
             await h.goto_row("item", "auto-dream-7b")
             await h.press("enter")
             await self._prompt_offers_register(h)
@@ -196,8 +224,11 @@ class PickerRegistryOffers(PilotCase):
         self.run_picker(s, start="local")
 
     def test_cleanup_offered_once_per_session(self):
+        # Starts at Home: only a Home-owned Local lane has Back (a direct-root lane has Quit).
         async def s(app, pilot, h):
             from textual.widgets import Input
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
             await h.wait_text("gone-model")
             await h.press("enter")                      # decline
             await h.wait_text("kept 1 missing model")
@@ -209,7 +240,7 @@ class PickerRegistryOffers(PilotCase):
             prompt = app.query_one("#prompt", Input)
             self.assertFalse(prompt.display, "cleanup offer must not reopen within a session")
             self.assertEqual(self.launches(), [])
-        self.run_picker(s, start="local")
+        self.run_picker(s)
 
 
 class PickerTools(PilotCase):

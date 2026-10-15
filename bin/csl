@@ -187,11 +187,26 @@ _register_model_cmd() {
     echo "no config.local.sh at $_LA_CFG" >&2
     return 1
   fi
+  # The backend comes from EVIDENCE (bin/la-detect-backend.py): GGUF -> llama_cpp; otherwise the
+  # model_type decides — rapid when the pinned rapid can build it (generic `mlx`, the machine
+  # default), omlx when only oMLX can (a per-model hard dependency, user 2026-10-15). Refuse
+  # rather than register a model that no installed backend can load.
+  local detected serve reason
+  detected=$(python3 "$CSL_DIR/la-detect-backend.py" "$LA_MODELS_DIR/$folder" 2>/dev/null) || detected=""
+  serve=$(printf '%s' "$detected" | awk -F'\t' 'NR==1{print $2}')
+  reason=$(printf '%s' "$detected" | awk -F'\t' 'NR==1{print $3}')
+  case "$serve" in
+    mlx|omlx|llama_cpp) ;;
+    unsupported|unknown)
+      echo "not registering '$folder': ${reason:-no backend can load it}" >&2
+      return 1 ;;
+    *) serve=mlx; reason="backend detection unavailable; using the machine default" ;;
+  esac
   local backup
   backup=$(_autoreg_backup_name)
   cp "$_LA_CFG" "$backup" || return 1
   local mode; mode=$(_cfg_mode "$_LA_CFG")
-  local line="la_register $alias $folder mlx auto \"\" false \"\" medium \"\" \"\" \"\" \"\""
+  local line="la_register $alias $folder $serve auto \"\" false \"\" medium \"\" \"\" \"\" \"\""
   local block_start="# >>> csl auto-registered (from on-disk scan) >>>"
   local block_end="# <<< csl auto-registered <<<"
   local tmp; tmp=$(mktemp) || return 1
@@ -213,7 +228,7 @@ _register_model_cmd() {
     echo "registering '$alias' produced an invalid config — restored the backup" >&2
     return 1
   fi
-  echo "registered '$alias' (folder $folder) in config.local.sh"
+  echo "registered '$alias' (folder $folder) in config.local.sh — backend $serve: $reason"
   return 0
 }
 _autoreg_backup_name() {
@@ -514,7 +529,19 @@ if [ "${INVENTORY:-0}" = "1" ]; then
     esac
   done
   # Then, auto-scanned models (on-disk but not registered)
-  # Use la_auto_scan_models from config-lib.sh to find them
+  # Use la_auto_scan_models from config-lib.sh to find them. The backend column is DETECTED
+  # (bin/la-detect-backend.py, one call for all folders), so the picker can say before
+  # registration whether a model would run on rapid or needs oMLX.
+  declare -A _auto_backend=()
+  _auto_folders=()
+  while IFS= read -r folder; do
+    [ -n "$folder" ] && _auto_folders+=("$LA_MODELS_DIR/$folder")
+  done < <(la_auto_scan_models)
+  if [ "${#_auto_folders[@]}" -gt 0 ]; then
+    while IFS=$'\t' read -r _path _backend _rest; do
+      _auto_backend[$(basename "$_path")]="$_backend"
+    done < <(python3 "$CSL_DIR/la-detect-backend.py" "${_auto_folders[@]}" 2>/dev/null)
+  fi
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     # Generate a sanitized alias from folder name
@@ -528,9 +555,14 @@ if [ "${INVENTORY:-0}" = "1" ]; then
       fi
     done
     [ "$registered" = "1" ] && continue
-    # Output auto-scanned entry: alias, backend, effort, roles, family
-    # Default to rapid backend (MLX default), medium effort, auto-scanned role
-    printf '%s\t%s\t%s\t%s\t%s\n' "$alias" "rapid (auto)" "medium" "auto-scanned" "$folder"
+    # Output auto-scanned entry: alias, backend, effort, roles, family.
+    # Backend = what registration would pick: "rapid (auto)" | "omlx (auto)" | "llama_cpp (auto)",
+    # or "unsupported (auto)" when no installed backend can build the architecture.
+    case "${_auto_backend[$folder]:-mlx}" in
+      mlx|unknown) _shown="rapid (auto)" ;;
+      *)           _shown="${_auto_backend[$folder]} (auto)" ;;
+    esac
+    printf '%s\t%s\t%s\t%s\t%s\n' "$alias" "$_shown" "medium" "auto-scanned" "$folder"
   done < <(la_auto_scan_models)
   exit 0
 fi
