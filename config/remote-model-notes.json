@@ -1,8 +1,8 @@
 {
   "_comment": "Short-form model notes for the remote picker's info box (shown under the model list on hover/highlight). Keyed by roster alias; a '-thinking' variant falls back to its base alias. Long form: README 'NVIDIA model field notes'.",
-  "nvidia-nemotron-ultra": "Nemotron 3 Ultra — capable on clearly-instructed work, relatively fast, 1M context. Thinks for long stretches; thinking blocks stream readably, and a queued prompt nudges the run mid-thought.",
+  "nvidia-nemotron-ultra": "Nemotron 3 Ultra — capable on clearly-instructed work, relatively fast, 1M context. Thinks for long stretches; thinking blocks stream readably, and a queued prompt nudges the run mid-thought. Caveat: can act rash — may present untested work as done and struggles with complex, loosely-scoped problems; scope asks tightly and check its \"done\". Super takes these shortcuts even more.",
   "nvidia-nemotron3": "Nemotron 3 Super — extremely fast, but takes the path of least resistance and declares goals done early. Good for quick, well-scoped asks; check its \"done\".",
   "nvidia-glm53-full": "GLM 5.3 — very smart, finds problems and solutions on its own; slow, ideal unattended overnight. 1M context. Don't /resume a long session cold: send \"hello\" first, then /resume-interrupted. ~1 min NVIDIA-side wait before the first token.",
   "nvidia-glm53": "GLM 5.3 Flash — much faster than GLM 5.3, still surprisingly smart at investigating context. Balanced thinking and output; the everyday reasoning driver.",
-  "nvidia-laguna": "Laguna XS 2.1 (Poolside) — coding specialist with capable tool use. Slow first prompt, then speeds up; slower than Nemotron Ultra. A stray think-tag may show in output (cosmetic)."
+  "nvidia-laguna": "Laguna XS 2.1 (Poolside) — coding specialist with capable tool use. Slow first prompt, then speeds up; slower than Nemotron Ultra. A stray think-tag may show in output — likely a reasoning tail: Laguna is probably a thinking model whose thinking blocks the harness does not recognize."
 }

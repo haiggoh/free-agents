@@ -195,6 +195,9 @@ Capable on clearly-instructed work, relatively fast, 1M context. Tends to think 
 stretches before reporting in. Two habits make it pleasant: the thinking blocks are
 readable as they stream, and **interjecting a queued prompt while it is still thinking
 nudges the ongoing work in a new direction** without losing the run.
+Caveat (2026-10-15): it can act rash — occasionally presenting unfinished, untested work
+as done — and it struggles with complex, loosely-scoped problems. Scope asks tightly and
+verify its "done" before shipping. Nemotron 3 Super takes these shortcuts even more often.
 
 **Nemotron 3 Super** — `nvidia-nemotron3` / `nvidia-nemotron3-thinking`
 Extremely fast, but takes the path of least resistance and declares goals fulfilled
@@ -219,8 +222,10 @@ output well balanced. The everyday driver among the reasoning models.
 Promising and specialized for coding. Slow on the first prompt, then picks up speed —
 overall slower than Nemotron Ultra. Capable tool use under Claude Code. Known wart: its
 reasoning output may not surface as thinking blocks, and a stray closing think-tag can
-occasionally appear in the text — a formatting issue, no observed impact on the work
-itself, and likely patchable.
+occasionally appear in the text. Likely explanation (2026-10-15): Laguna is a thinking
+model whose reasoning blocks the harness does not recognize, so the stray tag is the tail
+of an unrecognized reasoning block — cosmetic in the output, no observed impact on the
+work itself, and likely patchable.
 
 ### A full local session: offline and private
 

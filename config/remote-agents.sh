@@ -48,23 +48,27 @@ LA_REMOTE_AGENTS=(
   # ════════════════════════════════════════════════════════════════════════════════
   # Ordered by USER PREFERENCE first, then GENERATION EVIDENCE: confirmed lanes first,
   # partially-working next, never-produced-a-token last (each row states its evidence).
+  # 2026-10-15 user preference for the session picker: GLM 5.3 Flash (thinking) leads, then
+  # GLM 5.3 (thinking), Ultra (thinking), Super (thinking), Lightning (thinking), Laguna,
+  # then the non-thinking variants mirrored (Lightning after Super); the remaining visible
+  # models and the hidden broken rows follow.
   # Re-probe with: bin/remote-probe-log.py probe --all-nvidia ; report
-  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled by default.|1m"
+  "nvidia-glm53-thinking|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash (thinking)|unknown|PARTIAL: same model as the base alias — thinking is always-on on NIM; this alias just defaults reasoning_effort high. Fast.|-"
+  "nvidia-glm53-full-thinking|nvidia|z-ai/glm-5.3|NVIDIA GLM 5.3 (thinking)|unknown|SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.|-"
   "nvidia-nemotron-ultra-thinking|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.|1m"
-  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled by default.|-"
   "nvidia-nemotron3-thinking|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.|-"
-  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick. Reasoning disabled by default.|-"
   "nvidia-lightning-thinking|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B (thinking)|unknown|Reasoning enabled — stronger reasoning. Verified 2026-10-02.|-"
-  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|⚠️ BROKEN: TIMEOUT on all probes (2026-10-10, 2026-10-13). Consistent 180s timeouts. Hidden via broken-nvidia-models.json.|-"
-  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4.1-flash|NVIDIA DeepSeek V4.1 Flash|unknown|⚠️ BROKEN: TIMEOUT on all probes. Old v4-flash-0731 is 410 Gone. Hidden via broken-nvidia-models.json.|-"
   "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|PARTIAL: Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained (worker limit 32).|1m"
-  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|⚠️ BROKEN: connect/read timeouts — deployment unresponsive (re-audit 2026-10-13 with fixed probe; earlier 'empty' verdicts were partly the max_tokens=24 artifact). Hidden via broken-nvidia-models.json.|-"
   "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|PARTIAL: fast (1-4s), always-thinking — thinking CANNOT be disabled on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.|-"
-"nvidia-glm53-thinking|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash (thinking)|unknown|PARTIAL: same model as the base alias — thinking is always-on on NIM; this alias just defaults reasoning_effort high. Fast.|-"
-"nvidia-glm53-full|nvidia|z-ai/glm-5.3|NVIDIA GLM 5.3|unknown|SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.|-"
-"nvidia-glm53-full-thinking|nvidia|z-ai/glm-5.3|NVIDIA GLM 5.3 (thinking)|unknown|SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.|-"
+  "nvidia-glm53-full|nvidia|z-ai/glm-5.3|NVIDIA GLM 5.3|unknown|SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.|-"
+  "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled by default.|1m"
+  "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled by default.|-"
+  "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick. Reasoning disabled by default.|-"
   "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|RESTORED 2026-10-13: earlier 'empty' verdicts were the probe max_tokens=24 artifact; fixed probe (512 budget) answers OK. Occasional HTTP 500 historically (1/5).|-"
   "nvidia-gemma4|nvidia|google/gemma-4-31b-it|NVIDIA Gemma 4 31B|unknown|RESTORED 2026-10-13: the 2026-10-11 timeouts were transient capacity; fixed probe answers OK.|-"
+  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|⚠️ BROKEN: TIMEOUT on all probes (2026-10-10, 2026-10-13). Consistent 180s timeouts. Hidden via broken-nvidia-models.json.|-"
+  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4.1-flash|NVIDIA DeepSeek V4.1 Flash|unknown|⚠️ BROKEN: TIMEOUT on all probes. Old v4-flash-0731 is 410 Gone. Hidden via broken-nvidia-models.json.|-"
+  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|⚠️ BROKEN: connect/read timeouts — deployment unresponsive (re-audit 2026-10-13 with fixed probe; earlier 'empty' verdicts were partly the max_tokens=24 artifact). Hidden via broken-nvidia-models.json.|-"
   "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|⚠️ BROKEN: HTTP 404 on probes — not provisioned for account. Hidden via broken-nvidia-models.json.|-"
   "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|⚠️ BROKEN: HTTP 404 on probes — not provisioned. Hidden via broken-nvidia-models.json.|-"
   # Additional NVIDIA models as requested

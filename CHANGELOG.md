@@ -38,9 +38,12 @@
   loosely-scoped problems; scope asks tightly and verify its "done" (Super takes these
   shortcuts even more)
 - Default NVIDIA order in the session picker: GLM 5.3 Flash (thinking) → GLM 5.3 (thinking)
-  → Nemotron 3 Ultra (thinking) → Nemotron 3 Super (thinking) → Laguna XS 2.1, then the
-  non-thinking variants in the same relative order; remaining visible models follow, the
-  hidden broken rows last
+  → Nemotron 3 Ultra (thinking) → Nemotron 3 Super (thinking) → Lightning (thinking) →
+  Laguna XS 2.1, then the non-thinking variants in the same relative order (Lightning after
+  Super); remaining visible models follow, the hidden broken rows last
+- Laguna XS 2.1's stray think-tag is reinterpreted (user 2026-10-15): likely a reasoning
+  tail — Laguna is probably a thinking model whose thinking blocks the harness does not
+  recognize
 
 ## [0.34.13] — 2026-10-14
 
