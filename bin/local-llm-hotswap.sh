@@ -253,7 +253,7 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
         CURRENT_IDS=$(curl -s --max-time 4 "http://localhost:$port/v1/models" | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
         CURRENT_MODEL=$(printf '%s\n' "$CURRENT_IDS" | head -n 1)
 
-        if [ "$SERVE" = "rapid" ]; then
+        if [ "$SERVE" = "rapid" ] || [ "$SERVE" = "omlx" ]; then
             _meta="$CONFIG_DIR/server_${port}.meta"
             _listener_pid=$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null | head -1)
             _meta_backend=$(awk -F= '$1=="backend"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
@@ -263,7 +263,7 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             _meta_temp=$(awk -F= '$1=="temperature"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_pid=$(awk -F= '$1=="pid"{print $2}' "$_meta" 2>/dev/null)
             if [ "${LA_HOTSWAP_FORCE_FRESH:-0}" != "1" ] &&
-               [ "$_meta_backend" = "rapid" ] &&
+               [ "$_meta_backend" = "$SERVE" ] &&
                [ "$_meta_alias" = "$MODEL_NAME" ] &&
                [ "$_meta_model" = "$MODEL_DIR" ] &&
                [ "$_meta_spec" = "$RAPID_SPEC_CONFIG_SHA256" ] &&
@@ -271,7 +271,10 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
                [ -n "$_listener_pid" ] &&
                [ "$_listener_pid" = "$_meta_pid" ] &&
                printf '%s\n' "$CURRENT_IDS" | grep -qxF "$SPOOF_PRIMARY"; then
-                echo "✅ $MODEL_NAME already healthy via Rapid-MLX on port $port."
+                echo "✅ $MODEL_NAME already healthy via $SERVE on port $port."
+                # The served id is the spoof for both backends; say so, so the launcher's
+                # DISPATCH_MODEL contract holds on reuse exactly as on a fresh launch.
+                echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
                 echo "SUCCESS_PORT=$port"; exit 0
             fi
         fi
@@ -433,6 +436,70 @@ if [ "$SERVE" = "rapid" ]; then
     echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
     echo "SUCCESS_PORT=$TARGET_PORT"
     [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
+    exit 0
+fi
+
+# --- oMLX branch (serve=omlx): architectures only oMLX's bundled mlx_lm/mlx_vlm can build -----
+# oMLX serves every SUBFOLDER of --model-dir under that folder's name, taken AFTER resolving
+# symlinks (measured 0.7.0, 2026-10-15). So the spoof id needs a REAL folder named after it that
+# holds per-file links to the weights; linking the whole model dir would serve the weights' own
+# folder name and Claude Code's request for the spoof id would 404. Same layout as the Auto Mode
+# launcher's link_model_contents (bin/launch-claude-agent-omlx.sh).
+if [ "$SERVE" = "omlx" ]; then
+    if [ -z "${LA_OMLX_BIN:-}" ] || [ ! -x "$LA_OMLX_BIN" ]; then
+        echo "❌ oMLX executable not found: ${LA_OMLX_BIN:-<none discovered>}" >&2
+        echo "   $MODEL_NAME is pinned to serve=omlx because rapid-mlx cannot build its architecture." >&2
+        echo "   Install it:  brew install jundot/omlx/omlx   (or set LA_OMLX_BIN in config.local.sh)" >&2
+        exit 1
+    fi
+    OMLX_ROOT="$HOME/.cache/local-agents/omlx-session/port-$TARGET_PORT"
+    OMLX_VIEW="$OMLX_ROOT/models"
+    OMLX_CACHE="$HOME/.cache/local-agents/omlx-session/cache/$MODEL_NAME"
+    rm -rf "$OMLX_VIEW"
+    mkdir -p "$OMLX_VIEW/$SPOOF_PRIMARY" "$OMLX_ROOT/base" "$OMLX_CACHE"
+    for _item in "$MODEL_DIR"/* "$MODEL_DIR"/.[!.]*; do
+        [ -e "$_item" ] || continue
+        ln -s "$_item" "$OMLX_VIEW/$SPOOF_PRIMARY/$(basename "$_item")"
+    done
+    [ -f "$OMLX_VIEW/$SPOOF_PRIMARY/config.json" ] || {
+        echo "❌ oMLX model view is incomplete (no config.json linked from $MODEL_DIR)" >&2; exit 1; }
+
+    OMLX_CMD=(
+        "$LA_OMLX_BIN" serve
+        --model-dir "$OMLX_VIEW"
+        --base-path "$OMLX_ROOT/base"
+        --no-hf-cache
+        --headless
+        --host 127.0.0.1
+        --port "$TARGET_PORT"
+        --log-level info
+        --sse-keepalive-mode chunk
+        --max-concurrent-requests "$LA_OMLX_SESSION_MAX_CONCURRENT_REQUESTS"
+        --memory-guard "$LA_OMLX_SESSION_MEMORY_GUARD"
+        --paged-ssd-cache-dir "$OMLX_CACHE"
+        --paged-ssd-cache-max-size "$LA_OMLX_SESSION_CACHE_MAX_SIZE"
+        --hot-cache-max-size "${LA_OMLX_SESSION_HOT_CACHE_GB}GB"
+    )
+    OMLX_META="$CONFIG_DIR/server_${TARGET_PORT}.meta"
+    echo "🚀 Launching $MODEL_NAME via oMLX on free port $TARGET_PORT  (served as $SPOOF_PRIMARY)..."
+    nohup "${OMLX_CMD[@]}" > "$LOG_FILE" 2>&1 &
+    OMLX_PID=$!
+    {
+        echo "backend=omlx"
+        echo "alias=$MODEL_NAME"
+        echo "model_dir=$MODEL_DIR"
+        echo "served_id=$SPOOF_PRIMARY"
+        echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
+        [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
+        echo "pid=$OMLX_PID"
+    } > "$OMLX_META.tmp.$$"
+    mv -f "$OMLX_META.tmp.$$" "$OMLX_META"
+
+    wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$OMLX_PID" "$SPOOF_PRIMARY"
+    tail -n 12 "$LOG_FILE"
+    _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+    echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
+    echo "SUCCESS_PORT=$TARGET_PORT"
     exit 0
 fi
 

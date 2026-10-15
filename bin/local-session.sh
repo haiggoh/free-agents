@@ -111,7 +111,7 @@ if [[ $INVENTORY -eq 1 ]]; then
     # First, registered aliases
     for a in "${LA_ALIASES[@]}"; do
         case "${LA_SERVE[$a]:-}" in
-            rapid|vllm)
+            rapid|vllm|omlx)
                 la_on_disk "$a" || continue
                 printf '%s\t%s\t%s\t%s\t%s\n' "$a" "$(la_serve_display "$a")" "${LA_EFFORT[$a]:-}" \
                   "$(la_roles_for_alias "$a")" ""
@@ -168,7 +168,7 @@ if [[ -z "${LA_SERVE[$ALIAS]:-}" ]]; then
     exit 2
 fi
 case "${LA_SERVE[$ALIAS]}" in
-    rapid|vllm) ;;
+    rapid|vllm|omlx) ;;
     *) echo "local-session.sh: alias '$ALIAS' is not session-capable (serve=${LA_SERVE[$ALIAS]:-none})" >&2; exit 2 ;;
 esac
 la_on_disk "$ALIAS" || { echo "local-session.sh: model '$ALIAS' is not on disk" >&2; exit 1; }

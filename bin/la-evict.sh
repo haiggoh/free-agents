@@ -147,6 +147,7 @@ for port in $(seq "$PORT_START" "$PORT_MAX") $EXTRA_PORTS; do
 
     case "$cmd" in
         *rapid-mlx*)      backend=rapid-mlx ;;
+        *"omlx serve"*|*omlx.cli*) backend=omlx ;;
         *mlx_lm.server*)  backend=mlx-lm ;;
         *llama-server*)   backend=llama.cpp ;;
         *vllm-mlx*)       backend=vllm-mlx ;;

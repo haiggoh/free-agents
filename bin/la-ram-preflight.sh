@@ -49,6 +49,9 @@ MODEL_DIR="$LA_CUR_DIR"
 # its configured reusable-cache ceiling in addition to ordinary runtime/KV work.
 if [[ -n ${LA_RAM_MODEL_OVERHEAD_GB+x} ]]; then
   OVERHEAD=$LA_RAM_MODEL_OVERHEAD_GB
+elif [[ "${LA_CUR_SERVE:-}" = "omlx" ]]; then
+  # oMLX keeps a hot (RAM) prefix cache on top of runtime/KV work; the cold tier is on SSD.
+  OVERHEAD=$(LC_ALL=C awk -v hot="${LA_OMLX_SESSION_HOT_CACHE_GB:-4}" 'BEGIN{printf "%.1f", 6 + hot}')
 elif [[ "${LA_CUR_SERVE:-}" = "rapid" ]]; then
   OVERHEAD=$(LC_ALL=C awk     -v cache_mb="${LA_RAPID_CACHE_MEMORY_MB:-2048}"     'BEGIN{printf "%.1f", 6 + cache_mb/1024}')
 else
@@ -76,7 +79,7 @@ for p in $(seq "$PLOW" "$PHIGH"); do
 
   if [[ -n $ids ]] && grep -qxF "$ALIAS" <<<"$ids"; then
     served=1
-  elif [[ "${LA_CUR_SERVE:-}" = "rapid" ]]; then
+  elif [[ "${LA_CUR_SERVE:-}" = "rapid" || "${LA_CUR_SERVE:-}" = "omlx" ]]; then
     meta="$HOME/.claude/logs/local-agents-configs/server_${p}.meta"
     listener_pid=$(lsof -nP -t -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | head -1)
     meta_backend=$(awk -F= '$1=="backend"{print substr($0,index($0,"=")+1)}' "$meta" 2>/dev/null)
@@ -87,7 +90,7 @@ for p in $(seq "$PLOW" "$PHIGH"); do
     meta_spec=$(awk -F= '$1=="spec_config_sha256"{print substr($0,index($0,"=")+1)}' "$meta" 2>/dev/null)
     # Same conjunction hotswap requires: backend, alias, model dir, spec-config hash, live listener
     # matching the recorded pid, AND the spoof id actually served on the port.
-    if [[ "$meta_backend" = "rapid" &&
+    if [[ "$meta_backend" = "${LA_CUR_SERVE:-}" &&
           "$meta_alias" = "$ALIAS" &&
           "$meta_model" = "$MODEL_DIR" &&
           "$meta_spec" = "$SPEC_SHA" &&

@@ -521,9 +521,10 @@ MODEL_SPOOF=""
 # For Rapid-MLX, DISPATCH_MODEL is the spoof ID (only served model). Use it directly.
 # For vllm-mlx, DISPATCH_MODEL is the alias; we still need a spoof ID for Claude Code.
 # For mlx_lm, DISPATCH_MODEL is model_dir; not used for interactive sessions.
-if [ "$LA_CUR_SERVE" = "rapid" ] && [ -n "$DISPATCH_MODEL" ]; then
+if { [ "$LA_CUR_SERVE" = "rapid" ] || [ "$LA_CUR_SERVE" = "omlx" ]; } && [ -n "$DISPATCH_MODEL" ]; then
+    # Both serve exactly ONE id, the spoof, so the server's own answer is authoritative.
     MODEL_SPOOF="$DISPATCH_MODEL"
-    echo "[i] Rapid-MLX: using DISPATCH_MODEL as spoof ID: $MODEL_SPOOF"
+    echo "[i] $LA_CUR_SERVE: using DISPATCH_MODEL as spoof ID: $MODEL_SPOOF"
 else
     # vllm-mlx or fallback: find a spoof ID from /v1/models
     for _cand in $(printf '%s' "$LA_CUR_SPOOF" | tr ',' ' '); do
@@ -545,8 +546,8 @@ if [ "$LA_CUR_SERVE" = "mlx_lm" ]; then
     echo "    model=\"$LA_CUR_DIR\" via curl / bin/librarian-dispatch.py."; exit 0
 fi
 
-# --- DIRECT routing (no proxy/relay): the backend (rapid-mlx or vllm-mlx) serves the Anthropic
-# /v1/messages endpoint itself, under the spoof id. Both expose it; mlx_lm.server does not.
+# --- DIRECT routing (no proxy/relay): the backend (rapid-mlx, oMLX or vllm-mlx) serves the Anthropic
+# /v1/messages endpoint itself, under the spoof id. All three expose it; mlx_lm.server does not.
 export ANTHROPIC_BASE_URL="http://localhost:${VLLM_PORT}"    # NO /v1 — Claude Code appends /v1/messages
 export ANTHROPIC_AUTH_TOKEN="local"                           # backend ignores auth; avoids the API-key prompt
 export CLAUDE_IS_LOCAL="true"                                 # generic signal that this session is local

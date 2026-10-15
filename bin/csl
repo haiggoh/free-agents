@@ -306,7 +306,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "${SESSION_EMOJI_LOCAL}  Local session models (on disk, session-capable):"
   for a in "${LA_ALIASES[@]}"; do
     case "${LA_SERVE[$a]:-}" in
-      rapid|vllm)
+      rapid|vllm|omlx)
         if la_on_disk "$a"; then
           roles="$(la_roles_for_alias "$a")"
           [ -n "$roles" ] || roles="untagged"
@@ -370,7 +370,7 @@ if [ "${INVENTORY:-0}" = "1" ]; then
   # First, registered aliases
   for a in "${LA_ALIASES[@]}"; do
     case "${LA_SERVE[$a]:-}" in
-      rapid|vllm)
+      rapid|vllm|omlx)
         la_on_disk "$a" || continue
         printf '%s\t%s\t%s\t%s\t%s\n' "$a" "$(la_serve_display "$a")" "${LA_EFFORT[$a]:-}" \
           "$(la_roles_for_alias "$a")" ""

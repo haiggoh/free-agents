@@ -62,11 +62,16 @@ LA_CANONICAL_ROLES="operator reasoner validator utility"
 # llama.cpp / llama-server and MLX backends cannot load them, so a GGUF model must pin
 # serve=llama_cpp explicitly. la_finalize_serve warns loudly if a GGUF-looking artifact ends up
 # on an MLX backend, because that combination fails late (at weight load) and confusingly.
-LA_SERVE_BACKENDS="rapid vllm mlx_lm llama_cpp litellm api"
+# omlx is a legal PIN (oMLX, Homebrew tap jundot/omlx) for architectures only oMLX's bundled
+# mlx_lm/mlx_vlm can build — measured 2026-10-15: rapid-mlx 0.16.1 rejects `laguna` and lacks
+# `deepseek_v4`. bin/la-detect-backend.py chooses it per model; it is never the machine default.
+LA_SERVE_BACKENDS="rapid vllm mlx_lm omlx llama_cpp litellm api"
 LA_SERVE_GENERIC="mlx auto"
 # Which backends a GENERIC value may resolve to. Narrower than LA_SERVE_BACKENDS on purpose:
 # llama_cpp, litellm and api are legal PINS but must never be the MLX default, or flipping one line would reroute
-# every MLX model to an engine that cannot load safetensors at all.
+# every MLX model to an engine that cannot load safetensors at all. omlx is excluded for a different
+# reason: it is a per-model hard dependency, and its single-maintainer bus factor keeps the machine
+# default on rapid (roadmap 0.24.0, corrected 2026-10-15).
 LA_MLX_BACKENDS="rapid vllm mlx_lm"
 
 # --- canonical Claude spoof identities: ONE place to edit when Anthropic ships a model ---------
@@ -139,7 +144,7 @@ declare -A LA_MODEL_CONTEXT_OVERRIDE LA_MODEL_AUTOCOMPACT_OVERRIDE
 # These provide the catalogue defaults per model folder.
 declare -A LA_CATALOGUE_CONTEXT LA_CATALOGUE_AUTOCOMPACT LA_CATALOGUE_EXTENDED_CONTEXT LA_CATALOGUE_EXTENDED_AUTOCOMPACT LA_CATALOGUE_ENTRY_TYPE
 
-# la_register <alias> <subdir> <serve:mlx|rapid|vllm|mlx_lm|llama_cpp|litellm|api> <tool_parser> <reasoning_parser>
+# la_register <alias> <subdir> <serve:mlx|rapid|vllm|mlx_lm|omlx|llama_cpp|litellm|api> <tool_parser> <reasoning_parser>
 #             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb] [rapid_spec_json]
 # reasoning_parser may be "" (none). The last four are OPTIONAL and additive, so pre-existing
 # 8-field config lines keep working unchanged:
@@ -241,6 +246,7 @@ la_resolve_serve() {
     rapid-mlx|rapid_mlx)    echo rapid ;;
     mlx-lm|mlx_lm.server)   echo mlx_lm ;;
     llama.cpp|llama-cpp|llama_server|llama-server) echo llama_cpp ;;
+    oMLX|OMLX|omlx-serve)   echo omlx ;;
     *)
       case " $LA_SERVE_GENERIC " in
         *" ${d:-mlx} "*) echo "$LA_DEFAULT_MLX_BACKEND"; return 0 ;;
@@ -279,7 +285,7 @@ la_finalize_serve() {
     case "${LA_SUBDIR[$a]:-}" in
       *gguf*|*GGUF*)
         case "$r" in
-          rapid|vllm|mlx_lm)
+          rapid|vllm|mlx_lm|omlx)
             echo "⚠️  local-agents: '$a' looks like a GGUF artifact (${LA_SUBDIR[$a]}) but resolves to serve=$r." >&2
             echo "    MLX backends cannot load GGUF. Pin serve=llama_cpp on that registration." >&2 ;;
         esac ;;
@@ -530,6 +536,17 @@ la_load_config() {
   if [ -z "${LA_RAPID_BIN:-}" ]; then
     LA_RAPID_BIN="$(la_discover_rapid_bin)"
   fi
+  # oMLX executable for serve=omlx (one install: the Homebrew tap). LA_OMLX_BIN wins when set.
+  if [ -z "${LA_OMLX_BIN:-}" ]; then
+    if [ -x /opt/homebrew/bin/omlx ]; then LA_OMLX_BIN=/opt/homebrew/bin/omlx
+    else LA_OMLX_BIN="$(command -v omlx 2>/dev/null || true)"; fi
+  fi
+  # oMLX session server knobs (serve=omlx). The paged SSD cache persists prefixes across restarts;
+  # it is PER ALIAS under ~/.cache so a session model never shares the Auto Mode classifier's cache.
+  : "${LA_OMLX_SESSION_CACHE_MAX_SIZE:=40GB}"
+  : "${LA_OMLX_SESSION_HOT_CACHE_GB:=4}"
+  : "${LA_OMLX_SESSION_MEMORY_GUARD:=balanced}"
+  : "${LA_OMLX_SESSION_MAX_CONCURRENT_REQUESTS:=2}"
   : "${LA_PORT_START:=8000}"
   : "${LA_PORT_MAX:=8010}"
   : "${LA_MAX_OUTPUT_TOKENS:=8192}"

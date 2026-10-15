@@ -123,7 +123,7 @@ for binding in "${bindings[@]}"; do
   IFS='|' read -r alias effort mode <<<"$binding"
   serve="${LA_SERVE[$alias]:-}"
   case "$serve" in
-    rapid|vllm|mlx_lm|llama_cpp)
+    rapid|vllm|mlx_lm|omlx|llama_cpp)
       if la_on_disk "$alias"; then
         echo "$alias"
         exit 0

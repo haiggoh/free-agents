@@ -15,7 +15,7 @@
 #   ANTHROPIC_BASE_URL   — the endpoint the session will use (authoritative)
 #   MODEL_ALIAS          — the registered alias (e.g. qwen38-27b-4bit)
 #   MODEL_SPOOF          — the compatibility model ID (e.g. claude-opus-5)
-#   BACKEND              — resolved backend (rapid|vllm|mlx_lm|llama_cpp)
+#   BACKEND              — resolved backend (rapid|vllm|mlx_lm|omlx|llama_cpp)
 #   BACKEND_DECLARED     — declared backend from config (may be generic "mlx")
 #   LA_CUR_DIR           — model directory on disk
 #   LA_CUR_THINK         — thinking mode (true|false)
