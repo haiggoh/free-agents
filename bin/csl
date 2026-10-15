@@ -399,6 +399,13 @@ if [ "${INVENTORY:-0}" = "1" ]; then
   exit 0
 fi
 
+# Pending backend upgrades (found by the weekly check): ask yes/no before the picker opens, so an
+# accepted upgrade runs with no extra step (user 2026-10-15). Silent when nothing is pending, and
+# only with a terminal; LA_BACKEND_UPGRADES=0 turns the question off.
+if [ -t 0 ] && [ -t 1 ] && [ "${LA_BACKEND_UPGRADES:-1}" != "0" ]; then
+  python3 "$CSL_DIR/../install/backend_upgrades.py" --prompt || true
+fi
+
 # No arguments: the shared picker, starting at Home. Zero on-disk local models is a valid
 # first run (Remote, the downloader and the key wizard are all reachable from Home), so this
 # no longer exits early the way the numbered menu did.

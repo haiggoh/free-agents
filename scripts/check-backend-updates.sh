@@ -10,4 +10,8 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="${LA_PYTHON:-python3}"
 
-exec "$PYTHON" "$SCRIPT_DIR/check_backend_updates.py" --save-json "$@"
+# Package-level report first (log + notification), then refresh the backend UPGRADE list that
+# csl offers as a yes/no question at its next start (install/backend_upgrades.py).
+"$PYTHON" "$SCRIPT_DIR/check_backend_updates.py" --save-json "$@"; rc=$?
+"$PYTHON" "$SCRIPT_DIR/../install/backend_upgrades.py" --check || true
+exit "$rc"

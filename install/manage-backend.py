@@ -59,6 +59,7 @@ Examples:
   manage-backend.py --backend vllm-mlx releases --limit 10
   manage-backend.py --backend omlx install 0.7.0
   manage-backend.py --backend rapid-mlx check-updates
+  manage-backend.py upgrade            ask yes/no for each pending backend upgrade, run the accepted ones
   manage-backend.py --backend rapid-mlx promote 0.16.1
   manage-backend.py --backend rapid-mlx smoke 0.16.1
   manage-backend.py --backend rapid-mlx snapshot 0.16.1
@@ -68,7 +69,8 @@ Examples:
     )
     parser.add_argument("--home", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true", help="print the plan without executing")
-    parser.add_argument("--backend", choices=list_managers(), required=True, help="backend to manage")
+    # Required for every command except `upgrade`, which walks all backends (enforced in main()).
+    parser.add_argument("--backend", choices=list_managers(), help="backend to manage (not needed for `upgrade`)")
     parser.add_argument("--json", action="store_true", help="output JSON instead of text")
 
     sub = parser.add_subparsers(dest="command", required=True, help="Command to run")
@@ -97,6 +99,9 @@ Examples:
 
     # check-updates command (alias: updates)
     chk_p = sub.add_parser("check-updates", help="check for package updates", aliases=["updates"])
+    upg_p = sub.add_parser("upgrade", help="ask yes/no for each pending backend upgrade and run the accepted ones")
+    upg_p.add_argument("--check", action="store_true", help="refresh the pending list first (network)")
+    upg_p.add_argument("--yes", action="store_true", help="run every pending upgrade without asking")
 
     # promote command (for backends that support pin promotion)
     prom_p = sub.add_parser("promote", help="promote pins to a version")
@@ -482,8 +487,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Handle commands that don't need a backend
+    if args.command == "upgrade":
+        # Backend-independent: --backend is accepted but not needed here.
+        import backend_upgrades as bu
+        if args.check:
+            bu.check()
+        if not args.yes and not sys.stdin.isatty():
+            print("ERROR: upgrade asks yes/no and needs a terminal; pass --yes to run unattended", file=sys.stderr)
+            return 2
+        return bu.prompt(args.yes)
     if args.command == "list":
         return cmd_list(args)
+    if not args.backend:
+        parser.error("the following arguments are required: --backend")
 
     if not args.command:
         parser.print_help()
