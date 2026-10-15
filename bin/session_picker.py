@@ -898,8 +898,7 @@ class Picker(App):
                         if sm.handle_key(key):
                             event.stop()
                             return
-        # Handle group expand/collapse when on a group row (only when rows list is focused)
-        if key in ("left", "right"):
+            # Handle group expand/collapse when on a group row (only when rows list is focused)
             rows_list = self.query_one("#rows", OptionList)
             if self.focused is rows_list:
                 h = self._highlighted()
