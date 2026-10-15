@@ -1,3 +1,20 @@
+## [0.35.3] — 2026-10-15
+
+### Fixed — the two lane rows' swatches align
+
+- "Local" and "Remote" differ by one character, which shifted the Remote row's hex, swatch
+  and border slice one cell right; the lane label is now padded so both rows share the
+  column (user 2026-10-15), pinned by a cross-row width assertion in the style test
+
+### Fixed — theme colours survive version installs (the copy-scoped config wart)
+
+- Theme colours now persist in the stable user store `~/.claude/free-agents/themes/`
+  (sibling of the shared settings dir): the picker writes there, reads layer user store
+  over shipped defaults, and the session-theme generators apply the same precedence — so
+  colours chosen in ANY copy reach sessions and are NOT wiped by the next version install
+  (user 2026-10-15, the conscious unification). `LA_THEME_CONFIG_DIR` remains the test
+  escape hatch on top of both. Shipped defaults stay pinned in each copy's `config/`
+
 ## [0.35.2] — 2026-10-15
 
 ### Changed — Yellow is the default local session accent (user taste call)

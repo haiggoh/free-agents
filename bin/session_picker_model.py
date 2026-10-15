@@ -1022,11 +1022,28 @@ class ThemeConfigScreen(Screen):
     title = f"{ec.EMOJI_THEME_STR} Theme Colors"
 
     @staticmethod
-    def _theme_path(name: str) -> Path:
-        base = os.environ.get("LA_THEME_CONFIG_DIR")
-        if base:
-            return Path(base) / name
-        return Path(__file__).parent.parent / "config" / name
+    def _user_theme_path(name: str) -> Path:
+        """The stable user store: survives version installs, shared by every plugin copy."""
+        return Path.home() / ".claude" / "free-agents" / "themes" / name
+
+    @classmethod
+    def _theme_path(cls, name: str) -> Path:
+        """Theme config resolution (user 2026-10-15 — colours must survive plugin version
+        installs and be shared by every copy; the version-keyed cache dir is wiped on
+        update): 1) LA_THEME_CONFIG_DIR (test escape hatch), 2) the stable user store,
+        3) this copy's shipped config/. WRITES go to the env dir when set, else the user
+        store (_write_path). MUST MATCH theme_config_path() in generate-local/remote-
+        settings.py — the launcher's session theme must read the colours this picker writes."""
+        env = os.environ.get("LA_THEME_CONFIG_DIR")
+        if env:
+            return Path(env) / name
+        user = cls._user_theme_path(name)
+        return user if user.exists() else Path(__file__).parent.parent / "config" / name
+
+    @classmethod
+    def _write_path(cls, name: str) -> Path:
+        env = os.environ.get("LA_THEME_CONFIG_DIR")
+        return Path(env) / name if env else cls._user_theme_path(name)
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
@@ -1039,16 +1056,19 @@ class ThemeConfigScreen(Screen):
         """Row label per user 2026-10-15: the color name spelled out (accessibility), the
         hex rendered in the colour it names, and a swatch block that holds a FIXED column —
         the name field is padded to the palette's widest name so cycling never shifts it —
-        plus a thin slice in the derived border colour, previewing accent + border together."""
+        plus a thin slice in the derived border colour, previewing accent + border together.
+        The lane word is padded ("Local" vs "Remote" differ by one cell) so BOTH rows' hex,
+        swatch and slice share a column (user 2026-10-15)."""
         theme = self.local_theme if which == "local" else self.remote_theme
         emoji = ec.SESSION_EMOJI_LOCAL_STR if which == "local" else ec.SESSION_EMOJI_FREE_API_STR
         accent = theme["theme"]["accent_color"]
         name = dict(THEME_PRESETS).get(accent.upper(), "custom")
         width = max(len(n) for _, n in THEME_PRESETS)
+        lane_pad = " " * (len("Remote") - len(which.capitalize()))
         border = theme["theme"].get("border_color", "")
         if RICH_AVAILABLE:
             return Text.assemble(
-                f"{emoji} {which.capitalize()}: ",
+                f"{emoji} {which.capitalize()}:{lane_pad} ",
                 (f"{name:<{width}}", "bold"),
                 " ",
                 (accent, accent),
@@ -1056,7 +1076,7 @@ class ThemeConfigScreen(Screen):
                 Text("    ", style=f"on {accent}"),
                 Text(" ", style=f"on {border}"),
             )
-        return f"{emoji} {which.capitalize()}: {name:<{width}} {accent} + border {border}"
+        return f"{emoji} {which.capitalize()}:{lane_pad} {name:<{width}} {accent} + border {border}"
 
     def _set_accent(self, which: str, color: str):
         """setting() put: store the accent, re-derive the border, persist."""
@@ -1076,16 +1096,20 @@ class ThemeConfigScreen(Screen):
         theme_dict["theme"]["border_color"] = border
 
     def _save_theme(self, which: str):
-        """Write the lane's theme file back to disk (border re-derived from the accent)."""
+        """Write the lane's theme file back to disk (border re-derived from the accent).
+        Always to the stable user store (or the LA_THEME_CONFIG_DIR escape hatch) — never
+        the version-keyed cache, which the next update wipes."""
         import json
         if which == "local":
             self._recompute_border(self.local_theme)
-            self._theme_path("local-theme.json").write_text(
-                json.dumps(self.local_theme, indent=2, ensure_ascii=False) + "\n")
+            path = self._write_path("local-theme.json")
         else:
             self._recompute_border(self.remote_theme)
-            self._theme_path("remote-theme.json").write_text(
-                json.dumps(self.remote_theme, indent=2, ensure_ascii=False) + "\n")
+            path = self._write_path("remote-theme.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(
+            self.local_theme if which == "local" else self.remote_theme,
+            indent=2, ensure_ascii=False) + "\n")
 
     def _restore_defaults(self):
         self.local_theme["theme"]["accent_color"] = "#FFD700"

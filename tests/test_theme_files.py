@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,6 +73,30 @@ def test_remote_session_selects_free_lime_with_prefix():
     s = json.loads(run("generate-remote-settings.py", "--identity-json",
                        identity("free_api", provider_display="Free API (NVIDIA)")))
     assert s["theme"] == "custom:free-lime"
+
+
+def test_theme_colours_persist_in_the_user_store():
+    """0.35.3: the generators read the stable user store over shipped config, so picker
+    changes reach sessions and survive version installs (user 2026-10-15)."""
+    shipped = json.loads((ROOT / "config" / "local-theme.json").read_text())
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        store = home / ".claude" / "free-agents" / "themes"
+        store.mkdir(parents=True)
+        user = json.loads(json.dumps(shipped))
+        user["theme"]["accent_color"] = "#2468AC"
+        (store / "local-theme.json").write_text(json.dumps(user))
+        t = json.loads(run("generate-local-settings.py", "--emit-theme-file",
+                           env_extra={"HOME": str(home)}))
+        assert t["overrides"]["claude"] == "#2468AC"          # user store wins
+    # with NO user store, the shipped default still applies (empty HOME, deterministic)
+    empty = Path(tempfile.mkdtemp())
+    try:
+        t = json.loads(run("generate-local-settings.py", "--emit-theme-file",
+                           env_extra={"HOME": str(empty)}))
+        assert t["overrides"]["claude"] == shipped["theme"]["accent_color"]
+    finally:
+        empty.rmdir()
 
 
 def test_theme_slug_matches_the_file_the_launcher_installs():

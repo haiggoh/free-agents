@@ -795,5 +795,34 @@ class RemoteInfoBoxTests(unittest.TestCase):
         self.assertIn("Hover or highlight", lane.info_text(None))
 
 
+class ThemeStoreLayering(unittest.TestCase):
+    """0.35.3: theme colours persist in the stable user store (survive version installs,
+    shared by every copy), layered over shipped defaults; LA_THEME_CONFIG_DIR (tests)
+    wins over both."""
+
+    def test_picker_reads_user_store_and_writes_there(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        root = Path(__file__).resolve().parents[1]
+        shipped = json.loads((root / "config" / "local-theme.json").read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            user_dir = Path(tmp) / ".claude" / "free-agents" / "themes"
+            user_dir.mkdir(parents=True)
+            user = json.loads(json.dumps(shipped))
+            user["theme"]["accent_color"] = "#123456"
+            (user_dir / "local-theme.json").write_text(json.dumps(user))
+            with mock.patch("pathlib.Path.home", return_value=Path(tmp)):
+                scr = m.ThemeConfigScreen(m.Settings())
+                self.assertEqual(scr.local_theme["theme"]["accent_color"], "#123456")
+                # a step (the real write path — setting() put) must land in the USER store
+                {a.key: a for a in scr.actions()}["l"].step(1)
+                saved = json.loads((user_dir / "local-theme.json").read_text())
+                self.assertNotEqual(saved["theme"]["accent_color"], "#123456")
+            self.assertEqual(json.loads((root / "config" / "local-theme.json").read_text()),
+                             shipped)                   # shipped config untouched
+
+
 if __name__ == "__main__":
     unittest.main()

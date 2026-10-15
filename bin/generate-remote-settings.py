@@ -76,6 +76,21 @@ def select_spinner_verbs(family: str, spinner_data: dict) -> list:
     return unique
 
 
+def theme_config_path(config_dir, name):
+    """Where THEME colours live (user 2026-10-15: colours must survive plugin version
+    installs and be shared by every copy — the version-keyed cache is wiped on update):
+    1) LA_THEME_CONFIG_DIR (test escape hatch), 2) the stable user store
+    ~/.claude/free-agents/themes/<name>, 3) this copy's shipped config/<name>.
+    MUST MATCH ThemeConfigScreen._theme_path in session_picker_model.py — the picker
+    writes the user store; the session theme must read the colours it wrote. Mirrors
+    generate-local-settings.theme_config_path."""
+    env = os.environ.get('LA_THEME_CONFIG_DIR')
+    if env:
+        return Path(env) / name
+    user = Path.home() / '.claude' / 'free-agents' / 'themes' / name
+    return user if user.exists() else config_dir / name
+
+
 def build_theme_file(config_dir):
     """Build the custom THEME FILE content for ~/.claude/themes/<slug>.json.
 
@@ -89,7 +104,7 @@ def build_theme_file(config_dir):
     semantic signal like `error` is actively harmful. The accent is read from
     remote-theme.json so that file stays the single source of truth for the colour.
     """
-    theme_data = load_json_file(config_dir / 'remote-theme.json')
+    theme_data = load_json_file(theme_config_path(config_dir, 'remote-theme.json'))
     theme = theme_data.get('theme', {})
     fallback = theme_data.get('fallback', {})
     accent = theme.get('accent_color') or fallback.get('accent_color') or '#ADFF2F'
@@ -176,7 +191,7 @@ def main():
         return 1
 
     # Load theme and spinner data
-    theme_data = load_json_file(config_dir / 'remote-theme.json')
+    theme_data = load_json_file(theme_config_path(config_dir, 'remote-theme.json'))
     spinner_data = load_json_file(config_dir / 'remote-spinner-verbs.json')
 
     # Extract identity fields

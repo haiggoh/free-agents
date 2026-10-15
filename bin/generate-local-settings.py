@@ -92,14 +92,29 @@ def select_spinner_verbs(family: str, spinner_data: dict) -> list:
     return unique
 
 
+def theme_config_path(config_dir, name):
+    """Where THEME colours live (user 2026-10-15: colours must survive plugin version
+    installs and be shared by every copy — the version-keyed cache is wiped on update):
+    1) LA_THEME_CONFIG_DIR (test escape hatch), 2) the stable user store
+    ~/.claude/free-agents/themes/<name>, 3) this copy's shipped config/<name>.
+    MUST MATCH ThemeConfigScreen._theme_path in session_picker_model.py — the picker
+    writes the user store; the session theme must read the colours it wrote."""
+    env = os.environ.get('LA_THEME_CONFIG_DIR')
+    if env:
+        return Path(env) / name
+    user = Path.home() / '.claude' / 'free-agents' / 'themes' / name
+    return user if user.exists() else config_dir / name
+
+
 def build_theme_file(config_dir):
     """Custom THEME FILE for ~/.claude/themes/local-sky.json.
 
     Same shape and the same identity-only roles as generate-remote-settings.build_theme_file
     (see its docstring for why semantic colours stay untouched), plus clawd_body, which
-    tints the welcome-screen mascot. The accent is read from local-theme.json.
+    tints the welcome-screen mascot. The accent is read from local-theme.json — user
+    store first (see theme_config_path).
     """
-    theme_data = load_json_file(config_dir / 'local-theme.json')
+    theme_data = load_json_file(theme_config_path(config_dir, 'local-theme.json'))
     theme = theme_data.get('theme', {})
     accent = theme.get('accent_color') or '#00BFFF'
     border = theme.get('border_color') or accent      # softer prompt outline, same as remote

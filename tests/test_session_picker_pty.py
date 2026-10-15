@@ -306,6 +306,11 @@ class ThemeScreenColors(PilotCase):
             self.assertIn("on #FFD700", styles, f"no accent swatch in spans: {styles!r}")
             self.assertIn("on #C6B039", styles, f"no border slice in spans: {styles!r}")
             self.assertIn("#FFD700", styles, f"hex not rendered in its own colour: {styles!r}")
+            ridx = next(i for i, a in enumerate(app.action_ids) if a.key == "r")
+            rprompt = ol.get_option_at_index(ridx).prompt
+            self.assertIsInstance(rprompt, Text)
+            self.assertEqual(len(str(prompt)), len(str(rprompt)),
+                             f"lane rows misaligned: {prompt!s} | {rprompt!s}")
             width_before = len(str(prompt))
             app._activate_action(idx)                # step to Magenta (name 1 char longer)
             prompt2 = ol.get_option_at_index(idx).prompt
