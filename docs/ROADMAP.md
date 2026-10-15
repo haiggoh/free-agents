@@ -899,6 +899,16 @@ No single release may become several releases at once.
 
 Tracked as waypoints; listed here so the repo is not silent about them.
 
+- **Agent replacement has only a tool-less route.** The replace-subagents hook redirects an Agent
+  call to `bin/free-agent-tool.py`, which is a single stateless dispatch (one `curl`, text in, text
+  out). That fits text work (classification, drafting, review prose) but cannot do repo work: no file
+  access, no edits, no test runs. Measured 2026-10-15: a coding task (cc-transcript reading view) could
+  not be delegated through it. Needed: a second mode that runs the task as a **headless Claude Code
+  session** (`claude -p`) on a free lane, with the same capabilities as a `csl` session, inside an
+  isolated worktree, carrying the agent briefing. The hook should offer both routes and pick by the kind
+  of work (needs tools or edits → session; pure text → dispatch). Waypoint:
+  `free-agents-agent-replacement`.
+
 - **Rapid runtime promotion is now managed but 0.14 runtime qualification remains open.** The version manager can recreate superseded venvs from exact receipts and transactionally promote active pins, but a successful install/CLI smoke does not replace serve-level protocol, cache, concurrency, Metal, and real-session evidence. Keep rollback environments until those gates pass; retire them only when unpinned, inactive, and reproducible.
 - **Non-Qwen models default to Rapid without Rapid evidence.** `0.13.1` moved them to the default
   because that is what a default means; only the Qwen3.6/3.8 aliases are runtime-qualified there.
