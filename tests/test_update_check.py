@@ -46,7 +46,7 @@ def test_check_all_backends(tmp_path):
     # The outdated branch logs and fires an osascript notification. Both must stay inside the
     # test: unpatched, every suite run sent the user a REAL "0.15.2 -> 0.15.3" desktop
     # notification and appended the fake OUTDATED line to ~/.claude/logs.
-    with patch('check_backend_updates.get_manager') as mock_get_mgr, \
+    with patch('check_backend_updates.get_manager_instance') as mock_get_mgr, \
          patch.object(check_backend_updates, 'LOG_DIR', tmp_path), \
          patch.object(check_backend_updates, 'LOG_FILE', tmp_path / "backend-update-check.log"), \
          patch('subprocess.run') as mock_run:
@@ -62,6 +62,20 @@ def test_check_all_backends(tmp_path):
         # The notification is still attempted (behaviour kept), just intercepted.
         assert mock_run.call_args[0][0][0] == "osascript"
         assert "0.15.2->0.15.3" in (tmp_path / "backend-update-check.log").read_text()
+
+
+def test_check_backend_calls_check_updates_on_an_instance(tmp_path):
+    """Regression (measured 2026-10-14..15): check_backend called check_updates() on the manager
+    CLASS, so every backend failed with "missing 1 required positional argument: 'self'" and the
+    run still logged UP-TO-DATE. The call must reach a real instance."""
+    from managers.omlx import OMLXManager
+    with patch.object(check_backend_updates, 'LOG_DIR', tmp_path), \
+         patch.object(check_backend_updates, 'LOG_FILE', tmp_path / "backend-update-check.log"), \
+         patch.object(OMLXManager, 'check_updates', autospec=True, return_value=[]) as cu:
+        check_backend_updates.check_backend("omlx")
+    assert cu.call_count == 1, "check_updates was never called successfully"
+    assert isinstance(cu.call_args[0][0], OMLXManager)
+    assert "UNEXPECTED" not in (tmp_path / "backend-update-check.log").read_text()
 
 
 if __name__ == "__main__":

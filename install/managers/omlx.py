@@ -101,6 +101,31 @@ class OMLXManager(BackendManager):
             raise ManagerError("No available oMLX versions")
         return versions[0]
 
+    def check_updates(self) -> list[tuple[str, str, str]]:
+        """Compare the installed Homebrew keg with the tap's current stable version.
+
+        oMLX ships through the jundot/omlx tap, which publishes release candidates as its stable
+        version (0.7.1rc1 on 2026-10-15). GitHub's non-prerelease list cannot see those, so it is
+        the wrong source for "what would `brew upgrade` install". Raises when oMLX is not installed
+        through Homebrew: an empty list would be logged as "up to date".
+        """
+        installed = subprocess.run(["brew", "list", "--versions", "omlx"],
+                                   capture_output=True, text=True)
+        parts = installed.stdout.split() if installed.returncode == 0 else []
+        if len(parts) < 2:
+            raise ManagerError("oMLX is not installed via Homebrew (brew list --versions omlx)")
+        current = parts[-1]
+        info = subprocess.run(["brew", "info", "--json=v2", "omlx"], capture_output=True, text=True)
+        if info.returncode != 0:
+            raise ManagerError(f"brew info omlx failed: {info.stderr.strip()}")
+        try:
+            stable = json.loads(info.stdout)["formulae"][0]["versions"]["stable"]
+        except (ValueError, KeyError, IndexError) as exc:
+            raise ManagerError(f"unexpected brew info output: {exc}") from exc
+        if self._version_newer(stable, current):
+            return [("omlx", current, stable)]
+        return []
+
     def get_packages_to_check(self) -> list[str]:
         return ["omlx"]  # Not a PyPI package
 
@@ -108,6 +133,7 @@ class OMLXManager(BackendManager):
         return "homebrew"
 
     def get_version_source(self) -> str:
+        # The `releases` listing reads GitHub; the weekly check_updates reads Homebrew (above).
         return "github"
 
     def _get_latest_package_version(self, package: str) -> str:

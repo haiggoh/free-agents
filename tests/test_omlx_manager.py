@@ -121,3 +121,38 @@ def test_omlx_valid_versions():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+def _brew(installed_stdout, stable):
+    """subprocess.run stand-in answering the two brew queries check_updates makes."""
+    import json as _json
+    def run(cmd, *a, **k):
+        if cmd[:3] == ["brew", "list", "--versions"]:
+            return MagicMock(returncode=0 if installed_stdout else 1, stdout=installed_stdout, stderr="")
+        if cmd[:2] == ["brew", "info"]:
+            return MagicMock(returncode=0, stdout=_json.dumps(
+                {"formulae": [{"name": "omlx", "versions": {"stable": stable}}]}), stderr="")
+        raise AssertionError(f"unexpected command {cmd}")
+    return run
+
+
+def test_omlx_check_updates_reads_homebrew_and_counts_release_candidates():
+    """oMLX ships through the jundot/omlx tap, which publishes release candidates as its stable
+    version (0.7.1rc1 on 2026-10-15). The update check must compare against the tap, not GitHub's
+    non-prerelease list, or it can never see what `brew upgrade` will install."""
+    mgr = OMLXManager()
+    with patch("managers.omlx.subprocess.run", side_effect=_brew("omlx 0.7.0\n", "0.7.1rc1")):
+        assert mgr.check_updates() == [("omlx", "0.7.0", "0.7.1rc1")]
+    with patch("managers.omlx.subprocess.run", side_effect=_brew("omlx 0.7.1rc1\n", "0.7.1rc1")):
+        assert mgr.check_updates() == []
+    with patch("managers.omlx.subprocess.run", side_effect=_brew("omlx 0.7.1rc1\n", "0.7.1")):
+        assert mgr.check_updates() == [("omlx", "0.7.1rc1", "0.7.1")]
+
+
+def test_omlx_check_updates_raises_when_not_installed_via_homebrew():
+    """An empty result reads as "up to date" in the weekly log, so a missing install must be an
+    ERROR, never a silent []."""
+    from managers.base import ManagerError
+    mgr = OMLXManager()
+    with patch("managers.omlx.subprocess.run", side_effect=_brew("", "0.7.1rc1")):
+        with pytest.raises(ManagerError):
+            mgr.check_updates()

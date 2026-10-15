@@ -33,7 +33,12 @@ def log_message(msg: str) -> None:
 def check_backend(backend_name: str) -> tuple[str, list[tuple[str, str, str]]]:
     """Check a single backend for updates. Returns (backend_name, outdated_list)."""
     try:
-        mgr = get_manager(backend_name)
+        # An INSTANCE, not the class: get_manager() returns the class, and calling check_updates()
+        # on it failed for every backend ("missing 1 required positional argument: 'self'") while
+        # the run still logged UP-TO-DATE (measured 2026-10-14..15).
+        mgr = get_manager_instance(backend_name)
+        if mgr is None:
+            raise ManagerError(f"unknown backend {backend_name!r}")
         outdated = mgr.check_updates()
         checked = mgr.get_packages_to_check()
         log_message(f"CHECKED {backend_name}: {checked}")
