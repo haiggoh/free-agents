@@ -17,6 +17,7 @@ Navigation contract (docs/SESSION_PICKER.md):
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -995,91 +996,69 @@ class CloudConfigScreen(Screen):
         return []
 
 
+# Theme accent presets, ordered cool to warm (user 2026-10-14). Green Yellow closes the
+# list: it is the remote lane's shipped default and must stay reachable by cycling. ONE
+# copy on purpose — the 0.34.9 duplicate-Fire-Red bug came from this list living inline
+# in three methods and drifting.
+THEME_PRESETS = [
+    ("#EE2B2B", "Fire Red"), ("#00BFFF", "Sky Blue"), ("#00FFFF", "Cyan"),
+    ("#66F298", "Mint Green"), ("#990000", "Deep Red"), ("#F55F50", "Coral Red"),
+    ("#FF4500", "Orange Red"), ("#FFD700", "Yellow"), ("#FF00FF", "Magenta"),
+    ("#9370DB", "Medium Purple"), ("#00FA9A", "Spring Green"), ("#ADFF2F", "Green Yellow"),
+]
+
+
 class ThemeConfigScreen(Screen):
     """Theme color configuration for local and remote sessions.
 
-    Lets the user pick a main accent color by cycling through presets with left/right arrows
-    or Enter/mouse click. The prompt-input border is automatically derived as a paler version
-    of the accent (same lightness, 55% saturation).
+    Two settings rows, one per lane, behaving exactly like the effort/temperature rows
+    (user 2026-10-15): left/right arrows step the accent, Enter and mouse click step
+    forward, wrapping through THEME_PRESETS; `d` restores the shipped defaults. The
+    border is re-derived on every change as the accent at the same lightness, 55%
+    saturation. Theme files live in the plugin's config/ dir; LA_THEME_CONFIG_DIR
+    overrides that location so tests can cycle colors without ever writing into the
+    repo (the 0.34.13 release shipped a cycled-over default otherwise).
     """
     title = f"{ec.EMOJI_THEME_STR} Theme Colors"
+
+    @staticmethod
+    def _theme_path(name: str) -> Path:
+        base = os.environ.get("LA_THEME_CONFIG_DIR")
+        if base:
+            return Path(base) / name
+        return Path(__file__).parent.parent / "config" / name
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
         # Load current theme colors from config files
         import json
-        from pathlib import Path
-        config_dir = Path(__file__).parent.parent / "config"
-        self.local_theme = json.loads((Path(__file__).parent.parent / "config" / "local-theme.json").read_text())
-        self.remote_theme = json.loads((Path(__file__).parent.parent / "config" / "remote-theme.json").read_text())
-        self._selected_lane = "local"  # which lane is currently selected for cycling
+        self.local_theme = json.loads(self._theme_path("local-theme.json").read_text())
+        self.remote_theme = json.loads(self._theme_path("remote-theme.json").read_text())
 
-    def _current_presets(self):
-        """Return the current preset list with Fire Red first for local."""
-        return [
-            ("#EE2B2B", "Fire Red"),
-            ("#00BFFF", "Sky Blue"),
-            ("#00FFFF", "Cyan"),
-            ("#66F298", "Mint Green"),
-            ("#990000", "Deep Red"),
-            ("#F55F50", "Coral Red"),
-            ("#FF4500", "Orange Red"),
-            ("#FFD700", "Yellow"),
-            ("#FF00FF", "Magenta"),
-            ("#9370DB", "Medium Purple"),
-            ("#00FA9A", "Spring Green"),
-        ]
-
-    def _current_accent(self):
-        """Get the current accent color for the selected lane."""
-        if self._selected_lane == "local":
-            return self.local_theme["theme"]["accent_color"]
-        else:
-            return self.remote_theme["theme"]["accent_color"]
-
-    def _cycle_preset(self, which: str):
-        """Cycle through presets for the given theme."""
-        presets = [
-            "#EE2B2B", "#00BFFF", "#00FFFF", "#66F298",
-            "#990000", "#F55F50", "#FF4500", "#FFD700",
-            "#FF00FF", "#9370DB", "#00FA9A",
-        ]
+    def _lane_label(self, which: str):
+        """Row label per user 2026-10-15: the color name spelled out (accessibility), the
+        hex rendered in the colour it names, and a swatch block."""
         theme = self.local_theme if which == "local" else self.remote_theme
-        current = theme["theme"]["accent_color"]
-        try:
-            idx = presets.index(current)
-        except ValueError:
-            idx = -1
-        next_color = presets[(idx + 1) % len(presets)]
-        theme["theme"]["accent_color"] = next_color
-        self._recompute_border(theme if which == "local" else self.remote_theme)
-        self._save_theme("local" if which == "local" else "remote")
+        emoji = ec.SESSION_EMOJI_LOCAL_STR if which == "local" else ec.SESSION_EMOJI_FREE_API_STR
+        accent = theme["theme"]["accent_color"]
+        name = dict(THEME_PRESETS).get(accent.upper(), "custom")
+        if RICH_AVAILABLE:
+            return Text.assemble(
+                f"{emoji} {which.capitalize()}: ",
+                (name, "bold"),
+                " ",
+                (accent, accent),
+                "  ",
+                Text("    ", style=f"on {accent}"),
+            )
+        return f"{emoji} {which.capitalize()}: {name} {accent}"
 
-    def handle_key(self, key: str):
-        """Handle left/right arrow keys and Enter for cycling through presets."""
-        if key == "left":
-            # Cycle backwards
-            presets = [
-                "#EE2B2B", "#00BFFF", "#00FFFF", "#66F298",
-                "#990000", "#F55F50", "#FF4500", "#FFD700",
-                "#FF00FF", "#9370DB", "#00FA9A",
-            ]
-            theme = self.local_theme if self._selected_lane == "local" else self.remote_theme
-            current = theme["theme"]["accent_color"]
-            try:
-                idx = presets.index(current)
-            except ValueError:
-                idx = 0
-            prev_color = presets[(presets.index(current) - 1) % len(presets)]
-            theme["theme"]["accent_color"] = prev_color
-            self._recompute_border(theme if self._selected_lane == "local" else self.remote_theme)
-            self._save_theme("local" if self._selected_lane == "local" else "remote")
-            return True
-        elif key == "right" or key == "enter":
-            # Cycle forwards
-            self._cycle_preset(self._selected_lane)
-            return True
-        return super().handle_key(key)
+    def _set_accent(self, which: str, color: str):
+        """setting() put: store the accent, re-derive the border, persist."""
+        theme = self.local_theme if which == "local" else self.remote_theme
+        theme["theme"]["accent_color"] = color
+        self._recompute_border(theme)
+        self._save_theme(which)
 
     def _recompute_border(self, theme_dict: dict):
         """Recalculate border_color from accent_color at same lightness, 55% saturation."""
@@ -1092,18 +1071,16 @@ class ThemeConfigScreen(Screen):
         theme_dict["theme"]["border_color"] = border
 
     def _save_theme(self, which: str):
-        """Write theme file back to disk."""
+        """Write the lane's theme file back to disk (border re-derived from the accent)."""
         import json
-        from pathlib import Path
-        config_dir = Path(__file__).parent.parent / "config"
         if which == "local":
             self._recompute_border(self.local_theme)
-            path = Path(__file__).parent.parent / "config" / "local-theme.json"
-            path.write_text(json.dumps(self.local_theme, indent=2, ensure_ascii=False) + "\n")
+            self._theme_path("local-theme.json").write_text(
+                json.dumps(self.local_theme, indent=2, ensure_ascii=False) + "\n")
         else:
             self._recompute_border(self.remote_theme)
-            path = Path(__file__).parent.parent / "config" / "remote-theme.json"
-            path.write_text(json.dumps(self.remote_theme, indent=2, ensure_ascii=False) + "\n")
+            self._theme_path("remote-theme.json").write_text(
+                json.dumps(self.remote_theme, indent=2, ensure_ascii=False) + "\n")
 
     def _restore_defaults(self):
         self.local_theme["theme"]["accent_color"] = "#EE2B2B"
@@ -1112,44 +1089,20 @@ class ThemeConfigScreen(Screen):
         self._save_theme("remote")
 
     def actions(self):
-        acts = []
-        # Show current colors with swatches
-        local_accent = self.local_theme["theme"]["accent_color"]
-        remote_accent = self.remote_theme["theme"]["accent_color"]
-        
-        if RICH_AVAILABLE:
-            local_swatch = Text("        ", style=f"on {self.local_theme['theme']['accent_color']}")
-            local_label = Text.assemble(
-                f"{ec.SESSION_EMOJI_LOCAL_STR} Local: {self.local_theme['theme']['accent_color']} ",
-                Text("        ", style=f"on {self.local_theme['theme']['accent_color']}")
-            )
-            remote_swatch = Text("        ", style=f"on {self.remote_theme['theme']['accent_color']}")
-            remote_label = Text.assemble(
-                f"{ec.SESSION_EMOJI_FREE_API_STR} Remote: {self.remote_theme['theme']['accent_color']} ",
-                Text("        ", style=f"on {self.remote_theme['theme']['accent_color']}")
-            )
-        else:
-            local_label = f"{ec.SESSION_EMOJI_LOCAL_STR} Local: {self.local_theme['theme']['accent_color']}"
-            remote_label = f"{ec.SESSION_EMOJI_FREE_API_STR} Remote: {self.remote_theme['theme']['accent_color']}"
-        
-        # Select local or remote lane
-        acts.append(Action("l", local_label, lambda: self._select_lane("local")))
-        acts.append(Action("r", remote_label, lambda: self._select_lane("remote")))
-        acts.append(Action("d", "Restore defaults",
-                           lambda: self._restore_defaults()))
+        presets = [color for color, _ in THEME_PRESETS]
+        acts = [
+            setting("l", self._lane_label("local"), presets,
+                    lambda: self.local_theme["theme"]["accent_color"],
+                    lambda v: self._set_accent("local", v)),
+            setting("r", self._lane_label("remote"), presets,
+                    lambda: self.remote_theme["theme"]["accent_color"],
+                    lambda v: self._set_accent("remote", v)),
+            Action("d", "Restore defaults", lambda: self._restore_defaults()),
+        ]
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
 
-    def _select_lane(self, lane: str):
-        """Select which lane (local/remote) to cycle colors for."""
-        self._selected_lane = lane
-
-    
-    
-    
-    
-    
     def groups(self):
         return []
 

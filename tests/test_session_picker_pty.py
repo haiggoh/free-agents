@@ -224,5 +224,68 @@ class RemoteInfoBox(PilotCase):
         self.run_picker(s, start="remote")
 
 
+class ThemeScreenColors(PilotCase):
+    """The theme rows must behave exactly like the effort/temperature rows (user 2026-10-15):
+    left = step back, right = step forward, Enter = right, mouse click = Enter, wrapping
+    through every preset. Labels spell out the color name (accessibility), and persistence
+    goes ONLY to LA_THEME_CONFIG_DIR — 0.34.13 shipped a cycled-over default because live
+    testing wrote into the repo's config/."""
+
+    def seed(self):
+        import shutil
+        for name in ("local-theme.json", "remote-theme.json"):
+            shutil.copy(ROOT / "config" / name, self.themes / name)
+
+    def repo_accents(self):
+        import json
+        return [json.loads((ROOT / "config" / n).read_text())["theme"]["accent_color"]
+                for n in ("local-theme.json", "remote-theme.json")]
+
+    def lane_label(self, h, which):
+        marker = "Local" if which == "local" else "Remote"
+        return next(lbl for lbl in h.labels("actions") if marker in lbl)
+
+    def test_local_row_arrows_enter_click_and_wrap(self):
+        self.seed()
+        async def s(app, pilot, h):
+            await h.press("h")
+            await h.wait_screen("ThemeConfigScreen")
+            self.assertIn("Fire Red", self.lane_label(h, "local"))      # name spelled out
+            self.assertIn("#EE2B2B", self.lane_label(h, "local"))
+            await h.press("right")
+            self.assertIn("Sky Blue", self.lane_label(h, "local"))      # right steps forward
+            await h.press("left")
+            self.assertIn("Fire Red", self.lane_label(h, "local"))      # left steps back
+            await h.press("left")
+            self.assertIn("Green Yellow", self.lane_label(h, "local"))  # wraps to the last preset
+            await h.press("enter")                                      # enter == right arrow
+            self.assertIn("Fire Red", self.lane_label(h, "local"))
+            idx = next(i for i, a in enumerate(app.action_ids) if a.key == "l")
+            app._activate_action(idx)                                   # what a row click routes to
+            self.assertIn("Sky Blue", self.lane_label(h, "local"))
+        self.run_picker(s)
+        import json
+        saved = json.loads((self.themes / "local-theme.json").read_text())
+        self.assertEqual(saved["theme"]["accent_color"], "#00BFFF")     # persisted to the override
+        self.assertEqual(self.repo_accents(), ["#EE2B2B", "#ADFF2F"])   # repo untouched
+
+    def test_remote_row_steps_and_d_restores(self):
+        self.seed()
+        async def s(app, pilot, h):
+            await h.press("h")
+            await h.wait_screen("ThemeConfigScreen")
+            idx = next(i for i, a in enumerate(app.action_ids) if a.key == "r")
+            app._activate_action(idx)                                   # step the remote row
+            self.assertIn("#EE2B2B", self.lane_label(h, "remote"))      # Green Yellow -> Fire Red
+            await h.press("d")
+            self.assertIn("#ADFF2F", self.lane_label(h, "remote"))      # restored
+            self.assertIn("#EE2B2B", self.lane_label(h, "local"))
+        self.run_picker(s)
+        import json
+        saved = json.loads((self.themes / "remote-theme.json").read_text())
+        self.assertEqual(saved["theme"]["accent_color"], "#ADFF2F")
+        self.assertEqual(self.repo_accents(), ["#EE2B2B", "#ADFF2F"])
+
+
 if __name__ == "__main__":
     unittest.main()

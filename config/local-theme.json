@@ -1,9 +1,9 @@
 {
-  "_comment": "Sky-blue theme for LOCAL MLX sessions. Applied via per-session settings overlay — never written to user's persistent ~/.claude/settings.json.",
-  "_contract": "Theme accent color #00BFFF (sky blue). Provides session-scoped identity markers for launcher to inject via --settings.",
+  "_comment": "Fire-red theme for LOCAL MLX sessions (user 2026-10-14; the file was sky blue before 0.34.12 and the slug predates the colour). Applied via per-session settings overlay — never written to user's persistent ~/.claude/settings.json.",
+  "_contract": "Theme accent color #EE2B2B (fire red). Provides session-scoped identity markers for launcher to inject via --settings.",
   "theme": {
     "name": "local-sky",
-    "accent_color": "#66F298",
+    "accent_color": "#EE2B2B",
     "session_emoji": "🦾",
     "identity_label": "Local inference session",
     "supported_surfaces": [
@@ -15,7 +15,7 @@
       "native_ascii_artwork",
       "managed_announcements"
     ],
-    "border_color": "#7EDA9F",
+    "border_color": "#CB4E4E",
     "_border_color_note": "Prompt-input outline: the accent at the SAME lightness, saturation 55% (user 2026-10-14: as bright as the accent, less saturated, not dark)."
   },
   "fallback": {

@@ -664,7 +664,7 @@ class Picker(App):
                     rows.add_option(Option(f"    {box}{obj.label}", id=f"i:{obj.id}"))
                     self.row_ids.append(("item", obj.id))
 
-        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.RuntimeManagerScreen, m.APIKeysScreen)):
+        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.RuntimeManagerScreen, m.APIKeysScreen, m.ThemeConfigScreen)):
             rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
         target = keep or (f"i:{sm.accordion.selected_id}" if sm.accordion and sm.accordion.selected_id else None)
         if target:
@@ -687,6 +687,13 @@ class Picker(App):
             # Display shortcut as uppercase per R8 requirement
             display_key = a.key.upper()
             actions_list.add_option(Option(f"  {display_key}) {label}{enabled_str}", id=f"a:{len(self.action_ids)-1}"))
+
+        # Focus/highlight contract (user 2026-10-15, measured): the actions list must show a
+        # highlighted row as soon as it renders — rebuilding options resets Textual's
+        # highlight to None, and with none set, left/right/enter do nothing until the user
+        # presses down first. That is why the theme screen's arrows were dead on arrival.
+        if actions_list.option_count and actions_list.highlighted is None:
+            actions_list.highlighted = 0
 
         status = "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies"
         waiting = self._waiting_for() if hasattr(self, "_loading") else None
@@ -892,12 +899,6 @@ class Picker(App):
                     self._step_action(idx, +1 if key == "right" else -1)
                     event.stop()
                     return
-                else:
-                    # No step for this action - delegate to screen model for color cycling
-                    if hasattr(sm, 'handle_key'):
-                        if sm.handle_key(key):
-                            event.stop()
-                            return
             # Handle group expand/collapse when on a group row (only when rows list is focused)
             rows_list = self.query_one("#rows", OptionList)
             if self.focused is rows_list:
@@ -914,27 +915,13 @@ class Picker(App):
                         event.stop()
                         return
                 elif h and h[0] == "item" and sm.accordion is not None:
-                    # For items, delegate left/right to screen model for cycling colors
-                    # Left arrow on item with open group also collapses the group
+                    # Left arrow on an item with its group open collapses the group
                     if key == "left" and sm.accordion.open_group:
                         g = sm.accordion.open_group
                         sm.accordion.collapse()
                         self.render_model(keep=f"g:{g}")
                         event.stop()
                         return
-                    else:
-                        # Delegate to screen model's handle_key for cycling colors
-                        if hasattr(sm, 'handle_key'):
-                            if sm.handle_key(key):
-                                event.stop()
-                                return
-
-                else:
-                    # Delegate to screen model's handle_key for cycling colors
-                    if hasattr(sm, 'handle_key'):
-                        if sm.handle_key(key):
-                            event.stop()
-                            return
 
         if key == "escape" or (len(key) == 1 and key.isalpha() and key.islower()):
             keep = self._highlighted()

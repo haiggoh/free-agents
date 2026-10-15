@@ -1,3 +1,47 @@
+## [0.35.0] — 2026-10-15
+
+### Fixed — the theme color picker now actually cycles (it is the effort/temperature stepper)
+
+- The two lane rows are settings rows like effort and temperature (user spec 2026-10-15):
+  left/right arrows step the accent, Enter and mouse click step forward, both wrap through
+  the whole palette. The previous lane-select + delegated-arrow design never fired on a
+  freshly opened screen: rebuilding a screen's options resets Textual's highlight to None,
+  and the arrow handler requires one — every screen now highlights its first action row on
+  render, so ←/→/Enter work immediately everywhere.
+- Labels spell out the color name (accessibility), render the hex in the colour it names,
+  and keep a background swatch block: `🦾 Local: Fire Red #EE2B2B ▮`
+- The palette gained Green Yellow (#ADFF2F, the remote default) so both lanes' shipped
+  defaults are reachable by cycling; presets live in ONE module constant (`THEME_PRESETS`)
+  — the 0.34.9 duplicate-Fire-Red bug came from three drifting inline copies
+
+### Fixed — the picker no longer writes into the repo when tested
+
+- The theme config location is overridable (`LA_THEME_CONFIG_DIR`); the pilot tests seed a
+  temp copy and cycle freely — 0.34.13 shipped Mint Green as the local default because live
+  testing wrote cycled colours into `config/local-theme.json`
+- Shipped defaults restored: local Fire Red (#EE2B2B), remote green-yellow (#ADFF2F)
+
+### Changed — housekeeping
+
+- Removed the accordion remnant on the theme screen (and its "(nothing to show here yet)"
+  placeholder row), the unreachable `handle_key` enter branch, and the arrow-delegation
+  branches in `Picker.on_key` (no screen claims arrows via handle_key any more)
+- New pilot tests pin the interaction, the labels, and the repo-untouched guarantee
+- CHANGELOG repaired: duplicate [0.34.10] removed, missing [0.34.12] section restored,
+  0.34.8/0.34.9 order fixed; `csl --help` key legend updated (h = Theme colors on Home);
+  stale `.launchd-csl-salvage.patch` removed from the repo root
+
+### Changed — NVIDIA lane: model caveat and default order (user 2026-10-15)
+
+- Nemotron 3 Ultra's info-box note and README entry gain a caveat, parallel to Super's: it
+  can act rash — presenting untested work as done — and struggles with complex,
+  loosely-scoped problems; scope asks tightly and verify its "done" (Super takes these
+  shortcuts even more)
+- Default NVIDIA order in the session picker: GLM 5.3 Flash (thinking) → GLM 5.3 (thinking)
+  → Nemotron 3 Ultra (thinking) → Nemotron 3 Super (thinking) → Laguna XS 2.1, then the
+  non-thinking variants in the same relative order; remaining visible models follow, the
+  hidden broken rows last
+
 ## [0.34.13] — 2026-10-14
 
 ### Fixed — Theme color picker with left/right/Enter cycling (Nemotron Ultra)
@@ -12,7 +56,7 @@
 - Fixed session_picker.py to delegate left/right/Enter to ThemeConfigScreen.handle_key
 - Added Enter key support in ThemeConfigScreen.handle_key
 
-## [0.34.11] — 2026-10-14
+## [0.34.12] — 2026-10-14
 
 ### Changed — Fire Red is the default local session accent color
 
@@ -30,33 +74,19 @@
 - Accordion now properly initializes and expands local colors by default
 - Color swatches use background color (on #HEX) for highlight persistence
 
-## [0.34.10] — 2026-10-14
+> The changes above were originally filed under a "0.34.11" heading — this file had no 0.34.12
+> section until 0.35.0 repaired it. They are what the v0.34.12 tag shipped.
 
-### Fixed — Remote theme uses correct session emoji (📡)
+## [0.34.11] — 2026-10-14
 
-- `remote-theme.json` now sources its `session_emoji` from the canonical `emoji.sh` definitions
-  rather than hardcoding the outdated 🌐 globe emoji
-- The theme's `session_emoji` is now 📡 (matching `SESSION_EMOJI_FREE_API` from emoji.sh)
-- Fallback entry correctly uses ❓ for unknown sessions
+### Changed — Theme Colors picker interaction reworked (shipped with manifest 0.34.10)
 
-### Changed — Fire Red is now the default local session accent color
-
-- Local theme default changed from Sky Blue (#00BFFF) to Fire Red (#EE2B2B)
-- Remote theme remains green-yellow (#ADFF2F)
-- Default border colors updated to match (local: #CB4E4E, remote: #A3D05E)
-
-### Added — Expanded color palette with 11 presets per lane
-
-- New colors: Deep Red (#990000), Coral Red (#F55F50), Fire Red (#EE2B2B), Mint Green (#66F298)
-- Renamed: Gold → Yellow, Medium Spring Green → Spring Green
-- Reordered for logical cool-to-warm visual progression (11 presets per lane)
-
-### Changed — Theme Colors picker improvements
-
-- Accordion-based color selection with background-colored swatches (on #HEX)
-- Swatches persist through Textual's selection highlight
-- Left/right arrows cycle through presets per lane
-- Enter selects a color, l/r cycles presets, d restores defaults
+- Interaction moved to lane-select (`l`/`r`) + left/right cycling "per user feedback"; the
+  accordion color list kept for display
+- Remote accent briefly switched to Coral Red (#F55F50) — reverted in 0.34.12
+- Remote `session_emoji` corrected to 📡, fallback ❓
+- ⚠️ Shipped with `.claude-plugin/plugin.json` still reading 0.34.10 and a test asserting the
+  Fire Red default its own theme file did not yet carry (suite red at the tag); corrected in 0.34.12
 
 ## [0.34.10] — 2026-10-14
 
@@ -85,6 +115,23 @@
 - Swatches persist through Textual's selection highlight
 - Left/right arrows cycle through presets per lane
 - Enter selects a color, l/r cycles presets, d restores defaults
+
+> Prepared but never tagged — the number was consumed by 0.34.11's release; its content shipped
+> across 0.34.11–0.34.12. Kept (single copy) as the record of what 0.34.10 was meant to be.
+
+## [0.34.9] — 2026-10-14
+
+### Added — Expanded color palette in Theme Colors picker
+
+- Added three new red variants: Deep Red (#990000), Coral Red (#F55F50), Fire Red (#EE2B2B)
+- Added Mint Green (#66F298) between Cyan and Deep Red
+- Renamed Gold → Yellow (#FFD700), Medium Spring Green → Spring Green (#00FA9A)
+- Total: 11 presets per lane (was 8) for finer color selection
+
+### Changed — Color order reorganized for logical visual progression
+
+- Colors now flow: Sky Blue → Cyan → Mint Green → Deep Red → Coral Red → Fire Red → Orange Red → Yellow → Magenta → Medium Purple → Spring Green
+- Better visual flow from cool to warm tones
 
 ## [0.34.8] — 2026-10-14
 
@@ -107,8 +154,6 @@
 - Color swatches now use background color (`on #HEX`) via `Text.assemble`
   so they remain visible when the row is highlighted in light blue
 - Previously the foreground color was overridden by the selection highlight
-
-## [0.34.9] — 2026-10-14
 
 ### Added — Expanded color palette in Theme Colors picker
 

@@ -50,7 +50,7 @@ Modes:
 
 Picker keys: arrows move, Enter opens a group / launches, l Local, r Remote, s switch lane,
 e effort, a auto-mode, t telemetry, p queued-prompt hook, w watcher, m MCPs, k API keys,
-v Rapid-MLX runtime, n NVIDIA rate limiter, h trial rows (Remote), b Back, q Quit.
+v Rapid-MLX runtime, n NVIDIA rate limiter, h Theme colors (Home), trial rows (Remote), b Back, q Quit.
 Effort chosen in a picker is remembered in config/session-menu.local.json.
 
 Flags:

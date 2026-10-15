@@ -72,6 +72,8 @@ class _StubbedEnv(unittest.TestCase):
         self.cfg.mkdir()
         self.keys = t / "api_keys"
         self.keys.mkdir(mode=0o700)
+        self.themes = t / "themes"
+        self.themes.mkdir()
         stubs = t / "stubs"
         stubs.mkdir()
         for name, text in (("csl", LOCAL_INV), ("remote-session.sh", REMOTE_INV),
@@ -87,7 +89,8 @@ class _StubbedEnv(unittest.TestCase):
                     "LA_DOWNLOADER": str(stubs / "download-models.sh"),
                     "LA_URL_OPENER": str(stubs / "url-opener"),
                     "LA_API_KEYS_DIR": str(self.keys),
-                    "LA_SESSION_MENU_CONFIG_DIR": str(self.cfg)}
+                    "LA_SESSION_MENU_CONFIG_DIR": str(self.cfg),
+                    "LA_THEME_CONFIG_DIR": str(self.themes)}
 
     def launches(self):
         if not self.log.exists():
