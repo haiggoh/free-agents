@@ -168,13 +168,18 @@ assert_grep 'unrecognised option' "$out" 'an unknown flag names the problem'
 
 echo "== 2. --inventory is exactly the on-disk, session-capable roster =="
 inv="$(csl -- --inventory)"
-assert_eq "${#ON_DISK_SESSION_MODELS[@]}" "$(printf '%s\n' "$inv" | grep -c .)" \
+# Launchable rows only: since 0.36.0 the inventory ALSO reports registered-but-missing models as
+# "#missing<TAB>alias<TAB>subdir" so the picker can offer to retire them (user 2026-10-15).
+assert_eq "${#ON_DISK_SESSION_MODELS[@]}" "$(printf '%s\n' "$inv" | grep -v '^#missing' | grep -c .)" \
   "inventory lists ${#ON_DISK_SESSION_MODELS[@]} models"
 assert_eq "$SESSION_RAPID	rapid	$SESSION_RAPID_EFFORT	$SESSION_RAPID_ROLE	" \
   "$(printf '%s\n' "$inv" | grep "^$SESSION_RAPID	")" 'a Rapid row carries backend, configured effort and role'
 assert_eq "$SESSION_VLLM	vllm	$SESSION_VLLM_EFFORT	$SESSION_VLLM_ROLE	" \
   "$(printf '%s\n' "$inv" | grep "^$SESSION_VLLM	")" 'a vllm row carries backend, configured effort and role'
-assert_no_grep "$ABSENT	" "$inv" 'a registered model with no weights is omitted'
+# Whole-line test (assert_no_grep is grep -F, where a leading ^ would be a literal character).
+if printf '%s\n' "$inv" | grep -q "^$ABSENT	"; then check 1 'a registered model with no weights is not listed as launchable'
+else check 0 'a registered model with no weights is not listed as launchable'; fi
+assert_grep "#missing	$ABSENT	$ABSENT_DIR" "$inv" 'and is reported as #missing for the cleanup offer'
 assert_no_grep "$DISPATCH_ONLY	" "$inv" 'a dispatch-only backend (no /v1/messages) is omitted'
 
 echo "== 3. --dry-run shows the roster and the toggle defaults =="

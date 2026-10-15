@@ -175,6 +175,25 @@ la_register() {
   LA_RAPID_SPEC_CONFIG[$alias]="${12:-}"
 }
 
+# la_derive_mtp_variants -> for every registration carrying a speculative config (rapid_spec_json),
+# register <alias>-no-mtp: the same weights and settings with NO drafter, so the picker and the
+# tournament can compare a model with and without speculative decoding (user 2026-10-06). The empty
+# spec makes hotswap pass --no-spec-decode, and its different spec hash keeps the two on separate
+# servers. LA_MTP_VARIANTS=0 turns this off; an explicit registration of the name always wins.
+la_derive_mtp_variants() {
+  [ "${LA_MTP_VARIANTS:-1}" = "0" ] && return 0
+  local a v
+  for a in "${LA_ALIASES[@]:-}"; do
+    [ -n "$a" ] && [ -n "${LA_RAPID_SPEC_CONFIG[$a]:-}" ] || continue
+    case "$a" in *-no-mtp) continue ;; esac
+    v="$a-no-mtp"
+    [ -n "${LA_SUBDIR[$v]+x}" ] && continue
+    la_register "$v" "${LA_SUBDIR[$a]}" "${LA_SERVE_DECLARED[$a]}" "${LA_TOOLP[$a]}" \
+      "${LA_REASONP[$a]}" "${LA_THINK[$a]}" "${LA_SPOOF[$a]}" "${LA_EFFORT[$a]}" \
+      "${LA_ROLES[$a]:-}" "${LA_REPO[$a]:-}" "${LA_SIZE[$a]:-}" ""
+  done
+}
+
 # --- retired aliases: a rename must not fail silently -------------------------
 # la_retired <old-alias> <replacement-alias-or-note>
 # When an alias goes away (typically because the thing it named became the default), a bare
@@ -680,6 +699,7 @@ la_load_config() {
   : "${LA_COUNCIL_NOTE:=}"        # optional extra line appended to the agent prompt (e.g. a council rule)
   # Load derived catalogue for context/autocompaction defaults
   la_load_derived_catalogue
+  la_derive_mtp_variants
   la_finalize_roles
   # Resolve every generic `serve` value to a concrete backend. Must run AFTER the defaults above,
   # since LA_DEFAULT_MLX_BACKEND is one of them. A failure here is a config error, not a warning:

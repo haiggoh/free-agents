@@ -559,6 +559,7 @@ if [ "${INVENTORY:-0}" = "1" ]; then
     # Backend = what registration would pick: "rapid (auto)" | "omlx (auto)" | "llama_cpp (auto)",
     # or "unsupported (auto)" when no installed backend can build the architecture.
     case "${_auto_backend[$folder]:-mlx}" in
+      drafter)     continue ;;    # a speculative-decoding helper, loaded BY a target model
       mlx|unknown) _shown="rapid (auto)" ;;
       *)           _shown="${_auto_backend[$folder]} (auto)" ;;
     esac

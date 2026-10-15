@@ -432,5 +432,27 @@ fi
 
 # ===========================================================================
 echo
+echo "== MTP on/off variants (waypoint free-agents-0-25-7-wire-la, user 2026-10-06) =="
+# Every registration with a speculative config also yields <alias>-no-mtp: same weights, no
+# drafter, so the tournament can compare the two. LA_MTP_VARIANTS=0 turns the derivation off.
+VAR=$(cd "$SB" && HOME="$SB/home" bash -c '. config/config-lib.sh; la_load_config >/dev/null 2>&1 || exit 9
+  la_lookup rapid-qwen-mtp-no-mtp || { echo MISSING; exit 0; }
+  printf "dir=%s spec=[%s] serve=%s spoof=%s\n" "${LA_SUBDIR[rapid-qwen-mtp-no-mtp]}" "$LA_CUR_RAPID_SPEC_CONFIG" "$LA_CUR_SERVE" "$LA_CUR_SPOOF"')
+assert_grep "dir=FakeModel spec=[] serve=rapid" "$VAR" "rapid-qwen-mtp-no-mtp exists: same weights, empty spec"
+NONE=$(cd "$SB" && HOME="$SB/home" bash -c '. config/config-lib.sh; la_load_config >/dev/null 2>&1; la_lookup rapid-qwen-fast-no-mtp && echo PRESENT || echo ABSENT')
+assert_grep "ABSENT" "$NONE" "no variant for a registration without a speculative config"
+OFF=$(cd "$SB" && HOME="$SB/home" LA_MTP_VARIANTS=0 bash -c '. config/config-lib.sh; la_load_config >/dev/null 2>&1; la_lookup rapid-qwen-mtp-no-mtp && echo PRESENT || echo ABSENT')
+assert_grep "ABSENT" "$OFF" "LA_MTP_VARIANTS=0 disables the variants"
+ARGV_FILE="$SB/argv-nomtp.json"; rm -f "$ARGV_FILE"
+# (An earlier section appends a spec to rapid-qwen, so it is NOT a valid "no spec" control here;
+# rapid-qwen-fast never gets one.) Earlier sections leave stubs on every test port; free them
+# with the suite's own marker-matched reaper so this launch has a port.
+reap_stale_stubs 2>/dev/null; sleep 1
+OUT=$(run local-llm-hotswap.sh rapid-qwen-mtp-no-mtp)
+printf '%s' "$OUT" | grep -qF "SUCCESS_PORT="; check $? "the -no-mtp variant launches (SUCCESS_PORT)"
+ARGS=$(cat "$ARGV_FILE" 2>/dev/null)
+assert_grep "--no-spec-decode" "$ARGS" "the -no-mtp variant launches with --no-spec-decode"
+if printf '%s' "$ARGS" | grep -qF -- "--speculative-config"; then check 1 "the -no-mtp variant carries no speculative config"; else check 0 "the -no-mtp variant carries no speculative config"; fi
+
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
