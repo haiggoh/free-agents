@@ -134,6 +134,9 @@ _FAMILY_RULES = [
     ("Kat Coder", r"kat[-_ ]|\bkat\b"),
     ("Meta", r"muse|glimmer"),
     ("Granite", r"granite"),
+    # Poolside Laguna AFTER the vendor rules above: "laguna" collides with nothing, but
+    # the two variants (XS 33B, S 118B MoE) belong in ONE group (user 2026-10-15).
+    ("Poolside Laguna", r"laguna"),
 ]
 
 
@@ -236,7 +239,7 @@ class Settings:
     telemetry: bool = False
     stop_hook: bool = False          # queued-prompt hook OFF by default (user, 0.22.3)
     watcher: bool = False
-    enable_mcp: bool = False
+    enable_mcp: bool = True   # default ON (user 2026-10-15): new users missing MCPs they never disabled is worse than the reverse
     include_trials: bool = True      # interactive visibility only; direct CLI keeps its guard
     local_capable_shown: bool = False
     show_broken: bool = False        # unworking models; in-memory, like the CLI flag

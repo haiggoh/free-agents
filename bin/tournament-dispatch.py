@@ -67,6 +67,10 @@ MODELS = [
     dict(alias="llama-scout", dir="Llama-4-Scout-17B-16E-Instruct-4bit", serve="mlx_lm",
          tool_parser=None, reasoning_parser=None, thinking=None, large=True,
          role="utility (dispatch-only via mlx_lm.server; served under model-dir id)"),
+    dict(alias="laguna-fast", dir="laguna-s2.1-oq4e-fast", serve="mlx_lm",
+         tool_parser=None, reasoning_parser=None, thinking="true", large=True,
+         role="strongest local contender so far (118B MoE / 8B active; suspected thinking — "
+              "the API route shows stray think-tags; parsers UNKNOWN, probe raw output)"),
 ]
 
 def now(): return time.monotonic()

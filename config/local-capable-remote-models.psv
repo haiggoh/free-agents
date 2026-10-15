@@ -54,8 +54,9 @@ nvidia|moonshotai/kimi-k3|remote-preferred||nvidia-nim||No MLX artifact; remote-
 # DeepSeek V4 Flash — no MLX artifact; remote-only
 nvidia|deepseek-ai/deepseek-v4-flash-0731|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
 
-# Laguna XS 2.1 (Poolside) — no MLX artifact
-nvidia|poolside/laguna-xs-2.1|remote-preferred||nvidia-nim||No MLX artifact; remote-only route
+# Laguna XS 2.1 (Poolside) — an OptiQ MLX artifact now exists (2026-10-15); remote stays
+# preferred until the local route is proven. 33B/3B active, 256K context (poolside.ai + NIM docs).
+nvidia|poolside/laguna-xs-2.1|remote-preferred|mlx-community/Laguna-XS-2.1-OptiQ-4bit|mlx-optiq|21|OptiQ MLX artifact exists (21 GB); 256K context documented 2026-10-15
 
 # gpt-oss-20b — OpenAI model via NIM; no local equivalent
 nvidia|openai/gpt-oss-20b|local-capable||nvidia-nim|10.0|auto-estimated 18 GB at 4bit: ~18 GB (weights 10 + 8 overhead) fits the 96 GB budget with room to spare — comfortably local, no further math needed [prior note, size math does not refute it: No local equivalent; OpenAI-native model]

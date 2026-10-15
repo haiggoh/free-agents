@@ -258,7 +258,7 @@ entries:
   - folder: "laguna-s2.1-oq4e-fast"
     entry_type: standalone_model
     session_model: true
-    model_family: "Laguna S 2.1"
+    model_family: "Poolside Laguna"
     base_model: "poolside/Laguna-S-2.1"
     format: "MLX oQ4e fast"
     modalities: [text]
@@ -634,3 +634,18 @@ entries:
     extended_autocompaction_tokens: 1000000
     confidence: high
     notes: "128-expert MoE with 4 active experts. YaRN factor 128 extends 8192 base to 1M. mlx-vlm required for vision."
+
+  # 46
+  - folder: "laguna-xs2.1-optiq-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Poolside Laguna"
+    base_model: "poolside/Laguna-XS-2.1"
+    format: "MLX OptiQ 4-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    autocompaction_tokens: 200000
+    confidence: high
+    notes: >-
+      33B params / 3B active / 256K context (poolside.ai + NVIDIA NIM docs, 2026-10-15).
+      Auto-compact at 200k. Download via model-catalog.local.psv (mlx-optiq runtime).

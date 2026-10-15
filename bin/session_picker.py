@@ -304,7 +304,7 @@ class Picker(App):
             telemetry=os.environ.get("CSL_TELEMETRY", "0") == "1",
             stop_hook=os.environ.get("CSL_STOP_HOOK", "0") == "1",   # OFF by default (0.22.3)
             watcher=os.environ.get("CSL_WATCH", "0") == "1",
-            enable_mcp=os.environ.get("LA_ENABLE_MCP", "0") == "1",
+            enable_mcp=os.environ.get("LA_ENABLE_MCP", "1") == "1",   # default ON (user 2026-10-15); explicit env wins
             include_trials=not flags.exclude_trials,
             local_capable_shown=flags.local_capable_shown or os.environ.get("CSL_LOCAL_CAPABLE") == "1",
             on_effort_saved=self._save_effort,

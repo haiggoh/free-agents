@@ -1,3 +1,31 @@
+## [0.35.4] — 2026-10-15
+
+### Added — Poolside Laguna locally: XS downloads, S made downloadable, one picker group
+
+- Laguna XS 2.1 facts pinned from the source (poolside.ai + NVIDIA NIM docs): 33B params /
+  3B active / 256K context — the remote roster row's auto-compact window corrected `1m` →
+  `200k` (it claimed 1M for a 256K model, deferring compaction past the model's real
+  limit), and Laguna XS moved below the non-thinking NVIDIA models in the picker order
+- New rows in the SHIPPED default catalog (`model-catalog.psv`): Laguna XS 2.1 OptiQ 4-bit
+  (21.0 GB, mlx-optiq, optional) and Laguna S 2.1 oQ4e-fast (63.3 GB, headline contender,
+  optional) + session entries (XS: 262144/200000; S-fast already carried its own)
+- Laguna S 2.1 oQ4e-**fast** — already on disk, never assessed — is now the catalog's
+  headline local contender (118B MoE / 8B active, 1M context user-confirmed): status
+  `gated` → `candidate`, label carries the honest RAM floor (~64 GB weights, ~73 GB+
+  free unified memory), and it joins the local model tournament as a probe candidate
+  (parsers unknown, suspected thinking). The plain oQ4e variant was removed from the
+  catalog — identical quality, the -fast build supersedes it
+- Both variants group as **Poolside Laguna** in the local picker (new family rule; S's
+  fragmented "Laguna S 2.1" family unified into it)
+- The local-capable registry's "no MLX artifact; remote-only" verdict for Laguna XS is
+  superseded: the OptiQ artifact exists (21 GB); remote stays preferred until proven
+
+### Changed — MCPs enabled by default on both lanes
+
+- `enable_mcp` defaults ON (user 2026-10-15): a new user missing MCPs they never disabled
+  is worse than the reverse; the menu rows already show the live state (MCPs:
+  ENABLED/DISABLED)
+
 ## [0.35.3] — 2026-10-15
 
 ### Fixed — the two lane rows' swatches align

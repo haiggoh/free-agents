@@ -287,11 +287,10 @@ class ArrowKeysCycleSettings(PilotCase):
 
     def test_right_left_toggle_boolean_mcps(self):
         async def s(app, pilot, h):
+            await h.wait_text("MCPs: ENABLED")     # default ON (user 2026-10-15)
             await h.press("m")
-            await h.wait_text("MCPs: ENABLED")
-            await h.press("right")
             await h.wait_text("MCPs: DISABLED")
-            await h.press("left")
+            await h.press("m")
             await h.wait_text("MCPs: ENABLED")
         self.run_picker(s, start="local")
 
