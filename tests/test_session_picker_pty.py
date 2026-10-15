@@ -286,6 +286,27 @@ class ThemeScreenColors(PilotCase):
         self.assertEqual(saved["theme"]["accent_color"], "#ADFF2F")
         self.assertEqual(self.repo_accents(), ["#EE2B2B", "#ADFF2F"])
 
+    def test_lane_row_prompt_keeps_rich_text_styles(self):
+        """User 2026-10-15: swatch and hex colour must RENDER. render_model used to
+        f-string the label into the Option prompt, flattening the rich Text to a plain
+        str — the styles existed on the label object and still never displayed, which
+        str()-based assertions structurally could not detect."""
+        self.seed()
+        async def s(app, pilot, h):
+            from rich.text import Text
+            await h.press("h")
+            await h.wait_screen("ThemeConfigScreen")
+            from textual.widgets import OptionList
+            ol = app.query_one("#actions", OptionList)
+            idx = next(i for i, a in enumerate(app.action_ids) if a.key == "l")
+            prompt = ol.get_option_at_index(idx).prompt
+            self.assertIsInstance(prompt, Text,
+                                  f"prompt flattened to {type(prompt).__name__}: {prompt!r}")
+            styles = " ".join(str(span.style) for span in prompt.spans)
+            self.assertIn("on #EE2B2B", styles, f"no swatch style in spans: {styles!r}")
+            self.assertIn("#EE2B2B", styles, f"hex not rendered in its own colour: {styles!r}")
+        self.run_picker(s)
+
 
 if __name__ == "__main__":
     unittest.main()

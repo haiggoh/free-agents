@@ -680,13 +680,21 @@ class Picker(App):
         for a in sm.actions():
             if a.section == "hidden":
                 continue
-            label = a.label if a.enabled else f"{a.label}"
             # Store action object reference
             self.action_ids.append(a)
             enabled_str = "" if a.enabled else "  —"
-            # Display shortcut as uppercase per R8 requirement
-            display_key = a.key.upper()
-            actions_list.add_option(Option(f"  {display_key}) {label}{enabled_str}", id=f"a:{len(self.action_ids)-1}"))
+            # Display shortcut as uppercase per R8 requirement. Rich labels (the theme
+            # rows) must reach the Option as Text: an f-string here calls str() on the
+            # label and flattens every style — the 0.35.0 swatch/hex-colour bug
+            # (user 2026-10-15; the f-string predates the theme work entirely).
+            prompt = Text(f"  {a.key.upper()}) ")
+            if isinstance(a.label, Text):
+                prompt += a.label            # rich Text + Text keeps the spans
+            else:
+                prompt.append(str(a.label))
+            if enabled_str:
+                prompt.append(enabled_str)
+            actions_list.add_option(Option(prompt, id=f"a:{len(self.action_ids)-1}"))
 
         # Focus/highlight contract (user 2026-10-15, measured): the actions list must show a
         # highlighted row as soon as it renders — rebuilding options resets Textual's

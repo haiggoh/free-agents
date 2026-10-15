@@ -1,3 +1,20 @@
+## [0.35.1] — 2026-10-15
+
+### Fixed — theme row visuals actually render now (the 0.35.0 errata)
+
+- `render_model` built each action row's prompt with an f-string, which calls `str()` on
+  the label and flattened the rich Text — name styling, hex-in-its-own-colour and the
+  background swatch existed on the label object and never displayed (the pattern predates
+  the theme work; the accordion-era swatches likely never rendered either). Prompts are
+  now assembled as rich Text, preserving every span; a style-level pilot test asserts the
+  `on #EE2B2B` swatch and the hex colour survive into the Option prompt — a check the
+  str()-based tests structurally could not make
+- Known wart, unchanged: each copy of the plugin (repo checkout, version-scoped cache)
+  persists theme colours and settings into its OWN config dir; colours chosen in the cache
+  are reset by the next version install, and the copies do not see each other's changes
+  (only `~/.claude/themes/<slug>.json` is shared, last launch wins). Moving user
+  theme/settings persistence out of the plugin tree is future work
+
 ## [0.35.0] — 2026-10-15
 
 ### Fixed — the theme color picker now actually cycles (it is the effort/temperature stepper)
@@ -44,6 +61,11 @@
 - Laguna XS 2.1's stray think-tag is reinterpreted (user 2026-10-15): likely a reasoning
   tail — Laguna is probably a thinking model whose thinking blocks the harness does not
   recognize
+
+> ⚠️ **Errata (2026-10-15, shortly after release):** the label visuals above — hex in its
+> own colour, background swatch — do NOT display in 0.35.0: `render_model` flattens
+> rich-text labels to plain strings when building row prompts (`f"...{label}"`, a pattern
+> predating this release). The cycling itself works. Fix ships as 0.35.1.
 
 ## [0.34.13] — 2026-10-14
 
