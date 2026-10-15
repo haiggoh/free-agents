@@ -13,6 +13,8 @@ Backends (the `serve` value a registration should declare):
   omlx         Rapid-MLX cannot build it but oMLX's bundled mlx_lm or mlx_vlm can — a per-model
                hard dependency, not a preference (measured 2026-10-15: rapid 0.16.1 rejects
                `laguna`, oMLX serves it)
+  drafter      a speculative-decoding helper (model_type *_mtp / *_assistant) — loaded by a target
+               model's spec config, never served alone
   unsupported  neither engine knows the architecture
   unknown      no readable config.json / model_type
 
@@ -155,6 +157,10 @@ def detect(folder: Path, rapid: dict | None, omlx: dict | None) -> tuple[str, st
         model_type = None
     if not isinstance(model_type, str) or not model_type:
         return "unknown", "no readable config.json model_type"
+    if model_type.lower().endswith(("_mtp", "_assistant")):
+        # oMLX's helper rule (omlx/model_discovery.py): a speculative-decoding drafter, loaded BY
+        # a target model's spec config — never served on its own.
+        return "drafter", f"model_type={model_type} is a speculative-decoding drafter, not a model"
     if rapid is None:
         # Absence of evidence about rapid is not evidence against it: keep the default.
         return "mlx", f"model_type={model_type}; rapid-mlx could not be inspected, keeping the default"

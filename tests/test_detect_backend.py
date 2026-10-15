@@ -95,6 +95,14 @@ class DetectBackend(unittest.TestCase):
         self.assertEqual(v["backend"], "unsupported")
         self.assertIn("alien_arch", v["reason"])
 
+    def test_speculative_drafter_sidecar_is_not_a_model(self):
+        # Qwen3.8-27B-MTP-4bit (228 MB, model_type qwen3_5_mtp) is the DRAFTER qwen-3.8-operator
+        # loads through its rapid_spec_json, not a session model. oMLX's own rule: a model_type
+        # ending in _mtp or _assistant marks a speculative-decoding helper.
+        for name, mt in (("q-mtp", "qwen3_5_mtp"), ("g-asst", "gemma4_assistant")):
+            v = self.verdicts(self.folder(name, mt))[name]
+            self.assertEqual(v["backend"], "drafter", mt)
+
     def test_missing_config_is_unknown_not_a_guess(self):
         v = self.verdicts(self.folder("empty"))["empty"]
         self.assertEqual(v["backend"], "unknown")
