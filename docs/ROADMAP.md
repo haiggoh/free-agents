@@ -703,10 +703,20 @@ plan's engine policy should be read accordingly.
 
 ### Constraints
 
-Add as an **isolated optional** backend. Must not disturb Rapid-MLX dependencies and must never become
-a silent default — `serve=` resolution stays explicit, exactly as `serve=vllm` and `serve=llama_cpp` do.
-Test a non-speculative baseline before MTP / DSpark / DFlash. The single-maintainer bus factor is a
-real risk for a load-bearing dependency and argues for keeping Rapid the default.
+Add as an **isolated** backend that must not disturb Rapid-MLX dependencies. oMLX must not become the
+**machine-wide** default (`LA_DEFAULT_MLX_BACKEND`, which generic `serve=mlx|auto` rows resolve to):
+Rapid stays that default. Test a non-speculative baseline before MTP / DSpark / DFlash. The
+single-maintainer bus factor is a real risk and is the reason Rapid stays the machine default.
+
+> **Corrected 2026-10-15 (user):** the earlier wording ("isolated **optional** backend… must never
+> become a silent default") assumed oMLX was only ever a performance choice. That premise is false:
+> some architectures load **only** on oMLX — measured: `laguna` (Laguna S 2.1) fails on rapid-mlx
+> 0.16.1 with `Model type laguna not supported` and runs on oMLX; `deepseek_v4` is likewise absent from
+> the mlx_lm registry rapid and vllm-mlx share. For those models oMLX is a **hard dependency**, and
+> the correct per-model backend is `serve=omlx`, chosen automatically by backend detection exactly as
+> GGUF artifacts get `serve=llama_cpp`. That is a visible per-model pin written into the registration
+> line, not a silent default. Necessity overrides the bus-factor preference; the preference only
+> decides the machine default and ties between backends that can all load a model.
 
 ---
 
