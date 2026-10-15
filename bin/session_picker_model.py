@@ -1004,7 +1004,7 @@ THEME_PRESETS = [
     ("#EE2B2B", "Fire Red"), ("#00BFFF", "Sky Blue"), ("#00FFFF", "Cyan"),
     ("#66F298", "Mint Green"), ("#990000", "Deep Red"), ("#F55F50", "Coral Red"),
     ("#FF4500", "Orange Red"), ("#FFD700", "Yellow"), ("#FF00FF", "Magenta"),
-    ("#9370DB", "Medium Purple"), ("#00FA9A", "Spring Green"), ("#ADFF2F", "Green Yellow"),
+    ("#9370DB", "Medium Purple"), ("#00FA9A", "Spring Green"), ("#ADFF2F", "Lime"),
 ]
 
 
@@ -1037,21 +1037,26 @@ class ThemeConfigScreen(Screen):
 
     def _lane_label(self, which: str):
         """Row label per user 2026-10-15: the color name spelled out (accessibility), the
-        hex rendered in the colour it names, and a swatch block."""
+        hex rendered in the colour it names, and a swatch block that holds a FIXED column —
+        the name field is padded to the palette's widest name so cycling never shifts it —
+        plus a thin slice in the derived border colour, previewing accent + border together."""
         theme = self.local_theme if which == "local" else self.remote_theme
         emoji = ec.SESSION_EMOJI_LOCAL_STR if which == "local" else ec.SESSION_EMOJI_FREE_API_STR
         accent = theme["theme"]["accent_color"]
         name = dict(THEME_PRESETS).get(accent.upper(), "custom")
+        width = max(len(n) for _, n in THEME_PRESETS)
+        border = theme["theme"].get("border_color", "")
         if RICH_AVAILABLE:
             return Text.assemble(
                 f"{emoji} {which.capitalize()}: ",
-                (name, "bold"),
+                (f"{name:<{width}}", "bold"),
                 " ",
                 (accent, accent),
                 "  ",
                 Text("    ", style=f"on {accent}"),
+                Text(" ", style=f"on {border}"),
             )
-        return f"{emoji} {which.capitalize()}: {name} {accent}"
+        return f"{emoji} {which.capitalize()}: {name:<{width}} {accent} + border {border}"
 
     def _set_accent(self, which: str, color: str):
         """setting() put: store the accent, re-derive the border, persist."""
@@ -1083,7 +1088,7 @@ class ThemeConfigScreen(Screen):
                 json.dumps(self.remote_theme, indent=2, ensure_ascii=False) + "\n")
 
     def _restore_defaults(self):
-        self.local_theme["theme"]["accent_color"] = "#EE2B2B"
+        self.local_theme["theme"]["accent_color"] = "#FFD700"
         self.remote_theme["theme"]["accent_color"] = "#ADFF2F"
         self._save_theme("local")
         self._save_theme("remote")

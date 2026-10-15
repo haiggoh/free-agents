@@ -1,3 +1,26 @@
+## [0.35.2] — 2026-10-15
+
+### Changed — Yellow is the default local session accent (user taste call)
+
+- Local default #EE2B2B (fire red) → #FFD700 (yellow), border re-derived (#C6B039);
+  `d` restore, theme file and tests updated to match
+
+### Fixed — swatches hold a fixed column and preview the border
+
+- The colour name is padded to the palette's widest name, so the hex, swatch and the new
+  thin border-colour slice no longer shift as names change length (user 2026-10-15)
+- Each swatch gains a thin slice in the derived prompt-input border colour, previewing
+  accent + border together
+- "Green Yellow" renamed to "Lime" — same colour (#ADFF2F), a more evocative name
+
+### Fixed — roster row-1 pin updated to the new NVIDIA order (the v0.35.1 suite gap)
+
+- test_remote_session pins roster row 1 as the Enter-default product decision; the 0.35.0
+  reorder moved it (GLM 5.3 Flash (thinking) is now the remote Enter-default — deliberate,
+  per the 2026-10-15 preference) and the full suite went red at v0.35.1's tag because the
+  pin still expected Ultra. Pin updated; suite green. (How it slipped: a chained command
+  reported the bash suite's exit 0 over pytest's failure.)
+
 ## [0.35.1] — 2026-10-15
 
 ### Fixed — theme row visuals actually render now (the 0.35.0 errata)

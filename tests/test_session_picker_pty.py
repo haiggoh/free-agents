@@ -250,24 +250,24 @@ class ThemeScreenColors(PilotCase):
         async def s(app, pilot, h):
             await h.press("h")
             await h.wait_screen("ThemeConfigScreen")
-            self.assertIn("Fire Red", self.lane_label(h, "local"))      # name spelled out
-            self.assertIn("#EE2B2B", self.lane_label(h, "local"))
+            self.assertIn("Yellow", self.lane_label(h, "local"))        # name spelled out
+            self.assertIn("#FFD700", self.lane_label(h, "local"))
             await h.press("right")
-            self.assertIn("Sky Blue", self.lane_label(h, "local"))      # right steps forward
+            self.assertIn("Magenta", self.lane_label(h, "local"))       # right steps forward
             await h.press("left")
-            self.assertIn("Fire Red", self.lane_label(h, "local"))      # left steps back
+            self.assertIn("Yellow", self.lane_label(h, "local"))        # left steps back
             await h.press("left")
-            self.assertIn("Green Yellow", self.lane_label(h, "local"))  # wraps to the last preset
+            self.assertIn("Orange Red", self.lane_label(h, "local"))    # keeps stepping back
             await h.press("enter")                                      # enter == right arrow
-            self.assertIn("Fire Red", self.lane_label(h, "local"))
+            self.assertIn("Yellow", self.lane_label(h, "local"))
             idx = next(i for i, a in enumerate(app.action_ids) if a.key == "l")
             app._activate_action(idx)                                   # what a row click routes to
-            self.assertIn("Sky Blue", self.lane_label(h, "local"))
+            self.assertIn("Magenta", self.lane_label(h, "local"))
         self.run_picker(s)
         import json
         saved = json.loads((self.themes / "local-theme.json").read_text())
-        self.assertEqual(saved["theme"]["accent_color"], "#00BFFF")     # persisted to the override
-        self.assertEqual(self.repo_accents(), ["#EE2B2B", "#ADFF2F"])   # repo untouched
+        self.assertEqual(saved["theme"]["accent_color"], "#FF00FF")     # persisted to the override
+        self.assertEqual(self.repo_accents(), ["#FFD700", "#ADFF2F"])   # repo untouched
 
     def test_remote_row_steps_and_d_restores(self):
         self.seed()
@@ -276,21 +276,21 @@ class ThemeScreenColors(PilotCase):
             await h.wait_screen("ThemeConfigScreen")
             idx = next(i for i, a in enumerate(app.action_ids) if a.key == "r")
             app._activate_action(idx)                                   # step the remote row
-            self.assertIn("#EE2B2B", self.lane_label(h, "remote"))      # Green Yellow -> Fire Red
+            self.assertIn("#EE2B2B", self.lane_label(h, "remote"))      # Lime -> Fire Red
             await h.press("d")
             self.assertIn("#ADFF2F", self.lane_label(h, "remote"))      # restored
-            self.assertIn("#EE2B2B", self.lane_label(h, "local"))
+            self.assertIn("#FFD700", self.lane_label(h, "local"))       # local default
         self.run_picker(s)
         import json
         saved = json.loads((self.themes / "remote-theme.json").read_text())
         self.assertEqual(saved["theme"]["accent_color"], "#ADFF2F")
-        self.assertEqual(self.repo_accents(), ["#EE2B2B", "#ADFF2F"])
+        self.assertEqual(self.repo_accents(), ["#FFD700", "#ADFF2F"])
 
     def test_lane_row_prompt_keeps_rich_text_styles(self):
-        """User 2026-10-15: swatch and hex colour must RENDER. render_model used to
-        f-string the label into the Option prompt, flattening the rich Text to a plain
-        str — the styles existed on the label object and still never displayed, which
-        str()-based assertions structurally could not detect."""
+        """User 2026-10-15: swatch, hex colour, border slice and fixed swatch column must
+        RENDER. render_model used to f-string the label into the Option prompt, flattening
+        the rich Text to a plain str — the styles existed on the label object and still
+        never displayed, which str()-based assertions structurally could not detect."""
         self.seed()
         async def s(app, pilot, h):
             from rich.text import Text
@@ -303,8 +303,14 @@ class ThemeScreenColors(PilotCase):
             self.assertIsInstance(prompt, Text,
                                   f"prompt flattened to {type(prompt).__name__}: {prompt!r}")
             styles = " ".join(str(span.style) for span in prompt.spans)
-            self.assertIn("on #EE2B2B", styles, f"no swatch style in spans: {styles!r}")
-            self.assertIn("#EE2B2B", styles, f"hex not rendered in its own colour: {styles!r}")
+            self.assertIn("on #FFD700", styles, f"no accent swatch in spans: {styles!r}")
+            self.assertIn("on #C6B039", styles, f"no border slice in spans: {styles!r}")
+            self.assertIn("#FFD700", styles, f"hex not rendered in its own colour: {styles!r}")
+            width_before = len(str(prompt))
+            app._activate_action(idx)                # step to Magenta (name 1 char longer)
+            prompt2 = ol.get_option_at_index(idx).prompt
+            self.assertEqual(len(str(prompt2)), width_before,
+                             f"swatch column moved: {prompt!s} -> {prompt2!s}")
         self.run_picker(s)
 
 
