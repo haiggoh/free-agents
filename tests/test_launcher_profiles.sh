@@ -29,8 +29,10 @@ done
 grep -Fq '"${CLAUDE_EXTRA_ARGS[@]}"' "$LAUNCHER" ||
     fail "final invocation does not preserve argument boundaries"
 
-grep -Fq -- '--settings "$LA_CLAUDE_SETTINGS"' "$LAUNCHER" ||
-    fail "settings argument is not quoted"
+# Since 61cad74 every settings file is folded into ONE --settings (Claude Code keeps only the last
+# one it is given), so LA_CLAUDE_SETTINGS must be added as a quoted LAYER, not its own flag.
+grep -Fq -- 'LA_SETTINGS_LAYERS+=("$LA_CLAUDE_SETTINGS")' "$LAUNCHER" ||
+    fail "LA_CLAUDE_SETTINGS is not added as a quoted settings layer"
 
 grep -Fq -- '--tools "$LA_CLAUDE_TOOLS"' "$LAUNCHER" ||
     fail "tools argument is not quoted"

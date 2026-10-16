@@ -87,12 +87,14 @@ else
   echo "Output: $output"
 fi
 
-echo "== Test 6: nvidia-laguna defaults to 1m =="
+# 0.35.4: Laguna XS 2.1 has a 256K window (poolside.ai + NVIDIA NIM docs), so its roster row
+# compacts at 200k; the earlier 1m claimed four times the model's real context.
+echo "== Test 6: nvidia-laguna defaults to 200k =="
 output=$(run_remote_session "" "" "--dry-run nvidia-laguna" "$TEST_DIR/out6")
-if echo "$output" | grep -q "autocompact.*--autocompact 1m"; then
-  check 0 "nvidia-laguna shows 1m in dry-run output"
+if echo "$output" | grep -q "autocompact.*--autocompact 200k"; then
+  check 0 "nvidia-laguna shows 200k in dry-run output"
 else
-  check 1 "nvidia-laguna does not show 1m in dry-run output"
+  check 1 "nvidia-laguna does not show 200k in dry-run output"
   echo "Output: $output"
 fi
 
