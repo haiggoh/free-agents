@@ -1,3 +1,14 @@
+## [0.36.1] — 2026-10-16
+
+### Fixed — a status word in the spec field was treated as a speculative config
+
+- Registrations in the "experimental on-disk roster" block carry the STATUS word `experimental` in
+  the 12th `la_register` field, which is also `rapid_spec_json`. Passed through, it would have
+  launched rapid with `--speculative-config experimental`, and 0.36.0's MTP variants derived a
+  phantom `<alias>-no-mtp` for every such model (found dogfooding 0.36.0 on the live registry:
+  laguna-fast-no-mtp, gpt-oss-20b-no-mtp, …). Only a JSON object is now a spec; anything else is
+  kept as the status it is (`LA_STATUS`). No real launch log ever carried the bad value.
+
 ## [0.36.0] — 2026-10-16
 
 ### Added — oMLX serves ordinary local sessions (`serve=omlx`)

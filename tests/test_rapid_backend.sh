@@ -179,6 +179,8 @@ la_register rapid-qwen     FakeModel rapid qwen qwen3 true  claude-opus-5 high "
 la_register rapid-qwen-fast FakeModel rapid qwen ""    false claude-opus-5 low  "" "" 16
 la_register rapid-qwen-mtp FakeModel rapid qwen "" false claude-opus-5 high "" "" 16 '{"method":"mtp","model":"/tmp/fake-mtp","num_speculative_tokens":3}'
 la_register vllm-qwen      FakeModel vllm  qwen ""    false claude-opus-5 high "" "" 16
+# The live "experimental roster" block writes a STATUS word in the 12th (rapid_spec_json) field.
+la_register rapid-qwen-exp FakeModel rapid qwen ""    false claude-opus-5 high "" "" 16 experimental
 CFG
 
 STUB_PIDS=()
@@ -441,6 +443,12 @@ VAR=$(cd "$SB" && HOME="$SB/home" bash -c '. config/config-lib.sh; la_load_confi
 assert_grep "dir=FakeModel spec=[] serve=rapid" "$VAR" "rapid-qwen-mtp-no-mtp exists: same weights, empty spec"
 NONE=$(cd "$SB" && HOME="$SB/home" bash -c '. config/config-lib.sh; la_load_config >/dev/null 2>&1; la_lookup rapid-qwen-fast-no-mtp && echo PRESENT || echo ABSENT')
 assert_grep "ABSENT" "$NONE" "no variant for a registration without a speculative config"
+EXP=$(cd "$SB" && HOME="$SB/home" bash -c '. config/config-lib.sh; la_load_config >/dev/null 2>&1; la_lookup rapid-qwen-exp-no-mtp && echo PRESENT || echo ABSENT')
+assert_grep "ABSENT" "$EXP" "a non-JSON 12th field (status word) is not a speculative config: no variant"
+ARGV_FILE="$SB/argv-exp.json"; rm -f "$ARGV_FILE"; reap_stale_stubs 2>/dev/null; sleep 1
+OUT=$(run local-llm-hotswap.sh rapid-qwen-exp)
+ARGS=$(cat "$ARGV_FILE" 2>/dev/null)
+assert_grep "--no-spec-decode" "$ARGS" "a status word in the spec field launches WITHOUT --speculative-config"
 OFF=$(cd "$SB" && HOME="$SB/home" LA_MTP_VARIANTS=0 bash -c '. config/config-lib.sh; la_load_config >/dev/null 2>&1; la_lookup rapid-qwen-mtp-no-mtp && echo PRESENT || echo ABSENT')
 assert_grep "ABSENT" "$OFF" "LA_MTP_VARIANTS=0 disables the variants"
 ARGV_FILE="$SB/argv-nomtp.json"; rm -f "$ARGV_FILE"

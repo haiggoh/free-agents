@@ -132,7 +132,7 @@ la_parse_served_ids() {
 # Parallel arrays keyed by insertion; la_lookup fills LA_* vars for a given alias.
 LA_ALIASES=()
 declare -A LA_SUBDIR LA_SERVE LA_SERVE_DECLARED LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT LA_ROLES LA_REPO LA_SIZE
-declare -A LA_RAPID_SPEC_CONFIG
+declare -A LA_RAPID_SPEC_CONFIG LA_STATUS   # LA_STATUS: 12th-field status word (e.g. "experimental"), never a spec
 # Optional per-alias Claude Code auto-compaction overrides. csl applies
 # these only to the selected model's child launcher process.
 declare -A LA_SESSION_AUTO_COMPACT
@@ -172,7 +172,14 @@ la_register() {
   [ -n "${LA_SPOOF[$alias]}" ] || LA_SPOOF[$alias]="$LA_SPOOF_DEFAULT"
   LA_EFFORT[$alias]="$8"
   LA_ROLES[$alias]="${9:-}"; LA_REPO[$alias]="${10:-}"; LA_SIZE[$alias]="${11:-}"
-  LA_RAPID_SPEC_CONFIG[$alias]="${12:-}"
+  # Only a JSON object is a speculative config. The live "experimental roster" block writes a
+  # STATUS word ("experimental") in this 12th field; passed through, hotswap launched rapid with
+  # `--speculative-config experimental` and 0.36.0 derived phantom -no-mtp variants (measured
+  # 2026-10-16). A non-JSON value is kept as the status it is, never as a spec.
+  case "${12:-}" in
+    "{"*) LA_RAPID_SPEC_CONFIG[$alias]="${12}"; LA_STATUS[$alias]="" ;;
+    *)    LA_RAPID_SPEC_CONFIG[$alias]=""; LA_STATUS[$alias]="${12:-}" ;;
+  esac
 }
 
 # la_derive_mtp_variants -> for every registration carrying a speculative config (rapid_spec_json),
