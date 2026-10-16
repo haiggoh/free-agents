@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.32.2`. See `CHANGELOG.md`.
+`0.36.0`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -642,7 +642,12 @@ stale when written is not recoverable from history.*
 
 ## `0.24.0` — Backend lanes — oMLX
 
-**Status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
+**Status: SHIPPED in `0.36.0` (2026-10-16)** as a per-model backend (`serve=omlx`, chosen by
+`bin/la-detect-backend.py` for architectures only oMLX can build; never the machine default).
+Open from this section: oMLX parser/reasoning settings per model, and the slow first prompt measured
+on Laguna (prefix reuse 14,336 of 143,581 tokens between two headless prompts).
+
+**Original status: NOT STARTED.** User-flagged high priority 2026-09-06. Researched from primary sources the
 same day.
 
 > **Renumbered 2026-09-21** from `0.20.0` to `0.21.0` because `0.18.0` was spent on the lime

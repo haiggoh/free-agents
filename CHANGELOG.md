@@ -1,3 +1,85 @@
+## [0.36.0] — 2026-10-16
+
+### Added — oMLX serves ordinary local sessions (`serve=omlx`)
+
+- Some architectures load ONLY on oMLX: measured 2026-10-15, rapid-mlx 0.16.1 rejects `laguna`
+  ("Model type laguna not supported") and has no `deepseek_v4`. Until now only the Auto Mode
+  classifier launcher could start oMLX, so those models had no session route at all.
+- `serve=omlx` is a per-model pin served by `local-llm-hotswap.sh` exactly like rapid: a real
+  folder named after the spoof id holding per-file links (oMLX names a model after its resolved
+  subfolder, so linking the whole dir would serve the wrong id and Claude Code would 404), a
+  per-alias paged SSD cache, the `server_<port>.meta` record, readiness on the spoof id, warmup,
+  `DISPATCH_MODEL`, and meta-based reuse. csl, local-session, the launcher, RAM preflight (6 GB +
+  hot cache) and eviction all know it. It is deliberately NOT an `LA_MLX_BACKENDS` member: oMLX can
+  never become the machine default (roadmap 0.24.0, corrected).
+- Live proof on oMLX 0.7.1rc1: Laguna S 2.1 oQ4e-fast up in 22.7 s via the real hotswap, served as
+  `claude-opus-5-5`; a headless Claude Code session answered two prompts with working continuity.
+  Known gap: each prompt took ~9.5 min — the prefix cache reused 14,336 of 143,581 tokens because
+  the two prompts diverged at token 14,516. Investigate before relying on oMLX for interactive work.
+
+### Added — the backend is detected per model (`bin/la-detect-backend.py`)
+
+- GGUF → `llama_cpp`; otherwise `config.json`'s `model_type` is checked against each engine's OWN
+  registry (module names under `mlx_lm/models`, plus `mlx_vlm/models` for oMLX, and
+  `MODEL_REMAPPING`), read through that engine's interpreter without importing mlx: rapid can build
+  it → generic `mlx` (the machine default); only oMLX can → `omlx`; neither → `unsupported`.
+  Speculative-decoding drafters (`*_mtp`, `*_assistant`) are reported as `drafter`, not models. An
+  uninspectable rapid never causes an `omlx` pin.
+- Live verdicts: `laguna`, `deepseek_v4`, `gemma4_unified`, `muse_glimmer` → omlx; `qwen3_5` →
+  mlx; `Qwen3.8-27B-MTP-4bit` → drafter (it was wrongly listed as a launchable model).
+
+### Fixed — unregistered and deleted models in the local picker (the deepseek-v4 silent bounce)
+
+- Selecting an on-disk model the registry does not know used to bounce straight back to the menu:
+  the launcher rejected the alias and the picker painted over its error. The picker now offers
+  "Register <model> (backend: X) and launch it?"; yes runs `csl --register-model` (which writes the
+  DETECTED backend into a managed block of `config.local.sh`, with a timestamped backup and
+  restore-on-invalid) and launches; an architecture no backend supports is refused with the reason.
+- Every launch that fails now pauses with its output on screen ("exited N — press Enter").
+- Registered models whose weights are gone are reported by `csl --inventory` as `#missing` rows;
+  once per picker session the picker offers to move them to `config/removed-models.local.psv`
+  (`csl --unregister-model`) instead of keeping them in the registry forever.
+- Auto-scanned rows show the backend registration would pick (`rapid (auto)`, `omlx (auto)`,
+  `llama_cpp (auto)`, `unsupported (auto)`); drafters are no longer listed.
+
+### Added — MTP on/off variants
+
+- Every registration with a speculative config (`rapid_spec_json`) also yields `<alias>-no-mtp`:
+  the same weights without the drafter (`--no-spec-decode`, its own server by spec hash), so the
+  tournament can compare a model with and without speculative decoding. `LA_MTP_VARIANTS=0` turns
+  it off.
+
+### Added — backend upgrades are offered as a yes/no question
+
+- `install/backend_upgrades.py`: an upgrade is a newer release of the BACKEND, run by the tool that
+  installed it — `brew upgrade` (oMLX via the jundot tap, llama.cpp), `pipx upgrade litellm` (pipx
+  keeps injected packages such as prisma), or a side-by-side `manage-backend.py install` for
+  rapid-mlx / vllm-mlx. A bare dependency bump is never offered (mlx-lm 0.32.0 exists, but rapid
+  0.16.1 pins `mlx-lm<0.32`).
+- The weekly launchd check refreshes the pending list; `csl` asks at start when something is
+  pending, and `manage-backend.py upgrade [--check] [--yes]` asks on demand. Enter = yes; a no is
+  remembered for that exact version only; a failed upgrade stays pending; `LA_BACKEND_UPGRADES=0`
+  turns the question off.
+
+### Fixed — the weekly backend update check had checked nothing since at least 2026-10-14
+
+- `check_backend()` called `check_updates()` on the manager CLASS, so every backend failed with
+  "missing 1 required positional argument: 'self'" while the run logged UP-TO-DATE. It now uses an
+  instance; oMLX is compared against Homebrew (the tap ships release candidates as stable).
+
+### Added — tournament runs rapid-mlx and oMLX candidates
+
+- `bin/tournament-dispatch.py` routes `serve: rapid` and `serve: omlx` with each engine's own serve
+  CLI; `laguna-fast` is entered on both (rapid fails it by design — the finding is the point).
+
+### Changed
+
+- `VERSION` was stale at 0.32.2 (manifest 0.35.4); every version surface now reads 0.36.0.
+- Roadmap: oMLX is a hard per-model dependency for architectures only it loads; agent replacement
+  needs a headless-session mode (open item, not built here).
+- Tests that were red on main: `test_launcher_profiles.sh` (folded `--settings`) and
+  `test_remote_autocompaction.sh` (Laguna 200k) follow the current contracts.
+
 ## [0.35.4] — 2026-10-15
 
 ### Added — Poolside Laguna locally: XS downloads, S made downloadable, one picker group
