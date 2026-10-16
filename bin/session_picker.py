@@ -41,7 +41,8 @@ try:
     from textual.binding import Binding
     from textual.containers import Vertical
     from textual.message import Message
-    from textual.widgets import Input, OptionList, Static
+    from textual.screen import ModalScreen
+    from textual.widgets import Input, OptionList, SelectionList, Static
     from textual.widgets.option_list import Option
 except ImportError:  # pragma: no cover - the wrapper checks first; keep a clear message anyway
     sys.stderr.write("session-picker: the UI needs its venv — run install/setup-session-picker.sh\n")
@@ -242,6 +243,56 @@ class PromptInput(Input):
             self.post_message(self.Submitted(self, self.value))
         # Other prompts: no call to super() — Textual dispatches Input._on_paste itself, and
         # calling it here too inserted every paste twice.
+
+
+class ConfirmPanel(ModalScreen):
+    """The picker's one confirmation idiom (user 2026-10-16): the QUESTION is the first line at
+    full emphasis, the explanation sits under it, and the answers are selectable rows —
+    arrows + Enter or a click, never a typed yes/no. `items` (optional) are pre-ticked
+    checkboxes for a per-item choice. Escape always means the safe answer: dismiss(None).
+    Dismisses with (choice_id, [ticked item ids])."""
+
+    DEFAULT_CSS = """
+    ConfirmPanel { align: center middle; background: ansi_default 0%; }
+    #cp-box { width: 90; height: auto; max-height: 90%; border: heavy ansi_yellow;
+              padding: 0 1; background: ansi_default; }
+    #cp-question { text-style: bold; color: ansi_default; padding: 0 0 1 0; }
+    #cp-detail { color: ansi_default; padding: 0 0 1 0; }
+    #cp-pick { height: auto; max-height: 12; border: none; background: ansi_default; }
+    #cp-choices { height: auto; border: none; background: ansi_default; margin-top: 1; }
+    """
+
+    def __init__(self, question: str, detail: str, choices: list[tuple[str, str]],
+                 items: list[str] | None = None, ticked: list[str] | None = None):
+        super().__init__()
+        self.question, self.detail, self.choices = question, detail, choices
+        self.items = items or []
+        self.ticked = self.items if ticked is None else ticked
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="cp-box"):
+            yield Static(self.question, id="cp-question")
+            yield Static(self.detail, id="cp-detail")
+            pick = SelectionList(*((i, i, i in self.ticked) for i in self.items), id="cp-pick")
+            pick.display = bool(self.items)
+            yield pick
+            yield OptionList(*(Option(label, id=cid) for cid, label in self.choices), id="cp-choices")
+
+    def on_mount(self):
+        choices = self.query_one("#cp-choices", OptionList)
+        choices.highlighted = 0        # Enter answers the first (default) choice at once
+        choices.focus()
+
+    def on_option_list_option_selected(self, event):
+        event.stop()                   # never let it bubble into the picker's own handler
+        self.dismiss((event.option.id, list(self.query_one("#cp-pick", SelectionList).selected)))
+
+    def on_key(self, event):
+        # Escape = the safe answer. Handled HERE and stopped: a screen BINDING fires but the key
+        # still bubbles on to App.on_key, which read it as the lane's Escape (= Quit).
+        if event.key == "escape":
+            event.stop()
+            self.dismiss(None)
 
 
 class HoverOptionList(OptionList):
@@ -489,7 +540,7 @@ class Picker(App):
             sm.agents = data
             sm._regroup()
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
-            sm.set_models(data)
+            sm.set_models(data, *([MISSING_MODELS] if isinstance(sm, m.LocalScreen) else []))
             sm._models_loaded = True
         if isinstance(sm, m.LocalScreen) and kind == "local":
             self._offer_cleanup()
@@ -596,6 +647,8 @@ class Picker(App):
             # Pass models only if already cached; otherwise pass None for lazy loading
             local = self.cache.get("local")
             self.screen_model = m.LocalScreen(s, local, nav.owner)
+            if local is not None:
+                self.screen_model.set_models(local, MISSING_MODELS)
         elif nav.target == "remote":
             remote = self.cache.get("remote")
             self.screen_model = m.RemoteScreen(s, remote, nav.owner)
@@ -684,7 +737,9 @@ class Picker(App):
                 else:
                     queued = isinstance(sm, m.DownloadScreen) and obj.id in sm.queue
                     box = "[x] " if queued else ("[ ] " if isinstance(sm, m.DownloadScreen) else "")
-                    rows.add_option(Option(f"    {box}{obj.label}", id=f"i:{obj.id}"))
+                    label = f"    {box}{obj.label}"
+                    rows.add_option(Option(Text(label, style=obj.style) if getattr(obj, "style", "") else label,
+                                           id=f"i:{obj.id}"))
                     self.row_ids.append(("item", obj.id))
 
         if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.RuntimeManagerScreen, m.APIKeysScreen, m.ThemeConfigScreen)):
@@ -835,7 +890,7 @@ class Picker(App):
             if not getattr(sm, '_models_loaded', False):
                 self._maybe_load_inventory("local")
                 if "local" in self.cache:
-                    sm.set_models(self.cache["local"])
+                    sm.set_models(self.cache["local"], MISSING_MODELS)
                     sm._models_loaded = True
                 return True
         # Check RemoteScreen
@@ -873,6 +928,8 @@ class Picker(App):
             self.launch(req)
 
     def on_key(self, event):
+        if isinstance(self.screen, ConfirmPanel):   # the panel owns every key while it is open
+            return
         prompt = self.query_one("#prompt", Input)
         if prompt.display:
             if event.key == "escape":
@@ -982,6 +1039,9 @@ class Picker(App):
         if target.startswith("prompt:"):
             self._open_prompt(target)
             return
+        if target.startswith("confirm:missing:"):     # a red (weights-missing) row was selected
+            self._open_cleanup_panel(clicked=target.split(":", 2)[2])
+            return
         if target.startswith("warn:"):
             self.state_warnings.append(target[5:])
             self.render_model(keep=keep_id)
@@ -1065,7 +1125,6 @@ class Picker(App):
                "prompt:rt-launchd-install": "Install the weekly LaunchAgent update check? type yes:",
                "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:",
                "prompt:register": "{alias} is on disk but not registered. Register {alias} (backend: {backend}) and launch it? yes/no:",
-               "prompt:cleanup-missing": "{n} registered model(s) missing from disk: {names}. Move them to the removed-models list? yes/no:",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
                "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically, or type it and press Enter; empty Enter skips):"}
 
@@ -1091,8 +1150,6 @@ class Picker(App):
             mdl = getattr(self.screen_model, "models", {}).get(req.selected_id)
             backend = (mdl.backend if mdl else "").replace(" (auto)", "") or "rapid"
             label = label.format(alias=req.selected_id, backend=backend)
-        elif kind == "prompt:cleanup-missing":
-            label = label.format(n=len(self._missing), names=", ".join(self._missing))
         prompt.placeholder = ""   # the label is shown once, in #status below the input
         prompt.value = ""
         prompt.display = True
@@ -1172,20 +1229,6 @@ class Picker(App):
             self._prefetch(("local",))
             req.needs_register = False
             self.launch(req)
-        elif kind == "prompt:cleanup-missing":
-            names, self._missing = self._missing, []
-            if value.lower() in ("y", "yes"):
-                csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
-                r = subprocess.run([csl, "--unregister-model", *names], capture_output=True, text=True)
-                if r.returncode == 0:
-                    MISSING_MODELS.clear()
-                    self.state_warnings.append(f"moved {len(names)} missing model(s) to the removed-models list")
-                else:
-                    msg = (r.stderr or r.stdout).strip().splitlines()
-                    self.state_warnings.append("cleanup failed: " + (msg[-1] if msg else f"exit {r.returncode}"))
-            else:
-                self.state_warnings.append(f"kept {len(names)} missing model(s) in the registry")
-            self.render_model()
         elif kind == "prompt:keys:add":
             if value:
                 self.run_child(TOOLS["tool:keys:add"](value), pause=True)
@@ -1224,11 +1267,51 @@ class Picker(App):
         removed-models tombstone (csl --unregister-model). Declining keeps them, quietly."""
         if getattr(self, "_cleanup_offered", False) or not MISSING_MODELS:
             return
-        if getattr(self, "pending_prompt", None):
+        if getattr(self, "pending_prompt", None) or isinstance(self.screen, ConfirmPanel):
             return
         self._cleanup_offered = True
-        self._missing = list(MISSING_MODELS)
-        self._open_prompt("prompt:cleanup-missing")
+        self._open_cleanup_panel()
+
+    def _open_cleanup_panel(self, clicked: str | None = None):
+        """The missing-models question as a ConfirmPanel. `clicked` = the red row the user
+        selected: the panel then leads with WHY it will not launch, and ticks only that model."""
+        names = list(MISSING_MODELS)
+        if not names:
+            return
+        if clicked:
+            question = f"{clicked} cannot launch: its weights are missing from disk."
+            ticked = [clicked]
+        else:
+            question = f"{len(names)} registered model(s) are missing from disk."
+            ticked = names
+        detail = ("Their registry entries still point at deleted weights, so they can never "
+                  "launch. Remove the ticked ones from the list? They move to the removed-models "
+                  "list (csl --unregister-model, with a backup) and can be re-registered later.")
+        choices = [("remove", "Remove selected from the list"),
+                   ("keep", "Keep them for now (Esc)")]
+        self.push_screen(ConfirmPanel(question, detail, choices, items=names, ticked=ticked),
+                         self._cleanup_answered)
+
+    def _cleanup_answered(self, answer):
+        self.query_one("#rows", OptionList).focus()   # as _close_prompt: back to the list
+        choice, picked = answer if answer else ("keep", [])
+        names = list(MISSING_MODELS)
+        if choice != "remove" or not picked:
+            self.state_warnings.append(f"kept {len(names)} missing model(s) in the registry")
+            self.render_model()
+            return
+        csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
+        r = subprocess.run([csl, "--unregister-model", *picked], capture_output=True, text=True)
+        if r.returncode == 0:
+            MISSING_MODELS[:] = [n for n in MISSING_MODELS if n not in picked]
+            self.state_warnings.append(f"moved {len(picked)} missing model(s) to the removed-models list")
+            sm = self.screen_model
+            if isinstance(sm, m.LocalScreen) and sm._models_loaded:
+                sm.set_models(list(sm.models.values()), MISSING_MODELS)   # red rows go at once
+        else:
+            msg = (r.stderr or r.stdout).strip().splitlines()
+            self.state_warnings.append("cleanup failed: " + (msg[-1] if msg else f"exit {r.returncode}"))
+        self.render_model()
 
     # --- children ------------------------------------------------------------------------------
     def run_child(self, cmd, env=None, pause=False, cwd=None, pause_on_error=False):

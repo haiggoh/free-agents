@@ -355,6 +355,7 @@ def _effort_label(value: str) -> str:
 class Item:
     id: str
     label: str
+    style: str = ""     # a Rich style for the whole row ("red" = registered, weights missing)
 
 
 @dataclass
@@ -586,22 +587,24 @@ class LocalScreen(Screen):
             self.models = {}
             self.accordion.set_groups([])
 
-    def set_models(self, models: list[LocalModel]):
+    def set_models(self, models: list[LocalModel], missing: list[str] | None = None):
         # Key by profile_id for uniqueness (multiple profiles can share same alias)
         self.models = {mdl.profile_id or mdl.alias: mdl for mdl in models}
+        # Registered but weights gone: still LISTED, in red, so a deletion never looks like
+        # nothing happened (user 2026-10-16); never in self.models, so never launchable.
+        self.missing = [a for a in (missing or []) if a not in self.models]
         buckets: dict[str, list] = {}
         for mdl in models:
-            buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(mdl)
+            buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(
+                Item(mdl.profile_id or mdl.alias,
+                     f"{mdl.alias}"
+                     + (f" ({mdl.backend}" + (", thinking" if mdl.thinking else "") + ")" if mdl.backend else "")
+                     + (f"  [{mdl.roles}]" if mdl.roles else "")))
+        for alias in self.missing:
+            buckets.setdefault(family_for(alias), []).append(
+                Item(alias, f"{alias}  — weights missing from disk", style="red"))
         order = sorted(buckets, key=lambda f: (f == "Other", f.lower()))
-        self.accordion.set_groups([
-            Group(f, f"{f} ({len(buckets[f])})",
-                  [Item(
-                       x.profile_id or x.alias,
-                       f"{x.alias}"
-                       + (f" ({x.backend}" + (", thinking" if x.thinking else "") + ")" if x.backend else "")
-                       + (f"  [{x.roles}]" if x.roles else "")
-                   ) for x in buckets[f]])
-            for f in order])
+        self.accordion.set_groups([Group(f, f"{f} ({len(buckets[f])})", buckets[f]) for f in order])
         self._models_loaded = True
 
     def _toggle_choose_model(self):
@@ -676,6 +679,9 @@ class LocalScreen(Screen):
 
     def activate_selected(self):
         sel = self.accordion.selected_id
+        if sel and sel in (self.missing or []):
+            # Not launchable: point at the cleanup offer instead, with this model pre-ticked.
+            return Nav(f"confirm:missing:{sel}", self.owner)
         if not sel or sel not in self.models:
             return None
         mdl = self.models[sel]

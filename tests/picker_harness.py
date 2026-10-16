@@ -192,6 +192,28 @@ class PilotHelper:
     def text(self):
         return "\n".join([self.title(), *self.labels("actions"), *self.labels("rows"), self.status()])
 
+    def panel(self):
+        """The open ConfirmPanel (a modal screen), or None. Its widgets live on their own
+        screen, so app.query_one — which searches the ACTIVE screen — cannot see the main
+        list while it is open; read the panel through this instead."""
+        scr = self.app.screen
+        return scr if type(scr).__name__ == "ConfirmPanel" else None
+
+    def panel_text(self):
+        from textual.widgets import OptionList, SelectionList, Static
+        p = self.panel()
+        if p is None:
+            return ""
+        ol = p.query_one("#cp-choices", OptionList)
+        sl = p.query_one("#cp-pick", SelectionList)
+        return "\n".join([str(p.query_one("#cp-question", Static).render()),
+                          str(p.query_one("#cp-detail", Static).render()),
+                          *(str(sl.get_option_at_index(i).prompt) for i in range(sl.option_count)),
+                          *(str(ol.get_option_at_index(i).prompt) for i in range(ol.option_count))])
+
+    async def wait_panel(self, needle, secs=8):
+        await self.wait_for(lambda: needle in self.panel_text(), f"panel showing {needle!r}", secs)
+
     def screen(self):
         return type(self.app.screen_model).__name__
 
