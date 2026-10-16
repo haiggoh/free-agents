@@ -241,18 +241,36 @@ class PickerRegistryOffers(PilotCase):
 
     def test_cleanup_per_model_choice_removes_only_ticked(self):
         async def s(app, pilot, h):
-            from textual.widgets import SelectionList
-            await h.wait_panel("gone-model")
-            sl = h.panel().query_one("#cp-pick", SelectionList)
-            self.assertEqual(sorted(sl.selected), ["gone-model", "lost-model"], "all ticked by default")
-            sl.deselect("lost-model")
-            await h.settle(0.2)
+            await h.wait_panel("[x] lost-model")         # all ticked by default
+            self.assertIn("[x] gone-model", h.panel_text())
+            pick = h.panel().query_one("#cp-pick")
+            pick.focus()
+            pick.highlighted = pick.get_option_index("lost-model")
+            await h.press("space")                      # untick it: monochrome box, no colour
+            await h.wait_panel("[ ] lost-model")
+            h.panel().query_one("#cp-choices").focus()
             await h.press("enter")
             await h.wait_for(lambda: self.launches(), "the unregister call")
             self.assertEqual(self.launches()[0]["argv"], ["--unregister-model", "gone-model"])
         Path(self.env["CSL_SELF"]).write_text(inventory_stub(
             HYGIENE_INV + "#missing\tlost-model\tlost-model-v1\n"))
         self.run_picker(s, start="local")
+
+    def test_cleanup_result_does_not_follow_you_out_of_the_local_lane(self):
+        # User 2026-10-16: "moved N missing model(s)" stayed on Home and Remote.
+        async def s(app, pilot, h):
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
+            await h.wait_panel("gone-model")
+            await h.press("enter")
+            await h.wait_text("moved 1 missing model")
+            await h.press("b")
+            await h.wait_screen("HomeScreen")
+            self.assertNotIn("missing model", h.status())
+            await h.press("r")
+            await h.wait_screen("RemoteScreen")
+            self.assertNotIn("missing model", h.status())
+        self.run_picker(s)
 
     def test_cleanup_offered_once_per_session(self):
         # Starts at Home: only a Home-owned Local lane has Back (a direct-root lane has Quit).

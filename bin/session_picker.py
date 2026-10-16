@@ -42,7 +42,7 @@ try:
     from textual.containers import Vertical
     from textual.message import Message
     from textual.screen import ModalScreen
-    from textual.widgets import Input, OptionList, SelectionList, Static
+    from textual.widgets import Input, OptionList, Static
     from textual.widgets.option_list import Option
 except ImportError:  # pragma: no cover - the wrapper checks first; keep a clear message anyway
     sys.stderr.write("session-picker: the UI needs its venv — run install/setup-session-picker.sh\n")
@@ -249,7 +249,9 @@ class ConfirmPanel(ModalScreen):
     """The picker's one confirmation idiom (user 2026-10-16): the QUESTION is the first line at
     full emphasis, the explanation sits under it, and the answers are selectable rows —
     arrows + Enter or a click, never a typed yes/no. `items` (optional) are pre-ticked
-    checkboxes for a per-item choice. Escape always means the safe answer: dismiss(None).
+    checkboxes for a per-item choice, drawn as monochrome `[x]` / `[ ]` like the downloader's
+    queue (SelectionList's green half-block toggles appeared nowhere else; user 2026-10-16);
+    Space, Enter or a click toggles one. Escape always means the safe answer: dismiss(None).
     Dismisses with (choice_id, [ticked item ids])."""
 
     DEFAULT_CSS = """
@@ -258,7 +260,7 @@ class ConfirmPanel(ModalScreen):
               padding: 0 1; background: ansi_default; }
     #cp-question { text-style: bold; color: ansi_default; padding: 0 0 1 0; }
     #cp-detail { color: ansi_default; padding: 0 0 1 0; }
-    #cp-pick { height: auto; max-height: 12; border: none; background: ansi_default; }
+    #cp-pick { height: auto; max-height: 12; border: none; background: ansi_default; color: ansi_default; }
     #cp-choices { height: auto; border: none; background: ansi_default; margin-top: 1; }
     """
 
@@ -267,13 +269,16 @@ class ConfirmPanel(ModalScreen):
         super().__init__()
         self.question, self.detail, self.choices = question, detail, choices
         self.items = items or []
-        self.ticked = self.items if ticked is None else ticked
+        self.ticked = set(self.items if ticked is None else ticked)
+
+    def _box(self, item: str) -> str:
+        return f"{'[x]' if item in self.ticked else '[ ]'} {item}"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="cp-box"):
             yield Static(self.question, id="cp-question")
             yield Static(self.detail, id="cp-detail")
-            pick = SelectionList(*((i, i, i in self.ticked) for i in self.items), id="cp-pick")
+            pick = OptionList(*(Option(self._box(i), id=i) for i in self.items), id="cp-pick")
             pick.display = bool(self.items)
             yield pick
             yield OptionList(*(Option(label, id=cid) for cid, label in self.choices), id="cp-choices")
@@ -283,11 +288,25 @@ class ConfirmPanel(ModalScreen):
         choices.highlighted = 0        # Enter answers the first (default) choice at once
         choices.focus()
 
+    def _toggle(self, index: int):
+        pick = self.query_one("#cp-pick", OptionList)
+        item = pick.get_option_at_index(index).id
+        self.ticked ^= {item}
+        pick.replace_option_prompt_at_index(index, self._box(item))
+
     def on_option_list_option_selected(self, event):
         event.stop()                   # never let it bubble into the picker's own handler
-        self.dismiss((event.option.id, list(self.query_one("#cp-pick", SelectionList).selected)))
+        if event.option_list.id == "cp-pick":
+            self._toggle(event.option_index)
+            return
+        self.dismiss((event.option.id, [i for i in self.items if i in self.ticked]))
 
     def on_key(self, event):
+        pick = self.query_one("#cp-pick", OptionList)
+        if event.key == "space" and self.focused is pick and pick.highlighted is not None:
+            event.stop()
+            self._toggle(pick.highlighted)
+            return
         # Escape = the safe answer. Handled HERE and stopped: a screen BINDING fires but the key
         # still bubbles on to App.on_key, which read it as the lane's Escape (= Quit).
         if event.key == "escape":
@@ -635,7 +654,17 @@ class Picker(App):
             return m.CloudConfigScreen(s, nav.owner)
         raise ValueError(nav.target)
 
+    def _warn_here(self, msg: str):
+        """A warning about THIS screen's action: shown here, dropped on the next screen change
+        (user 2026-10-16: the cleanup result followed them to Home and Remote)."""
+        self.state_warnings.append(msg)
+        self._screen_warnings = getattr(self, "_screen_warnings", set()) | {msg}
+
     def goto(self, nav: m.Nav):
+        scoped = getattr(self, "_screen_warnings", set())
+        if scoped:
+            self.state_warnings = [w for w in self.state_warnings if w not in scoped]
+            self._screen_warnings = set()
         # Build screen WITHOUT loading inventory (lazy loading)
         # Inventory will be loaded on-demand when user toggles "Choose model"
         s = self.settings
@@ -1297,14 +1326,14 @@ class Picker(App):
         choice, picked = answer if answer else ("keep", [])
         names = list(MISSING_MODELS)
         if choice != "remove" or not picked:
-            self.state_warnings.append(f"kept {len(names)} missing model(s) in the registry")
+            self._warn_here(f"kept {len(names)} missing model(s) in the registry")
             self.render_model()
             return
         csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
         r = subprocess.run([csl, "--unregister-model", *picked], capture_output=True, text=True)
         if r.returncode == 0:
             MISSING_MODELS[:] = [n for n in MISSING_MODELS if n not in picked]
-            self.state_warnings.append(f"moved {len(picked)} missing model(s) to the removed-models list")
+            self._warn_here(f"moved {len(picked)} missing model(s) to the removed-models list")
             sm = self.screen_model
             if isinstance(sm, m.LocalScreen) and sm._models_loaded:
                 sm.set_models(list(sm.models.values()), MISSING_MODELS)   # red rows go at once

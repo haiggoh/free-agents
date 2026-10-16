@@ -200,12 +200,12 @@ class PilotHelper:
         return scr if type(scr).__name__ == "ConfirmPanel" else None
 
     def panel_text(self):
-        from textual.widgets import OptionList, SelectionList, Static
+        from textual.widgets import OptionList, Static
         p = self.panel()
         if p is None:
             return ""
         ol = p.query_one("#cp-choices", OptionList)
-        sl = p.query_one("#cp-pick", SelectionList)
+        sl = p.query_one("#cp-pick", OptionList)
         return "\n".join([str(p.query_one("#cp-question", Static).render()),
                           str(p.query_one("#cp-detail", Static).render()),
                           *(str(sl.get_option_at_index(i).prompt) for i in range(sl.option_count)),
