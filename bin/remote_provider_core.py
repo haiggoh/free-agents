@@ -104,11 +104,18 @@ class Provider:
             return False
         return all(os.environ.get(n, "").strip() != "" for n in self.extra_env)
 
+    @property
+    def has_catalog(self):
+        """True iff the provider exposes a callable catalog endpoint (models_path or catalog_url)."""
+        return bool(self.catalog_url or self.models_path)
 
-# --- the six providers -------------------------------------------------------
-# Gemini is the only one fully implemented in the MVP; the rest are declared so
-# the router and doctor can name them and report "declared, not implemented".
-# Every entry keeps the exact endpoints the plan pinned.
+
+# --- the provider roster ----------------------------------------------------
+# Every provider that the remote-fallback lane can reach. Each entry carries the
+# exact endpoints from config/remote-agents.sh and remote-session.sh's _openai_base
+# / _catalog_request, so the dispatch / doctor / probe tools and the session launcher
+# share ONE source of truth for URLs. Adding a provider here automatically enables it
+# in remote-provider-doctor.py and remote-probe-log.py (after the IMPLEMENTSED gate).
 PROVIDERS = {
     "gemini": Provider(
         id="gemini", display="Gemini API", tier=RENEWING_FREE,
@@ -178,15 +185,111 @@ PROVIDERS = {
         notes="Free tier but the EFFECTIVE limits are dynamic (NVIDIA throttles "
               "free keys unpredictably) — treat as unknown, verify per call.",
     ),
+    # --- OpenAI-compatible providers added from config/remote-agents.sh roster ---
+    # These all speak /chat/completions with Bearer auth. Tiers match the roster;
+    # most are 'unknown' because their free-tier status is unverified per-account.
+    "mistral": Provider(
+        id="mistral", display="Mistral", tier=UNKNOWN,
+        base_url="https://api.mistral.ai/v1",
+        chat_path="/chat/completions", models_path="/models",
+        key_env="MISTRAL_API_KEY",
+        default_models=("mistral-medium-2604", "codestral-2508", "mistral-small-2603"),
+        notes="OpenAI-compatible via mistral/ LiteLLM prefix. Free and paid tiers; "
+              "verify per account.",
+    ),
+    "zai": Provider(
+        id="zai", display="ZAI", tier=UNKNOWN,
+        base_url="https://api.z.ai/api/paas/v4",
+        chat_path="/chat/completions", models_path="",
+        key_env="ZAI_API_KEY",
+        default_models=(),
+        notes="ZAI Coding Plan endpoint is distinct; this route uses general API "
+              "billing. OpenAI-compatible. No documented /models catalog route.",
+    ),
+    "siliconflow": Provider(
+        id="siliconflow", display="SiliconFlow", tier=UNKNOWN,
+        base_url="https://api.siliconflow.com/v1",
+        chat_path="/chat/completions", models_path="/models?type=text",
+        key_env="SILICONFLOW_API_KEY",
+        default_models=(),
+        notes="OpenAI-compatible. International .com endpoint. Free and paid models "
+              "differ; inspect catalog pricing.",
+    ),
+    "llm7": Provider(
+        id="llm7", display="LLM7", tier=UNKNOWN,
+        base_url="https://api.llm7.io/v1",
+        chat_path="/chat/completions", models_path="/models",
+        key_env="LLM7_API_KEY",
+        default_models=(),
+        notes="OpenAI-compatible. Catalog contains free and paid models; inspect "
+              "pricing and tools.",
+    ),
+    "kilo": Provider(
+        id="kilo", display="Kilo Gateway", tier=UNKNOWN,
+        base_url="https://api.kilo.ai/api/gateway",
+        chat_path="/chat/completions", models_path="/models",
+        key_env="KILO_API_KEY",
+        default_models=(),
+        notes="OpenAI-compatible. Free and paid models differ; inspect catalog pricing.",
+    ),
+    "vercel": Provider(
+        id="vercel", display="Vercel Gateway", tier=UNKNOWN,
+        base_url="https://ai-gateway.vercel.sh/v1",
+        chat_path="/chat/completions", models_path="/models",
+        key_env="AI_GATEWAY_API_KEY",
+        default_models=(),
+        notes="OpenAI-compatible. Credits and paid account billing apply; select "
+              "explicitly.",
+    ),
+    "sambanova": Provider(
+        id="sambanova", display="SambaNova", tier=UNKNOWN,
+        base_url="https://api.sambanova.ai/v1",
+        chat_path="/chat/completions", models_path="/models",
+        key_env="SAMBANOVA_API_KEY",
+        default_models=(),
+        notes="OpenAI-compatible. Account trial, credit and paid billing vary.",
+    ),
+    "modelscope": Provider(
+        id="modelscope", display="ModelScope", tier=UNKNOWN,
+        base_url="https://api-inference.modelscope.cn/v1",
+        chat_path="/chat/completions", models_path="/models",
+        key_env="MODELSCOPE_API_KEY",
+        default_models=(),
+        notes="OpenAI-compatible API-Inference endpoint. Explicit model required; "
+              "account quota and tool use untested. No documented /models catalog.",
+    ),
+    "streamlake": Provider(
+        id="streamlake", display="Streamlake", tier=UNKNOWN,
+        base_url="https://api.streamlake.ai/v1",
+        chat_path="/chat/completions", models_path="/models",
+        key_env="STREAMLAKE_API_KEY",
+        default_models=(),
+        notes="OpenAI-compatible. Select a catalog model; "
+              "https://console.streamlake.ai/console/wanqing/api-key.",
+    ),
 }
 
-# Providers whose Python dispatch path is implemented.
-IMPLEMENTED = {"gemini", "nvidia"}
+# Providers whose Python dispatch path is implemented. A provider is "implemented"
+# when its transport (OpenAI-compatible /chat/completions + Bearer auth) is verified
+# and the doctor can scan its catalog. Providers with no catalog URL have
+# catalog_scanable=False, so the doctor skips the GET and reports that fact instead
+# of failing. Providers marked tier=TRIAL (cerebras) are still IMPLEMENTED — the
+# tier controls whether the router SELECTS them, not whether they work.
+IMPLEMENTED = {"gemini", "nvidia", "groq", "openrouter", "cloudflare",
+               "mistral", "zai", "siliconflow", "llm7", "kilo", "vercel",
+               "sambanova", "modelscope", "streamlake"}
 
 # Providers whose requests must pass the machine-wide limiter in bin/rate_limiter.py. NVIDIA's
 # free tier is 40 RPM per KEY, shared by every proxy, dispatcher and parallel agent on this
 # machine; a dispatcher that called it directly used to bypass the bucket the proxies share.
+# Other providers' free tiers have smaller daily quotas (Gemini ~10k tokens/min, Groq ~1k RPM),
+# so they are not rate-limited through the shared bucket — the probe tool paces them locally.
 RATE_LIMITED = {"nvidia"}
+
+# Providers that expose an OpenAI-compatible /models endpoint (or a catalog_url)
+# that the doctor can GET without spending quota. Empty means "no catalog available".
+CATALOG_SCANABLE = {pid for pid, p in PROVIDERS.items()
+                    if p.models_path or p.catalog_url}
 
 
 def get(provider_id):
