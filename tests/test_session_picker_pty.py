@@ -177,11 +177,17 @@ class PickerRegistryOffers(PilotCase):
     def _prompt_offers_register(self, h, alias="auto-dream-7b"):
         return h.wait_text(f"Register {alias}")
 
+    async def _click_red_row(self, h, alias="gone-model"):
+        """The ONLY way the cleanup panel opens (user 2026-10-16: no automatic offer)."""
+        await h.press("c")
+        await h.settle(0.5)
+        await h.open_group("Other")                     # family_for() has no rule for these
+        await h.goto_row("item", alias)
+        await h.press("enter")
+        await h.wait_panel(f"{alias} cannot launch")
+
     def test_register_decline_launches_nothing(self):
         async def s(app, pilot, h):
-            await h.wait_panel("missing from disk")     # cleanup offer is open first; Esc keeps
-            await h.press("escape")
-            await h.wait_text("kept 1 missing model")
             await h.press("c")
             await h.settle(0.5)
             await h.open_group("Other")                 # family_for() has no rule for it
@@ -195,9 +201,6 @@ class PickerRegistryOffers(PilotCase):
 
     def test_register_accept_runs_register_then_launch(self):
         async def s(app, pilot, h):
-            await h.wait_panel("missing from disk")
-            await h.press("escape")
-            await h.wait_text("kept 1 missing model")
             await h.press("c")
             await h.settle(0.5)
             await h.open_group("Other")                 # family_for() has no rule for it
@@ -217,7 +220,7 @@ class PickerRegistryOffers(PilotCase):
         # User 2026-10-16: the typed yes/no sat ABOVE a grey explanation and read as detail.
         # Now a modal panel: the question is its first line, each missing model is listed.
         async def s(app, pilot, h):
-            await h.wait_panel("gone-model")
+            await self._click_red_row(h)
             first = h.panel_text().splitlines()[0]
             self.assertIn("missing from disk", first)
             self.assertIn("Remove selected from the list", h.panel_text())
@@ -226,14 +229,13 @@ class PickerRegistryOffers(PilotCase):
 
     def test_cleanup_accept_moves_missing_model_to_tombstone(self):
         async def s(app, pilot, h):
-            await h.wait_panel("gone-model")
+            await self._click_red_row(h)
             await h.press("enter")                      # the highlighted default: remove
             await h.wait_for(lambda: self.launches(), "the unregister call")
             rec = self.launches()[0]
             self.assertEqual(rec["prog"], "csl")
             self.assertEqual(rec["argv"], ["--unregister-model", "gone-model"])
             await h.wait_for(lambda: h.panel() is None, "panel closed")
-            await h.press("c")
             await h.settle(0.5)
             self.assertNotIn("gone-model", "\n".join(h.labels("rows")),
                              "a removed model must leave the list at once")
@@ -241,17 +243,22 @@ class PickerRegistryOffers(PilotCase):
 
     def test_cleanup_per_model_choice_removes_only_ticked(self):
         async def s(app, pilot, h):
-            await h.wait_panel("[x] lost-model")         # all ticked by default
+            await self._click_red_row(h)
+            # Only the clicked model is ticked; both boxes must actually DRAW (rendered text).
             self.assertIn("[x] gone-model", h.panel_text())
+            self.assertIn("[ ] lost-model", h.panel_text())
             pick = h.panel().query_one("#cp-pick")
             pick.focus()
             pick.highlighted = pick.get_option_index("lost-model")
-            await h.press("space")                      # untick it: monochrome box, no colour
-            await h.wait_panel("[ ] lost-model")
+            await h.press("space")                      # tick it too: monochrome box, no colour
+            await h.wait_panel("[x] lost-model")
+            pick.highlighted = pick.get_option_index("gone-model")
+            await h.press("space")                      # …and untick the clicked one
+            await h.wait_panel("[ ] gone-model")
             h.panel().query_one("#cp-choices").focus()
             await h.press("enter")
             await h.wait_for(lambda: self.launches(), "the unregister call")
-            self.assertEqual(self.launches()[0]["argv"], ["--unregister-model", "gone-model"])
+            self.assertEqual(self.launches()[0]["argv"], ["--unregister-model", "lost-model"])
         Path(self.env["CSL_SELF"]).write_text(inventory_stub(
             HYGIENE_INV + "#missing\tlost-model\tlost-model-v1\n"))
         self.run_picker(s, start="local")
@@ -261,7 +268,7 @@ class PickerRegistryOffers(PilotCase):
         async def s(app, pilot, h):
             await h.press("l")
             await h.wait_screen("LocalScreen")
-            await h.wait_panel("gone-model")
+            await self._click_red_row(h)
             await h.press("enter")
             await h.wait_text("moved 1 missing model")
             await h.press("b")
@@ -272,20 +279,16 @@ class PickerRegistryOffers(PilotCase):
             self.assertNotIn("missing model", h.status())
         self.run_picker(s)
 
-    def test_cleanup_offered_once_per_session(self):
-        # Starts at Home: only a Home-owned Local lane has Back (a direct-root lane has Quit).
+    def test_entering_local_opens_no_panel_by_itself(self):
+        # User 2026-10-16: the red rows are warning enough; the question waits for a click.
         async def s(app, pilot, h):
             await h.press("l")
             await h.wait_screen("LocalScreen")
-            await h.wait_panel("gone-model")
-            await h.press("escape")                     # decline
-            await h.wait_text("kept 1 missing model")
-            await h.press("b")                          # home
-            await h.wait_screen("HomeScreen")
-            await h.press("l")                          # local again
-            await h.wait_screen("LocalScreen")
             await h.settle(1.0)
-            self.assertIsNone(h.panel(), "cleanup offer must not reopen by itself within a session")
+            self.assertIsNone(h.panel(), "no automatic cleanup offer on entering Local")
+            await h.press("c")
+            await h.settle(0.5)
+            self.assertIsNone(h.panel())
             self.assertEqual(self.launches(), [])
         self.run_picker(s)
 
@@ -293,8 +296,6 @@ class PickerRegistryOffers(PilotCase):
         # User 2026-10-16: a registered model whose weights are gone must not look launchable.
         async def s(app, pilot, h):
             from textual.widgets import OptionList
-            await h.wait_panel("gone-model")
-            await h.press("escape")
             await h.press("c")
             await h.settle(0.5)
             await h.open_group("Other")                 # family_for() has no rule for it
@@ -309,13 +310,10 @@ class PickerRegistryOffers(PilotCase):
 
     def test_selecting_missing_model_reopens_cleanup_never_launches(self):
         async def s(app, pilot, h):
-            await h.wait_panel("gone-model")
-            await h.press("escape")                     # the automatic offer is declined…
-            await h.press("c")
-            await h.settle(0.5)
-            await h.open_group("Other")                 # family_for() has no rule for it
-            await h.goto_row("item", "gone-model")
-            await h.press("enter")                      # …but clicking the red row brings it back
+            await self._click_red_row(h)
+            await h.press("escape")                     # Esc = keep
+            await h.wait_text("kept 1 missing model")
+            await h.press("enter")                      # the red row again: the panel comes back
             await h.wait_panel("gone-model cannot launch")
             await h.press("escape")
             self.assertEqual(self.launches(), [], "a missing model must never reach the launcher")

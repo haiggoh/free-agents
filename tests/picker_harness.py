@@ -208,7 +208,10 @@ class PilotHelper:
         sl = p.query_one("#cp-pick", OptionList)
         return "\n".join([str(p.query_one("#cp-question", Static).render()),
                           str(p.query_one("#cp-detail", Static).render()),
-                          *(str(sl.get_option_at_index(i).prompt) for i in range(sl.option_count)),
+                          # the RENDERED text, not the prompt: a str prompt "[x] a" is parsed
+                          # as markup and draws " a" (user 2026-10-16 saw blank ticks), while
+                          # str(prompt) still read "[x] a" and the test passed.
+                          *(sl._get_visual(sl.get_option_at_index(i)).plain for i in range(sl.option_count)),
                           *(str(ol.get_option_at_index(i).prompt) for i in range(ol.option_count))])
 
     async def wait_panel(self, needle, secs=8):

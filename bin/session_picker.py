@@ -278,7 +278,8 @@ class ConfirmPanel(ModalScreen):
         with Vertical(id="cp-box"):
             yield Static(self.question, id="cp-question")
             yield Static(self.detail, id="cp-detail")
-            pick = OptionList(*(Option(self._box(i), id=i) for i in self.items), id="cp-pick")
+            # Text, not str: a str prompt is parsed as markup, and "[x]" is a valid tag (eaten).
+            pick = OptionList(*(Option(Text(self._box(i)), id=i) for i in self.items), id="cp-pick")
             pick.display = bool(self.items)
             yield pick
             yield OptionList(*(Option(label, id=cid) for cid, label in self.choices), id="cp-choices")
@@ -292,7 +293,7 @@ class ConfirmPanel(ModalScreen):
         pick = self.query_one("#cp-pick", OptionList)
         item = pick.get_option_at_index(index).id
         self.ticked ^= {item}
-        pick.replace_option_prompt_at_index(index, self._box(item))
+        pick.replace_option_prompt_at_index(index, Text(self._box(item)))
 
     def on_option_list_option_selected(self, event):
         event.stop()                   # never let it bubble into the picker's own handler
@@ -561,9 +562,7 @@ class Picker(App):
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data, *([MISSING_MODELS] if isinstance(sm, m.LocalScreen) else []))
             sm._models_loaded = True
-        if isinstance(sm, m.LocalScreen) and kind == "local":
-            self._offer_cleanup()
-        elif isinstance(sm, m.VersionsScreen) and kind == sm.inventory_kind:
+        if isinstance(sm, m.VersionsScreen) and kind == sm.inventory_kind:
             sm.set_entries(data)
             if not getattr(self, "pending_prompt", None):
                 self.render_model()
@@ -721,10 +720,6 @@ class Picker(App):
 
         self.nav = nav
         self.render_model()
-        # Entering Local with the inventory ALREADY cached (it loaded while Home was showing)
-        # must offer the cleanup too; _loaded() only covers an inventory that lands on Local.
-        if nav.target == "local" and "local" in self.cache:
-            self._offer_cleanup()
 
     def render_model(self, keep: str | None = None):
         sm = self.screen_model
@@ -766,8 +761,10 @@ class Picker(App):
                 else:
                     queued = isinstance(sm, m.DownloadScreen) and obj.id in sm.queue
                     box = "[x] " if queued else ("[ ] " if isinstance(sm, m.DownloadScreen) else "")
+                    # Text whenever a box is drawn: a str "[x]" is markup and renders as nothing.
                     label = f"    {box}{obj.label}"
-                    rows.add_option(Option(Text(label, style=obj.style) if getattr(obj, "style", "") else label,
+                    style = getattr(obj, "style", "")
+                    rows.add_option(Option(Text(label, style=style) if (style or box) else label,
                                            id=f"i:{obj.id}"))
                     self.row_ids.append(("item", obj.id))
 
@@ -820,7 +817,7 @@ class Picker(App):
         if isinstance(sm, m.DownloadScreen):
             status = "  ↑↓ move · Space/Enter queue · c review"
         if self.state_warnings:
-            status += f"\n  {ec.EMOJI_WARNING_STR} " + self.state_warnings[-1]
+            status += f"\n  {ec.EMOJI_WARNING_STR}  " + self.state_warnings[-1]   # 2 spaces: VS16 emoji
         self.query_one("#status", Static).update(status)
         self._update_info()
 
@@ -1290,16 +1287,6 @@ class Picker(App):
             self._open_prompt("prompt:register")
             return
         self.run_child(command_for(req), env=req.env, pause_on_error=True)
-
-    def _offer_cleanup(self):
-        """Once per picker session: registered models whose weights are gone may move to the
-        removed-models tombstone (csl --unregister-model). Declining keeps them, quietly."""
-        if getattr(self, "_cleanup_offered", False) or not MISSING_MODELS:
-            return
-        if getattr(self, "pending_prompt", None) or isinstance(self.screen, ConfirmPanel):
-            return
-        self._cleanup_offered = True
-        self._open_cleanup_panel()
 
     def _open_cleanup_panel(self, clicked: str | None = None):
         """The missing-models question as a ConfirmPanel. `clicked` = the red row the user
