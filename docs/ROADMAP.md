@@ -703,10 +703,20 @@ plan's engine policy should be read accordingly.
 
 ### Constraints
 
-Add as an **isolated optional** backend. Must not disturb Rapid-MLX dependencies and must never become
-a silent default — `serve=` resolution stays explicit, exactly as `serve=vllm` and `serve=llama_cpp` do.
-Test a non-speculative baseline before MTP / DSpark / DFlash. The single-maintainer bus factor is a
-real risk for a load-bearing dependency and argues for keeping Rapid the default.
+Add as an **isolated** backend that must not disturb Rapid-MLX dependencies. oMLX must not become the
+**machine-wide** default (`LA_DEFAULT_MLX_BACKEND`, which generic `serve=mlx|auto` rows resolve to):
+Rapid stays that default. Test a non-speculative baseline before MTP / DSpark / DFlash. The
+single-maintainer bus factor is a real risk and is the reason Rapid stays the machine default.
+
+> **Corrected 2026-10-15 (user):** the earlier wording ("isolated **optional** backend… must never
+> become a silent default") assumed oMLX was only ever a performance choice. That premise is false:
+> some architectures load **only** on oMLX — measured: `laguna` (Laguna S 2.1) fails on rapid-mlx
+> 0.16.1 with `Model type laguna not supported` and runs on oMLX; `deepseek_v4` is likewise absent from
+> the mlx_lm registry rapid and vllm-mlx share. For those models oMLX is a **hard dependency**, and
+> the correct per-model backend is `serve=omlx`, chosen automatically by backend detection exactly as
+> GGUF artifacts get `serve=llama_cpp`. That is a visible per-model pin written into the registration
+> line, not a silent default. Necessity overrides the bus-factor preference; the preference only
+> decides the machine default and ties between backends that can all load a model.
 
 ---
 
@@ -898,6 +908,16 @@ No single release may become several releases at once.
 ## Known open items not owned by a release above
 
 Tracked as waypoints; listed here so the repo is not silent about them.
+
+- **Agent replacement has only a tool-less route.** The replace-subagents hook redirects an Agent
+  call to `bin/free-agent-tool.py`, which is a single stateless dispatch (one `curl`, text in, text
+  out). That fits text work (classification, drafting, review prose) but cannot do repo work: no file
+  access, no edits, no test runs. Measured 2026-10-15: a coding task (cc-transcript reading view) could
+  not be delegated through it. Needed: a second mode that runs the task as a **headless Claude Code
+  session** (`claude -p`) on a free lane, with the same capabilities as a `csl` session, inside an
+  isolated worktree, carrying the agent briefing. The hook should offer both routes and pick by the kind
+  of work (needs tools or edits → session; pure text → dispatch). Waypoint:
+  `free-agents-agent-replacement`.
 
 - **Rapid runtime promotion is now managed but 0.14 runtime qualification remains open.** The version manager can recreate superseded venvs from exact receipts and transactionally promote active pins, but a successful install/CLI smoke does not replace serve-level protocol, cache, concurrency, Metal, and real-session evidence. Keep rollback environments until those gates pass; retire them only when unpinned, inactive, and reproducible.
 - **Non-Qwen models default to Rapid without Rapid evidence.** `0.13.1` moved them to the default
