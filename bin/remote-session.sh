@@ -52,6 +52,9 @@ if [[ $# -eq 0 && -t 1 ]]; then
 fi
 ROSTER="$REPO_ROOT/config/remote-agents.sh"
 KEYS="$SCRIPT_DIR/remote-keys.sh"
+# Load the provider registry — single source of truth for endpoints,
+# routing prefixes, and availability checks. Sourced, not executed.
+source "$SCRIPT_DIR/remote-provider-registry.sh"
 RUNDIR="${TMPDIR:-/tmp}/local-agents-remote"
 
 # Corporate wifi runs a TLS-inspecting proxy, so Python's certifi bundle rejects every
@@ -193,39 +196,6 @@ _valid_model() {
         echo 'remote-session: provide a model ID using --remote-model (letters, digits, _ . / : @ + - only).' >&2
         return 2
     }
-}
-
-_available() {
-    [[ "$1" != github ]] || {
-        echo 'remote-session: GitHub Models is retired (official docs; catalog HTTP 410 checked 2026-09-14). Select another provider directly; no generation or automatic fallback attempted. https://docs.github.com/en/github-models' >&2
-        return 2
-    }
-}
-
-# Generic OpenAI-compatible routes, verified against official provider docs.
-# Always set api_base explicitly: no OpenAI endpoint or credential fallthrough.
-_openai_base() {
-    case "$1" in
-        mistral) echo 'https://api.mistral.ai/v1' ;;
-        zai) echo 'https://api.z.ai/api/paas/v4' ;;
-        siliconflow) echo 'https://api.siliconflow.com/v1' ;;
-        llm7) echo 'https://api.llm7.io/v1' ;;
-        kilo) echo 'https://api.kilo.ai/api/gateway' ;;
-        vercel) echo 'https://ai-gateway.vercel.sh/v1' ;;
-        sambanova) echo 'https://api.sambanova.ai/v1' ;;
-        modelscope) echo 'https://api-inference.modelscope.cn/v1' ;;
-        streamlake) echo 'https://api.streamlake.ai/v1' ;;
-        *) return 2 ;;
-    esac
-}
-
-_clear_provider_env() {
-    # The user's shell may still globally export keys. Keep only the selected
-    # provider in the proxy; no provider secrets are needed by the Claude child.
-    local name
-    for name in GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GITHUB_MODELS_TOKEN CEREBRAS_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY ZAI_API_KEY SILICONFLOW_API_KEY LLM7_API_KEY KILO_API_KEY AI_GATEWAY_API_KEY SAMBANOVA_API_KEY MODELSCOPE_API_KEY STREAMLAKE_API_KEY OPENAI_API_KEY; do
-        unset "$name"
-    done
 }
 
 # ---- roster helpers ---------------------------------------------------------
@@ -513,35 +483,7 @@ _cloudflare_base() {
     printf 'https://api.cloudflare.com/client/v4/accounts/%s/ai/v1' "$account"
 }
 
-_catalog_request() {
-    local prov="$1" envline key base
-    _available "$prov" || return 2
-    case "$prov" in
-        gemini)     base="https://generativelanguage.googleapis.com/v1beta/openai/models" ;;
-        groq)       base="https://api.groq.com/openai/v1/models" ;;
-        nvidia)     base="https://integrate.api.nvidia.com/v1/models" ;;
-        openrouter) base="https://openrouter.ai/api/v1/models" ;;
-        cerebras)   base="https://api.cerebras.ai/v1/models" ;;
-        cloudflare) base="$(_cloudflare_base)" || return 1
-                    base="${base%/v1}/models/search?per_page=100" ;;
-        mistral|llm7|kilo|vercel|sambanova) base="$(_openai_base "$prov")/models" ;;
-        siliconflow) base="$(_openai_base "$prov")/models?type=text" ;;
-        streamlake) base="$(_openai_base "$prov")/models" ;;
-        zai) echo 'remote-session: no documented ZAI catalog route; use --remote-model ID from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.' >&2; return 2 ;;
-        modelscope) echo 'remote-session: no documented ModelScope catalog route; use --remote-model ID from the API-Inference model page: https://modelscope.cn/docs/model-service/API-Inference/intro' >&2; return 2 ;;
-        *) echo "remote-session: no documented catalog route for $prov; choose an API model from its provider docs with --remote-model ID. Catalog verification unavailable." >&2; return 2 ;;
-    esac
-    envline="$("$KEYS" --env "$prov")" || return 1
-    envline="${envline%%$'\n'*}"
-    key="${envline#*=}"
-    # curl, not python: it uses the system trust store, which survives the
-    # corporate TLS-inspecting proxy that breaks python's default bundle.
-    # Keep the credential out of argv; escape curl-config quotes/backslashes.
-    key="${key//\\/\\\\}"; key="${key//\"/\\\"}"
-    printf 'header = "Authorization: Bearer %s"\n' "$key" |
-        curl --config - --fail --silent --max-time 25 "$base" || {
-        printf '  model check : ? catalog request failed (network, authorization, or service error)\n' >&2; return 1; }
-}
+# _catalog_request is provided by the sourced remote-provider-registry.sh
 
 catalog_models() { # tab-separated model ID and metadata; no default selection
     local body
@@ -763,22 +705,6 @@ _write_classifier_entry() { # _write_classifier_entry <cfg> <session-provider> <
     [[ "$cprov" != "$sprov" && " $SUBAGENT_POOL_PROVIDERS " != *" $cprov "* ]] && \
         SUBAGENT_POOL_PROVIDERS="${SUBAGENT_POOL_PROVIDERS:+$SUBAGENT_POOL_PROVIDERS }$cprov"
     return 0
-}
-
-_litellm_route() { # _litellm_route <provider> <model> -> "litellm_model|api_base"
-    local prov="$1" model="$2" base=""
-    case "$prov" in
-        gemini)     echo "gemini/$model|" ;;
-        groq)       echo "groq/$model|" ;;
-        nvidia)     echo "nvidia_nim/$model|" ;;
-        openrouter) echo "openrouter/$model|" ;;
-        cerebras)   echo "cerebras/$model|" ;;
-        cloudflare) base="$(_cloudflare_base)" || return 1; echo "openai/$model|$base" ;;
-        mistral)    echo "mistral/$model|" ;;
-        zai|siliconflow|llm7|kilo|vercel|sambanova|modelscope|streamlake)
-                    base="$(_openai_base "$prov")" || return 1; echo "openai/$model|$base" ;;
-        *)          return 1 ;;
-    esac
 }
 
 SUBAGENT_POOL_PROVIDERS=""   # extra providers whose keys the proxy needs (set by _write_subagent_pool)
