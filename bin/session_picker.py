@@ -1144,38 +1144,121 @@ class Picker(App):
     # --- inline prompts (text entry, confirmations) ------------------------------------------
     PROMPTS = {"prompt:session": "Session name (letters, digits, - _; empty = ephemeral):",
                "prompt:oneshot": "One-shot prompt:",
-               "prompt:download-review": "",
-               "prompt:rl-reset": "Really delete the shared limiter state file? type yes:",
-               "prompt:rt-remove": "Remove Rapid-MLX {version}? yes/no:",
-               "prompt:rt-remove-sure": "Are you sure? {version} is deleted permanently. yes/no:",
-               "prompt:rt-launchd-install": "Install the weekly LaunchAgent update check? type yes:",
-               "prompt:rt-launchd-uninstall": "Remove the weekly LaunchAgent update check? type yes:",
-               "prompt:register": "{alias} is on disk but not registered. Register {alias} (backend: {backend}) and launch it? yes/no:",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
                "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically, or type it and press Enter; empty Enter skips):"}
 
+    # Yes/no questions are ConfirmPanels, never typed (user 2026-10-16: ONE confirmation idiom).
+    # The FIRST choice is what Enter answers: the action for harmless ones, the safe answer for
+    # anything that deletes. Escape is always the safe answer.
+    CONFIRMS = ("prompt:download-review", "prompt:rl-reset", "prompt:rt-remove",
+                "prompt:rt-remove-sure", "prompt:rt-launchd-install",
+                "prompt:rt-launchd-uninstall", "prompt:register")
+
+    def _confirm(self, kind):
+        sm = self.screen_model
+        if kind == "prompt:download-review":
+            rv = sm.review()
+            fit = ("fits the disk reserve" if rv.fits
+                   else "BREACHES the disk reserve — the downloader will refuse")
+            q, d = (f"Download {len(rv.aliases)} model(s), ~{rv.total_gb:g} GB?",
+                    f"{', '.join(rv.aliases)} · {fit}.")
+            choices = [("yes", "Download now"), ("no", "Cancel (Esc)")]
+        elif kind == "prompt:rl-reset":
+            q, d = ("Delete the shared rate-limiter state file?",
+                    "Every free-API lane forgets its recorded request history and cooldowns.")
+            choices = [("no", "Cancel (Esc)"), ("yes", "Delete the state file")]
+        elif kind == "prompt:rt-remove":
+            v = sm.accordion.selected_id
+            q, d = (f"Remove Rapid-MLX {v}?", "You are asked once more before anything is deleted.")
+            choices = [("no", "Cancel (Esc)"), ("yes", f"Remove {v}")]
+        elif kind == "prompt:rt-remove-sure":
+            v = sm.accordion.selected_id
+            q, d = (f"Are you sure? {v} is deleted permanently.", "This cannot be undone from the picker.")
+            choices = [("no", "Cancel (Esc)"), ("yes", f"Yes, delete {v}")]
+        elif kind in ("prompt:rt-launchd-install", "prompt:rt-launchd-uninstall"):
+            verb = "Install" if kind.endswith("-install") else "Remove"
+            q, d = (f"{verb} the weekly LaunchAgent update check?",
+                    "A per-user launchd job that checks for backend updates once a week.")
+            choices = ([("yes", "Install it"), ("no", "Cancel (Esc)")] if verb == "Install"
+                       else [("no", "Cancel (Esc)"), ("yes", "Remove it")])
+        else:  # prompt:register
+            req = self._pending_launch
+            mdl = getattr(sm, "models", {}).get(req.selected_id)
+            backend = (mdl.backend if mdl else "").replace(" (auto)", "") or "rapid"
+            q, d = (f"{req.selected_id} is on disk but not registered.",
+                    f"Register it (backend: {backend}) and launch it now?")
+            choices = [("yes", "Register and launch"), ("no", "Cancel (Esc)")]
+        self.push_screen(ConfirmPanel(q, d, choices), lambda ans: self._confirmed(kind, ans))
+
+    def _confirmed(self, kind, answer):
+        self.query_one("#rows", OptionList).focus()
+        yes = bool(answer) and answer[0] == "yes"
+        sm = self.screen_model
+        if kind == "prompt:download-review":
+            req = sm.confirm(yes)
+            if req:
+                self.run_child(command_for(req), pause=True)
+                self.goto(m.Nav("download", self.nav.owner))
+            else:
+                self.state_warnings.append("download cancelled — nothing was started")
+                self.render_model()
+        elif kind == "prompt:rl-reset":
+            if yes:
+                self.run_child(["python3", "-c",
+                                "import rate_limiter as r,os;p=r.DEFAULT_STATE if not os.environ.get('LA_NVIDIA_THROTTLE_STATE') else r.Path(os.environ['LA_NVIDIA_THROTTLE_STATE']);p.unlink(missing_ok=True);print('state file reset')"],
+                               pause=True, cwd=str(BIN))
+            else:
+                self.state_warnings.append("limiter state unchanged — nothing was deleted")
+                self.render_model()
+        elif kind in ("prompt:rt-remove", "prompt:rt-remove-sure"):
+            # Select, yes, then an "are you sure" yes: the highlighted row names the version.
+            v = sm.accordion.selected_id if isinstance(sm, m.VersionsScreen) else None
+            if not (v and yes):
+                self.state_warnings.append("removal cancelled — nothing was deleted")
+                self.render_model()
+            elif kind == "prompt:rt-remove":
+                self._confirm("prompt:rt-remove-sure")
+            else:
+                self.run_tool(f"tool:rt-op:remove:{v}")
+        elif kind in ("prompt:rt-launchd-install", "prompt:rt-launchd-uninstall"):
+            if yes:
+                self.run_child(TOOLS["tool:" + kind.split(":", 1)[1]](self.settings.runtime_backend), pause=True)
+            else:
+                self.state_warnings.append("launchd unchanged — nothing was run")
+                self.render_model()
+        elif kind == "prompt:register":
+            req, self._pending_launch = self._pending_launch, None
+            if not yes:
+                self.state_warnings.append(f"{req.selected_id} not registered — nothing launched")
+                self.render_model()
+                return
+            csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
+            r = subprocess.run([csl, "--register-model", req.register_folder],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                msg = (r.stderr or r.stdout).strip().splitlines()
+                self.state_warnings.append(f"could not register {req.selected_id}: "
+                                           + (msg[-1] if msg else f"exit {r.returncode}"))
+                self.render_model()
+                return
+            self.cache.pop("local", None)          # the registry changed: reload on next view
+            self._prefetch(("local",))
+            req.needs_register = False
+            self.launch(req)
+
     def _open_prompt(self, kind):
+        if kind in self.CONFIRMS:
+            self._confirm(kind)
+            return
         self.pending_prompt = kind
         prompt = self.query_one("#prompt", Input)
         label = self.PROMPTS[kind]
-        if kind == "prompt:download-review":
-            rv = self.screen_model.review()
-            fit = "fits the disk reserve" if rv.fits else "BREACHES the disk reserve — the downloader will refuse"
-            label = (f"Queue: {', '.join(rv.aliases)} · ~{rv.total_gb:g} GB · {fit}. "
-                     "Type yes to download, anything else cancels:")
-        elif kind == "prompt:keys:key":
+        if kind == "prompt:keys:key":
             # Replace {provider} placeholder with actual provider name
             slug = getattr(self, '_pending_provider', 'unknown')
             label = label.format(provider=next((name for s_, name, *_ in m.APIKeysScreen.PROVIDERS if s_ == slug), slug))
             prompt.password = True  # Hidden input for API key
             prompt.submit_on_paste = True
-        elif kind in ("prompt:rt-remove", "prompt:rt-remove-sure"):
-            label = label.format(version=self.screen_model.accordion.selected_id)
-        elif kind == "prompt:register":
-            req = self._pending_launch
-            mdl = getattr(self.screen_model, "models", {}).get(req.selected_id)
-            backend = (mdl.backend if mdl else "").replace(" (auto)", "") or "rapid"
-            label = label.format(alias=req.selected_id, backend=backend)
         prompt.placeholder = ""   # the label is shown once, in #status below the input
         prompt.value = ""
         prompt.display = True
@@ -1206,55 +1289,6 @@ class Picker(App):
             req = sm.one_shot(value)
             if req:
                 self.run_child(command_for(req), pause=True)
-        elif kind == "prompt:download-review":
-            req = sm.confirm(value.lower() == "yes")
-            if req:
-                self.run_child(command_for(req), pause=True)
-                self.goto(m.Nav("download", self.nav.owner))
-            else:
-                self.state_warnings.append("download cancelled — nothing was started")
-                self.render_model()
-        elif kind == "prompt:rl-reset":
-            if value.lower() == "yes":
-                self.run_child(["python3", "-c",
-                                "import rate_limiter as r,os;p=r.DEFAULT_STATE if not os.environ.get('LA_NVIDIA_THROTTLE_STATE') else r.Path(os.environ['LA_NVIDIA_THROTTLE_STATE']);p.unlink(missing_ok=True);print('state file reset')"],
-                               pause=True, cwd=str(BIN))
-
-        elif kind in ("prompt:rt-remove", "prompt:rt-remove-sure"):
-            # Select, yes, then an "are you sure" yes: the highlighted row names the version.
-            v = sm.accordion.selected_id if isinstance(sm, m.VersionsScreen) else None
-            if not (v and value.lower() in ("y", "yes")):
-                self.state_warnings.append("removal cancelled — nothing was deleted")
-                self.render_model()
-            elif kind == "prompt:rt-remove":
-                self._open_prompt("prompt:rt-remove-sure")
-            else:
-                self.run_tool(f"tool:rt-op:remove:{v}")
-        elif kind in ("prompt:rt-launchd-install", "prompt:rt-launchd-uninstall"):
-            if value.lower() == "yes":
-                self.run_child(TOOLS["tool:" + kind.split(":", 1)[1]](self.settings.runtime_backend), pause=True)
-            else:
-                self.state_warnings.append("launchd unchanged — nothing was run")
-                self.render_model()
-        elif kind == "prompt:register":
-            req, self._pending_launch = self._pending_launch, None
-            if value.lower() not in ("y", "yes"):
-                self.state_warnings.append(f"{req.selected_id} not registered — nothing launched")
-                self.render_model()
-                return
-            csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
-            r = subprocess.run([csl, "--register-model", req.register_folder],
-                               capture_output=True, text=True)
-            if r.returncode != 0:
-                msg = (r.stderr or r.stdout).strip().splitlines()
-                self.state_warnings.append(f"could not register {req.selected_id}: "
-                                           + (msg[-1] if msg else f"exit {r.returncode}"))
-                self.render_model()
-                return
-            self.cache.pop("local", None)          # the registry changed: reload on next view
-            self._prefetch(("local",))
-            req.needs_register = False
-            self.launch(req)
         elif kind == "prompt:keys:add":
             if value:
                 self.run_child(TOOLS["tool:keys:add"](value), pause=True)

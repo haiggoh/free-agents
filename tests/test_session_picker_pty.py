@@ -175,7 +175,7 @@ class PickerRegistryOffers(PilotCase):
         Path(self.env["CSL_SELF"]).write_text(inventory_stub(HYGIENE_INV))
 
     def _prompt_offers_register(self, h, alias="auto-dream-7b"):
-        return h.wait_text(f"Register {alias}")
+        return h.wait_panel(f"{alias} is on disk but not registered")
 
     async def _click_red_row(self, h, alias="gone-model"):
         """The ONLY way the cleanup panel opens (user 2026-10-16: no automatic offer)."""
@@ -194,7 +194,7 @@ class PickerRegistryOffers(PilotCase):
             await h.goto_row("item", "auto-dream-7b")
             await h.press("enter")
             await self._prompt_offers_register(h)
-            await h.press(*"no", "enter")
+            await h.press("escape")
             await h.wait_text("not registered")
             self.assertEqual(self.launches(), [])       # recorder logs every stub call: NONE ran
         self.run_picker(s, start="local")
@@ -207,7 +207,7 @@ class PickerRegistryOffers(PilotCase):
             await h.goto_row("item", "auto-dream-7b")
             await h.press("enter")
             await self._prompt_offers_register(h)
-            await h.press(*"yes", "enter")
+            await h.press("enter")                      # default: Register and launch
             await h.wait_for(lambda: len(self.launches()) >= 2, "register + launch recorded")
             recs = self.launches()
             self.assertEqual([rec["prog"] for rec in recs], ["csl", "csl"])
@@ -330,17 +330,36 @@ class PickerTools(PilotCase):
             await h.goto_row("item", "gemma-4-26b")
             await h.press("space")
             await h.press("c")
-            await h.wait_text("Type yes to download")
-            await h.press(*"no", "enter")
+            await h.wait_panel("Download 2 model(s)")
+            await h.press("escape")
             await h.wait_text("download cancelled")
             self.assertEqual(self.launches(), [])
             await h.press("c")
-            await h.wait_text("Type yes to download")
-            await h.press(*"yes", "enter")
+            await h.wait_panel("Download 2 model(s)")
+            await h.press("enter")                      # default: Download now
             await h.wait_for(lambda: self.launches(), "the downloader run")
             self.assertEqual(self.launches()[0]["argv"],
                              ["--select", "qwen-3.8-operator", "--select", "gemma-4-26b"])
         self.run_picker(s, start="download")
+
+    def test_rate_limiter_reset_is_a_panel_and_defaults_to_cancel(self):
+        async def s(app, pilot, h):
+            state = Path(self.tmp.name) / "limiter-state.json"
+            state.write_text("{}")
+            os.environ["LA_NVIDIA_THROTTLE_STATE"] = str(state)
+            self.addCleanup(os.environ.pop, "LA_NVIDIA_THROTTLE_STATE", None)
+            await h.press("n")
+            await h.wait_screen("RateLimiterScreen")
+            await h.press("x")
+            await h.wait_panel("Delete the shared rate-limiter state file?")
+            await h.press("enter")                   # default = Cancel: deletes nothing
+            await h.wait_text("limiter state unchanged")
+            self.assertTrue(state.exists())
+            await h.press("x")
+            await h.wait_panel("Delete the shared rate-limiter state file?")
+            await h.press("down", "enter")           # Delete the state file
+            await h.wait_for(lambda: not state.exists(), "the state file to go")
+        self.run_picker(s, start="remote")
 
     def test_rate_limiter_screen_persists_and_is_child_of_remote(self):
         async def s(app, pilot, h):

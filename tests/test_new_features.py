@@ -77,25 +77,44 @@ class BackendManagerScreen(PilotCase):
             await h.press("down")
             self.assertEqual(app._highlighted(), ("item", "0.15.3"))
             await h.press("enter")
-            await h.wait_text("Remove Rapid-MLX 0.15.3? yes/no")
-            await h.press(*"no", "enter")                            # first question: no
+            await h.wait_panel("Remove Rapid-MLX 0.15.3?")
+            await h.press("enter")                                   # default = Cancel
             await h.wait_text("removal cancelled")
             await h.goto_row("item", "0.15.3")
             await h.press("enter")
-            await h.wait_text("Remove Rapid-MLX 0.15.3? yes/no")
-            await h.press(*"yes", "enter")
-            await h.wait_text("Are you sure? 0.15.3")
-            await h.press(*"no", "enter")                            # second question: no
+            await h.wait_panel("Remove Rapid-MLX 0.15.3?")
+            await h.press("down", "enter")                           # Remove 0.15.3
+            await h.wait_panel("Are you sure? 0.15.3")
+            await h.press("escape")                                  # second question: Esc
             await h.wait_text("removal cancelled")
             self.assertEqual(self.launches(), [])
             await h.goto_row("item", "0.15.3")
             await h.press("enter")
-            await h.wait_text("Remove Rapid-MLX 0.15.3? yes/no")
-            await h.press(*"yes", "enter")
-            await h.wait_text("Are you sure? 0.15.3")
-            await h.press("y", "enter")
+            await h.wait_panel("Remove Rapid-MLX 0.15.3?")
+            await h.press("down", "enter")
+            await h.wait_panel("Are you sure? 0.15.3")
+            await h.press("down", "enter")                           # Yes, delete 0.15.3
             await h.wait_for(lambda: self.launches(), "the remove child")
             self.assertEqual(self.launches()[-1]["argv"], ["--backend", "rapid-mlx", "remove", "0.15.3", "--yes"])
+        self.run_picker(s)
+
+    def test_launchd_install_and_uninstall_are_panel_questions(self):
+        self._stub_manager()
+        async def s(app, pilot, h):
+            await h.press("v")
+            await h.wait_screen("RuntimeManagerScreen")
+            await h.press("l")
+            await h.wait_screen("LaunchdScreen")
+            await h.press("u")
+            await h.wait_panel("Remove the weekly LaunchAgent update check?")
+            await h.press("enter")                                   # default = Cancel
+            await h.wait_text("launchd unchanged")
+            self.assertEqual(self.launches(), [])
+            await h.press("i")
+            await h.wait_panel("Install the weekly LaunchAgent update check?")
+            await h.press("enter")                                   # default = Install it
+            await h.wait_for(lambda: self.launches(), "the install child")
+            self.assertEqual(self.launches()[-1]["argv"][-2:], ["launchd", "install"])
         self.run_picker(s)
 
     def test_last_rapid_mlx_version_is_never_offered_for_removal(self):
