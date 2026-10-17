@@ -216,6 +216,32 @@ class PickerRegistryOffers(PilotCase):
             self.assertEqual(recs[1]["argv"][1], "auto-dream-7b")
         self.run_picker(s, start="local")
 
+    def test_unregistered_model_is_yellow_and_pinned_entry_registers_without_launch(self):
+        # User 2026-10-17: new on-disk models are easy to miss inside the folds; mark them
+        # yellow and pin one "Register new local models found on disk" row above every group.
+        async def s(app, pilot, h):
+            from textual.widgets import OptionList
+            await h.press("c")
+            await h.settle(0.5)
+            rows = app.query_one("#rows", OptionList)
+            first = rows.get_option_at_index(0).prompt
+            self.assertIn("Register new local models found on disk (1)", str(first))
+            self.assertIn("yellow", str(getattr(first, "style", "")))
+            await h.open_group("Other")
+            await h.goto_row("item", "auto-dream-7b")
+            row = rows.get_option_at_index(rows.highlighted).prompt
+            self.assertIn("not registered yet", str(row))
+            self.assertIn("yellow", str(getattr(row, "style", "")))
+            await h.goto_row("group", self.m.NEW_MODELS_GROUP)
+            await h.press("enter")
+            await h.wait_panel("[x] auto-dream-7b")
+            await h.press("enter")                      # default: Register selected
+            await h.wait_for(lambda: self.launches(), "the register call")
+            self.assertEqual([r["argv"] for r in self.launches()], [["--register-model", "auto-dream-7b"]],
+                             "registers only — nothing is launched from this entry")
+            await h.wait_text("registered 1 model")
+        self.run_picker(s, start="local")
+
     def test_cleanup_offer_is_a_panel_question_first(self):
         # User 2026-10-16: the typed yes/no sat ABOVE a grey explanation and read as detail.
         # Now a modal panel: the question is its first line, each missing model is listed.

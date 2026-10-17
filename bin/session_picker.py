@@ -758,6 +758,10 @@ class Picker(App):
                         rows.add_option(Option("", id="sep", disabled=True))
                         self.row_ids.append(None)
                         continue
+                    if getattr(obj, "style", ""):         # an action header, not a fold
+                        rows.add_option(Option(Text(obj.label, style=obj.style), id=f"g:{obj.id}"))
+                        self.row_ids.append(("group", obj.id))
+                        continue
                     mark = "▾" if obj.id == sm.accordion.open_group else "▸"
                     rows.add_option(Option(f"{mark} {obj.label}", id=f"g:{obj.id}"))
                     self.row_ids.append(("group", obj.id))
@@ -938,6 +942,9 @@ class Picker(App):
         if not h:
             return
         acc = self.screen_model.accordion
+        if h == ("group", m.NEW_MODELS_GROUP):
+            self._open_register_panel()
+            return
         if h[0] == "group":
             if acc.open_group == h[1]:
                 acc.collapse()
@@ -1344,6 +1351,45 @@ class Picker(App):
                    ("keep", "Keep them for now (Esc)")]
         self.push_screen(ConfirmPanel(question, detail, choices, items=names, ticked=ticked),
                          self._cleanup_answered)
+
+    def _open_register_panel(self):
+        """Every on-disk, unregistered model in one ConfirmPanel, all ticked: register the ticked
+        ones (csl --register-model per folder) without launching any of them."""
+        new = list(getattr(self.screen_model, "unregistered", []) or [])
+        if not new:
+            return
+        self._register_folders = {x.alias: (x.folder or x.alias) for x in new}
+        names = [x.alias for x in new]
+        self.push_screen(ConfirmPanel(
+            f"{len(names)} new model(s) found on disk, not registered yet.",
+            "Registering adds each ticked model to your local registry (config.local.sh, with a "
+            "backup) so it can be launched from this list. Nothing is launched now.",
+            [("register", "Register selected"), ("keep", "Not now (Esc)")],
+            items=names), self._register_answered)
+
+    def _register_answered(self, answer):
+        self.query_one("#rows", OptionList).focus()
+        choice, picked = answer if answer else ("keep", [])
+        if choice != "register" or not picked:
+            self._warn_here("no models registered")
+            self.render_model()
+            return
+        csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
+        failed = []
+        for alias in picked:
+            r = subprocess.run([csl, "--register-model", self._register_folders[alias]],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                msg = (r.stderr or r.stdout).strip().splitlines()
+                failed.append(f"{alias} ({msg[-1] if msg else f'exit {r.returncode}'})")
+        done = len(picked) - len(failed)
+        self._warn_here(f"registered {done} model(s)" + (f"; failed: {', '.join(failed)}" if failed else ""))
+        self.cache.pop("local", None)                  # the registry changed: reload the list
+        sm = self.screen_model
+        if isinstance(sm, m.LocalScreen):
+            sm._models_loaded = False
+        self._prefetch(("local",))
+        self.render_model()
 
     def _cleanup_answered(self, answer):
         self.query_one("#rows", OptionList).focus()   # as _close_prompt: back to the list

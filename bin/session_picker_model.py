@@ -363,6 +363,7 @@ class Group:
     id: str
     label: str
     items: list
+    style: str = ""     # a Rich style for the header; a styled empty group is an ACTION row
 
 
 class Accordion:
@@ -383,7 +384,8 @@ class Accordion:
         if self.selected_id:
             self.open_group = self._group_of(self.selected_id)
         if self.open_group is None and groups:
-            self.open_group = groups[0].id
+            # The first group that HAS rows: an action header (e.g. "Register new…") opens nothing.
+            self.open_group = next((g.id for g in groups if g.items), groups[0].id)
 
     def _group_of(self, item_id):
         for g in self.groups:
@@ -562,6 +564,9 @@ class LaunchRequest:
     register_folder: str = ""   # the on-disk folder to register (may differ from the alias)
 
 
+NEW_MODELS_GROUP = "__new_models__"   # the "Register new local models…" action header
+
+
 class LocalScreen(Screen):
     title = f"{ec.SESSION_EMOJI_LOCAL_STR} Local Session Picker"
     # Registered aliases whose weights are gone from disk (csl --inventory reports them as
@@ -595,16 +600,28 @@ class LocalScreen(Screen):
         self.missing = [a for a in (missing or []) if a not in self.models]
         buckets: dict[str, list] = {}
         for mdl in models:
-            buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(
-                Item(mdl.profile_id or mdl.alias,
-                     f"{mdl.alias}"
-                     + (f" ({mdl.backend}" + (", thinking" if mdl.thinking else "") + ")" if mdl.backend else "")
-                     + (f"  [{mdl.roles}]" if mdl.roles else "")))
+            if mdl.auto_scanned:
+                # On disk but not registered: yellow, and it says so (user 2026-10-17).
+                item = Item(mdl.profile_id or mdl.alias,
+                            f"{mdl.alias}  — on disk, not registered yet", style="yellow")
+            else:
+                item = Item(mdl.profile_id or mdl.alias,
+                            f"{mdl.alias}"
+                            + (f" ({mdl.backend}" + (", thinking" if mdl.thinking else "") + ")" if mdl.backend else "")
+                            + (f"  [{mdl.roles}]" if mdl.roles else ""))
+            buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(item)
         for alias in self.missing:
             buckets.setdefault(family_for(alias), []).append(
                 Item(alias, f"{alias}  — weights missing from disk", style="red"))
         order = sorted(buckets, key=lambda f: (f == "Other", f.lower()))
-        self.accordion.set_groups([Group(f, f"{f} ({len(buckets[f])})", buckets[f]) for f in order])
+        groups = [Group(f, f"{f} ({len(buckets[f])})", buckets[f]) for f in order]
+        self.unregistered = [x for x in models if x.auto_scanned]
+        if self.unregistered:
+            # Temporary entry ABOVE every group, so new models are seen without opening each one.
+            groups.insert(0, Group(NEW_MODELS_GROUP,
+                                   f"+ Register new local models found on disk ({len(self.unregistered)})",
+                                   [], style="bold yellow"))
+        self.accordion.set_groups(groups)
         self._models_loaded = True
 
     def _toggle_choose_model(self):
