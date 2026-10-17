@@ -41,6 +41,14 @@ _REQUIRES_YAML_MSG = (
     "install with `uv pip install pyyaml`"
 )
 
+
+def _coerce_str(v):
+    """Convert YAML-parsed date objects back to strings."""
+    if _date is not None and isinstance(v, _date):
+        return v.isoformat()
+    return v
+
+
 REPO_ROOT = Path(__file__).parent.parent
 _YAML_PATH = REPO_ROOT / "config" / "remote-registry.yaml"
 
