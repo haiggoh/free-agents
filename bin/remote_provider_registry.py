@@ -25,6 +25,11 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    from datetime import date as _date
+except ImportError:
+    _date = None
+
 # --- yaml import (soft dependency) -------------------------------------------
 try:
     import yaml
@@ -175,7 +180,7 @@ def _load_registry():
             catalog_url=pd.get("catalog_url", ""),
             key_env=pd.get("key_env", ""),
             extra_env=tuple(extra) if extra else (),
-            static_headers=dict(static) if static else {},
+            static_headers={k: _coerce_str(v) for k, v in (dict(static).items())} if static else {},
             default_models=tuple(defaults) if defaults else (),
             supports_responses=bool(pd.get("supports_responses", False)),
             notes=pd.get("notes", ""),
