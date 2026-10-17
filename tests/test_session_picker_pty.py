@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from picker_harness import ROOT, PilotCase, PTYCase, inventory_stub  # noqa: E402
+from picker_harness import RECORDER, ROOT, PilotCase, PTYCase, inventory_stub  # noqa: E402
 
 
 class PickerNavigation(PilotCase):
@@ -240,6 +240,25 @@ class PickerRegistryOffers(PilotCase):
             self.assertEqual([r["argv"] for r in self.launches()], [["--register-model", "auto-dream-7b"]],
                              "registers only — nothing is launched from this entry")
             await h.wait_text("registered 1 model")
+            # After the reload the model is a plain registered row and the pinned entry is gone
+            # (the stub now reports it registered, as the real csl does after --register-model).
+            await h.wait_for(lambda: not any("Register new" in r for r in h.labels("rows")),
+                             "the pinned register entry to disappear")
+            await h.open_group("Other")
+            await h.goto_row("item", "auto-dream-7b")
+            row = rows.get_option_at_index(rows.highlighted).prompt
+            self.assertNotIn("not registered", str(row))
+            self.assertNotIn("yellow", str(getattr(row, "style", "")))
+        # A stub that REMEMBERS the registration, like the real csl (user 2026-10-17: the old
+        # fixture kept reporting it unregistered, so the row stayed yellow).
+        reg = Path(self.tmp.name) / "registered"
+        after = HYGIENE_INV.replace(AUTO_ROW, "auto-dream-7b\trapid\tmedium\t\t")
+        Path(self.env["CSL_SELF"]).write_text(
+            "#!/bin/sh\n"
+            f'case "$1" in --register-model) touch "{reg}";; esac\n'
+            f'for a in "$@"; do [ "$a" = --inventory ] && {{ if [ -e "{reg}" ]; then cat <<\'EOF\'\n{after}EOF\n'
+            f"else cat <<'EOF'\n{HYGIENE_INV}EOF\nfi; exit 0; }}; done\n"
+            + RECORDER.split("\n", 1)[1])
         self.run_picker(s, start="local")
 
     def test_cleanup_offer_is_a_panel_question_first(self):

@@ -7,7 +7,8 @@
 #
 # What the fakes contain (edit the heredocs below to stage a different situation):
 #   csl inventory    qwen-3.8-operator (normal), auto-dream-7b (on disk, NOT registered),
-#                    gone-model / lost-model / devstral-2-123b (registered, weights MISSING)
+#                    gone-model / lost-model / devstral-2-123b (registered, weights MISSING);
+#                    register/unregister are remembered, so the list changes like the real one
 #   downloader       qwen-3.8-operator 16 GB, gemma-4-26b 14 GB (both absent), 500 GB free
 #   backend manager  rapid-mlx 0.16.1 + 0.15.3 installed; releases 0.17.0 / 0.16.1 / 0.15.3
 #   remote lane      two fake providers (Groq, Gemini); launches are only logged
@@ -45,18 +46,26 @@ cat > "$SB/record" <<EOF
 echo "\$(date +%H:%M:%S) would run: \$(basename "\$0") \$*" >> "$SB/calls.log"
 EOF
 
+# The fake csl KEEPS STATE like the real one: --register-model / --unregister-model change what the
+# next --inventory reports, so the picker's reload after a confirmation can be seen working.
 cat > "$SB/csl" <<EOF
 #!/bin/sh
+REG="$SB/registered" UNREG="$SB/unregistered"
+touch "\$REG" "\$UNREG"
+case "\$1" in
+  --help|-h) echo "sandbox csl: fake inventory that remembers register/unregister calls"; echo "see picker-sandbox.sh"; exit 0;;
+  --register-model) . "$SB/record"; echo "\$2" >> "\$REG"; echo "registered \$2 (sandbox)"; exit 0;;
+  --unregister-model) . "$SB/record"; shift; for a in "\$@"; do echo "\$a" >> "\$UNREG"; done; exit 0;;
+esac
 case "\$*" in
-  *--help*) echo "sandbox csl: fake inventory; other calls are only logged"; echo "see picker-sandbox.sh"; exit 0;;
-  *--inventory*) cat <<'INV'
-qwen-3.8-operator	rapid	high
-auto-dream-7b	rapid (auto)	medium	auto-scanned	auto-dream-7b
-#missing	gone-model	gone-model-v2
-#missing	lost-model	lost-model-v1
-#missing	devstral-2-123b	Devstral-2-123B
-INV
-  exit 0;;
+  *--inventory*)
+    printf 'qwen-3.8-operator\trapid\thigh\t\t\n'
+    if grep -qx auto-dream-7b "\$REG"; then printf 'auto-dream-7b\trapid\tmedium\t\t\n'
+    else printf 'auto-dream-7b\trapid (auto)\tmedium\tauto-scanned\tauto-dream-7b\n'; fi
+    for m in gone-model:gone-model-v2 lost-model:lost-model-v1 devstral-2-123b:Devstral-2-123B; do
+      a=\${m%%:*}; grep -qx "\$a" "\$UNREG" || printf '#missing\t%s\t%s\n' "\$a" "\${m#*:}"
+    done
+    exit 0;;
 esac
 . "$SB/record"
 EOF
