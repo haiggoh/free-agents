@@ -18,7 +18,8 @@ Environment Variables:
   LA_MEMGUARD_SOFT_PCT        Soft RAM threshold percentage (default: 85).
   LA_MEMGUARD_HARD_PCT        Hard RAM threshold percentage (default: 93).
   LA_MEMGUARD_COOLDOWN_S      Cooldown between session compacts in seconds (default: 300).
-  LA_MEMGUARD_INJECT_CMD      Command to inject compact instruction into session.
+  LA_MEMGUARD_INJECT_CMD      Injector, called as `<cmd> <session-id> <text>`
+                              (default: la-memguard-inject.py beside this file).
   LA_MEMGUARD_NOTIFY          Set to 0 to disable macOS notifications (default: 1).
   LA_MEMGUARD_INTERVAL_S      Default loop interval for run subcommand (default: 2.0).
 """
@@ -163,6 +164,7 @@ def decide(
     cfg: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     new_state = {
+        **state,
         "level": state.get("level", "ok"),
         "last_compact_at": dict(state.get("last_compact_at", {})),
         "pending": dict(state.get("pending", {})),
@@ -270,6 +272,49 @@ def decide(
     return actions, new_state
 
 
+CONTINUE_GRACE_S = 3.0      # after a compact, give a prompt the user queued time to go out first
+ABORT_FORGET_S = 900.0       # an abort whose compact never finished is dropped after this
+
+
+def decide_abort(sessions: list[dict[str, Any]], state: dict[str, Any], now: float
+                 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """A turn aborted by the backend's memory limit: compact that session now (no threshold, no
+    cooldown — the backend already said memory is gone), then type `continue` once the compact has
+    finished, unless the user's own prompt has resumed the work in the meantime."""
+    st = {**state, "handled_abort": dict(state.get("handled_abort", {})),
+          "await_continue": dict(state.get("await_continue", {}))}
+    actions: list[dict[str, Any]] = []
+    by_id = {s["id"]: s for s in sessions}
+    for sid, s in by_id.items():
+        abort_at = s.get("memory_abort_at")
+        if not abort_at or abort_at <= st["handled_abort"].get(sid, 0) or not s.get("idle"):
+            continue
+        st["handled_abort"][sid] = abort_at
+        st["await_continue"][sid] = {"abort_at": abort_at, "requested_at": now}
+        st.setdefault("last_compact_at", {})[sid] = now
+        st["inflight"] = {"id": sid, "at": now}
+        actions.append({"kind": "compact", "session": sid, "level": "abort",
+                        "reason": "Memory guard: the last turn hit the backend's memory limit — "
+                                  "compacting now, then continuing automatically"})
+    for sid, w in list(st["await_continue"].items()):
+        s = by_id.get(sid)
+        if s is None or now - w["requested_at"] > ABORT_FORGET_S:
+            del st["await_continue"][sid]
+            continue
+        done = s.get("compacted_at") or 0
+        if done < w["requested_at"]:
+            continue  # compact not finished yet
+        if (s.get("last_prompt_at") or 0) > done or not s.get("idle"):
+            del st["await_continue"][sid]  # the user's queued prompt carries on: no `continue`
+            actions.append({"kind": "skip-continue", "session": sid})
+            continue
+        if now - done < CONTINUE_GRACE_S:
+            continue
+        del st["await_continue"][sid]
+        actions.append({"kind": "continue", "session": sid})
+    return actions, st
+
+
 def act_on_actions(actions: list[dict[str, Any]], state_dir: Path, now: float) -> None:
     if not actions:
         return
@@ -284,14 +329,19 @@ def act_on_actions(actions: list[dict[str, Any]], state_dir: Path, now: float) -
                 f.write(json.dumps(action_log) + "\n")
 
                 kind = action.get("kind")
-                if kind == "compact":
-                    inject_cmd = os.environ.get("LA_MEMGUARD_INJECT_CMD")
-                    if inject_cmd:
-                        try:
-                            cmd = shlex.split(inject_cmd) + [action["session"], action["reason"]]
-                            subprocess.run(cmd, check=False)
-                        except Exception:
-                            pass
+                if kind in ("compact", "continue"):
+                    text = f"/compact {action['reason']}" if kind == "compact" else "continue"
+                    inject_cmd = os.environ.get("LA_MEMGUARD_INJECT_CMD") or shlex.join(
+                        [sys.executable, str(Path(__file__).resolve().parent / "la-memguard-inject.py")])
+                    try:
+                        r = subprocess.run(shlex.split(inject_cmd) + [action["session"], text],
+                                           capture_output=True, text=True, timeout=120)
+                        f.write(json.dumps({"kind": "inject-result", "session": action["session"],
+                                            "rc": r.returncode, "out": (r.stdout + r.stderr).strip()[:300],
+                                            "t": now}) + "\n")
+                    except Exception as exc:
+                        f.write(json.dumps({"kind": "inject-result", "session": action["session"],
+                                            "rc": -1, "out": str(exc)[:300], "t": now}) + "\n")
                 elif kind == "notify":
                     if os.environ.get("LA_MEMGUARD_NOTIFY") != "0":
                         try:
@@ -351,7 +401,9 @@ def do_run(interval: float, once: bool, state_dir: Path) -> int:
 
         now = time.time()
         state = load_state(state_dir)
+        abort_actions, state = decide_abort(sessions, state, now)
         actions, new_state = decide(reading, sessions, footprints, state, now, cfg)
+        actions = abort_actions + actions
         act_on_actions(actions, state_dir, now)
         save_state(state_dir, new_state)
 

@@ -202,7 +202,7 @@ def test_run_once_end_to_end(tmp_path):
 
     assert inj_out.exists()
     inj_text = inj_out.read_text()
-    assert "test-sess Memory guard: RAM at 90% of the 100 GB ceiling" in inj_text
+    assert "test-sess /compact Memory guard: RAM at 90% of the 100 GB ceiling" in inj_text
 
     log_file = state_dir / "watchdog.log"
     assert log_file.exists()
@@ -260,3 +260,62 @@ def test_phys_footprint_parsing_not_rss():
     assert memguard.parse_phys_footprint(out) == 53.0
     assert memguard.parse_phys_footprint("    phys_footprint: 512 MB\n") == 0.5
     assert memguard.parse_phys_footprint("") == 0.0
+
+
+# ---- aborted turn -> compact -> continue (phase 3) ---------------------------------------------
+
+def _abort_sess(**kw):
+    s = {"id": "s1", "idle": True, "memory_abort_at": 100.0}
+    s.update(kw)
+    return s
+
+
+def test_abort_compacts_then_continues_after_the_compact():
+    acts, st = memguard.decide_abort([_abort_sess()], {}, 101.0)
+    assert [a["kind"] for a in acts] == ["compact"] and acts[0]["session"] == "s1"
+    acts, st = memguard.decide_abort([_abort_sess()], st, 120.0)
+    assert acts == [], "no continue before the compact has finished"
+    done = _abort_sess(compacted_at=150.0)
+    acts, st = memguard.decide_abort([done], st, 151.0)
+    assert acts == [], "grace period lets a queued user prompt go first"
+    acts, st = memguard.decide_abort([done], st, 160.0)
+    assert [a["kind"] for a in acts] == ["continue"]
+    acts, st = memguard.decide_abort([done], st, 170.0)
+    assert acts == [], "one abort, one compact, one continue"
+
+
+def test_user_prompt_after_the_compact_skips_continue():
+    _, st = memguard.decide_abort([_abort_sess()], {}, 101.0)
+    s = _abort_sess(compacted_at=150.0, last_prompt_at=152.0, idle=False)
+    acts, st = memguard.decide_abort([s], st, 160.0)
+    assert [a["kind"] for a in acts] == ["skip-continue"]
+    acts, _ = memguard.decide_abort([_abort_sess(compacted_at=150.0, last_prompt_at=152.0)], st, 200.0)
+    assert acts == []
+
+
+def test_no_abort_no_action_and_busy_abort_waits():
+    assert memguard.decide_abort([{"id": "s1", "idle": True}], {}, 10.0)[0] == []
+    acts, st = memguard.decide_abort([_abort_sess(idle=False)], {}, 101.0)
+    assert acts == [], "never type into a running turn"
+    acts, _ = memguard.decide_abort([_abort_sess()], st, 102.0)
+    assert [a["kind"] for a in acts] == ["compact"]
+
+
+def test_registry_flags_only_memory_aborts(tmp_path, monkeypatch):
+    monkeypatch.setenv("LA_MEMGUARD_STATE_DIR", str(tmp_path))
+    reg = memguard.load_registry_module()
+    sid = reg.register("omlx", "8000", "m", launcher_pid=os.getpid())
+    omlx = ("Request aborted: process memory limit exceeded (usage 98.9 GB, abort threshold "
+            "(hard watermark) 98.5 GB, ceiling 103.9 GB). Reduce context length.")
+    reg.mark(sid, "StopFailure", {"hook_event_name": "StopFailure", "error": "rate_limit",
+                                  "error_details": "429 Too Many Requests"})
+    assert "memory_abort_at" not in reg.read(sid)
+    reg.mark(sid, "StopFailure", {"hook_event_name": "StopFailure", "error": "api_error",
+                                  "error_details": omlx})
+    assert reg.read(sid)["memory_abort_at"] > 0
+    reg.mark(sid, "UserPromptSubmit", {})
+    reg.mark(sid, "PostCompact", {"trigger": "auto"})
+    assert reg.read(sid)["idle"] is False
+    reg.mark(sid, "PostCompact", {"trigger": "manual"})
+    rec = reg.read(sid)
+    assert rec["idle"] is True and rec["compacted_at"] > 0

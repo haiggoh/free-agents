@@ -8,7 +8,7 @@ Usage:
   la-memguard-registry.py register --backend B --port P --model M [--tmux-socket PATH --tmux-target T]
                                    [--launcher-pid PID]      prints the new session id
   la-memguard-registry.py unregister ID
-  la-memguard-registry.py mark ID --event EVENT            EVENT: Stop | StopFailure | UserPromptSubmit | SessionEnd
+  la-memguard-registry.py mark ID --event EVENT            EVENT: Stop | StopFailure | UserPromptSubmit | PostCompact | SessionEnd
   la-memguard-registry.py hook                             hook entry: reads the hook JSON on stdin, marks
                                                            $LA_MEMGUARD_SESSION_ID; a no-op when that is unset
   la-memguard-registry.py list                             JSON array of live sessions (prunes dead launchers)
@@ -23,12 +23,16 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
 IDLE_EVENTS = {"Stop": True, "StopFailure": True, "UserPromptSubmit": False}
+# A turn ended by a backend memory abort (oMLX's guard; rapid/llama.cpp out-of-memory refusals).
+MEMORY_ABORT_RE = re.compile(r"process memory limit exceeded|out of memory|insufficient memory|"
+                             r"memory (?:limit|pressure|guard)|kIOGPUCommandBufferCallbackErrorOutOfMemory", re.I)
 
 
 def state_dir() -> Path:
@@ -89,7 +93,7 @@ def unregister(sid: str) -> None:
     (sessions_dir() / f".{sid}.lock").unlink(missing_ok=True)
 
 
-def mark(sid: str, event: str) -> bool:
+def mark(sid: str, event: str, payload: dict | None = None) -> bool:
     """Record a hook event. Returns False when the session is not registered (nothing written)."""
     with _locked(sid):
         rec = read(sid)
@@ -104,6 +108,14 @@ def mark(sid: str, event: str) -> bool:
             rec["idle"] = idle
             if event == "UserPromptSubmit":
                 rec["last_prompt_at"] = now
+        if event == "StopFailure" and MEMORY_ABORT_RE.search(json.dumps(payload or {})):
+            rec["memory_abort_at"] = now
+        elif event == "PostCompact":
+            rec["compacted_at"] = now
+            # A manual /compact runs between turns, and no Stop follows it: the session is idle
+            # again. An auto-compact can run mid-turn, so it leaves the flag alone.
+            if (payload or {}).get("trigger") == "manual":
+                rec["idle"] = True
         elif event == "SessionEnd":
             rec["ended"] = True
             rec["idle"] = True
@@ -169,9 +181,10 @@ def main(argv: list[str]) -> int:
         if not sid:
             return 0
         try:
-            event = json.load(sys.stdin).get("hook_event_name", "")
+            payload = json.load(sys.stdin)
+            event = payload.get("hook_event_name", "")
             if event:
-                mark(sid, event)
+                mark(sid, event, payload)
         except Exception:
             pass
         return 0

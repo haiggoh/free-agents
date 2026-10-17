@@ -112,6 +112,17 @@
           }
         ]
       }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -z \"${LA_MEMGUARD_SESSION_ID:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/bin/la-memguard-registry.py\" hook",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
