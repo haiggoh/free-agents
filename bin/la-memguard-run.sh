@@ -50,6 +50,8 @@ la_memguard_claude() {
     sid="$(python3 "$reg" register --backend "$backend" --port "$port" --model "$model" \
         --tmux-socket "$socket" --tmux-target "$target" --launcher-pid "$$" 2>/dev/null)" || sid=""
     export LA_MEMGUARD_SESSION_ID="$sid"
+    # One watchdog per machine; it exits by itself once no local session is registered.
+    [ -n "$sid" ] && python3 "$LAUNCH_DIR/la-memguard.py" ensure >/dev/null 2>&1
 
     if [ "$mode" != tmux ]; then
         claude "$@"
@@ -68,7 +70,7 @@ la_memguard_claude() {
         "$tmux_bin" -S "$socket" -f /dev/null new-session -d -s "$target" -x "$(tput cols 2>/dev/null || echo 120)" \
             -y "$(tput lines 2>/dev/null || echo 40)" "$runner" \
             \; set -g prefix None \; unbind-key C-b \; set -g escape-time 0 \; set -g status off \
-            \; set -g mouse on \; set -g history-limit 50000 \; set -g default-terminal tmux-256color \
+            \; set -g mouse on \; set -g focus-events on \; set -g history-limit 50000 \; set -g default-terminal tmux-256color \
             \; set -ga terminal-features ',*:RGB' \; set -g remain-on-exit off >/dev/null 2>&1
         if "$tmux_bin" -S "$socket" has-session -t "$target" 2>/dev/null; then
             "$tmux_bin" -S "$socket" attach-session -t "$target" >/dev/null 2>&1
