@@ -235,6 +235,15 @@ LK_EMOJI_TOGGLE_OFF_STR = _EMOJIS.get("LK_EMOJI_TOGGLE_OFF", "🚫")
 LK_EMOJI_BACK_STR = _EMOJIS.get("LK_EMOJI_BACK", "🏠")
 
 
+def gap(emoji: str) -> str:
+    """The emoji plus the space(s) that keep the following text clear of it. A narrow base
+    character + U+FE0F (🗑️ ℹ️ ↩️ 🌡️) is DRAWN two columns wide by the terminal but measured as
+    one, so a single space gets painted over (user 2026-10-16/17); those get two spaces."""
+    import unicodedata
+    narrow = emoji.endswith("\ufe0f") and unicodedata.east_asian_width(emoji[0]) not in "WF"
+    return emoji + ("  " if narrow else " ")
+
+
 if __name__ == "__main__":
     # Print all loaded emojis for debugging
     for k, v in sorted(_load_emojis().items()):

@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
 import session_picker_model as m  # noqa: E402
+import emoji_constants as ec  # noqa: E402
 
 
 def local_models(n=12):
@@ -372,6 +373,22 @@ class GroupingTests(unittest.TestCase):
             for action in screen.actions():
                 with self.subTest(screen=type(screen).__name__, key=action.key):
                     self.assertEqual(foreign(action.label), [], action.label)
+
+    def test_narrow_vs16_emoji_get_two_spaces(self):
+        # User 2026-10-17: "Remove an installed version", "Show info…", "Back to Backend
+        # manager" — a narrow base + U+FE0F draws 2 columns, so one space is painted over.
+        import re, unicodedata
+        root = Path(__file__).resolve().parent.parent
+        narrow = {k[:-4] for k, v in vars(ec).items() if k.endswith("_STR") and isinstance(v, str)
+                  and v.endswith("\ufe0f") and unicodedata.east_asian_width(v[0]) not in "WF"}
+        self.assertTrue(narrow, "fixture: no narrow VS16 emoji found to check")
+        for f in ("bin/session_picker_model.py", "bin/session_picker.py"):
+            for n, line in enumerate((root / f).read_text().splitlines(), 1):
+                for k in narrow:
+                    with self.subTest(file=f, line=n, emoji=k):
+                        self.assertIsNone(re.search(r"\{ec\." + k + r"_STR\} (?! )", line), line.strip())
+        self.assertEqual(ec.gap("\U0001f5d1\ufe0f"), "\U0001f5d1\ufe0f  ")   # 🗑️ narrow + VS16
+        self.assertEqual(ec.gap("\U0001f527"), "\U0001f527 ")                  # 🔧 already wide
 
     def test_no_emoji_literals_in_picker_source(self):
         # Single source of truth: every emoji the picker draws is defined in config/emoji.sh.

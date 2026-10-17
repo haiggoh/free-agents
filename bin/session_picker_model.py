@@ -519,7 +519,7 @@ class HomeScreen(Screen):
         if src:
             line += f"\nConfig: {src}"
         if os.environ.get("LA_FALLBACK_CONFIG") == "1":
-            line += (f"\n{ec.EMOJI_WARNING_STR} Using public fallback defaults. Private models "
+            line += (f"\n{ec.EMOJI_WARNING_STR}  Using public fallback defaults. Private models "
                      "are not present in this installed copy.")
         return line
 
@@ -537,7 +537,7 @@ class HomeScreen(Screen):
                    lambda: Nav("local", HOME_OWNED), section="lanes"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
-            Action("c", f"{ec.EMOJI_CLOUD_CONFIG_STR} {ec.EMOJI_TOOLS_STR} Cloud session configuration…", lambda: Nav("cloud_config", HOME_OWNED), section="tools"),
+            Action("c", f"{ec.EMOJI_CLOUD_CONFIG_STR}  {ec.EMOJI_TOOLS_STR} Cloud session configuration…", lambda: Nav("cloud_config", HOME_OWNED), section="tools"),
             Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools"),
             Action("o", f"{ec.LK_EMOJI_CONVO_STR} Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
         ]
@@ -967,7 +967,7 @@ class CloudConfigScreen(Screen):
     - Classifier Source: NVIDIA API / local default classifier / Auto (local + free-API only)
     - Bypass Permissions: blind-trust for free-API remote sessions (the gateway launcher hardcodes it)
     """
-    title = f"{ec.EMOJI_CLOUD_CONFIG_STR} {ec.EMOJI_TOOLS_STR} Cloud Session Configuration"
+    title = f"{ec.EMOJI_CLOUD_CONFIG_STR}  {ec.EMOJI_TOOLS_STR} Cloud Session Configuration"
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
@@ -1261,7 +1261,7 @@ class VersionsScreen(Screen):
         super().__init__(settings, owner)
         self.op = op
         self.backend = settings.runtime_backend
-        self.title = f"{VERSION_OP_EMOJI[op]} {self.OPS[op][0]} — {self.backend}"
+        self.title = f"{ec.gap(VERSION_OP_EMOJI[op])}{self.OPS[op][0]} — {self.backend}"
         self.entries: list[VersionEntry] | None = None
         self.promote_after_install = True
         if entries is not None:
@@ -1323,7 +1323,7 @@ class VersionsScreen(Screen):
             acts.append(setting("p", f"Promote pins after install: {'ON' if self.promote_after_install else 'OFF'}",
                                 (True, False), lambda: self.promote_after_install,
                                 lambda v: setattr(self, "promote_after_install", v)))
-        acts.append(Action("b", f"{ec.EMOJI_BACK_STR} Back to Backend manager", lambda: BACK, section="nav"))
+        acts.append(Action("b", f"{ec.EMOJI_BACK_STR}  Back to Backend manager", lambda: BACK, section="nav"))
         check_action_table(acts)
         return acts
 
@@ -1347,14 +1347,14 @@ def runtime_actions(screen) -> list:
         Action("r", f"{ec.EMOJI_RELEASES_STR} List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
         Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", pick("install"), section="tools"),
         Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", pick("validate"), section="tools"),
-        Action("f", f"{ec.EMOJI_INFO_STR} Show info for an installed version", pick("info"), section="tools"),
+        Action("f", f"{ec.EMOJI_INFO_STR}  Show info for an installed version", pick("info"), section="tools"),
     ]
     ops = BACKEND_VERSION_OPS.get(b, ())
     for key, op, label in (("s", "snapshot", "Snapshot an installed version"),
                            ("p", "promote", "Promote pins to an installed version"),
                            ("x", "remove", "Remove an installed version")):
         if op in ops:
-            acts.append(Action(key, f"{VERSION_OP_EMOJI[op]} {label}", pick(op), section="tools"))
+            acts.append(Action(key, f"{ec.gap(VERSION_OP_EMOJI[op])}{label}", pick(op), section="tools"))
     acts.append(Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", screen.owner),
                        section="tools"))
     acts += screen.nav_actions()
@@ -1529,13 +1529,13 @@ class LaunchdScreen(Screen):
     def actions(self):
         acts = [
             Action("s", f"{ec.EMOJI_LAUNCHD_STATUS_STR} Status", lambda: Nav("tool:rt-launchd-status"), section="tools"),
-            Action("o", f"{ec.EMOJI_LAUNCHD_RUN_ONCE_STR} Run the update check once now",
+            Action("o", f"{ec.EMOJI_LAUNCHD_RUN_ONCE_STR}  Run the update check once now",
                    lambda: Nav("tool:rt-launchd-run-once"), section="tools"),
             Action("i", f"{ec.EMOJI_LAUNCHD_INSTALL_STR} Install the weekly check (LaunchAgent)",
                    lambda: Nav("prompt:rt-launchd-install"), section="tools"),
             Action("u", f"{ec.EMOJI_LAUNCHD_UNINSTALL_STR} Uninstall the weekly check",
                    lambda: Nav("prompt:rt-launchd-uninstall"), section="tools"),
-            Action("b", f"{ec.EMOJI_BACK_STR} Back to Backend manager",
+            Action("b", f"{ec.EMOJI_BACK_STR}  Back to Backend manager",
                    lambda: BACK if self.owner == SUB else Nav("runtime", self.owner), section="nav"),
         ]
         check_action_table(acts)

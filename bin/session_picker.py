@@ -1087,7 +1087,7 @@ class Picker(App):
             self.goto(m.Nav(target, m.SUB))
             self.screen_model.back_label = (
                 f"{ec.EMOJI_HOME_STR} Back to Home" if isinstance(caller, m.HomeScreen)
-                else f"{ec.EMOJI_BACK_STR} Back to " + (caller.title.split(" ", 1)[-1] if getattr(caller, "title", "") else "previous"))
+                else f"{ec.EMOJI_BACK_STR}  Back to " + (caller.title.split(" ", 1)[-1] if getattr(caller, "title", "") else "previous"))
             self.render_model()
             return
         if target == "home":
