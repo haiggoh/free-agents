@@ -6,6 +6,7 @@
 #
 # Environment:
 #   LA_PICKER_VENV   picker venv (default ~/.local/share/free-agents/picker-venv)
+#   LA_MANAGE_BACKEND  executable standing in for install/manage-backend.py (demos and tests)
 #
 # If the venv is missing this prints the one command that creates it and exits 3. It never
 # falls back to an old numbered menu.

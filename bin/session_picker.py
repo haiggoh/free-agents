@@ -176,7 +176,10 @@ def command_for(req: m.LaunchRequest) -> list[str]:
 
 
 def _mb(backend: str, *args: str) -> list[str]:
-    return ["python3", str(REPO / "install/manage-backend.py"), "--backend", backend, *args]
+    # LA_MANAGE_BACKEND: an executable standing in for manage-backend.py (demos, like LA_DOWNLOADER).
+    exe = os.environ.get("LA_MANAGE_BACKEND")
+    head = [exe] if exe else ["python3", str(REPO / "install/manage-backend.py")]
+    return [*head, "--backend", backend, *args]
 
 
 def load_versions(kind: str) -> list[m.VersionEntry]:
