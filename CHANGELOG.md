@@ -1,3 +1,42 @@
+## [0.36.2] — 2026-10-17
+
+### Changed — every yes/no question in the picker is one confirmation panel
+
+- The typed `yes/no` prompts sat above a grey explanation that read as minor detail. Every
+  confirmation is now a `ConfirmPanel` modal: the question on top in bold, the explanation under it,
+  answers you pick with ↑↓ + Enter or the mouse, and Escape always the safe answer. It covers
+  registering a model, the download review, removing a Rapid-MLX version (both steps), installing
+  or removing the weekly LaunchAgent, the rate-limiter reset, and the missing-models cleanup.
+- Enter takes the first answer: the action for harmless questions, **Cancel** for anything that
+  deletes (Rapid-MLX remove and its "are you sure", rate-limiter reset, LaunchAgent removal).
+- Text prompts that take real input (session name, one-shot prompt, API key) stay text fields.
+
+### Added — models that need attention are marked in the Local list
+
+- A registered model whose weights are gone is no longer hidden: it is listed in **red**,
+  "weights missing from disk", cannot launch, and is not counted as on disk. Selecting it opens the
+  cleanup panel with that model ticked; per-model `[x]` / `[ ]` boxes choose which to remove. The
+  panel no longer opens by itself on entering Local — the red rows are the signal.
+- A model on disk but not registered is **yellow**, "on disk, not registered yet", and while any
+  exist a yellow "+ Register new local models found on disk (N)" row sits above every group. It
+  registers the ticked models without launching any; the list reloads and the row disappears.
+- `tests/sandbox/picker-sandbox.sh`: run a checkout's picker against fake inventories (missing and
+  unregistered models, downloader, backend versions, remote providers, limiter state). Every action
+  is only logged to `calls.log`; register/unregister are remembered so the list changes as in real
+  use. `LA_MANAGE_BACKEND` lets the backend manager be faked the same way as `LA_DOWNLOADER`.
+
+### Fixed
+
+- Ticked `[x]` boxes drew as nothing: a plain-string option is parsed as Textual markup and `[x]`
+  is a valid tag. Rows are now `Text`; the tests read the rendered text, which is why the old test
+  passed.
+- Escape in a panel also reached the lane underneath and could quit it.
+- Emoji made of a narrow character plus U+FE0F (🗑️ ℹ️ ↩️ ⚠️) draw two columns but count as one, so
+  the single space after them was painted over: every "Back to …" row, "Remove an installed
+  version", "Show info…", "Run the update check once now", the Cloud configuration title and the
+  status-line warning. They get two spaces now, and a test keeps it that way.
+- "moved / kept N missing model(s)" no longer follows you from Local to Home and Remote.
+
 ## [0.36.1] — 2026-10-16
 
 ### Fixed — a status word in the spec field was treated as a speculative config
