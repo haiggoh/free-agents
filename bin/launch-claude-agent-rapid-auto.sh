@@ -115,6 +115,7 @@ la_mktemp_json() {
 # Load shared emoji constants (single source of truth)
 # shellcheck source=../config/emoji.sh
 . "$LAUNCH_DIR/../config/emoji.sh"
+. "$LAUNCH_DIR/la-memguard-run.sh"
 la_load_config || exit 1
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/omlx-progress.sh"
@@ -904,7 +905,7 @@ if [ -f "$server_log" ]; then
 fi
 
 session_status=0
-if claude "${claude_args[@]}"; then
+if la_memguard_claude rapid "$LA_RAPID_AUTO_PORT" "$MODEL_ALIAS" -- "${claude_args[@]}"; then
     session_status=0
 else
     session_status=$?
