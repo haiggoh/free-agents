@@ -122,6 +122,7 @@ la_mktemp_json() {
 # Load shared emoji constants (single source of truth)
 # shellcheck source=../config/emoji.sh
 . "$LAUNCH_DIR/../config/emoji.sh"
+. "$LAUNCH_DIR/la-memguard-run.sh"
 la_load_config || exit 1
 
 MODEL_ALIAS="${1:-}"
@@ -941,4 +942,4 @@ for _layer in ${LA_SETTINGS_LAYERS[@]+"${LA_SETTINGS_LAYERS[@]}"}; do
 done
 [ -n "$LA_SETTINGS_FINAL" ] && CLAUDE_EXTRA_ARGS+=(--settings "$LA_SETTINGS_FINAL")
 
-claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode "$_PERM_MODE" --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"
+la_memguard_claude "$BACKEND" "$VLLM_PORT" "$MODEL_ALIAS" -- --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode "$_PERM_MODE" --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"

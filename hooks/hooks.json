@@ -28,6 +28,15 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -z \"${LA_MEMGUARD_SESSION_ID:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/bin/la-memguard-registry.py\" hook",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -69,6 +78,37 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/local-queue-stop-hook.py\"",
             "timeout": 10,
             "statusMessage": "Checking for queued prompts\u2026"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -z \"${LA_MEMGUARD_SESSION_ID:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/bin/la-memguard-registry.py\" hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -z \"${LA_MEMGUARD_SESSION_ID:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/bin/la-memguard-registry.py\" hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -z \"${LA_MEMGUARD_SESSION_ID:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/bin/la-memguard-registry.py\" hook",
+            "timeout": 5
           }
         ]
       }
