@@ -3,6 +3,19 @@
 # bin/remote-provider-registry.sh (bash) parse this file.
 #
 # Schema: see docs/remote-sot-execution-plan.md
+# Route fields (read by bin/remote-registry-generate.py):
+#   litellm_prefix       LiteLLM provider prefix of the proxy model string (<prefix>/<model>)
+#   api_base_mode        none = LiteLLM knows the endpoint; static = pass base_url as api_base;
+#                        cloudflare = account-scoped base resolved at run time (_cloudflare_base)
+#   generic_openai_base  true = _openai_base answers for this provider (remote-session.sh relies on it)
+#   catalog_mode         default = base_url + models_path; cloudflare_search = /models/search?per_page=100
+#   catalog_disabled_message  set = no catalog route; the message is printed instead
+#   session_env          env names remote-keys.sh exports (default: key_env + extra_env)
+#   retired_message      set = provider refused by _available with this message
+# Env names cleared from the Claude child besides every provider's session_env:
+clear_env_extra:
+  - OPENAI_API_KEY
+
 providers:
 
   cerebras:
@@ -19,6 +32,9 @@ providers:
     default_models:
       - llama-3.1-70b
     supports_responses: false
+    litellm_prefix: cerebras
+    api_base_mode: none
+    generic_openai_base: false
     notes: >-
       CLASSIFIED AS TRIAL, not permanently free. The router will only select it in include-trials / research-emergency modes.
 
@@ -39,6 +55,10 @@ providers:
     default_models:
       - "@cf/meta/llama-3.1-8b-instruct"
     supports_responses: true
+    litellm_prefix: openai
+    api_base_mode: cloudflare
+    generic_openai_base: false
+    catalog_mode: cloudflare_search
     notes: >-
       Free monthly quota. Requires an account id + API token. The CF-Access-* headers come from the Workers AI API page and must be added to the key env if present.
 
@@ -58,6 +78,9 @@ providers:
       - gemini-2.5-flash
       - gemini-2.5-pro
     supports_responses: false
+    litellm_prefix: gemini
+    api_base_mode: none
+    generic_openai_base: false
     notes: >-
       OpenAI-compatible. Free tier with a resetting per-day quota — the primary emergency lane.
 
@@ -77,6 +100,13 @@ providers:
       - openai/gpt-4o-mini
       - meta-llama/llama-3.1-70b-instruct
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: false
+    session_env:
+      - GITHUB_MODELS_TOKEN
+    retired_message: >-
+      remote-session: GitHub Models is retired (official docs; catalog HTTP 410 checked 2026-09-14). Select another provider directly; no generation or automatic fallback attempted. https://docs.github.com/en/github-models
     notes: >-
       Requires `models:read` on the token. Rate limits are per-token and reset. Model catalog is a separate endpoint, not /models.
 
@@ -94,6 +124,9 @@ providers:
     default_models:
       - llama-3.3-70b-versatile
     supports_responses: true
+    litellm_prefix: groq
+    api_base_mode: none
+    generic_openai_base: false
     notes: "OpenAI-compatible, fast. Free tier resets."
 
   kilo:
@@ -109,6 +142,9 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: true
     notes: >-
       OpenAI-compatible. Free and paid models differ; inspect catalog pricing.
 
@@ -125,6 +161,9 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: true
     notes: >-
       OpenAI-compatible. Catalog contains free and paid models; inspect pricing and tools.
 
@@ -144,6 +183,9 @@ providers:
       - codestral-2508
       - mistral-small-2603
     supports_responses: false
+    litellm_prefix: mistral
+    api_base_mode: none
+    generic_openai_base: true
     notes: >-
       OpenAI-compatible via mistral/ LiteLLM prefix. Free and paid tiers; verify per account.
 
@@ -160,6 +202,11 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: true
+    catalog_disabled_message: >-
+      remote-session: no documented ModelScope catalog route; use --remote-model ID from the API-Inference model page: https://modelscope.cn/docs/model-service/API-Inference/intro
     notes: >-
       OpenAI-compatible API-Inference endpoint. Explicit model required; account quota and tool use untested. No documented /models catalog.
 
@@ -177,6 +224,9 @@ providers:
     default_models:
       - meta/llama-3.1-70b-instruct
     supports_responses: false
+    litellm_prefix: nvidia_nim
+    api_base_mode: none
+    generic_openai_base: false
     notes: >-
       Free tier but the EFFECTIVE limits are dynamic (NVIDIA throttles free keys unpredictably) — treat as unknown, verify per call.
 
@@ -193,6 +243,9 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openrouter
+    api_base_mode: none
+    generic_openai_base: false
     notes: >-
       Free models are namespaced ('openrouter/free' or ':free'). Tier is model-dependent (free vs paid) — see the router's free-model rule.
 
@@ -209,6 +262,9 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: true
     notes: >-
       OpenAI-compatible. Account trial, credit and paid billing vary.
 
@@ -225,6 +281,9 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: true
     notes: >-
       OpenAI-compatible. International .com endpoint. Free and paid models differ; inspect catalog pricing.
 
@@ -241,6 +300,9 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: true
     notes: >-
       OpenAI-compatible. Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key.
 
@@ -257,6 +319,9 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: true
     notes: >-
       OpenAI-compatible. Credits and paid account billing apply; select explicitly.
 
@@ -273,6 +338,11 @@ providers:
     static_headers: {}
     default_models: []
     supports_responses: false
+    litellm_prefix: openai
+    api_base_mode: static
+    generic_openai_base: true
+    catalog_disabled_message: >-
+      remote-session: no documented ZAI catalog route; use --remote-model ID from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.
     notes: >-
       ZAI Coding Plan endpoint is distinct; this route uses general API billing. OpenAI-compatible. No documented /models catalog route.
 
