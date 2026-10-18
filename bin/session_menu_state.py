@@ -41,9 +41,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 4
-READABLE_SCHEMAS = (1, 2, 3, 4)
-SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature", "intercept_agents")
+SCHEMA_VERSION = 5
+READABLE_SCHEMAS = (1, 2, 3, 4, 5)
+SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature",
+            "intercept_agents", "memguard")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown",
@@ -82,6 +83,19 @@ _RL_NUMERIC = {"rpm": (1, 10000), "bucket_capacity": (1, 1000),
                "max_cooldown": (0, 3600), "backoff_multiplier": (1, 10), "max_retries": (0, 50)}
 _RL_WHOLE = ("rpm", "bucket_capacity", "max_retries")
 
+# Memory guard (schema 5). Booleans plus bounded numbers; the watchdog and the launchers read the
+# effective values through `session_menu_state.py memguard-env` (explicit LA_MEMGUARD_* env wins).
+#   enabled             the guard runs at all (LA_MEMGUARD)
+#   tmux                local sessions start inside a private tmux session so /compact can be typed
+#   soft_pct/hard_pct   RAM thresholds in percent; soft < hard
+#   quiet_s             seconds of keyboard + screen quiet before typing into a session
+#   auto_continue       after a memory-abort compact, type `continue` by itself
+#   registry_auto_sync  register new on-disk models / move missing ones without asking (off = 0.36.2)
+DEFAULT_MEMGUARD = {"enabled": True, "tmux": True, "soft_pct": 85, "hard_pct": 93, "quiet_s": 3,
+                    "auto_continue": True, "registry_auto_sync": False}
+_MG_BOOL = ("enabled", "tmux", "auto_continue", "registry_auto_sync")
+_MG_NUMERIC = {"soft_pct": (50, 98), "hard_pct": (51, 99), "quiet_s": (0, 60)}
+
 # Intercept Agents toggle (Deny & Replace): 1 = ON (FreeAgent), 0 = OFF (Native Agent)
 INTERCEPT_AGENTS_CHOICES = ("0", "1")
 DEFAULT_INTERCEPT_AGENTS = "1"
@@ -109,6 +123,7 @@ class State:
     last_launched_tier: dict = field(default_factory=dict)
     temperature: dict = field(default_factory=lambda: dict(DEFAULT_TEMPERATURE))
     intercept_agents: str = DEFAULT_INTERCEPT_AGENTS
+    memguard: dict = field(default_factory=lambda: dict(DEFAULT_MEMGUARD))
     warnings: list = field(default_factory=list)
 
 
@@ -148,6 +163,25 @@ def _validate_last_launched(lane: str, alias) -> None:
         raise ValueError(f"{lane} last launched alias is not a valid alias")
 
 
+def _validate_memguard(values: dict, allow_none: bool = False, pair: bool = True) -> None:
+    """Each key in range; with `pair`, soft < hard once merged over the defaults (None = default)."""
+    for key, value in values.items():
+        if value is None and allow_none:
+            continue
+        if key in _MG_BOOL:
+            if not isinstance(value, bool):
+                raise ValueError(f"memguard {key} must be true or false")
+        elif key in _MG_NUMERIC:
+            lo, hi = _MG_NUMERIC[key]
+            if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+                raise ValueError(f"memguard {key} must be a whole number in {lo}..{hi}")
+        else:
+            raise ValueError(f"unknown memguard setting {key!r}")
+    full = {**DEFAULT_MEMGUARD, **{k: v for k, v in values.items() if v is not None}}
+    if pair and full["soft_pct"] >= full["hard_pct"]:
+        raise ValueError("memguard soft_pct must be below hard_pct")
+
+
 def _validate_temperature(lane: str, value) -> None:
     if lane not in ALLOWED_TEMPERATURE:
         raise ValueError(f"unknown lane {lane!r}")
@@ -163,8 +197,8 @@ def _unsafe_dir(config_dir: Path) -> str | None:
     return None
 
 
-def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str]:
-    """Return (effort, rate_limiter, last_launched, temperature, intercept_agents) or raise ValueError with a short reason."""
+def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict]:
+    """Return (effort, rate_limiter, last_launched, temperature, intercept_agents, memguard) or raise ValueError with a short reason."""
     if len(raw) > MAX_BYTES:
         raise ValueError("preference file is too large")
     try:
@@ -180,6 +214,12 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str]:
         raise ValueError(f"unknown preference section(s) {', '.join(unknown)}")
     if doc["schema_version"] == 1 and "last_launched" in doc:
         raise ValueError("last_launched needs schema_version 2")
+    if doc["schema_version"] < 5 and "memguard" in doc:
+        raise ValueError("memguard needs schema_version 5")
+    memguard = doc.get("memguard", {})
+    if not isinstance(memguard, dict):
+        raise ValueError("preference sections must be JSON objects")
+    _validate_memguard(memguard)
     effort = doc.get("effort", {})
     limiter = doc.get("rate_limiter", {})
     last = doc.get("last_launched", {})
@@ -205,10 +245,10 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str]:
     # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
     for lane, tier in tiers.items():
         last[f"{lane}:tier"] = tier
-    return effort, limiter, last, temperature, intercept_agents
+    return effort, limiter, last, temperature, intercept_agents, memguard
 
 
-def _read(path: Path) -> tuple[dict, dict, dict, dict, str] | None:
+def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict] | None:
     """None when absent; raises ValueError when present but unusable."""
     try:
         st = os.lstat(path)
@@ -237,13 +277,14 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.warnings.append(f"{exc}; using built-in defaults and leaving the file untouched")
         return state
     if found:
-        effort, limiter, last, temperature, intercept_agents = found
+        effort, limiter, last, temperature, intercept_agents, memguard = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
         state.last_launched_tier = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
         state.temperature.update(temperature)
         state.intercept_agents = intercept_agents
+        state.memguard.update(memguard)
     return state
 
 
@@ -346,10 +387,23 @@ def _write(config_dir: Path, doc: dict) -> None:
         pass
 
 
-def _update(config_dir: Path | str, mutate) -> str | None:
+def _doc(effort, limiter, last, temperature, intercept_agents, memguard) -> dict:
+    doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
+           "last_launched": {k: v for k, v in last.items() if ":" not in k},
+           "temperature": temperature,
+           "intercept_agents": intercept_agents}
+    tiers = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
+    if tiers:
+        doc["last_launched_tier"] = tiers
+    if memguard:
+        doc["memguard"] = memguard
+    return doc
+
+
+def _update(config_dir: Path | str, mutate, mutate_memguard=None) -> str | None:
     """Apply `mutate(effort, limiter, last_launched, temperature)` under the lock. Returns a warning or None.
 
-    Always writes schema 4, so a schema-1/2/3 file is migrated here (and only here), carrying every
+    Always writes schema 5, so a schema-1/2/3/4 file is migrated here (and only here), carrying every
     section it already had."""
     config_dir = Path(config_dir)
     reason = _unsafe_dir(config_dir)
@@ -359,17 +413,14 @@ def _update(config_dir: Path | str, mutate) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, intercept_agents = found
+                effort, limiter, last, temperature, intercept_agents, memguard = found
             else:
-                effort, limiter, last, temperature, intercept_agents = {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS
-            mutate(effort, limiter, last, temperature)
-            doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
-                   "last_launched": {k: v for k, v in last.items() if ":" not in k},
-                   "temperature": temperature,
-                   "intercept_agents": intercept_agents}
-            tiers = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
-            if tiers:
-                doc["last_launched_tier"] = tiers
+                effort, limiter, last, temperature, intercept_agents, memguard = {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}
+            if mutate_memguard is not None:
+                mutate_memguard(memguard)
+            else:
+                mutate(effort, limiter, last, temperature)
+            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard)
             _write(config_dir, doc)
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
@@ -397,6 +448,35 @@ def save_rate_limiter(config_dir: Path | str, values: dict) -> str | None:
             else:
                 limiter[key] = value
     return _update(config_dir, mutate)
+
+
+def save_memguard(config_dir: Path | str, values: dict) -> str | None:
+    """Persist memory-guard settings; a None value drops the key back to its default."""
+    _validate_memguard(values, allow_none=True, pair=False)   # ranges; the pair rule needs the merge
+    merged = dict(load(config_dir).memguard)
+    for key, value in values.items():
+        merged[key] = DEFAULT_MEMGUARD[key] if value is None else value
+    _validate_memguard(merged)                       # then the pair rule on what will be stored
+
+    def mutate(mg):
+        for key, value in values.items():
+            if value is None:
+                mg.pop(key, None)
+            else:
+                mg[key] = value
+    return _update(config_dir, None, mutate_memguard=mutate)
+
+
+def memguard_env(state: State) -> dict:
+    """The LA_MEMGUARD_* names the launchers and the watchdog read, from the saved settings."""
+    mg = state.memguard
+    return {"LA_MEMGUARD": "1" if mg["enabled"] else "0",
+            "LA_MEMGUARD_TMUX": "1" if mg["tmux"] else "0",
+            "LA_MEMGUARD_SOFT_PCT": str(mg["soft_pct"]),
+            "LA_MEMGUARD_HARD_PCT": str(mg["hard_pct"]),
+            "LA_MEMGUARD_QUIET_S": str(mg["quiet_s"]),
+            "LA_MEMGUARD_AUTO_CONTINUE": "1" if mg["auto_continue"] else "0",
+            "LA_REGISTRY_AUTO_SYNC": "1" if mg["registry_auto_sync"] else "0"}
 
 
 def save_last_launched(config_dir: Path | str, lane: str, alias: str,
@@ -441,17 +521,10 @@ def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, _ = found
+                effort, limiter, last, temperature, _, memguard = found
             else:
-                effort, limiter, last, temperature = {}, {}, {}, {}
-            doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
-                   "last_launched": {k: v for k, v in last.items() if ":" not in k},
-                   "temperature": temperature,
-                   "intercept_agents": value}
-            tiers = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
-            if tiers:
-                doc["last_launched_tier"] = tiers
-            _write(config_dir, doc)
+                effort, limiter, last, temperature, memguard = {}, {}, {}, {}, {}
+            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard))
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
     except OSError as exc:
@@ -478,6 +551,8 @@ def main(argv: list[str]) -> int:
     st.add_argument("lane", choices=list(ALLOWED_TEMPERATURE))
     st.add_argument("value")
     sub.add_parser("show", help="print the effective state as JSON")
+    sub.add_parser("memguard-env", help="print the memory-guard settings as shell-safe "
+                                        "NAME=value lines (the launchers source them)")
     ia = sub.add_parser("set-intercept", help="persist intercept agents toggle")
     ia.add_argument("value", choices=list(INTERCEPT_AGENTS_CHOICES))
     args = parser.parse_args(argv)
@@ -515,7 +590,10 @@ def main(argv: list[str]) -> int:
     state = load(REPO_CONFIG_DIR)
     for warning in state.warnings:
         print(f"session_menu_state: warning: {warning}", file=sys.stderr)
-    if args.cmd == "get":
+    if args.cmd == "memguard-env":
+        for name, value in memguard_env(state).items():
+            print(f"{name}={value}")
+    elif args.cmd == "get":
         print(state.effort[args.lane])
     elif args.cmd == "get-temp":
         print(state.temperature[args.lane])
@@ -524,7 +602,8 @@ def main(argv: list[str]) -> int:
                           "last_launched": state.last_launched,
                           "last_launched_tier": state.last_launched_tier,
                           "temperature": state.temperature,
-                          "intercept_agents": state.intercept_agents}, indent=2))
+                          "intercept_agents": state.intercept_agents,
+                          "memguard": state.memguard}, indent=2))
     return 0
 
 

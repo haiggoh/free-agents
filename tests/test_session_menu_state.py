@@ -129,7 +129,7 @@ class StateTests(unittest.TestCase):
         self._assert_warns_and_keeps(b"{not json")
 
     def test_unknown_future_schema_warns_without_overwrite(self):
-        self._assert_warns_and_keeps(json.dumps({"schema_version": 5, "effort": {}}).encode())
+        self._assert_warns_and_keeps(json.dumps({"schema_version": sms.SCHEMA_VERSION + 1, "effort": {}}).encode())
 
     def test_unknown_section_warns_without_overwrite(self):
         # Fails if a section this version does not know is silently dropped by the next write.
@@ -241,6 +241,61 @@ class StateTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 sms.save_rate_limiter(self.cfg, bad)
 
+    # --- memory guard (schema 5) ---------------------------------------------------
+    def test_memguard_defaults_round_trip_and_env(self):
+        st = sms.load(self.cfg)
+        self.assertEqual(st.memguard, sms.DEFAULT_MEMGUARD)
+        self.assertFalse(self.file.exists())                       # load never writes
+        self.assertIsNone(sms.save_memguard(self.cfg, {"soft_pct": 80, "registry_auto_sync": True}))
+        st = sms.load(self.cfg)
+        self.assertEqual((st.memguard["soft_pct"], st.memguard["registry_auto_sync"]), (80, True))
+        self.assertEqual(st.memguard["hard_pct"], 93)               # untouched keys keep defaults
+        doc = json.loads(self.file.read_text())
+        self.assertEqual(doc["memguard"], {"soft_pct": 80, "registry_auto_sync": True})  # only what was set
+        env = sms.memguard_env(st)
+        self.assertEqual((env["LA_MEMGUARD_SOFT_PCT"], env["LA_REGISTRY_AUTO_SYNC"], env["LA_MEMGUARD"]),
+                         ("80", "1", "1"))
+        self.assertIsNone(sms.save_memguard(self.cfg, {"soft_pct": None}))    # None = back to default
+        self.assertEqual(sms.load(self.cfg).memguard["soft_pct"], 85)
+
+    def test_memguard_other_sections_survive_and_vice_versa(self):
+        sms.save_memguard(self.cfg, {"enabled": False})
+        sms.save_effort(self.cfg, "local_session", "low")
+        sms.save_intercept_agents(self.cfg, "0")
+        st = sms.load(self.cfg)
+        self.assertEqual((st.memguard["enabled"], st.effort["local_session"], st.intercept_agents),
+                         (False, "low", "0"))
+
+    def test_schema4_file_loads_unchanged_and_memguard_refused_below_5(self):
+        v4 = {"schema_version": 4, "effort": {"local_session": "low"}, "intercept_agents": "1"}
+        raw = json.dumps(v4).encode()
+        self.file.write_bytes(raw)
+        st = sms.load(self.cfg)
+        self.assertEqual((st.warnings, st.memguard), ([], sms.DEFAULT_MEMGUARD))
+        self.assertEqual(self.file.read_bytes(), raw)
+        self._assert_warns_and_keeps(json.dumps({"schema_version": 4, "memguard": {"enabled": False}}).encode())
+
+    def test_memguard_invalid_values_refused(self):
+        for bad in ({"enabled": 1}, {"soft_pct": 85.5}, {"soft_pct": 40}, {"hard_pct": 100},
+                    {"quiet_s": -1}, {"soft_pct": 95, "hard_pct": 90}, {"bogus": True}, {"tmux": "yes"}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                sms.save_memguard(self.cfg, bad)
+        sms.save_memguard(self.cfg, {"hard_pct": 90})
+        with self.assertRaises(ValueError):                         # 91 >= saved hard 90
+            sms.save_memguard(self.cfg, {"soft_pct": 91})
+        self._assert_warns_and_keeps(json.dumps({"schema_version": 5, "memguard": {"soft_pct": "85"}}).encode())
+
+    def test_memguard_env_cli(self):
+        import subprocess
+        sms.save_memguard(self.cfg, {"tmux": False})
+        r = subprocess.run([sys.executable, str(ROOT / "bin/session_menu_state.py"), "memguard-env"],
+                           env=dict(os.environ, FREE_AGENTS_CONFIG_DIR=str(self.cfg)),
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = dict(ln.split("=", 1) for ln in r.stdout.splitlines())
+        self.assertEqual(lines["LA_MEMGUARD_TMUX"], "0")
+        self.assertEqual(set(lines), set(sms.memguard_env(sms.State())))
+
     # --- last launched (schema 2) ------------------------------------------------
     def test_v1_file_migrates_only_on_confirmed_write_keeping_everything(self):
         v1 = {"schema_version": 1, "effort": {"local_session": "low", "lowkey": "minimal"},
@@ -252,7 +307,7 @@ class StateTests(unittest.TestCase):
         self.assertEqual(self.file.read_bytes(), raw)
         self.assertIsNone(sms.save_last_launched(self.cfg, "local_session", "qwen-3.8-operator"))
         doc = json.loads(self.file.read_text())
-        self.assertEqual(doc["schema_version"], 4)
+        self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)
         self.assertEqual(doc["effort"], v1["effort"])
         self.assertEqual(doc["rate_limiter"], v1["rate_limiter"])
         self.assertEqual(doc["last_launched"], {"local_session": "qwen-3.8-operator"})
