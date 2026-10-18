@@ -57,6 +57,7 @@ class LauncherSmokeTests(unittest.TestCase):
             'bin/csl',
             'bin/remote-session.sh',
             'bin/remote-provider-registry.sh',
+            'bin/remote-catalog-parse.py',
             'bin/remote-keys.sh',
             'bin/launch-claude-agent.sh',
             'bin/launch-claude-agent-rapid-auto.sh',
@@ -294,6 +295,7 @@ class EffortPersistenceIntegrationTest(unittest.TestCase):
         fixtures = [
             'bin/remote-session.sh',
             'bin/remote-provider-registry.sh',
+            'bin/remote-catalog-parse.py',
             'bin/remote-keys.sh',
             'bin/la-session-identity.sh',
             'bin/la-roles.sh',

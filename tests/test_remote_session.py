@@ -26,7 +26,7 @@ NEW_ROUTES = {
     'vercel': ('AI_GATEWAY_API_KEY', 'https://ai-gateway.vercel.sh/v1'),
     'sambanova': ('SAMBANOVA_API_KEY', 'https://api.sambanova.ai/v1'),
     'modelscope': ('MODELSCOPE_API_KEY', 'https://api-inference.modelscope.cn/v1'),
-    'streamlake': ('STREAMLAKE_API_KEY', 'https://api.streamlake.ai/v1'),
+    'streamlake': ('STREAMLAKE_API_KEY', 'https://vanchin.streamlake.ai/api/gateway/v1/endpoints'),
 }
 # Providers with a NATIVE LiteLLM prefix (no api_base line); every other NEW_ROUTES entry is a generic
 # openai/ route with an explicit api_base. Mistral moved to native mistral/ in 0.28.x.
@@ -41,6 +41,7 @@ class RemoteSessionTests(unittest.TestCase):
         for directory in ('bin', 'config', 'keys', 'stubs', 'home'):
             (self.root / directory).mkdir()
         for rel in ('bin/csl', 'bin/remote-session.sh', 'bin/remote-provider-registry.sh',
+                    'bin/remote-catalog-parse.py',
                     'bin/remote-keys.sh',
                     'bin/blind-trust-settings.py',
                     'config/remote-agents.sh', 'config/remote-agent-system-prompt.txt',
@@ -534,7 +535,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 if provider not in provider_to_alias:
                     provider_to_alias[provider] = alias
         self.env['CATALOG'] = json.dumps({'data': [{'id': 'vendor/model'}, {'id': 'vendor/model2'}]})
-        for provider in NEW_ROUTES.keys() - {'zai', 'modelscope'}:
+        for provider in NEW_ROUTES.keys() - {'modelscope'}:
             alias = provider_to_alias.get(provider, provider)
             with self.subTest(provider=provider):
                 result = self.run_cli('--models', alias)
@@ -547,7 +548,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 self.assertIn(endpoint, argv)
                 verified = self.run_cli('--verify', alias, '--remote-model', 'vendor/model')
                 self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
-        for provider in ('zai', 'modelscope'):
+        for provider in ('modelscope',):
             alias = provider_to_alias.get(provider, provider)
             result = self.run_cli('--models', alias)
             self.assertEqual(result.returncode, 2)
@@ -575,6 +576,43 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
             self.env['CATALOG'] = json.dumps(payload)
             self.assertEqual(self.run_cli('--models', 'llm7').returncode, 1)
 
+    def test_catalog_shapes_from_live_providers(self):
+        # Row shapes copied from the real catalogs (2026-10-18), trimmed. Each blanked a whole list.
+        cases = {
+            # OpenRouter / Kilo: "~" alias ids made the old parser abort every row.
+            'tilde id skipped, rest kept': {'data': [
+                {'id': '~openai/gpt-sol-latest', 'supported_parameters': ['tools']},
+                {'id': 'openai/gpt-5', 'supported_parameters': ['tools', 'reasoning']},
+                {'id': 'x/no-tools', 'supported_parameters': ['temperature']}]},
+            # Mistral: every row is type "base"; capabilities carry the signal.
+            'mistral base type': {'data': [
+                {'id': 'codestral-latest', 'type': 'base',
+                 'capabilities': {'completion_chat': True, 'function_calling': True}},
+                {'id': 'mistral-embed', 'type': 'base',
+                 'capabilities': {'completion_chat': False, 'function_calling': False}},
+                {'id': 'mistral-ocr', 'type': 'base',
+                 'capabilities': {'completion_chat': True, 'function_calling': False}}]},
+            # Hugging Face router: tool support lives per serving provider.
+            'hf providers': {'data': [
+                {'id': 'zai-org/GLM-5.3', 'providers': [
+                    {'provider': 'a', 'supports_tools': False},
+                    {'provider': 'b', 'supports_tools': True, 'pricing': {'input': 1}}]},
+                {'id': 'x/notools', 'providers': [{'provider': 'a', 'supports_tools': False}]}]},
+        }
+        expected = {'tilde id skipped, rest kept': (['openai/gpt-5'], ['~openai', 'x/no-tools']),
+                    'mistral base type': (['codestral-latest'], ['mistral-embed', 'mistral-ocr']),
+                    'hf providers': (['zai-org/GLM-5.3'], ['x/notools'])}
+        for name, payload in cases.items():
+            with self.subTest(name):
+                self.env['CATALOG'] = json.dumps(payload)
+                result = self.run_cli('--models', 'llm7')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                ids = [ln.split('\t', 1)[0] for ln in result.stdout.splitlines() if '\t' in ln]
+                keep, drop = expected[name]
+                self.assertEqual(ids, keep)
+                for d in drop:
+                    self.assertNotIn(d, result.stdout)
+
     def test_picker_requires_explicit_valid_selection(self):
         self.env['CATALOG'] = json.dumps({'data': [{'id': 'first/paid'}, {'id': 'second/free'}]})
         for selection, expected in (('2\n', 'second/free'), ('02\n', 'second/free'), ('\n', None), ('q\n', None), ('0\n', None), ('3\n', None)):
@@ -590,8 +628,8 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                     self.assertEqual(result.stdout, '')
                 self.assertIn('No model is selected by default', result.stderr)
 
-    def test_manual_picker_without_catalog_for_zai_and_modelscope(self):
-        for provider, domain in (('zai', 'docs.z.ai'), ('modelscope', 'modelscope.cn')):
+    def test_manual_picker_without_catalog_for_modelscope(self):
+        for provider, domain in (('modelscope', 'modelscope.cn'),):
             for selection, expected in (('vendor/model\n', 'vendor/model'), ('\n', None), ('q\n', None), ('bad model\n', None)):
                 with self.subTest(provider=provider, selection=selection):
                     result = subprocess.run(['bash', '-c', 'source "$1"; choose_model "$2"',

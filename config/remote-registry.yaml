@@ -291,7 +291,7 @@ providers:
     id: streamlake
     display: Streamlake
     tier: unknown
-    base_url: https://api.streamlake.ai/v1
+    base_url: https://vanchin.streamlake.ai/api/gateway/v1/endpoints
     chat_path: /chat/completions
     models_path: /models
     catalog_url: ""
@@ -304,7 +304,7 @@ providers:
     api_base_mode: static
     generic_openai_base: true
     notes: >-
-      OpenAI-compatible. Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key.
+      OpenAI-compatible. Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key. Host moved: api.streamlake.ai is NXDOMAIN; vanchin.streamlake.ai/api/gateway/v1/endpoints serves /models (29 ids) and chat (2026-10-18: authenticated, "balance insufficient" on this account = needs credit).
 
   vercel:
     id: vercel
@@ -331,7 +331,7 @@ providers:
     tier: unknown
     base_url: https://api.z.ai/api/paas/v4
     chat_path: /chat/completions
-    models_path: ""
+    models_path: /models
     catalog_url: ""
     key_env: ZAI_API_KEY
     extra_env: []
@@ -341,10 +341,8 @@ providers:
     litellm_prefix: openai
     api_base_mode: static
     generic_openai_base: true
-    catalog_disabled_message: >-
-      remote-session: no documented ZAI catalog route; use --remote-model ID from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.
     notes: >-
-      ZAI Coding Plan endpoint is distinct; this route uses general API billing. OpenAI-compatible. No documented /models catalog route.
+      ZAI Coding Plan endpoint is distinct; this route uses general API billing. OpenAI-compatible. /models answers (11 ids, checked 2026-10-18).
 
 # Model roster — one row per (alias, provider, model_id) triple.
 # The hierarchy (provider accordion → models underneath) is computed

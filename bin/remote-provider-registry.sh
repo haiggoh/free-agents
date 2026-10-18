@@ -32,7 +32,7 @@ _openai_base() {
         modelscope) echo 'https://api-inference.modelscope.cn/v1' ;;
         sambanova) echo 'https://api.sambanova.ai/v1' ;;
         siliconflow) echo 'https://api.siliconflow.com/v1' ;;
-        streamlake) echo 'https://api.streamlake.ai/v1' ;;
+        streamlake) echo 'https://vanchin.streamlake.ai/api/gateway/v1/endpoints' ;;
         vercel) echo 'https://ai-gateway.vercel.sh/v1' ;;
         zai) echo 'https://api.z.ai/api/paas/v4' ;;
         *) return 2 ;;
@@ -63,9 +63,9 @@ _catalog_request() {
         openrouter) base='https://openrouter.ai/api/v1/models' ;;
         sambanova) base='https://api.sambanova.ai/v1/models' ;;
         siliconflow) base='https://api.siliconflow.com/v1/models?type=text' ;;
-        streamlake) base='https://api.streamlake.ai/v1/models' ;;
+        streamlake) base='https://vanchin.streamlake.ai/api/gateway/v1/endpoints/models' ;;
         vercel) base='https://ai-gateway.vercel.sh/v1/models' ;;
-        zai) echo 'remote-session: no documented ZAI catalog route; use --remote-model ID from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.' >&2; return 2 ;;
+        zai) base='https://api.z.ai/api/paas/v4/models' ;;
         *) echo "remote-session: no documented catalog route for $prov; choose an API model from its provider docs with --remote-model ID. Catalog verification unavailable." >&2; return 2 ;;
     esac
     envline="$("$KEYS" --env "$prov")" || return 1
@@ -95,7 +95,7 @@ _litellm_route() { # _litellm_route <provider> <model> -> "litellm_model|api_bas
         openrouter) echo "openrouter/$model|" ;;
         sambanova) echo "openai/$model|"'https://api.sambanova.ai/v1' ;;
         siliconflow) echo "openai/$model|"'https://api.siliconflow.com/v1' ;;
-        streamlake) echo "openai/$model|"'https://api.streamlake.ai/v1' ;;
+        streamlake) echo "openai/$model|"'https://vanchin.streamlake.ai/api/gateway/v1/endpoints' ;;
         vercel) echo "openai/$model|"'https://ai-gateway.vercel.sh/v1' ;;
         zai) echo "openai/$model|"'https://api.z.ai/api/paas/v4' ;;
         *) return 1 ;;

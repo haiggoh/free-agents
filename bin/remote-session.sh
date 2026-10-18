@@ -488,46 +488,14 @@ _cloudflare_base() {
 catalog_models() { # tab-separated model ID and metadata; no default selection
     local body
     body="$(_catalog_request "$1")" || return $?
-    printf '%s' "$body" | python3 -c '
-import json,re,sys
-try:
-    payload=json.load(sys.stdin)
-    rows=payload.get("data",payload.get("result")) if isinstance(payload,dict) else payload
-    if isinstance(payload,dict) and payload.get("success") is False: raise ValueError()
-    if not isinstance(rows,list): raise ValueError()
-    result=[]
-    for row in rows:
-        if not isinstance(row,dict): raise ValueError()
-        ident=row.get("name",row.get("id")) if isinstance(payload,dict) and "result" in payload else row.get("id")
-        if not isinstance(ident,str): raise ValueError()
-        if ident.startswith("models/"): ident=ident.split("/",1)[1]
-        if not re.fullmatch(r"[a-zA-Z0-9@][a-zA-Z0-9_./:@+-]*",ident): raise ValueError()
-        caps=row.get("capabilities") or {}
-        if not isinstance(caps,dict): caps={}
-        if caps.get("completion_chat") is False or caps.get("function_calling") is False or row.get("tools_calling") is False: continue
-        if row.get("model_type",row.get("type", "chat")) not in ("chat", "language", "text", "model", "chat-completion"): continue
-        params=row.get("supported_parameters")
-        tools=caps.get("function_calling",row.get("tools_calling",("tools" in params) if isinstance(params,list) else "unknown"))
-        if tools is False: continue
-        # JSON serialization escapes terminal control characters in metadata.
-        metadata=json.dumps({"pricing":row.get("pricing","unknown"),"tier":row.get("tier","unknown"),"tools":tools},ensure_ascii=True)
-        result.append(ident+"\t"+metadata)
-    if not result: raise ValueError()
-except (ValueError,TypeError,AttributeError):
-    print("remote-session: empty, malformed, error, or no chat/tool candidates in catalog.",file=sys.stderr); sys.exit(1)
-print("\n".join(result))
-'
+    printf '%s' "$body" | python3 "$SCRIPT_DIR/remote-catalog-parse.py"
 }
 
 choose_model() {
     local prov="$1" rows line n i=0
     local -a models=()
-    if [[ "$prov" == zai || "$prov" == modelscope ]]; then
-        if [[ "$prov" == zai ]]; then
-            echo 'Choose an API model from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.' >&2
-        else
-            echo 'Choose an API-Inference model from https://modelscope.cn/docs/model-service/API-Inference/intro .' >&2
-        fi
+    if [[ "$prov" == modelscope ]]; then
+        echo 'Choose an API-Inference model from https://modelscope.cn/docs/model-service/API-Inference/intro .' >&2
         echo 'Model access, tool sessions and account billing are untested. No default model is selected.' >&2
         read -r -p 'Enter the exact model ID (q to cancel): ' n >&2 || return 2
         [[ "$n" != q ]] || return 2
