@@ -11,12 +11,29 @@
 # Falls back to running claude directly (registered, but with no injection target) when tmux is
 # missing, stdin/stdout is not a terminal, or LA_MEMGUARD_TMUX=0. Already inside tmux: the current
 # pane is the target and nothing is nested. LA_MEMGUARD=0 skips the guard entirely.
-# Env: LA_MEMGUARD, LA_MEMGUARD_TMUX, LA_MEMGUARD_STATE_DIR, LA_MEMGUARD_TMUX_BIN (tests).
+# Settings come from the picker's Memory guard screen (session_menu_state.py memguard-env); a
+# variable already set in the environment wins, so an explicit export always overrides the menu.
+# Env: LA_MEMGUARD, LA_MEMGUARD_TMUX, LA_MEMGUARD_SOFT_PCT/HARD_PCT/QUIET_S/AUTO_CONTINUE,
+#      LA_MEMGUARD_STATE_DIR, LA_MEMGUARD_TMUX_BIN (tests).
+
+# _la_memguard_settings: export each saved memory-guard setting the caller has not set itself.
+# Values are NAME=value lines from our own store (validated there: digits / 0 / 1), but they are
+# still read with `read`, never eval'd.
+_la_memguard_settings() {
+    local line name value
+    while IFS= read -r line; do
+        name="${line%%=*}"; value="${line#*=}"
+        case "$name" in LA_MEMGUARD|LA_MEMGUARD_*|LA_REGISTRY_AUTO_SYNC) ;; *) continue ;; esac
+        case "$value" in *[!0-9.]*|"") continue ;; esac
+        [ -n "${!name+set}" ] || export "$name=$value"
+    done < <(python3 "$LAUNCH_DIR/session_menu_state.py" memguard-env 2>/dev/null)
+}
 
 la_memguard_claude() {
     local backend="$1" port="$2" model="$3"
     shift 3
     [ "${1:-}" = "--" ] && shift
+    _la_memguard_settings
     if [ "${LA_MEMGUARD:-1}" = "0" ]; then
         claude "$@"
         return $?

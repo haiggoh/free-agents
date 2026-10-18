@@ -211,6 +211,39 @@ def test_run_once_end_to_end(tmp_path):
     assert any(a.get("kind") == "compact" and a.get("session") == "test-sess" for a in actions)
 
 
+def _abort_tick(tmp_path, auto_continue):
+    """One `run --once` tick on an idle session whose last turn hit the backend memory limit."""
+    state_dir = tmp_path / "state"
+    (state_dir / "sessions").mkdir(parents=True)
+    (state_dir / "sessions" / "s1.json").write_text(json.dumps({
+        "id": "s1", "backend": "omlx", "port": "8123", "model": "m", "launcher_pid": os.getpid(),
+        "tmux_socket": "/x.sock", "tmux_target": "t", "idle": True, "memory_abort_at": 100.0}))
+    seg = tmp_path / "seg.sh"
+    seg.write_text('#!/bin/sh\necho \'{"label":"ram","text":"10.0/100.0G 10%","level":"ok"}\'\n')
+    seg.chmod(0o755)
+    out = tmp_path / "inj.out"
+    inj = tmp_path / "inj.sh"
+    inj.write_text(f'#!/bin/sh\necho "$@" >> "{out}"\n')
+    inj.chmod(0o755)
+    env = dict(os.environ, LA_MEMGUARD_STATE_DIR=str(state_dir), LA_MEMGUARD_SEGMENT=str(seg),
+               LA_MEMGUARD_INJECT_CMD=str(inj), LA_MEMGUARD_NOTIFY="0",
+               LA_MEMGUARD_FOOTPRINT_CMD="true", LA_MEMGUARD_AUTO_CONTINUE=auto_continue)
+    subprocess.run([sys.executable, str(script_path), "run", "--once"], env=env, timeout=10, check=True)
+    state = json.loads((state_dir / "watchdog.json").read_text())
+    return out.read_text(), state
+
+
+def test_run_honours_auto_continue_end_to_end(tmp_path):
+    # The real `run` loop must hand LA_MEMGUARD_AUTO_CONTINUE to the abort logic: with it OFF the
+    # session is compacted but never queued for the automatic `continue`.
+    on_out, on_state = _abort_tick(tmp_path / "on", "1")
+    off_out, off_state = _abort_tick(tmp_path / "off", "0")
+    assert "s1 /compact" in on_out and "s1 /compact" in off_out
+    assert "s1" in on_state.get("await_continue", {})
+    assert "s1" not in off_state.get("await_continue", {})
+    assert "continuing automatically" in on_out and "continuing automatically" not in off_out
+
+
 def test_run_empty_registry(tmp_path):
     state_dir = tmp_path / "empty_state"
     env = os.environ.copy()
@@ -282,6 +315,20 @@ def test_abort_compacts_then_continues_after_the_compact():
     assert [a["kind"] for a in acts] == ["continue"]
     acts, st = memguard.decide_abort([done], st, 170.0)
     assert acts == [], "one abort, one compact, one continue"
+
+
+def test_auto_continue_off_compacts_but_never_types_continue(monkeypatch):
+    acts, st = memguard.decide_abort([_abort_sess()], {}, 101.0, auto_continue=False)
+    assert [a["kind"] for a in acts] == ["compact"]
+    assert "continuing automatically" not in acts[0]["reason"]
+    done = _abort_sess(compacted_at=150.0)
+    for t in (160.0, 200.0, 400.0):
+        acts, st = memguard.decide_abort([done], st, t, auto_continue=False)
+        assert acts == [], "no continue when the user turned it off"
+    monkeypatch.setenv("LA_MEMGUARD_AUTO_CONTINUE", "0")
+    assert memguard.load_cfg()["auto_continue"] is False
+    monkeypatch.delenv("LA_MEMGUARD_AUTO_CONTINUE")
+    assert memguard.load_cfg()["auto_continue"] is True
 
 
 def test_user_prompt_after_the_compact_skips_continue():

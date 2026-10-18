@@ -22,6 +22,8 @@ Environment Variables:
                               (default: la-memguard-inject.py beside this file).
   LA_MEMGUARD_NOTIFY          Set to 0 to disable macOS notifications (default: 1).
   LA_MEMGUARD_INTERVAL_S      Default loop interval for run subcommand (default: 2.0).
+  LA_MEMGUARD_AUTO_CONTINUE   Set to 0 to compact after a memory-limit abort without typing
+                              `continue` afterwards (default: 1).
 """
 
 import fcntl
@@ -50,6 +52,7 @@ def load_cfg() -> dict[str, Any]:
         "hard_pct": float(os.environ.get("LA_MEMGUARD_HARD_PCT", 93)),
         "cooldown_s": float(os.environ.get("LA_MEMGUARD_COOLDOWN_S", 300)),
         "interval_s": float(os.environ.get("LA_MEMGUARD_INTERVAL_S", 2.0)),
+        "auto_continue": os.environ.get("LA_MEMGUARD_AUTO_CONTINUE", "1") != "0",
     }
 
 
@@ -276,8 +279,8 @@ CONTINUE_GRACE_S = 3.0      # after a compact, give a prompt the user queued tim
 ABORT_FORGET_S = 900.0       # an abort whose compact never finished is dropped after this
 
 
-def decide_abort(sessions: list[dict[str, Any]], state: dict[str, Any], now: float
-                 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def decide_abort(sessions: list[dict[str, Any]], state: dict[str, Any], now: float,
+                 auto_continue: bool = True) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """A turn aborted by the backend's memory limit: compact that session now (no threshold, no
     cooldown — the backend already said memory is gone), then type `continue` once the compact has
     finished, unless the user's own prompt has resumed the work in the meantime."""
@@ -290,12 +293,14 @@ def decide_abort(sessions: list[dict[str, Any]], state: dict[str, Any], now: flo
         if not abort_at or abort_at <= st["handled_abort"].get(sid, 0) or not s.get("idle"):
             continue
         st["handled_abort"][sid] = abort_at
-        st["await_continue"][sid] = {"abort_at": abort_at, "requested_at": now}
+        if auto_continue:   # off: compact only; the user types the next prompt themselves
+            st["await_continue"][sid] = {"abort_at": abort_at, "requested_at": now}
         st.setdefault("last_compact_at", {})[sid] = now
         st["inflight"] = {"id": sid, "at": now}
         actions.append({"kind": "compact", "session": sid, "level": "abort",
                         "reason": "Memory guard: the last turn hit the backend's memory limit — "
-                                  "compacting now, then continuing automatically"})
+                                  + ("compacting now, then continuing automatically" if auto_continue
+                                     else "compacting now; send your next prompt when it is done")})
     for sid, w in list(st["await_continue"].items()):
         s = by_id.get(sid)
         if s is None or now - w["requested_at"] > ABORT_FORGET_S:
@@ -401,7 +406,7 @@ def do_run(interval: float, once: bool, state_dir: Path) -> int:
 
         now = time.time()
         state = load_state(state_dir)
-        abort_actions, state = decide_abort(sessions, state, now)
+        abort_actions, state = decide_abort(sessions, state, now, cfg["auto_continue"])
         actions, new_state = decide(reading, sessions, footprints, state, now, cfg)
         actions = abort_actions + actions
         act_on_actions(actions, state_dir, now)

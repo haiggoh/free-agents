@@ -365,6 +365,56 @@ class PickerRegistryOffers(PilotCase):
         self.run_picker(s, start="local")
 
 
+class RegistryAutoSync(PilotCase):
+    """Memory guard screen: "Auto-sync local registry with the disk" ON registers new on-disk
+    models and moves missing ones to the removed list without asking; OFF is 0.36.2 (ask)."""
+
+    def _stub(self):
+        # A csl that remembers what was done, like the real one: after the sync the inventory
+        # reports the new model registered and the missing one gone.
+        done = Path(self.tmp.name) / "synced"
+        after = "qwen-3.8-operator\trapid\thigh\t\t\nauto-dream-7b\trapid\tmedium\t\t\n"
+        Path(self.env["CSL_SELF"]).write_text(
+            "#!/bin/sh\n"
+            f'case "$1" in --register-model|--unregister-model) touch "{done}";; esac\n'
+            f'for a in "$@"; do [ "$a" = --inventory ] && {{ if [ -e "{done}" ]; then printf \'{after}\'; '
+            f"else cat <<'EOF'\n{HYGIENE_INV}EOF\nfi; exit 0; }}; done\n"
+            + RECORDER.split("\n", 1)[1])
+
+    def _prefs(self, values):
+        sys.path.insert(0, str(ROOT / "bin"))
+        import session_menu_state as sms
+        sms.save_memguard(self.cfg, values)
+
+    def test_on_syncs_without_asking_and_says_what_it_did(self):
+        self._stub()
+        self._prefs({"registry_auto_sync": True})
+
+        async def s(app, pilot, h):
+            await h.wait_for(lambda: len(self.launches()) >= 2, "register + unregister calls")
+            argvs = [r["argv"] for r in self.launches()]
+            self.assertIn(["--register-model", "auto-dream-7b"], argvs)
+            self.assertIn(["--unregister-model", "gone-model"], argvs)
+            self.assertFalse(any(a and a[0] == "--picker-launch" for a in argvs), "nothing launched")
+            self.assertIsNone(h.panel(), "no question asked")
+            await h.wait_text("auto-synced the registry: registered 1, moved 1 missing")
+            await h.press("c")
+            await h.settle(0.5)
+            self.assertFalse(any("Register new" in r for r in h.labels("rows")))
+            self.assertFalse(any("weights missing" in r for r in h.labels("rows")))
+        self.run_picker(s, start="local")
+
+    def test_off_is_unchanged_nothing_runs(self):
+        self._stub()
+
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.settle(0.8)
+            self.assertEqual(self.launches(), [])
+            self.assertTrue(any("Register new" in r for r in h.labels("rows")))
+        self.run_picker(s, start="local")
+
+
 class PickerTools(PilotCase):
     def test_downloader_lists_catalog_cancel_zero_calls_confirm_exact_aliases(self):
         async def s(app, pilot, h):

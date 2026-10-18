@@ -23,6 +23,11 @@ HOOKS = ROOT / "hooks" / "hooks.json"
 @pytest.fixture
 def env(tmp_path):
     e = dict(os.environ)
+    # The wrapper reads saved picker settings: point it at an empty private store, and drop any
+    # LA_MEMGUARD_* the developer exported, so the real preferences never decide a test.
+    e["FREE_AGENTS_CONFIG_DIR"] = str(tmp_path / "prefs")
+    for k in [k for k in e if k.startswith("LA_MEMGUARD") or k == "LA_REGISTRY_AUTO_SYNC"]:
+        e.pop(k)
     e["LA_MEMGUARD_STATE_DIR"] = str(tmp_path / "state")
     e.pop("LA_MEMGUARD_SESSION_ID", None)
     e.pop("TMUX", None)
@@ -173,6 +178,39 @@ def test_wrapper_opt_out_runs_claude_unregistered(env, tmp_path):
                        stdin=subprocess.DEVNULL, timeout=30)
     assert "RC=0" in r.stdout
     assert "SID=\n" in log.read_text()
+
+
+def _save_prefs(env, values):
+    sms_dir = env["FREE_AGENTS_CONFIG_DIR"]
+    code = ("import json,sys; sys.path.insert(0, sys.argv[1]); import session_menu_state as s; "
+            "print(s.save_memguard(sys.argv[2], json.loads(sys.argv[3])))")
+    subprocess.run([sys.executable, "-c", code, str(ROOT / "bin"), sms_dir, json.dumps(values)],
+                   check=True, capture_output=True)
+
+
+def test_wrapper_honours_saved_guard_off(env, tmp_path):
+    # The picker's "Memory guard: OFF" reaches the launcher: claude runs unregistered.
+    _save_prefs(env, {"enabled": False})
+    bindir, log = stub_claude(tmp_path, rc=0)
+    e = dict(env, PATH=f"{bindir}:{env['PATH']}")
+    r = subprocess.run(["bash", "-c", wrapper_cmd()], env=e, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=30)
+    assert "RC=0" in r.stdout, r.stdout + r.stderr
+    assert "SID=\n" in log.read_text()
+
+
+def test_explicit_env_beats_saved_setting_and_settings_reach_the_child(env, tmp_path):
+    _save_prefs(env, {"enabled": False, "soft_pct": 80})
+    bindir, log = stub_claude(tmp_path, rc=0)
+    probe = (f'LAUNCH_DIR={str(ROOT / "bin")!r}; . {str(RUN)!r}; _la_memguard_settings; '
+             'echo "G=$LA_MEMGUARD S=$LA_MEMGUARD_SOFT_PCT H=$LA_MEMGUARD_HARD_PCT"')
+    r = subprocess.run(["bash", "-c", probe], env=dict(env, LA_MEMGUARD="1"), capture_output=True,
+                       text=True, timeout=30)
+    assert "G=1 S=80 H=93" in r.stdout, r.stdout + r.stderr     # export wins; saved + defaults fill in
+    e = dict(env, PATH=f"{bindir}:{env['PATH']}", LA_MEMGUARD="1")
+    subprocess.run(["bash", "-c", wrapper_cmd()], env=e, capture_output=True, text=True,
+                   stdin=subprocess.DEVNULL, timeout=30)
+    assert "SID=rapid-8123-" in log.read_text()                 # explicit LA_MEMGUARD=1 ran it
 
 
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")

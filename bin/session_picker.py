@@ -117,6 +117,35 @@ def load_local_models() -> list[m.LocalModel]:
 MISSING_MODELS: list[str] = []
 
 
+def auto_sync_registry(models) -> str:
+    """Memory guard screen's "auto-sync" ON: register every on-disk unregistered model and move
+    every registered-but-missing one to the removed list, without asking (OFF = the panels).
+
+    Uses the same csl subcommands as the panels (each backs the registry up first). Returns the
+    status note to show, "" when there was nothing to do. Runs in the loader thread."""
+    csl = os.environ.get("CSL_SELF") or str(BIN / "csl")
+    new = [x for x in models if x.auto_scanned]
+    gone = list(MISSING_MODELS)
+    if not new and not gone:
+        return ""
+    registered, failed = 0, []
+    for x in new:
+        r = _run([csl, "--register-model", x.folder or x.alias])
+        if r.returncode == 0:
+            registered += 1
+        else:
+            failed.append(x.alias)
+    moved = 0
+    if gone:
+        r = _run([csl, "--unregister-model", *gone])
+        if r.returncode == 0:
+            moved = len(gone)
+        else:
+            failed += gone
+    note = f"auto-synced the registry: registered {registered}, moved {moved} missing"
+    return note + (f"; failed: {', '.join(failed)}" if failed else "")
+
+
 def load_remote_agents() -> list[m.RemoteAgent]:
     rs = os.environ.get("CSL_REMOTE_LAUNCHER") or str(BIN / "remote-session.sh")
     r = _run(["bash", rs, "--inventory"])
@@ -617,6 +646,11 @@ class Picker(App):
                 data, err = load_remote_catalog(kind), None
             else:
                 data, err = globals()[self.LOADERS[kind]](), None
+                if kind == "local" and self.settings.memguard.get("registry_auto_sync"):
+                    note = auto_sync_registry(data)
+                    if note:
+                        data = load_local_models()         # the registry changed: read it again
+                        self.call_from_thread(self._warn_here, note)
         except Exception as exc:              # surfaced as a status warning, never swallowed
             data, err = [], f"{kind} model list failed to load: {exc}"
         self.call_from_thread(self._loaded, kind, data, err)
