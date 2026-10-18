@@ -1,3 +1,47 @@
+## [0.37.0] — 2026-10-18
+
+### Added — every provider you hold a key for is usable, with its live model list
+
+- **Live catalogs in the remote accordion.** Opening a provider group in the session picker fetches
+  that provider's tool-capable model list in the background and shows it under the pinned aliases
+  (pinned first, no duplicates; a loading row while it arrives, the reason when it fails). Picking a
+  catalog row launches with `--remote-model`, and **Go launch** remembers the exact model.
+- **Model lists that never appeared now do:** Kilo (312), OpenRouter (381), Mistral (27), Streamlake
+  (29) and Z.ai (11). Before, one odd id (OpenRouter's `~openai/…` aliases) threw away the whole
+  list, Mistral's `type: "base"` on every chat model filtered all of them out, Streamlake's host was
+  gone and Z.ai was assumed to have no catalog.
+- **Hugging Face** as a provider (`huggingface` alias, `router.huggingface.co`, 113 tool-capable
+  models), in API-key setup too. It is **paid-only**: free accounts get no Inference credits, and a
+  free key answers `402 no remaining credits`.
+- **Local-capable verdicts from Hugging Face.** When a model id states no size, the footprint
+  estimator looks up the Hugging Face `safetensors` parameter count (cached 30 days) — the figure
+  behind the website's "fits your hardware" badge. Laguna XS 2.1, whose id names no size, is now
+  correctly local-capable (33.4B). Catalog rows in the picker are filtered the same way, from the
+  cache, so the list never waits.
+- `remote-agent-dispatch.py --reasoning-effort low|medium|high`, and reasoning is saved to
+  `reasoning.txt` beside the answer.
+
+### Changed — one source for providers and the roster
+
+- `config/remote-registry.yaml` is the only hand-edited provider/roster file.
+  `bin/remote-registry-generate.py` (maintainers only; needs pyyaml) generates
+  `config/remote-registry.json` for the Python tools and `bin/remote-provider-registry.sh` for bash.
+  **End users need no pyyaml.** A drift test fails when either generated file, or
+  `config/remote-agents.sh`, disagrees with the YAML. The proxy config routes from the same table:
+  all 98 alias/thinking combinations are byte-identical to 0.36.2 apart from Streamlake's new host.
+- Streamlake moved to `vanchin.streamlake.ai` (`api.streamlake.ai` no longer resolves).
+
+### Fixed
+
+- The dispatcher printed a green tick for a run that returned **no answer** (a thinking model spent
+  its whole `max_tokens` on reasoning); it now exits 2 and says where the tokens went.
+- The stream reader treated a stream that opens with a keep-alive comment or blank line as plain
+  JSON, and returned nothing.
+- Launching a `paid_only` model (Mistral Large 4, Hugging Face) silently lost **Go launch**: the
+  preferences file refused that tier.
+- `estimate-model-footprint.py --apply` glued its first new row onto a policy file's last line when
+  the file did not end in a newline.
+
 ## [0.36.2] — 2026-10-17
 
 ### Changed — every yes/no question in the picker is one confirmation panel

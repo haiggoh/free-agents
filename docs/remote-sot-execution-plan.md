@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-16
 **Branch:** `feat/scan-all-remote-models-2026`
-**Status:** DRAFT — awaiting approval before any code changes
+**Status:** SUPERSEDED (2026-10-18) — implemented in 0.37.0 with a YAML source and generated JSON + bash artifacts instead of the PSV drafted here; see CHANGELOG 0.37.0 and docs/remote-session/README.md.
 
 ---
 

@@ -27,6 +27,7 @@ NEW_ROUTES = {
     'sambanova': ('SAMBANOVA_API_KEY', 'https://api.sambanova.ai/v1'),
     'modelscope': ('MODELSCOPE_API_KEY', 'https://api-inference.modelscope.cn/v1'),
     'streamlake': ('STREAMLAKE_API_KEY', 'https://vanchin.streamlake.ai/api/gateway/v1/endpoints'),
+    'huggingface': ('HF_TOKEN', 'https://router.huggingface.co/v1'),
 }
 # Providers with a NATIVE LiteLLM prefix (no api_base line); every other NEW_ROUTES entry is a generic
 # openai/ route with an explicit api_base. Mistral moved to native mistral/ in 0.28.x.

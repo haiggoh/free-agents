@@ -29,14 +29,21 @@ bin/remote-session.sh --stop          # stop a proxy this script started
 Any other arguments pass straight through to `claude`, so
 `remote-session.sh gemini-flash -p '…' --allowedTools Read` works as expected.
 
-The eight new provider aliases are `mistral`, `zai`, `siliconflow`, `llm7`,
-`kilo`, `vercel`, `sambanova`, and `modelscope`. Choose a model interactively,
-or pass `--remote-model MODEL_ID` explicitly. Mistral, SiliconFlow, LLM7,
-Kilo, Vercel, and SambaNova have catalog listing; Z.AI and ModelScope ask for
-an ID from their provider pages. No model is automatically selected from a
-mixed-price catalog. Model overrides are labeled with unverified billing, even
-when the original alias was free. Z.AI uses its general API, not a Coding Plan
-subscription; SiliconFlow uses the international `.com` service.
+Every provider with a saved key has a `SELECT` alias: `mistral`, `zai`, `siliconflow`, `llm7`,
+`kilo`, `vercel`, `sambanova`, `modelscope`, `streamlake` and `huggingface`, next to the pinned
+NVIDIA, Gemini, Groq, OpenRouter, Cloudflare and Cerebras rows. Choose a model interactively,
+or pass `--remote-model MODEL_ID` explicitly. Every provider except ModelScope has catalog
+listing (`--models <alias>`); ModelScope asks for an ID from its provider page. No model is
+automatically selected from a mixed-price catalog. Model overrides are labeled with unverified
+billing, even when the original alias was free. Z.AI uses its general API, not a Coding Plan
+subscription; SiliconFlow uses the international `.com` service; Streamlake moved to
+`vanchin.streamlake.ai` (the old `api.streamlake.ai` no longer resolves). Hugging Face is
+`paid_only`: free accounts get no Inference Provider credits.
+
+In the session picker, opening a provider group fetches that provider's live tool-capable
+catalog in the background and lists it under the pinned aliases (pinned models first, no
+duplicates). Picking a catalog row launches the provider's alias with `--remote-model`, and
+Go launch remembers the exact model.
 
 All eight new routes are **offline-tested integrations**, not live tool-use or
 quota qualification. Their endpoint/model mapping and credential isolation are
@@ -66,8 +73,14 @@ Install (once): `pipx install 'litellm[proxy]' && pipx inject litellm truststore
 
 ## A separate list, on purpose
 
-Remote agents live in `config/remote-agents.sh`, **not** in the local model
-roster. A remote agent runs on a third party's hardware, bills against a
+Remote agents live in `config/remote-registry.yaml` (providers and the roster, the one
+hand-edited file) and its bash mirror `config/remote-agents.sh`, **not** in the local model
+roster. `bin/remote-registry-generate.py --write` turns the YAML into
+`config/remote-registry.json` (read by the Python tools with the standard library) and
+`bin/remote-provider-registry.sh` (the bash 3.2 routing library); only that generator needs
+pyyaml, so it is a maintainer dependency, not a user one. Never edit the two generated files:
+`tests/test_remote_registry_generated.py` fails when they, or `remote-agents.sh`, drift from
+the YAML. A remote agent runs on a third party's hardware, bills against a
 quota rather than free local compute, and sends your prompts off the machine.
 Those are different decisions from picking a local model, so they get their own
 menu instead of being interleaved.
@@ -89,7 +102,12 @@ picker and non-interactive `--list` output.
 
 Classification fails open: an entry with no policy row, or a provider that lets you choose the
 model at runtime, stays **visible** — uncertainty is never a reason to hide something. The
-policy file is hand-curated; there is no automated generator behind it yet.
+policy file is hand-curated evidence. `bin/estimate-model-footprint.py --hf --roster … --policy …`
+suggests classifications from the parameter count: the Hugging Face `safetensors` total of the
+matching repo (the figure behind the website's "fits your hardware" badge; cached 30 days in
+`~/.cache/free-agents/hf-params.json`), else the count in the model id. `--apply` writes only
+high-confidence verdicts and backs the file up first. Live catalog rows in the picker are
+classified the same way, from the cache only, so the list never waits on the network.
 
 ### Unworking-model filter
 
