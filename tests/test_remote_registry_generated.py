@@ -160,7 +160,12 @@ class TestRemoteRegistryGenerated(unittest.TestCase):
             self.assertIn("bin/remote-provider-registry.sh", res_chk_drift.stderr)
 
     def test_behaviour_reference_table(self) -> None:
-        """Bash execution behavior of committed library matches reference table."""
+        """Bash execution behavior of committed library matches reference table.
+
+        The table was recorded from the hand-written 0.36.2 functions on main (2026-10-18).
+        Intended changes since then, each a line below: streamlake moved to the vanchin host
+        (api.streamlake.ai is NXDOMAIN) and zai gained its /models catalog.
+        """
         bash = _get_bash()
         with tempfile.TemporaryDirectory() as tmpdir:
             stub_dir = Path(tmpdir)
@@ -265,15 +270,15 @@ cat sambanova rc=0 URL https://api.sambanova.ai/v1/models
 route siliconflow rc=0 openai/m/x|https://api.siliconflow.com/v1
 base siliconflow rc=0 https://api.siliconflow.com/v1
 cat siliconflow rc=0 URL https://api.siliconflow.com/v1/models?type=text
-route streamlake rc=0 openai/m/x|https://api.streamlake.ai/v1
-base streamlake rc=0 https://api.streamlake.ai/v1
-cat streamlake rc=0 URL https://api.streamlake.ai/v1/models
+route streamlake rc=0 openai/m/x|https://vanchin.streamlake.ai/api/gateway/v1/endpoints
+base streamlake rc=0 https://vanchin.streamlake.ai/api/gateway/v1/endpoints
+cat streamlake rc=0 URL https://vanchin.streamlake.ai/api/gateway/v1/endpoints/models
 route vercel rc=0 openai/m/x|https://ai-gateway.vercel.sh/v1
 base vercel rc=0 https://ai-gateway.vercel.sh/v1
 cat vercel rc=0 URL https://ai-gateway.vercel.sh/v1/models
 route zai rc=0 openai/m/x|https://api.z.ai/api/paas/v4
 base zai rc=0 https://api.z.ai/api/paas/v4
-cat zai rc=2 remote-session: no documented ZAI catalog route; use --remote-model ID from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.
+cat zai rc=0 URL https://api.z.ai/api/paas/v4/models
 route bogus rc=1 
 base bogus rc=2 
 cat bogus rc=2 remote-session: no documented catalog route for bogus; choose an API model from its provider docs with --remote-model ID. Catalog verification unavailable."""
