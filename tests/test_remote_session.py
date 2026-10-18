@@ -27,11 +27,10 @@ NEW_ROUTES = {
     'sambanova': ('SAMBANOVA_API_KEY', 'https://api.sambanova.ai/v1'),
     'modelscope': ('MODELSCOPE_API_KEY', 'https://api-inference.modelscope.cn/v1'),
     'streamlake': ('STREAMLAKE_API_KEY', 'https://api.streamlake.ai/v1'),
-    'cerebras': ('CEREBRAS_API_KEY', 'https://api.cerebras.ai/v1'),
 }
 # Providers with a NATIVE LiteLLM prefix (no api_base line); every other NEW_ROUTES entry is a generic
 # openai/ route with an explicit api_base. Mistral moved to native mistral/ in 0.28.x.
-NATIVE_PREFIX = {'mistral': 'mistral/', 'cerebras': 'cerebras/'}
+NATIVE_PREFIX = {'mistral': 'mistral/'}
 
 
 class RemoteSessionTests(unittest.TestCase):
@@ -245,7 +244,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
 
     def test_proxy_config_all_models_and_thinking(self):
         prefixes = dict(gemini='gemini/', groq='groq/', nvidia='nvidia_nim/',
-                        openrouter='openrouter/', cloudflare='openai/',
+                        openrouter='openrouter/', cerebras='cerebras/', cloudflare='openai/',
                         **{p: NATIVE_PREFIX.get(p, 'openai/') for p in NEW_ROUTES})
         for alias, provider, model, *_ in self.roster():
             if model == 'SELECT':

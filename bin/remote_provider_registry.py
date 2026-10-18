@@ -7,9 +7,10 @@ quota checks) and `agent-fallback.py` (the router) all import from here so that
 the provider model — its endpoints, its tier, its tiering policy — cannot drift
 between the three tools.
 
-Provider data is loaded from config/remote-registry.yaml at import time. The YAML
-is the single source of truth; this module parses it and exposes the same Python
-API that remote_provider_core.py previously owned inline.
+Provider data comes from config/remote-registry.yaml, the single source of truth. At
+import time this module reads config/remote-registry.json, which
+bin/remote-registry-generate.py generates from the YAML, so end users need only the
+standard library (no pyyaml). A drift test keeps the JSON in step with the YAML.
 
 Privacy posture (non-negotiable): the remote lane is DISABLED by default.
 Nothing in this module ever makes a network call on its own. A caller must
@@ -25,32 +26,9 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-try:
-    from datetime import date as _date
-except ImportError:
-    _date = None
-
-# --- yaml import (soft dependency) -------------------------------------------
-try:
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None
-
-_REQUIRES_YAML_MSG = (
-    "pyyaml is required for remote-provider-registry.py; "
-    "install with `uv pip install pyyaml`"
-)
-
-
-def _coerce_str(v):
-    """Convert YAML-parsed date objects back to strings."""
-    if _date is not None and isinstance(v, _date):
-        return v.isoformat()
-    return v
-
-
 REPO_ROOT = Path(__file__).parent.parent
-_YAML_PATH = REPO_ROOT / "config" / "remote-registry.yaml"
+_YAML_PATH = REPO_ROOT / "config" / "remote-registry.yaml"   # the hand-edited source
+_JSON_PATH = REPO_ROOT / "config" / "remote-registry.json"   # generated from it; read at runtime
 
 SCHEMA_VERSION = 1
 
@@ -160,15 +138,9 @@ RATE_LIMITED = {"nvidia"}
 
 
 def _load_registry():
-    """Parse config/remote-registry.yaml and return (PROVIDERS dict, ENTRIES list).
-
-    Raises RuntimeError if pyyaml is not available.
-    """
-    if yaml is None:
-        raise RuntimeError(_REQUIRES_YAML_MSG)
-
-    with open(_YAML_PATH) as fh:
-        data = yaml.safe_load(fh)
+    """Read the generated config/remote-registry.json; return (PROVIDERS, ENTRIES, CATALOG_SCANABLE)."""
+    with open(_JSON_PATH, encoding="utf-8") as fh:
+        data = json.load(fh)
 
     providers_raw = data.get("providers", {})
     entries_raw = data.get("entries", [])
@@ -188,7 +160,7 @@ def _load_registry():
             catalog_url=pd.get("catalog_url", ""),
             key_env=pd.get("key_env", ""),
             extra_env=tuple(extra) if extra else (),
-            static_headers={k: _coerce_str(v) for k, v in (dict(static).items())} if static else {},
+            static_headers=dict(static) if static else {},
             default_models=tuple(defaults) if defaults else (),
             supports_responses=bool(pd.get("supports_responses", False)),
             notes=pd.get("notes", ""),

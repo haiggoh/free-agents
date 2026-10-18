@@ -1,0 +1,774 @@
+{
+  "schema_version": 1,
+  "generated_by": "bin/remote-registry-generate.py",
+  "source": "config/remote-registry.yaml",
+  "clear_env_extra": [
+    "OPENAI_API_KEY"
+  ],
+  "providers": {
+    "cerebras": {
+      "id": "cerebras",
+      "display": "Cerebras",
+      "tier": "trial",
+      "base_url": "https://api.cerebras.ai/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "CEREBRAS_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [
+        "llama-3.1-70b"
+      ],
+      "supports_responses": false,
+      "litellm_prefix": "cerebras",
+      "api_base_mode": "none",
+      "generic_openai_base": false,
+      "notes": "CLASSIFIED AS TRIAL, not permanently free. The router will only select it in include-trials / research-emergency modes."
+    },
+    "cloudflare": {
+      "id": "cloudflare",
+      "display": "Cloudflare Workers AI",
+      "tier": "renewing_free",
+      "base_url": "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "CLOUDFLARE_API_TOKEN",
+      "extra_env": [
+        "CLOUDFLARE_ACCOUNT_ID"
+      ],
+      "static_headers": {
+        "CF-Access-Client-Id": "workers-ai",
+        "CF-Access-Client-Secret": ""
+      },
+      "default_models": [
+        "@cf/meta/llama-3.1-8b-instruct"
+      ],
+      "supports_responses": true,
+      "litellm_prefix": "openai",
+      "api_base_mode": "cloudflare",
+      "generic_openai_base": false,
+      "catalog_mode": "cloudflare_search",
+      "notes": "Free monthly quota. Requires an account id + API token. The CF-Access-* headers come from the Workers AI API page and must be added to the key env if present."
+    },
+    "gemini": {
+      "id": "gemini",
+      "display": "Gemini API",
+      "tier": "renewing_free",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "GEMINI_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [
+        "gemini-3.6-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro"
+      ],
+      "supports_responses": false,
+      "litellm_prefix": "gemini",
+      "api_base_mode": "none",
+      "generic_openai_base": false,
+      "notes": "OpenAI-compatible. Free tier with a resetting per-day quota — the primary emergency lane."
+    },
+    "github": {
+      "id": "github",
+      "display": "GitHub Models",
+      "tier": "renewing_free",
+      "base_url": "https://models.github.ai/inference",
+      "chat_path": "/chat/completions",
+      "models_path": "",
+      "catalog_url": "https://models.github.ai/catalog/models",
+      "key_env": "GITHUB_TOKEN",
+      "extra_env": [],
+      "static_headers": {
+        "X-GitHub-Api-Version": "2026-03-10"
+      },
+      "default_models": [
+        "openai/gpt-4o-mini",
+        "meta-llama/llama-3.1-70b-instruct"
+      ],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": false,
+      "session_env": [
+        "GITHUB_MODELS_TOKEN"
+      ],
+      "retired_message": "remote-session: GitHub Models is retired (official docs; catalog HTTP 410 checked 2026-09-14). Select another provider directly; no generation or automatic fallback attempted. https://docs.github.com/en/github-models",
+      "notes": "Requires `models:read` on the token. Rate limits are per-token and reset. Model catalog is a separate endpoint, not /models."
+    },
+    "groq": {
+      "id": "groq",
+      "display": "Groq",
+      "tier": "renewing_free",
+      "base_url": "https://api.groq.com/openai/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "GROQ_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [
+        "llama-3.3-70b-versatile"
+      ],
+      "supports_responses": true,
+      "litellm_prefix": "groq",
+      "api_base_mode": "none",
+      "generic_openai_base": false,
+      "notes": "OpenAI-compatible, fast. Free tier resets."
+    },
+    "kilo": {
+      "id": "kilo",
+      "display": "Kilo Gateway",
+      "tier": "unknown",
+      "base_url": "https://api.kilo.ai/api/gateway",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "KILO_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "notes": "OpenAI-compatible. Free and paid models differ; inspect catalog pricing."
+    },
+    "llm7": {
+      "id": "llm7",
+      "display": "LLM7",
+      "tier": "unknown",
+      "base_url": "https://api.llm7.io/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "LLM7_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "notes": "OpenAI-compatible. Catalog contains free and paid models; inspect pricing and tools."
+    },
+    "mistral": {
+      "id": "mistral",
+      "display": "Mistral",
+      "tier": "unknown",
+      "base_url": "https://api.mistral.ai/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "MISTRAL_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [
+        "mistral-medium-2604",
+        "codestral-2508",
+        "mistral-small-2603"
+      ],
+      "supports_responses": false,
+      "litellm_prefix": "mistral",
+      "api_base_mode": "none",
+      "generic_openai_base": true,
+      "notes": "OpenAI-compatible via mistral/ LiteLLM prefix. Free and paid tiers; verify per account."
+    },
+    "modelscope": {
+      "id": "modelscope",
+      "display": "ModelScope",
+      "tier": "unknown",
+      "base_url": "https://api-inference.modelscope.cn/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "MODELSCOPE_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "catalog_disabled_message": "remote-session: no documented ModelScope catalog route; use --remote-model ID from the API-Inference model page: https://modelscope.cn/docs/model-service/API-Inference/intro",
+      "notes": "OpenAI-compatible API-Inference endpoint. Explicit model required; account quota and tool use untested. No documented /models catalog."
+    },
+    "nvidia": {
+      "id": "nvidia",
+      "display": "NVIDIA NIM",
+      "tier": "unknown",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "NVIDIA_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [
+        "meta/llama-3.1-70b-instruct"
+      ],
+      "supports_responses": false,
+      "litellm_prefix": "nvidia_nim",
+      "api_base_mode": "none",
+      "generic_openai_base": false,
+      "notes": "Free tier but the EFFECTIVE limits are dynamic (NVIDIA throttles free keys unpredictably) — treat as unknown, verify per call."
+    },
+    "openrouter": {
+      "id": "openrouter",
+      "display": "OpenRouter",
+      "tier": "unknown",
+      "base_url": "https://openrouter.ai/api/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "OPENROUTER_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openrouter",
+      "api_base_mode": "none",
+      "generic_openai_base": false,
+      "notes": "Free models are namespaced ('openrouter/free' or ':free'). Tier is model-dependent (free vs paid) — see the router's free-model rule."
+    },
+    "sambanova": {
+      "id": "sambanova",
+      "display": "SambaNova",
+      "tier": "unknown",
+      "base_url": "https://api.sambanova.ai/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "SAMBANOVA_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "notes": "OpenAI-compatible. Account trial, credit and paid billing vary."
+    },
+    "siliconflow": {
+      "id": "siliconflow",
+      "display": "SiliconFlow",
+      "tier": "unknown",
+      "base_url": "https://api.siliconflow.com/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models?type=text",
+      "catalog_url": "",
+      "key_env": "SILICONFLOW_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "notes": "OpenAI-compatible. International .com endpoint. Free and paid models differ; inspect catalog pricing."
+    },
+    "streamlake": {
+      "id": "streamlake",
+      "display": "Streamlake",
+      "tier": "unknown",
+      "base_url": "https://api.streamlake.ai/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "STREAMLAKE_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "notes": "OpenAI-compatible. Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key."
+    },
+    "vercel": {
+      "id": "vercel",
+      "display": "Vercel Gateway",
+      "tier": "unknown",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "AI_GATEWAY_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "notes": "OpenAI-compatible. Credits and paid account billing apply; select explicitly."
+    },
+    "zai": {
+      "id": "zai",
+      "display": "ZAI",
+      "tier": "unknown",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "chat_path": "/chat/completions",
+      "models_path": "",
+      "catalog_url": "",
+      "key_env": "ZAI_API_KEY",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "catalog_disabled_message": "remote-session: no documented ZAI catalog route; use --remote-model ID from https://docs.z.ai/guides/overview . This route uses general API billing, not the Coding Plan.",
+      "notes": "ZAI Coding Plan endpoint is distinct; this route uses general API billing. OpenAI-compatible. No documented /models catalog route."
+    }
+  },
+  "entries": [
+    {
+      "alias": "nvidia-glm53-thinking",
+      "provider": "nvidia",
+      "model_id": "z-ai/glm-5.3-flash",
+      "display": "NVIDIA GLM 5.3 Flash (thinking)",
+      "tier": "unknown",
+      "notes": "PARTIAL: same model as the base alias — thinking is always-on on NIM; this alias just defaults reasoning_effort high. Fast.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-glm53-full-thinking",
+      "provider": "nvidia",
+      "model_id": "z-ai/glm-5.3",
+      "display": "NVIDIA GLM 5.3 (thinking)",
+      "tier": "unknown",
+      "notes": "SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-nemotron-ultra-thinking",
+      "provider": "nvidia",
+      "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "display": "NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)",
+      "tier": "unknown",
+      "notes": "Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.",
+      "autocompact_default": "1m"
+    },
+    {
+      "alias": "nvidia-nemotron3-thinking",
+      "provider": "nvidia",
+      "model_id": "nvidia/nemotron-3-super-120b-a12b",
+      "display": "NVIDIA Nemotron 3 Super 120B-A12B (thinking)",
+      "tier": "unknown",
+      "notes": "Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-lightning-thinking",
+      "provider": "nvidia",
+      "model_id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "display": "NVIDIA Nemotron 3.5 Lightning 30B-A3B (thinking)",
+      "tier": "unknown",
+      "notes": "Reasoning enabled — stronger reasoning. Verified 2026-10-02.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-glm53",
+      "provider": "nvidia",
+      "model_id": "z-ai/glm-5.3-flash",
+      "display": "NVIDIA GLM 5.3 Flash",
+      "tier": "unknown",
+      "notes": "PARTIAL: fast (1-4s), always-thinking — thinking CANNOT be disabled on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-glm53-full",
+      "provider": "nvidia",
+      "model_id": "z-ai/glm-5.3",
+      "display": "NVIDIA GLM 5.3",
+      "tier": "unknown",
+      "notes": "SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-nemotron-ultra",
+      "provider": "nvidia",
+      "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "display": "NVIDIA Nemotron 3 Ultra 550B-A55B",
+      "tier": "unknown",
+      "notes": "★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled by default.",
+      "autocompact_default": "1m"
+    },
+    {
+      "alias": "nvidia-nemotron3",
+      "provider": "nvidia",
+      "model_id": "nvidia/nemotron-3-super-120b-a12b",
+      "display": "NVIDIA Nemotron 3 Super 120B-A12B",
+      "tier": "unknown",
+      "notes": "GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled by default.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-lightning",
+      "provider": "nvidia",
+      "model_id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "display": "NVIDIA Nemotron 3.5 Lightning 30B-A3B",
+      "tier": "unknown",
+      "notes": "GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick. Reasoning disabled by default.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-laguna",
+      "provider": "nvidia",
+      "model_id": "poolside/laguna-xs-2.1",
+      "display": "NVIDIA Laguna XS 2.1 (Poolside)",
+      "tier": "unknown",
+      "notes": "PARTIAL: Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained (worker limit 32). 33B params / 3B active / 256K context (poolside.ai, 2026-10-15) — sits below the non-thinking models by size; auto-compact window 200k.",
+      "autocompact_default": "200k"
+    },
+    {
+      "alias": "nvidia-muse-glimmer",
+      "provider": "nvidia",
+      "model_id": "meta/muse-glimmer-30b",
+      "display": "NVIDIA Muse Glimmer 30B (Meta)",
+      "tier": "unknown",
+      "notes": "RESTORED 2026-10-13: earlier 'empty' verdicts were the probe max_tokens=24 artifact; fixed probe (512 budget) answers OK. Occasional HTTP 500 historically (1/5).",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-gemma4",
+      "provider": "nvidia",
+      "model_id": "google/gemma-4-31b-it",
+      "display": "NVIDIA Gemma 4 31B",
+      "tier": "unknown",
+      "notes": "RESTORED 2026-10-13: the 2026-10-11 timeouts were transient capacity; fixed probe answers OK.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-kimi-k3",
+      "provider": "nvidia",
+      "model_id": "moonshotai/kimi-k3",
+      "display": "NVIDIA Kimi K3 (Moonshot)",
+      "tier": "unknown",
+      "notes": "⚠️ BROKEN: TIMEOUT on all probes (2026-10-10, 2026-10-13). Consistent 180s timeouts. Hidden via broken-nvidia-models.json.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-deepseek-v4",
+      "provider": "nvidia",
+      "model_id": "deepseek-ai/deepseek-v4.1-flash",
+      "display": "NVIDIA DeepSeek V4.1 Flash",
+      "tier": "unknown",
+      "notes": "⚠️ BROKEN: TIMEOUT on all probes. Old v4-flash-0731 is 410 Gone. Hidden via broken-nvidia-models.json.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-gptoss",
+      "provider": "nvidia",
+      "model_id": "openai/gpt-oss-20b",
+      "display": "NVIDIA gpt-oss-20b",
+      "tier": "unknown",
+      "notes": "⚠️ BROKEN: connect/read timeouts — deployment unresponsive (re-audit 2026-10-13 with fixed probe; earlier 'empty' verdicts were partly the max_tokens=24 artifact). Hidden via broken-nvidia-models.json.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-kimi-k26",
+      "provider": "nvidia",
+      "model_id": "moonshotai/kimi-k2.6",
+      "display": "NVIDIA Kimi K2.6 (Moonshot)",
+      "tier": "unknown",
+      "notes": "⚠️ BROKEN: HTTP 404 on probes — not provisioned for account. Hidden via broken-nvidia-models.json.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-nano3",
+      "provider": "nvidia",
+      "model_id": "nvidia/nemotron-nano-3-30b-a3b",
+      "display": "NVIDIA Nemotron Nano 3 30B-A3B",
+      "tier": "unknown",
+      "notes": "⚠️ BROKEN: HTTP 404 on probes — not provisioned. Hidden via broken-nvidia-models.json.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-nemotron4",
+      "provider": "nvidia",
+      "model_id": "nvidia/nemotron-4-340b-instruct",
+      "display": "NVIDIA Nemotron 4 340B",
+      "tier": "unknown",
+      "notes": "⚠️ BROKEN: HTTP 404 on probe — not provisioned. Hidden via broken-nvidia-models.json.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-minitron",
+      "provider": "nvidia",
+      "model_id": "nvidia/minitron-12b",
+      "display": "NVIDIA Minitron 12B",
+      "tier": "unknown",
+      "notes": "⚠️ BROKEN: HTTP 404 on probe — not provisioned. Hidden via broken-nvidia-models.json.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "gemini-3.8-flash",
+      "provider": "gemini",
+      "model_id": "gemini-3.8-flash",
+      "display": "Gemini 3.8 Flash",
+      "tier": "renewing_free",
+      "notes": "★ PREFERRED Gemini. Catalog-listed; newer than 3.6. Thinking off for latency.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "gemini-3.8-flash-thinking",
+      "provider": "gemini",
+      "model_id": "gemini-3.8-flash",
+      "display": "Gemini 3.8 Flash (thinking)",
+      "tier": "renewing_free",
+      "notes": "Preferred Gemini, thinking ON — slower, stronger reasoning.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "gemini-flash",
+      "provider": "gemini",
+      "model_id": "gemini-3.6-flash",
+      "display": "Gemini 3.6 Flash",
+      "tier": "renewing_free",
+      "notes": "FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "gemini-flash-thinking",
+      "provider": "gemini",
+      "model_id": "gemini-3.6-flash",
+      "display": "Gemini 3.6 Flash (thinking)",
+      "tier": "renewing_free",
+      "notes": "VERIFIED weights; thinking ON — slower, stronger reasoning.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "gemini-flash-lite",
+      "provider": "gemini",
+      "model_id": "gemini-3.1-flash-lite",
+      "display": "Gemini 3.1 Flash-Lite",
+      "tier": "renewing_free",
+      "notes": "VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "groq-oss120",
+      "provider": "groq",
+      "model_id": "openai/gpt-oss-120b",
+      "display": "Groq gpt-oss-120b",
+      "tier": "renewing_free",
+      "notes": "VERIFIED chat+tools. Very fast; best once Gemini quota is spent.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "groq-oss20",
+      "provider": "groq",
+      "model_id": "openai/gpt-oss-20b",
+      "display": "Groq gpt-oss-20b",
+      "tier": "renewing_free",
+      "notes": "Smaller/faster sibling for utility work.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "groq-qwen36",
+      "provider": "groq",
+      "model_id": "qwen/qwen3.6-27b",
+      "display": "Groq Qwen 3.6 27B",
+      "tier": "renewing_free",
+      "notes": "Catalog only; account quotas apply.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "groq-qwen38",
+      "provider": "groq",
+      "model_id": "qwen/qwen3.8-27b",
+      "display": "Groq Qwen 3.8 27B",
+      "tier": "renewing_free",
+      "notes": "Catalog only; account quotas apply.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "openrouter-free",
+      "provider": "openrouter",
+      "model_id": "openrouter/free",
+      "display": "OpenRouter free router",
+      "tier": "renewing_free",
+      "notes": "Catalog only. Routes among free models; account limits still apply.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "openrouter-nemotron",
+      "provider": "openrouter",
+      "model_id": "nvidia/nemotron-3-super-120b-a12b:free",
+      "display": "OpenRouter Nemotron 3 Super (free)",
+      "tier": "renewing_free",
+      "notes": "Catalog lists zero token prices and tools; no generation probe.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "openrouter-code",
+      "provider": "openrouter",
+      "model_id": "cohere/north-mini-code:free",
+      "display": "OpenRouter North Mini Code (free)",
+      "tier": "renewing_free",
+      "notes": "Catalog lists zero token prices and tools; no generation probe.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "cloudflare-oss20",
+      "provider": "cloudflare",
+      "model_id": "@cf/openai/gpt-oss-20b",
+      "display": "Cloudflare gpt-oss-20b",
+      "tier": "unknown",
+      "notes": "Catalog only. Requires cloudflare token and cloudflare-account-id; account billing applies.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "cloudflare-qwen38",
+      "provider": "cloudflare",
+      "model_id": "@cf/qwen/qwen3.8-27b",
+      "display": "Cloudflare Qwen 3.8 27B",
+      "tier": "unknown",
+      "notes": "Catalog only; free allocation and paid overage depend on the account.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "cerebras-oss120",
+      "provider": "cerebras",
+      "model_id": "gpt-oss-120b",
+      "display": "Cerebras gpt-oss-120b",
+      "tier": "trial",
+      "notes": "Catalog only. Use --include-trials; account billing not verified.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "cerebras-qwen38",
+      "provider": "cerebras",
+      "model_id": "qwen-3.8-27b",
+      "display": "Cerebras Qwen 3.8 27B",
+      "tier": "trial",
+      "notes": "Catalog only. Use --include-trials; account billing not verified.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "mistral",
+      "provider": "mistral",
+      "model_id": "SELECT",
+      "display": "Mistral (choose model)",
+      "tier": "unknown",
+      "notes": "Select a catalog model; free experiment and paid plans differ. Tool session untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "mistral-codestral",
+      "provider": "mistral",
+      "model_id": "codestral-2508",
+      "display": "Mistral Codestral 2508",
+      "tier": "unknown",
+      "notes": "WORKING - coding specialist, 256K context, tools confirmed",
+      "autocompact_default": "256k"
+    },
+    {
+      "alias": "mistral-medium",
+      "provider": "mistral",
+      "model_id": "mistral-medium-2604",
+      "display": "Mistral Medium 2604",
+      "tier": "unknown",
+      "notes": "WORKING - general purpose, 262K context, tools confirmed",
+      "autocompact_default": "256k"
+    },
+    {
+      "alias": "mistral-small",
+      "provider": "mistral",
+      "model_id": "mistral-small-2603",
+      "display": "Mistral Small 2603",
+      "tier": "unknown",
+      "notes": "Catalog listed - smaller/faster, 262K context, tools confirmed",
+      "autocompact_default": "256k"
+    },
+    {
+      "alias": "mistral-large-4",
+      "provider": "mistral",
+      "model_id": "mistral-large-4-0",
+      "display": "Mistral Large 4",
+      "tier": "paid_only",
+      "notes": "Catalog listed - flagship, 1M context, tools confirmed, requires paid subscription",
+      "autocompact_default": "1m"
+    },
+    {
+      "alias": "zai",
+      "provider": "zai",
+      "model_id": "SELECT",
+      "display": "ZAI general API (choose model)",
+      "tier": "unknown",
+      "notes": "Explicit model required. General API billing; not the GLM Coding Plan endpoint. Tool session untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "siliconflow",
+      "provider": "siliconflow",
+      "model_id": "SELECT",
+      "display": "SiliconFlow (choose model)",
+      "tier": "unknown",
+      "notes": "International .com endpoint. Free and paid models differ; select explicitly. Tool session untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "llm7",
+      "provider": "llm7",
+      "model_id": "SELECT",
+      "display": "LLM7 (choose model)",
+      "tier": "unknown",
+      "notes": "Catalog contains free and paid models; inspect pricing and tools. Tool session untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "kilo",
+      "provider": "kilo",
+      "model_id": "SELECT",
+      "display": "Kilo Gateway (choose model)",
+      "tier": "unknown",
+      "notes": "Free and paid models differ; inspect catalog pricing. Tool session untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "vercel",
+      "provider": "vercel",
+      "model_id": "SELECT",
+      "display": "Vercel Gateway (choose model)",
+      "tier": "unknown",
+      "notes": "Credits and paid account billing apply; select explicitly. Tool session untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "sambanova",
+      "provider": "sambanova",
+      "model_id": "SELECT",
+      "display": "SambaNova (choose model)",
+      "tier": "unknown",
+      "notes": "Account trial, credit and paid billing vary. Tool session untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "modelscope",
+      "provider": "modelscope",
+      "model_id": "SELECT",
+      "display": "ModelScope (choose model)",
+      "tier": "unknown",
+      "notes": "Explicit API-Inference model required; account quota and tool use untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "streamlake",
+      "provider": "streamlake",
+      "model_id": "SELECT",
+      "display": "Streamlake (choose model)",
+      "tier": "unknown",
+      "notes": "Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key. Tool session untested.",
+      "autocompact_default": "-"
+    }
+  ]
+}
