@@ -80,6 +80,7 @@ EMOJI_BACK="↩️"             # generic Back (to the screen that opened this o
 
 # NVIDIA rate limiter emoji
 EMOJI_NVIDIA_RATE_LIMITER="🚦"
+EMOJI_MEMORY_GUARD="🛡️"
 
 # Launchd management emojis (backend update checks; 0.21.0's csl diff, landed in the picker in 0.22.0)
 EMOJI_LAUNCHD_INSTALL="📥"

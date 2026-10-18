@@ -375,6 +375,24 @@ class RemoteLiveCatalog(PilotCase):
         self.run_picker(s, start="remote")
 
 
+class MemoryGuardSettings(PilotCase):
+    def test_home_u_opens_guard_and_a_change_is_saved_and_reloaded(self):
+        async def s(app, pilot, h):
+            await h.press("u")
+            await h.wait_text("Memory guard (local sessions)")
+            await h.press("a")                                  # auto-sync OFF -> ON
+            await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
+            self.assertEqual(self.saved_state()["memguard"], {"registry_auto_sync": True})
+            await h.press("escape")
+            await h.wait_screen("HomeScreen")                   # Escape returns, never quits
+        self.run_picker(s, start="home")
+        # A fresh picker reads it back.
+        async def again(app, pilot, h):
+            await h.press("u")
+            await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
+        self.run_picker(again, start="home")
+
+
 class DownloaderQueue(PilotCase):
     def test_space_queues_and_unqueues_like_the_status_line_says(self):
         async def s(app, pilot, h):

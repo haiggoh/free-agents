@@ -452,6 +452,7 @@ class Picker(App):
             remote_temperature=state.temperature.get("remote_api_session", sms.DEFAULT_TEMPERATURE["remote_api_session"]),
             lowkey_temperature=state.temperature.get("lowkey", sms.DEFAULT_TEMPERATURE["lowkey"]),
             rate_limiter=dict(state.rate_limiter),
+            memguard=dict(state.memguard),
             auto_mode=int(os.environ.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
             telemetry=os.environ.get("CSL_TELEMETRY", "0") == "1",
             stop_hook=os.environ.get("CSL_STOP_HOOK", "0") == "1",   # OFF by default (0.22.3)
@@ -521,6 +522,14 @@ class Picker(App):
 
     def _save_rl(self, values):
         warning = sms.save_rate_limiter(self._config_dir(), values)
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
+
+    def _save_mg(self, values):
+        try:
+            warning = sms.save_memguard(self._config_dir(), values)
+        except ValueError as exc:              # the screen never offers one; never crash on it
+            warning = f"{exc}; not saved"
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
 
@@ -718,6 +727,8 @@ class Picker(App):
             return m.DownloadScreen(s, entries=None, free_gb=None, headroom_gb=None, owner=nav.owner)
         if nav.target == "rate_limiter":
             return m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
+        if nav.target == "memguard":
+            return m.MemoryGuardScreen(s, nav.owner, on_save=self._save_mg)
         if nav.target == "runtime_manager":
             return m.RuntimeManagerScreen(s, nav.owner)
         if nav.target == "api_keys":
@@ -768,6 +779,8 @@ class Picker(App):
             self.screen_model = m.DownloadScreen(s, entries, free, head, nav.owner)
         elif nav.target == "rate_limiter":
             self.screen_model = m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
+        elif nav.target == "memguard":
+            self.screen_model = m.MemoryGuardScreen(s, nav.owner, on_save=self._save_mg)
         elif nav.target == "runtime_manager":
             self.screen_model = m.RuntimeManagerScreen(s, nav.owner)
         elif nav.target == "runtime":
@@ -851,7 +864,8 @@ class Picker(App):
                                            id=f"i:{obj.id}"))
                     self.row_ids.append(("item", obj.id))
 
-        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.RuntimeManagerScreen, m.APIKeysScreen, m.ThemeConfigScreen)):
+        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.MemoryGuardScreen,
+                                                    m.RuntimeManagerScreen, m.APIKeysScreen, m.ThemeConfigScreen)):
             rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
         target = keep or (f"i:{sm.accordion.selected_id}" if sm.accordion and sm.accordion.selected_id else None)
         if target:
@@ -1178,7 +1192,7 @@ class Picker(App):
             return
         self.goto(m.Nav(target, owner))
 
-    SUB_TARGETS = ("rate_limiter", "runtime_manager", "runtime", "api_keys", "runtime_launchd",
+    SUB_TARGETS = ("rate_limiter", "memguard", "runtime_manager", "runtime", "api_keys", "runtime_launchd",
                    "remote_filters")   # Filter settings… returns to Remote, never Quit
 
     def _go_back(self):

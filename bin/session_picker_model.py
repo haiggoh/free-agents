@@ -274,6 +274,7 @@ class Settings:
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
     lowkey_temperature: str = sms.DEFAULT_TEMPERATURE["lowkey"]
     rate_limiter: dict = field(default_factory=dict)
+    memguard: dict = field(default_factory=lambda: dict(sms.DEFAULT_MEMGUARD))
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
     # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=local default classifier always, 2=Auto)
     classifier_source: int = 2
@@ -526,6 +527,10 @@ def _tool_actions(backend: bool = True, local_session: bool = False, home: bool 
         Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
                lambda: Nav("runtime_manager"), section="tools"),
     ]
+    if local_session or home:
+        # The memory guard protects LOCAL sessions only, so Remote does not offer it.
+        acts.append(Action("u", f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}Memory guard", lambda: Nav("memguard"),
+                           section="tools"))
     if not local_session:
         acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section="tools"))
         if not home:
@@ -1341,6 +1346,76 @@ class RateLimiterScreen(Screen):
                    lambda: self._cycle("max_retries", self.RETRY_STEPS, 5)),
             Action("i", "Show live limiter status", lambda: Nav("tool:rl-status"), section="tools"),
             Action("x", "Reset shared limiter state file", lambda: Nav("tool:rl-reset"), section="tools"),
+        ]
+        acts += self.nav_actions()
+        check_action_table(acts)
+        return acts
+
+
+class MemoryGuardScreen(Screen):
+    """Memory guard settings, persisted in session-menu.local.json (memguard, schema 5).
+
+    The launchers export these as LA_MEMGUARD_* (session_menu_state.py memguard-env); a variable
+    the user exported still wins. Every cycle includes sms.DEFAULT_MEMGUARD, so the screen never
+    shows a value the guard does not use.
+    """
+    title = f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}Memory guard (local sessions)"
+    SOFT_STEPS = (75, 80, 85, 90)
+    HARD_STEPS = (90, 93, 95, 97)
+    QUIET_STEPS = (2, 3, 5, 10)
+
+    def __init__(self, settings: Settings, owner: str = DIRECT_ROOT,
+                 on_save: Callable[[dict], object] | None = None):
+        super().__init__(settings, owner)
+        self.on_save = on_save
+        self.accordion = None
+
+    def value(self, key):
+        return self.settings.memguard.get(key, sms.DEFAULT_MEMGUARD[key])
+
+    def _set(self, key, value):
+        self.settings.memguard[key] = value
+        if self.on_save:
+            self.on_save({key: value})
+
+    def _toggle(self, key):
+        self._set(key, not self.value(key))
+
+    def _cycle(self, key, steps):
+        """Next step that keeps soft below hard; a pair-breaking step is skipped, never saved."""
+        cur = self.value(key)
+        order = list(steps)
+        start = order.index(cur) + 1 if cur in order else 0
+        for i in range(len(order)):
+            cand = order[(start + i) % len(order)]
+            soft = cand if key == "soft_pct" else self.value("soft_pct")
+            hard = cand if key == "hard_pct" else self.value("hard_pct")
+            if soft < hard:
+                self._set(key, cand)
+                return
+
+    def groups(self):
+        return []
+
+    def actions(self):
+        on = self.value("enabled")
+        def onoff(v):
+            return "ON" if v else "OFF"
+        acts = [
+            Action("g", f"Memory guard: {onoff(on)}", lambda: self._toggle("enabled")),
+            Action("t", f"Start sessions inside tmux (lets the guard type /compact): {onoff(self.value('tmux'))}",
+                   lambda: self._toggle("tmux"), enabled=on),
+            Action("s", f"Compact at RAM ≥ {self.value('soft_pct')}% (when the session is idle)",
+                   lambda: self._cycle("soft_pct", self.SOFT_STEPS), enabled=on),
+            Action("h", f"Compact the largest session at once at RAM ≥ {self.value('hard_pct')}%",
+                   lambda: self._cycle("hard_pct", self.HARD_STEPS), enabled=on),
+            Action("w", f"Wait for {self.value('quiet_s')}s of no typing before typing into a session",
+                   lambda: self._cycle("quiet_s", self.QUIET_STEPS), enabled=on),
+            Action("c", f"After a memory-limit abort, continue by itself: {onoff(self.value('auto_continue'))}",
+                   lambda: self._toggle("auto_continue"), enabled=on),
+            Action("a", f"Auto-sync local registry with the disk (no prompts): "
+                        f"{onoff(self.value('registry_auto_sync'))}",
+                   lambda: self._toggle("registry_auto_sync")),
         ]
         acts += self.nav_actions()
         check_action_table(acts)

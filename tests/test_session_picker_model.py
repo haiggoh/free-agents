@@ -112,6 +112,49 @@ class RateLimiterScreenTests(unittest.TestCase):
         self.assertEqual(saved, {"max_cooldown": 600, "backoff_multiplier": 3.0, "max_retries": 10})
 
 
+class MemoryGuardScreenTests(unittest.TestCase):
+    def test_every_cycle_includes_the_store_default(self):
+        # Fails if the screen shows a value the guard does not use.
+        S, d = m.MemoryGuardScreen, m.sms.DEFAULT_MEMGUARD
+        self.assertIn(d["soft_pct"], S.SOFT_STEPS)
+        self.assertIn(d["hard_pct"], S.HARD_STEPS)
+        self.assertIn(d["quiet_s"], S.QUIET_STEPS)
+        labels = {a.key: a.label for a in S(m.Settings()).actions()}
+        self.assertIn(f"{d['soft_pct']}%", labels["s"])
+        self.assertIn(f"{d['hard_pct']}%", labels["h"])
+        self.assertIn("OFF", labels["a"])                         # auto-sync off = 0.36.2 behaviour
+
+    def test_rows_persist_through_on_save_and_cycle_never_breaks_soft_below_hard(self):
+        saved = {}
+        s = m.Settings()
+        screen = m.MemoryGuardScreen(s, on_save=saved.update)
+        for key in "tca":
+            screen.handle_key(key)
+        self.assertEqual(saved, {"tmux": False, "auto_continue": False, "registry_auto_sync": True})
+        seen = set()
+        for _ in range(12):                                      # every soft step, twice over
+            screen.handle_key("s")
+            seen.add(s.memguard["soft_pct"])
+            self.assertLess(s.memguard["soft_pct"], s.memguard["hard_pct"])
+        s.memguard["hard_pct"] = 90
+        for _ in range(8):
+            screen.handle_key("s")
+            self.assertLess(s.memguard["soft_pct"], 90)          # 90 is skipped while hard is 90
+        self.assertEqual(seen, set(m.MemoryGuardScreen.SOFT_STEPS))
+
+    def test_guard_off_disables_dependent_rows_but_not_auto_sync(self):
+        s = m.Settings()
+        s.memguard["enabled"] = False
+        acts = {a.key: a for a in m.MemoryGuardScreen(s).actions()}
+        self.assertFalse(any(acts[k].enabled for k in "tshwc"))
+        self.assertTrue(acts["a"].enabled)                       # registry sync is independent
+
+    def test_entry_on_home_and_local_only(self):
+        self.assertEqual(m.HomeScreen(m.Settings()).handle_key("u"), m.Nav("memguard"))
+        self.assertEqual(m.LocalScreen(m.Settings(), []).handle_key("u"), m.Nav("memguard"))
+        self.assertNotIn("u", [a.key for a in m.RemoteScreen(m.Settings(), []).actions()])
+
+
 class BackendManagerContractTests(unittest.TestCase):
     """The runtime screen drives install/manage-backend.py (0.21.0). Fails if a row calls a
     subcommand main's parser rejects OR parses-but-never-dispatches (the merge's dead calls)."""
