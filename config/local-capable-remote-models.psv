@@ -21,8 +21,9 @@
 #   - exact (provider, remote_model_id) keys — no fuzzy matching
 #   - duplicate keys are rejected by the parser
 #   - unknown / missing entries remain visible (fail-open)
-#   - parameter count alone is NOT a decision factor; artifact size, backend support,
-#     and context/KV overhead matter more
+#   - a known artifact size wins; the parameter count (Hugging Face safetensors total, else the
+#     count in the model id) is the FALLBACK when no artifact size is known (user 2026-10-18) —
+#     bin/estimate-model-footprint.py --hf. Backend support and context/KV overhead still matter.
 #
 # Classification guide:
 #   local-capable    — a viable local artifact exists or has a documented conversion route,
@@ -56,7 +57,7 @@ nvidia|deepseek-ai/deepseek-v4-flash-0731|remote-preferred||nvidia-nim||No MLX a
 
 # Laguna XS 2.1 (Poolside) — an OptiQ MLX artifact now exists (2026-10-15); remote stays
 # preferred until the local route is proven. 33B/3B active, 256K context (poolside.ai + NIM docs).
-nvidia|poolside/laguna-xs-2.1|remote-preferred|mlx-community/Laguna-XS-2.1-OptiQ-4bit|mlx-optiq|21|OptiQ MLX artifact exists (21 GB); 256K context documented 2026-10-15
+nvidia|poolside/laguna-xs-2.1|local-capable|mlx-community/Laguna-XS-2.1-OptiQ-4bit|mlx-optiq|16.7|auto-estimated 25 GB at 4bit: ~25 GB (weights 17 + 8 overhead) fits the 96 GB budget with room to spare — comfortably local, no further math needed [prior note, size math does not refute it: OptiQ MLX artifact exists (21 GB); 256K context documented 2026-10-15]
 
 # gpt-oss-20b — OpenAI model via NIM; no local equivalent
 nvidia|openai/gpt-oss-20b|local-capable||nvidia-nim|10.0|auto-estimated 18 GB at 4bit: ~18 GB (weights 10 + 8 overhead) fits the 96 GB budget with room to spare — comfortably local, no further math needed [prior note, size math does not refute it: No local equivalent; OpenAI-native model]
@@ -128,3 +129,6 @@ kilo|SELECT|unknown||kilo||Model-selected-at-runtime; no default classification
 vercel|SELECT|unknown||vercel||Model-selected-at-runtime; no default classification
 sambanova|SELECT|unknown||sambanova||Model-selected-at-runtime; no default classification
 modelscope|SELECT|unknown||modelscope||Model-selected-at-runtime; no default classification
+nvidia|z-ai/glm-5.3|remote-preferred|||376.6|auto-estimated 385 GB at 4bit: ~385 GB exceeds the 96 GB budget by 289 GB — far past the ceiling, so no quantization or KV choice recovers it
+nvidia|deepseek-ai/deepseek-v4.1-flash|remote-preferred|||381.6|auto-estimated 390 GB at 4bit: ~390 GB exceeds the 96 GB budget by 294 GB — far past the ceiling, so no quantization or KV choice recovers it
+nvidia|nvidia/nemotron-4-340b-instruct|remote-preferred|||170.0|auto-estimated 178 GB at 4bit: ~178 GB exceeds the 96 GB budget by 82 GB — far past the ceiling, so no quantization or KV choice recovers it

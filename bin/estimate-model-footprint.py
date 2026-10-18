@@ -108,11 +108,99 @@ def parse_params(model_id: str) -> dict:
             "confidence": confidence, "note": note}
 
 
+# --- Hugging Face fallback: the parameter count when the id does not state one ------------
+# The model page's "fits your hardware" badge comes from the same field: safetensors.total.
+# Public API, no key. Results are cached so a picker never waits on the network twice.
+HF_API = "https://huggingface.co/api/models"
+HF_CACHE_TTL_S = 30 * 86400
+
+
+def _hf_cache_path() -> pathlib.Path:
+    import os
+    base = os.environ.get("LA_HF_PARAMS_CACHE")
+    if base:
+        return pathlib.Path(base)
+    root = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return pathlib.Path(root) / "free-agents" / "hf-params.json"
+
+
+def _hf_get(url: str, timeout: float):
+    """GET JSON from the HF API. Tests replace this function; None on any failure."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = False):
+    """(total parameters, HF repo) for a model id, or (None, None) when no single base repo matches.
+
+    Exact repo first (case-sensitive on HF), then a name search accepting only a repo whose
+    name equals the id's last segment case-insensitively. Derivative uploads (-GGUF, -INT4,
+    -DFlash ...) carry a longer name, so they never match; a same-owner repo is preferred.
+    Ambiguity (two base repos) is "unknown": a wrong count is worse than none."""
+    cache_path = _hf_cache_path()
+    key = model_id.lower()
+    try:
+        cache = json.loads(cache_path.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get(key)
+    if hit and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S:
+        return hit.get("total"), hit.get("repo")
+    if offline:
+        return None, None
+
+    from urllib.parse import quote
+    total = repo = None
+    if "/" in model_id:
+        obj = _hf_get(f"{HF_API}/{quote(model_id, safe='/')}?expand[]=safetensors", timeout)
+        if isinstance(obj, dict) and (obj.get("safetensors") or {}).get("total"):
+            total, repo = obj["safetensors"]["total"], obj.get("id", model_id)
+    if total is None:
+        tail = model_id.split("/")[-1]
+        found = _hf_get(f"{HF_API}?search={quote(tail)}&limit=50&expand[]=safetensors", timeout)
+        if isinstance(found, list):
+            exact = [m for m in found if isinstance(m, dict)
+                     and str(m.get("id", "")).split("/")[-1].lower() == tail.lower()
+                     and (m.get("safetensors") or {}).get("total")]
+            owner = model_id.split("/")[0].lower() if "/" in model_id else None
+            if owner:
+                same_owner = [m for m in exact if m["id"].split("/")[0].lower() == owner]
+                exact = same_owner or exact
+            totals = {m["safetensors"]["total"] for m in exact}
+            if len(totals) == 1:
+                total, repo = totals.pop(), exact[0]["id"]
+    cache[key] = {"total": total, "repo": repo, "at": time.time()}
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache, indent=1, sort_keys=True))
+        tmp.replace(cache_path)
+    except OSError:
+        pass                                  # a read-only cache costs a lookup, never a verdict
+    return total, repo
+
+
 def estimate(model_id: str, quant: str = "4bit",
              budget_gb: float = DEFAULT_BUDGET_GB,
-             kv_overhead_gb: float = DEFAULT_KV_OVERHEAD_GB) -> dict:
-    """Estimate footprint and give a SUGGESTED classification (never authoritative)."""
+             kv_overhead_gb: float = DEFAULT_KV_OVERHEAD_GB, *,
+             use_hf: bool = False, hf_offline: bool = False) -> dict:
+    """Estimate footprint and give a SUGGESTED classification (never authoritative).
+
+    Precedence (user 2026-10-18): the HF safetensors count of the matching base repo, then
+    the count parsed from the id, then unknown (visible). With use_hf the HF rung is tried
+    first because it is a measurement; the id parse is the rough fallback."""
     parsed = parse_params(model_id)
+    if use_hf:
+        total, repo = hf_total_params(model_id, offline=hf_offline)
+        if total:
+            parsed = {**parsed, "total_b": round(total / 1e9, 1),
+                      "confidence": "medium" if parsed.get("active_b") is None else "medium-moe",
+                      "note": f"HF {repo}: {total / 1e9:.1f}B params (safetensors)"
+                              + (f"; {parsed['active_b']:g}B active" if parsed.get("active_b") else "")}
     bpw = BYTES_PER_WEIGHT[quant]
     out = {"model_id": model_id, "quant": quant, "budget_gb": budget_gb, **parsed}
 
@@ -244,6 +332,8 @@ def apply_to_policy(path: str, updates: list, *, dry_run: bool = False) -> dict:
         rewritten.append(update["model_id"])
 
     appended = []
+    if by_key and out_lines and not out_lines[-1].endswith("\n"):
+        out_lines[-1] += "\n"       # a last line without a newline would swallow the first append
     for update in by_key.values():
         out_lines.append("|".join([
             update["provider"], update["model_id"], update["suggested"], "", "",
@@ -285,6 +375,12 @@ def main() -> int:
     parser.add_argument("--roster", help="pipe-separated roster file, or - for stdin")
     parser.add_argument("--policy", help="policy PSV to compare against")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    parser.add_argument("--hf", action="store_true",
+                        help="when the id states no parameter count, look up the Hugging Face "
+                             "safetensors total (public API, cached 30 d in "
+                             "~/.cache/free-agents/hf-params.json; LA_HF_PARAMS_CACHE overrides)")
+    parser.add_argument("--hf-offline", action="store_true",
+                        help="with --hf, use only cached Hugging Face results (no network)")
     parser.add_argument("--disagreements-only", action="store_true",
                         help="only report rows the policy misses or contradicts")
     parser.add_argument("--apply", action="store_true",
@@ -295,7 +391,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.model_id and not args.roster:
-        result = estimate(args.model_id, args.quant, args.budget_gb, args.kv_overhead_gb)
+        result = estimate(args.model_id, args.quant, args.budget_gb, args.kv_overhead_gb,
+                          use_hf=args.hf, hf_offline=args.hf_offline)
         if args.json:
             print(json.dumps(result, indent=2))
         else:
@@ -314,7 +411,8 @@ def main() -> int:
     policy = read_policy(args.policy) if args.policy else {}
     findings, agree = [], 0
     for alias, provider, model_id in rows:
-        result = estimate(model_id, args.quant, args.budget_gb, args.kv_overhead_gb)
+        result = estimate(model_id, args.quant, args.budget_gb, args.kv_overhead_gb,
+                          use_hf=args.hf, hf_offline=args.hf_offline)
         current = policy.get((provider, model_id))
         result.update(alias=alias, provider=provider, policy=current)
         if current is None:

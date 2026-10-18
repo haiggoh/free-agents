@@ -90,7 +90,10 @@ class _StubbedEnv(unittest.TestCase):
                     "LA_URL_OPENER": str(stubs / "url-opener"),
                     "LA_API_KEYS_DIR": str(self.keys),
                     "LA_SESSION_MENU_CONFIG_DIR": str(self.cfg),
-                    "LA_THEME_CONFIG_DIR": str(self.themes)}
+                    "LA_THEME_CONFIG_DIR": str(self.themes),
+                    # Catalog rows never reach Hugging Face from a test, nor its real cache.
+                    "LA_PICKER_HF_LOOKUP": "0",
+                    "LA_HF_PARAMS_CACHE": str(t / "hf-params.json")}
 
     def launches(self):
         if not self.log.exists():

@@ -130,6 +130,44 @@ def load_remote_agents() -> list[m.RemoteAgent]:
     return agents
 
 
+_FOOTPRINT = None
+
+
+def _footprint():
+    global _FOOTPRINT
+    if _FOOTPRINT is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("estimate_model_footprint",
+                                                      BIN / "estimate-model-footprint.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _FOOTPRINT = mod
+    return _FOOTPRINT
+
+
+def catalog_local_capable(provider, model_id):
+    """True when a live-catalog row is estimated to fit this machine (the filter then hides it).
+
+    Runs while the accordion regroups, so it must never wait on the network: it reads the
+    Hugging Face count only from the cache that load_remote_catalog warmed, then falls back
+    to the count in the id. An unknown verdict stays visible (fail-open)."""
+    try:
+        return _footprint().estimate(model_id, use_hf=True, hf_offline=True)["suggested"] == "local-capable"
+    except Exception:
+        return False
+
+
+def _warm_hf_cache(model_ids):
+    """Fill the HF parameter cache for catalog ids that state no count (loader thread only)."""
+    try:
+        fp = _footprint()
+    except Exception:
+        return
+    for mid in model_ids:
+        if fp.parse_params(mid)["total_b"] is None:
+            fp.hf_total_params(mid, timeout=4.0)
+
+
 def load_remote_catalog(kind):
     """`rcat:<alias>` -> that provider's live chat/tool catalog as m.CatalogModel rows.
 
@@ -141,7 +179,15 @@ def load_remote_catalog(kind):
     if r.returncode != 0:
         msg = (r.stderr or "").strip().splitlines()
         raise RuntimeError(msg[-1] if msg else f"catalog exited {r.returncode}")
-    return [m.CatalogModel.from_line(ln) for ln in r.stdout.splitlines() if "\t" in ln]
+    rows = [m.CatalogModel.from_line(ln) for ln in r.stdout.splitlines() if "\t" in ln]
+    if os.environ.get("LA_PICKER_HF_LOOKUP", "1") != "0":
+        _warm_hf_cache([c.model_id for c in rows][:HF_WARM_LIMIT])
+    return rows
+
+
+# A catalog can list hundreds of ids; the first lookups cost ~0.3 s each, so cap the cold
+# warm-up per provider. Later opens read the 30-day cache instantly.
+HF_WARM_LIMIT = int(os.environ.get("LA_PICKER_HF_WARM_LIMIT", "40"))
 
 
 def load_catalog():
@@ -424,7 +470,8 @@ class Picker(App):
             last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
                                  **state.last_launched},
             last_launched_tier=dict(state.last_launched_tier),
-            on_last_launched=self._save_last_launched)
+            on_last_launched=self._save_last_launched,
+            catalog_local_capable=catalog_local_capable)
         self.start = start
         self.nav_stack: list = []          # callers of sub-screens (Back returns to them)
         self.screen_model: m.Screen | None = None
