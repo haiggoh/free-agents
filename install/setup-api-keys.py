@@ -71,6 +71,10 @@ PROVIDERS = (
     Provider("streamlake", "Streamlake", "https://console.streamlake.ai/console/wanqing/api-key",
              "Sign in, open API Keys, and create a key. Check account billing.",
              ("streamlake",), "account billing; session available", True),
+    Provider("huggingface", "Hugging Face", "https://huggingface.co/settings/tokens",
+             "Create a fine-grained token with \"Make calls to Inference Providers\". Free accounts get "
+             "no monthly credits (PRO: $2/month); calls fail with 402 once credits run out.",
+             ("huggingface",), "paid credits; choose model", True),
 )
 
 

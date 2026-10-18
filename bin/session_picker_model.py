@@ -170,7 +170,8 @@ PROVIDER_LABELS = {"nvidia": "NVIDIA", "gemini": "Gemini", "groq": "Groq",
                    "openrouter": "OpenRouter", "cloudflare": "Cloudflare", "cerebras": "Cerebras",
                    "mistral": "Mistral", "zai": "Z.ai", "siliconflow": "SiliconFlow",
                    "llm7": "LLM7", "kilo": "Kilo", "vercel": "Vercel", "sambanova": "SambaNova",
-                   "modelscope": "ModelScope", "streamlake": "Streamlake"}
+                   "modelscope": "ModelScope", "streamlake": "Streamlake",
+                   "huggingface": "Hugging Face"}
 
 
 _MODEL_NOTES_PATH = Path(__file__).resolve().parent.parent / "config" / "remote-model-notes.json"

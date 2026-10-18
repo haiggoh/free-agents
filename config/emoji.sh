@@ -65,6 +65,7 @@ EMOJI_PROVIDER_MODELSCOPE="🔬"
 EMOJI_PROVIDER_CEREBRAS="🧠"
 EMOJI_PROVIDER_NVIDIA="🚦"
 EMOJI_PROVIDER_STREAMLAKE="🏞️"
+EMOJI_PROVIDER_HUGGINGFACE="🤗"
 
 # Backend manager actions (picker `v` screen)
 EMOJI_BACKEND="🧩"          # backend selector (Rapid-MLX / vllm-mlx / oMLX / llama.cpp / LiteLLM)

@@ -39,11 +39,12 @@ _provider_spec() {
         sambanova)  echo "SAMBANOVA_API_KEY:sambanova" ;;
         modelscope) echo "MODELSCOPE_API_KEY:modelscope" ;;
         streamlake) echo "STREAMLAKE_API_KEY:streamlake" ;;
+        huggingface) echo "HF_TOKEN:huggingface" ;;
         *)          return 1 ;;
     esac
 }
 
-ALL_PROVIDERS="gemini groq openrouter cloudflare cerebras nvidia mistral zai siliconflow llm7 kilo vercel sambanova modelscope streamlake"
+ALL_PROVIDERS="gemini groq openrouter cloudflare cerebras nvidia mistral zai siliconflow llm7 kilo vercel sambanova modelscope streamlake huggingface"
 
 usage() {
     sed -n '2,/^set -euo pipefail/{ /^set -euo pipefail/d; s/^# \{0,1\}//; p; }' "$0"
