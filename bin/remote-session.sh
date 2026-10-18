@@ -719,18 +719,12 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     _available "$prov" || return 2
     _valid_model "$model" || return 2
     local litellm_model think_line="" api_base=""
-    case "$prov" in
-        gemini)     litellm_model="gemini/$model" ;;
-        groq)       litellm_model="groq/$model" ;;
-        nvidia)     litellm_model="nvidia_nim/$model" ;;
-        openrouter) litellm_model="openrouter/$model" ;;
-        cerebras)   litellm_model="cerebras/$model" ;;
-        cloudflare) litellm_model="openai/$model"; api_base="$(_cloudflare_base)" || return 1 ;;
-        mistral)    litellm_model="mistral/$model" ;;
-        zai|siliconflow|llm7|kilo|vercel|sambanova|modelscope|streamlake)
-                    litellm_model="openai/$model"; api_base="$(_openai_base "$prov")" || return 1 ;;
-        *)          echo "remote-session: no LiteLLM prefix for provider $prov" >&2; return 1 ;;
-    esac
+    # The route comes from the generated registry (config/remote-registry.yaml), so a provider
+    # added there is routable here without a second hand-kept list.
+    local route
+    route="$(_litellm_route "$prov" "$model")" || {
+        echo "remote-session: no LiteLLM prefix for provider $prov" >&2; return 1; }
+    litellm_model="${route%%|*}"; api_base="${route#*|}"
     # Gemini 3.x spends its whole token budget on thinking unless told not to;
     # that truncated real replies during bring-up, so default it OFF.
     [[ "$prov" == "gemini" && "$thinking" != "true" ]] && \
