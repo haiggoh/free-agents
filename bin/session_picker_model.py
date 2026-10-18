@@ -17,6 +17,7 @@ Navigation contract (docs/SESSION_PICKER.md):
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -115,6 +116,27 @@ class RemoteAgent:
     local_capable: bool = False
     has_key: bool = True
     broken: bool = False      # listed in config/broken-nvidia-models.json
+    model_id: str = ""        # provider model id (remote-session.sh --inventory column 8)
+
+
+@dataclass
+class CatalogModel:
+    """One row of a provider's live catalog (remote-session.sh --models)."""
+    model_id: str
+    tools: object = "unknown"     # True / "unknown" (False rows never reach the picker)
+    pricing: object = "unknown"
+
+    @classmethod
+    def from_line(cls, line: str) -> "CatalogModel":
+        ident, _, meta = line.partition("\t")
+        try:
+            data = json.loads(meta) if meta else {}
+        except ValueError:
+            data = {}
+        return cls(ident, data.get("tools", "unknown"), data.get("pricing", "unknown"))
+
+
+CATALOG_PREFIX = "cat:"     # catalog row ids: cat:<provider>:<model id>
 
 
 # Order matters: identity markers first, so "deepseek-r1-distill-qwen" is DeepSeek (the
@@ -284,6 +306,8 @@ class Settings:
     last_launched_tier: dict = field(default_factory=dict)
     # Called with (lane, alias, tier|None) when a launch request is made; persists it.
     on_last_launched: Callable[[str, str, str | None], object] | None = None
+    # (provider, model id) -> True when a live-catalog row is local-capable (hidden by the filter).
+    catalog_local_capable: Callable[[str, str], bool] | None = None
     notes: list = field(default_factory=list)
 
 
@@ -755,6 +779,9 @@ class RemoteScreen(Screen):
         super().__init__(settings, owner)
         self._models_loaded = False
         self._choose_model_visible = False  # Model list hidden by default
+        # provider -> list[CatalogModel] once loaded, or an error string; absent = not fetched.
+        self.catalogs: dict = {}
+        self._catalog_pending: set = set()
         if agents is not None:
             self.agents = agents
             self._regroup()
@@ -778,6 +805,7 @@ class RemoteScreen(Screen):
         groups = []
         for prov in order:
             items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}") for a in buckets[prov]]
+            items += self._catalog_items(prov, buckets[prov])
             groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
         if not groups and not any(a.has_key for a in self.agents):
             # No provider key at all: the list is an instruction, not a roster of unusable models.
@@ -786,10 +814,72 @@ class RemoteScreen(Screen):
         self.accordion.set_groups(groups)
         self._models_loaded = True
 
+    # --- live provider catalogs (pinned aliases first, then everything the provider lists) ---
+    def _catalog_items(self, prov: str, pinned: list) -> list:
+        cat = self.catalogs.get(prov)
+        if prov in self._catalog_pending and cat is None:
+            return [Item(f"{CATALOG_PREFIX}{prov}:__loading__", "  … loading the provider's model list", style="dim")]
+        if isinstance(cat, str):
+            return [Item(f"{CATALOG_PREFIX}{prov}:__error__", f"  model list unavailable: {cat}", style="red")]
+        if not cat:
+            return []
+        have = {a.model_id for a in pinned if a.model_id}
+        tier = pinned[0].tier if pinned else "unknown"
+        rows = []
+        for c in cat:
+            if c.model_id in have:
+                continue                       # already a pinned row, with its own notes
+            probe = RemoteAgent(f"{CATALOG_PREFIX}{prov}:{c.model_id}", prov, c.model_id, tier,
+                                local_capable=self._catalog_local_capable(prov, c.model_id),
+                                model_id=c.model_id)
+            if not self._visible(probe):
+                continue
+            tools = "" if c.tools is True else "  · tools untested"
+            rows.append(Item(probe.alias, f"{c.model_id}  · catalog{tools}"))
+        return rows
+
+    def _catalog_local_capable(self, prov: str, model_id: str) -> bool:
+        """The local-capable verdict for a catalog row (Settings.catalog_local_capable, set by the picker)."""
+        fn = getattr(self.settings, "catalog_local_capable", None)
+        return bool(fn and fn(prov, model_id))
+
+    def catalog_kind_needed(self) -> str | None:
+        """The loader kind for the open provider group's catalog, once; None when nothing to do."""
+        prov = self.accordion.open_group
+        if not prov or prov.startswith("__") or prov in self.catalogs or prov in self._catalog_pending:
+            return None
+        pinned = next((a for a in self.agents if a.provider == prov and self._visible(a)), None)
+        if pinned is None:
+            return None
+        self._catalog_pending.add(prov)
+        self._refresh_keep_open()               # show the loading row at once
+        return f"rcat:{pinned.alias}"
+
+    def set_catalog(self, alias: str, rows, err: str | None):
+        prov = next((a.provider for a in self.agents if a.alias == alias), None)
+        if prov is None:
+            return
+        self._catalog_pending.discard(prov)
+        self.catalogs[prov] = (err.split(": ", 1)[-1] if err else list(rows))
+        self._refresh_keep_open()
+
+    def _refresh_keep_open(self):
+        keep, open_group = self.accordion.selected_id, self.accordion.open_group
+        self._regroup()
+        if keep and not self.accordion.select(keep):
+            self.accordion.selected_id = None
+        if open_group:
+            self.accordion.expand(open_group)
+
     def info_text(self, item_id: str | None) -> str:
         """The info box under the model list: the model's display name and its short-form
         note (config/remote-model-notes.json), or a hint when nothing is pointed at. Only
         models get a box — group headers and the no-keys instruction get the hint."""
+        if item_id and item_id.startswith(CATALOG_PREFIX):
+            parts = item_id.split(":", 2)
+            if len(parts) == 3 and not parts[2].startswith("__"):
+                return (f"{parts[2]}\nListed by {PROVIDER_LABELS.get(parts[1], parts[1])}'s catalog; not "
+                        "pinned. Tool sessions, quota and billing are untested.")
         agent = next((a for a in self.agents if a.alias == item_id), None)
         if agent is None:
             return "Hover or highlight a model to see notes about it."
@@ -866,9 +956,10 @@ class RemoteScreen(Screen):
         last_model = self.settings.last_launched_model.get(lane)
         if not last_model:
             return None
-        loaded = next((a for a in self.agents if a.alias == last_model), None)
+        alias, _, remote_model = last_model.partition("@")
+        loaded = next((a for a in self.agents if a.alias == alias), None)
         tier = loaded.tier if loaded else self.settings.last_launched_tier.get(lane, "unknown")
-        return self._request_for(last_model, tier)
+        return self._request_for(alias, tier, remote_model=remote_model)
 
     def _cycle_temperature(self):
         s = self.settings
@@ -893,18 +984,29 @@ class RemoteScreen(Screen):
         sel = self.accordion.selected_id
         if sel == "__nokeys__:k":
             return Nav("api_keys", self.owner)
+        if sel and sel.startswith(CATALOG_PREFIX):
+            _, prov, model = sel.split(":", 2)
+            if model.startswith("__"):
+                return None                    # the loading / error row
+            pinned = next((a for a in self.agents if a.provider == prov and self._visible(a)), None)
+            if pinned is None:
+                return None
+            # Launch through the provider's first visible alias with the catalog model swapped in.
+            return self._request_for(pinned.alias, pinned.tier, remote_model=model)
         agent = next((a for a in self.agents if a.alias == sel and self._visible(a)), None)
         if agent is None:
             return None
         return self._request_for(agent.alias, agent.tier)
 
-    def _request_for(self, alias: str, tier: str):
+    def _request_for(self, alias: str, tier: str, remote_model: str = ""):
         s = self.settings
+        # A catalog pick is remembered as "<alias>@<model>" so Go launch repeats the same model.
+        remembered = f"{alias}@{remote_model}" if remote_model else alias
         if s.last_launched_model is not None:
-            s.last_launched_model["remote_api_session"] = alias
+            s.last_launched_model["remote_api_session"] = remembered
         s.last_launched_tier["remote_api_session"] = tier
         if s.on_last_launched:
-            s.on_last_launched("remote_api_session", alias, tier)
+            s.on_last_launched("remote_api_session", remembered, tier)
         argv = ["remote"] + ["-a"] * s.auto_mode
         if s.telemetry:
             argv.append("-t")
@@ -919,6 +1021,8 @@ class RemoteScreen(Screen):
             argv += ["--effort", effort]
         if s.remote_temperature:
             argv += ["--temperature", s.remote_temperature]
+        if remote_model:
+            argv += ["--remote-model", remote_model]
         argv.append(alias)
         env = {"LA_QUEUE_STOP_HOOK": "1" if s.stop_hook else "0",
                "LA_DENY_GH_RELEASE": "1" if s.deny_gh_release else "0",

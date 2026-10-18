@@ -123,10 +123,25 @@ def load_remote_agents() -> list[m.RemoteAgent]:
     agents = []
     for line in r.stdout.splitlines():
         p = line.split("\t")
-        if len(p) in (6, 7):     # 7th column (broken) arrived with main's 0.21.9 filter
+        if len(p) in (6, 7, 8):  # 7th column (broken) arrived with 0.21.9, 8th (model id) with 0.37.0
             agents.append(m.RemoteAgent(p[0], p[1], p[2], p[3], local_capable=p[4] == "1",
-                                        has_key=p[5] == "1", broken=len(p) == 7 and p[6] == "1"))
+                                        has_key=p[5] == "1", broken=len(p) >= 7 and p[6] == "1",
+                                        model_id=p[7] if len(p) == 8 else ""))
     return agents
+
+
+def load_remote_catalog(kind):
+    """`rcat:<alias>` -> that provider's live chat/tool catalog as m.CatalogModel rows.
+
+    Runs `remote-session.sh --models <alias>` (one catalog GET, no generation). Raises on
+    failure so the picker shows an error row instead of a silently empty group."""
+    alias = kind.split(":", 1)[1]
+    rs = os.environ.get("CSL_REMOTE_LAUNCHER") or str(BIN / "remote-session.sh")
+    r = _run(["bash", rs, "--include-trials", "--models", alias])
+    if r.returncode != 0:
+        msg = (r.stderr or "").strip().splitlines()
+        raise RuntimeError(msg[-1] if msg else f"catalog exited {r.returncode}")
+    return [m.CatalogModel.from_line(ln) for ln in r.stdout.splitlines() if "\t" in ln]
 
 
 def load_catalog():
@@ -542,6 +557,8 @@ class Picker(App):
         try:
             if kind.startswith("versions:"):
                 data, err = load_versions(kind), None
+            elif kind.startswith("rcat:"):
+                data, err = load_remote_catalog(kind), None
             else:
                 data, err = globals()[self.LOADERS[kind]](), None
         except Exception as exc:              # surfaced as a status warning, never swallowed
@@ -565,6 +582,12 @@ class Picker(App):
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data, *([MISSING_MODELS] if isinstance(sm, m.LocalScreen) else []))
             sm._models_loaded = True
+        if kind.startswith("rcat:"):
+            if isinstance(sm, m.RemoteScreen):
+                sm.set_catalog(kind.split(":", 1)[1], data, err)
+            if err in self.state_warnings:
+                self.state_warnings.remove(err)    # shown as the group's own error row instead
+            self.cache.pop(kind, None)             # the screen keeps it; a failed load can be retried
         if isinstance(sm, m.VersionsScreen) and kind == sm.inventory_kind:
             sm.set_entries(data)
             if not getattr(self, "pending_prompt", None):
@@ -737,6 +760,12 @@ class Picker(App):
 
         # Handle lazy loading when "Choose model" is toggled
         self._handle_lazy_load()
+        # An open remote provider group fetches its live catalog once, in the background. Every
+        # way a group opens (Enter, Right, the automatic first group) passes through here.
+        if isinstance(sm, m.RemoteScreen) and sm._choose_model_visible:
+            kind = sm.catalog_kind_needed()
+            if kind:
+                self._prefetch((kind,))
 
         # Conditionally show model list based on _choose_model_visible
         show_models = True

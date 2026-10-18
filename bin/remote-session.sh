@@ -436,7 +436,7 @@ print_inventory() {
         lc=0; _lc_is_hidden "$prov" "$model" && lc=1
         key=0; "$KEYS" --check "$prov" >/dev/null 2>&1 && key=1
         br=0; _is_broken_hidden "$alias" && br=1
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$alias" "$prov" "$disp" "$tier" "$lc" "$key" "$br"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$alias" "$prov" "$disp" "$tier" "$lc" "$key" "$br" "$model"
     done
 }
 

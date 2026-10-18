@@ -337,6 +337,44 @@ class LastLaunchedPersistence(PilotCase):
         self.run_picker(s, start="remote")
 
 
+class RemoteLiveCatalog(PilotCase):
+    """Opening a provider group fetches its catalog in the background and lists it under the pins."""
+
+    def setUp(self):
+        super().setUp()
+        stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
+        # The inventory stub answers --inventory; --models answers after a delay that would
+        # freeze the UI if the fetch ran on the event loop.
+        stub.write_text(
+            "#!/bin/sh\n"
+            "for a in \"$@\"; do\n"
+            "  [ \"$a\" = --inventory ] && { printf 'nvidia-a\\tnvidia\\tNVIDIA A\\tunknown\\t0\\t1\\t0\\tvendor/pinned\\n'; exit 0; }\n"
+            "  [ \"$a\" = --models ] && { sleep 1.5; printf 'vendor/pinned\\t{\"tools\": true}\\nvendor/extra\\t{\"tools\": true}\\n'; exit 0; }\n"
+            "done\n" + RECORDER.split("\n", 1)[1])
+
+    def test_open_group_lists_catalog_and_launches_with_remote_model(self):
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("NVIDIA A")
+            await h.wait_text("loading the provider")       # visible while the stub sleeps
+            # The stub sleeps 1.5 s: if the fetch ran on the event loop, this short pause could
+            # not return before it finished.
+            t0 = time.time()
+            await pilot.pause(0.1)
+            self.assertLess(time.time() - t0, 0.8)
+            self.assertIn("rcat:nvidia-a", app._loading)
+            await h.wait_text("vendor/extra", secs=10)
+            self.assertNotIn("cat:nvidia:vendor/pinned", [r for r in app.row_ids if r])
+            await h.goto_row("item", "cat:nvidia:vendor/extra")
+            await h.press("enter")
+            await h.wait_for(lambda: self.launches(), "a recorded launch")
+            argv = self.launches()[-1]["argv"]
+            self.assertEqual(argv[-3:], ["--remote-model", "vendor/extra", "nvidia-a"])
+            self.assertEqual(self.saved_state()["last_launched"]["remote_api_session"],
+                             "nvidia-a@vendor/extra")
+        self.run_picker(s, start="remote")
+
+
 class DownloaderQueue(PilotCase):
     def test_space_queues_and_unqueues_like_the_status_line_says(self):
         async def s(app, pilot, h):
