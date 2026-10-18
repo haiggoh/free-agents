@@ -124,6 +124,10 @@ def main(argv=None):
     ap.add_argument("--payload", help="JSON body file (overrides --prompt); the body as-is")
     ap.add_argument("--model", help="model id (default: provider's first known-good)")
     ap.add_argument("--max-tokens", type=int, default=2048)
+    ap.add_argument("--reasoning-effort", choices=("low", "medium", "high"),
+                    help="send reasoning_effort (OpenAI spelling; honoured by GLM on NVIDIA and "
+                         "Gemini). For a thinking model give --max-tokens room for the reasoning "
+                         "too, or the answer comes back empty with finish_reason=length")
     ap.add_argument("--system", default="", help="optional system message")
     ap.add_argument("--files", nargs="*", default=[], help="files to attach")
     ap.add_argument("--allow-remote-files", action="store_true",
@@ -168,6 +172,8 @@ def main(argv=None):
     else:
         body, attached = build_body(a.prompt, a.files, model, a.max_tokens,
                                     a.system, a.allow_remote_files, a.max_file_chars)
+    if a.reasoning_effort:
+        body["reasoning_effort"] = a.reasoning_effort
 
     outdir = a.outdir or tempfile.mkdtemp(prefix="remote-agent-")
     os.makedirs(outdir, exist_ok=True)
@@ -175,12 +181,17 @@ def main(argv=None):
     banner(provider, body, attached, a.dry_run, a.allow_remote_files)
 
     out_path = os.path.join(outdir, "output.txt")
+    # Thinking models (GLM on NVIDIA, Gemini) stream reasoning separately; keep it, so a run
+    # that spends its whole max_tokens on reasoning shows WHERE the tokens went.
+    reasoning_path = os.path.join(outdir, "reasoning.txt")
     out_fd = open(out_path, "w")
+    rfd = open(reasoning_path, "w")
     try:
-        result = remote_http.stream_chat(provider, body, outdir, out_fd, rfd=None,
+        result = remote_http.stream_chat(provider, body, outdir, out_fd, rfd=rfd,
                                          timeout=a.timeout, dry_run=a.dry_run)
     finally:
         out_fd.close()
+        rfd.close()
 
     result.output_path = out_path
     if a.dry_run:
@@ -191,6 +202,17 @@ def main(argv=None):
 
     if a.json_out:
         json.dump(result.to_dict(), open(a.json_out, "w"), indent=2)
+
+    if result.ok and result.output_chars == 0:
+        # A thinking model that used its whole max_tokens on reasoning still ends with [DONE].
+        # That is not a success: say where the tokens went instead of printing a green tick.
+        details = (result.usage or {}).get("completion_tokens_details") or {}
+        print("✖ REMOTE %s finished with NO answer text in %.1fs (completion_tokens=%s, "
+              "reasoning_tokens=%s). Raise --max-tokens or lower --reasoning-effort; "
+              "reasoning so far → %s" % (
+                  provider.id, result.elapsed, (result.usage or {}).get("completion_tokens", "?"),
+                  details.get("reasoning_tokens", "?"), reasoning_path), file=sys.stderr)
+        return 2
 
     if result.ok:
         print("[✓] REMOTE %s returned %d chars in %.1fs (model=%s)" % (

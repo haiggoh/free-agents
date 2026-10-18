@@ -237,15 +237,19 @@ def _consume_stream(resp, out_fd, rfd):
     # Peek the first line to detect a non-SSE body (some providers return a
     # plain JSON error even on 200, or a plain JSON completion when stream is
     # ignored).
-    raw_lines = []
+    # SSE framing may precede the first event: blank lines, ": keep-alive" comments, and
+    # "event:"/"id:"/"retry:" fields. Servers send them while a slow model warms up, so the
+    # first line deciding "SSE or plain JSON" must be the first line carrying content.
     first = None
     try:
         while True:
             raw = resp.readline()
             if not raw:
                 break
+            text = raw.decode("utf-8", "replace").strip()
+            if not text or text.startswith(":") or text.split(":", 1)[0] in ("event", "id", "retry"):
+                continue
             first = raw
-            raw_lines.append(first)
             break
     except Exception:
         pass
