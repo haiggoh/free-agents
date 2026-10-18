@@ -44,6 +44,11 @@ from typing import Any
 yaml: Any = None
 
 
+# = remote_provider_registry.TIER_CHOICES. Roster ENTRIES use the picker vocabulary instead
+# (renewing_free | trial | unknown | paid_only), which is why entries are not checked here.
+PROVIDER_TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown")
+
+
 def _sh_quote(val: str) -> str:
     """Return a single-quoted bash string literal, safely escaping single quotes."""
     return "'" + val.replace("'", "'\\''") + "'"
@@ -145,6 +150,10 @@ def validate(data: dict[str, Any]) -> None:
             )
 
         api_base_mode = prov.get("api_base_mode")
+        # The router (agent-fallback.py) gates on this enum; any other value would never be routed.
+        if prov.get("tier") not in PROVIDER_TIERS:
+            raise ValueError(f"Provider '{p_key}' has tier {prov.get('tier')!r}; "
+                             f"one of {', '.join(PROVIDER_TIERS)}")
         if api_base_mode not in {"none", "static", "cloudflare"}:
             raise ValueError(
                 f"Provider '{p_key}' has invalid api_base_mode '{api_base_mode}'"

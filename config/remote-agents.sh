@@ -123,6 +123,7 @@ LA_REMOTE_AGENTS=(
   "sambanova|sambanova|SELECT|SambaNova (choose model)|unknown|Account trial, credit and paid billing vary. Tool session untested.|-"
   "modelscope|modelscope|SELECT|ModelScope (choose model)|unknown|Explicit API-Inference model required; account quota and tool use untested.|-"
   "streamlake|streamlake|SELECT|Streamlake (choose model)|unknown|Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key. Tool session untested.|-"
+  "huggingface|huggingface|SELECT|Hugging Face (choose model)|paid_only|Select a catalog model; needs Inference credits (free accounts have none, PRO: 2 USD/month). https://huggingface.co/settings/tokens. Tool session untested.|-"
 )
 
 # Which spoofed Claude ids the proxy should answer to. Claude Code asks for these

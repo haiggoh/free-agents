@@ -127,7 +127,7 @@ class Provider:
 # remote-provider-doctor.py and remote-probe-log.py (after the IMPLEMENTED gate).
 IMPLEMENTED = {"gemini", "nvidia", "groq", "openrouter", "cloudflare",
                "mistral", "zai", "siliconflow", "llm7", "kilo", "vercel",
-               "sambanova", "modelscope", "streamlake"}
+               "sambanova", "modelscope", "streamlake", "huggingface"}
 
 # Providers whose requests must pass the machine-wide limiter in bin/rate_limiter.py. NVIDIA's
 # free tier is 40 RPM per KEY, shared by every proxy, dispatcher and parallel agent on this

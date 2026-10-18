@@ -12,8 +12,8 @@
 #   _litellm_route <provider> <model>
 # NOTE: The sourcing script must provide $KEYS and _cloudflare_base.
 
-_PROVIDER_IDS='cerebras cloudflare gemini github groq kilo llm7 mistral modelscope nvidia openrouter sambanova siliconflow streamlake vercel zai'
-_CLEAR_PROVIDER_ENV_VARS='AI_GATEWAY_API_KEY CEREBRAS_API_KEY CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN GEMINI_API_KEY GITHUB_MODELS_TOKEN GROQ_API_KEY KILO_API_KEY LLM7_API_KEY MISTRAL_API_KEY MODELSCOPE_API_KEY NVIDIA_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY SAMBANOVA_API_KEY SILICONFLOW_API_KEY STREAMLAKE_API_KEY ZAI_API_KEY'
+_PROVIDER_IDS='cerebras cloudflare gemini github groq kilo llm7 mistral modelscope nvidia openrouter sambanova siliconflow streamlake huggingface vercel zai'
+_CLEAR_PROVIDER_ENV_VARS='AI_GATEWAY_API_KEY CEREBRAS_API_KEY CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN GEMINI_API_KEY GITHUB_MODELS_TOKEN GROQ_API_KEY HF_TOKEN KILO_API_KEY LLM7_API_KEY MISTRAL_API_KEY MODELSCOPE_API_KEY NVIDIA_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY SAMBANOVA_API_KEY SILICONFLOW_API_KEY STREAMLAKE_API_KEY ZAI_API_KEY'
 
 _available() {
     case "$1" in
@@ -33,6 +33,7 @@ _openai_base() {
         sambanova) echo 'https://api.sambanova.ai/v1' ;;
         siliconflow) echo 'https://api.siliconflow.com/v1' ;;
         streamlake) echo 'https://vanchin.streamlake.ai/api/gateway/v1/endpoints' ;;
+        huggingface) echo 'https://router.huggingface.co/v1' ;;
         vercel) echo 'https://ai-gateway.vercel.sh/v1' ;;
         zai) echo 'https://api.z.ai/api/paas/v4' ;;
         *) return 2 ;;
@@ -64,6 +65,7 @@ _catalog_request() {
         sambanova) base='https://api.sambanova.ai/v1/models' ;;
         siliconflow) base='https://api.siliconflow.com/v1/models?type=text' ;;
         streamlake) base='https://vanchin.streamlake.ai/api/gateway/v1/endpoints/models' ;;
+        huggingface) base='https://router.huggingface.co/v1/models' ;;
         vercel) base='https://ai-gateway.vercel.sh/v1/models' ;;
         zai) base='https://api.z.ai/api/paas/v4/models' ;;
         *) echo "remote-session: no documented catalog route for $prov; choose an API model from its provider docs with --remote-model ID. Catalog verification unavailable." >&2; return 2 ;;
@@ -96,6 +98,7 @@ _litellm_route() { # _litellm_route <provider> <model> -> "litellm_model|api_bas
         sambanova) echo "openai/$model|"'https://api.sambanova.ai/v1' ;;
         siliconflow) echo "openai/$model|"'https://api.siliconflow.com/v1' ;;
         streamlake) echo "openai/$model|"'https://vanchin.streamlake.ai/api/gateway/v1/endpoints' ;;
+        huggingface) echo "openai/$model|"'https://router.huggingface.co/v1' ;;
         vercel) echo "openai/$model|"'https://ai-gateway.vercel.sh/v1' ;;
         zai) echo "openai/$model|"'https://api.z.ai/api/paas/v4' ;;
         *) return 1 ;;
@@ -115,7 +118,7 @@ Source this script in bash to use its routing and catalog functions:
   _catalog_request <provider>
   _litellm_route <provider> <model>
 
-Configured provider IDs: cerebras cloudflare gemini github groq kilo llm7 mistral modelscope nvidia openrouter sambanova siliconflow streamlake vercel zai
+Configured provider IDs: cerebras cloudflare gemini github groq kilo llm7 mistral modelscope nvidia openrouter sambanova siliconflow streamlake huggingface vercel zai
 EOF
             exit 0
             ;;

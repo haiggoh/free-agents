@@ -106,6 +106,18 @@ class StateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sms.save_last_launched(self.cfg, "remote_api_session", "x", "free-forever")
 
+    def test_roster_tiers_are_all_storable(self):
+        # Every tier the remote roster uses must round-trip, or launching that row silently
+        # loses "Go launch". paid_only (Mistral Large 4, Hugging Face) was refused until 0.37.0.
+        import subprocess
+        out = subprocess.run(["bash", "-c", 'source "$1"; printf "%s\\n" "${LA_REMOTE_AGENTS[@]}"', "x",
+                              str(Path(__file__).resolve().parents[1] / "config/remote-agents.sh")],
+                             capture_output=True, text=True, check=True).stdout
+        for tier in sorted({row.split("|")[4] for row in out.splitlines()}):
+            with self.subTest(tier=tier):
+                self.assertIsNone(sms.save_last_launched(self.cfg, "remote_api_session", "a", tier))
+                self.assertEqual(sms.load(self.cfg).last_launched_tier["remote_api_session"], tier)
+
     def test_bad_tier_in_file_is_refused_not_trusted(self):
         (self.file).write_text(json.dumps(
             {"schema_version": 2, "last_launched_tier": {"remote_api_session": "bogus"}}))

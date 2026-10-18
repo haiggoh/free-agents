@@ -290,6 +290,24 @@
       "generic_openai_base": true,
       "notes": "OpenAI-compatible. Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key. Host moved: api.streamlake.ai is NXDOMAIN; vanchin.streamlake.ai/api/gateway/v1/endpoints serves /models (29 ids) and chat (2026-10-18: authenticated, \"balance insufficient\" on this account = needs credit)."
     },
+    "huggingface": {
+      "id": "huggingface",
+      "display": "Hugging Face Inference Providers",
+      "tier": "paid",
+      "base_url": "https://router.huggingface.co/v1",
+      "chat_path": "/chat/completions",
+      "models_path": "/models",
+      "catalog_url": "",
+      "key_env": "HF_TOKEN",
+      "extra_env": [],
+      "static_headers": {},
+      "default_models": [],
+      "supports_responses": false,
+      "litellm_prefix": "openai",
+      "api_base_mode": "static",
+      "generic_openai_base": true,
+      "notes": "OpenAI-compatible router over many serving providers; /models lists 135 ids with per-provider supports_tools + pricing (2026-10-18). Free accounts get NO monthly Inference credits (PRO $2/month): our free key answered 402 \"no remaining credits\" on a 5-token call (2026-10-18). Fine-grained token with \"Make calls to Inference Providers\"."
+    },
     "vercel": {
       "id": "vercel",
       "display": "Vercel Gateway",
@@ -767,6 +785,15 @@
       "display": "Streamlake (choose model)",
       "tier": "unknown",
       "notes": "Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key. Tool session untested.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "huggingface",
+      "provider": "huggingface",
+      "model_id": "SELECT",
+      "display": "Hugging Face (choose model)",
+      "tier": "paid_only",
+      "notes": "Select a catalog model; needs Inference credits (free accounts have none, PRO: 2 USD/month). https://huggingface.co/settings/tokens. Tool session untested.",
       "autocompact_default": "-"
     }
   ]

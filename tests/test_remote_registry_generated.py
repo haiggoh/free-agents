@@ -373,7 +373,7 @@ printf "GITHUB_TOKEN=${{GITHUB_TOKEN:-unset}}\\n"
                 "p1": {
                     "id": "p1",
                     "display": "P1",
-                    "tier": "free",
+                    "tier": "renewing_free",
                     "base_url": "https://p1.example.com/v1",
                     "chat_path": "/chat/completions",
                     "models_path": "/models",
@@ -391,7 +391,7 @@ printf "GITHUB_TOKEN=${{GITHUB_TOKEN:-unset}}\\n"
                 "p2": {
                     "id": "p2",
                     "display": "P2",
-                    "tier": "free",
+                    "tier": "renewing_free",
                     "base_url": "https://p2.example.com/v1",
                     "chat_path": "/chat/completions",
                     "models_path": "",
@@ -433,6 +433,12 @@ printf "GITHUB_TOKEN=${{GITHUB_TOKEN:-unset}}\\n"
         with self.assertRaises(ValueError):
             rrg.validate(bad_mode)
 
+        # Provider tier outside the router enum (paid_only is an ENTRY tier, not a provider tier)
+        bad_tier = json.loads(json.dumps(valid_dict))
+        bad_tier["providers"]["p1"]["tier"] = "paid_only"
+        with self.assertRaises(ValueError):
+            rrg.validate(bad_tier)
+
         # Entry with unknown provider
         bad_prov = json.loads(json.dumps(valid_dict))
         bad_prov["entries"][0]["provider"] = "nonexistent"
@@ -467,7 +473,7 @@ printf "GITHUB_TOKEN=${{GITHUB_TOKEN:-unset}}\\n"
                 "qprov": {
                     "id": "qprov",
                     "display": "Quote Prov",
-                    "tier": "free",
+                    "tier": "renewing_free",
                     "base_url": "https://ex.com/it's/$HOME\"`x`/v1",
                     "chat_path": "/chat",
                     "models_path": "/models",

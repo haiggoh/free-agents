@@ -46,7 +46,8 @@ READABLE_SCHEMAS = (1, 2, 3, 4)
 SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature", "intercept_agents")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
-TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown")  # = remote_provider_core.TIER_CHOICES
+TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown",
+         "paid_only")  # = remote_provider_core.TIER_CHOICES + the roster's paid_only
 PREFS_NAME = "session-menu.local.json"
 LOCK_NAME = "session-menu.local.lock"
 MAX_BYTES = 16 * 1024
