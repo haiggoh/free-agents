@@ -324,8 +324,21 @@ if [ -x "$HOTSWAP_DIR/la-ram-preflight.sh" ]; then
     fi
 fi
 
+# --- Memory guard: per-model KV cache precision (Phase 4 plumbing) ------------------------------
+# The menu store is the one source (session_menu_state.py kv-get); a read failure fails open to
+# `auto`, which adds no flag, so a launch behaves exactly as it did before the memory guard.
+MG_KV="$(python3 "$HOTSWAP_DIR/session_menu_state.py" kv-get "$MODEL_NAME" 2>/dev/null || echo auto)"
+
 # --- Rapid-MLX branch ---------------------------------------------------------
 if [ "$SERVE" = "rapid" ]; then
+    # Memory guard: refuse BEFORE anything else when the saved KV precision is invalid for this
+    # architecture (rapid-mlx rejects explicit int8/int4 for sliding-window and MLA models, so a
+    # server started with it would die at startup anyway).
+    if ! MG_KV_FLAGS="$(python3 "$HOTSWAP_DIR/la-memguard-window.py" kv-flags --backend rapid --model-id "${LA_REPO[$MODEL_NAME]:-$MODEL_DIR}" --kv "$MG_KV")"; then
+        echo "🛑 Not launching $MODEL_NAME — the memory guard refused its saved KV precision." >&2
+        echo "   Back to the backend default with:  session_menu_state.py kv-set $MODEL_NAME auto" >&2
+        exit 1
+    fi
     if [ ! -x "$LA_RAPID_BIN" ]; then
         echo "❌ Rapid-MLX executable not found or not executable: ${LA_RAPID_BIN:-<none discovered>}" >&2
         echo "   Rapid is the DEFAULT backend, so this stops every generic registration. Fix by either:" >&2
@@ -375,6 +388,8 @@ if [ "$SERVE" = "rapid" ]; then
         --no-mllm
         --pflash "$LA_RAPID_PFLASH"
     )
+    # shellcheck disable=SC2206  # our module's fixed flag spellings; no spaces inside a value
+    [ -n "$MG_KV_FLAGS" ] && RAPID_CMD+=($MG_KV_FLAGS)
 
     if [ -n "$RAPID_SPEC_CONFIG" ]; then
         RAPID_CMD+=(--speculative-config "$RAPID_SPEC_CONFIG")
@@ -423,6 +438,7 @@ if [ "$SERVE" = "rapid" ]; then
         echo "alias=$MODEL_NAME"
         echo "model_dir=$MODEL_DIR"
         echo "served_id=$SPOOF_PRIMARY"
+        echo "kv_dtype=$MG_KV"
         echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
         [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
         echo "pid=$RAPID_PID"
@@ -480,6 +496,7 @@ if [ "$SERVE" = "omlx" ]; then
         --paged-ssd-cache-max-size "$LA_OMLX_SESSION_CACHE_MAX_SIZE"
         --hot-cache-max-size "${LA_OMLX_SESSION_HOT_CACHE_GB}GB"
     )
+    [ "$MG_KV" != "auto" ] && echo "⚠️  KV precision $MG_KV is saved for $MODEL_NAME, but oMLX's turboquant lives in the live ~/.omlx/settings.json (user-gated) — not applied by this launch." >&2
     OMLX_META="$CONFIG_DIR/server_${TARGET_PORT}.meta"
     echo "🚀 Launching $MODEL_NAME via oMLX on free port $TARGET_PORT  (served as $SPOOF_PRIMARY)..."
     nohup "${OMLX_CMD[@]}" > "$LOG_FILE" 2>&1 &
@@ -489,6 +506,7 @@ if [ "$SERVE" = "omlx" ]; then
         echo "alias=$MODEL_NAME"
         echo "model_dir=$MODEL_DIR"
         echo "served_id=$SPOOF_PRIMARY"
+        echo "kv_dtype=$MG_KV"
         echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
         [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
         echo "pid=$OMLX_PID"
@@ -672,6 +690,11 @@ if [ "$CUDA_TIER" = "B" ]; then
             fi
         fi
 
+        if ! MG_KV_FLAGS="$(python3 "$HOTSWAP_DIR/la-memguard-window.py" kv-flags --backend llama --model-id "${LA_REPO[$MODEL_NAME]:-$MODEL_DIR}" --kv "$MG_KV")"; then
+            echo "🛑 Not launching $MODEL_NAME — the memory guard refused its saved KV precision ($MG_KV)." >&2
+            echo "   Back to the backend default with:  session_menu_state.py kv-set $MODEL_NAME auto" >&2
+            exit 1
+        fi
         LLAMA_CMD=(
             "$LLAMA_SERVER"
             -m "$MODEL_DIR"
@@ -681,6 +704,8 @@ if [ "$CUDA_TIER" = "B" ]; then
             -ngl "$NGL"
             --mlock
         )
+        # shellcheck disable=SC2206  # our module's fixed flag spellings; no spaces inside a value
+        [ -n "$MG_KV_FLAGS" ] && LLAMA_CMD+=($MG_KV_FLAGS)
 
         echo "🚀 Launching $MODEL_NAME via llama-server (Tier B, -ngl $NGL) on port $TARGET_PORT..."
         nohup "${LLAMA_CMD[@]}" > "$LOG_FILE" 2>&1 &
@@ -706,6 +731,11 @@ if [ "$CUDA_TIER" = "C" ] || [ "$LA_HARDWARE" = "cpu-only" ]; then
         exit 1
     fi
 
+    if ! MG_KV_FLAGS="$(python3 "$HOTSWAP_DIR/la-memguard-window.py" kv-flags --backend llama --model-id "${LA_REPO[$MODEL_NAME]:-$MODEL_DIR}" --kv "$MG_KV")"; then
+        echo "🛑 Not launching $MODEL_NAME — the memory guard refused its saved KV precision ($MG_KV)." >&2
+        echo "   Back to the backend default with:  session_menu_state.py kv-set $MODEL_NAME auto" >&2
+        exit 1
+    fi
     LLAMA_CMD=(
         "$LLAMA_SERVER"
         -m "$MODEL_DIR"
@@ -713,6 +743,8 @@ if [ "$CUDA_TIER" = "C" ] || [ "$LA_HARDWARE" = "cpu-only" ]; then
         --port "$TARGET_PORT"
         -c 32768
     )
+    # shellcheck disable=SC2206  # our module's fixed flag spellings; no spaces inside a value
+    [ -n "$MG_KV_FLAGS" ] && LLAMA_CMD+=($MG_KV_FLAGS)
 
     echo "💻 Launching $MODEL_NAME via llama-server (CPU mode) on port $TARGET_PORT..."
     nohup "${LLAMA_CMD[@]}" > "$LOG_FILE" 2>&1 &
@@ -746,6 +778,7 @@ EXTRA_ARGS=(--enable-auto-tool-choice --tool-call-parser "$TOOLP" --timeout "$LA
 [ -n "$REASONP" ] && EXTRA_ARGS+=(--reasoning-parser "$REASONP" --default-temperature 0.6 --default-top-p 0.95)
 export VLLM_MLX_ENABLE_THINKING="${VLLM_MLX_ENABLE_THINKING:-$THINK}"
 
+[ "$MG_KV" != "auto" ] && echo "⚠️  KV precision $MG_KV is saved for $MODEL_NAME, but vllm-mlx has no KV-dtype serve flag (its config carries a fixed quantization level) — not applied." >&2
 echo "🚀 Launching $MODEL_NAME on free port $TARGET_PORT  (🧠 thinking: $VLLM_MLX_ENABLE_THINKING)..."
 nohup "$LA_VENV/vllm-mlx" serve --models-config "$TMP_CONFIG" --port "$TARGET_PORT" "${EXTRA_ARGS[@]}" > "$LOG_FILE" 2>&1 &
 wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$SPOOF_PRIMARY"

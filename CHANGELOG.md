@@ -21,6 +21,29 @@
 - `remote-agent-dispatch.py --reasoning-effort low|medium|high`, and reasoning is saved to
   `reasoning.txt` beside the answer.
 
+### Added — the memory guard: auto-compact instead of a dead session
+
+- **`la-memguard` watchdog + compact injector.** One machine-wide watchdog polls the statusline's
+  wired-vs-Metal-cap figure (the one RAM reader, so guard and statusline can never disagree); over
+  the soft threshold it types `/compact <reason>` into the IDLE local session with the largest
+  footprint — inside tmux, so an unsent draft is stashed and restored by Claude Code itself. A
+  `StopFailure` hook notices a memory-aborted turn and auto-`continue`s after the compact.
+  Sessions register per machine; the watchdog exits when none is left.
+- **Per-model KV cache precision** (`session_menu_state.py kv-set <alias> auto|int8|int4`):
+  rapid-mlx launches pass `--kv-cache-dtype`, llama.cpp passes `-ctk/-ctv q8_0|q4_0`, and
+  architectures rapid rejects for explicit quantization (Gemma 3/4, GPT-OSS; DeepSeek V3+,
+  Kimi K2.5) are **refused before launch** with the fix command — instead of a server dying at
+  startup. oMLX's turboquant stays live-config (user-gated) and vllm-mlx has no flag; both say so
+  instead of silently ignoring the setting, and the running server's meta records `kv_dtype`.
+- **RAM-calibrated auto-compact window** — off by default, `LA_MEMGUARD_WINDOW=1`. The launcher
+  derives the token count at which weights + overhead + KV reach the soft RAM share from seeded
+  per-(backend, KV dtype) GB-per-1k figures, clamps it to Claude Code's 100k–1m autocompact range
+  and the model's context, and **exports nothing for models whose context is below the floor** —
+  the watchdog, not the window, is their guard. An explicit `LA_AUTO_COMPACT_WINDOW` always wins.
+- **csl "Memory guard" screen**: auto-compact on/off, tmux wrapping, soft/hard thresholds, quiet
+  window, auto-continue after an aborted turn — persisted in the session-menu store (schema 5),
+  obeyed by the launchers and the watchdog, with explicit env always winning over the menu.
+
 ### Changed — one source for providers and the roster
 
 - `config/remote-registry.yaml` is the only hand-edited provider/roster file.

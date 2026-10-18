@@ -296,6 +296,64 @@ class StateTests(unittest.TestCase):
         self.assertEqual(lines["LA_MEMGUARD_TMUX"], "0")
         self.assertEqual(set(lines), set(sms.memguard_env(sms.State())))
 
+    # --- memory guard: per-model KV precision (Phase 4 plumbing) ------------------
+    def test_kv_dtype_defaults_empty_and_never_reaches_env(self):
+        # Fails if an unset model is anything but auto, or kv leaks into the global env block.
+        st = sms.load(self.cfg)
+        self.assertEqual(st.memguard["kv_dtype"], {})
+        self.assertNotIn("kv_dtype", sms.memguard_env(st))
+        self.assertFalse(self.file.exists())
+
+    def test_kv_dtype_states_do_not_share_the_default_dict(self):
+        # Fails if the {} default is shallow-copied so one state's edit mutates the next load.
+        st = sms.load(self.cfg)
+        st.memguard["kv_dtype"]["qwen-3.8-operator"] = "int8"
+        self.assertEqual(sms.load(self.cfg).memguard["kv_dtype"], {})
+
+    def test_kv_dtype_round_trip_replaces_whole_dict(self):
+        # Fails if saving a kv dict merges with the previous one, or drops the rest of the section.
+        self.assertIsNone(sms.save_memguard(self.cfg, {"kv_dtype": {"qwen-3.8-operator": "int8",
+                                                                   "kat-coder-optiq": "int4"}}))
+        st = sms.load(self.cfg)
+        self.assertEqual(st.memguard["kv_dtype"], {"qwen-3.8-operator": "int8", "kat-coder-optiq": "int4"})
+        self.assertEqual(st.memguard["soft_pct"], 85)          # rest of section untouched
+        self.assertIsNone(sms.save_memguard(self.cfg, {"kv_dtype": {"glm-x": "int8"}}))
+        self.assertEqual(sms.load(self.cfg).memguard["kv_dtype"], {"glm-x": "int8"})  # replaced, not merged
+        self.assertIsNone(sms.save_memguard(self.cfg, {"kv_dtype": None}))            # None = back to default
+        self.assertEqual(sms.load(self.cfg).memguard["kv_dtype"], {})
+
+    def test_kv_dtype_invalid_refused(self):
+        # Fails if a bad dtype, a non-dict, or a bogus alias is accepted into the store.
+        for bad in ({"kv_dtype": {"m": "int16"}}, {"kv_dtype": {"m": 8}},
+                    {"kv_dtype": "int8"}, {"kv_dtype": []},
+                    {"kv_dtype": {"bad alias!": "int8"}}, {"kv_dtype": {"": "int8"}}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                sms.save_memguard(self.cfg, bad)
+        self.assertFalse(self.file.exists())                   # refused writes leave nothing behind
+
+    def test_kv_get_set_cli(self):
+        import subprocess
+
+        def run(*args):
+            return subprocess.run([sys.executable, str(ROOT / "bin/session_menu_state.py"), *args],
+                                  env=dict(os.environ, FREE_AGENTS_CONFIG_DIR=str(self.cfg)),
+                                  capture_output=True, text=True)
+
+        r = run("kv-get", "qwen-3.8-operator")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "auto"))    # unset model = auto
+        self.assertEqual(run("kv-set", "qwen-3.8-operator", "int8").returncode, 0)
+        r = run("kv-set", "kat-coder-optiq", "int4")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # one model's set does not erase another model's entry (CLI merges per model)
+        self.assertEqual(run("kv-get", "qwen-3.8-operator").stdout.strip(), "int8")
+        self.assertEqual(run("kv-get", "kat-coder-optiq").stdout.strip(), "int4")
+        self.assertEqual(run("kv-set", "qwen-3.8-operator", "auto").returncode, 0)
+        self.assertEqual(run("kv-get", "qwen-3.8-operator").stdout.strip(), "auto")   # auto clears the entry
+        self.assertEqual(run("kv-get", "kat-coder-optiq").stdout.strip(), "int4")     # others untouched
+        self.assertNotEqual(run("kv-set", "qwen-3.8-operator", "int16").returncode, 0)  # bad dtype refused
+        self.assertEqual(run("kv-get", "qwen-3.8-operator").stdout.strip(), "auto")   # unchanged by refusal
+        self.assertNotEqual(run("kv-set", "bad alias!", "int8").returncode, 0)        # bogus alias refused
+
     # --- last launched (schema 2) ------------------------------------------------
     def test_v1_file_migrates_only_on_confirmed_write_keeping_everything(self):
         v1 = {"schema_version": 1, "effort": {"local_session": "low", "lowkey": "minimal"},

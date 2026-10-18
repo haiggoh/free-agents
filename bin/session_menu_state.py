@@ -91,10 +91,14 @@ _RL_WHOLE = ("rpm", "bucket_capacity", "max_retries")
 #   quiet_s             seconds of keyboard + screen quiet before typing into a session
 #   auto_continue       after a memory-abort compact, type `continue` by itself
 #   registry_auto_sync  register new on-disk models / move missing ones without asking (off = 0.36.2)
+#   kv_dtype            per-model KV cache precision (Phase 4): {alias: auto|int8|int4}; empty =
+#                       every model on the backend default. Per-model, so never in memguard-env:
+#                       read it with `kv-get`.
 DEFAULT_MEMGUARD = {"enabled": True, "tmux": True, "soft_pct": 85, "hard_pct": 93, "quiet_s": 3,
-                    "auto_continue": True, "registry_auto_sync": False}
+                    "auto_continue": True, "registry_auto_sync": False, "kv_dtype": {}}
 _MG_BOOL = ("enabled", "tmux", "auto_continue", "registry_auto_sync")
 _MG_NUMERIC = {"soft_pct": (50, 98), "hard_pct": (51, 99), "quiet_s": (0, 60)}
+KV_CHOICES = ("auto", "int8", "int4")
 
 # Intercept Agents toggle (Deny & Replace): 1 = ON (FreeAgent), 0 = OFF (Native Agent)
 INTERCEPT_AGENTS_CHOICES = ("0", "1")
@@ -123,7 +127,10 @@ class State:
     last_launched_tier: dict = field(default_factory=dict)
     temperature: dict = field(default_factory=lambda: dict(DEFAULT_TEMPERATURE))
     intercept_agents: str = DEFAULT_INTERCEPT_AGENTS
-    memguard: dict = field(default_factory=lambda: dict(DEFAULT_MEMGUARD))
+    # kv_dtype holds a mutable dict, so copy that one too — or every State would share (and be
+    # able to mutate) the module-level default.
+    memguard: dict = field(default_factory=lambda: {**DEFAULT_MEMGUARD,
+                                                    "kv_dtype": dict(DEFAULT_MEMGUARD["kv_dtype"])})
     warnings: list = field(default_factory=list)
 
 
@@ -175,6 +182,14 @@ def _validate_memguard(values: dict, allow_none: bool = False, pair: bool = True
             lo, hi = _MG_NUMERIC[key]
             if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
                 raise ValueError(f"memguard {key} must be a whole number in {lo}..{hi}")
+        elif key == "kv_dtype":
+            if not isinstance(value, dict):
+                raise ValueError("memguard kv_dtype must be an object of model -> auto|int8|int4")
+            for alias, kv in value.items():
+                if not isinstance(alias, str) or not _ALIAS_RE.fullmatch(alias):
+                    raise ValueError(f"memguard kv_dtype model is not a valid alias: {alias!r}")
+                if kv not in KV_CHOICES:
+                    raise ValueError(f"memguard kv_dtype for {alias} must be one of {', '.join(KV_CHOICES)}")
         else:
             raise ValueError(f"unknown memguard setting {key!r}")
     full = {**DEFAULT_MEMGUARD, **{k: v for k, v in values.items() if v is not None}}
@@ -555,6 +570,11 @@ def main(argv: list[str]) -> int:
                                         "NAME=value lines (the launchers source them)")
     ia = sub.add_parser("set-intercept", help="persist intercept agents toggle")
     ia.add_argument("value", choices=list(INTERCEPT_AGENTS_CHOICES))
+    kg = sub.add_parser("kv-get", help="print the saved KV cache precision for a model (default auto)")
+    kg.add_argument("alias")
+    ks = sub.add_parser("kv-set", help="persist one model's KV cache precision (auto clears it)")
+    ks.add_argument("alias")
+    ks.add_argument("value", choices=list(KV_CHOICES))
     args = parser.parse_args(argv)
 
     if args.cmd == "set":
@@ -587,6 +607,21 @@ def main(argv: list[str]) -> int:
             print(f"session_menu_state: warning: {warning}", file=sys.stderr)
             return 1
         return 0
+    if args.cmd == "kv-set":
+        try:
+            current = dict(load(REPO_CONFIG_DIR).memguard["kv_dtype"])
+            if args.value == "auto":
+                current.pop(args.alias, None)
+            else:
+                current[args.alias] = args.value
+            warning = save_memguard(REPO_CONFIG_DIR, {"kv_dtype": current})
+        except ValueError as exc:
+            print(f"session_menu_state: {exc}", file=sys.stderr)
+            return 2
+        if warning:
+            print(f"session_menu_state: warning: {warning}", file=sys.stderr)
+            return 1
+        return 0
     state = load(REPO_CONFIG_DIR)
     for warning in state.warnings:
         print(f"session_menu_state: warning: {warning}", file=sys.stderr)
@@ -597,6 +632,8 @@ def main(argv: list[str]) -> int:
         print(state.effort[args.lane])
     elif args.cmd == "get-temp":
         print(state.temperature[args.lane])
+    elif args.cmd == "kv-get":
+        print(state.memguard["kv_dtype"].get(args.alias, "auto"))
     else:
         print(json.dumps({"effort": state.effort, "rate_limiter": state.rate_limiter,
                           "last_launched": state.last_launched,

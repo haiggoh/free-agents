@@ -399,6 +399,26 @@ print(",".join(sorted(allowed & denied)))
     CLAUDE_EXTRA_ARGS+=(--tools "$LA_CLAUDE_TOOLS")
 fi
 
+# --- Memory guard: RAM-calibrated auto-compact window (Phase 4 plumbing) ------------------------
+# OFF by default (LA_MEMGUARD_WINDOW=0): the figures are seeded, and Phase 6 measures the real
+# ones. Fills LA_AUTO_COMPACT_WINDOW only when the switch is on AND the caller has not set it
+# explicitly (explicit env always wins, like every LA_MEMGUARD_* knob) AND a model manifest gave
+# the effective context that caps the math. The existing validation below still gates the value.
+: "${LA_MEMGUARD_WINDOW:=0}"
+MG_KV_CUR="$(python3 "$LAUNCH_DIR/session_menu_state.py" kv-get "$MODEL_ALIAS" 2>/dev/null || echo auto)"
+if [ "${LA_MEMGUARD_WINDOW}" = "1" ] && [ -z "${LA_AUTO_COMPACT_WINDOW:-}" ] && [ -n "${effective:-}" ] \
+   && [ -n "${LA_SIZE[$MODEL_ALIAS]:-}" ]; then
+    MG_SOFT="$(python3 "$LAUNCH_DIR/session_menu_state.py" memguard-env 2>/dev/null | sed -n 's/^LA_MEMGUARD_SOFT_PCT=//p')"
+    MG_WINDOW="$(python3 "$LAUNCH_DIR/la-memguard-window.py" window \
+        --weights-gb "${LA_SIZE[$MODEL_ALIAS]}" --backend "${LA_CUR_SERVE:-rapid}" --kv "$MG_KV_CUR" \
+        --model-id "${LA_REPO[$MODEL_ALIAS]:-}" \
+        --soft-pct "${MG_SOFT:-85}" --context-tokens "$effective" 2>/dev/null || true)"
+    if [ -n "$MG_WINDOW" ]; then
+        export LA_AUTO_COMPACT_WINDOW="$MG_WINDOW"
+        echo "🧠 Memory guard: RAM-calibrated auto-compact window = $MG_WINDOW tokens (seeded figures; LA_MEMGUARD_WINDOW=1)."
+    fi
+fi
+
 if [ -n "$LA_AUTO_COMPACT_WINDOW" ]; then
     if ! command -v python3 >/dev/null 2>&1; then
         echo "❌ python3 is required to validate LA_AUTO_COMPACT_WINDOW."
@@ -492,6 +512,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     [ -n "${LA_CLAUDE_SETTINGS:-}" ] && echo "  Settings      : $LA_CLAUDE_SETTINGS"
     [ -n "${LA_CLAUDE_TOOLS:-}" ] && echo "  Tools         : $LA_CLAUDE_TOOLS"
     [ -n "${LA_AUTO_COMPACT_WINDOW:-}" ] && echo "  Autocompact   : $LA_AUTO_COMPACT_WINDOW"
+    echo "  Memory guard  : window $([ "${LA_MEMGUARD_WINDOW:-0}" = "1" ] && echo ON || echo off), KV precision $MG_KV_CUR"
     [ -n "${LA_MCP_CONFIG:-}" ] && echo "  MCP config    : $LA_MCP_CONFIG"
     [ -n "${LA_TEMPERATURE:-}" ] && echo "  Temperature   : $LA_TEMPERATURE"
     exit 0
