@@ -158,11 +158,15 @@ check(core.LOCAL == "local" and core.PAID == "paid"
 check(core.get("gemini") is not None and core.get("gemini").tier == core.RENEWING_FREE,
       "gemini is declared as renewing_free")
 check(set(core.PROVIDERS) == {"gemini", "groq", "openrouter", "cloudflare",
-                              "github", "cerebras", "nvidia"},
-      "all seven providers are declared")
+                              "github", "cerebras", "nvidia", "mistral",
+                              "zai", "siliconflow", "llm7", "kilo", "vercel",
+                              "sambanova", "modelscope", "streamlake"},
+      "all sixteen providers are declared from remote-registry.yaml")
 check(core.get("cerebras").tier == core.TRIAL, "cerebras is classified TRIAL (not free)")
-check(core.IMPLEMENTED == {"gemini", "nvidia"},
-      "gemini + nvidia are implemented; the rest are declared, not runnable")
+check(core.IMPLEMENTED == {"gemini", "nvidia", "groq", "openrouter", "cloudflare",
+                           "mistral", "zai", "siliconflow", "llm7", "kilo",
+                           "vercel", "sambanova", "modelscope", "streamlake"},
+      "fourteen providers are implemented; github is declared but excluded")
 check(core.RATE_LIMITED <= core.IMPLEMENTED and "nvidia" in core.RATE_LIMITED,
       "nvidia dispatches go through the machine-wide limiter")
 check(not core.get("groq") and core.get("groq").tier == core.RENEWING_FREE or True,
@@ -482,5 +486,30 @@ check("prompt" not in detail.lower(),
 print()
 print("%d passed, %d failed" % (passed, failed))
 # Don't exit at import time - let pytest handle it
+
+# ===========================================================================
+print("== remote-provider-registry: YAML round-trip ==")
+reg = load("reg", "remote_provider_registry.py")
+# The registry loaded from config/remote-registry.yaml should have the same
+# provider count and tier distribution as when we verify against it directly.
+check(len(reg.PROVIDERS) == 16,
+      "registry parsed 16 providers from remote-registry.yaml")
+check(len(reg.ENTRIES) == 49,
+      "registry parsed 49 model entries from remote-registry.yaml")
+check(reg.get("gemini").tier == reg.RENEWING_FREE,
+      "registry tier: gemini = renewing_free")
+check(reg.get("cerebras").tier == reg.TRIAL,
+      "registry tier: cerebras = trial (not free)")
+check("github" in reg.PROVIDERS,
+      "registry includes github (declared, not implemented)")
+check("github" not in reg.IMPLEMENTED,
+      "registry: github is declared but excluded from IMPLEMENTED")
+check(reg.CATALOG_SCANABLE == {
+    "gemini", "groq", "nvidia", "openrouter", "cloudflare",
+    "mistral", "siliconflow", "llm7", "kilo", "vercel",
+    "sambanova", "modelscope", "streamlake",
+    "cerebras", "github"},
+      "catalog-scannable: 15 providers have a callable /models endpoint")
+
 if __name__ == "__main__":
     sys.exit(1 if failed else 0)

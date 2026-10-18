@@ -27,10 +27,11 @@ NEW_ROUTES = {
     'sambanova': ('SAMBANOVA_API_KEY', 'https://api.sambanova.ai/v1'),
     'modelscope': ('MODELSCOPE_API_KEY', 'https://api-inference.modelscope.cn/v1'),
     'streamlake': ('STREAMLAKE_API_KEY', 'https://api.streamlake.ai/v1'),
+    'cerebras': ('CEREBRAS_API_KEY', 'https://api.cerebras.ai/v1'),
 }
 # Providers with a NATIVE LiteLLM prefix (no api_base line); every other NEW_ROUTES entry is a generic
 # openai/ route with an explicit api_base. Mistral moved to native mistral/ in 0.28.x.
-NATIVE_PREFIX = {'mistral': 'mistral/'}
+NATIVE_PREFIX = {'mistral': 'mistral/', 'cerebras': 'cerebras/'}
 
 
 class RemoteSessionTests(unittest.TestCase):
@@ -40,7 +41,8 @@ class RemoteSessionTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         for directory in ('bin', 'config', 'keys', 'stubs', 'home'):
             (self.root / directory).mkdir()
-        for rel in ('bin/csl', 'bin/remote-session.sh', 'bin/remote-keys.sh',
+        for rel in ('bin/csl', 'bin/remote-session.sh', 'bin/remote-provider-registry.sh',
+                    'bin/remote-keys.sh',
                     'bin/blind-trust-settings.py',
                     'config/remote-agents.sh', 'config/remote-agent-system-prompt.txt',
                     'config/shared-agent-shipping-rules.txt',
@@ -243,7 +245,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
 
     def test_proxy_config_all_models_and_thinking(self):
         prefixes = dict(gemini='gemini/', groq='groq/', nvidia='nvidia_nim/',
-                        openrouter='openrouter/', cerebras='cerebras/', cloudflare='openai/',
+                        openrouter='openrouter/', cloudflare='openai/',
                         **{p: NATIVE_PREFIX.get(p, 'openai/') for p in NEW_ROUTES})
         for alias, provider, model, *_ in self.roster():
             if model == 'SELECT':
@@ -480,14 +482,26 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         self.assertNotIn('reasoning_effort', cfg.read_text())
 
     def test_dynamic_models_validation_and_retired_github(self):
+        # Build a provider->alias map from the fixture roster
+        roster_result = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\n" "${LA_REMOTE_AGENTS[@]}"',
+                                        'roster', str(self.root / 'config/remote-agents.sh')],
+                                       env=self.env, text=True, capture_output=True, check=True)
+        provider_to_alias = {}
+        for row in roster_result.stdout.splitlines():
+            parts = row.split('|')
+            if len(parts) >= 2:
+                alias, provider = parts[0], parts[1]
+                if provider not in provider_to_alias:
+                    provider_to_alias[provider] = alias
         for provider in NEW_ROUTES:
+            alias = provider_to_alias.get(provider, provider)
             with self.subTest(provider=provider):
-                self.assertEqual(self.run_cli('--dry-run', provider).returncode, 2)
-                good = self.run_cli('--dry-run', provider, '--remote-model', 'vendor/model:free')
+                self.assertEqual(self.run_cli('--dry-run', alias).returncode, 2)
+                good = self.run_cli('--dry-run', alias, '--remote-model', 'vendor/model:free')
                 self.assertEqual(good.returncode, 0, good.stderr)
                 self.assertIn('do not assume free', good.stdout)
                 for invalid in ('', 'model\napi_key: evil', 'model with spaces', '-option'):
-                    self.assertEqual(self.run_cli('--dry-run', provider, '--remote-model', invalid).returncode, 2)
+                    self.assertEqual(self.run_cli('--dry-run', alias, '--remote-model', invalid).returncode, 2)
                 (self.root / 'keys' / provider).unlink()
                 self.assertEqual(self.run_cli('--dry-run', provider, '--remote-model', 'vendor/model').returncode, 1)
         for args in (('--dry-run', 'github-models'), ('--verify', 'github-models'), ('--models', 'github-models')):
@@ -509,10 +523,22 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         self.assertIn('tier       : unknown', verified.stdout)
 
     def test_dynamic_catalog_models_and_manual_only_routes(self):
+        # Build a provider->alias map from the fixture roster
+        roster_result = subprocess.run(['bash', '-c', 'source "$1"; printf "%s\n" "${LA_REMOTE_AGENTS[@]}"',
+                                        'roster', str(self.root / 'config/remote-agents.sh')],
+                                       env=self.env, text=True, capture_output=True, check=True)
+        provider_to_alias = {}
+        for row in roster_result.stdout.splitlines():
+            parts = row.split('|')
+            if len(parts) >= 2:
+                alias, provider = parts[0], parts[1]
+                if provider not in provider_to_alias:
+                    provider_to_alias[provider] = alias
         self.env['CATALOG'] = json.dumps({'data': [{'id': 'vendor/model'}, {'id': 'vendor/model2'}]})
         for provider in NEW_ROUTES.keys() - {'zai', 'modelscope'}:
+            alias = provider_to_alias.get(provider, provider)
             with self.subTest(provider=provider):
-                result = self.run_cli('--models', provider)
+                result = self.run_cli('--models', alias)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('vendor/model2', result.stdout)
                 argv = json.loads((self.root / 'curl-argv').read_text())
@@ -520,10 +546,11 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 if provider == 'siliconflow':
                     endpoint += '?type=text'
                 self.assertIn(endpoint, argv)
-                verified = self.run_cli('--verify', provider, '--remote-model', 'vendor/model')
+                verified = self.run_cli('--verify', alias, '--remote-model', 'vendor/model')
                 self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
         for provider in ('zai', 'modelscope'):
-            result = self.run_cli('--models', provider)
+            alias = provider_to_alias.get(provider, provider)
+            result = self.run_cli('--models', alias)
             self.assertEqual(result.returncode, 2)
             self.assertIn('--remote-model', result.stderr)
 
