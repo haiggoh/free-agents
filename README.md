@@ -239,6 +239,9 @@ Linux are the same idea on other backends ([docs/CUDA.md](docs/CUDA.md)).
 
 Newest first. `CHANGELOG.md` has every release in full.
 
+- **0.38.0**: the [memory guard](#the-memory-guard-auto-compact-instead-of-a-dead-session-0380):
+  local sessions compact before they run out of RAM; per-model KV cache precision.
+
 - **0.29.x**: acquisition-catalogue reader with load-time validation; backend-manager CLI parity
   (every documented subcommand dispatches); a Homebrew formula.
 - **0.28.x**: genuine auto mode on the free-API lane, with Claude Code's classifier answered by a
@@ -999,6 +1002,31 @@ Anthropic's classifier, and its judgements have not been scored against it, so k
 for genuinely high-risk actions. And the airtight offline proof (block the gateway, then re-run) is
 still outstanding; the evidence above is a positive observation of the request arriving locally, not
 a demonstration that no fallback path exists.
+
+### The memory guard: auto-compact instead of a dead session (0.38.0)
+
+A local model that runs out of RAM mid-turn kills the session (oMLX aborts the request; other
+backends wedge or get OOM-killed). The memory guard compacts the session before that happens:
+
+- **Watchdog** (`bin/la-memguard.py`, one per machine). It reads the same wired-vs-Metal-cap figure as
+  the status line. Above the soft threshold (default 85%) it types `/compact` into the **idle**
+  local session with the largest footprint. The launchers start claude inside a private tmux
+  session for this (`bin/la-memguard-run.sh`); an unsent draft is stashed and restored. Without
+  tmux, or with `LA_MEMGUARD_TMUX=0`, the session is registered but cannot be compacted for you.
+- **Aborted-turn recovery.** If a turn still dies of memory, a `StopFailure` hook compacts and sends
+  `continue` (`LA_MEMGUARD_AUTO_CONTINUE=0` turns that off).
+- **KV cache precision per model**: `session_menu_state.py kv-set <alias> auto|int8|int4`. Rapid-MLX
+  gets `--kv-cache-dtype`, llama.cpp `-ctk/-ctv`. Architectures Rapid-MLX rejects for explicit
+  quantization (Gemma 3/4, GPT-OSS, DeepSeek V3+, Kimi K2.5) are refused **before** launch, with
+  the fix command. Lanes with no flag say so rather than ignoring the setting.
+- **RAM-calibrated auto-compact window** (off by default, `LA_MEMGUARD_WINDOW=1`): the launcher
+  derives the token count at which the model's KV would reach the soft threshold and sets the
+  auto-compact window to it. An explicit `LA_AUTO_COMPACT_WINDOW` always wins.
+
+Configure it in the picker (`csl`, **Memory guard** screen, `u` on Home or Local): on/off, tmux,
+soft/hard thresholds, quiet window, auto-continue. An environment variable you export
+(`LA_MEMGUARD_SOFT_PCT`, `LA_MEMGUARD_HARD_PCT`, `LA_MEMGUARD_QUIET_S`, …) beats the saved setting.
+`LA_MEMGUARD=0` skips the guard for one launch.
 
 ### A local session that is actually local
 
