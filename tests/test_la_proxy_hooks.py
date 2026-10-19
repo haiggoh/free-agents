@@ -41,19 +41,8 @@ def ch(content=None, reasoning=None, finish=None):
 
 
 def mismatches(chunks):
-    from litellm.llms.anthropic.experimental_pass_through.adapters.streaming_iterator import (
-        AnthropicStreamWrapper)
-    open_types, errors, text, thinking = {}, [], "", ""
-    for ev in AnthropicStreamWrapper(completion_stream=iter(chunks), model="m"):
-        if ev.get("type") == "content_block_start":
-            open_types[ev["index"]] = ev["content_block"]["type"]
-        if ev.get("type") == "content_block_delta":
-            dt, bt = ev["delta"]["type"], open_types.get(ev["index"])
-            if (dt == "thinking_delta") != (bt == "thinking"):
-                errors.append(f"{dt} into {bt}")
-            text += ev["delta"].get("text", "")
-            thinking += ev["delta"].get("thinking", "")
-    return errors, text, thinking
+    # The module's own probe, so the test and the proxy share ONE lookup of LiteLLM's adapter.
+    return load_hooks().stream_mismatches(chunks)
 
 
 def MIXED():
@@ -77,10 +66,10 @@ class StreamAdapterTests(unittest.TestCase):
         self.assertEqual((errors, thinking), ([], "ab"))
 
     def test_module_no_longer_patches_litellm(self):
-        from litellm.llms.anthropic.experimental_pass_through.adapters import streaming_iterator as si
-        before = si._CombinedChunkSplitter.__dict__.get("_split")
+        splitter = load_hooks().litellm_adapter("_CombinedChunkSplitter")
+        before = splitter.__dict__.get("_split")
         load_hooks()
-        self.assertIs(si._CombinedChunkSplitter.__dict__.get("_split"), before)
+        self.assertIs(splitter.__dict__.get("_split"), before)
 
     def test_check_passes_on_fixed_adapter(self):
         mod = load_hooks()
@@ -112,6 +101,29 @@ class StreamAdapterTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class AdapterLookupTests(unittest.TestCase):
+    """LiteLLM relocates its private adapter package between releases; the lookup must follow."""
+
+    def setUp(self):
+        self.mod = load_hooks()
+
+    def test_every_adapter_class_resolves_on_this_litellm(self):
+        for name in self.mod._ADAPTER_MODULES:
+            self.assertEqual(self.mod.litellm_adapter(name).__name__, name)
+
+    def test_unknown_parent_is_found_by_walking(self):
+        # Planted relocation: no known parent matches, so only the package walk can find it.
+        self.mod._ADAPTER_PARENTS = ("no_such_parent_a", "no_such_parent_b")
+        cls = self.mod.litellm_adapter("AnthropicStreamWrapper")
+        self.assertEqual(cls.__name__, "AnthropicStreamWrapper")
+
+    def test_removed_class_raises_import_error(self):
+        self.mod._ADAPTER_MODULES = {"GoneWrapper": "adapters.streaming_iterator"}
+        with self.assertRaises(ImportError):
+            self.mod.litellm_adapter("GoneWrapper")
+
+
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
 class NvidiaKwargsTests(unittest.TestCase):
     def setUp(self):
         self.mod = load_hooks()
@@ -130,9 +142,7 @@ class NvidiaKwargsTests(unittest.TestCase):
     def test_adapter_really_forwards_the_rejected_keys(self):
         # Guards the premise: if a future LiteLLM translates these itself, this fails and the
         # normalisation can be retired rather than kept on faith.
-        from litellm.llms.anthropic.experimental_pass_through.adapters.transformation import (
-            LiteLLMAnthropicMessagesAdapter)
-        out = LiteLLMAnthropicMessagesAdapter().translate_anthropic_to_openai(
+        out = self.mod.litellm_adapter("LiteLLMAnthropicMessagesAdapter")().translate_anthropic_to_openai(
             anthropic_message_request={"model": "m", "max_tokens": 8, "stop_sequences": ["S"],
                                        "safeguards": {}, "messages": [{"role": "user", "content": "x"}]})
         keys = set(dict(out[0] if isinstance(out, tuple) else out))

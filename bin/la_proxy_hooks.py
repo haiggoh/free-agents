@@ -65,6 +65,40 @@ NVIDIA_DROP_KEYS = ("safeguards",)
 
 MIN_LITELLM = "1.102.1"
 
+# LiteLLM moves its Anthropic adapter between PRIVATE packages (experimental_pass_through ->
+# pass_through in 1.105.1), so resolve the classes by NAME: known parents first, then a walk of
+# litellm.llms.anthropic for a module with the same leaf. A relocation keeps working; only a
+# renamed or removed class fails, which is a real signal rather than upgrade noise.
+_ADAPTER_MODULES = {
+    "AnthropicStreamWrapper": "adapters.streaming_iterator",
+    "_CombinedChunkSplitter": "adapters.streaming_iterator",
+    "LiteLLMAnthropicMessagesAdapter": "adapters.transformation",
+}
+_ADAPTER_PARENTS = ("pass_through", "experimental_pass_through")
+
+
+def litellm_adapter(name: str):
+    """Return LiteLLM's Anthropic adapter class `name`, wherever this LiteLLM keeps it."""
+    import importlib
+    rel = _ADAPTER_MODULES[name]
+    candidates = [f"litellm.llms.anthropic.{parent}.{rel}" for parent in _ADAPTER_PARENTS]
+    # Walk the FILES, not pkgutil: 1.105.1's pass_through/ has no __init__.py, and
+    # pkgutil.walk_packages silently skips namespace packages.
+    import litellm.llms.anthropic as root
+    leaf = rel.rsplit(".", 1)[-1] + ".py"
+    for base in map(Path, root.__path__):
+        for path in sorted(base.rglob(leaf)):
+            dotted = ".".join(path.relative_to(base).with_suffix("").parts)
+            candidates.append(f"{root.__name__}.{dotted}")
+    for modname in candidates:
+        try:
+            mod = importlib.import_module(modname)
+        except Exception:
+            continue
+        if hasattr(mod, name):
+            return getattr(mod, name)
+    raise ImportError(f"this LiteLLM defines no {name} under litellm.llms.anthropic")
+
 
 def _probe_chunks():
     from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
@@ -84,8 +118,7 @@ def _probe_chunks():
 
 def stream_mismatches(chunks):
     """Drive LiteLLM's real Anthropic stream adapter; return (errors, text, thinking)."""
-    from litellm.llms.anthropic.experimental_pass_through.adapters.streaming_iterator import (
-        AnthropicStreamWrapper)
+    AnthropicStreamWrapper = litellm_adapter("AnthropicStreamWrapper")
     open_types, errors, text, thinking = {}, [], "", ""
     for ev in AnthropicStreamWrapper(completion_stream=iter(chunks), model="m"):
         if ev.get("type") == "content_block_start":

@@ -26,6 +26,14 @@
   window, auto-continue after an aborted turn — persisted in the session-menu store (schema 5),
   obeyed by the launchers and the watchdog, with explicit env always winning over the menu.
 
+### Fixed
+
+- **The proxy's LiteLLM stream check survives LiteLLM moving its files.** LiteLLM 1.105.1 renamed
+  the private `experimental_pass_through` package to `pass_through`, so the startup check warned
+  "could not probe" on every proxy start and `la_proxy_hooks.py --self-test` failed. The adapter
+  classes are now found by name: known locations first, then a search of LiteLLM's Anthropic
+  package. A move is followed silently; only a class that is really gone is reported.
+
 ## [0.37.0] — 2026-10-18
 
 ### Added — every provider you hold a key for is usable, with its live model list
