@@ -136,11 +136,24 @@ def test_backend_status_lists_every_backend():
     # Fails if a backend's KV plumbing state is silently missing (adversarial review:
     # "Only oMLX wired → other backends silently unprotected → Phase 4 lists each backend's state").
     status = window.backend_status()
-    assert set(status) == {"rapid", "llama", "omlx", "vllm"}
+    assert set(status) == {"rapid", "llama", "omlx", "vllm", "mlx_lm", "cuda-vllm"}
     assert status["rapid"] == "flag"
     assert status["llama"] == "flag"
     assert status["omlx"] == "not-plumbed-live-config"
     assert status["vllm"] == "no-flag"
+    assert status["mlx_lm"] == "no-flag"
+    assert status["cuda-vllm"] == "not-plumbed"
+
+
+def test_model_rates_take_precedence_and_key_on_backend():
+    # Fails if the Phase 6 per-model table cannot override the (backend, kv) seed, or if it
+    # cannot distinguish the same model id on two backends (workflow finding: the plan's
+    # figures are per (model, BACKEND, KV dtype) — the key must carry the backend).
+    window.MODEL_RATES.clear()
+    window.MODEL_RATES[("mlx-community/Qwen3.0-1.7B-4bit", "rapid", "int8")] = 0.1
+    assert window.resolve_rate("rapid", "int8", "mlx-community/Qwen3.0-1.7B-4bit") == 0.1
+    assert window.resolve_rate("llama", "int8", "mlx-community/Qwen3.0-1.7B-4bit") == 0.35
+    window.MODEL_RATES.clear()
 
 
 # --- CLI ------------------------------------------------------------------------

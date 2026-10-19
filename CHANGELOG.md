@@ -32,9 +32,12 @@
 - **Per-model KV cache precision** (`session_menu_state.py kv-set <alias> auto|int8|int4`):
   rapid-mlx launches pass `--kv-cache-dtype`, llama.cpp passes `-ctk/-ctv q8_0|q4_0`, and
   architectures rapid rejects for explicit quantization (Gemma 3/4, GPT-OSS; DeepSeek V3+,
-  Kimi K2.5) are **refused before launch** with the fix command — instead of a server dying at
-  startup. oMLX's turboquant stays live-config (user-gated) and vllm-mlx has no flag; both say so
-  instead of silently ignoring the setting, and the running server's meta records `kv_dtype`.
+  Kimi K2.5) are **refused before launch** — before the port scan, so no kill path runs first —
+  with the fix command, instead of a server dying at startup. oMLX's turboquant stays live-config
+  (user-gated) and vllm-mlx/mlx_lm/CUDA-vLLM have no flag; every lane says so instead of silently
+  ignoring the setting. The rapid server's meta records the APPLIED `kv_dtype` (oMLX records
+  `kv_dtype_saved`), and a changed precision no longer rides a healthy server: the reuse check
+  compares it and a fresh server takes the new setting.
 - **RAM-calibrated auto-compact window** — off by default, `LA_MEMGUARD_WINDOW=1`. The launcher
   derives the token count at which weights + overhead + KV reach the soft RAM share from seeded
   per-(backend, KV dtype) GB-per-1k figures, clamps it to Claude Code's 100k–1m autocompact range

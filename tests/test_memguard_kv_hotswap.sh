@@ -41,11 +41,12 @@ if grep -q 'kv-flags --backend llama' "$HOTSWAP"; then
 else
   bad "llama branches have no kv-flags call"
 fi
-META_KV_COUNT=$(grep -c 'echo "kv_dtype=$MG_KV"' "$HOTSWAP")
-if [ "$META_KV_COUNT" -ge 2 ]; then
-  ok "both meta-writing branches (rapid, omlx) record kv_dtype"
+RAPID_META_KV=$(grep -c 'echo "kv_dtype=$MG_KV"' "$HOTSWAP")
+OMLX_META_KV=$(grep -c 'echo "kv_dtype_saved=$MG_KV"' "$HOTSWAP")
+if [ "$RAPID_META_KV" -ge 1 ] && [ "$OMLX_META_KV" -ge 1 ]; then
+  ok "rapid meta records the APPLIED kv_dtype; oMLX meta records kv_dtype_saved (requested, not applied)"
 else
-  bad "expected kv_dtype in both rapid and omlx metas, found $META_KV_COUNT (llama/vllm write no metas — pre-existing)"
+  bad "meta kv records wrong: rapid=$RAPID_META_KV applied, omlx=$OMLX_META_KV saved"
 fi
 if grep -qE '\[ "\$MG_KV" != "auto" \]' "$HOTSWAP"; then
   ok "flagless backends warn instead of silently ignoring a saved precision"
@@ -61,8 +62,49 @@ else
   bad "the rapid KV refusal does not exit"
 fi
 
+# 2b. STATIC ORDER: the refusal must sit BEFORE the port scan — the scan reclaims zombie ports
+#     and LA_HOTSWAP_FORCE_FRESH kills healthy servers, and a refused precision must never take
+#     a server down with it (workflow finding: refusal-after-kill strands the user).
+scan_line=$(grep -n 'Scanning ports' "$HOTSWAP" | head -1 | cut -d: -f1)
+if [ -n "$ref_line" ] && [ -n "$scan_line" ] && [ "$ref_line" -lt "$scan_line" ]; then
+  ok "the KV refusal runs before the port scan (no kill can precede it)"
+else
+  bad "KV refusal is not before the port scan (ref=$ref_line scan=$scan_line)"
+fi
+
+# 2c. STATIC: the healthy-reuse seam must compare the saved precision (workflow finding: a
+#     changed kv_dtype was silently never applied on reuse) and the serve commands must append
+#     the resolved flags (workflow finding: the appends had no pin).
+if grep -q '\[ "$_meta_kv" = "$MG_KV" \]' "$HOTSWAP"; then
+  ok "the healthy-reuse match includes kv_dtype"
+else
+  bad "reuse match ignores kv_dtype — a changed precision never takes effect"
+fi
+if grep -q 'RAPID_CMD+=($MG_KV_FLAGS)' "$HOTSWAP"; then
+  ok "rapid serve command appends the KV flags"
+else
+  bad "rapid serve command lost the KV flag append"
+fi
+if grep -q 'LLAMA_CMD+=($MG_KV_FLAGS)' "$HOTSWAP"; then
+  ok "llama serve commands append the KV flags"
+else
+  bad "llama serve commands lost the KV flag append"
+fi
+
 # 3. BEHAVIOURAL: end-to-end through the scratch clone. Fixtures: one gemma alias (rapid
 #    rejects explicit int8 for it), one qwen alias (accepts int8); a temp menu store.
+# SAFETY, inherited from test_hotswap_ram_preflight.sh: the recipe pins a dead port range and
+# points the backend binary at nothing, so no code path can start a server; config.example.sh
+# assigns ports with a plain `=` so an env override does NOT survive la_load_config — the
+# overrides must be APPENDED to the scratch config to be the last assignments.
+# The port itself is pre-checked: if anything happens to listen on 9990, the behavioural part
+# is SKIPPED rather than letting hotswap's zombie-reclaim see it.
+if lsof -i :9990 -sTCP:LISTEN -t >/dev/null 2>&1; then
+  echo "  ⚠️  port 9990 is occupied — skipping the behavioural cases (not a pass)"
+  echo
+  [ "$fail" -eq 0 ] && { echo "hotswap KV glue: PASS (statics only; behaviourals skipped)"; exit 0; }
+  echo "hotswap KV glue: FAIL ($fail failed, $pass passed; behaviourals skipped)"; exit 1
+fi
 SCRATCH="$WORK/repo"; mkdir -p "$SCRATCH"
 cp -RL "$REPO/bin" "$REPO/config" "$SCRATCH/" 2>/dev/null
 for _f in "$SCRATCH/config/config.local.sh" "$SCRATCH/config/config.example.sh"; do
@@ -74,8 +116,8 @@ append_both ''
 append_both 'LA_PORT_START=9990'
 append_both 'LA_PORT_MAX=9990'
 append_both 'LA_RAPID_BIN=/nonexistent/rapid-mlx'
-append_both 'la_register kvtest-gemma kvtest-gemma-fake mlx qwen "" false "" high "" mlx-community/gemma-3-1b-it-4bit 1.0'
-append_both 'la_register kvtest-qwen  kvtest-qwen-fake  mlx qwen "" false "" high "" mlx-community/Qwen3.0-1.7B-4bit 1.0'
+append_both 'la_register kvtest-gemma kvtest-gemma-fake rapid qwen "" false "" high "" mlx-community/gemma-3-1b-it-4bit 1.0'
+append_both 'la_register kvtest-qwen  kvtest-qwen-fake  rapid qwen "" false "" high "" mlx-community/Qwen3.0-1.7B-4bit 1.0'
 
 # Fixture model dirs: hotswap validates (a) the dir exists and (b) it holds a file >1 MB
 # (bin/local-llm-hotswap.sh:201-207), so each fixture alias gets a 2 MB stub weight.
@@ -106,7 +148,9 @@ else
   bad "auto run died somewhere other than the gate or the binary check — inspect: $out"
 fi
 
-# b) gemma + int8 must be refused BEFORE any server work, with no SUCCESS_PORT.
+# b) gemma + int8 must be refused BEFORE any server work AND before the port scan — the old
+#    SUCCESS_PORT check was vacuous (unreachable on every path this harness can take); the
+#    no-scan assertion is the real pin for the refusal-before-kill ordering.
 kv_set kvtest-gemma int8 >/dev/null 2>&1
 out=$(run_swap kvtest-gemma); rc=$?
 if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qi 'refused its saved KV precision'; then
@@ -114,10 +158,10 @@ if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qi 'refused its saved KV precis
 else
   bad "gemma + int8 was not refused (rc=$rc)"
 fi
-if printf '%s' "$out" | grep -q 'SUCCESS_PORT='; then
-  bad "SUCCESS_PORT printed despite the KV refusal"
+if printf '%s' "$out" | grep -q 'Scanning ports'; then
+  bad "the refusal run reached the port scan — the gate sits after the kill paths"
 else
-  ok "no SUCCESS_PORT on refusal"
+  ok "the refusal fires before the port scan (no kill path can run first)"
 fi
 
 # c) qwen + int8 must pass the KV gate AND reach the after-gate stage, or the pass is vacuous.

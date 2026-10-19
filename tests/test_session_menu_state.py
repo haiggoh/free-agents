@@ -297,6 +297,18 @@ class StateTests(unittest.TestCase):
         self.assertEqual(set(lines), set(sms.memguard_env(sms.State())))
 
     # --- memory guard: per-model KV precision (Phase 4 plumbing) ------------------
+    def test_kv_dtype_writes_bump_schema_so_old_readers_warn(self):
+        # Fails if the new store key ships under the old schema number: a pre-kv_dtype reader
+        # would reject a file its schema claim says it understands, silently degrading every
+        # saved setting to defaults. The bump makes old readers fail LOUDLY ("unsupported
+        # schema_version") instead. (Workflow finding #7.)
+        sms.save_memguard(self.cfg, {"kv_dtype": {"qwen-3.8-operator": "int8"}})
+        doc = json.loads(self.file.read_text())
+        self.assertEqual(doc["schema_version"], 6)
+        self.assertGreaterEqual(sms.SCHEMA_VERSION, 6)
+        self.assertIn(5, sms.READABLE_SCHEMAS)          # schema-5 files still load
+
+
     def test_kv_dtype_defaults_empty_and_never_reaches_env(self):
         # Fails if an unset model is anything but auto, or kv leaks into the global env block.
         st = sms.load(self.cfg)

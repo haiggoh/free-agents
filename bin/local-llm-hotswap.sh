@@ -246,6 +246,23 @@ _preflight_warmup() {
     return 0
 }
 
+# --- Memory guard: per-model KV precision (Phase 4 plumbing) ------------------------------------
+# Read BEFORE the port scan and refuse BEFORE any kill path: the scan reclaims zombie ports and
+# LA_HOTSWAP_FORCE_FRESH kills healthy servers, and a refused precision must never take a server
+# down with it (workflow review: a refusal after the kill paths strands the user with nothing).
+# The menu store is the one source (session_menu_state.py kv-get); a read failure fails open to
+# `auto`. `auto` skips the kv-flags call entirely (never refused, empty flags) — no extra spawn on
+# the default path.
+MG_KV="$(python3 "$HOTSWAP_DIR/session_menu_state.py" kv-get "$MODEL_NAME" 2>/dev/null || echo auto)"
+MG_KV_FLAGS=""
+if [ "$SERVE" = "rapid" ] && [ "$MG_KV" != "auto" ]; then
+    if ! MG_KV_FLAGS="$(python3 "$HOTSWAP_DIR/la-memguard-window.py" kv-flags --backend rapid --model-id "${LA_REPO[$MODEL_NAME]:-$MODEL_DIR}" --kv "$MG_KV")"; then
+        echo "🛑 Not launching $MODEL_NAME — the memory guard refused its saved KV precision." >&2
+        echo "   Back to the backend default with:  session_menu_state.py kv-set $MODEL_NAME auto" >&2
+        exit 1
+    fi
+fi
+
 echo "Scanning ports $LA_PORT_START-$LA_PORT_MAX for a free slot (config: ${LA_CONFIG_SOURCE})..."
 TARGET_PORT=""
 for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
@@ -262,12 +279,15 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             _meta_spec=$(awk -F= '$1=="spec_config_sha256"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_temp=$(awk -F= '$1=="temperature"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_pid=$(awk -F= '$1=="pid"{print $2}' "$_meta" 2>/dev/null)
+            _meta_kv=$(awk -F= '$1=="kv_dtype"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            [ -n "$_meta_kv" ] || _meta_kv="auto"   # a pre-memory-guard meta served the backend default
             if [ "${LA_HOTSWAP_FORCE_FRESH:-0}" != "1" ] &&
                [ "$_meta_backend" = "$SERVE" ] &&
                [ "$_meta_alias" = "$MODEL_NAME" ] &&
                [ "$_meta_model" = "$MODEL_DIR" ] &&
                [ "$_meta_spec" = "$RAPID_SPEC_CONFIG_SHA256" ] &&
                [ "$_meta_temp" = "${LA_TEMPERATURE:-}" ] &&
+               [ "$_meta_kv" = "$MG_KV" ] &&
                [ -n "$_listener_pid" ] &&
                [ "$_listener_pid" = "$_meta_pid" ] &&
                printf '%s\n' "$CURRENT_IDS" | grep -qxF "$SPOOF_PRIMARY"; then
@@ -276,6 +296,13 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
                 # DISPATCH_MODEL contract holds on reuse exactly as on a fresh launch.
                 echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
                 echo "SUCCESS_PORT=$port"; exit 0
+            fi
+            # Same model on the same backend but a different KV precision: the chain above
+            # declined the reuse, so a fresh server will take the new setting. Say WHY — this
+            # is the one config the healthy-reuse seam silently ate before Phase 4's review.
+            if [ "$_meta_backend" = "$SERVE" ] && [ "$_meta_alias" = "$MODEL_NAME" ] && \
+               [ "$_meta_model" = "$MODEL_DIR" ] && [ "$_meta_kv" != "$MG_KV" ]; then
+                echo "ℹ️ Port $port serves $MODEL_NAME with kv=$_meta_kv, but the saved precision is $MG_KV — a fresh server will pick up the new setting; the old one keeps running (kill $_meta_pid to reclaim the port)."
             fi
         fi
 
@@ -506,7 +533,7 @@ if [ "$SERVE" = "omlx" ]; then
         echo "alias=$MODEL_NAME"
         echo "model_dir=$MODEL_DIR"
         echo "served_id=$SPOOF_PRIMARY"
-        echo "kv_dtype=$MG_KV"
+        echo "kv_dtype_saved=$MG_KV"
         echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
         [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
         echo "pid=$OMLX_PID"
@@ -523,6 +550,7 @@ fi
 
 # --- mlx_lm.server branch (dispatch-only tiers, e.g. Llama-4 which vllm-mlx misroutes) --------
 if [ "$SERVE" = "mlx_lm" ]; then
+    [ "$MG_KV" != "auto" ] && echo "⚠️  KV precision $MG_KV is saved for $MODEL_NAME, but the mlx_lm.server lane has no KV flag — not applied." >&2
     echo "🚀 Launching $MODEL_NAME via mlx_lm.server on free port $TARGET_PORT..."
     nohup "$LA_VENV/python" -m mlx_lm server --model "$MODEL_DIR" --host 127.0.0.1 --port "$TARGET_PORT" \
         --max-tokens 4096 > "$LOG_FILE" 2>&1 &
@@ -554,6 +582,7 @@ if [ "$CUDA_TIER" = "A" ]; then
     fi
 
     # Build vLLM command for Tier A (full VRAM)
+    [ "$MG_KV" != "auto" ] && echo "⚠️  KV precision $MG_KV is saved for $MODEL_NAME, but the CUDA vLLM lane is not plumbed — not applied." >&2
     VLLM_CMD=(
         "$VLLM_BIN" serve "$MODEL_DIR"
         --host 127.0.0.1
@@ -618,6 +647,7 @@ if [ "$CUDA_TIER" = "B" ]; then
             fi
         fi
 
+        [ "$MG_KV" != "auto" ] && echo "⚠️  KV precision $MG_KV is saved for $MODEL_NAME, but the CUDA vLLM lane is not plumbed — not applied." >&2
         VLLM_CMD=(
             "$VLLM_BIN" serve "$MODEL_DIR"
             --host 127.0.0.1

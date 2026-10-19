@@ -41,8 +41,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 5
-READABLE_SCHEMAS = (1, 2, 3, 4, 5)
+SCHEMA_VERSION = 6
+READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6)
 SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature",
             "intercept_agents", "memguard")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
@@ -83,8 +83,10 @@ _RL_NUMERIC = {"rpm": (1, 10000), "bucket_capacity": (1, 1000),
                "max_cooldown": (0, 3600), "backoff_multiplier": (1, 10), "max_retries": (0, 50)}
 _RL_WHOLE = ("rpm", "bucket_capacity", "max_retries")
 
-# Memory guard (schema 5). Booleans plus bounded numbers; the watchdog and the launchers read the
-# effective values through `session_menu_state.py memguard-env` (explicit LA_MEMGUARD_* env wins).
+# Memory guard (schema 5; kv_dtype grew it to 6 so pre-kv_dtype readers reject the file loudly on
+# the VERSION, not on an unknown key). Booleans plus bounded numbers; the watchdog and the
+# launchers read the effective values through `session_menu_state.py memguard-env` (explicit
+# LA_MEMGUARD_* env wins).
 #   enabled             the guard runs at all (LA_MEMGUARD)
 #   tmux                local sessions start inside a private tmux session so /compact can be typed
 #   soft_pct/hard_pct   RAM thresholds in percent; soft < hard

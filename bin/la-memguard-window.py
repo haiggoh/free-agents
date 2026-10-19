@@ -56,8 +56,10 @@ SEEDED_GB_PER_1K: dict[tuple[str, str], float] = {
 }
 DEFAULT_GB_PER_1K = 0.7
 
-# Phase 6 records measured per-model figures here; they take precedence over the seeds.
-MODEL_RATES: dict[tuple[str, str], float] = {}
+# Phase 6 records measured per-(model, BACKEND, kv) figures here; they take precedence over the
+# (backend, kv) seeds. The backend is part of the key because the same artifact quantizes
+# differently on different lanes (plan: figures are per model, backend and KV dtype).
+MODEL_RATES: dict[tuple[str, str, str], float] = {}
 
 # rapid-mlx rejects explicit int8/int4 for sliding-window and MLA architectures (its own
 # --help, plan fact 6): KV quantization is meaningless there and the server refuses to start.
@@ -138,17 +140,19 @@ def window_tokens(weights_gb: float, gb_per_1k: float, ceiling_gb: float = DEFAU
 
 
 def resolve_rate(backend: str, kv: str, model_id: str) -> float:
-    """Measured figure for (model, kv) if Phase 6 recorded one, else the (backend, kv) seed."""
-    return MODEL_RATES.get((model_id, kv), SEEDED_GB_PER_1K.get((backend, kv), DEFAULT_GB_PER_1K))
+    """Measured (model, backend, kv) figure if Phase 6 recorded one, else the (backend, kv) seed."""
+    return MODEL_RATES.get((model_id, backend, kv), SEEDED_GB_PER_1K.get((backend, kv), DEFAULT_GB_PER_1K))
 
 
 def backend_status() -> dict[str, str]:
-    """Each backend's KV plumbing state, listed so no backend is silently unprotected."""
+    """Each launch lane's KV plumbing state, listed so no lane is silently unprotected."""
     return {
         "rapid": "flag",
         "llama": "flag",
         "omlx": "not-plumbed-live-config",
         "vllm": "no-flag",
+        "mlx_lm": "no-flag",
+        "cuda-vllm": "not-plumbed",
     }
 
 
