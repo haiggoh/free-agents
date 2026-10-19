@@ -1,4 +1,4 @@
-## [0.38.0] — unreleased
+## [0.38.0] — 2026-10-19
 
 ### Added — the memory guard: auto-compact instead of a dead session
 
