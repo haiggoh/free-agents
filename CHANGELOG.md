@@ -77,6 +77,20 @@
   SiliconFlow, SambaNova and LLM7 are in their setup steps and registry notes. No provider was marked
   paid-only: several refusals may be daily allowances, to be rechecked.
 
+### Added — the remote picker lists every catalog model, not "(choose model)"
+
+- **The ten "choose model" placeholder rows are gone** (Mistral, Z.ai, SiliconFlow, LLM7, Kilo,
+  Vercel, SambaNova, ModelScope, Streamlake, Hugging Face). A registry row with `model_id: SELECT`
+  is not a launchable model — picking it either demanded an id the user had no way to know, or
+  dropped into an interactive prompt. The placeholder no longer renders: the provider's roster IS
+  its live catalog (rows appear once the group loads; a placeholder-only provider's catalog starts
+  loading as soon as the model list is shown, without waiting for the group to be opened — one
+  provider per background fetch, after the open group). The counts line no longer counts
+  placeholders as either visible or hidden. Launching a catalog pick is unchanged: it launches
+  `<alias> --remote-model <id>` through the placeholder alias.
+- **The CLI is unchanged**: `remote-session.sh <alias> --remote-model <id>` still launches a
+  non-interactive pick, and interactive `<alias>` still opens the numbered catalog chooser.
+
 ## [0.38.0] — 2026-10-19
 
 ### Added — the memory guard: auto-compact instead of a dead session

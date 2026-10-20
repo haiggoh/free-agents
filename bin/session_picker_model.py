@@ -789,7 +789,7 @@ class RemoteScreen(Screen):
         # and "no key" labels still say what matters where it matters.
         if not self._models_loaded:
             return "Free/paid cloud API (provider quotas apply)"
-        vis = sum(1 for a in self.agents if self._visible(a))
+        vis = sum(1 for a in self.agents if self._visible(a) and a.model_id != "SELECT")
         return f"{vis} model(s) visible  (hidden: {self.hidden_count()})"
 
     def __init__(self, settings: Settings, agents: list[RemoteAgent] | None = None, owner: str = DIRECT_ROOT):
@@ -821,7 +821,11 @@ class RemoteScreen(Screen):
             buckets.setdefault(agent.provider, []).append(agent)
         groups = []
         for prov in order:
-            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}") for a in buckets[prov]]
+            # A "choose model" placeholder (registry model_id SELECT) is not a launchable row —
+            # users cannot type the real id — so the provider's roster IS its catalog: the
+            # placeholder never renders, only its real pinned rows and the catalog do (2026-10-20).
+            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}")
+                     for a in buckets[prov] if a.model_id != "SELECT"]
             items += self._catalog_items(prov, buckets[prov])
             groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
         if not groups and not any(a.has_key for a in self.agents):
@@ -861,16 +865,26 @@ class RemoteScreen(Screen):
         return bool(fn and fn(prov, model_id))
 
     def catalog_kind_needed(self) -> str | None:
-        """The loader kind for the open provider group's catalog, once; None when nothing to do."""
+        """The loader kind for the open provider group's catalog, once, then for each
+        placeholder-only provider ("choose model" rows — the catalog IS their roster) even
+        unopened; None when nothing to do."""
         prov = self.accordion.open_group
-        if not prov or prov.startswith("__") or prov in self.catalogs or prov in self._catalog_pending:
-            return None
-        pinned = next((a for a in self.agents if a.provider == prov and self._visible(a)), None)
-        if pinned is None:
-            return None
-        self._catalog_pending.add(prov)
-        self._refresh_keep_open()               # show the loading row at once
-        return f"rcat:{pinned.alias}"
+        if (prov and not prov.startswith("__") and prov not in self.catalogs
+                and prov not in self._catalog_pending):
+            pinned = next((a for a in self.agents if a.provider == prov and self._visible(a)), None)
+            if pinned is not None:
+                self._catalog_pending.add(prov)
+                self._refresh_keep_open()           # show the loading row at once
+                return f"rcat:{pinned.alias}"
+        for agent in self.agents:               # placeholder rosters load unprompted
+            if agent.model_id != "SELECT" or not self._visible(agent):
+                continue
+            if agent.provider in self.catalogs or agent.provider in self._catalog_pending:
+                continue
+            self._catalog_pending.add(agent.provider)
+            self._refresh_keep_open()           # show the loading row at once
+            return f"rcat:{agent.alias}"
+        return None
 
     def set_catalog(self, alias: str, rows, err: str | None):
         prov = next((a.provider for a in self.agents if a.alias == alias), None)
@@ -917,7 +931,7 @@ class RemoteScreen(Screen):
         return True
 
     def hidden_count(self) -> int:
-        return sum(1 for a in self.agents if not self._visible(a))
+        return sum(1 for a in self.agents if not self._visible(a) and a.model_id != "SELECT")
 
     def _toggle(self, attr):
         setattr(self.settings, attr, not getattr(self.settings, attr))

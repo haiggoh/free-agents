@@ -16,6 +16,7 @@ def agents():
     return [m.RemoteAgent("mistral", "mistral", "Mistral (choose model)", "unknown", model_id="SELECT"),
             m.RemoteAgent("mistral-large", "mistral", "Mistral Large", "unknown",
                           model_id="mistral-large-latest"),
+            m.RemoteAgent("zai", "zai", "ZAI general API (choose model)", "unknown", model_id="SELECT"),
             m.RemoteAgent("gemini-flash", "gemini", "Gemini Flash", "renewing_free",
                           model_id="gemini-3.8-flash"),
             m.RemoteAgent("cerebras-oss", "cerebras", "Cerebras OSS", "trial", model_id="gpt-oss-120b")]
@@ -42,7 +43,8 @@ class CatalogAccordionTests(unittest.TestCase):
         lane.accordion.expand("mistral")
         self.assertEqual(lane.catalog_kind_needed(), "rcat:mistral")
         self.assertIn("cat:mistral:__loading__", self.ids(lane, "mistral"))
-        self.assertIsNone(lane.catalog_kind_needed())          # pending: never asked twice
+        self.assertEqual(lane.catalog_kind_needed(), "rcat:zai")   # pending: mistral never again
+        self.assertIsNone(lane.catalog_kind_needed())              # (the placeholder drain ends)
         self.assertEqual(lane.accordion.open_group, "mistral")  # the loading regroup keeps it open
 
     def test_pinned_first_then_catalog_deduped(self):
@@ -51,9 +53,55 @@ class CatalogAccordionTests(unittest.TestCase):
         lane.catalog_kind_needed()
         lane.set_catalog("mistral", cat("mistral-large-latest", "codestral-latest", "devstral-2"), None)
         self.assertEqual(self.ids(lane, "mistral"),
-                         ["mistral", "mistral-large", "cat:mistral:codestral-latest", "cat:mistral:devstral-2"])
-        self.assertIsNone(lane.catalog_kind_needed())          # loaded: not fetched again
+                         ["mistral-large", "cat:mistral:codestral-latest", "cat:mistral:devstral-2"])
+        self.assertEqual(lane.catalog_kind_needed(), "rcat:zai")   # loaded: mistral never again
+        self.assertIsNone(lane.catalog_kind_needed())              # (the placeholder drain ends)
         self.assertEqual(lane.accordion.open_group, "mistral")
+
+    def test_choose_model_placeholder_row_is_gone(self):
+        # The "(choose model)" row is not a launchable model: the provider's roster IS its
+        # catalog, so the placeholder row disappears and real pinned rows stay (T1, 2026-10-20).
+        lane = self.screen()
+        lane.accordion.expand("mistral")
+        lane.catalog_kind_needed()
+        lane.set_catalog("mistral", cat("codestral-latest"), None)
+        self.assertNotIn("mistral", self.ids(lane, "mistral"))
+        self.assertIn("mistral-large", self.ids(lane, "mistral"))
+
+    def test_placeholder_only_provider_still_gets_a_group(self):
+        # zai has ONLY the placeholder row: the group must survive on the catalog's back.
+        lane = self.screen()
+        lane.accordion.expand("zai")
+        self.assertEqual(lane.catalog_kind_needed(), "rcat:zai")
+        self.assertIn("cat:zai:__loading__", self.ids(lane, "zai"))
+        lane.set_catalog("zai", cat("glm-5.3-flash", "glm-5"), None)
+        self.assertEqual(self.ids(lane, "zai"), ["cat:zai:glm-5.3-flash", "cat:zai:glm-5"])
+
+    def test_placeholder_only_catalog_loads_without_expanding(self):
+        # The placeholder's catalog IS the roster, so it loads as soon as the model list is
+        # shown — one provider per tick, after the open group — without waiting for anyone
+        # to open zai. (The accordion auto-opens the first group, mistral: served first.)
+        lane = self.screen()
+        self.assertEqual(lane.catalog_kind_needed(), "rcat:mistral")   # open group first
+        self.assertEqual(lane.catalog_kind_needed(), "rcat:zai")       # then the placeholder
+        self.assertIn("cat:zai:__loading__", self.ids(lane, "zai"))
+        self.assertIsNone(lane.catalog_kind_needed())          # pending: never asked twice
+        self.assertEqual(lane.accordion.open_group, "mistral")  # the drain keeps it open
+
+    def test_catalog_launch_on_placeholder_only_provider(self):
+        # Selecting a catalog row launches through the placeholder alias with --remote-model.
+        lane = self.screen()
+        lane.accordion.expand("zai")
+        lane.catalog_kind_needed()
+        lane.set_catalog("zai", cat("glm-5.3-flash"), None)
+        self.assertTrue(lane.accordion.select("cat:zai:glm-5.3-flash"))
+        req = lane.activate_selected()
+        self.assertEqual(req.argv[-3:], ["--remote-model", "glm-5.3-flash", "zai"])
+
+    def test_placeholder_not_counted_as_visible_or_hidden(self):
+        # The placeholder is replaced, not hidden: neither count may include it.
+        lane = self.screen(include_trials=False)   # cerebras (trial) is the one hidden row
+        self.assertEqual(lane.policy, "2 model(s) visible  (hidden: 1)")
 
     def test_error_row_instead_of_empty_group(self):
         lane = self.screen()
