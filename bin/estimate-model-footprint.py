@@ -58,7 +58,20 @@ BYTES_PER_WEIGHT = {"4bit": 0.5, "6bit": 0.75, "8bit": 1.0, "fp16": 2.0}
 DEFAULT_KV_OVERHEAD_GB = 8.0
 
 # Mirrors LA_MEMORY_BUDGET_GB in config.example.sh rather than inventing a number.
+# This is the FALLBACK when the device cannot be read (and the explicit --budget-gb /
+# env override ladder above it fails); the budget itself is derived from the device
+# (T4, user 2026-10-20) — never from a hardcoded machine size.
 DEFAULT_BUDGET_GB = 96.0
+
+# Share of the device memory the estimator treats as usable budget. Unified RAM is
+# shared with the OS/GPU, so 75% — the standing convention (96 GB of a 128 GB Mac).
+# VRAM is dedicated to the GPU, so its share is higher.
+UNIFIED_BUDGET_SHARE = 0.75
+VRAM_BUDGET_SHARE = 0.9
+
+# Memoized (gb, kind) of the device read; None until first needed. Tests overwrite it
+# to fake a machine — they never run sysctl/nvidia-smi on real hardware.
+_DEVICE_BUDGET = None
 
 # A parameter count: 30b, 550b, a55b (active), 7.5b. Anchored to a token boundary so
 # it cannot match inside a version (3.5) or a date (0731).
@@ -184,15 +197,83 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
     return total, repo
 
 
+def _device_memory_gb():
+    """(usable_gb, kind) of THIS device — unified RAM on macOS/Linux, VRAM on CUDA —
+    memoized; (None, None) when nothing can be read. bin/la-hw-detect.sh reads the same
+    sources for the launcher; this is the estimator's own minimal read so a one-shot
+    `estimate` need not source a shell stack. Never raises."""
+    global _DEVICE_BUDGET
+    if _DEVICE_BUDGET is not None:
+        return _DEVICE_BUDGET
+    gb = kind = None
+    try:
+        import subprocess as _sp
+        if sys.platform == "darwin":
+            out = _sp.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True,
+                          timeout=5).stdout.strip()
+            if out.isdigit():
+                gb, kind = int(out) / 2 ** 30, "unified"     # Apple counts GiB
+        else:
+            meminfo = pathlib.Path("/proc/meminfo")
+            if meminfo.exists():
+                for line in meminfo.read_text().splitlines():
+                    if line.startswith("MemTotal:"):
+                        gb, kind = int(line.split()[1]) / 2 ** 20, "unified"   # kB -> GiB
+                        break
+            if gb is None:
+                out = _sp.run(["nvidia-smi", "--query-gpu=memory.total",
+                               "--format=csv,noheader,nounits"], capture_output=True,
+                              text=True, timeout=10).stdout.strip().splitlines()
+                if out and out[0].strip().isdigit():
+                    gb, kind = int(out[0].strip()) / 1024, "vram"              # MiB -> GiB
+    except Exception:
+        gb = kind = None
+    _DEVICE_BUDGET = (gb, kind)
+    return _DEVICE_BUDGET
+
+
+def derive_budget_gb(device_gb: float, kind: str) -> float:
+    """Usable budget from a detected device size: 75% of unified RAM (the standing
+    96-of-128 convention), 90% of dedicated VRAM."""
+    share = VRAM_BUDGET_SHARE if kind == "vram" else UNIFIED_BUDGET_SHARE
+    return round(device_gb * share, 1)
+
+
+def _resolve_budget_gb(explicit):
+    """(budget_gb, source): an explicit argument wins, then LA_MEMORY_BUDGET_GB, then the
+    device read, then the DEFAULT_BUDGET_GB fallback (never a hardcoded machine size)."""
+    if explicit is not None:
+        return float(explicit), "explicit"
+    import os
+    env = os.environ.get("LA_MEMORY_BUDGET_GB")
+    if env:
+        try:
+            return float(env), "env"
+        except ValueError:
+            pass
+    gb, kind = _device_memory_gb()
+    if gb and kind:
+        return derive_budget_gb(gb, kind), "device"
+    return DEFAULT_BUDGET_GB, "default"
+
+
 def estimate(model_id: str, quant: str = "4bit",
-             budget_gb: float = DEFAULT_BUDGET_GB,
+             budget_gb=None,
              kv_overhead_gb: float = DEFAULT_KV_OVERHEAD_GB, *,
              use_hf: bool = False, hf_offline: bool = False) -> dict:
     """Estimate footprint and give a SUGGESTED classification (never authoritative).
 
     Precedence (user 2026-10-18): the HF safetensors count of the matching base repo, then
     the count parsed from the id, then unknown (visible). With use_hf the HF rung is tried
-    first because it is a measurement; the id parse is the rough fallback."""
+    first because it is a measurement; the id parse is the rough fallback.
+
+    Visibility rule (user 2026-10-20, superseding the old visible near-ceiling band): a
+    model that FITS at >=4-bit is local-capable and hidden; only models that do NOT fit
+    at 4-bit stay visible (2/3-bit-only fits are edge cases and stay visible too). The
+    old caution about near-ceiling fits lives on as a `medium` confidence label and in
+    the reason text, not in visibility. The budget is resolved explicit -> env
+    LA_MEMORY_BUDGET_GB -> device read -> DEFAULT_BUDGET_GB."""
+    budget_gb, budget_source = _resolve_budget_gb(budget_gb)
     parsed = parse_params(model_id)
     if use_hf:
         total, repo = hf_total_params(model_id, offline=hf_offline)
@@ -202,7 +283,8 @@ def estimate(model_id: str, quant: str = "4bit",
                       "note": f"HF {repo}: {total / 1e9:.1f}B params (safetensors)"
                               + (f"; {parsed['active_b']:g}B active" if parsed.get("active_b") else "")}
     bpw = BYTES_PER_WEIGHT[quant]
-    out = {"model_id": model_id, "quant": quant, "budget_gb": budget_gb, **parsed}
+    out = {"model_id": model_id, "quant": quant, "budget_gb": budget_gb,
+           "budget_source": budget_source, **parsed}
 
     if parsed["total_b"] is None:
         out.update(weights_gb=None, total_gb=None, fits=None, suggested="unknown",
@@ -214,34 +296,21 @@ def estimate(model_id: str, quant: str = "4bit",
     fits = total_gb <= budget_gb
     out.update(weights_gb=round(weights_gb, 1), total_gb=round(total_gb, 1), fits=fits)
 
-    # Margin matters more than the bare verdict: near the ceiling the estimate's own
-    # error is larger than the headroom, so it must not read as confident.
     margin = budget_gb - total_gb
-    # The marker band is the COMPLEMENT of the comfortable band below (total < 50% of budget),
-    # so every fit is either comfortably local or explicitly marked as a near call -- no gap
-    # where a 71%-of-budget model reads as a confident verdict it has not earned.
-    if fits and total_gb >= 0.5 * budget_gb:
-        # Near the ceiling the estimate's own error exceeds the headroom, so this is NOT a
-        # verdict. It is still more informative than a bare "unknown": the id does tell us the
-        # model is in the right size class, just not that it definitely fits. So it gets its
-        # own marker, which the filter treats as VISIBLE -- the fail-open guarantee is intact,
-        # the user simply sees WHICH visible rows are the near misses worth investigating.
-        out.update(suggested="potentially-local-capable",
-                   reason=f"~{total_gb:.0f} GB against a {budget_gb:.0f} GB budget "
-                          f"({margin:.0f} GB spare) — over half the budget, where KV growth and "
-                          "quantization choices the model id cannot reveal could decide it, so "
-                          "it needs real evidence before being hidden (stays visible)")
-    elif fits:
-        # Symmetric with the overshoot case below: a model that fits with room to spare is
-        # just as clear-cut as one that busts the ceiling. A 20B model needs no advanced
-        # math to prove it runs on this machine, so it must not be left visible-by-default
-        # as if uncertain -- that wastes the picker attention the filter exists to protect.
-        confidence = "high" if total_gb < 0.5 * budget_gb else out["confidence"]
+    # ONE visibility rule (user 2026-10-20): a fit at >=4-bit hides the row at ANY margin.
+    # Near the ceiling the estimate's own error is larger than the headroom, so THAT
+    # uncertainty is recorded as a `medium` confidence and said in the reason — it no
+    # longer keeps the row visible. Only a NON-fit stays visible: a model that would need
+    # 2-bit or 3-bit quantization to fit is the user's stated edge case, shown.
+    if fits:
+        near_ceiling = total_gb >= 0.5 * budget_gb
+        confidence = "medium" if near_ceiling else "high"
         out.update(suggested="local-capable", confidence=confidence,
                    reason=f"~{total_gb:.0f} GB (weights {weights_gb:.0f} + {kv_overhead_gb:.0f} overhead) "
-                          f"fits the {budget_gb:.0f} GB budget"
-                          + (" with room to spare — comfortably local, no further math needed"
-                             if total_gb < 0.5 * budget_gb else ""))
+                          f"fits the {budget_gb:.0f} GB budget ({margin:.0f} GB spare)"
+                          + (" — near the ceiling: KV growth could decide it, hidden per the "
+                             "fit-at-4bit rule" if near_ceiling else
+                             " — comfortably local, no further math needed"))
     else:
         # ASYMMETRY, deliberately. The estimate's error is a fraction of the model size, so a
         # large overshoot is a SAFER call than a near-fit: nothing about quantization, KV
@@ -367,9 +436,10 @@ def main() -> int:
                         help="a single model id to estimate, e.g. nvidia/nemotron-3-ultra-550b-a55b")
     parser.add_argument("--quant", default="4bit", choices=sorted(BYTES_PER_WEIGHT),
                         help="quantization assumed for the local artifact (default: 4bit)")
-    parser.add_argument("--budget-gb", type=float, default=DEFAULT_BUDGET_GB,
-                        help=f"usable memory budget in GB (default: {DEFAULT_BUDGET_GB:g}, "
-                             "mirrors LA_MEMORY_BUDGET_GB)")
+    parser.add_argument("--budget-gb", type=float, default=None,
+                        help="usable memory budget in GB (default: auto — LA_MEMORY_BUDGET_GB "
+                             "if set, else the DEVICE: 75%% of unified RAM / 90%% of CUDA VRAM "
+                             f"via sysctl/nvidia-smi, else {DEFAULT_BUDGET_GB:g})")
     parser.add_argument("--kv-overhead-gb", type=float, default=DEFAULT_KV_OVERHEAD_GB,
                         help=f"KV cache + runtime allowance in GB (default: {DEFAULT_KV_OVERHEAD_GB:g})")
     parser.add_argument("--roster", help="pipe-separated roster file, or - for stdin")
@@ -399,7 +469,7 @@ def main() -> int:
             print(f"{result['model_id']}")
             print(f"  params    : {result['note']}")
             print(f"  estimate  : {result['total_gb'] or '?'} GB at {args.quant} "
-                  f"(budget {args.budget_gb:g} GB)")
+                  f"(budget {result['budget_gb']:g} GB, from {result['budget_source']})")
             print(f"  suggested : {result['suggested']}  [confidence: {result['confidence']}]")
             print(f"  reason    : {result['reason']}")
         return 0
@@ -409,9 +479,10 @@ def main() -> int:
 
     rows = read_roster(args.roster)
     policy = read_policy(args.policy) if args.policy else {}
+    sweep_budget, sweep_budget_source = _resolve_budget_gb(args.budget_gb)
     findings, agree = [], 0
     for alias, provider, model_id in rows:
-        result = estimate(model_id, args.quant, args.budget_gb, args.kv_overhead_gb,
+        result = estimate(model_id, args.quant, sweep_budget, args.kv_overhead_gb,
                           use_hf=args.hf, hf_offline=args.hf_offline)
         current = policy.get((provider, model_id))
         result.update(alias=alias, provider=provider, policy=current)
@@ -434,8 +505,8 @@ def main() -> int:
     flagged = [r for r in findings if r["finding"]]
     print(f"Footprint sweep — {len(rows)} roster rows, {agree} agree with the policy, "
           f"{len(flagged)} to review")
-    print(f"(assuming {args.quant}, {args.budget_gb:g} GB budget, "
-          f"{args.kv_overhead_gb:g} GB overhead)\n")
+    print(f"(assuming {args.quant}, {sweep_budget:g} GB budget "
+          f"[from {sweep_budget_source}], {args.kv_overhead_gb:g} GB overhead)\n")
     for result in flagged:
         print(f"  {result['alias']}  ({result['provider']})")
         print(f"    {result['finding']}")
@@ -453,19 +524,15 @@ def main() -> int:
         print("--apply needs --policy", file=sys.stderr)
         return 2
 
-    # HIGH CONFIDENCE ONLY. A near-ceiling MoE (~68 GB of a 96 GB budget) can be decided by
-    # KV overhead the id cannot reveal, so those stay human work. Rows the estimator calls
-    # `unknown` are never written -- that would convert fail-open into a silent hide.
-    # High-confidence verdicts, plus the near-ceiling MARKER. Writing
-    # `potentially-local-capable` is safe at any confidence because the filter keeps those rows
-    # VISIBLE -- it records "worth a look", never "hide this". What must never be written is a
-    # bare `unknown`, which carries no information, or a medium-confidence local-capable, which
-    # WOULD hide a row the estimate cannot vouch for.
+    # What --apply may write, under the user's 2026-10-20 rule: a fit at >=4-bit IS the
+    # user's vouch, so `local-capable` is written at any confidence. `remote-preferred`
+    # stays high-confidence-only (a NEAR overshoot is genuinely uncertain; only a far
+    # miss is safe to write). A bare `unknown` is never written -- that would convert
+    # fail-open into a silent hide.
     eligible = [r for r in findings
                 if r["finding"] and (
-                    (r["confidence"] == "high"
-                     and r["suggested"] in ("local-capable", "remote-preferred"))
-                    or r["suggested"] == "potentially-local-capable")]
+                    r["suggested"] == "local-capable"
+                    or (r["confidence"] == "high" and r["suggested"] == "remote-preferred"))]
     skipped = [r for r in findings if r["finding"] and r not in eligible]
 
     outcome = apply_to_policy(args.policy, eligible, dry_run=args.apply_dry_run)

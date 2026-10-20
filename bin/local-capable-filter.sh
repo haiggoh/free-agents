@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # local-capable-filter.sh — classify remote roster rows by whether they could reasonably run
-# locally on this machine's 128 GB unified-memory stack.
+# locally on THIS device (unified RAM on macOS/Linux, VRAM on CUDA — derived by
+# estimate-model-footprint.py from sysctl/nvidia-smi, never a hardcoded machine size).
 #
 # Usage:
 #   local-capable-filter.sh --parse <policy.psv> [--roster <roster-file-or-->]

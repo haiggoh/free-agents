@@ -108,6 +108,28 @@
   pinned. Tool sessions, quota and billing are untested." boilerplate are removed (user
   2026-10-20: redundant, often stale, adds no value).
 
+### Fixed — the local-capable budget is derived from the device, and every 4-bit fit hides
+
+- **The memory budget is read from the DEVICE, not hardcoded** (user 2026-10-20: "the local
+  capable filter should be portable — it should know the device's shared RAM (mac mlx) or VRAM
+  (cuda) and not always assume my 128 GB"). `estimate-model-footprint.py` resolves the budget
+  explicit `--budget-gb` -> `LA_MEMORY_BUDGET_GB` -> the device (75% of unified RAM via
+  `sysctl hw.memsize` / `/proc/meminfo`, 90% of CUDA VRAM via `nvidia-smi`) -> the 96 GB
+  fallback, and names the source in its output. Tests fake the device read; nothing reads real
+  hardware in CI.
+- **One visibility rule, per the user's standing instruction: a model that fits at >=4-bit
+  hides; models that would only fit at 2/3-bit stay visible (edge cases).** The old
+  "potentially-local-capable" visible band (fits but over half the budget) kept gpt-oss-120b
+  (~68 GB) and Llama-3.2-90B (~53 GB) visible on the 128 GB machine; both now hide, and the old
+  caution survives as a `medium` confidence label and in the reason text, not in visibility.
+  The policy file was re-applied under the new rule (4 rows rewritten, incl. both gpt-oss-120b
+  rows; automatic backup beside the file, prior hand-written notes preserved).
+- **The unworking-models filter was audited and needs no change**: `config/broken-nvidia-models.json`
+  lists aliases with `status: "broken"`; `--inventory` reports broken status regardless of the
+  toggle so the picker owns visibility, and the rows hide unless `--show-broken` / the picker's
+  "Unworking models" toggle is on. (The downloader-side `hardware_target` filter is separate and
+  already tested by `tests/test_hardware_target.sh`.)
+
 ## [0.38.0] — 2026-10-19
 
 ### Added — the memory guard: auto-compact instead of a dead session

@@ -6,6 +6,7 @@ Environment: none required.
 """
 import importlib.util
 from pathlib import Path
+import os
 import subprocess
 import sys
 import tempfile
@@ -74,28 +75,30 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(result['confidence'], 'high')
         self.assertTrue(result['fits'])
 
-    def test_near_the_ceiling_is_marked_not_shrugged_at(self):
-        """The uncertain band gets its own MARKER rather than a bare `unknown`.
+    def test_near_the_ceiling_still_hides_user_rule_2026_10_20(self):
+        """A fit at >=4-bit HIDES the row, even near the ceiling.
 
-        The id does tell us the model is in the right size class -- just not that it
-        definitely fits. `potentially-local-capable` records that, and the filter keeps
-        those rows VISIBLE, so fail-open holds while the user can still see which visible
-        rows are the near calls. A bare `unknown` would throw away what we do know.
+        User rule (2026-10-20), superseding the old visible-band: "filter any model that
+        has downloadable weights on huggingface that would fit my setup at 4 bit
+        quantization (or higher). Models that would only fit with 2bit or 3bit
+        quantizations are edge cases [shown]." The old caution now lives in the
+        confidence label (medium) and the reason text, not in visibility.
         """
         # 170B at 4bit = 85 GB + 8 overhead = 93 GB against a 96 GB budget: a 3 GB margin.
         result = efp.estimate('vendor/model-170b')
         self.assertTrue(result['fits'])
-        self.assertEqual(result['suggested'], 'potentially-local-capable')
+        self.assertEqual(result['suggested'], 'local-capable')
+        self.assertEqual(result['confidence'], 'medium')   # the caution moved here
+        self.assertIn('ceiling', result['reason'])
 
-    def test_the_two_fit_bands_meet_with_no_confident_gap(self):
-        """Every fit is either comfortably local or explicitly marked -- never a silent
-        confident verdict in between. A 120B-class model at ~71% of budget used to fall in
-        such a gap and read as a plain local-capable it had not earned."""
+    def test_every_fit_is_local_capable_no_visible_gap(self):
+        """One rule, no bands: fits at 4-bit hide at ANY margin; only non-fits stay visible.
+        A 120B-class model at ~71% of budget is the user's own example (gpt-oss-120b)."""
         for model_id in ('vendor/model-100b', 'vendor/model-120b', 'vendor/model-150b'):
             with self.subTest(model_id=model_id):
                 result = efp.estimate(model_id)
                 self.assertTrue(result['fits'])
-                self.assertEqual(result['suggested'], 'potentially-local-capable')
+                self.assertEqual(result['suggested'], 'local-capable')
 
     def test_no_parameter_count_fails_open_to_visible(self):
         result = efp.estimate('moonshotai/kimi-k3')
@@ -121,8 +124,10 @@ class SweepTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
 
     def run_script(self, *args):
+        # stdin=DEVNULL: a sweep with --roster '-' reads stdin, and an ad-hoc run under an
+        # open pipe (no EOF) would block forever instead of failing (measured 2026-10-20).
         return subprocess.run([sys.executable, str(SCRIPT), *args],
-                              text=True, capture_output=True)
+                              text=True, capture_output=True, stdin=subprocess.DEVNULL)
 
     def test_help_prints_and_exits_zero_without_doing_work(self):
         result = self.run_script('--help')
@@ -209,14 +214,15 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(len(backups), 1, 'a backup must be written before the rewrite')
         self.assertIn('stale', backups[0].read_text())
 
-    def test_apply_never_writes_a_hiding_verdict_it_cannot_vouch_for(self):
-        """The gate that keeps --apply safe.
+    def test_apply_writes_fits_and_never_a_bare_unknown(self):
+        """The gate that keeps --apply safe, under the user's 2026-10-20 rule.
 
-        A near-ceiling row MAY be written, but only as `potentially-local-capable`, which the
-        filter keeps VISIBLE -- recording "worth a look", never "hide this". What must never be
-        written is a medium-confidence `local-capable` (that WOULD hide a row the estimate
-        cannot vouch for) or a bare `unknown` (no information, and it would convert fail-open
-        into a silent hide).
+        A fit at >=4-bit IS the user's vouch now (their standing instruction, quoted in
+        test_near_the_ceiling_still_hides_user_rule_2026_10_20), so --apply writes
+        `local-capable` at any confidence. What must STILL never be written is a bare
+        `unknown` -- no information, and writing it would convert fail-open into a
+        silent hide. Medium-confidence `remote-preferred` (a NEAR overshoot) stays
+        human work: only the far-past-the-ceiling ones are safe to write.
         """
         roster = self.root / 'roster.psv'
         roster.write_text('near|nvidia|vendor/model-120b\n'
@@ -227,10 +233,10 @@ class SweepTests(unittest.TestCase):
                                  '--disagreements-only', '--apply')
         self.assertEqual(result.returncode, 0, result.stderr)
         text = policy.read_text()
-        self.assertIn('potentially-local-capable', text,
-                      'the near-ceiling row is marked, since marking never hides it')
-        self.assertNotIn('|local-capable|', text,
-                         'a medium-confidence row must NOT get the hiding verdict')
+        self.assertIn('nvidia|vendor/model-120b|local-capable|', text,
+                      'the fit is written; the user rule made fit-at-4bit decisive')
+        self.assertIn('near ceiling', text,
+                      'the hand-written reason is preserved alongside the auto note')
         self.assertNotIn('unknown', text, 'a bare unknown is never written')
         self.assertNotIn('mystery-model', text,
                          'a row with no parameter count is not written at all')
@@ -253,6 +259,60 @@ class SweepTests(unittest.TestCase):
                                  str(ROOT / 'config/local-capable-remote-models.psv'))
         # stdin is empty here; the point is the policy file loads cleanly.
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class DeviceBudgetTests(unittest.TestCase):
+    """T4: the budget comes from the DEVICE (unified RAM on macOS/Linux, VRAM on CUDA),
+    never from a hardcoded 128 GB. Tests fake the device read — they never call sysctl
+    or nvidia-smi on the real machine."""
+
+    def setUp(self):
+        self._orig_device = efp._DEVICE_BUDGET
+        efp._DEVICE_BUDGET = (None, None)          # no memo: every test fakes explicitly
+        os.environ.pop('LA_MEMORY_BUDGET_GB', None)
+
+    def tearDown(self):
+        efp._DEVICE_BUDGET = self._orig_device
+        os.environ.pop('LA_MEMORY_BUDGET_GB', None)
+
+    def test_derive_budget_gb(self):
+        # 75% of unified RAM mirrors the standing config convention (96 GB of 128).
+        self.assertAlmostEqual(efp.derive_budget_gb(128.0, 'unified'), 96.0)
+        # VRAM is dedicated (no OS takeback), so its share is higher.
+        self.assertAlmostEqual(efp.derive_budget_gb(24.0, 'vram'), 21.6)
+
+    def test_explicit_budget_beats_everything(self):
+        efp._DEVICE_BUDGET = (128.0, 'unified')
+        self.assertEqual(efp._resolve_budget_gb(50.0), (50.0, 'explicit'))
+
+    def test_env_budget_beats_device(self):
+        os.environ['LA_MEMORY_BUDGET_GB'] = '80'
+        efp._DEVICE_BUDGET = (128.0, 'unified')
+        self.assertEqual(efp._resolve_budget_gb(None), (80.0, 'env'))
+
+    def test_device_budget_when_no_env(self):
+        efp._DEVICE_BUDGET = (128.0, 'unified')
+        self.assertEqual(efp._resolve_budget_gb(None), (96.0, 'device'))
+        efp._DEVICE_BUDGET = (24.0, 'vram')
+        self.assertEqual(efp._resolve_budget_gb(None), (21.6, 'device'))
+
+    def test_fallback_budget_when_device_unknown(self):
+        efp._DEVICE_BUDGET = (None, None)
+        budget, source = efp._resolve_budget_gb(None)
+        self.assertEqual(budget, efp.DEFAULT_BUDGET_GB)
+        self.assertEqual(source, 'default')
+
+    def test_estimate_uses_device_budget_and_names_the_source(self):
+        efp._DEVICE_BUDGET = (32.0, 'unified')     # a small machine: budget 24 GB
+        r = efp.estimate('vendor/model-70b')       # 35 + 8 = 43 GB: does NOT fit 24
+        self.assertEqual(r['budget_gb'], 24.0)
+        self.assertEqual(r['budget_source'], 'device')
+        self.assertEqual(r['suggested'], 'remote-preferred')   # visible: clearly not local
+        # and the user's own case on their machine (fake 128 GB): gpt-oss-120b now hides
+        efp._DEVICE_BUDGET = (128.0, 'unified')
+        r = efp.estimate('openai/gpt-oss-120b')
+        self.assertEqual(r['budget_gb'], 96.0)
+        self.assertEqual(r['suggested'], 'local-capable')
 
 
 if __name__ == '__main__':

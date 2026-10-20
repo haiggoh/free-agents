@@ -175,11 +175,15 @@ def _footprint():
 
 
 def catalog_local_capable(provider, model_id):
-    """True when a live-catalog row is estimated to fit this machine (the filter then hides it).
+    """True when a live-catalog row would fit THIS device at >=4-bit (the filter hides it).
 
-    Runs while the accordion regroups, so it must never wait on the network: it reads the
-    Hugging Face count only from the cache that load_remote_catalog warmed, then falls back
-    to the count in the id. An unknown verdict stays visible (fail-open)."""
+    User rule 2026-10-20: hidden when downloadable weights exist that fit the device at
+    4-bit quantization or finer; 2/3-bit-only fits stay visible (edge cases). The budget
+    comes from the device itself (75% of unified RAM / 90% of CUDA VRAM), never a
+    hardcoded size. Runs while the accordion regroups, so it must never wait on the
+    network: it reads the Hugging Face count only from the cache that load_remote_catalog
+    warmed, then falls back to the count in the id. An unknown verdict stays visible
+    (fail-open)."""
     try:
         return _footprint().estimate(model_id, use_hf=True, hf_offline=True)["suggested"] == "local-capable"
     except Exception:
