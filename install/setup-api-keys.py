@@ -32,7 +32,9 @@ PROVIDERS = (
              "Sign in, choose Create API key, and select a project with free-tier access.",
              ("gemini",), "session available"),
     Provider("groq", "Groq", "https://console.groq.com/keys",
-             "Create an account, then Create API Key. Name it Local Agents.",
+             "Create an account, then Create API Key. Name it Local Agents. Free-tier tokens-per-"
+             "minute limits are per model, and some (gpt-oss-120b: 8000 TPM) are smaller than Claude "
+             "Code's own prompt, so those models answer 413 \"Request too large\".",
              ("groq",), "session available"),
     Provider("openrouter", "OpenRouter", "https://openrouter.ai/settings/keys",
              "Create Key, name it Local Agents. Later, select only explicitly free models.",
@@ -45,22 +47,29 @@ PROVIDERS = (
              "Sign up, open API Keys in your profile, and create a Studio key for your free plan.",
              ("mistral",)),
     Provider("zai", "Z.AI", "https://z.ai/manage-apikey/apikey-list",
-             "Create an API key. Later, use only models currently listed as zero-priced.",
+             "Create an API key. Later, use only models currently listed as zero-priced. A key with no "
+             "balance or resource package answers \"Insufficient balance\" (code 1113) on every model.",
              ("zai",)),
     Provider("siliconflow", "SiliconFlow", "https://cloud.siliconflow.com/account/ak",
-             "Sign up, then Create API Key. Later, select a zero-priced model.",
+             "Sign up, then Create API Key. Later, select a zero-priced model. An account with a zero "
+             "balance was refused (402 \"balance is insufficient\") even on a zero-priced model.",
              ("siliconflow",)),
     Provider("llm7", "LLM7", "https://dash.llm7.io",
-             "Sign in to the dashboard and create or copy your API token.", ("llm7",)),
+             "Sign in to the dashboard and create or copy your API token. Claude-family and other paid "
+             "models need balance (402); pick one of the free models. Free models have a DAILY token "
+             "quota (429 \"Daily token quota exceeded\").", ("llm7",)),
     Provider("kilo", "Kilo", "https://app.kilo.ai",
              "Sign in to your personal account. Open Your Profile; copy the API key at the bottom.",
              ("kilo",)),
     Provider("vercel", "Vercel AI Gateway",
              "https://vercel.com/d?title=AI+Gateway+API+Keys&to=%2F%5Bteam%5D%2F~%2Fai-gateway%2Fapi-keys",
-             "Select your team, then Create key in AI Gateway. Check its budget before later use.",
-             ("vercel",)),
+             "Vercel requires a CREDIT CARD ON FILE before the gateway serves ANY request, "
+             "free credits included (403 \"requires a valid credit card\" otherwise). Add one under "
+             "Billing first, then select your team and Create key in AI Gateway.",
+             ("vercel",), "credit card required, even for free credits"),
     Provider("sambanova", "SambaNova", "https://cloud.sambanova.ai/dashboard",
-             "Sign up, open API Keys, and create a key. Check current trial/credit eligibility.",
+             "Sign up, open API Keys, and create a key. Without a payment method on file it answers "
+             "402 \"A payment method is required\".",
              ("sambanova",), "optional credits; choose model", True),
     Provider("cerebras", "Cerebras", "https://cloud.cerebras.ai/platform/",
              "Open API Keys and create a key. Check current trial or account credits.",

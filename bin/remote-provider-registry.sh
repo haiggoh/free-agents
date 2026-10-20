@@ -105,6 +105,16 @@ _litellm_route() { # _litellm_route <provider> <model> -> "litellm_model|api_bas
     esac
 }
 
+_anthropic_base() { # _anthropic_base <provider> -> native Anthropic base URL, or exit 1
+    case "$1" in
+        kilo) echo 'https://api.kilo.ai/api/gateway' ;;
+        llm7) echo 'https://api.llm7.io' ;;
+        openrouter) echo 'https://openrouter.ai/api' ;;
+        zai) echo 'https://api.z.ai/api/anthropic' ;;
+        *) return 1 ;;
+    esac
+}
+
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     case "${1:-}" in
         -h|--help)
@@ -117,6 +127,7 @@ Source this script in bash to use its routing and catalog functions:
   _clear_provider_env
   _catalog_request <provider>
   _litellm_route <provider> <model>
+  _anthropic_base <provider>
 
 Configured provider IDs: cerebras cloudflare gemini github groq kilo llm7 mistral modelscope nvidia openrouter sambanova siliconflow streamlake huggingface vercel zai
 EOF

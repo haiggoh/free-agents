@@ -387,6 +387,41 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                            text=True, capture_output=True)
         self.assertEqual(r.stdout.strip(), '', 'router_settings keys Router does not take: ' + r.stdout)
 
+    def _native_cfg(self, prov, model, mode):
+        shutil.copy2(ROOT / 'bin/anthropic-route.py', self.root / 'bin/anthropic-route.py')
+        cfg = self.root / 'proxy-native.yaml'
+        cfg.unlink(missing_ok=True)
+        r = subprocess.run(['bash', '-c', 'source "$1"; _decide_native_route "$3" "$4"; '
+                            'write_proxy_config "$2" "$3" "$4" false high; echo "PT=${LA_PASSTHROUGH_MODELS:-}"',
+                            'x', str(self.root / 'bin/library.sh'), str(cfg), prov, model],
+                           env=dict(self.env, LA_REMOTE_ANTHROPIC=mode,
+                                    LA_ANTHROPIC_ROUTE_CACHE=str(self.root / 'route.json')),
+                           text=True, capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return cfg.read_text(), r.stdout
+
+    def test_native_anthropic_lane_forwards_untranslated(self):
+        """0.38.1: a provider with anthropic_base, for a model the probe accepted, gets a
+        passthrough deployment: native base, supported_endpoints, and NO reasoning_effort mapping
+        (effort travels as Claude Code's own output_config.effort)."""
+        text, out = self._native_cfg('openrouter', 'openrouter/free', 'on')
+        session = text.split('litellm_settings:')[0]
+        self.assertIn('      model: openai/openrouter/free\n', session)
+        self.assertIn('      api_base: https://openrouter.ai/api\n', session)
+        self.assertEqual(session.count('      supported_endpoints: ["/v1/messages"]\n'), self.spoof_id_count)
+        self.assertNotIn('reasoning_effort', session)
+        self.assertIn('PT=openrouter/free', out, 'the hook must learn which ids to declare reasoning-capable')
+
+    def test_chat_lane_when_native_is_off_or_absent(self):
+        text, out = self._native_cfg('openrouter', 'openrouter/free', 'off')
+        self.assertNotIn('supported_endpoints', text)
+        self.assertIn('      model: openrouter/openrouter/free\n', text)
+        self.assertIn('reasoning_effort: high', text)
+        self.assertIn('PT=\n', out)
+        # groq has no anthropic_base: forcing native changes nothing.
+        text, _ = self._native_cfg('groq', 'openai/gpt-oss-120b', 'on')
+        self.assertNotIn('supported_endpoints', text)
+
     def test_proxy_hooks_registered_and_linked_next_to_config(self):
         """The callback must be importable from the CONFIG's directory, since that is where
         LiteLLM looks; a callbacks line without the module beside it kills proxy startup."""

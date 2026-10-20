@@ -1391,6 +1391,11 @@ class Picker(App):
             # Replace {provider} placeholder with actual provider name
             slug = getattr(self, '_pending_provider', 'unknown')
             label = label.format(provider=next((name for s_, name, *_ in m.APIKeysScreen.PROVIDERS if s_ == slug), slug))
+            # The provider's setup steps sit right above the key field: account requirements such as
+            # Vercel's credit card are only useful BEFORE the key is saved.
+            steps = next((p.steps for p in m.KEY_PROVIDERS if p.slug == slug), "")
+            if steps:
+                label = steps + "\n  " + label
             prompt.password = True  # Hidden input for API key
             prompt.submit_on_paste = True
         prompt.placeholder = ""   # the label is shown once, in #status below the input

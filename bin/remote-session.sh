@@ -822,6 +822,22 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     key_env="$("$KEYS" --names "$prov")" || return 1
     key_env="${key_env%%$'\n'*}"
 
+    # NATIVE ANTHROPIC LANE (0.38.1). When start_proxy decided (bin/anthropic-route.py, one cached
+    # probe per model) that this provider serves THIS model on its own Anthropic /v1/messages, the
+    # proxy forwards Claude Code's request untranslated: thinking, output_config.effort and
+    # cache_control arrive as written, so effort is the model's own Anthropic effort rather than
+    # our reasoning_effort mapping. LiteLLM's passthrough (supported_endpoints) still runs our
+    # hooks; la_proxy_hooks registers the model as reasoning-capable (LA_PASSTHROUGH_MODELS),
+    # without which LiteLLM silently DROPS thinking/effort for an id it does not know.
+    local native_line=""
+    if [[ "${LA_ROUTE_NATIVE:-0}" == 1 ]] && api_base="$(_anthropic_base "$prov")"; then
+        litellm_model="openai/$model"
+        native_line='    model_info:
+      supported_endpoints: ["/v1/messages"]'
+        think_line=""; effort_line=""
+        export LA_PASSTHROUGH_MODELS="$model"
+    fi
+
     _prepare_runtime_file "$cfg" || return 1
     echo "model_list:" >> "$cfg"
     local spoof
@@ -852,6 +868,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             if [[ "$prov" == "nvidia" || "$prov" == "gemini" || "$prov" == "groq" ]]; then
                 echo "      num_retries: 3"
             fi
+            [[ -n "$native_line" ]] && echo "$native_line"
         } >> "$cfg"
     done
     _write_subagent_pool "$cfg" "$prov" || return 1
@@ -898,6 +915,22 @@ general_settings:
 YAML
 }
 
+_decide_native_route() { # _decide_native_route <provider> <model> -> sets LA_ROUTE_NATIVE=0|1
+    # Per MODEL, not per provider: LLM7 serves some ids natively and refuses others. One tiny probe,
+    # cached 30 days (bin/anthropic-route.py); an undecided probe (balance, rate, 5xx) is not
+    # cached and falls back to chat/completions. LA_REMOTE_ANTHROPIC=on|off forces it.
+    LA_ROUTE_NATIVE=0
+    local base verdict key_line
+    base="$(_anthropic_base "$1")" || return 0
+    key_line="$("$KEYS" --env "$1" 2>/dev/null | head -1)"
+    verdict="$(LA_ANTHROPIC_KEY="${key_line#*=}" python3 "$SCRIPT_DIR/anthropic-route.py" \
+               decide "$1" "$2" "$base")" || verdict="chat"
+    if [[ "$verdict" == anthropic ]]; then
+        LA_ROUTE_NATIVE=1
+    fi
+    return 0
+}
+
 start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperature] -> echoes port
     local prov="$1" model="$2" thinking="$3" effort="${4:-}" temperature="${5:-}"
     umask 077
@@ -919,6 +952,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     _prepare_runtime_dir || return 1
     port="$(free_port)" || return 1
     cfg="$RUNDIR/proxy-$port.yaml"; log="$RUNDIR/proxy-$port.log"; pidf="$RUNDIR/proxy-$port.pid"
+    _decide_native_route "$prov" "$model"
     write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 1
     _prepare_runtime_file "$log" || return 1
     _prepare_runtime_file "$pidf" || return 1
@@ -1572,6 +1606,12 @@ echo "   proxy    : starting LiteLLM (Anthropic /v1/messages → $PROV)…"
 PORT="$(start_proxy "$PROV" "$MODEL" "$THINKING" "$EFFORT_CHOICE" "$TEMPERATURE_CHOICE")" || {
     echo "remote-session: could not start the translating proxy." >&2; exit 1; }
 echo "   proxy    : ready on http://127.0.0.1:$PORT"
+# start_proxy ran in a subshell, so read the lane it chose back from the config it wrote.
+if grep -q 'supported_endpoints: \["/v1/messages"\]' "$RUNDIR/proxy-$PORT.yaml" 2>/dev/null; then
+    echo "   lane     : native Anthropic /v1/messages (effort and thinking sent as Claude Code wrote them)"
+else
+    echo "   lane     : chat/completions translation"
+fi
 echo
 
 

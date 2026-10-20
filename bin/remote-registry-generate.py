@@ -164,6 +164,12 @@ def validate(data: dict[str, Any]) -> None:
                 f"Provider '{p_key}' has api_base_mode 'static' but empty base_url"
             )
 
+        anthropic_base = prov.get("anthropic_base")
+        if anthropic_base is not None and not (
+                isinstance(anthropic_base, str) and anthropic_base.startswith("https://")):
+            raise ValueError(f"Provider '{p_key}' anthropic_base must be an https:// URL "
+                             f"(the base Claude-style clients append /v1/messages to)")
+
         catalog_mode = prov.get("catalog_mode")
         if catalog_mode is not None and catalog_mode != "cloudflare_search":
             raise ValueError(
@@ -178,6 +184,7 @@ def validate(data: dict[str, Any]) -> None:
             prov.get("litellm_prefix", ""),
             prov.get("catalog_disabled_message", ""),
             prov.get("retired_message", ""),
+            prov.get("anthropic_base", ""),
         ]
         for val in shell_checked:
             if isinstance(val, str) and "\n" in val:
@@ -405,6 +412,20 @@ def _render_sh(data: dict[str, Any]) -> str:
     lines.append("}")
     lines.append("")
 
+    # _anthropic_base: providers that ALSO serve Anthropic /v1/messages natively. Whether a
+    # given model may use it is decided per model at launch (bin/anthropic-route.py).
+    lines.append(
+        '_anthropic_base() { # _anthropic_base <provider> -> native Anthropic base URL, or exit 1'
+    )
+    lines.append('    case "$1" in')
+    for pid, prov in providers.items():
+        if prov.get("anthropic_base") and not prov.get("retired_message"):
+            lines.append(f'        {pid}) echo {_sh_quote(prov["anthropic_base"])} ;;')
+    lines.append("        *) return 1 ;;")
+    lines.append("    esac")
+    lines.append("}")
+    lines.append("")
+
     # CLI self-execution dispatch
     lines.extend(
         [
@@ -420,6 +441,7 @@ def _render_sh(data: dict[str, Any]) -> str:
             "  _clear_provider_env",
             "  _catalog_request <provider>",
             "  _litellm_route <provider> <model>",
+            "  _anthropic_base <provider>",
             "",
             f"Configured provider IDs: {provider_ids_str}",
             "EOF",

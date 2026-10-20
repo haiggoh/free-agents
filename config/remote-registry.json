@@ -137,7 +137,8 @@
       "litellm_prefix": "openai",
       "api_base_mode": "static",
       "generic_openai_base": true,
-      "notes": "OpenAI-compatible. Free and paid models differ; inspect catalog pricing."
+      "anthropic_base": "https://api.kilo.ai/api/gateway",
+      "notes": "OpenAI-compatible, AND native Anthropic /v1/messages (200 with effort, 2026-10-20). Free and paid models differ; inspect catalog pricing."
     },
     "llm7": {
       "id": "llm7",
@@ -155,7 +156,8 @@
       "litellm_prefix": "openai",
       "api_base_mode": "static",
       "generic_openai_base": true,
-      "notes": "OpenAI-compatible. Catalog contains free and paid models; inspect pricing and tools."
+      "anthropic_base": "https://api.llm7.io",
+      "notes": "OpenAI-compatible; native Anthropic /v1/messages for SOME models only (GLM-5.3-Flash: \"does not support the requested schema\", 2026-10-20) -- decided per model at launch. Catalog contains free and paid models; claude-* ids answered 402 \"Insufficient balance\" on our account (2026-10-20)."
     },
     "mistral": {
       "id": "mistral",
@@ -234,7 +236,8 @@
       "litellm_prefix": "openrouter",
       "api_base_mode": "none",
       "generic_openai_base": false,
-      "notes": "Free models are namespaced ('openrouter/free' or ':free'). Tier is model-dependent (free vs paid) — see the router's free-model rule."
+      "anthropic_base": "https://openrouter.ai/api",
+      "notes": "Native Anthropic /v1/messages answers 200 and honours effort low/max (2026-10-20). Free models are namespaced ('openrouter/free' or ':free'). Tier is model-dependent (free vs paid) — see the router's free-model rule."
     },
     "sambanova": {
       "id": "sambanova",
@@ -252,7 +255,7 @@
       "litellm_prefix": "openai",
       "api_base_mode": "static",
       "generic_openai_base": true,
-      "notes": "OpenAI-compatible. Account trial, credit and paid billing vary."
+      "notes": "OpenAI-compatible. 2026-10-20: 402 \"A payment method is required\" on a key with no card -- free use may need a payment method on file."
     },
     "siliconflow": {
       "id": "siliconflow",
@@ -270,7 +273,7 @@
       "litellm_prefix": "openai",
       "api_base_mode": "static",
       "generic_openai_base": true,
-      "notes": "OpenAI-compatible. International .com endpoint. Free and paid models differ; inspect catalog pricing."
+      "notes": "OpenAI-compatible. International .com endpoint. Free and paid models differ; inspect catalog pricing. 2026-10-20: 402 \"account balance is insufficient\" even on a zero-priced pick -- may need a top-up, recheck before marking paid-only."
     },
     "streamlake": {
       "id": "streamlake",
@@ -324,7 +327,7 @@
       "litellm_prefix": "openai",
       "api_base_mode": "static",
       "generic_openai_base": true,
-      "notes": "OpenAI-compatible. Credits and paid account billing apply; select explicitly."
+      "notes": "OpenAI-compatible. REQUIRES A CREDIT CARD ON FILE even for the free monthly credits: 403 \"AI Gateway requires a valid credit card on file to service requests\" (2026-10-20)."
     },
     "zai": {
       "id": "zai",
@@ -342,7 +345,8 @@
       "litellm_prefix": "openai",
       "api_base_mode": "static",
       "generic_openai_base": true,
-      "notes": "ZAI Coding Plan endpoint is distinct; this route uses general API billing. OpenAI-compatible. /models answers (11 ids, checked 2026-10-18)."
+      "anthropic_base": "https://api.z.ai/api/anthropic",
+      "notes": "Native Anthropic endpoint at /api/anthropic (exists; answered \"Insufficient balance or no resource package\", code 1113, 2026-10-20 -- free allowance may be daily). Some GLM models always think and reject thinking-off. ZAI Coding Plan endpoint is distinct; this route uses general API billing. OpenAI-compatible. /models answers (11 ids, checked 2026-10-18)."
     }
   },
   "entries": [

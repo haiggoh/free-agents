@@ -292,15 +292,34 @@ _ACCOUNT = re.compile(
     r"exceeded\s+your\s+monthly\s+included\s+credits|billing\s+(?:details|required)", re.I)
 
 
+# Limits no retry within minutes can clear (2026-10-20 live gate): LLM7 429 "Daily token quota
+# exceeded. Retry after 63713 seconds."; Groq 413 "Request too large ... tokens per minute (TPM):
+# Limit 8000, Requested 42136" -- Claude Code's system prompt + tools alone exceed Groq's free TPM.
+_DAILY_QUOTA = re.compile(r"daily\s+(?:token\s+)?(?:quota|limit)|quota\s+exceeded.{0,40}retry\s+after\s+\d{4,}", re.I)
+_TOO_LARGE = re.compile(r"request\s+too\s+large|tokens\s+per\s+minute.{0,40}limit\s+\d+.{0,20}requested\s+\d+", re.I)
+
+
 def is_account_error(status, text: str) -> bool:
-    return status in (402, 403, 429, 400, None) and bool(_ACCOUNT.search(text or ""))
+    """True for refusals a retry cannot fix soon: account/billing, a daily quota, a too-large request."""
+    text = text or ""
+    if status in (402, 403, 429, 400, None) and _ACCOUNT.search(text):
+        return True
+    return status in (413, 429, 400, None) and bool(_DAILY_QUOTA.search(text) or _TOO_LARGE.search(text))
 
 
-def account_error_detail(provider: str, text: str) -> str:
-    return (f"{provider or 'the provider'} refused the request because of the provider ACCOUNT, "
-            f"not this proxy or the model route. Provider says: {text.strip()[:400]} -- Free "
-            f"allowances may reset daily, so retry later; otherwise check that account's billing "
-            f"or credits, or pick another provider.")
+def account_error_detail(provider: str, text: str, status=None) -> str:
+    who, said = provider or "the provider", text.strip()[:400]
+    if _TOO_LARGE.search(text):
+        return (f"{who} refused the request as too large for this model's free per-minute token "
+                f"limit -- Claude Code's prompt alone (system prompt + tool definitions) is bigger "
+                f"than that limit, so this model cannot run a Claude Code session on this tier. "
+                f"Provider says: {said} -- pick another model or provider.")
+    if _DAILY_QUOTA.search(text):
+        return (f"{who} says today's quota for this model is used up. Provider says: {said} -- "
+                f"it resets on the provider's schedule; pick another model or provider meanwhile.")
+    return (f"{who} refused the request because of the provider ACCOUNT, not this proxy or the "
+            f"model route. Provider says: {said} -- Free allowances may reset daily, so retry later; "
+            f"otherwise check that account's billing or credits, or pick another provider.")
 
 
 try:
@@ -385,6 +404,20 @@ class LAProxyHooks(CustomLogger):
               f"in the last 60 s -> all NVIDIA proxies pause {info['pause']:.0f}s",
               file=sys.stderr)
 
+    async def async_pre_request_hook(self, model, messages, kwargs):
+        # fix 7, native Anthropic lane only (LA_PASSTHROUGH_MODELS set): fold per-turn effort into
+        # the request's output_config. LiteLLM 1.105 passes `messages` separately and does not take
+        # a replacement back, so the SAME list is edited in place.
+        if not os.environ.get("LA_PASSTHROUGH_MODELS") or not isinstance(messages, list):
+            return None
+        folded = fold_per_turn_effort({"messages": messages, "output_config": kwargs.get("output_config")})
+        if folded is None:
+            return None
+        messages[:] = folded["messages"]
+        if folded.get("output_config"):
+            kwargs["output_config"] = folded["output_config"]
+        return kwargs
+
     async def async_post_call_failure_hook(self, request_data, original_exception,
                                            user_api_key_dict, traceback_str=None):
         # fix 6: what the CLIENT sees. An account refusal becomes a 402 that names the provider;
@@ -394,7 +427,8 @@ class LAProxyHooks(CustomLogger):
             return None
         from fastapi import HTTPException
         provider = os.environ.get("LA_REMOTE_PROVIDER", "")
-        detail = account_error_detail(provider, text.split("Exception - ", 1)[-1].split("\nLiteLLM:")[0])
+        detail = account_error_detail(provider, text.split("Exception - ", 1)[-1].split("\nLiteLLM:")[0],
+                                      getattr(original_exception, "status_code", None))
         print(f"la_proxy_hooks: {detail}", file=sys.stderr)
         # LiteLLM 1.105's /v1/messages endpoint awaits this hook but DISCARDS its return value and
         # builds the reply from the exception's own status_code/message/type -- so rewrite those
@@ -408,9 +442,60 @@ class LAProxyHooks(CustomLogger):
         return HTTPException(status_code=402, detail=detail)
 
 
+# ---- fix 7: the native Anthropic lane keeps thinking + effort ------------------------------
+
+def register_passthrough_models(ids: str) -> list:
+    """Declare each id (comma list) reasoning- and effort-capable, so LiteLLM's /v1/messages
+    passthrough FORWARDS thinking and output_config.effort instead of dropping them.
+
+    Measured on 1.105.1 with an echo upstream: for an id missing from its model map LiteLLM logs
+    "Dropping adaptive thinking/output_config.effort ... does not support extended thinking" and
+    strips both, so a native lane would silently lose the effort the user chose. The lookup uses
+    the BARE id as well as openai/<id>, so both are registered (one alone was measured not to work).
+    """
+    import litellm
+    caps = {"litellm_provider": "openai", "mode": "chat", "supports_reasoning": True,
+            "supports_output_config": True, "supports_adaptive_thinking": True,
+            "supports_max_reasoning_effort": True, "supports_xhigh_reasoning_effort": True,
+            "input_cost_per_token": 0, "output_cost_per_token": 0}
+    done = []
+    for mid in (i.strip() for i in (ids or "").split(",")):
+        if mid:
+            litellm.register_model({f"openai/{mid}": dict(caps), mid: dict(caps)})
+            done.append(mid)
+    return done
+
+
+def fold_per_turn_effort(kwargs: dict) -> dict | None:
+    """Move per-message output_config (Claude Code's per-turn effort on a mid-conversation
+    role:system message) up to the request's own output_config; None when there is none.
+
+    The per-turn form only Anthropic itself accepts: OpenRouter's /v1/messages refused it
+    ("Mid-conversation reasoning effort (configuration_update) is not supported") for most free
+    models on 2026-10-20, while the same effort at request level was honoured. The latest turn's
+    setting wins, which is what the per-turn control means.
+    """
+    messages = kwargs.get("messages")
+    if not isinstance(messages, list) or not any(
+            isinstance(m, dict) and "output_config" in m for m in messages):
+        return None
+    out, latest, folded = dict(kwargs), None, []
+    for m in messages:
+        if isinstance(m, dict) and "output_config" in m:
+            m = dict(m)
+            latest = m.pop("output_config") or latest
+        folded.append(m)
+    out["messages"] = folded
+    if isinstance(latest, dict):
+        out["output_config"] = {**(kwargs.get("output_config") or {}), **latest}
+    return out
+
+
 # Loading this module (which LiteLLM does at proxy start) checks the upstream stream fix.
 if CustomLogger is not object:
     check_stream_adapter()
+    if os.environ.get("LA_PASSTHROUGH_MODELS"):
+        register_passthrough_models(os.environ["LA_PASSTHROUGH_MODELS"])
 proxy_hooks = LAProxyHooks() if CustomLogger is not object else None
 
 

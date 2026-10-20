@@ -1621,9 +1621,15 @@ class APIKeysScreen(Screen):
         if groups:
             self.accordion.open_group = groups[0].id
 
+    # Account requirements a user must meet BEFORE a key can work, shown on the provider's row so
+    # they are seen while choosing, not discovered as a 403 inside the first session.
+    ACCOUNT_WARNINGS = {"vercel": f"{ec.EMOJI_WARNING_STR}  needs a credit card on file, even for free credits"}
+
     def _get_provider_status(self, slug: str, key_files: tuple) -> str:
         """Get status of a provider by checking actual key files in ~/.api_keys"""
-        return f"{ec.EMOJI_OK_STR} Saved" if provider_has_key(slug) else f"{ec.EMOJI_MISSING_STR} Missing"
+        status = f"{ec.EMOJI_OK_STR} Saved" if provider_has_key(slug) else f"{ec.EMOJI_MISSING_STR} Missing"
+        warning = self.ACCOUNT_WARNINGS.get(slug)
+        return f"{status}  {warning}" if warning else status
 
     def actions(self):
         # No static actions - all actions are via accordion items

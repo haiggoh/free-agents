@@ -1,3 +1,59 @@
+## [0.38.1] — 2026-10-20
+
+### Fixed — remote sessions failed on the first prompt on almost every non-NVIDIA provider
+
+- **Every `openai/` route (Z.ai, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, Streamlake, Cloudflare,
+  ModelScope, Hugging Face) was sent to the OpenAI Responses API and 404'd.** LiteLLM 1.105 bridges
+  Anthropic `/v1/messages` to `/responses` for every `openai/` model. The proxy config tried to stop
+  that with `disable_responses_api: true`, a key LiteLLM never had: it applies `litellm_settings` with
+  `setattr`, so the key was silently inert. Now `use_chat_completions_url_for_anthropic_messages`, and
+  a test checks every `litellm_settings` / `router_settings` key against the INSTALLED LiteLLM.
+  (`telemetry: false` was removed for the same reason: a legacy no-op.) NVIDIA was unaffected because
+  it has its own `nvidia_nim/` prefix.
+- **The "transient error counting down" was not transient.** After the first upstream failure the
+  router cooled down the only deployment, so every Claude Code retry got a synthetic `429 No
+  deployments available ... Try again in 5 seconds` and the real error stayed hidden.
+  `router_settings.disable_cooldowns: true`.
+- **Account refusals now answer at once, named.** Balance / credit / payment-method / credit-card
+  refusals (Z.ai sends its "Insufficient balance" as a **429**) become an HTTP **402** that names the
+  provider, keeps the provider's own words, and says a free allowance may simply reset tomorrow.
+  LiteLLM's `/v1/messages` endpoint discards a failure hook's return value, so the hook rewrites the
+  exception in place (measured on 1.105.1).
+- **Groq**: never sent `prompt_cache_key` (LiteLLM adds it because Groq's config claims support;
+  Groq's API answers 400 "property 'prompt_cache_key' is unsupported").
+- **Gemini**: `disable_anthropic_gemini_context_caching_transform` -- Claude Code's `cache_control`
+  made LiteLLM create a paid `cachedContents` entry, which the free tier answers with 429.
+- **Learned per model, like the max_tokens cap**: a 400 naming an unsupported property drops it; "does
+  not support reasoning" (LLM7 deepseek-v4-pro) drops reasoning_effort/thinking; "always engages in
+  thinking and cannot be disabled" (Z.ai glm-5.3-flash) sends thinking-off turns as `low`.
+
+- **Daily quotas and too-large requests are named too, not retried.** LLM7's "Daily token quota
+  exceeded. Retry after 63713 seconds" and Groq's 413 "Request too large ... tokens per minute
+  (TPM): Limit 8000, Requested 42136" (Claude Code's prompt alone is over that model's free TPM)
+  come back at once with what they mean. Measured in the release's live gate.
+
+### Added — a native Anthropic lane, decided per model
+
+- Providers that also serve Anthropic `/v1/messages` (`anthropic_base` in the registry: OpenRouter,
+  Kilo, Z.ai, LLM7) are used natively when the chosen MODEL accepts it: thinking and
+  `output_config.effort` arrive exactly as Claude Code wrote them, so the effort level is the model's
+  own Anthropic effort. `bin/anthropic-route.py` decides with one tiny probe and caches the verdict for
+  30 days (`~/.local/state/local-agents/anthropic-route.json`); an account, rate or server error is
+  "undecided" and NOT cached. `LA_REMOTE_ANTHROPIC=on|off` forces it. The launch banner names the lane.
+  LiteLLM's passthrough drops thinking/effort for an id it does not know, so the proxy hooks declare
+  the model reasoning-capable (`LA_PASSTHROUGH_MODELS`). Claude Code's PER-TURN effort
+  (`output_config` on a mid-conversation system message) is folded into the request's own
+  `output_config`: OpenRouter refused the per-turn form ("Mid-conversation reasoning effort
+  (configuration_update) is not supported") for most free models.
+- The NVIDIA rate limiter stays NVIDIA-only on both lanes; no other provider has a known RPM ceiling.
+
+### Changed — account requirements visible during API key setup
+
+- **Vercel needs a credit card on file before it serves any request, free credits included** -- shown
+  on its API Keys row, in its setup steps, and above the key field. Measured account quirks for Z.ai,
+  SiliconFlow, SambaNova and LLM7 are in their setup steps and registry notes. No provider was marked
+  paid-only: several refusals may be daily allowances, to be rechecked.
+
 ## [0.38.0] — 2026-10-19
 
 ### Added — the memory guard: auto-compact instead of a dead session

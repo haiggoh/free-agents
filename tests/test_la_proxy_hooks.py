@@ -346,6 +346,33 @@ class LearnedRequestFixTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class NativeLaneTests(unittest.TestCase):
+    """Fix 7: on the native Anthropic lane, Claude Code's PER-TURN effort (output_config on a
+    mid-conversation role:system message, beta per-turn-control-2026-07-01) is folded into the
+    request-level output_config. OpenRouter answered it on 2026-10-20 with 400 "Mid-conversation
+    reasoning effort (configuration_update) is not supported on <model>" for most free models."""
+
+    def setUp(self):
+        self.mod = load_hooks()
+
+    def test_per_turn_effort_moves_to_the_request(self):
+        kwargs = {"model": "openai/openrouter/free", "output_config": {"effort": "high"},
+                  "messages": [{"role": "user", "content": "a"},
+                               {"role": "system", "content": "note", "output_config": {"effort": "max"}},
+                               {"role": "user", "content": "b"}]}
+        out = self.mod.fold_per_turn_effort(kwargs)
+        self.assertEqual(out["output_config"], {"effort": "max"}, "the latest per-turn effort wins")
+        self.assertTrue(all("output_config" not in m for m in out["messages"]))
+        self.assertEqual(out["messages"][1]["content"], "note", "the message itself is kept")
+        self.assertIn("output_config", kwargs["messages"][1], "the caller's dict is not mutated")
+
+    def test_nothing_to_fold_returns_none(self):
+        self.assertIsNone(self.mod.fold_per_turn_effort(
+            {"messages": [{"role": "user", "content": "a"}], "output_config": {"effort": "low"}}))
+        self.assertIsNone(self.mod.fold_per_turn_effort({"input": "x"}))
+
+
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
 class AccountErrorTests(unittest.TestCase):
     """Fix 6: an upstream refusal about the ACCOUNT (balance, credits, payment method, card) is
     answered as HTTP 402 naming the provider. Claude Code retries 429/5xx for minutes behind a
@@ -358,7 +385,25 @@ class AccountErrorTests(unittest.TestCase):
         ("llm7", 402, '{"error":{"message":"Insufficient balance. Please top up your balance to continue."}}'),
         ("huggingface", 402, "You have exceeded your monthly included credits for Inference Providers."),
     )
-    NOT_ACCOUNT = ((429, "Rate limit exceeded"), (429, "Too Many Requests"), (400, "bad request"))
+    # Not the account, but equally not fixable by a retry within minutes: the session must say so
+    # at once instead of counting down. Real texts from the 2026-10-20 live gate.
+    HARD_LIMIT = (
+        ("llm7", 429, "Daily token quota exceeded. Retry after 63713 seconds."),
+        ("groq", 413, "Request too large for model `openai/gpt-oss-120b` in organization `org_x` service "
+                      "tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 42136, please "
+                      "reduce your message size and try again."),
+    )
+    NOT_ACCOUNT = ((429, "Rate limit exceeded"), (429, "Too Many Requests"), (400, "bad request"),
+                   (503, "This model is currently experiencing high demand."))
+
+    def test_hard_limits_are_recognised_and_named(self):
+        for prov, status, text in self.HARD_LIMIT:
+            with self.subTest(prov):
+                self.assertTrue(self.mod.is_account_error(status, text))
+                detail = self.mod.account_error_detail(prov, text, status)
+                self.assertIn(prov, detail)
+                self.assertNotIn("ACCOUNT", detail, "a quota/size limit is not a billing problem")
+        self.assertIn("Claude Code's prompt alone", self.mod.account_error_detail("groq", self.HARD_LIMIT[1][2], 413))
 
     def setUp(self):
         self.mod = load_hooks()

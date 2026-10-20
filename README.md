@@ -239,6 +239,9 @@ Linux are the same idea on other backends ([docs/CUDA.md](docs/CUDA.md)).
 
 Newest first. `CHANGELOG.md` has every release in full.
 
+- **0.38.1**: remote sessions work past the first prompt on every keyed provider (the
+  chat/completions switch LiteLLM actually reads); a native Anthropic lane, chosen per model, for
+  OpenRouter, Kilo, Z.ai and LLM7; account refusals (balance, card) shown at once as a named 402.
 - **0.38.0**: the [memory guard](#the-memory-guard-auto-compact-instead-of-a-dead-session-0380):
   local sessions compact before they run out of RAM; per-model KV cache precision.
 

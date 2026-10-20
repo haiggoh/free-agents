@@ -114,6 +114,17 @@ class APIKeysDesignTests(unittest.TestCase):
                 f"Group {group.id} label missing status icon: {group.label}"
             )
 
+    def test_vercel_credit_card_requirement_is_visible_before_key_entry(self):
+        """0.38.1: Vercel answers 403 "requires a valid credit card on file" even for free credits.
+        The requirement must be on the accordion row AND in the steps shown at the key prompt."""
+        api_keys = m.APIKeysScreen(self.settings)
+        row = next(g.label for g in api_keys.groups() if g.id == "vercel")
+        self.assertIn("credit card", row)
+        steps = next(p.steps for p in m.KEY_PROVIDERS if p.slug == "vercel")
+        self.assertIn("CREDIT CARD", steps)
+        other = next(g.label for g in api_keys.groups() if g.id == "groq")
+        self.assertNotIn("credit card", other)
+
     def test_no_generic_add_api_key_action(self):
         """Generic 'Add API key (select provider)' action is removed."""
         api_keys = m.APIKeysScreen(self.settings)
