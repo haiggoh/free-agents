@@ -574,6 +574,12 @@ _prepare_runtime_file() {
 free_port() {
     local p
     for ((p=LA_REMOTE_PROXY_PORT_MIN; p<=LA_REMOTE_PROXY_PORT_MAX; p++)); do
+        # A port is NOT free while the session that owned it still runs, even if its proxy died:
+        # that session's ANTHROPIC_BASE_URL still points here, and a new proxy for another
+        # provider on this port would silently answer it (the 2026-10-20 Mistral misroute).
+        if [[ -r "$RUNDIR/proxy-$p.owner" ]] && _owner_alive "$(cat "$RUNDIR/proxy-$p.owner")"; then
+            continue
+        fi
         if ! lsof -ti tcp:"$p" >/dev/null 2>&1; then echo "$p"; return 0; fi
     done
     echo "remote-session: no free port in ${LA_REMOTE_PROXY_PORT_MIN}-${LA_REMOTE_PROXY_PORT_MAX}" >&2

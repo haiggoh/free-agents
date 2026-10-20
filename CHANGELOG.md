@@ -56,6 +56,8 @@
   terminal; the next test reused its port with a Mistral config, so that session died on Mistral's
   429. Each proxy now records its owner (launcher pid + start time, so a recycled pid is not mistaken
   for it); `--stop` stops only proxies whose owner is gone, `--stop <port> --force` is the override.
+  `free_port` also skips a port whose owning session is still alive even if its proxy died, so a
+  live session's base URL can never be answered by a new proxy for another provider.
 - **csl no longer offers an "upgrade" to an OLDER release.** The weekly check had cached "litellm
   1.102.4 -> 1.105.1"; with 1.106.0 installed by hand, the launch-time recheck still asked, because it
   compared installed != offered. It now compares versions and drops an offer that is already met.

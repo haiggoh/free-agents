@@ -432,6 +432,27 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         time.sleep(0.3)
         self.assertIsNotNone(procs[4146].poll())
 
+    def test_free_port_skips_a_port_whose_session_is_alive(self):
+        """Second half of the 2026-10-20 incident: once a session's proxy is gone, its port must
+        not be handed to a NEW proxy (another provider) while that session still points at it."""
+        rundir = self.root / 'local-agents-remote'
+        rundir.mkdir(exist_ok=True)
+        owner = subprocess.Popen(['sleep', '120'])
+        self.addCleanup(owner.kill)
+        self.stub('lsof', '#!/bin/sh\nexit 1\n')                     # every port looks free
+        def port(owner_line):
+            (rundir / 'proxy-4141.owner').write_text(owner_line)
+            r = subprocess.run(['bash', '-c', 'source "$1"; free_port', 'x', str(self.root / 'bin/library.sh')],
+                               env=self.env, text=True, capture_output=True)
+            return r.stdout.strip()
+        # The owner line exactly as the launcher writes it (_proc_start), not a re-derivation.
+        start = subprocess.run(['bash', '-c', 'source "$1"; _proc_start "$2"', 'x',
+                                str(self.root / 'bin/library.sh'), str(owner.pid)],
+                               env=self.env, text=True, capture_output=True).stdout.strip()
+        self.assertTrue(start)
+        self.assertEqual(port(f'{owner.pid} {start}'), '4142', 'live owner: 4141 is reserved')
+        self.assertEqual(port('999999 x'), '4141', 'dead owner: 4141 is free again')
+
     def test_recycled_owner_pid_counts_as_gone(self):
         """A session closed hours ago may have its pid reused by an unrelated process. The owner
         record carries the launcher's START TIME too, so a live pid with another start time is
