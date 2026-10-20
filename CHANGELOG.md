@@ -90,6 +90,14 @@
   `<alias> --remote-model <id>` through the placeholder alias.
 - **The CLI is unchanged**: `remote-session.sh <alias> --remote-model <id>` still launches a
   non-interactive pick, and interactive `<alias>` still opens the numbered catalog chooser.
+- **The lists are cached on disk and revised once per session.** Each provider's catalog lands in
+  `~/.local/state/local-agents/remote-catalogs/<provider>.json` (file 0600, dir 0700, atomic
+  replace, `LA_REMOTE_CATALOG_CACHE_DIR` overrides the location). The picker paints the cached
+  list on the first paint and revises it in the background: new ids appear, vanished ids
+  disappear, and the cache is rewritten from the live answer. A failed refresh (network, 401,
+  TLS) **keeps the cached list and says so** in the group header ("cached, refresh failed: …") —
+  it never empties it. No new HTTP: the revision is the same GET-only `remote-session.sh
+  --models` call, which already goes through curl's system trust store.
 
 ## [0.38.0] — 2026-10-19
 

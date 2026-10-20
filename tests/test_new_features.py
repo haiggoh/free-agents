@@ -9,6 +9,7 @@ pure model/constant checks need no UI at all.
 
 Run: ~/.local/share/free-agents/picker-venv/bin/python -m pytest tests/test_new_features.py
 """
+import json
 import os
 import re
 import stat
@@ -389,6 +390,24 @@ class RemoteLiveCatalog(PilotCase):
             self.assertEqual(argv[-3:], ["--remote-model", "vendor/extra", "nvidia-a"])
             self.assertEqual(self.saved_state()["last_launched"]["remote_api_session"],
                              "nvidia-a@vendor/extra")
+        self.run_picker(s, start="remote")
+
+    def test_cached_catalog_renders_at_first_paint_and_revises(self):
+        # T2: rows from the provider's disk cache are on screen before the live fetch
+        # answers; the background revision then adds new ids and removes vanished ones.
+        cache_dir = Path(self.tmp.name) / "cat-cache"
+        cache_dir.mkdir(mode=0o700)
+        os.environ["LA_REMOTE_CATALOG_CACHE_DIR"] = str(cache_dir)
+        self.addCleanup(os.environ.pop, "LA_REMOTE_CATALOG_CACHE_DIR", None)
+        (cache_dir / "nvidia.json").write_text(json.dumps({
+            "provider": "nvidia", "fetched": "2026-10-19T00:00:00Z",
+            "rows": [["vendor/cached-old", {"tools": True}]]}))
+
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("vendor/cached-old")          # from the cache, instantly
+            await h.wait_text("vendor/extra", secs=10)      # revision adds the new id
+            self.assertNotIn("vendor/cached-old", h.text())  # and removes the vanished one
         self.run_picker(s, start="remote")
 
 

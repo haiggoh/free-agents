@@ -669,6 +669,7 @@ class Picker(App):
         if isinstance(sm, m.RemoteScreen) and kind == "remote" and not sm._models_loaded:
             sm.agents = data
             sm._regroup()
+            sm.load_cached_catalogs()          # cached rosters paint at once (T2)
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data, *([MISSING_MODELS] if isinstance(sm, m.LocalScreen) else []))
             sm._models_loaded = True
@@ -1060,6 +1061,7 @@ class Picker(App):
                     sm.agents = self.cache["remote"]
                     sm._regroup()  # Re-group with loaded agents
                     sm._models_loaded = True
+                    sm.load_cached_catalogs()   # cached rosters paint at once (T2)
                 return True
         return False
 

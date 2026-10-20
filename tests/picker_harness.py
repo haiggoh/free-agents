@@ -93,7 +93,10 @@ class _StubbedEnv(unittest.TestCase):
                     "LA_THEME_CONFIG_DIR": str(self.themes),
                     # Catalog rows never reach Hugging Face from a test, nor its real cache.
                     "LA_PICKER_HF_LOOKUP": "0",
-                    "LA_HF_PARAMS_CACHE": str(t / "hf-params.json")}
+                    "LA_HF_PARAMS_CACHE": str(t / "hf-params.json"),
+                    # The catalog disk cache (T2) reads and writes at picker runtime: tests
+                    # must never see nor poison the user's real ~/.local/state catalogs.
+                    "LA_REMOTE_CATALOG_CACHE_DIR": str(t / "catalog-cache")}
 
     def launches(self):
         if not self.log.exists():

@@ -21,6 +21,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
@@ -137,6 +138,53 @@ class CatalogModel:
 
 
 CATALOG_PREFIX = "cat:"     # catalog row ids: cat:<provider>:<model id>
+
+# --- per-provider catalog cache (T2) ------------------------------------------------------
+# The picker renders a provider's catalog from this cache instantly and revises it in the
+# background once per session; a failed refresh keeps the cached list (never empties it).
+CATALOG_CACHE_DIR_ENV = "LA_REMOTE_CATALOG_CACHE_DIR"
+
+
+def catalog_cache_dir() -> Path:
+    d = os.environ.get(CATALOG_CACHE_DIR_ENV)
+    return Path(d) if d else Path.home() / ".local/state/local-agents/remote-catalogs"
+
+
+def write_catalog_cache(provider: str, rows: list) -> None:
+    """Persist one provider's catalog (file 0600, dir 0700, atomic replace). Best-effort:
+    a cache failure must never fail the picker, so every error is swallowed."""
+    try:
+        d = catalog_cache_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        os.chmod(d, 0o700)
+        payload = {"provider": provider,
+                   "fetched": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                   "rows": [[c.model_id, {"tools": c.tools, "pricing": c.pricing}] for c in rows]}
+        p = d / f"{provider}.json"
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload))
+        os.chmod(tmp, 0o600)
+        tmp.replace(p)
+    except OSError:
+        pass
+
+
+def read_catalog_cache(provider: str) -> "list[CatalogModel] | None":
+    """Cached rows for a provider, or None when missing/corrupt — never raises. Rows whose
+    id is not a string are dropped (a corrupt entry must not poison the whole file)."""
+    try:
+        data = json.loads((catalog_cache_dir() / f"{provider}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for r in rows:
+        if isinstance(r, list) and r and isinstance(r[0], str):
+            meta = r[1] if len(r) > 1 and isinstance(r[1], dict) else {}
+            out.append(CatalogModel(r[0], meta.get("tools", "unknown"), meta.get("pricing", "unknown")))
+    return out or None
 
 
 # Order matters: identity markers first, so "deepseek-r1-distill-qwen" is DeepSeek (the
@@ -799,6 +847,10 @@ class RemoteScreen(Screen):
         # provider -> list[CatalogModel] once loaded, or an error string; absent = not fetched.
         self.catalogs: dict = {}
         self._catalog_pending: set = set()
+        # Providers whose rows came from the disk cache and still owe one background
+        # revision this session; provider -> refresh error message, cleared on success.
+        self._catalog_stale: set = set()
+        self.catalog_refresh_error: dict = {}
         if agents is not None:
             self.agents = agents
             self._regroup()
@@ -827,13 +879,27 @@ class RemoteScreen(Screen):
             items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}")
                      for a in buckets[prov] if a.model_id != "SELECT"]
             items += self._catalog_items(prov, buckets[prov])
-            groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
+            label = f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})"
+            if prov in self.catalog_refresh_error:
+                label += f" · cached, refresh failed: {self.catalog_refresh_error[prov]}"
+            groups.append(Group(prov, label, items))
         if not groups and not any(a.has_key for a in self.agents):
             # No provider key at all: the list is an instruction, not a roster of unusable models.
             groups = [Group("__nokeys__", f"{ec.EMOJI_KEY_STR} No API key saved yet",
                             [Item("__nokeys__:k", "Press K (API keys) to set one up — every listed provider has a free tier")])]
         self.accordion.set_groups(groups)
         self._models_loaded = True
+
+    def load_cached_catalogs(self):
+        """Render every provider that has a disk cache from it at once — the list is there
+        on the first paint and the background revision (catalog_kind_needed) updates it
+        after. Called once, when the agent roster lands. No network, never raises."""
+        for prov in dict.fromkeys(a.provider for a in self.agents):
+            rows = read_catalog_cache(prov)
+            if rows:
+                self.catalogs.setdefault(prov, rows)
+                self._catalog_stale.add(prov)
+        self._refresh_keep_open()
 
     # --- live provider catalogs (pinned aliases first, then everything the provider lists) ---
     def _catalog_items(self, prov: str, pinned: list) -> list:
@@ -884,14 +950,35 @@ class RemoteScreen(Screen):
             self._catalog_pending.add(agent.provider)
             self._refresh_keep_open()           # show the loading row at once
             return f"rcat:{agent.alias}"
+        for prov in self._catalog_stale:        # cached rosters: one background revision
+            if prov in self._catalog_pending:
+                continue
+            anchor = next((a for a in self.agents if a.provider == prov and self._visible(a)), None)
+            if anchor is None:
+                self._catalog_stale.discard(prov)
+                continue
+            self._catalog_pending.add(prov)
+            self._refresh_keep_open()
+            return f"rcat:{anchor.alias}"
         return None
 
     def set_catalog(self, alias: str, rows, err: str | None):
         prov = next((a.provider for a in self.agents if a.alias == alias), None)
         if prov is None:
             return
+        prev = self.catalogs.get(prov)
         self._catalog_pending.discard(prov)
+        self._catalog_stale.discard(prov)      # revised once per session, success or not
+        if err and isinstance(prev, list) and prev:
+            # A failed refresh keeps the known list and says so in the group header —
+            # a network/401/TLS failure must never empty the model list (T2).
+            self.catalog_refresh_error[prov] = err.split(": ", 1)[-1]
+            self._refresh_keep_open()
+            return
+        self.catalog_refresh_error.pop(prov, None)
         self.catalogs[prov] = (err.split(": ", 1)[-1] if err else list(rows))
+        if not err and rows:
+            write_catalog_cache(prov, rows)
         self._refresh_keep_open()
 
     def _refresh_keep_open(self):
