@@ -1294,6 +1294,27 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   visible output or tool arguments.
 - **`la-evict` is a last resort, and a conservative one.** The escape hatch for when the machine is already out of RAM and the normal lifecycle is unresponsive: it never bulk-kills the roster, never touches a server with a live session on its first pass, and escalates only one step per repeat call inside the window — so a healthy stack is left alone. Deliberately standalone (no `config-lib.sh`, no registry): a fallback that runs while the stack is sick must not depend on the stack.
 
+## Testing
+
+The full suite runs in PARALLEL by default (pytest-xdist, 2026-10-20: 692+ tests in ~75 s vs ~250 s serial):
+
+```sh
+~/.local/bin/pytest -q tests/ -p no:cacheprovider -n auto     # full suite, all cores
+```
+
+- **Serial fallback** — when pytest-xdist is not installed (or you suspect an order-dependence bug), drop
+  `-n auto` and run the same command; a parallel-only failure is a real defect to report, not a reason to
+  quietly re-serialize.
+- **Picker UI tests** run in their own venv (Textual pilot):
+  `~/.local/share/free-agents/picker-venv/bin/python -m pytest -q tests/test_new_features.py`.
+- **LiteLLM proxy tests** run under the LiteLLM interpreter so they see the installed LiteLLM:
+  `~/.local/pipx/venvs/litellm/bin/python tests/test_la_proxy_hooks.py tests/test_anthropic_route.py
+  tests/test_litellm_contract.py` (the contract test pins the LiteLLM behaviours this release depends on —
+  run it after every LiteLLM upgrade).
+- **Shell gates**: `bash tests/lint.sh` (shellcheck) and `bash tests/test_every_script_has_help.sh`.
+- Ad-hoc single test files: `python3 tests/<file>.py < /dev/null` (a suite that reads stdin needs the closed
+  stdin; see `tests/test_estimate_model_footprint.py`).
+
 ## Diagnostics
 
 | Script | What it checks |
