@@ -278,5 +278,122 @@ class OutputCapTests(unittest.TestCase):
         self.assertNotIn("safeguards", out)
 
 
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class LearnedRequestFixTests(unittest.TestCase):
+    """Fix 5: a provider's 400 naming a field it rejects corrects that model's later requests.
+
+    Every error string here is the provider's REAL reply, captured from a live proxy log on
+    2026-10-20 (0.38.1). The router's one BadRequest retry makes the failing turn succeed.
+    """
+    GROQ = ('GroqException - {"error":{"message":"property \'prompt_cache_key\' is unsupported",'
+            '"type":"invalid_request_error"}}')
+    LLM7 = "OpenAIException - Model 'deepseek-v4-pro' does not support reasoning."
+    ZAI = ("OpenAIException - This model always engages in thinking and cannot be disabled; "
+           "please use low, high, or max")
+
+    def setUp(self):
+        self.mod = load_hooks()
+        self.hooks = self.mod.LAProxyHooks()
+        self.hooks._bucket = None
+
+    def _fail(self, text, model, provider="openai"):
+        import litellm
+        exc = litellm.BadRequestError(message=text, model=model, llm_provider=provider)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            asyncio.run(self.hooks.async_log_failure_event(
+                {"model": model, "custom_llm_provider": provider, "exception": exc}, None, None, None))
+        return err.getvalue()
+
+    def _pre(self, model, provider="openai", **params):
+        kwargs = {"model": f"{provider}/{model}", "custom_llm_provider": provider, **params}
+        out = asyncio.run(self.hooks.async_pre_call_deployment_hook(kwargs, None))
+        return kwargs if out is None else out
+
+    def test_groq_never_gets_prompt_cache_key_even_on_the_first_request(self):
+        out = self._pre("openai/gpt-oss-120b", provider="groq", prompt_cache_key="k", max_tokens=9)
+        self.assertNotIn("prompt_cache_key", out)
+        self.assertEqual(out["max_tokens"], 9)
+
+    def test_unsupported_property_is_learned_per_model(self):
+        log = self._fail(self.GROQ, "qwen/q", provider="groq")
+        self.assertIn("rejects 'prompt_cache_key'", log)
+        self.assertNotIn("prompt_cache_key", self._pre("qwen/q", provider="groq", prompt_cache_key="k"))
+        # A different model of another provider is untouched by groq's lesson.
+        self.assertEqual(self._pre("m2", prompt_cache_key="k")["prompt_cache_key"], "k")
+
+    def test_model_without_reasoning_loses_reasoning_effort(self):
+        self.assertEqual(self._pre("deepseek-v4-pro", reasoning_effort="high")["reasoning_effort"], "high")
+        log = self._fail(self.LLM7, "deepseek-v4-pro")
+        self.assertIn("does not reason", log)
+        out = self._pre("deepseek-v4-pro", reasoning_effort="high", thinking={"type": "enabled"})
+        self.assertNotIn("reasoning_effort", out)
+        self.assertNotIn("thinking", out)
+
+    def test_always_thinking_model_never_gets_thinking_off(self):
+        # Claude Code's thinking-disabled turns arrive as reasoning_effort="none" (measured
+        # through LiteLLM 1.105.1 with an echo upstream).
+        log = self._fail(self.ZAI, "glm-5.3-flash")
+        self.assertIn("always thinks", log)
+        self.assertEqual(self._pre("glm-5.3-flash", reasoning_effort="none")["reasoning_effort"], "low")
+        self.assertEqual(self._pre("glm-5.3-flash", reasoning_effort="high")["reasoning_effort"], "high",
+                         "an explicit level is left alone")
+
+    def test_unrelated_400_learns_nothing(self):
+        self._fail("max_tokens must be positive", "m3")
+        self.assertEqual(self._pre("m3", reasoning_effort="none", prompt_cache_key="k"),
+                         {"model": "openai/m3", "custom_llm_provider": "openai",
+                          "reasoning_effort": "none", "prompt_cache_key": "k"})
+
+
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class AccountErrorTests(unittest.TestCase):
+    """Fix 6: an upstream refusal about the ACCOUNT (balance, credits, payment method, card) is
+    answered as HTTP 402 naming the provider. Claude Code retries 429/5xx for minutes behind a
+    countdown; a 402 it reports at once. Real texts from 2026-10-20 live proxy logs."""
+    ACCOUNT = (
+        ("zai", 429, "Insufficient balance or no resource package. Please recharge."),
+        ("siliconflow", 402, "Sorry, your account balance is insufficient"),
+        ("sambanova", 402, "A payment method is required. Add one at https://cloud.sambanova.ai/plans/billing to continue."),
+        ("vercel", 403, "AI Gateway requires a valid credit card on file to service requests."),
+        ("llm7", 402, '{"error":{"message":"Insufficient balance. Please top up your balance to continue."}}'),
+        ("huggingface", 402, "You have exceeded your monthly included credits for Inference Providers."),
+    )
+    NOT_ACCOUNT = ((429, "Rate limit exceeded"), (429, "Too Many Requests"), (400, "bad request"))
+
+    def setUp(self):
+        self.mod = load_hooks()
+
+    def test_account_refusals_are_recognised(self):
+        for prov, status, text in self.ACCOUNT:
+            with self.subTest(prov):
+                self.assertTrue(self.mod.is_account_error(status, text))
+
+    def test_rate_limits_are_not_account_errors(self):
+        for status, text in self.NOT_ACCOUNT:
+            with self.subTest(text):
+                self.assertFalse(self.mod.is_account_error(status, text))
+
+    def test_failure_hook_answers_402_naming_the_provider(self):
+        import litellm
+        hooks = self.mod.LAProxyHooks()
+        hooks._bucket = None
+        exc = litellm.RateLimitError(message="OpenAIException - " + self.ACCOUNT[0][2],
+                                     llm_provider="openai", model="glm-5.3")
+        os.environ["LA_REMOTE_PROVIDER"] = "zai"
+        self.addCleanup(os.environ.pop, "LA_REMOTE_PROVIDER", None)
+        with contextlib.redirect_stderr(io.StringIO()):
+            out = asyncio.run(hooks.async_post_call_failure_hook({}, exc, None))
+        self.assertEqual(out.status_code, 402)
+        self.assertIn("zai", out.detail)
+        self.assertIn("ACCOUNT", out.detail)
+        self.assertIn("Insufficient balance", out.detail, "the provider's own words stay visible")
+        # LiteLLM's /v1/messages endpoint ignores the returned HTTPException and replies from the
+        # exception itself (measured on 1.105.1), so the exception must be rewritten in place.
+        self.assertEqual(exc.status_code, 402)
+        self.assertIn("ACCOUNT", exc.message)
+        plain = litellm.RateLimitError(message="Rate limit exceeded", llm_provider="openai", model="m")
+        self.assertIsNone(asyncio.run(hooks.async_post_call_failure_hook({}, plain, None)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -858,11 +858,17 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     cat >> "$cfg" <<'YAML'
 litellm_settings:
   drop_params: true
-  telemetry: false
-  # GLOBAL, not per-model (LiteLLM reads it from litellm_settings only): never bridge Anthropic
-  # /v1/messages through the OpenAI Responses API -- Mistral and most OpenAI-compatible routes 404
-  # on /v1/responses. Every route here speaks chat/completions, so it is safe for all of them.
-  disable_responses_api: true
+  # Never bridge Anthropic /v1/messages through the OpenAI Responses API: LiteLLM sends EVERY
+  # openai/ route there by default, and zai, siliconflow, llm7, ... 404 on /responses. The proxy
+  # applies these keys with setattr(litellm, key, value), so a misspelt or retired key is SILENTLY
+  # inert: until 0.38.1 this line read `disable_responses_api: true`, a key LiteLLM never had, and
+  # every openai/ route failed its first prompt. (`telemetry: false` went for the same reason: a
+  # legacy no-op since LiteLLM 1.105.) tests/test_remote_session.py checks each key against the
+  # installed LiteLLM.
+  use_chat_completions_url_for_anthropic_messages: true
+  # Gemini: Claude Code marks its prompt with cache_control, which LiteLLM turns into a paid
+  # cachedContents call that the free tier answers with 429 before the real request is sent.
+  disable_anthropic_gemini_context_caching_transform: true
 YAML
     # PROXY HOOKS (bin/la_proxy_hooks.py): NIM's rejected request keys (safeguards, and
     # stop_sequences on LiteLLM < 1.102.1 -> HTTP 400), the machine-wide NVIDIA 40 RPM bucket,
@@ -883,6 +889,10 @@ YAML
 router_settings:
   retry_policy:
     BadRequestErrorRetries: 1
+  # One deployment per name: a cooldown after its first failure answers every retry with a
+  # synthetic "429 No deployments available ... Try again in 5 seconds", which Claude Code counts
+  # down and retries for minutes while the REAL upstream error (404, 402 balance, 400) stays hidden.
+  disable_cooldowns: true
 general_settings:
   master_key: sk-local-agents-remote
 YAML
@@ -927,6 +937,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
         ( _clear_provider_env
           # shellcheck disable=SC2163 # line_o is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
           while IFS= read -r line_o; do [[ -n "$line_o" ]] && export "$line_o"; done <<< "$envassign_o"
+          export LA_REMOTE_PROVIDER="$prov"   # la_proxy_hooks names it in account errors
           exec "${_cmd[@]}" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
         echo $! > "$pidf"
         local j
@@ -966,6 +977,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     ( _clear_provider_env
       # shellcheck disable=SC2163 # line is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
       while IFS= read -r line; do [[ -n "$line" ]] && export "$line"; done <<< "$envassign"
+      export LA_REMOTE_PROVIDER="$prov"   # la_proxy_hooks names it in account errors
       exec "$litellm_py" "$trust_wrapper" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
     echo $! > "$pidf"
 

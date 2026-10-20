@@ -221,6 +221,88 @@ def clamp_max_tokens(kwargs: dict) -> dict | None:
     return out
 
 
+# ---- fix 5: learn the request fields a model rejects from its own 400 ---------------------
+
+# Same idiom as fix 4: the provider's 400 names what it refuses, the failure hook remembers it
+# per model, and the router's one BadRequest retry plus every later request go out corrected.
+# Real texts (2026-10-20 proxy logs): Groq "property 'prompt_cache_key' is unsupported"; LLM7
+# "Model 'deepseek-v4-pro' does not support reasoning."; Z.ai glm-5.3-flash "This model always
+# engages in thinking and cannot be disabled; please use low, high, or max".
+_UNSUPPORTED_PROPERTY = re.compile(
+    r"(?:property|parameter)\s+[`'\"]?([a-z_]+)[`'\"]?\s+is\s+(?:unsupported|not\s+supported)", re.I)
+_NO_REASONING = re.compile(r"does\s+not\s+support\s+(?:reasoning|thinking)", re.I)
+_ALWAYS_THINKS = re.compile(r"(?:always\s+engages\s+in\s+thinking|thinking\s+cannot\s+be\s+disabled|"
+                            r"cannot\s+be\s+disabled.{0,40}(?:low|high))", re.I)
+# Seeded: known before the first request, so that request never fails. LiteLLM adds
+# prompt_cache_key because Groq's config CLAIMS support for it; Groq's API rejects it.
+_PROVIDER_DROP = {"groq": {"prompt_cache_key"}}
+_LEARNED_DROP: dict[str, set] = {}      # model -> request keys it rejected
+_NO_REASONING_MODELS: set = set()
+_ALWAYS_THINKING_MODELS: set = set()
+_REASONING_KEYS = ("reasoning_effort", "thinking")
+
+
+def learn_request_fix(kwargs: dict) -> str | None:
+    """Remember what this model's 400 refused; return a log line, or None if nothing was learned."""
+    exc = (kwargs or {}).get("exception")
+    if exc is None or getattr(exc, "status_code", None) not in (400, 422, None):
+        return None
+    text, key = str(exc), _cap_key(kwargs)
+    m = _UNSUPPORTED_PROPERTY.search(text)
+    if m:
+        _LEARNED_DROP.setdefault(key, set()).add(m.group(1))
+        return f"{key} rejects '{m.group(1)}'; dropping it from its requests for this session"
+    if _NO_REASONING.search(text):
+        _NO_REASONING_MODELS.add(key)
+        return f"{key} does not reason; sending it no reasoning_effort/thinking for this session"
+    if _ALWAYS_THINKS.search(text):
+        _ALWAYS_THINKING_MODELS.add(key)
+        return f"{key} always thinks; a thinking-off turn is sent as reasoning_effort=low"
+    return None
+
+
+def apply_request_fixes(kwargs: dict) -> dict | None:
+    """kwargs with the learned/seeded corrections applied, or None when nothing changes."""
+    key = _cap_key(kwargs)
+    provider = str(kwargs.get("custom_llm_provider") or "")
+    drop = set(_PROVIDER_DROP.get(provider, ())) | _LEARNED_DROP.get(key, set())
+    if key in _NO_REASONING_MODELS:
+        drop.update(_REASONING_KEYS)
+    out = {k: v for k, v in kwargs.items() if k not in drop}
+    # Claude Code's thinking-disabled turns reach the provider as reasoning_effort="none".
+    if key in _ALWAYS_THINKING_MODELS and out.get("reasoning_effort") in ("none", "disabled", None):
+        if "reasoning_effort" in out or kwargs.get("thinking", {}) == {"type": "disabled"}:
+            out["reasoning_effort"] = "low"
+            out.pop("thinking", None)
+    return None if out == kwargs else out
+
+
+# ---- fix 6: account refusals reach the user at once, named, not as a retry countdown ------
+
+# Wording providers use when the ACCOUNT (not the request, not the rate) is the problem. Real
+# texts, 2026-10-20: zai 429 "Insufficient balance or no resource package. Please recharge.";
+# siliconflow 402 "your account balance is insufficient"; sambanova 402 "A payment method is
+# required"; vercel 403 "requires a valid credit card on file"; llm7 402 "Insufficient balance";
+# huggingface 402 "exceeded your monthly included credits". Z.ai sends this as a 429, which
+# Claude Code retries behind a countdown for minutes -- the "transient error" that never clears.
+_ACCOUNT = re.compile(
+    r"insufficient[_\s]+(?:balance|quota|credits?|funds)|balance\s+is\s+insufficient|"
+    r"no\s+resource\s+package|please\s+(?:recharge|top\s+up)|top\s+up\s+your|"
+    r"payment\s+method\s+is\s+required|credit\s+card|no\s+remaining\s+credits|"
+    r"exceeded\s+your\s+monthly\s+included\s+credits|billing\s+(?:details|required)", re.I)
+
+
+def is_account_error(status, text: str) -> bool:
+    return status in (402, 403, 429, 400, None) and bool(_ACCOUNT.search(text or ""))
+
+
+def account_error_detail(provider: str, text: str) -> str:
+    return (f"{provider or 'the provider'} refused the request because of the provider ACCOUNT, "
+            f"not this proxy or the model route. Provider says: {text.strip()[:400]} -- Free "
+            f"allowances may reset daily, so retry later; otherwise check that account's billing "
+            f"or credits, or pick another provider.")
+
+
 try:
     from litellm.integrations.custom_logger import CustomLogger
 except Exception:                                      # allows --help/--self-test w/o litellm
@@ -263,11 +345,16 @@ class LAProxyHooks(CustomLogger):
             self._bucket = get_limiter()
 
     async def async_pre_call_deployment_hook(self, kwargs, call_type):
+        changed = None
         clamped = clamp_max_tokens(kwargs)               # fix 4: every provider
         if clamped is not None:
-            kwargs = clamped
+            kwargs = changed = clamped
+        fixed = apply_request_fixes(kwargs)              # fix 5: every provider
+        if fixed is not None:
+            kwargs = changed = fixed
         if not _is_nvidia(kwargs):
-            return clamped
+            # The rate limiter is NVIDIA's alone: no other provider has a known RPM ceiling.
+            return changed
         if self._bucket is not None:
             waited = await self._bucket.aacquire()
             if waited > 0:
@@ -282,6 +369,9 @@ class LAProxyHooks(CustomLogger):
         if cap is not None:
             print(f"la_proxy_hooks: {_cap_key(kwargs)} rejects max_tokens above {cap}; "
                   f"clamping its requests to {cap} for this session", file=sys.stderr)
+        lesson = learn_request_fix(kwargs or {}) if cap is None else None
+        if lesson:
+            print(f"la_proxy_hooks: {lesson}", file=sys.stderr)
         # Runs once per failed upstream ATTEMPT (router retries included). A 429 means our
         # window disagrees with NVIDIA's count: pause every proxy on the machine and log how
         # many requests the window held, which is the number that locates the real limit.
@@ -294,6 +384,28 @@ class LAProxyHooks(CustomLogger):
         print(f"la_proxy_hooks: NVIDIA 429 with {info['in_window']}/{info['limit']} requests "
               f"in the last 60 s -> all NVIDIA proxies pause {info['pause']:.0f}s",
               file=sys.stderr)
+
+    async def async_post_call_failure_hook(self, request_data, original_exception,
+                                           user_api_key_dict, traceback_str=None):
+        # fix 6: what the CLIENT sees. An account refusal becomes a 402 that names the provider;
+        # Claude Code shows a 402 at once instead of retrying a 429 behind a countdown.
+        text = str(original_exception)
+        if not is_account_error(getattr(original_exception, "status_code", None), text):
+            return None
+        from fastapi import HTTPException
+        provider = os.environ.get("LA_REMOTE_PROVIDER", "")
+        detail = account_error_detail(provider, text.split("Exception - ", 1)[-1].split("\nLiteLLM:")[0])
+        print(f"la_proxy_hooks: {detail}", file=sys.stderr)
+        # LiteLLM 1.105's /v1/messages endpoint awaits this hook but DISCARDS its return value and
+        # builds the reply from the exception's own status_code/message/type -- so rewrite those
+        # in place (Anthropic's 402 type is billing_error). The return still serves the endpoints
+        # that honour it (chat/completions).
+        for attr, value in (("status_code", 402), ("message", detail), ("type", "billing_error")):
+            try:
+                setattr(original_exception, attr, value)
+            except Exception:
+                pass
+        return HTTPException(status_code=402, detail=detail)
 
 
 # Loading this module (which LiteLLM does at proxy start) checks the upstream stream fix.

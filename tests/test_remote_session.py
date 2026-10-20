@@ -8,6 +8,7 @@ import itertools
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -357,6 +358,34 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         text, r = self._write_cfg({'LA_SUBAGENT_POOL': 'gemini:gemini-3.8-flash'})
         self.assertEqual(text.count('model_name: "claude-*"'), 1)
         self.assertIn('POOL=\n', r.stdout)
+
+    def test_litellm_settings_are_keys_litellm_reads(self):
+        """REGRESSION GUARD (0.38.1). `disable_responses_api: true` sat in litellm_settings for weeks
+        while LiteLLM never read it, so every openai/ route (zai, siliconflow, llm7, kilo, ...) went to
+        the OpenAI Responses API and 404'd on the first prompt. The proxy applies litellm_settings with
+        setattr(litellm, key, value), so an unknown key is silently inert: check each one against the
+        INSTALLED LiteLLM, and require the switch that keeps /v1/messages on chat/completions."""
+        litellm_py = Path.home() / '.local/pipx/venvs/litellm/bin/python'
+        if not litellm_py.exists():
+            self.skipTest('no pipx litellm venv on this machine')
+        text, _ = self._write_cfg(prov='zai', model='glm-5.3')
+        block = re.search(r'^litellm_settings:\n((?:[ #].*\n|\n)*)', text, re.M).group(1)
+        keys = re.findall(r'^  ([a-z_]+):', block, re.M)
+        self.assertIn('use_chat_completions_url_for_anthropic_messages', keys, text)
+        r = subprocess.run([str(litellm_py), '-c',
+                            'import sys, litellm; print(",".join(k for k in sys.argv[1:] if not hasattr(litellm, k)))',
+                            *keys], text=True, capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), '', 'litellm_settings keys LiteLLM does not read: ' + r.stdout)
+        router = re.search(r'^router_settings:\n((?:[ #].*\n|\n)*)', text, re.M).group(1)
+        rkeys = re.findall(r'^  ([a-z_]+):', router, re.M)
+        self.assertIn('disable_cooldowns', rkeys, 'a cooldown hides the real upstream error')
+        r = subprocess.run([str(litellm_py), '-c',
+                            'import sys, inspect; from litellm import Router; '
+                            'p = inspect.signature(Router.__init__).parameters; '
+                            'print(",".join(k for k in sys.argv[1:] if k not in p))', *rkeys],
+                           text=True, capture_output=True)
+        self.assertEqual(r.stdout.strip(), '', 'router_settings keys Router does not take: ' + r.stdout)
 
     def test_proxy_hooks_registered_and_linked_next_to_config(self):
         """The callback must be importable from the CONFIG's directory, since that is where
