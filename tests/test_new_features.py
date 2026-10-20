@@ -176,6 +176,23 @@ class APIKeysScreen(PilotCase):
             self.assertTrue(rows[4].lstrip("▸▾ ").startswith("Google Gemini"), rows[4])
         self.run_picker(s)
 
+    def test_info_box_shows_the_highlighted_providers_requirements(self):
+        """0.38.1: the same bordered info box the remote model list has, under the provider list:
+        it must SHOW (display on) and say what the account needs -- Vercel's credit card."""
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            info = app.query_one("#info")
+            await h.goto_row("item", "add:nvidia")
+            await h.pilot.pause(0.3)
+            self.assertTrue(info.display, "info box hidden on the API Keys screen")
+            self.assertIn("NVIDIA", str(info.render()))
+            await h.open_group("vercel")
+            await h.goto_row("item", "add:vercel")
+            await h.pilot.pause(0.3)
+            self.assertIn("CREDIT CARD", str(info.render()))
+        self.run_picker(s)
+
     def test_open_signup_page_uses_the_opener_not_a_real_browser(self):
         async def s(app, pilot, h):
             await h.press("k")

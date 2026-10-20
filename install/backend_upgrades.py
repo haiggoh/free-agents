@@ -197,23 +197,32 @@ def pending(state: dict | None = None) -> list[Upgrade]:
 
 def still_needed(u: Upgrade, run: Runner = _run) -> bool:
     """Cheap, local re-check at prompt time: the nightly brew/pipx job may already have done it."""
+    # "Needed" means the installed version is OLDER than the offer -- not merely different. A user
+    # who upgraded past the cached offer by hand (litellm 1.106.0 installed, 1.105.1 offered,
+    # measured 2026-10-20) must not be asked to "upgrade" to the older release.
     if u.via == "homebrew":
         r = run(["brew", "list", "--versions", u.command[-1].split("/")[-1]])
-        return r.returncode == 0 and u.latest not in r.stdout.split()
+        parts = r.stdout.split()
+        return r.returncode == 0 and len(parts) > 1 and _newer(u.latest, parts[-1])
     if u.via == "pipx":
         try:
             meta = json.loads(run(["pipx", "list", "--json"]).stdout or "{}")
             cur = meta["venvs"]["litellm"]["metadata"]["main_package"]["package_version"]
         except (ValueError, KeyError):
             return False
-        return cur != u.latest
+        return _newer(u.latest, cur)
     return True
 
 
 def prompt(assume_yes: bool, ask: Callable[[str], str] = input, run_live: Callable | None = None,
            run: Runner = _run, out=sys.stdout) -> int:
     data = load_state()
-    todo = [u for u in pending(data) if still_needed(u, run)]
+    offers = pending(data)
+    todo = [u for u in offers if still_needed(u, run)]
+    stale = {u.backend for u in offers} - {u.backend for u in todo}
+    if stale:      # already at (or past) the offered release: drop the offer, do not re-ask next launch
+        data["pending"] = [p for p in data.get("pending", []) if p.get("backend") not in stale]
+        save_state(data)
     if not todo:
         return 0
     run_live = run_live or (lambda cmd: subprocess.run(cmd).returncode)

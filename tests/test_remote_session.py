@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -386,6 +387,75 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                             'print(",".join(k for k in sys.argv[1:] if k not in p))', *rkeys],
                            text=True, capture_output=True)
         self.assertEqual(r.stdout.strip(), '', 'router_settings keys Router does not take: ' + r.stdout)
+
+    def test_stop_never_touches_a_proxy_whose_session_is_alive(self):
+        """INCIDENT 2026-10-20 00:38 UTC. A testing session ran `remote-session.sh --stop`, which
+        stopped EVERY proxy of ours -- including the one serving a healthy all-night NVIDIA GLM
+        session. The next probe reused the freed port with a Mistral config, so that session's
+        requests went to Mistral and died on Mistral's 429. --stop now stops only ORPHANED proxies
+        (owner pid recorded at launch and no longer running); --stop <port> is the explicit form,
+        and it too refuses while the owner lives unless --force."""
+        rundir = self.root / 'local-agents-remote'
+        rundir.mkdir(exist_ok=True)
+        live_owner = subprocess.Popen(['sleep', '120'])
+        self.addCleanup(live_owner.kill)
+        procs = {}
+        for port, owner in ((4146, str(live_owner.pid)), (4147, '999999'), (4148, None)):
+            (rundir / f'proxy-{port}.yaml').write_text('model_list: []\n')
+            # A process whose command line names litellm and proxy-<port>.yaml (= _is_our_proxy).
+            p = subprocess.Popen(['bash', '-c', 'exec -a litellm sleep 120', 'x',
+                                  '--config', str(rundir / f'proxy-{port}.yaml')])
+            self.addCleanup(p.kill)
+            procs[port] = p
+            (rundir / f'proxy-{port}.pid').write_text(str(p.pid))
+            if owner:
+                (rundir / f'proxy-{port}.owner').write_text(owner)
+
+        def stop(*args):
+            return subprocess.run(['bash', '-c', 'source "$1"; shift; _is_our_proxy() { kill -0 "$1" 2>/dev/null; }; '
+                                   'stop_proxy "$@"', 'x', str(self.root / 'bin/library.sh'), *args],
+                                  env=self.env, text=True, capture_output=True)
+
+        r = stop()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        time.sleep(0.3)
+        self.assertIsNone(procs[4146].poll(), 'a proxy whose session is alive must survive --stop')
+        self.assertIn('4146', r.stdout + r.stderr, 'say which proxy was kept and why')
+        self.assertIsNotNone(procs[4147].poll(), 'an orphan (owner gone) is stopped')
+        self.assertIsNone(procs[4148].poll(), 'no owner record: unknown, so it is kept, not guessed')
+
+        r = stop('4146')
+        time.sleep(0.3)
+        self.assertIsNone(procs[4146].poll(), '--stop <port> also refuses while the owner lives')
+        self.assertIn('--force', r.stdout + r.stderr)
+        stop('4146', '--force')
+        time.sleep(0.3)
+        self.assertIsNotNone(procs[4146].poll())
+
+    def test_recycled_owner_pid_counts_as_gone(self):
+        """A session closed hours ago may have its pid reused by an unrelated process. The owner
+        record carries the launcher's START TIME too, so a live pid with another start time is
+        not the owner, and its proxy is an orphan."""
+        rundir = self.root / 'local-agents-remote'
+        rundir.mkdir(exist_ok=True)
+        stranger = subprocess.Popen(['sleep', '120'])        # alive, but not the launcher
+        self.addCleanup(stranger.kill)
+        (rundir / 'proxy-4149.yaml').write_text('model_list: []\n')
+        p = subprocess.Popen(['bash', '-c', 'exec -a litellm sleep 120', 'x',
+                              '--config', str(rundir / 'proxy-4149.yaml')])
+        self.addCleanup(p.kill)
+        (rundir / 'proxy-4149.pid').write_text(str(p.pid))
+        (rundir / 'proxy-4149.owner').write_text(f'{stranger.pid} Mo._1_Jan_00:00:00_2024\n')
+        r = subprocess.run(['bash', '-c', 'source "$1"; _is_our_proxy() { kill -0 "$1" 2>/dev/null; }; stop_proxy',
+                            'x', str(self.root / 'bin/library.sh')], env=self.env, text=True, capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        time.sleep(0.3)
+        self.assertIsNotNone(p.poll(), 'pid alive but start time differs: the owner is gone')
+        self.assertIsNone(stranger.poll(), 'the unrelated process itself is never touched')
+        # And the real owner format round-trips: a record written by _proc_start matches itself.
+        r = subprocess.run(['bash', '-c', 'source "$1"; _owner_alive "$$ $(_proc_start $$)" && echo ALIVE',
+                            'x', str(self.root / 'bin/library.sh')], env=self.env, text=True, capture_output=True)
+        self.assertIn('ALIVE', r.stdout, r.stderr)
 
     def _native_cfg(self, prov, model, mode):
         shutil.copy2(ROOT / 'bin/anthropic-route.py', self.root / 'bin/anthropic-route.py')

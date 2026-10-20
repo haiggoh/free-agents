@@ -13,7 +13,8 @@
 #   remote-session.sh --list               # print the remote roster and key status
 #   remote-session.sh --verify <alias>     # check credential + model id live, launch nothing
 #   remote-session.sh --dry-run <alias>    # print the plan and the env, start nothing
-#   remote-session.sh --stop               # stop any proxy this script started
+#   remote-session.sh --stop               # stop ORPHANED proxies (their session has exited)
+#   remote-session.sh --stop <port> [--force]  # one proxy; --force even if its session is alive
 #   remote-session.sh --include-trials     # also offer trial-tier (non-free) agents
 #   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
 #   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
@@ -600,26 +601,65 @@ stop_one_proxy() { # stop_one_proxy <port>
     if _is_our_proxy "$pid" "$port"; then
         kill "$pid" 2>/dev/null && echo "   proxy    : stopped (pid $pid, port $port)"
     fi
-    rm -f "$pf"
+    rm -f "$pf" "$RUNDIR/proxy-$port.owner"
     return 0
 }
 
-stop_proxy() {
-    local killed=0 pf port pid
-    # A literal unmatched glob would be iterated as a filename, so nullglob guards the
-    # no-proxy-running case instead of relying on the -e test alone.
+_proc_start() { # _proc_start <pid> -> the process's start time, compact; empty if it is gone
+    ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' '_'
+}
+
+_owner_alive() { # _owner_alive "<pid> <start>" -> 0 only if THAT process (not a recycled pid) runs
+    local pid="${1%% *}" start="${1#* }"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || return 1
+    # Hours after a session ends macOS may reuse its pid for an unrelated process; the start time
+    # tells them apart. An owner line without a start time (pid only) falls back to kill -0.
+    [[ "$start" == "$1" || -z "$start" ]] && return 0
+    [[ "$(_proc_start "$pid")" == "$start" ]]
+}
+
+stop_proxy() { # stop_proxy [<port>] [--force]
+    # INCIDENT 2026-10-20 00:38 UTC: a TESTING session ran `--stop`, which stopped every proxy of
+    # ours -- including the one serving a healthy all-night NVIDIA session in another terminal. The
+    # next probe reused the freed port with a Mistral config, so that session's requests went to
+    # Mistral and died on Mistral's 429. A proxy belongs to the session that launched it
+    # (proxy-<port>.owner = the launcher's pid), so:
+    #   --stop              stops only ORPHANS: owner recorded and no longer running
+    #   --stop <port>       that one proxy, and it too refuses while its owner is alive
+    #   --stop <port> --force   the explicit override
+    # A proxy with NO owner record (started by an older launcher) is kept: unknown is not orphaned.
+    local want="" force=0 a killed=0 kept=0 pf port pid owner
+    for a in "$@"; do
+        case "$a" in --force) force=1 ;; *) want="$a" ;; esac
+    done
+    # nullglob: an unmatched glob would otherwise be iterated as a literal filename.
     shopt -s nullglob
     for pf in "$RUNDIR"/proxy-*.pid; do
         port="$(basename "$pf")"; port="${port#proxy-}"; port="${port%.pid}"
+        [[ -n "$want" && "$port" != "$want" ]] && continue
         pid="$(cat "$pf" 2>/dev/null)"
-        if _is_our_proxy "$pid" "$port"; then
-            kill "$pid" 2>/dev/null && killed=$((killed+1))
-            echo "remote-session: stopped proxy pid $pid (port $port)"
+        owner="$(cat "$RUNDIR/proxy-$port.owner" 2>/dev/null)"
+        if ! _is_our_proxy "$pid" "$port"; then
+            rm -f "$pf" "$RUNDIR/proxy-$port.owner"; continue
         fi
-        rm -f "$pf"
+        if [[ $force -eq 0 ]]; then
+            if [[ -z "$owner" ]]; then
+                echo "remote-session: kept proxy on port $port: no owner record, so it may serve a live session" \
+                     "(stop it explicitly: $0 --stop $port --force)" >&2
+                kept=$((kept+1)); continue
+            fi
+            if _owner_alive "$owner"; then
+                echo "remote-session: kept proxy on port $port: its session (pid ${owner%% *}) is still running" \
+                     "(override: $0 --stop $port --force)" >&2
+                kept=$((kept+1)); continue
+            fi
+        fi
+        kill "$pid" 2>/dev/null && killed=$((killed+1))
+        echo "remote-session: stopped proxy pid $pid (port $port)"
+        rm -f "$pf" "$RUNDIR/proxy-$port.owner"
     done
     shopt -u nullglob
-    [[ $killed -eq 0 ]] && echo "remote-session: no proxy of ours was running"
+    [[ $killed -eq 0 && $kept -eq 0 ]] && echo "remote-session: no proxy of ours was running"
     return 0
 }
 
@@ -923,7 +963,15 @@ _decide_native_route() { # _decide_native_route <provider> <model> -> sets LA_RO
     local base verdict key_line
     base="$(_anthropic_base "$1")" || return 0
     key_line="$("$KEYS" --env "$1" 2>/dev/null | head -1)"
-    verdict="$(LA_ANTHROPIC_KEY="${key_line#*=}" python3 "$SCRIPT_DIR/anthropic-route.py" \
+    # LiteLLM's own interpreter, not bare python3: it carries truststore, which the PYTHONPATH
+    # shim injects so the probe trusts the macOS Keychain. Under a system python3 without it,
+    # a TLS-inspecting network fails the probe (CERTIFICATE_VERIFY_FAILED, measured on corporate
+    # wifi 2026-10-20) and every model reads "undecided" -- the native lane silently never wins.
+    local py; py="$(head -1 "$(command -v litellm 2>/dev/null)" 2>/dev/null)"; py="${py#\#!}"; py="${py%% *}"
+    # Only a PYTHON interpreter will do: a non-console-script litellm (a wrapper, a test stub)
+    # has a shell shebang, and running the probe under /bin/sh fails it silently -> "chat".
+    [[ -x "$py" && "$(basename "$py")" == [Pp]ython* ]] || py=python3
+    verdict="$(LA_ANTHROPIC_KEY="${key_line#*=}" "$py" "$SCRIPT_DIR/anthropic-route.py" \
                decide "$1" "$2" "$base")" || verdict="chat"
     if [[ "$verdict" == anthropic ]]; then
         LA_ROUTE_NATIVE=1
@@ -973,7 +1021,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
           while IFS= read -r line_o; do [[ -n "$line_o" ]] && export "$line_o"; done <<< "$envassign_o"
           export LA_REMOTE_PROVIDER="$prov"   # la_proxy_hooks names it in account errors
           exec "${_cmd[@]}" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
-        echo $! > "$pidf"
+        echo $! > "$pidf"; echo "$$ $(_proc_start $$)" > "$RUNDIR/proxy-$port.owner"
         local j
         # shellcheck disable=SC2034  # retry counter, not read
         for j in $(seq 1 60); do
@@ -1013,7 +1061,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
       while IFS= read -r line; do [[ -n "$line" ]] && export "$line"; done <<< "$envassign"
       export LA_REMOTE_PROVIDER="$prov"   # la_proxy_hooks names it in account errors
       exec "$litellm_py" "$trust_wrapper" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
-    echo $! > "$pidf"
+    echo $! > "$pidf"; echo "$$ $(_proc_start $$)" > "$RUNDIR/proxy-$port.owner"
 
     # Bounded readiness wait with real diagnostics on failure.
     # 5 minutes (300s) for proxy startup — prefill on first request can take several minutes.
@@ -1039,12 +1087,16 @@ TELEMETRY_ENABLED=0  # 0=off (no nonessential traffic), 1=on (stock behavior)
 SELECTED_EFFORT=""
 EFFORT_CHOICE=""
 PERMISSION_MODE="auto"   # resolved from AUTO_MODE_STATE below
+STOP_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)        usage; exit 0 ;;
         --print-spoof)    printf '%s\n' "$(_select_spoof_primary)"; exit 0 ;;
         --list)           MODE="list"; shift ;;
-        --stop)           MODE="stop"; shift ;;
+        --stop)           MODE="stop"; shift
+                          while [[ $# -gt 0 && ( "$1" == --force || "$1" =~ ^[0-9]+$ ) ]]; do
+                              STOP_ARGS+=("$1"); shift
+                          done ;;
         --verify)         MODE="verify"; ALIAS="${2:-}"; shift 2 || shift ;;
         --models)         MODE="models"; ALIAS="${2:-}"; shift 2 || shift ;;
         --remote-model)   [[ $# -ge 2 ]] || { echo 'remote-session: --remote-model needs an ID' >&2; exit 2; }
@@ -1105,7 +1157,7 @@ fi
 case "$MODE" in
     list) print_list; exit 0 ;;
     inventory) print_inventory; exit 0 ;;
-    stop) stop_proxy; exit 0 ;;
+    stop) stop_proxy "${STOP_ARGS[@]+"${STOP_ARGS[@]}"}"; exit 0 ;;
     models)
         ENTRY="$(_entry_for "$ALIAS")" || { echo 'remote-session: --models needs a known alias' >&2; exit 2; }
         echo 'Catalog candidates only; listed prices/tier/tools are provider metadata. Generation, tool sessions and account billing untested.' >&2

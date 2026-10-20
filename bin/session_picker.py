@@ -957,7 +957,9 @@ class Picker(App):
         row (mouse) or else the highlighted one (keyboard)."""
         info = self.query_one("#info", Static)
         sm = self.screen_model
-        if not (isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and sm._models_loaded):
+        remote_list = isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and sm._models_loaded
+        # Any other screen opts in by defining info_text (API Keys: the provider's requirements).
+        if not (remote_list or (not isinstance(sm, m.RemoteScreen) and hasattr(sm, "info_text"))):
             info.display = False
             return
         if not from_hover:

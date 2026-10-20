@@ -145,6 +145,21 @@ class Upgrades(unittest.TestCase):
                   run=FakeShell(brew={"omlx": "0.7.1rc1"}), out=io.StringIO())
         self.assertEqual(asked, [])
 
+    def test_installed_newer_than_the_offer_is_not_asked(self):
+        # Measured 2026-10-20: the weekly check cached "litellm 1.102.4 -> 1.105.1"; the user then
+        # upgraded to 1.106.0 by hand, and csl still offered a DOWNGRADE-shaped "upgrade" because the
+        # re-check only asked "installed != offered".
+        self.seed(bu.Upgrade("litellm", "1.102.4", "1.105.1", ["pipx", "upgrade", "litellm"], "pipx"))
+        asked = []
+        bu.prompt(False, ask=lambda q: asked.append(q) or "y", run_live=lambda c: 0,
+                  run=FakeShell(pipx_litellm="1.106.0"), out=io.StringIO())
+        self.assertEqual(asked, [])
+        self.assertEqual(bu.pending(), [], "a stale offer is dropped, not kept for next launch")
+        self.seed(self.omlx())
+        bu.prompt(False, ask=lambda q: asked.append(q) or "y", run_live=lambda c: 0,
+                  run=FakeShell(brew={"omlx": "0.7.2"}), out=io.StringIO())
+        self.assertEqual(asked, [], "same for homebrew: 0.7.2 installed beats a 0.7.1rc1 offer")
+
     def test_nothing_pending_prints_nothing(self):
         out = io.StringIO()
         self.assertEqual(bu.prompt(False, ask=lambda q: "y", run_live=lambda c: 0,

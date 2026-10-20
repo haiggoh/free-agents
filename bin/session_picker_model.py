@@ -331,6 +331,18 @@ def _load_key_providers():
 KEY_PROVIDERS = _load_key_providers()
 
 
+def _registry_provider_note(slug: str) -> str:
+    """config/remote-registry.json's notes for a key-setup slug ('' if none). The two slug sets
+    differ only for vercel/huggingface key files, which share the provider id."""
+    import json
+    from pathlib import Path
+    try:
+        data = json.loads((Path(__file__).resolve().parent.parent / "config" / "remote-registry.json").read_text())
+        return str(data.get("providers", {}).get(slug, {}).get("notes") or "").strip()
+    except (OSError, ValueError):
+        return ""
+
+
 def _key_provider_order():
     """NVIDIA, Gemini, Groq first (the proven and most-used), then the rest alphabetically."""
     first = ("nvidia", "gemini", "groq")
@@ -1630,6 +1642,21 @@ class APIKeysScreen(Screen):
         status = f"{ec.EMOJI_OK_STR} Saved" if provider_has_key(slug) else f"{ec.EMOJI_MISSING_STR} Missing"
         warning = self.ACCOUNT_WARNINGS.get(slug)
         return f"{status}  {warning}" if warning else status
+
+    def info_text(self, item_id: str | None) -> str:
+        """The info box under the list: what the highlighted provider needs BEFORE a key works
+        (its setup steps, incl. account requirements such as Vercel's credit card) plus the
+        registry's measured notes. Shown for a provider row and for its Open/Add items."""
+        slug = item_id.split(":", 1)[-1] if item_id else None
+        prov = next((p for p in KEY_PROVIDERS if p.slug == slug), None)
+        if prov is None:
+            return "Highlight a provider to see what its account needs before a key works."
+        lines = [prov.name, prov.steps]
+        note = _registry_provider_note(slug)
+        # Skip the note when the steps already say it (Vercel's card requirement is in both).
+        if note and not ("credit card" in note.lower() and "credit card" in prov.steps.lower()):
+            lines.append("Measured: " + note)
+        return "\n".join(lines)
 
     def actions(self):
         # No static actions - all actions are via accordion items

@@ -8,7 +8,9 @@
   that with `disable_responses_api: true`, a key LiteLLM never had: it applies `litellm_settings` with
   `setattr`, so the key was silently inert. Now `use_chat_completions_url_for_anthropic_messages`, and
   a test checks every `litellm_settings` / `router_settings` key against the INSTALLED LiteLLM.
-  (`telemetry: false` was removed for the same reason: a legacy no-op.) NVIDIA was unaffected because
+  (`telemetry: false` was removed for the same reason: LiteLLM's own telemetry was retired upstream
+  and the key is a deprecated no-op. Claude Code's telemetry to Anthropic is unaffected and stays OFF:
+  that is `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, set by the launcher, a separate switch.) NVIDIA was unaffected because
   it has its own `nvidia_nim/` prefix.
 - **The "transient error counting down" was not transient.** After the first upstream failure the
   router cooled down the only deployment, so every Claude Code retry got a synthetic `429 No
@@ -45,12 +47,31 @@
   (`output_config` on a mid-conversation system message) is folded into the request's own
   `output_config`: OpenRouter refused the per-turn form ("Mid-conversation reasoning effort
   (configuration_update) is not supported") for most free models.
-- The NVIDIA rate limiter stays NVIDIA-only on both lanes; no other provider has a known RPM ceiling.
+- The machine-wide 40 RPM limiter still applies to exactly the requests that use the NVIDIA API key
+  (any model on NVIDIA's API) and to nothing else -- no other provider has a known RPM ceiling, and
+  local models are never routed through it.
+
+- **`remote-session.sh --stop` no longer kills proxies that still serve a session.** On 2026-10-20 a
+  testing session's `--stop` took down the proxy of a healthy all-night NVIDIA session in another
+  terminal; the next test reused its port with a Mistral config, so that session died on Mistral's
+  429. Each proxy now records its owner (launcher pid + start time, so a recycled pid is not mistaken
+  for it); `--stop` stops only proxies whose owner is gone, `--stop <port> --force` is the override.
+- **csl no longer offers an "upgrade" to an OLDER release.** The weekly check had cached "litellm
+  1.102.4 -> 1.105.1"; with 1.106.0 installed by hand, the launch-time recheck still asked, because it
+  compared installed != offered. It now compares versions and drops an offer that is already met.
+- **The route probe trusts the macOS Keychain** -- it runs under LiteLLM's interpreter (which has
+  truststore) instead of bare python3, so on a TLS-inspecting network it no longer reads every model
+  as "undecided" (CERTIFICATE_VERIFY_FAILED, measured on corporate wifi).
+- **LiteLLM contract test** (`tests/test_litellm_contract.py`): a real LiteLLM proxy against a fake
+  upstream pins the five LiteLLM behaviours this release depends on. Run after every LiteLLM upgrade;
+  verified on 1.106.0.
 
 ### Changed — account requirements visible during API key setup
 
 - **Vercel needs a credit card on file before it serves any request, free credits included** -- shown
-  on its API Keys row, in its setup steps, and above the key field. Measured account quirks for Z.ai,
+  on its API Keys row, in its setup steps, and above the key field.
+- **API Keys has the info box the remote model list has**: the highlighted provider's setup steps and
+  its measured account quirks. Measured account quirks for Z.ai,
   SiliconFlow, SambaNova and LLM7 are in their setup steps and registry notes. No provider was marked
   paid-only: several refusals may be daily allowances, to be rechecked.
 
