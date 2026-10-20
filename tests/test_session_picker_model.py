@@ -854,6 +854,14 @@ class RemoteInfoBoxTests(unittest.TestCase):
         self.assertIn("Hover or highlight", lane.info_text("nvidia"))      # a group id
         self.assertIn("Hover or highlight", lane.info_text(None))
 
+    def test_info_text_shows_the_model_lane(self):
+        # T3: every model's info box names its lane; NVIDIA has no native endpoint, so the
+        # verdict is plain chat/completions without any route probe.
+        agents = [m.RemoteAgent("nvidia-laguna", "nvidia", "NVIDIA Laguna XS 2.1", "unknown",
+                                model_id="nvidia/llama-3.3-nemotron-super-49b")]
+        lane = m.RemoteScreen(m.Settings(), agents, owner=m.DIRECT_ROOT)
+        self.assertIn("Lane: chat/completions", lane.info_text("nvidia-laguna"))
+
 
 class ThemeStoreLayering(unittest.TestCase):
     """0.35.3: theme colours persist in the stable user store (survive version installs,

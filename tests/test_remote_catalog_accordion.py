@@ -5,6 +5,7 @@ Usage: python3 tests/test_remote_catalog_accordion.py [-v]
 Environment: none required; no provider is called (catalog rows are handed in).
 """
 from pathlib import Path
+import os
 import sys
 import unittest
 
@@ -156,13 +157,63 @@ class CatalogAccordionTests(unittest.TestCase):
         lane._regroup()
         self.assertNotIn("cerebras", [g.id for g in lane.groups()])
 
-    def test_untested_tools_are_labelled(self):
+    def test_tools_untested_label_is_gone(self):
+        # The per-row "tools untested" suffix is stale noise on nearly every row (user
+        # 2026-10-20): gone from catalog rows and pinned rows alike.
         lane = self.screen()
         lane.accordion.expand("gemini")
         lane.catalog_kind_needed()
         lane.set_catalog("gemini-flash", cat("gemini-x", tools="unknown"), None)
         label = next(i.label for g in lane.groups() for i in g.items if i.id == "cat:gemini:gemini-x")
-        self.assertIn("tools untested", label)
+        self.assertNotIn("tools untested", label)
+        for g in lane.groups():
+            for i in g.items:
+                self.assertNotIn("tools untested", i.label)
+
+    def lane_screen(self, agents):
+        s = m.Settings()
+        lane = m.RemoteScreen(s, agents, owner=m.DIRECT_ROOT)
+        lane._choose_model_visible = True
+        return lane
+
+    def route_cache_env(self, verdicts):
+        import json as js
+        import tempfile
+        cache = Path(tempfile.mkdtemp()) / "route.json"
+        os.environ["LA_ANTHROPIC_ROUTE_CACHE"] = str(cache)
+        self.addCleanup(os.environ.pop, "LA_ANTHROPIC_ROUTE_CACHE", None)
+        cache.write_text(js.dumps(verdicts))
+
+    def test_lane_tags_on_rows_follow_the_route_cache(self):
+        # Lane = native Anthropic / chat/completions / undecided (not yet probed). Rows tag
+        # only non-default lanes; providers without anthropic_base are always chat and
+        # never tagged. Verdicts come from anthropic-route's own cache file (env-redirected).
+        self.route_cache_env({
+            "zai|glm-native": {"route": "anthropic", "at": 1, "status": 200},
+            "kilo|kilo-chat": {"route": "chat", "at": 1, "status": 400}})
+        agents = [m.RemoteAgent("zai", "zai", "ZAI", "unknown", model_id="SELECT"),
+                  m.RemoteAgent("kilo-a", "kilo", "Kilo A", "unknown", model_id="kilo-chat"),
+                  m.RemoteAgent("gemini-flash", "gemini", "Gemini Flash", "renewing_free",
+                                model_id="gemini-x")]
+        lane = self.lane_screen(agents)
+        lane.accordion.expand("zai")
+        lane.catalog_kind_needed()
+        lane.set_catalog("zai", cat("glm-native", "glm-unprobed"), None)
+        labels = {i.id: i.label for g in lane.groups() for i in g.items}
+        self.assertIn("native Anthropic", labels["cat:zai:glm-native"])
+        self.assertIn("undecided (not yet probed)", labels["cat:zai:glm-unprobed"])
+        self.assertNotIn("Anthropic", labels["kilo-a"])     # cached chat = the default, no tag
+        self.assertNotIn("Anthropic", labels["gemini-flash"])  # no anthropic_base, no tag
+
+    def test_catalog_info_text_shows_lane_and_drops_boilerplate(self):
+        self.route_cache_env({"zai|glm-native": {"route": "anthropic", "at": 1, "status": 200}})
+        agents = [m.RemoteAgent("zai", "zai", "ZAI", "unknown", model_id="SELECT")]
+        lane = self.lane_screen(agents)
+        text = lane.info_text("cat:zai:glm-native")
+        self.assertIn("Lane: native Anthropic", text)
+        self.assertNotIn("untested", text)
+        self.assertNotIn("Listed by", text)
+        self.assertNotIn("not pinned", text)
 
     def test_catalog_line_parse(self):
         c = m.CatalogModel.from_line('a/b\t{"pricing": {"prompt": "0"}, "tier": "unknown", "tools": true}')

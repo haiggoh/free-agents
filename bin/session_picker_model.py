@@ -187,6 +187,79 @@ def read_catalog_cache(provider: str) -> "list[CatalogModel] | None":
     return out or None
 
 
+# --- per-model lane (T3) ------------------------------------------------------------------
+# native Anthropic (provider speaks /v1/messages AND this model accepted it), chat/completions
+# (the translation lane), or undecided (provider has a native endpoint but the model was never
+# probed). The verdicts are anthropic-route.py's; read through its own loader so the cache
+# path, env override and format have exactly one definition.
+
+_ROUTE_MOD = None
+_ROUTE_CACHE_BY_PATH: dict = {}
+_ANTHROPIC_BASE_PROVIDERS: "set | None" = None
+
+
+def _route_module():
+    global _ROUTE_MOD
+    if _ROUTE_MOD is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "anthropic_route", Path(__file__).resolve().parent / "anthropic-route.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)     # stdlib-only module; defines cache_path/load_cache
+        _ROUTE_MOD = mod
+    return _ROUTE_MOD
+
+
+def route_cache() -> dict:
+    """The anthropic-route verdict cache, memoized per cache path (tests redirect the env
+    var, so one path must never leak its data into another)."""
+    try:
+        mod = _route_module()
+        path = Path(mod.cache_path()).resolve()
+    except Exception:
+        return {}
+    if path not in _ROUTE_CACHE_BY_PATH:
+        try:
+            data = mod.load_cache()
+        except Exception:
+            data = {}
+        _ROUTE_CACHE_BY_PATH[path] = data if isinstance(data, dict) else {}
+    return _ROUTE_CACHE_BY_PATH[path]
+
+
+def _anthropic_base_providers() -> set:
+    global _ANTHROPIC_BASE_PROVIDERS
+    if _ANTHROPIC_BASE_PROVIDERS is None:
+        try:
+            data = json.loads((Path(__file__).resolve().parent.parent
+                               / "config" / "remote-registry.json").read_text())
+            _ANTHROPIC_BASE_PROVIDERS = {
+                pid for pid, e in (data.get("providers") or {}).items()
+                if isinstance(e, dict) and e.get("anthropic_base")}
+        except (OSError, ValueError):
+            _ANTHROPIC_BASE_PROVIDERS = set()
+    return _ANTHROPIC_BASE_PROVIDERS
+
+
+def lane_for(provider: str, model_id: str) -> str:
+    """"native Anthropic" | "chat/completions" | "undecided (not yet probed)". Providers
+    without a native endpoint are chat/completions with no probe; everything else reads
+    anthropic-route's cache."""
+    if provider not in _anthropic_base_providers():
+        return "chat/completions"
+    hit = route_cache().get(f"{provider}|{model_id}")
+    if isinstance(hit, dict) and hit.get("route") in ("anthropic", "chat"):
+        return "native Anthropic" if hit["route"] == "anthropic" else "chat/completions"
+    return "undecided (not yet probed)"
+
+
+def lane_tag(provider: str, model_id: str) -> str:
+    """Row suffix for a NON-default lane: "" when chat/completions, so the common case
+    stays untagged and the two states worth noticing stand out."""
+    lane = lane_for(provider, model_id)
+    return "" if lane == "chat/completions" else f"  · {lane}"
+
+
 # Order matters: identity markers first, so "deepseek-r1-distill-qwen" is DeepSeek (the
 # model's identity), not Qwen (its base architecture).
 _FAMILY_RULES = [
@@ -876,7 +949,7 @@ class RemoteScreen(Screen):
             # A "choose model" placeholder (registry model_id SELECT) is not a launchable row —
             # users cannot type the real id — so the provider's roster IS its catalog: the
             # placeholder never renders, only its real pinned rows and the catalog do (2026-10-20).
-            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}")
+            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}{lane_tag(a.provider, a.model_id)}")
                      for a in buckets[prov] if a.model_id != "SELECT"]
             items += self._catalog_items(prov, buckets[prov])
             label = f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})"
@@ -921,8 +994,9 @@ class RemoteScreen(Screen):
                                 model_id=c.model_id)
             if not self._visible(probe):
                 continue
-            tools = "" if c.tools is True else "  · tools untested"
-            rows.append(Item(probe.alias, f"{c.model_id}  · catalog{tools}"))
+            # The per-row "tools untested" flag is gone (user 2026-10-20: stale noise on
+            # nearly every row); the row tags a NON-default lane instead.
+            rows.append(Item(probe.alias, f"{c.model_id}  · catalog{lane_tag(prov, c.model_id)}"))
         return rows
 
     def _catalog_local_capable(self, prov: str, model_id: str) -> bool:
@@ -990,19 +1064,21 @@ class RemoteScreen(Screen):
             self.accordion.expand(open_group)
 
     def info_text(self, item_id: str | None) -> str:
-        """The info box under the model list: the model's display name and its short-form
-        note (config/remote-model-notes.json), or a hint when nothing is pointed at. Only
-        models get a box — group headers and the no-keys instruction get the hint."""
+        """The info box under the model list: the model's display name, its lane, and its
+        short-form note (config/remote-model-notes.json), or a hint when nothing is pointed
+        at. Only models get a box — group headers and the no-keys instruction get the hint."""
         if item_id and item_id.startswith(CATALOG_PREFIX):
             parts = item_id.split(":", 2)
             if len(parts) == 3 and not parts[2].startswith("__"):
-                return (f"{parts[2]}\nListed by {PROVIDER_LABELS.get(parts[1], parts[1])}'s catalog; not "
-                        "pinned. Tool sessions, quota and billing are untested.")
+                return (f"{parts[2]}\n{PROVIDER_LABELS.get(parts[1], parts[1])} catalog · "
+                        f"Lane: {lane_for(parts[1], parts[2])}")
         agent = next((a for a in self.agents if a.alias == item_id), None)
         if agent is None:
             return "Hover or highlight a model to see notes about it."
+        lane_line = f"Lane: {lane_for(agent.provider, agent.model_id)}"
         note = model_note(agent.alias)
-        return f"{agent.display}\n{note}" if note else f"{agent.display}\nNo notes for this model yet."
+        return (f"{agent.display}\n{lane_line}\n{note}" if note
+                else f"{agent.display}\n{lane_line}\nNo notes for this model yet.")
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings

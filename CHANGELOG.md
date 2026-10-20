@@ -98,6 +98,15 @@
   TLS) **keeps the cached list and says so** in the group header ("cached, refresh failed: …") —
   it never empties it. No new HTTP: the revision is the same GET-only `remote-session.sh
   --models` call, which already goes through curl's system trust store.
+- **Every model names its lane; the "tools untested" noise is gone.** Each row's info box says
+  `Lane: native Anthropic | chat/completions | undecided (not yet probed)` — native Anthropic for
+  models on a provider with `anthropic_base` that `bin/anthropic-route.py`'s cached probe
+  accepted, undecided when never probed, plain chat/completions everywhere else (no probe, no
+  native endpoint). Rows carry the short tag only for non-default lanes, so `· native Anthropic`
+  and `· undecided (not yet probed)` stand out instead of a suffix repeated on every line. The
+  per-row "· tools untested" suffix and the catalog info box's "Listed by …'s catalog; not
+  pinned. Tool sessions, quota and billing are untested." boilerplate are removed (user
+  2026-10-20: redundant, often stale, adds no value).
 
 ## [0.38.0] — 2026-10-19
 
