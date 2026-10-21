@@ -1,4 +1,4 @@
-## [0.38.1] — 2026-10-20
+## [0.38.1] — 2026-10-21
 
 ### Fixed — remote sessions failed on the first prompt on almost every non-NVIDIA provider
 
