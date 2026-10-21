@@ -52,7 +52,8 @@ class RemoteSessionTests(unittest.TestCase):
                     # emoji.sh is sourced unconditionally at remote-session.sh:52 and its
                     # SESSION_EMOJI_* vars are read under `set -u`; without it in the
                     # fixture every launch path aborts before doing anything.
-                    'config/emoji.sh'):
+                    'config/emoji.sh', 'config/dispatch-preferences.json',
+                    'bin/session-fallbacks.py'):
             shutil.copy2(ROOT / rel, self.root / rel)
         source = (self.root / 'bin/remote-session.sh').read_text()
         (self.root / 'bin/library.sh').write_text(source.split('# ---- argument parsing')[0])
@@ -305,6 +306,64 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                            env=dict(self.env, **(extra_env or {})), text=True, capture_output=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         return cfg.read_text(), r
+
+    def _fallbacks(self, text):
+        """(fallback deployments in order, router fallbacks block) from a generated config."""
+        models = []
+        for chunk in text.split('  - model_name: ')[1:]:
+            name = chunk.split('\n', 1)[0]
+            if name.startswith('la-fallback-'):
+                models.append(chunk.split('      model: ', 1)[1].split('\n', 1)[0])
+        block = text.split('  fallbacks:', 1)[1].split('\n', 1)[0] if '  fallbacks:' in text else ''
+        return models, block
+
+    def test_session_fallback_chain_follows_the_maintainer_order(self):
+        """0.40.0: an upstream throttle on the session model is answered by the next model, on
+        the same port. Same provider only, own model skipped, order from dispatch-preferences."""
+        text, _ = self._write_cfg(model='z-ai/glm-5.3-flash')
+        models, block = self._fallbacks(text)
+        self.assertEqual(models, ['nvidia_nim/z-ai/glm-5.3', 'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
+                                  'nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b'])
+        # Every spoofed id AND the generic "*" key (measured: a "claude-*" key does not match a
+        # subagent id such as claude-haiku-9) list the chain in order.
+        self.assertIn('"*": ["la-fallback-1", "la-fallback-2", "la-fallback-3"]', block)
+        self.assertIn('"claude-opus-5-5": ["la-fallback-1", "la-fallback-2", "la-fallback-3"]', block)
+        self.assertNotIn('"claude-*":', block)
+        # A throttled model fails over at once instead of retrying itself three times.
+        self.assertIn('    RateLimitErrorRetries: 0\n', text)
+        # Cooldowns stay off: they would mask the real upstream error (contract test 2).
+        self.assertIn('  disable_cooldowns: true\n', text)
+
+    def test_fallbacks_reuse_the_model_specific_params(self):
+        text, _ = self._write_cfg(model='z-ai/glm-5.3-flash')
+        ultra = text.split('  - model_name: "la-fallback-3"\n', 1)[1].split('  - model_name:', 1)[0]
+        self.assertIn('enable_thinking: false', ultra.split('litellm_settings:')[0])
+        glm = text.split('  - model_name: "la-fallback-1"\n', 1)[1].split('  - model_name:', 1)[0]
+        self.assertIn('      reasoning_effort: low\n', glm)
+        self.assertIn('      api_key: os.environ/NVIDIA_API_KEY\n', glm)
+
+    def test_session_on_ultra_falls_back_to_the_others_in_order(self):
+        text, _ = self._write_cfg()
+        models, _ = self._fallbacks(text)
+        self.assertEqual(models, ['nvidia_nim/z-ai/glm-5.3-flash', 'nvidia_nim/z-ai/glm-5.3',
+                                  'nvidia_nim/deepseek-ai/deepseek-v4.1-flash'])
+
+    def test_fallbacks_off_and_override_and_other_providers(self):
+        text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'off'}, model='z-ai/glm-5.3-flash')
+        self.assertEqual(self._fallbacks(text), ([], ''))
+        text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'nvidia:z-ai/glm-5.3, bogus'},
+                                  model='z-ai/glm-5.3-flash')
+        self.assertEqual(self._fallbacks(text)[0], ['nvidia_nim/z-ai/glm-5.3'])
+        # A provider with no session chain in the roster gets none (no cross-provider quota drain).
+        text, _ = self._write_cfg(prov='gemini', model='gemini-3.8-flash')
+        self.assertEqual(self._fallbacks(text), ([], ''))
+
+    def test_fallbacks_need_the_providers_key(self):
+        (self.root / 'keys' / 'nvidia').unlink()
+        (self.root / 'keys' / 'nvidia-2').write_text('fixture-not-a-real-key') if False else None
+        r = subprocess.run(['bash', '-c', 'source "$1"; _session_fallbacks nvidia z-ai/glm-5.3-flash',
+                            'x', str(self.root / 'bin/library.sh')], env=self.env, text=True, capture_output=True)
+        self.assertEqual(r.stdout.strip(), '')
 
     def test_subagent_ids_are_routed_not_rejected(self):
         """Subagents ask for claude-haiku-5-5 / claude-sonnet-4-6 / ...; before 0.27.0 the proxy

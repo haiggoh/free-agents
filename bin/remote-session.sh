@@ -764,17 +764,11 @@ _write_subagent_pool() { # _write_subagent_pool <cfg> <session-provider>  (hybri
     return 0
 }
 
-write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking> [effort] [temperature]
-    local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}" temperature="${6:-}"
-    _available "$prov" || return 2
-    _valid_model "$model" || return 2
-    local litellm_model think_line="" api_base=""
-    # The route comes from the generated registry (config/remote-registry.yaml), so a provider
-    # added there is routable here without a second hand-kept list.
-    local route
-    route="$(_litellm_route "$prov" "$model")" || {
-        echo "remote-session: no LiteLLM prefix for provider $prov" >&2; return 1; }
-    litellm_model="${route%%|*}"; api_base="${route#*|}"
+# Per-model request params (thinking/effort lines) for one deployment, shared by the session model
+# and its fallbacks so both get the same model-family rules. Sets MP_THINK_LINE / MP_EFFORT_LINE.
+MP_THINK_LINE=""; MP_EFFORT_LINE=""
+_model_param_lines() { # _model_param_lines <provider> <model> <thinking> [effort]
+    local prov="$1" model="$2" thinking="$3" effort="${4:-}" think_line=""
     # Gemini 3.x spends its whole token budget on thinking unless told not to;
     # that truncated real replies during bring-up, so default it OFF.
     [[ "$prov" == "gemini" && "$thinking" != "true" ]] && \
@@ -868,6 +862,65 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
         esac
     fi
 
+    MP_THINK_LINE="$think_line"; MP_EFFORT_LINE="$effort_line"
+}
+
+# FALLBACK CHAIN (0.40.0). NVIDIA can throttle ONE model upstream for hours (GLM 5.3 Flash
+# answered 429 in 0.2 s all night on 2026-10-20 while DeepSeek on the same key answered 46/46).
+# The proxy then answers from the next model in the session chain (bin/session-fallbacks.py:
+# config/dispatch-preferences.json session_fallbacks, same provider only, own model skipped), on
+# the same port, with no restart. Members without a key are skipped. LA_REMOTE_FALLBACKS=off.
+_session_fallbacks() { # _session_fallbacks <provider> <model> -> "provider:model" lines (keyed)
+    local line fprov fmodel
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        fprov="${line%%:*}"; fmodel="${line#*:}"
+        _valid_model "$fmodel" 2>/dev/null || continue
+        "$KEYS" --check "$fprov" >/dev/null 2>&1 || continue
+        echo "$line"
+    done < <(python3 "$SCRIPT_DIR/session-fallbacks.py" "$1" "$2" 2>/dev/null)
+}
+
+FALLBACK_NAMES=()
+_write_fallbacks() { # _write_fallbacks <cfg> <provider> <model> <thinking> [effort] [temperature]
+    local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}" temperature="${6:-}"
+    local line fprov fmodel route key n=0
+    FALLBACK_NAMES=()
+    while IFS= read -r line; do
+        fprov="${line%%:*}"; fmodel="${line#*:}"
+        route="$(_litellm_route "$fprov" "$fmodel")" || continue
+        key="$("$KEYS" --names "$fprov")" || continue; key="${key%%$'\n'*}"
+        _model_param_lines "$fprov" "$fmodel" "$thinking" "$effort"
+        n=$((n+1)); FALLBACK_NAMES+=("la-fallback-$n")
+        {
+            echo "  - model_name: \"la-fallback-$n\""
+            echo "    litellm_params:"
+            echo "      model: ${route%%|*}"
+            echo "      api_key: os.environ/$key"
+            [[ -n "${route#*|}" ]] && echo "      api_base: ${route#*|}"
+            [[ -n "$MP_THINK_LINE" ]] && echo "$MP_THINK_LINE"
+            [[ -n "$MP_EFFORT_LINE" ]] && echo "$MP_EFFORT_LINE"
+            [[ -n "$temperature" ]] && echo "      temperature: $temperature"
+            echo "      num_retries: 1"
+        } >> "$cfg"
+    done < <(_session_fallbacks "$prov" "$model")
+    return 0
+}
+
+write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinking> [effort] [temperature]
+    local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}" temperature="${6:-}"
+    _available "$prov" || return 2
+    _valid_model "$model" || return 2
+    local litellm_model think_line="" api_base=""
+    # The route comes from the generated registry (config/remote-registry.yaml), so a provider
+    # added there is routable here without a second hand-kept list.
+    local route
+    route="$(_litellm_route "$prov" "$model")" || {
+        echo "remote-session: no LiteLLM prefix for provider $prov" >&2; return 1; }
+    litellm_model="${route%%|*}"; api_base="${route#*|}"
+    _model_param_lines "$prov" "$model" "$thinking" "$effort"
+    think_line="$MP_THINK_LINE"; local effort_line="$MP_EFFORT_LINE"
+
     local key_env
     key_env="$("$KEYS" --names "$prov")" || return 1
     key_env="${key_env%%$'\n'*}"
@@ -921,6 +974,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             [[ -n "$native_line" ]] && echo "$native_line"
         } >> "$cfg"
     done
+    _write_fallbacks "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 1
     _write_subagent_pool "$cfg" "$prov" || return 1
     cat >> "$cfg" <<'YAML'
 litellm_settings:
@@ -956,6 +1010,17 @@ YAML
 router_settings:
   retry_policy:
     BadRequestErrorRetries: 1
+YAML
+    if [[ ${#FALLBACK_NAMES[@]} -gt 0 ]]; then
+        # A throttled model fails over AT ONCE instead of retrying itself; every spoofed id and the
+        # generic "*" key list the chain ("claude-*" as a key does NOT match a subagent id such as
+        # claude-haiku-9: measured on LiteLLM 1.105.1, the generic "*" does).
+        local chain="" fid entries=""
+        for fid in "${FALLBACK_NAMES[@]}"; do chain+="${chain:+, }\"$fid\""; done
+        for fid in "${_spoofs[@]}" '*'; do entries+="${entries:+, }{\"$fid\": [$chain]}"; done
+        { echo "    RateLimitErrorRetries: 0"; echo "  fallbacks: [$entries]"; } >> "$cfg"
+    fi
+    cat >> "$cfg" <<'YAML'
   # One deployment per name: a cooldown after its first failure answers every retry with a
   # synthetic "429 No deployments available ... Try again in 5 seconds", which Claude Code counts
   # down and retries for minutes while the REAL upstream error (404, 402 balance, 400) stays hidden.

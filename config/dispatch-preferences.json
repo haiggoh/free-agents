@@ -126,5 +126,27 @@
    ],
    "note": "Private and very fast; smaller, so weaker on hard tasks: bulk and mechanical work."
   }
- ]
+ ],
+ "session_fallbacks": {
+  "description": "Fallback chain for a FREE SESSION's proxy (bin/remote-session.sh), used when the session's own model is throttled upstream: the proxy answers from the next model here, same port, no restart. Same provider only (a session would drain another provider's free quota). The session's own model is skipped. LA_REMOTE_FALLBACKS=off disables; LA_REMOTE_FALLBACKS=provider:model,... overrides.",
+  "maintainer_note": "Order set 2026-10-21: GLM 5.3 Flash, GLM 5.3, DeepSeek V4.1 Flash (slow but superior quality, so above Nemotron), Nemotron 3 Ultra last (least capable, least likely to be throttled).",
+  "order": [
+   {
+    "provider": "nvidia",
+    "model": "z-ai/glm-5.3-flash"
+   },
+   {
+    "provider": "nvidia",
+    "model": "z-ai/glm-5.3"
+   },
+   {
+    "provider": "nvidia",
+    "model": "deepseek-ai/deepseek-v4.1-flash"
+   },
+   {
+    "provider": "nvidia",
+    "model": "nvidia/nemotron-3-ultra-550b-a55b"
+   }
+  ]
+ }
 }
