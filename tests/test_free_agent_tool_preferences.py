@@ -243,6 +243,24 @@ class RemoteDispatchTests(Base):
             fat.subprocess.run = real
         self.assertIn("503", str(cm.exception))
 
+    def test_failure_reason_is_the_dispatchers_verdict_line_not_a_json_tail(self):
+        # remote-agent-dispatch prints "✖ REMOTE ... failed: [...] HTTP 503 — <multi-line JSON>";
+        # the LAST stderr line is the JSON's closing "]", which said nothing (measured 2026-10-21).
+        err = ("REMOTE banner\n✖ REMOTE gemini failed: [transient] HTTP 503 — [{\n"
+               '  "error": {"code": 503, "message": "high demand"}\n}\n]\n')
+
+        def fake_run(cmd, **_kw):
+            return subprocess.CompletedProcess(cmd, 3, stdout="", stderr=err)
+
+        real, fat.subprocess.run = fat.subprocess.run, fake_run
+        try:
+            with self.assertRaises(fat.DispatchFailed) as cm:
+                fat.dispatch_entry(R1, "p", {})
+        finally:
+            fat.subprocess.run = real
+        self.assertIn("HTTP 503", str(cm.exception))
+        self.assertNotEqual(str(cm.exception).strip(), "]")
+
 
 class HelpTests(unittest.TestCase):
     def test_help_prints_usage_and_runs_nothing(self):

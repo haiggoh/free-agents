@@ -360,7 +360,10 @@ def dispatch_entry(entry, prompt: str, env) -> str:
         text = out.read_text() if out.exists() else ""
         if r.returncode != 0 or not text.strip():
             msg = (r.stderr or r.stdout or "").strip().splitlines()
-            raise DispatchFailed(msg[-1] if msg else f"exit {r.returncode}, no answer")
+            # The dispatcher's verdict line ("✖ REMOTE ... failed: [...] HTTP 503 — ...") names
+            # the cause; the last line is often only the tail of a multi-line JSON body.
+            verdict = next((ln for ln in msg if "✖ REMOTE" in ln), msg[-1] if msg else "")
+            raise DispatchFailed(verdict.strip()[:240] or f"exit {r.returncode}, no answer")
         return text
     _serve, spoof, _subdir, _repo = get_model_endpoint(entry["alias"])
     try:
