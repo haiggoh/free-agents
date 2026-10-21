@@ -40,7 +40,7 @@ agents and you reached for the `Agent` tool, you have not complied yet.
 bin/lowkey-cli.py             # (alias lk) or plain curl to localhost → free LOCAL model
 bin/librarian-dispatch.py     # long/streaming generations: --port (local) or --provider nvidia|gemini (remote)
 bin/remote-agent-dispatch.py  # → free REMOTE API model (bigger + smarter, see the map below)
-bin/free-agent-tool.py        # stdin {"prompt","subagent_type"} → routed by role to a free model
+bin/free-agent-tool.py        # stdin {"prompt","files"} → the maintainer's model order, fails over; --list
 bin/agent-fallback.py         # picks a lane for you, with a privacy/cost posture
 bin/csl                       # a full interactive session on either free lane
 ```

@@ -1,14 +1,14 @@
 {
   "description": "NVIDIA models that are known to be non-functional on NVIDIA NIM API. Distinction: 'broken' = model endpoint fails (timeout/404) regardless of account tier; 'paid_only' = model works but requires paid subscription (separate tier in remote-agents.sh). These models are hidden by default via --show-broken / 'u' toggle, NOT by --show-paid-only / 'p' toggle.",
-  "last_updated": "2026-10-13",
+  "last_updated": "2026-10-21",
   "models": [
     {
       "model_id": "moonshotai/kimi-k3",
       "alias": "nvidia-kimi-k3",
-      "reason": "TIMEOUT on all configurations (180s) — NVIDIA API capacity/availability issue. Model listed in catalog but backend does not respond. Same catalog metadata (no pricing/tier) as working Nemotron models. NOT a paid-tier restriction.",
+      "reason": "HTTP 410 Gone: NVIDIA retired the model on 2026-10-15 (\"reached its end of life on 2026-10-15T08:00:00Z\"). Earlier (2026-10-10/13) it timed out on every probe.",
       "status": "broken",
-      "failure_mode": "timeout",
-      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10 and 2026-10-13; re-confirmed 2026-10-13 with the fixed probe (max_tokens 512): read timeout at 90s."
+      "failure_mode": "end_of_life",
+      "evidence": "2026-10-21 dispatch smoke test, twice: HTTP 410 with the end-of-life message. Other providers listing kimi-k3 (Hugging Face, SiliconFlow, LLM7, Kilo) all answered 402 on our keys."
     },
     {
       "model_id": "moonshotai/kimi-k2.6",
@@ -17,14 +17,6 @@
       "status": "broken",
       "failure_mode": "account_provisioning",
       "evidence": "HTTP 404 with explicit 'Not found for account' message. Confirmed 2026-10-10."
-    },
-    {
-      "model_id": "deepseek-ai/deepseek-v4.1-flash",
-      "alias": "nvidia-deepseek-v4",
-      "reason": "TIMEOUT on all configurations (180s) — NVIDIA API capacity/availability issue. Model listed in catalog but backend does not respond. Old v4-flash-0731 is 410 Gone. NOT a paid-tier restriction.",
-      "status": "broken",
-      "failure_mode": "timeout",
-      "evidence": "HTTP 200 on health checks, but generation requests hang until 180s proxy timeout. Confirmed 2026-10-10 and 2026-10-13; re-confirmed 2026-10-13 with the fixed probe (max_tokens 512): read timeout at 90s."
     },
     {
       "model_id": "deepseek-ai/deepseek-coder-6.7b-instruct",

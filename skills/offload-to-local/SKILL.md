@@ -40,13 +40,60 @@ agents and you reached for the `Agent` tool, you have not complied yet.
 bin/lowkey-cli.py             # (alias lk) or plain curl to localhost → free LOCAL model
 bin/librarian-dispatch.py     # long/streaming generations: --port (local) or --provider nvidia|gemini (remote)
 bin/remote-agent-dispatch.py  # → free REMOTE API model (bigger + smarter, see the map below)
-bin/free-agent-tool.py        # stdin {"prompt","subagent_type"} → routed by role to a free model
+bin/free-agent-tool.py        # stdin {"prompt","files"} → the maintainer's model order, fails over; --list
 bin/agent-fallback.py         # picks a lane for you, with a privacy/cost posture
 bin/csl                       # a full interactive session on either free lane
 ```
 
 Self-check before you claim you offloaded anything: **name the process that ran the tokens.**
 If the answer is not "a localhost port" or "a free provider's API", it was not free.
+
+## Default routing on a PAID session — offload first, announce always
+
+With free-agents installed, **delegated work on a paid session goes to a free model by default.**
+That covers every native fan-out path, not just a lone `Agent` call: `Agent`/Task, `Workflow`,
+parallel subagents, review agents, `/ultracode`-style runs. Each of those starts a PAID model. So
+decide the route BEFORE the call, not after a hook stops it:
+
+1. **Self-contained text work** (review, analysis, extraction, drafting, a cross-check) → a
+   stateless dispatch through `bin/free-agent-tool.py`. Attach the inputs as `"files"`: the model
+   cannot read the disk. It walks the maintainer's preference order in
+   `config/dispatch-preferences.json` and fails over on its own (`--list` shows the order and
+   what is available now). Several independent pieces = several parallel Bash calls.
+2. **Work that must read files or run commands** → a free SESSION (`remote-session.sh <alias>`, or
+   `csl` locally). A stateless dispatch would narrate the reads it cannot do and return nothing.
+   Session models are NOT the dispatch order: see the `free-session-handover` skill.
+3. **A paid subagent** only with a stated reason: security-critical work, the final verification of
+   a free result, or a free lane that is measured as failing right now.
+
+**Announce the model and route BEFORE every offload** ("offloading to Gemini 3.8 Flash, stateless
+dispatch"). Free models differ a lot in quality and speed, and the user needs to know which one ran.
+The tool also prints the model it tried on stderr and returns `model_used` and `route`. Repeat
+those in your reply.
+
+The default order (maintainer, 2026-10-21): Gemini 3.8 Flash → DeepSeek V4.1 Flash (NVIDIA) → GLM
+5.3 → GLM 5.3 Flash → Nemotron 3 Ultra (fallback) → local DeepSeek V4 Flash → local Laguna S → local
+KAT Coder (fast, smaller: weaker on hard tasks). Kimi K3 is not on it: NVIDIA retired it on
+2026-10-15 (410 Gone) and every other provider that lists it wants paid credits (402).
+Override it with `config/dispatch-preferences.local.json` or `FA_DISPATCH_PREFS`.
+
+**Council routing — pick by strength, review across families.** Each entry also lists the roles it
+is strong at (operator, reasoner, validator, utility) and its model family. Ask for a role with
+`"role": "validator"` (a `subagent_type` such as `code-reviewer` maps to one), and for an
+adversarial review add `"avoid_family": "<family that did the work>"`. A different family often
+finds what a stronger model of the same family misses, so for review, family diversity beats raw
+capability. Example: work drafted by Gemini (`google`) gets its review from DeepSeek or GLM.
+
+| Role | Who fills it (preference order) |
+|---|---|
+| operator | Gemini 3.8 Flash → GLM 5.3 Flash → local Laguna S → local KAT Coder |
+| reasoner | Gemini 3.8 Flash → DeepSeek V4.1 Flash → GLM 5.3 → GLM 5.3 Flash → Nemotron 3 Ultra → local DeepSeek V4 Flash |
+| validator | Gemini 3.8 Flash → DeepSeek V4.1 Flash → GLM 5.3 → GLM 5.3 Flash → Nemotron 3 Ultra → local Laguna S |
+| utility | Gemini 3.8 Flash → local KAT Coder |
+
+`free-agent-tool.py --list` prints the live table (families, roles, what is available now). When
+the roster changes, edit `config/dispatch-preferences.json` and give each new entry its `family`
+and `roles`; the tests refuse an entry without them.
 
 ## Which free agent? — remote is SMARTER, local is PRIVATE
 
@@ -76,7 +123,7 @@ the parameter count.**
 
 So filter by SIZE, not by lane:
 - **Remote is only the right call when the model is genuinely bigger than local** — the
-  hundreds-of-billions tier (e.g. Nemotron Ultra 550B, Kimi K3, DeepSeek V4, Gemini Flash).
+  hundreds-of-billions tier (e.g. Nemotron Ultra 550B, DeepSeek V4, GLM 5.3, Gemini Flash).
 - **If a remote entry has a local-capable equivalent, prefer the LOCAL one.** Same capability,
   unlimited, private, no quota burned. The repo tracks this classification for the picker
   (a local-capable filter over the remote roster, hidden by default); apply the *same* judgement
@@ -89,8 +136,8 @@ Concrete current picks — **verify with `bin/remote-session.sh --list` and `bin
 before using a name; rosters and model ids rot:**
 
 - **Remote, big/smart:** Gemini 3.8 Flash and Gemini 3.6 Flash (note: **separate** daily
-  quotas — treat them as two budgets, not one), NVIDIA Nemotron 3 Ultra 550B-A55B, Kimi K3,
-  DeepSeek V4 Flash. For utility-tier remote work, Nemotron 3.5 Lightning 30B or Groq
+  quotas — treat them as two budgets, not one), NVIDIA Nemotron 3 Ultra 550B-A55B, GLM 5.3,
+  DeepSeek V4.1 Flash. (Kimi K3: NVIDIA retired it on 2026-10-15; other providers want paid credits.) For utility-tier remote work, Nemotron 3.5 Lightning 30B or Groq
   gpt-oss-120b (very fast).
 - **Local, simpler work:** the KAT-Coder 2.5 and Qwen 3.8 class aliases — resolve the live names
   with `bin/la-roles.sh`.

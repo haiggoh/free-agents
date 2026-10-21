@@ -76,7 +76,12 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str) -> str:
     return (
         f"Free-agents replacement: run this subagent for FREE via Bash instead of paid Sonnet.\n"
         f"  python3 \"{free_tool}\" <<'{delim}'\n{payload_json}\n{delim}\n"
-        f"Returns JSON: {{\"content\": \"...\", \"model_used\": \"...\"}}.\n"
+        f"Returns JSON: {{\"content\": \"...\", \"model_used\": \"...\", \"route\": \"...\"}}.\n"
+        f"Before running it, tell the user which model it goes to (`python3 \"{free_tool}\" --list` "
+        f"shows the preference order); free models are not equal.\n"
+        f"It is a STATELESS dispatch: the model cannot read files or run commands. Add the files "
+        f"it needs as \"files\": [paths] (their contents are attached). Work that must drive tools "
+        f"belongs in a free session (remote-session.sh / csl), not here.\n"
         f"Independent tasks may be launched as several parallel Bash calls.\n"
         f"Original description: {description}\n"
         f"Configure: csl -> Cloud Session Configuration -> Replace subagents with free agents, "

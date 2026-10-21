@@ -1,3 +1,51 @@
+## [0.39.0] — 2026-10-21
+
+### Changed — free offloading is the default on a paid session, and every offload says where it went
+
+- **The dispatch model follows the maintainer's preference order**, not a role lookup (user
+  2026-10-21: "they're not equal so I need to know"). `config/dispatch-preferences.json` lists the
+  A-tier roster: Gemini 3.8 Flash, DeepSeek V4.1 Flash (NVIDIA), GLM 5.3, GLM 5.3 Flash, Nemotron 3
+  Ultra (fallback), then local DeepSeek V4 Flash, Laguna S and KAT Coder. Kimi K3 was smoke-tested
+  for this release and left out: NVIDIA retired it on 2026-10-15 (410 Gone), and Hugging Face,
+  SiliconFlow, LLM7 and Kilo all answer 402 (paid credits required). `bin/free-agent-tool.py` runs the first available entry (remote needs
+  its key, local needs its weights) and falls over to the next on a quota, 5xx, timeout or empty
+  answer. Override with `config/dispatch-preferences.local.json` or `FA_DISPATCH_PREFS`;
+  `FA_DISPATCH_ROUTING=role` keeps the old role routing.
+- **Council routing: roles and model families** (user 2026-10-21: "a different model family for
+  adversarial review can get a completely new angle"). Each entry lists the roles it is strong at
+  and its family. A request's `"role"` (or a `subagent_type` such as `code-reviewer`) keeps only
+  entries with that role, in preference order; `"avoid_family"` skips the family that did the
+  work, so a review comes from a different family.
+- **Every attempt is announced** on stderr (model and route), and the result JSON carries
+  `model_used`, `display`, `route` and every attempt with its error.
+- **`"files"` are attached.** A dispatch cannot read the disk, so the files a task needs are
+  now sent with it. Before this, a review that needed files came back as narration of the reads
+  the model could not do.
+- **`free-agent-tool.py --help` and `--list`.** `--help` used to be read as JSON input;
+  `--list` shows the order and what is available now, and sends nothing.
+- Each remote dispatch gets a fresh output directory, so a failed run can no longer return the
+  previous run's answer from the shared `/tmp/fa-free-agent`.
+- **The SessionStart nudge on a PAID session now says free offloading is the default** for
+  every native delegation path (Agent/Task, Workflow, fan-out, review agents), names the
+  dispatch-or-session choice, and asks the agent to announce the model before offloading. The
+  `Agent` intercept's redirect says the same and warns that a dispatch cannot read files.
+
+### Changed — DeepSeek V4.1 Flash is listed again; Kimi K3 marked retired
+
+- **DeepSeek V4.1 Flash (NVIDIA) is off the unworking-models list.** A real review dispatch
+  answered in about 10 minutes with a substantive result (2026-10-21); the earlier verdict came
+  from short probes that timed out. Its info box says what to expect: it works but is slow
+  (minutes per request), so dispatch it with a long timeout, not for an interactive session.
+- **Kimi K3** stays hidden, now for the real reason: NVIDIA retired it on 2026-10-15 (410 Gone).
+
+### Added — the `free-session-handover` skill
+
+- When to run a full free session instead of a dispatch, and why its model choice differs
+  (Gemini's free quota runs out fast in a session, DeepSeek is slow per turn, GLM 5.3 is the
+  session workhorse). Also a condensed overnight-handover playbook: the handoff document, the
+  launch-successor-first order, effort at launch, "spawning is not offloading", and a standing
+  rules template.
+
 ## [0.38.1] — 2026-10-21
 
 ### Fixed — remote sessions failed on the first prompt on almost every non-NVIDIA provider

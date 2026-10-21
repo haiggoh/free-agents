@@ -239,6 +239,9 @@ Linux are the same idea on other backends ([docs/CUDA.md](docs/CUDA.md)).
 
 Newest first. `CHANGELOG.md` has every release in full.
 
+- **0.39.0**: free offloading is the default on a paid session; dispatch follows a set model
+  order (Gemini 3.8 Flash first) with automatic failover and says which model ran; new
+  `free-session-handover` skill.
 - **0.38.1**: remote sessions work past the first prompt on every keyed provider (the
   chat/completions switch LiteLLM actually reads); a native Anthropic lane, chosen per model, for
   OpenRouter, Kilo, Z.ai and LLM7; account refusals (balance, card) shown at once as a named 402.

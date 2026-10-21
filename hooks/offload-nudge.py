@@ -14,9 +14,48 @@ import os
 import sys
 
 
+def is_free_session(base_url: str) -> bool:
+    """A localhost base URL is a free session (local model or a free-API proxy)."""
+    from urllib.parse import urlparse
+    try:
+        return (urlparse(base_url).hostname or "") in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+    except ValueError:
+        return False
+
+
+def paid_nudge(root: str) -> str:
+    """A PAID session: free offloading is the DEFAULT for delegated work, fan-out included."""
+    tool = f"{root}/bin/free-agent-tool.py" if root else "the plugin's bin/free-agent-tool.py"
+    return (
+        "free-agents is installed and this session runs on PAID inference, so FREE OFFLOADING IS "
+        "THE DEFAULT for delegated work. Before ANY Agent/Task call, Workflow, fan-out, parallel "
+        "subagents, /ultracode-style runs or a review agent, route the work to a free model "
+        "INSTEAD of a paid subagent: the native Agent tool can only start a paid model. Pick the "
+        "shape first: (1) self-contained text work (review, analysis, extraction, drafting, a "
+        "second opinion) → STATELESS dispatch: "
+        f"`python3 {tool} <<'JSON'` with {{\"prompt\": ..., \"files\": [paths]}} — attach the "
+        "files, because a dispatch cannot read them; it walks the maintainer's preference order "
+        "(`--list` shows it: Gemini 3.8 Flash, DeepSeek V4.1 Flash, GLM 5.3, GLM 5.3 Flash, Nemotron 3 Ultra, "
+        "then local DeepSeek V4 Flash, Laguna S, KAT Coder) and fails over by itself. Several "
+        "independent pieces = several parallel Bash calls. (2) Work that must read files or run "
+        "commands → a free SESSION (remote-session.sh <alias>, or csl for local), never a "
+        "stateless dispatch; session models differ from dispatch ones (Gemini quota runs out fast in "
+        "a session, DeepSeek is slow; GLM 5.3 is the session workhorse) — see the "
+        "free-session-handover skill, which also covers overnight handovers. ALWAYS ANNOUNCE the model and route to the user BEFORE offloading — "
+        "free models are not equal. A paid subagent needs a stated reason (security-critical, "
+        "final verification of the free result, or a free lane measured as failing now). Keep "
+        "judgment, integration and the final check on this session. Full guidance: the "
+        "offload-to-local skill."
+    )
+
+
 def main():
     try:
         root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+        if not is_free_session(os.environ.get("ANTHROPIC_BASE_URL", "")):
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                     "additionalContext": paid_nudge(root)}}))
+            return 0
         resolver = f"{root}/bin/la-roles.sh" if root else "the plugin's bin/la-roles.sh (or `csl roles`)"
         nudge = (
             "local-agents (offload-to-local): before executing a multi-step or file-touching task, "

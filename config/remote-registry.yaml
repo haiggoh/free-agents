@@ -546,7 +546,7 @@ entries:
     display: NVIDIA Kimi K3 (Moonshot)
     tier: unknown
     notes: >-
-      ⚠️ BROKEN: TIMEOUT on all probes (2026-10-10, 2026-10-13). Consistent 180s timeouts. Hidden via broken-nvidia-models.json.
+      ⚠️ RETIRED: NVIDIA returns 410 Gone since 2026-10-15 (end of life). Earlier probes timed out (2026-10-10/13). Hidden via broken-nvidia-models.json.
     autocompact_default: "-"
 
   - alias: nvidia-deepseek-v4
@@ -555,7 +555,7 @@ entries:
     display: NVIDIA DeepSeek V4.1 Flash
     tier: unknown
     notes: >-
-      ⚠️ BROKEN: TIMEOUT on all probes. Old v4-flash-0731 is 410 Gone. Hidden via broken-nvidia-models.json.
+      WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.
     autocompact_default: "-"
 
   - alias: nvidia-gptoss
