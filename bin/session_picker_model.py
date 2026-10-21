@@ -17,6 +17,8 @@ Navigation contract (docs/SESSION_PICKER.md):
 """
 from __future__ import annotations
 
+import calendar
+import datetime
 import json
 import os
 import re
@@ -118,6 +120,7 @@ class RemoteAgent:
     has_key: bool = True
     broken: bool = False      # listed in config/broken-nvidia-models.json
     model_id: str = ""        # provider model id (remote-session.sh --inventory column 8)
+    old: bool = False         # catalog row older than the age cutoff (pinned rows: never)
 
 
 @dataclass
@@ -260,6 +263,59 @@ def lane_tag(provider: str, model_id: str) -> str:
     return "" if lane == "chat/completions" else f"  · {lane}"
 
 
+# --- model age (T6) ------------------------------------------------------------------------
+# The user 2026-10-20: "some are quite old, we should have an additional filter set up for
+# that." Catalog rows older than the cutoff hide until the picker toggle (or --show-old)
+# shows them. The date is Hugging Face's createdAt, cached alongside the parameter count
+# by the footprint estimator; a row with no date available stays VISIBLE (fail-open), and
+# pinned registry rows — which have no dates — are never age-checked.
+DEFAULT_MODEL_AGE_MONTHS = 18
+MAX_MODEL_AGE_MONTHS_ENV = "LA_REMOTE_MAX_MODEL_AGE_MONTHS"
+
+
+def max_model_age_months() -> int:
+    """The age cutoff in months: LA_REMOTE_MAX_MODEL_AGE_MONTHS, default 18. An unreadable
+    or non-positive value falls back to the default rather than disabling the filter."""
+    try:
+        v = int(os.environ.get(MAX_MODEL_AGE_MONTHS_ENV, DEFAULT_MODEL_AGE_MONTHS))
+    except ValueError:
+        return DEFAULT_MODEL_AGE_MONTHS
+    return v if v > 0 else DEFAULT_MODEL_AGE_MONTHS
+
+
+def age_cutoff_date(months: int, today=None):
+    """`months` calendar months before `today` (the day clamped to the shorter month)."""
+    t = today or datetime.date.today()
+    y, m = t.year, t.month - int(months)
+    y += (m - 1) // 12                       # floor division walks back over year ends
+    m = (m - 1) % 12 + 1
+    return datetime.date(y, m, min(t.day, calendar.monthrange(y, m)[1]))
+
+
+def created_before_cutoff(created: str, months: int, today=None) -> bool:
+    """True when a Hugging Face createdAt ISO stamp predates the cutoff. Anything
+    unreadable (missing, empty, malformed) is NOT old: the filter must never hide what
+    it cannot date."""
+    try:
+        d = datetime.date.fromisoformat(str(created)[:10])
+    except (TypeError, ValueError):
+        return False
+    return d < age_cutoff_date(months, today)
+
+
+def size_sorted(rows, size_of):
+    """Rows largest-first (user 2026-10-20: parameter size is a rough capability signal).
+
+    Rows with a parameter count sort by it descending; rows with none sort after ALL
+    sized rows, in their incoming order. The sort is stable, so equal sizes keep the
+    list's own order — and it is display-order only: ids, launch argv and dedup logic
+    are untouched."""
+    def key(r):
+        b = size_of(r)
+        return (1, 0.0) if b is None else (0, -b)
+    return sorted(rows, key=key)
+
+
 # Order matters: identity markers first, so "deepseek-r1-distill-qwen" is DeepSeek (the
 # model's identity), not Qwen (its base architecture).
 _FAMILY_RULES = [
@@ -389,6 +445,8 @@ class Settings:
     include_trials: bool = True      # interactive visibility only; direct CLI keeps its guard
     local_capable_shown: bool = False
     show_broken: bool = False        # unworking models; in-memory, like the CLI flag
+    show_old: bool = False           # models over the age cutoff; in-memory, like the CLI flag
+                                     # (--show-old seeds it; the picker filter toggle re-reveals)
     deny_gh_release: bool = False    # re-add "Bash(gh release create:*)" to the blind-trust deny list (off since 0.32.0)
     remote_temperature: str = sms.DEFAULT_TEMPERATURE["remote_api_session"]
     local_temperature: str = sms.DEFAULT_TEMPERATURE["local_session"]
@@ -430,6 +488,13 @@ class Settings:
     on_last_launched: Callable[[str, str, str | None], object] | None = None
     # (provider, model id) -> True when a live-catalog row is local-capable (hidden by the filter).
     catalog_local_capable: Callable[[str, str], bool] | None = None
+    # (provider, model id) -> parameter count in billions for the per-provider size sort, or
+    # None when unknown (the row then sorts after the sized ones). Set by the picker; absent
+    # (plain Settings()) means no data, and nothing sorts.
+    model_param_count: Callable[[str, str], "float | None"] | None = None
+    # (provider, model id) -> True when a live-catalog row predates the age cutoff (hidden
+    # unless show_old). Set by the picker; absent means no dates known, so nothing hides.
+    catalog_model_old: Callable[[str, str], bool] | None = None
     notes: list = field(default_factory=list)
 
 
@@ -949,8 +1014,14 @@ class RemoteScreen(Screen):
             # A "choose model" placeholder (registry model_id SELECT) is not a launchable row —
             # users cannot type the real id — so the provider's roster IS its catalog: the
             # placeholder never renders, only its real pinned rows and the catalog do (2026-10-20).
+            # NVIDIA's pinned order is curated by hand (user 2026-10-20: "except nvidia we
+            # have sorted those manually very deliberately") — every other provider's pins
+            # sort size-descending, unknowns last in inventory order.
+            pinned = [a for a in buckets[prov] if a.model_id != "SELECT"]
+            if prov != "nvidia":
+                pinned = size_sorted(pinned, lambda a: self._catalog_size(prov, a.model_id))
             items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}{lane_tag(a.provider, a.model_id)}")
-                     for a in buckets[prov] if a.model_id != "SELECT"]
+                     for a in pinned]
             items += self._catalog_items(prov, buckets[prov])
             label = f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})"
             if prov in self.catalog_refresh_error:
@@ -986,11 +1057,14 @@ class RemoteScreen(Screen):
         have = {a.model_id for a in pinned if a.model_id}
         tier = pinned[0].tier if pinned else "unknown"
         rows = []
-        for c in cat:
+        # Largest first (T6), unknowns last in catalog order; the dedup below is by id
+        # membership, so a display-only reordering cannot change which rows survive.
+        for c in size_sorted(cat, lambda c: self._catalog_size(prov, c.model_id)):
             if c.model_id in have:
                 continue                       # already a pinned row, with its own notes
             probe = RemoteAgent(f"{CATALOG_PREFIX}{prov}:{c.model_id}", prov, c.model_id, tier,
                                 local_capable=self._catalog_local_capable(prov, c.model_id),
+                                old=self._catalog_old(prov, c.model_id),
                                 model_id=c.model_id)
             if not self._visible(probe):
                 continue
@@ -1003,6 +1077,30 @@ class RemoteScreen(Screen):
         """The local-capable verdict for a catalog row (Settings.catalog_local_capable, set by the picker)."""
         fn = getattr(self.settings, "catalog_local_capable", None)
         return bool(fn and fn(prov, model_id))
+
+    def _catalog_size(self, prov: str, model_id: str) -> "float | None":
+        """The parameter count for the size sort (Settings.model_param_count, set by the
+        picker), or None when unknown — the row then sorts after the sized ones. A broken
+        verdict degrades to None, never to a render failure."""
+        fn = getattr(self.settings, "model_param_count", None)
+        if fn is None:
+            return None
+        try:
+            v = fn(prov, model_id)
+        except Exception:
+            return None
+        return float(v) if isinstance(v, (int, float)) and v > 0 else None
+
+    def _catalog_old(self, prov: str, model_id: str) -> bool:
+        """Whether a catalog row predates the age cutoff (Settings.catalog_model_old, set
+        by the picker). Unknown (no callable / verdict error) means NOT old: fail-open."""
+        fn = getattr(self.settings, "catalog_model_old", None)
+        if fn is None:
+            return False
+        try:
+            return bool(fn(prov, model_id))
+        except Exception:
+            return False
 
     def catalog_kind_needed(self) -> str | None:
         """The loader kind for the open provider group's catalog, once, then for each
@@ -1090,6 +1188,10 @@ class RemoteScreen(Screen):
         if agent.local_capable and not s.local_capable_shown:
             return False
         if agent.broken and not s.show_broken:
+            return False
+        # The age filter (T6): only catalog probes carry old=True — pinned registry rows
+        # have no dates and are never hidden by it.
+        if agent.old and not s.show_old:
             return False
         return True
 
@@ -1229,7 +1331,7 @@ class RemoteFiltersScreen(Screen):
     """Filter settings for Remote API Session Picker.
 
     Submenu showing filter options: limited trials, locally-runnable models,
-    unworking models, and hidden-model report.
+    unworking models, old models (over the age cutoff), and hidden-model report.
     """
     title = f"{ec.EMOJI_FILTER_STR} Remote Filter Settings"
 
@@ -1247,6 +1349,9 @@ class RemoteFiltersScreen(Screen):
                    lambda: self._toggle("local_capable_shown")),
             Action("u", f"{ec.EMOJI_BROKEN_MODELS_STR}  Unworking models: {'SHOWN' if s.show_broken else 'HIDDEN'}",
                    lambda: self._toggle("show_broken")),
+            Action("o", f"{ec.EMOJI_OLD_MODELS_STR}  Old models (over the age cutoff): "
+                        f"{'SHOWN' if s.show_old else 'HIDDEN'}",
+                   lambda: self._toggle("show_old")),
             Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
         ]
         acts += self.nav_actions()

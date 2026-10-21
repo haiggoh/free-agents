@@ -15,7 +15,7 @@ the contract. This file owns only terminal concerns:
 
 Invoked through the bin/session-picker wrapper (never by typing a python path):
   session-picker [home|local|remote|lowkey|download|rate-limiter] [--include-trials]
-                 [--exclude-trials] [--local-capable-shown] [--help]
+                 [--exclude-trials] [--local-capable-shown] [--show-old] [--help]
 """
 from __future__ import annotations
 
@@ -190,15 +190,48 @@ def catalog_local_capable(provider, model_id):
         return False
 
 
+def model_param_count(provider, model_id):
+    """Parameter count in billions for the per-provider size sort, or None when unknown.
+
+    The count in the id first (the estimator's parser); when the id states none, the
+    Hugging Face count ONLY if already cached — same offline rule as the local-capable
+    verdict: a render never waits on the network. None sorts after the sized rows."""
+    try:
+        fp = _footprint()
+        total = fp.parse_params(model_id)["total_b"]
+        if total is None:
+            total, _repo = fp.hf_total_params(model_id, offline=True)
+            total = round(total / 1e9, 1) if total else None   # HF counts raw params
+        return float(total) if total else None
+    except Exception:
+        return None
+
+
+def catalog_model_old(provider, model_id):
+    """True when a live-catalog row predates the age cutoff (the filter hides it).
+
+    The cutoff is LA_REMOTE_MAX_MODEL_AGE_MONTHS months (default 18) before today; the
+    date is the row's Hugging Face createdAt, read from the cache the loader thread
+    warmed — never fetched at render time. No cached date means NOT old (fail-open)."""
+    try:
+        created = _footprint().hf_created(model_id)
+    except Exception:
+        return False
+    return m.created_before_cutoff(created, m.max_model_age_months())
+
+
 def _warm_hf_cache(model_ids):
-    """Fill the HF parameter cache for catalog ids that state no count (loader thread only)."""
+    """Fill the HF cache (parameter count + createdAt date) for catalog ids (loader thread).
+
+    Every id is warmed up to the per-provider cap: the age filter needs a date for sized
+    ids too, not only for the ones that state no count. Fresh entries answer from the
+    cache and cost no network."""
     try:
         fp = _footprint()
     except Exception:
         return
     for mid in model_ids:
-        if fp.parse_params(mid)["total_b"] is None:
-            fp.hf_total_params(mid, timeout=4.0)
+        fp.hf_total_params(mid, timeout=4.0)
 
 
 def load_remote_catalog(kind):
@@ -493,6 +526,7 @@ class Picker(App):
             enable_mcp=os.environ.get("LA_ENABLE_MCP", "1") == "1",   # default ON (user 2026-10-15); explicit env wins
             include_trials=not flags.exclude_trials,
             local_capable_shown=flags.local_capable_shown or os.environ.get("CSL_LOCAL_CAPABLE") == "1",
+            show_old=getattr(flags, "show_old", False),
             on_effort_saved=self._save_effort,
             on_temperature_saved=self._save_temperature,
             security_review=cloud["security_review"],
@@ -505,7 +539,9 @@ class Picker(App):
                                  **state.last_launched},
             last_launched_tier=dict(state.last_launched_tier),
             on_last_launched=self._save_last_launched,
-            catalog_local_capable=catalog_local_capable)
+            catalog_local_capable=catalog_local_capable,
+            model_param_count=model_param_count,
+            catalog_model_old=catalog_model_old)
         self.start = start
         self.nav_stack: list = []          # callers of sub-screens (Back returns to them)
         self.screen_model: m.Screen | None = None
@@ -1668,6 +1704,9 @@ def main(argv):
     ap.add_argument("--exclude-trials", action="store_true", help="start with trial rows hidden")
     ap.add_argument("--local-capable-shown", action="store_true",
                     help="start with locally-runnable remote models shown")
+    ap.add_argument("--show-old", action="store_true",
+                    help="start with remote catalog models over the age cutoff shown "
+                         "(LA_REMOTE_MAX_MODEL_AGE_MONTHS, default 18 months)")
     args = ap.parse_args(argv)
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("session-picker: needs an interactive terminal (use a direct alias or --list instead)",

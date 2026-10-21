@@ -153,7 +153,10 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
     Exact repo first (case-sensitive on HF), then a name search accepting only a repo whose
     name equals the id's last segment case-insensitively. Derivative uploads (-GGUF, -INT4,
     -DFlash ...) carry a longer name, so they never match; a same-owner repo is preferred.
-    Ambiguity (two base repos) is "unknown": a wrong count is worse than none."""
+    Ambiguity (two base repos) is "unknown": a wrong count is worse than none. The same GET
+    also carries createdAt (the T6 age filter reads it offline from this cache); entries
+    written before that field existed are refetched ONCE to gain it, and a failed refetch
+    keeps the count it already had."""
     cache_path = _hf_cache_path()
     key = model_id.lower()
     try:
@@ -161,20 +164,25 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
     except (OSError, ValueError):
         cache = {}
     hit = cache.get(key)
-    if hit and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S:
-        return hit.get("total"), hit.get("repo")
+    fresh = bool(hit) and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S
     if offline:
-        return None, None
+        # A render-time read never waits on the network: any fresh entry answers, with or
+        # without a date (an offline entry lacking one is simply not old yet).
+        return (hit.get("total"), hit.get("repo")) if fresh else (None, None)
+    if fresh and "created" in hit:
+        return hit.get("total"), hit.get("repo")   # complete entry (created None = HF had none)
 
     from urllib.parse import quote
-    total = repo = None
+    total = repo = created = None
     if "/" in model_id:
-        obj = _hf_get(f"{HF_API}/{quote(model_id, safe='/')}?expand[]=safetensors", timeout)
+        obj = _hf_get(f"{HF_API}/{quote(model_id, safe='/')}?expand[]=safetensors&expand[]=createdAt", timeout)
         if isinstance(obj, dict) and (obj.get("safetensors") or {}).get("total"):
             total, repo = obj["safetensors"]["total"], obj.get("id", model_id)
+            created = obj.get("createdAt")
     if total is None:
         tail = model_id.split("/")[-1]
-        found = _hf_get(f"{HF_API}?search={quote(tail)}&limit=50&expand[]=safetensors", timeout)
+        found = _hf_get(f"{HF_API}?search={quote(tail)}&limit=50"
+                        f"&expand[]=safetensors&expand[]=createdAt", timeout)
         if isinstance(found, list):
             exact = [m for m in found if isinstance(m, dict)
                      and str(m.get("id", "")).split("/")[-1].lower() == tail.lower()
@@ -186,7 +194,14 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
             totals = {m["safetensors"]["total"] for m in exact}
             if len(totals) == 1:
                 total, repo = totals.pop(), exact[0]["id"]
-    cache[key] = {"total": total, "repo": repo, "at": time.time()}
+                created = exact[0].get("createdAt")
+    if total is None and isinstance(hit, dict) and hit.get("total") is not None:
+        # A refetch that came back empty (offline-looking failure) must not erase a count
+        # we already had: keep it and record that the date is simply unknown.
+        total, repo = hit.get("total"), hit.get("repo")
+    if created is None and isinstance(hit, dict) and hit.get("created"):
+        created = hit.get("created")
+    cache[key] = {"total": total, "repo": repo, "created": created, "at": time.time()}
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = cache_path.with_suffix(".tmp")
@@ -195,6 +210,23 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
     except OSError:
         pass                                  # a read-only cache costs a lookup, never a verdict
     return total, repo
+
+
+def hf_created(model_id: str):
+    """The repo's createdAt date ("YYYY-MM-DD..."), read from the cache ONLY.
+
+    The picker's age filter calls this at render time, which must never wait on the
+    network: an id that was never warmed (or whose cached entry predates the created
+    field) answers None, and the caller treats that as NOT old (fail-open). An expired
+    entry reads as unknown too — the next warm-up refetches it with a date."""
+    try:
+        cache = json.loads(_hf_cache_path().read_text())
+    except (OSError, ValueError):
+        return None
+    hit = cache.get(model_id.lower())
+    if hit and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S:
+        return hit.get("created") or None
+    return None
 
 
 def _device_memory_gb():

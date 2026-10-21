@@ -101,6 +101,88 @@ class HFFallbackTests(unittest.TestCase):
         self.assertEqual(r["suggested"], "unknown")
 
 
+class CreatedAtTests(unittest.TestCase):
+    """The createdAt date rides the same GET and cache entry as the count (T6 age filter).
+
+    The picker's old-model filter reads hf_created() offline at render time, so the cache
+    entry must carry the date, a pre-created entry is refetched exactly once to gain it,
+    and a failed refetch must not erase the count the local-capable filter depends on."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cache = Path(self.tmp.name) / "hf-params.json"
+        os.environ["LA_HF_PARAMS_CACHE"] = str(self.cache)
+        self.addCleanup(os.environ.pop, "LA_HF_PARAMS_CACHE", None)
+        self.calls = []
+        self.responses = {}
+        real = efp._hf_get
+        self.addCleanup(setattr, efp, "_hf_get", real)
+
+        def fake(url, timeout):
+            self.calls.append(url)
+            for needle, resp in self.responses.items():
+                if needle in url:
+                    return resp
+            return None
+        efp._hf_get = fake
+
+    def entry(self, key):
+        return json.loads(self.cache.read_text())[key]
+
+    def test_exact_repo_response_caches_created_at(self):
+        self.responses = {"/zai-org/GLM-5.3-Flash?": {"id": "zai-org/GLM-5.3-Flash",
+                                                      "createdAt": "2025-08-04T22:33:06.000Z",
+                                                      "safetensors": {"total": 321323031390}}}
+        efp.hf_total_params("zai-org/GLM-5.3-Flash")
+        e = self.entry("zai-org/glm-5.3-flash")
+        self.assertEqual(e["created"], "2025-08-04T22:33:06.000Z")
+        self.assertEqual(e["total"], 321323031390)
+
+    def test_search_branch_also_asks_for_created_at(self):
+        self.responses = {"search=laguna-xs-2.1": LAGUNA_SEARCH}
+        efp.hf_total_params("poolside/laguna-xs-2.1")
+        self.assertTrue(any("expand[]=createdAt" in c for c in self.calls), self.calls)
+        self.assertEqual(self.entry("poolside/laguna-xs-2.1")["created"], None)  # fixture has no date
+
+    def test_hf_created_reads_cache_only(self):
+        self.responses = {"/x/y?": {"id": "x/y", "createdAt": "2024-01-02T03:04:05.000Z",
+                                    "safetensors": {"total": 7e9}}}
+        efp.hf_total_params("x/y")
+        n = len(self.calls)
+        self.assertEqual(efp.hf_created("x/y"), "2024-01-02T03:04:05.000Z")
+        self.assertEqual(len(self.calls), n)          # render-time read: never a network wait
+        self.assertIsNone(efp.hf_created("never/warmed"))
+
+    def test_entry_without_created_is_refetched_once_and_failure_keeps_total(self):
+        # A cache written before the created field existed gains the date on the next
+        # warm-up; a failed refetch keeps the count and remembers the miss (no storm).
+        self.cache.write_text(json.dumps({"a/b": {"total": 12e9, "repo": "A/B", "at": time.time()}}))
+        efp.hf_total_params("a/b")                    # every fake call fails
+        e = self.entry("a/b")
+        self.assertEqual(e["total"], 12e9)
+        self.assertIsNone(e["created"])
+        self.assertEqual(e["repo"], "A/B")
+        n = len(self.calls)
+        efp.hf_total_params("a/b")                    # fresh entry WITH the created key: no refetch
+        self.assertEqual(len(self.calls), n)
+
+    def test_successful_refetch_gains_created_at(self):
+        self.responses = {"/a/b?": {"id": "a/b", "createdAt": "2023-05-06T00:00:00.000Z",
+                                    "safetensors": {"total": 5e9}}}
+        self.cache.write_text(json.dumps({"a/b": {"total": 5e9, "repo": "a/b", "at": time.time()}}))
+        efp.hf_total_params("a/b")
+        e = self.entry("a/b")
+        self.assertEqual(e["created"], "2023-05-06T00:00:00.000Z")
+        self.assertEqual(e["total"], 5e9)
+
+    def test_offline_read_of_pre_created_entry_keeps_the_count(self):
+        # The local-capable filter reads offline: an entry without a date must still
+        # answer with its cached total until the warm-up fills the date in.
+        self.cache.write_text(json.dumps({"a/b": {"total": 12e9, "repo": "A/B", "at": time.time()}}))
+        self.assertEqual(efp.hf_total_params("a/b", offline=True), (12e9, "A/B"))
+
+
 if __name__ == "__main__":
     unittest.main()
 

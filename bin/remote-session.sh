@@ -169,6 +169,9 @@ REMOTE_MODEL=""
 LOCAL_CAPABLE_SHOWN=0
 # Show broken models: 0=hidden (default), 1=shown.
 SHOW_BROKEN_MODELS=0
+# Show models over the age cutoff (LA_REMOTE_MAX_MODEL_AGE_MONTHS, default 18): 0=hidden (default).
+# Only the picker's catalog rows carry dates, so this seeds the picker's initial state.
+SHOW_OLD_MODELS=0
 # When true, remote-session.sh runs as a submenu of csl and returns
 # via a navigation token on stdout instead of exec'ing claude.
 CSL_OWNER=0
@@ -188,6 +191,7 @@ usage() {
     echo "  -c, --choose-effort   Choose effort level for the selected model"
     echo "  --temperature VALUE   Set temperature (0.0-2.0, controls randomness/creativity)"
     echo "  --show-broken         Show unworking models (config/broken-nvidia-models.json) in picker (default: hidden; menu key u)"
+    echo "  --show-old            Show catalog models over the age cutoff in picker (default: hidden; LA_REMOTE_MAX_MODEL_AGE_MONTHS, default 18 months; filter menu key o)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
     echo "  --print-spoof         Print the spoofed model id claude will be launched with, then exit"
 }
@@ -1144,6 +1148,7 @@ while [[ $# -gt 0 ]]; do
         --temperature)    [[ $# -ge 2 ]] || { echo 'remote-session: --temperature needs a value (0.0-2.0)' >&2; exit 2; }
                           TEMPERATURE_CHOICE="$2"; shift 2 ;;
         --show-broken)    SHOW_BROKEN_MODELS=1; shift ;;
+        --show-old)       SHOW_OLD_MODELS=1; shift ;;
         --enable-mcp)     export LA_REMOTE_ENABLE_MCP=1; shift ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
         -*)               if [[ -z "$ALIAS" ]]; then
@@ -1370,6 +1375,7 @@ if [[ -z "$ALIAS" ]]; then
         _picker_args=(remote)
         [[ $INCLUDE_TRIALS -eq 1 ]] && _picker_args+=(--include-trials)
         [[ $LOCAL_CAPABLE_SHOWN -eq 1 ]] && _picker_args+=(--local-capable-shown)
+        [[ $SHOW_OLD_MODELS -eq 1 ]] && _picker_args+=(--show-old)
         trap - EXIT
         exec "$SCRIPT_DIR/session-picker" "${_picker_args[@]}"
     fi

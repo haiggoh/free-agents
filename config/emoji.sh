@@ -33,6 +33,7 @@ EMOJI_TOOLS="🔧"
 EMOJI_MODEL_CHOICE="⚙️ " # was 🔆 (sun) — changed to gear
 EMOJI_MCP="🔌"
 EMOJI_BROKEN_MODELS="🚧"  # unworking models filter (remote menu `u`)
+EMOJI_OLD_MODELS="🕰️"      # old-models filter, T6 age cutoff (remote filters menu `o`)
 EMOJI_TEMPERATURE="🌡️"     # temperature preset (picker `o`, bash remote menu `O`)
 EMOJI_GO_LAUNCH="🚀"       # picker `g`: launch the last-launched model
 EMOJI_TRIALS="🔖"          # picker remote `h`: limited-trial providers shown/hidden

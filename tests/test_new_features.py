@@ -411,6 +411,73 @@ class RemoteLiveCatalog(PilotCase):
         self.run_picker(s, start="remote")
 
 
+class RemoteAgeFilterAndShowOld(PilotCase):
+    """T6: catalog rows over the age cutoff hide unless --show-old seeds the picker, and
+    LA_REMOTE_MAX_MODEL_AGE_MONTHS moves the cutoff. The date comes from the HF cache the
+    harness pre-writes; the network is never touched (LA_PICKER_HF_LOOKUP=0)."""
+
+    def setUp(self):
+        super().setUp()
+        stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
+        stub.write_text(
+            "#!/bin/sh\n"
+            "for a in \"$@\"; do\n"
+            "  [ \"$a\" = --inventory ] && { printf 'nvidia-a\\tnvidia\\tNVIDIA A\\tunknown\\t0\\t1\\t0\\tvendor/pinned\\n'; exit 0; }\n"
+            "  [ \"$a\" = --models ] && { printf 'vendor/ancient\\t{\"tools\": true}\\nvendor/fresh\\t{\"tools\": true}\\n'; exit 0; }\n"
+            "done\n" + RECORDER.split("\n", 1)[1])
+        # The HF cache knows one id is old; the other was never warmed (fail-open visible).
+        Path(self.env["LA_HF_PARAMS_CACHE"]).write_text(json.dumps({
+            "vendor/ancient": {"total": None, "repo": None,
+                               "created": "2023-01-01T00:00:00.000Z", "at": time.time()}}))
+
+    def test_old_row_hidden_by_default(self):
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("vendor/fresh", secs=10)
+            self.assertNotIn("vendor/ancient", h.text())
+        self.run_picker(s, start="remote")
+
+    def test_show_old_flag_shows_the_old_row_from_the_start(self):
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("vendor/ancient", secs=10)
+        self.run_picker(s, start="remote", show_old=True)
+
+    def test_env_cutoff_moves_the_hidden_set(self):
+        # 240 months = 20 years: the 2023 date is young again, so the row shows without
+        # the flag — the cutoff, not the row, decided.
+        os.environ["LA_REMOTE_MAX_MODEL_AGE_MONTHS"] = "240"
+        self.addCleanup(os.environ.pop, "LA_REMOTE_MAX_MODEL_AGE_MONTHS", None)
+
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("vendor/ancient", secs=10)
+        self.run_picker(s, start="remote")
+
+
+class ModelParamCountUnits(unittest.TestCase):
+    """The size sort's real data source: an id-stated count and a cached Hugging Face count
+    must come back in the SAME unit (billions), or every HF-only row outranks every
+    id-stated row regardless of true size."""
+
+    def test_hf_cached_count_is_billions_like_the_id_count(self):
+        import tempfile
+        try:
+            import textual  # noqa: F401  (session_picker exits without it)
+        except ImportError:
+            self.skipTest("textual not importable: run under the picker venv python")
+        import session_picker as sp
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        cache = Path(tmp.name) / "hf-params.json"
+        cache.write_text(json.dumps({"vendor/nameless": {
+            "total": 4_000_000_000, "repo": "vendor/nameless", "created": None, "at": time.time()}}))
+        os.environ["LA_HF_PARAMS_CACHE"] = str(cache)
+        self.addCleanup(os.environ.pop, "LA_HF_PARAMS_CACHE", None)
+        self.assertEqual(sp.model_param_count("mistral", "vendor/big-70b"), 70.0)
+        self.assertEqual(sp.model_param_count("mistral", "vendor/nameless"), 4.0)
+
+
 class MemoryGuardSettings(PilotCase):
     def test_home_u_opens_guard_and_a_change_is_saved_and_reloaded(self):
         async def s(app, pilot, h):

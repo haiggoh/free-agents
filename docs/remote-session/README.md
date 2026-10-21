@@ -124,6 +124,17 @@ To retire or restore a model, edit the JSON: the script reads the file directly,
 second list to keep in sync. Like the local-capable filter it fails open, so a missing or
 unparseable file hides nothing.
 
+### Old-model filter and size sort
+
+Catalog models whose Hugging Face `createdAt` is older than `LA_REMOTE_MAX_MODEL_AGE_MONTHS`
+(default **18**) are **hidden by default**. Toggle them with **`o`** (🕰️ old models) in the
+picker's Remote filters, or start with them shown via `remote-session.sh --show-old`. A model
+with no cached date stays visible, and pinned registry rows are never age-checked.
+
+Within each provider, rows sort largest parameter count first (from the id, else the cached
+Hugging Face count); unknown sizes go last in catalog order. NVIDIA's pinned rows keep their
+hand-curated order. Sorting changes display order only, never which model a row launches.
+
 ### Timeouts
 
 `API_TIMEOUT_MS` defaults to **300000 (5 min)** for remote sessions (it was 600000 before 0.21.9),

@@ -130,6 +130,29 @@
   "Unworking models" toggle is on. (The downloader-side `hardware_target` filter is separate and
   already tested by `tests/test_hardware_target.sh`.)
 
+### Added — the old-model filter, and models sorted largest-first per provider
+
+- **Catalog models older than a cutoff are hidden until asked for** (user 2026-10-20: "some
+  are quite old, we should have an additional filter set up for that"). The cutoff is 18
+  months, `LA_REMOTE_MAX_MODEL_AGE_MONTHS` overrides it. The date is Hugging Face's
+  `createdAt`, fetched by the same background warm-up that already fills the parameter
+  cache (which now warms every catalog id up to its per-provider cap — sized ids need a
+  date too) and read OFFLINE at render time: a row with no cached date stays visible
+  (fail-open, a render never waits on the network), and pinned registry rows have no
+  dates and are never age-hidden. The toggle joins the filter submenu (🕰️ Old models
+  (over the age cutoff), key `o`, beside Unworking models), and `remote-session.sh
+  --show-old` passes the initial state through to the picker, as `--local-capable-shown`
+  does.
+- **Each provider's rows now sort by parameter count, largest first** (user 2026-10-20:
+  parameter size is a rough indicator of capability). Catalog rows sort by the
+  estimator's parser — the count in the id itself, or the Hugging Face count already in
+  the cache when the id states none; ids with no count sort after ALL sized rows, in
+  catalog order. Pinned rows sort the same way, EXCEPT NVIDIA's: their registry order is
+  hand-curated ("except nvidia we have sorted those manually very deliberately") and is
+  untouched — the sort still reaches NVIDIA's catalog rows, the new entries that order
+  never considered. The sort is display-order only: item ids, launch argv and dedup
+  logic are unchanged.
+
 ## [0.38.0] — 2026-10-19
 
 ### Added — the memory guard: auto-compact instead of a dead session

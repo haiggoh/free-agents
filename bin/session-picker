@@ -2,7 +2,7 @@
 # session-picker — start the Free Agents session picker UI (Textual) from any entry point.
 #
 # Usage: session-picker [home|local|remote|lowkey|download|rate-limiter|remote_filters] [--exclude-trials]
-#                       [--local-capable-shown] [--help]
+#                       [--local-capable-shown] [--show-old] [--help]
 #
 # Environment:
 #   LA_PICKER_VENV   picker venv (default ~/.local/share/free-agents/picker-venv)
