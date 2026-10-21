@@ -926,7 +926,7 @@ class Picker(App):
                         rows.add_option(Option(Text(obj.label, style=obj.style), id=f"g:{obj.id}"))
                         self.row_ids.append(("group", obj.id))
                         continue
-                    mark = "▾" if obj.id == sm.accordion.open_group else "▸"
+                    mark = "▾" if sm.accordion.is_open(obj.id) else "▸"
                     rows.add_option(Option(f"{mark} {obj.label}", id=f"g:{obj.id}"))
                     self.row_ids.append(("group", obj.id))
                 else:
@@ -1114,8 +1114,8 @@ class Picker(App):
             self._open_register_panel()
             return
         if h[0] == "group":
-            if acc.open_group == h[1]:
-                acc.collapse()
+            if acc.is_open(h[1]):
+                acc.collapse(h[1])
             else:
                 acc.expand(h[1])
             self.render_model(keep=f"g:{h[1]}")
@@ -1202,15 +1202,15 @@ class Picker(App):
                         event.stop()
                         return
                     elif key == "left":
-                        sm.accordion.collapse()
+                        sm.accordion.collapse(h[1])
                         self.render_model(keep=f"g:{h[1]}")
                         event.stop()
                         return
                 elif h and h[0] == "item" and sm.accordion is not None:
-                    # Left arrow on an item with its group open collapses the group
-                    if key == "left" and sm.accordion.open_group:
-                        g = sm.accordion.open_group
-                        sm.accordion.collapse()
+                    # Left arrow on an item collapses ITS group (under a search several are open)
+                    g = sm.accordion._group_of(h[1])
+                    if key == "left" and g and sm.accordion.is_open(g):
+                        sm.accordion.collapse(g)
                         self.render_model(keep=f"g:{g}")
                         event.stop()
                         return
@@ -1322,6 +1322,7 @@ class Picker(App):
     # --- inline prompts (text entry, confirmations) ------------------------------------------
     PROMPTS = {"prompt:session": "Session name (letters, digits, - _; empty = ephemeral):",
                "prompt:oneshot": "One-shot prompt:",
+               "prompt:search": "Find model (part of its name, every provider; empty Enter clears):",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
                "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically, or type it and press Enter; empty Enter skips):"}
 
@@ -1443,7 +1444,7 @@ class Picker(App):
             prompt.password = True  # Hidden input for API key
             prompt.submit_on_paste = True
         prompt.placeholder = ""   # the label is shown once, in #status below the input
-        prompt.value = ""
+        prompt.value = getattr(self.screen_model, "search", "") if kind == "prompt:search" else ""
         prompt.display = True
         self.query_one("#status", Static).update("  " + label)
         prompt.focus()
@@ -1467,6 +1468,10 @@ class Picker(App):
                 self.state_warnings.append("session name rejected: use letters, digits, - or _")
             else:
                 sm.session_name = value
+            self.render_model()
+        elif kind == "prompt:search" and isinstance(sm, m.RemoteScreen):
+            self._handle_lazy_load()
+            sm.set_search(value)
             self.render_model()
         elif kind == "prompt:oneshot":
             req = sm.one_shot(value)

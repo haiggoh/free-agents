@@ -135,6 +135,13 @@ Within each provider, rows sort largest parameter count first (from the id, else
 Hugging Face count); unknown sizes go last in catalog order. NVIDIA's pinned rows keep their
 hand-curated order. Sorting changes display order only, never which model a row launches.
 
+### Finding a model by name
+
+Press **`W`** (🔎 Find model) on the Remote screen and type part of a model's name. Every
+provider that offers a match opens at once and shows only the matching rows. This is the one
+case where several groups are open together. Filters still apply. Press `W` and submit an
+empty line to clear the search.
+
 ### Timeouts
 
 `API_TIMEOUT_MS` defaults to **300000 (5 min)** for remote sessions (it was 600000 before 0.21.9),

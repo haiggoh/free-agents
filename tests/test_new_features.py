@@ -455,6 +455,43 @@ class RemoteAgeFilterAndShowOld(PilotCase):
         self.run_picker(s, start="remote")
 
 
+class RemoteModelSearch(PilotCase):
+    """T7: W asks for a model name; every provider whose rows match opens at once, showing
+    only the matching rows, and an empty search restores the one-open accordion."""
+
+    def setUp(self):
+        super().setUp()
+        stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
+        stub.write_text(
+            "#!/bin/sh\n"
+            "for a in \"$@\"; do\n"
+            "  [ \"$a\" = --inventory ] && { printf 'nv-glm\\tnvidia\\tNV GLM Flash\\tunknown\\t0\\t1\\t0\\tz-ai/glm-flash\\n"
+            "nv-kimi\\tnvidia\\tNV Kimi\\tunknown\\t0\\t1\\t0\\tmoonshot/kimi\\n"
+            "zai-glm\\tzai\\tZai GLM\\tunknown\\t0\\t1\\t0\\tglm-zai\\n'; exit 0; }\n"
+            "  [ \"$a\" = --models ] && { printf ''; exit 0; }\n"
+            "done\n" + RECORDER.split("\n", 1)[1])
+
+    def test_search_opens_every_matching_provider(self):
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("NV Kimi", secs=10)
+            self.assertNotIn("Zai GLM", h.text())             # one group open before the search
+            await h.press("w")
+            await h.press(*"glm", "enter")
+            await h.wait_text("Zai GLM", secs=10)
+            self.assertIn("NV GLM Flash", h.text())
+            self.assertNotIn("NV Kimi", h.text())
+            from textual.widgets import Static
+            self.assertIn('matching "glm"', str(app.query_one("#policy", Static).render()))
+            await h.press("w")
+            for _ in range(3):
+                await h.press("backspace")
+            await h.press("enter")
+            await h.wait_text("NV Kimi", secs=10)
+            self.assertNotIn("Zai GLM", h.text())
+        self.run_picker(s, start="remote")
+
+
 class ModelParamCountUnits(unittest.TestCase):
     """The size sort's real data source: an id-stated count and a cached Hugging Face count
     must come back in the SAME unit (billions), or every HF-only row outranks every

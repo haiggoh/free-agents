@@ -591,12 +591,22 @@ class Group:
 
 
 class Accordion:
-    """Groups with at most one open; selection is by stable item id, never by row index."""
+    """Groups with at most one open; selection is by stable item id, never by row index.
+
+    The one exception (T7, user 2026-10-20): while a model-name search is active the owner
+    sets multi_open, and every group in it is open at once — a model several providers
+    offer shows under each. None (the default) is the ordinary one-open accordion."""
 
     def __init__(self):
         self.groups: list[Group] = []
         self.open_group: str | None = None
         self.selected_id: str | None = None
+        self.multi_open: set | None = None
+
+    def is_open(self, group_id: str) -> bool:
+        if self.multi_open is not None:
+            return group_id in self.multi_open
+        return group_id == self.open_group
 
     def set_groups(self, groups: list[Group]):
         self.groups = groups
@@ -620,10 +630,21 @@ class Accordion:
     def expand(self, group_id: str) -> bool:
         if any(g.id == group_id for g in self.groups):
             self.open_group = group_id
+            if self.multi_open is not None:
+                self.multi_open.add(group_id)
             return True
         return False
 
-    def collapse(self):
+    def collapse(self, group_id: str | None = None):
+        """Close the open group; in multi-open mode close only `group_id` (all when None)."""
+        if self.multi_open is not None:
+            if group_id is None:
+                self.multi_open.clear()
+            else:
+                self.multi_open.discard(group_id)
+            if group_id is None or group_id == self.open_group:
+                self.open_group = None
+            return
         self.open_group = None
 
     def select(self, item_id: str) -> bool:
@@ -631,15 +652,17 @@ class Accordion:
         if group is None:
             return False
         self.open_group = group
+        if self.multi_open is not None:
+            self.multi_open.add(group)
         self.selected_id = item_id
         return True
 
     def rows(self):
-        """Flattened visible rows: ('group', Group) headers and ('item', Item) for the open one."""
+        """Flattened visible rows: ('group', Group) headers and ('item', Item) for open ones."""
         out = []
         for g in self.groups:
             out.append(("group", g))
-            if g.id == self.open_group:
+            if self.is_open(g.id):
                 out.extend(("item", i) for i in g.items)
         return out
 
@@ -975,6 +998,9 @@ class RemoteScreen(Screen):
         # and "no key" labels still say what matters where it matters.
         if not self._models_loaded:
             return "Free/paid cloud API (provider quotas apply)"
+        if self.search:
+            n = sum(len(g.items) for g in self.accordion.groups if not g.id.startswith("__"))
+            return f'{n} model(s) matching "{self.search}"  (W to change, empty clears)'
         vis = sum(1 for a in self.agents if self._visible(a) and a.model_id != "SELECT")
         return f"{vis} model(s) visible  (hidden: {self.hidden_count()})"
 
@@ -989,6 +1015,8 @@ class RemoteScreen(Screen):
         # revision this session; provider -> refresh error message, cleared on success.
         self._catalog_stale: set = set()
         self.catalog_refresh_error: dict = {}
+        self.search = ""                     # model-name search (T7); "" = no search
+        self._search_seen: set = set()       # groups shown so far in this search
         if agents is not None:
             self.agents = agents
             self._regroup()
@@ -1020,19 +1048,51 @@ class RemoteScreen(Screen):
             pinned = [a for a in buckets[prov] if a.model_id != "SELECT"]
             if prov != "nvidia":
                 pinned = size_sorted(pinned, lambda a: self._catalog_size(prov, a.model_id))
+            if self.search:
+                pinned = [a for a in pinned if self._matches(a.model_id, a.display)]
             items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}{lane_tag(a.provider, a.model_id)}")
                      for a in pinned]
             items += self._catalog_items(prov, buckets[prov])
+            if self.search and not items:
+                continue                       # a search shows only providers with a match
             label = f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})"
             if prov in self.catalog_refresh_error:
                 label += f" · cached, refresh failed: {self.catalog_refresh_error[prov]}"
             groups.append(Group(prov, label, items))
+        if self.search and not groups and any(self._visible(a) for a in self.agents):
+            groups = [Group("__nomatch__", f'No model matches "{self.search}"',
+                            [Item("__nomatch__:x", "Press W to change the search (empty clears it)")])]
         if not groups and not any(a.has_key for a in self.agents):
             # No provider key at all: the list is an instruction, not a roster of unusable models.
             groups = [Group("__nokeys__", f"{ec.EMOJI_KEY_STR} No API key saved yet",
                             [Item("__nokeys__:k", "Press K (API keys) to set one up — every listed provider has a free tier")])]
         self.accordion.set_groups(groups)
+        if self.search:
+            # The one exception to the one-open rule: every matching provider is open, and a
+            # group that appears later (its catalog just landed) opens too. A header the user
+            # folded during this search stays folded across refreshes.
+            was_open = self.accordion.multi_open or set()
+            self.accordion.multi_open = {g.id for g in groups
+                                         if g.id not in self._search_seen or g.id in was_open}
+            self._search_seen |= {g.id for g in groups}
+        else:
+            self.accordion.multi_open = None
         self._models_loaded = True
+
+    def _matches(self, model_id: str, display: str = "") -> bool:
+        q = self.search.casefold()
+        return q in (model_id or "").casefold() or q in (display or "").casefold()
+
+    def set_search(self, query: str):
+        """Search model names across every provider (T7). Empty clears it and restores the
+        ordinary accordion (the first group open)."""
+        self.search = (query or "").strip()
+        self._search_seen = set()
+        self.accordion.multi_open = None
+        if not self.search:
+            self.accordion.multi_open = None
+            self.accordion.open_group = None
+        self._refresh_keep_open()
 
     def load_cached_catalogs(self):
         """Render every provider that has a disk cache from it at once — the list is there
@@ -1062,6 +1122,8 @@ class RemoteScreen(Screen):
         for c in size_sorted(cat, lambda c: self._catalog_size(prov, c.model_id)):
             if c.model_id in have:
                 continue                       # already a pinned row, with its own notes
+            if self.search and not self._matches(c.model_id):
+                continue
             probe = RemoteAgent(f"{CATALOG_PREFIX}{prov}:{c.model_id}", prov, c.model_id, tier,
                                 local_capable=self._catalog_local_capable(prov, c.model_id),
                                 old=self._catalog_old(prov, c.model_id),
@@ -1114,8 +1176,8 @@ class RemoteScreen(Screen):
                 self._catalog_pending.add(prov)
                 self._refresh_keep_open()           # show the loading row at once
                 return f"rcat:{pinned.alias}"
-        for agent in self.agents:               # placeholder rosters load unprompted
-            if agent.model_id != "SELECT" or not self._visible(agent):
+        for agent in self.agents:               # placeholder rosters (and, under a search, every roster) load unprompted
+            if (agent.model_id != "SELECT" and not self.search) or not self._visible(agent):
                 continue
             if agent.provider in self.catalogs or agent.provider in self._catalog_pending:
                 continue
@@ -1217,6 +1279,11 @@ class RemoteScreen(Screen):
             # The picker will lazy-load the models
             pass
 
+    def _open_search(self):
+        """W: ask for a model name (the picker's inline prompt); the list opens with it."""
+        self._choose_model_visible = True
+        return Nav("prompt:search")
+
     def _choose_model_label(self):
         return "Choose model…" if not self._choose_model_visible else "Choose model (shown)"
 
@@ -1228,6 +1295,8 @@ class RemoteScreen(Screen):
             setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
                     TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v)),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
+            Action("w", f"{ec.EMOJI_SEARCH_STR}  Find model: {self.search or '<all providers>'}",
+                   self._open_search),
             Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
             Action("y", f"{ec.EMOJI_FILTER_STR}  Filter settings…", lambda: Nav("remote_filters", self.owner), section="tools"),

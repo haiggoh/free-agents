@@ -151,7 +151,23 @@
   hand-curated ("except nvidia we have sorted those manually very deliberately") and is
   untouched — the sort still reaches NVIDIA's catalog rows, the new entries that order
   never considered. The sort is display-order only: item ids, launch argv and dedup
-  logic are unchanged.
+  logic are unchanged. (A unit slip compared cached Hugging Face counts, which are raw,
+  against id counts in billions, so every HF-only row outranked the rest. Fixed before
+  release, with a test.)
+
+### Added — find a model by name, across every provider
+
+- **`W` (🔎 Find model) searches model names on the Remote screen** (user 2026-10-20: "we
+  also need to allow searching for a model name"). It matches part of a model id or its
+  display name, case-insensitively, in pinned and catalog rows alike. Starting a search
+  loads every provider's catalog, not just the open group's.
+- **The one exception to the one-open-group rule:** while a search is active, every
+  provider with a match is open at once and shows only its matching rows, so a model
+  several providers offer appears under each ("multiple groups are allowed to be open at
+  the same time, but only the model that matches the search shows in each"). Providers
+  without a match drop out. A group you fold during the search stays folded, and a
+  provider whose catalog lands later opens on arrival. The filters (trials, local-capable,
+  unworking, old) still apply. An empty search restores the ordinary accordion.
 
 ## [0.38.0] — 2026-10-19
 
