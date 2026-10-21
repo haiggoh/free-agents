@@ -363,6 +363,56 @@ printf "GITHUB_TOKEN=${{GITHUB_TOKEN:-unset}}\\n"
 
         self.assertEqual(yaml_lines, sh_lines)
 
+    def _roster_fixture(self, tmp_root: Path) -> Path:
+        (tmp_root / "config").mkdir(exist_ok=True)
+        (tmp_root / "bin").mkdir(exist_ok=True)
+        dst = tmp_root / "config" / "remote-agents.sh"
+        shutil.copy2(ROOT / "config" / "remote-agents.sh", dst)
+        return dst
+
+    def test_write_regenerates_the_roster_block_and_keeps_the_rest(self) -> None:
+        """0.40.0: the LA_REMOTE_AGENTS array is GENERATED from the YAML between two markers, so a
+        YAML change can no longer be overlooked; the hand-written header and settings stay."""
+        if not _has_pyyaml():
+            self.skipTest("pyyaml not installed")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            dst = self._roster_fixture(tmp_root)
+            text = dst.read_text()
+            start = text.index("LA_REMOTE_AGENTS=(")
+            # Plant drift inside the generated block, and a marker outside it.
+            dst.write_text(text.replace('"nvidia-glm53|', '"nvidia-glm53-STALE|', 1) + "# HAND-KEPT TAIL\n")
+            res = subprocess.run([sys.executable, str(GENERATOR_PATH), "--write", "--root", str(tmp_root)],
+                                 capture_output=True, text=True, cwd=str(ROOT))
+            self.assertEqual(res.returncode, 0, res.stderr)
+            out = dst.read_text()
+            self.assertNotIn("nvidia-glm53-STALE", out)
+            self.assertIn("# HAND-KEPT TAIL\n", out)
+            self.assertEqual(out[:start], text[:start], "the header above the array is untouched")
+            self.assertIn("LA_REMOTE_SPOOF_IDS=", out)
+            bash = _get_bash()
+            r = subprocess.run([bash, "-c", f'source "{dst}"; printf "%s\\n" "${{LA_REMOTE_AGENTS[@]}}"'],
+                               capture_output=True, text=True)
+            data = rrg.load(ROOT / "config" / "remote-registry.yaml")
+            want = [f"{e['alias']}|{e['provider']}|{e['model_id']}|{e['display']}|{e['tier']}|"
+                    f"{e.get('notes', '')}|{e['autocompact_default']}" for e in data["entries"]]
+            self.assertEqual([ln for ln in r.stdout.splitlines() if ln], want)
+
+    def test_check_names_a_stale_roster_and_the_fix(self) -> None:
+        if not _has_pyyaml():
+            self.skipTest("pyyaml not installed")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            subprocess.run([sys.executable, str(GENERATOR_PATH), "--write", "--root", str(tmp_root)],
+                           capture_output=True, text=True, cwd=str(ROOT))
+            dst = self._roster_fixture(tmp_root)
+            dst.write_text(dst.read_text().replace('"nvidia-glm53|', '"nvidia-glm53-STALE|', 1))
+            res = subprocess.run([sys.executable, str(GENERATOR_PATH), "--check", "--root", str(tmp_root)],
+                                 capture_output=True, text=True, cwd=str(ROOT))
+            self.assertEqual(res.returncode, 1)
+            self.assertIn("config/remote-agents.sh", res.stderr)
+            self.assertIn("--write", res.stderr)
+
     def test_validation(self) -> None:
         """Validation rules check schema completeness and constraint violations."""
         if not _has_pyyaml():

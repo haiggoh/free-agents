@@ -7,6 +7,8 @@ of truth for remote LLM providers and the model roster) and generates:
      Read at runtime by Python with stdlib json (no pyyaml dependency for end users).
   2. bin/remote-provider-registry.sh
      A bash 3.2-compatible library sourced by bin/remote-session.sh.
+  3. the LA_REMOTE_AGENTS array in config/remote-agents.sh, between its generated markers
+     (the rest of that file stays hand-written).
 
 This tool is maintainer-only and requires pyyaml:
     pipx inject <venv> pyyaml   OR   uv pip install pyyaml
@@ -460,6 +462,62 @@ def _render_sh(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+ROSTER_BEGIN = "# >>> generated from config/remote-registry.yaml by bin/remote-registry-generate.py --write: do not edit >>>"
+ROSTER_END = "# <<< generated roster <<<"
+
+
+def _entry_comments(yaml_text: str) -> dict[str, list[str]]:
+    """Comment lines that sit directly above each "- alias:" in the YAML, keyed by alias, so the
+    generated shell roster keeps the same reasoning next to each row."""
+    out: dict[str, list[str]] = {}
+    pending: list[str] = []
+    in_entries = False
+    for line in yaml_text.splitlines():
+        if line.startswith("entries:"):
+            in_entries = True
+            continue
+        if not in_entries:
+            continue
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            pending.append(stripped)
+        elif stripped.startswith("- alias:"):
+            out[stripped.split(":", 1)[1].strip()] = pending
+            pending = []
+        elif not stripped:
+            continue
+        else:
+            pending = []
+    return out
+
+
+def _render_roster_block(data: dict[str, Any], yaml_text: str) -> str:
+    """The LA_REMOTE_AGENTS array for config/remote-agents.sh, between the two markers."""
+    comments = _entry_comments(yaml_text)
+    lines = [ROSTER_BEGIN, "LA_REMOTE_AGENTS=("]
+    for e in data["entries"]:
+        for c in comments.get(e["alias"], []):
+            lines.append("  " + c)
+        row = "|".join([e["alias"], e["provider"], e["model_id"], e["display"], e["tier"],
+                        str(e.get("notes", "")), str(e["autocompact_default"])])
+        lines.append('  "' + row.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+                     .replace("`", "\\`") + '"')
+    lines += [")", ROSTER_END]
+    return "\n".join(lines) + "\n"
+
+
+def _splice_roster(current: str, block: str) -> str:
+    """Replace the generated block (or, the first time, the hand-kept LA_REMOTE_AGENTS=( ... )
+    array) in remote-agents.sh, leaving every other line untouched."""
+    if ROSTER_BEGIN in current and ROSTER_END in current:
+        head, rest = current.split(ROSTER_BEGIN, 1)
+        tail = rest.split(ROSTER_END, 1)[1]
+        return head + block.rstrip("\n") + tail
+    start = current.index("LA_REMOTE_AGENTS=(")
+    end = current.index("\n)\n", start) + 3
+    return current[:start] + block + current[end:]
+
+
 def render(data: dict[str, Any]) -> dict[str, str]:
     """Render in-memory artifact paths and their generated string contents."""
     validate(data)
@@ -551,6 +609,13 @@ def main(argv: list[str] | None = None) -> int:
         ("config/remote-registry.json", json_path, artifacts["config/remote-registry.json"], 0o644),
         ("bin/remote-provider-registry.sh", sh_path, artifacts["bin/remote-provider-registry.sh"], 0o755),
     ]
+    # config/remote-agents.sh is hand-written EXCEPT its roster array, which is generated: a YAML
+    # change can no longer be overlooked there (the parity test used to find it after the fact).
+    roster_path = root / "config" / "remote-agents.sh"
+    if roster_path.is_file():
+        block = _render_roster_block(data, Path(args.yaml_path).read_text(encoding="utf-8"))
+        targets.append(("config/remote-agents.sh", roster_path,
+                        _splice_roster(roster_path.read_text(encoding="utf-8"), block), 0o644))
 
     if args.check:
         stale: list[str] = []

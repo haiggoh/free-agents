@@ -15,10 +15,26 @@
 # Launch does not consume a separate generation probe. A catalog listing is not
 # evidence of working tool calls, remaining quota, or an account billing limit.
 
+# >>> generated from config/remote-registry.yaml by bin/remote-registry-generate.py --write: do not edit >>>
 LA_REMOTE_AGENTS=(
+  # remote-agents.sh — the REMOTE cloud-API session roster.
+  #
+  # Deliberately a SEPARATE list from the local MLX aliases in config.local.sh:
+  # a remote agent runs on someone else's hardware over the network, so it is
+  # selected on its own menu and never mixed into the local model list.
+  #
+  # Each entry:  alias|provider|model-id|display|tier|notes|autocompact_default
+  # provider must have a key mapping and a remote-session.sh proxy route.
+  # tier: renewing_free | trial | unknown | paid_only
+  # autocompact_default: default LA_AUTO_COMPACT_WINDOW for this model (e.g., 1m for 1M-context models),
+  #                      or "-" for no default, or empty. Only used when LA_AUTO_COMPACT_WINDOW is not set.
+  # SELECT requires an explicit --remote-model ID or an interactive model choice.
+  #
+  # Recheck pinned ids with remote-session.sh --verify <alias> (catalog GET only).
+  # Launch does not consume a separate generation probe. A catalog listing is not
+  # evidence of working tool calls, remaining quota, or an account billing limit.
   # Catalogs checked 2026-09-14. Newly added rows are CATALOG ONLY: no generation
   # probes were spent. Historical tool checks are identified individually below.
-
   # ════════════════════════════════════════════════════════════════════════════════
   # ★ TIER 1 — NVIDIA NIM: THE PREFERRED REMOTE LANE. Listed first, and first is the
   # Enter-default in every picker that reads this roster in order.
@@ -74,7 +90,6 @@ LA_REMOTE_AGENTS=(
   # Additional NVIDIA models as requested
   "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b-instruct|NVIDIA Nemotron 4 340B|unknown|⚠️ BROKEN: HTTP 404 on probe — not provisioned. Hidden via broken-nvidia-models.json.|-"
   "nvidia-minitron|nvidia|nvidia/minitron-12b|NVIDIA Minitron 12B|unknown|⚠️ BROKEN: HTTP 404 on probe — not provisioned. Hidden via broken-nvidia-models.json.|-"
-
   # --- TIER 2 — Gemini: still VERIFIED for tool-calling, but DEMOTED from the default.
   # The free quota is reached annoyingly fast, leaving little headroom to get real work
   # done in one sitting (operator, 2026-09-15) — a lane you cannot finish a task on is not
@@ -87,26 +102,21 @@ LA_REMOTE_AGENTS=(
   "gemini-flash|gemini|gemini-3.6-flash|Gemini 3.6 Flash|renewing_free|FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable.|-"
   "gemini-flash-thinking|gemini|gemini-3.6-flash|Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning.|-"
   "gemini-flash-lite|gemini|gemini-3.1-flash-lite|Gemini 3.1 Flash-Lite|renewing_free|VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use.|-"
-
   # --- Groq: fastest tokens/sec of any free lane
   "groq-oss120|groq|openai/gpt-oss-120b|Groq gpt-oss-120b|renewing_free|VERIFIED chat+tools. Very fast; best once Gemini quota is spent.|-"
   "groq-oss20|groq|openai/gpt-oss-20b|Groq gpt-oss-20b|renewing_free|Smaller/faster sibling for utility work.|-"
   "groq-qwen36|groq|qwen/qwen3.6-27b|Groq Qwen 3.6 27B|renewing_free|Catalog only; account quotas apply.|-"
   "groq-qwen38|groq|qwen/qwen3.8-27b|Groq Qwen 3.8 27B|renewing_free|Catalog only; account quotas apply.|-"
-
   # --- OpenRouter: explicit free router or zero-priced, tool-capable catalog rows
   "openrouter-free|openrouter|openrouter/free|OpenRouter free router|renewing_free|Catalog only. Routes among free models; account limits still apply.|-"
   "openrouter-nemotron|openrouter|nvidia/nemotron-3-super-120b-a12b:free|OpenRouter Nemotron 3 Super (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe.|-"
   "openrouter-code|openrouter|cohere/north-mini-code:free|OpenRouter North Mini Code (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe.|-"
-
   # --- Cloudflare Workers AI: account-specific OpenAI-compatible endpoint
   "cloudflare-oss20|cloudflare|@cf/openai/gpt-oss-20b|Cloudflare gpt-oss-20b|unknown|Catalog only. Requires cloudflare token and cloudflare-account-id; account billing applies.|-"
   "cloudflare-qwen38|cloudflare|@cf/qwen/qwen3.8-27b|Cloudflare Qwen 3.8 27B|unknown|Catalog only; free allocation and paid overage depend on the account.|-"
-
   # --- Cerebras: retain explicit trial opt-in until this account is requalified.
   "cerebras-oss120|cerebras|gpt-oss-120b|Cerebras gpt-oss-120b|trial|Catalog only. Use --include-trials; account billing not verified.|-"
   "cerebras-qwen38|cerebras|qwen-3.8-27b|Cerebras Qwen 3.8 27B|trial|Catalog only. Use --include-trials; account billing not verified.|-"
-
   # Provider selections intentionally pin no speculative default model. General
   # account API endpoints; ZAI Coding Plan is a distinct endpoint, not this route.
   "mistral|mistral|SELECT|Mistral (choose model)|unknown|Select a catalog model; free experiment and paid plans differ. Tool session untested.|-"
@@ -125,6 +135,7 @@ LA_REMOTE_AGENTS=(
   "streamlake|streamlake|SELECT|Streamlake (choose model)|unknown|Select a catalog model; https://console.streamlake.ai/console/wanqing/api-key. Tool session untested.|-"
   "huggingface|huggingface|SELECT|Hugging Face (choose model)|paid_only|Select a catalog model; needs Inference credits (free accounts have none, PRO: 2 USD/month). https://huggingface.co/settings/tokens. Tool session untested.|-"
 )
+# <<< generated roster <<<
 
 # Which spoofed Claude ids the proxy should answer to. Claude Code asks for these
 # names; the proxy maps them onto the chosen remote model.
