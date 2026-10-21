@@ -71,6 +71,13 @@ class RemoteSessionTests(unittest.TestCase):
         self.env = dict(os.environ, HOME=str(self.root / 'home'),
                         TMPDIR=str(self.root), LA_API_KEYS_DIR=str(self.root / 'keys'),
                         PATH=str(self.root / 'stubs') + ':' + os.environ['PATH'],
+                        # HERMETICITY: a session launched in blind-trust mode exports
+                        # CLOUD_BYPASS_PERMISSIONS=1 to every child (including this
+                        # pytest process), and the launcher under test then forces
+                        # bypassPermissions no matter what `-a` pressed — the toggle
+                        # assertions read the PARENT SESSION's mode, not the fixture's.
+                        # Pin the default so the ladder is what gets tested.
+                        CLOUD_BYPASS_PERMISSIONS='0',
                         CATALOG=json.dumps({'data': []}), CURL_CODE='0',
                         CURL_ARGV=str(self.root / 'curl-argv'),
                         # The stubs are /bin/sh scripts, so the launcher's real path
@@ -262,10 +269,14 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                                         env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 text = cfg.read_text()
-                self.assertEqual(text.count('      model: ' + prefixes[provider] + model + '\n'), self.spoof_id_count)
+                # 0.40.0: la-fallback-* deployments follow the primary and carry their own
+                # per-model params, so every param assertion below describes the primary
+                # deployment block only.
+                primary = self._primary(text)
+                self.assertEqual(primary.count('      model: ' + prefixes[provider] + model + '\n'), self.spoof_id_count)
                 self.assertEqual(cfg.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn('fixture-not-a-real-key', text)
-                self.assertEqual('      thinking:' in text, provider == 'gemini' and thinking == 'false')
+                self.assertEqual('      thinking:' in primary, provider == 'gemini' and thinking == 'false')
                 # NVIDIA NEMOTRON reasoning must be disabled at the backend or the Anthropic
                 # translation layer 500s the session (enable_thinking works for Nemotron).
                 # GLM is different and now measured: enable_thinking is INERT on NIM GLM in
@@ -275,17 +286,17 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                 is_nemotron = provider == 'nvidia' and 'nemotron' in model
                 is_glm = provider == 'nvidia' and 'glm' in model
                 expected_false_count = self.spoof_id_count if is_nemotron and thinking == 'false' else 0
-                self.assertEqual(text.count('        enable_thinking: false\n'),
+                self.assertEqual(primary.count('        enable_thinking: false\n'),
                                  expected_false_count)
                 if provider == 'nvidia' and not is_nemotron:
                     if is_glm:
-                        self.assertNotIn('enable_thinking', text)
+                        self.assertNotIn('enable_thinking', primary)
                         want_effort = 'high' if thinking == 'true' else 'low'
-                        self.assertEqual(text.count('      reasoning_effort: ' + want_effort + '\n'),
+                        self.assertEqual(primary.count('      reasoning_effort: ' + want_effort + '\n'),
                                          self.spoof_id_count)
                     else:
                         # Other NVIDIA models with no explicit effort: provider default stands.
-                        self.assertNotIn('reasoning_effort', text)
+                        self.assertNotIn('reasoning_effort', primary)
                 if provider == 'cloudflare':
                     self.assertIn('/accounts/' + 'a' * 32 + '/ai/v1', text)
                     self.assertIn('os.environ/CLOUDFLARE_API_TOKEN', text)
@@ -307,11 +318,20 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         self.assertEqual(r.returncode, 0, r.stderr)
         return cfg.read_text(), r
 
+    def _primary(self, text):
+        """The primary deployment block of a generated config. 0.40.0: la-fallback-*
+        deployments follow the primary and carry their OWN per-model params (a GLM
+        fallback of a Nemotron session brings reasoning_effort, a Nemotron fallback
+        of a GLM session brings enable_thinking), so an assertion that describes the
+        session model must scope to this block, not the whole file."""
+        return text.split('  - model_name: "la-fallback-1"', 1)[0] if '"la-fallback-1"' in text else text
+
     def _fallbacks(self, text):
         """(fallback deployments in order, router fallbacks block) from a generated config."""
         models = []
         for chunk in text.split('  - model_name: ')[1:]:
-            name = chunk.split('\n', 1)[0]
+            # the emitted name is quoted: `model_name: "la-fallback-1"`
+            name = chunk.split('\n', 1)[0].strip('"')
             if name.startswith('la-fallback-'):
                 models.append(chunk.split('      model: ', 1)[1].split('\n', 1)[0])
         block = text.split('  fallbacks:', 1)[1].split('\n', 1)[0] if '  fallbacks:' in text else ''
@@ -632,13 +652,13 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         # With no -thinking suffix, thinking defaults to false regardless of effort.
         ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
         text = write('nvidia', ultra, 'high')
-        self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
-        self.assertNotIn('reasoning_effort', text,
+        self.assertEqual(self._primary(text).count('        enable_thinking: false\n'), self.spoof_id_count)
+        self.assertNotIn('reasoning_effort', self._primary(text),
                          'Nemotron does not accept reasoning_effort; sending it is the bug')
         # With -thinking suffix, thinking is explicitly enabled.
         text = write('nvidia', ultra, 'high', 'true')
-        self.assertEqual(text.count('        enable_thinking: true\n'), self.spoof_id_count)
-        self.assertNotIn('reasoning_effort', text)
+        self.assertEqual(self._primary(text).count('        enable_thinking: true\n'), self.spoof_id_count)
+        self.assertNotIn('reasoning_effort', self._primary(text))
         text = write('nvidia', ultra, '')
         self.assertEqual(text.count('        enable_thinking: false\n'), self.spoof_id_count)
 
@@ -659,7 +679,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
 
         # A non-Nemotron NVIDIA model DOES take the OpenAI-compatible field.
         text = write('nvidia', 'nvidia/gpt-oss-20b', 'high')
-        self.assertEqual(text.count('      reasoning_effort: high\n'), self.spoof_id_count)
+        self.assertEqual(self._primary(text).count('      reasoning_effort: high\n'), self.spoof_id_count)
 
         # Claude Code offers five levels; the OpenAI field accepts three.
         for level, expected in (('low', 'low'), ('medium', 'medium'),
@@ -679,11 +699,11 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         for thinking, expected in (('false', 'low'), ('true', 'high')):
             with self.subTest(glm_default=thinking):
                 text = write('nvidia', 'z-ai/glm-5.3', '', thinking)
-                self.assertNotIn('enable_thinking', text)
-                self.assertEqual(text.count('      reasoning_effort: ' + expected + '\n'),
+                self.assertNotIn('enable_thinking', self._primary(text))
+                self.assertEqual(self._primary(text).count('      reasoning_effort: ' + expected + '\n'),
                                  self.spoof_id_count)
         text = write('nvidia', 'z-ai/glm-5.3', 'medium', 'true')
-        self.assertEqual(text.count('      reasoning_effort: medium\n'), self.spoof_id_count)
+        self.assertEqual(self._primary(text).count('      reasoning_effort: medium\n'), self.spoof_id_count)
 
         # An unknown level is refused loudly, not silently written into the config.
         cfg = self.root / 'proxy.yaml'
