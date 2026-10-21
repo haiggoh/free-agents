@@ -19,14 +19,6 @@
       "evidence": "HTTP 404 with explicit 'Not found for account' message. Confirmed 2026-10-10."
     },
     {
-      "model_id": "deepseek-ai/deepseek-coder-6.7b-instruct",
-      "alias": "nvidia-deepseek-coder",
-      "reason": "HTTP 404 Not Found — model not accessible. Catalog lists it but function not provisioned for this account. NOT a paid-tier restriction.",
-      "status": "broken",
-      "failure_mode": "not_provisioned",
-      "evidence": "Catalog shows model but generation returns 404. Confirmed 2026-10-03."
-    },
-    {
       "model_id": "openai/gpt-oss-20b",
       "alias": "nvidia-gptoss",
       "reason": "Connection-level timeouts — the deployment is unresponsive for generation. The 2026-10-11 'empty completion' verdicts were partly the probe's max_tokens=24 artifact (see docs/nvidia-nim-serving-notes.md); with a 512 budget the route now times out at connect instead, so the deployment itself is degraded, not the probe.",
