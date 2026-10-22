@@ -15,6 +15,11 @@
 #   remote-session.sh --dry-run <alias>    # print the plan and the env, start nothing
 #   remote-session.sh --stop               # stop ORPHANED proxies (their session has exited)
 #   remote-session.sh --stop <port> [--force]  # one proxy; --force even if its session is alive
+#   remote-session.sh --swap-model <port> <alias> [--force]
+#                                         # rescue a STALLED session: relaunch its proxy on
+#                                         # another model, same port (pre-flight on a scratch
+#                                         # port; backs up and reverts on any failure; refuses
+#                                         # a session that answered recently unless --force)
 #   remote-session.sh --include-trials     # also offer trial-tier (non-free) agents
 #   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
 #   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
@@ -1061,6 +1066,69 @@ _decide_native_route() { # _decide_native_route <provider> <model> -> sets LA_RO
     return 0
 }
 
+_spawn_proxy_on() { # _spawn_proxy_on <port> <cfg> <log> <prov> -> background pid on stdout
+    # The ONE spawn path (0.40.0): start_proxy, the swap pre-flight and the swap's revert
+    # all launch through here, so a swapped session runs exactly what a fresh one would.
+    # Only THIS provider's credential (plus the subagent pool's) enters the proxy env.
+    local port="$1" cfg="$2" log="$3" prov="$4"
+    local -a cmd=()
+    if [[ -n "${LA_LITELLM_CMD:-}" ]]; then
+        # shellcheck disable=SC2206
+        local -a _c=(${LA_LITELLM_CMD})
+        command -v "${_c[0]}" >/dev/null 2>&1 || [[ -x "${_c[0]}" ]] || {
+            echo "remote-session: LA_LITELLM_CMD is not executable: ${_c[0]}" >&2; return 1; }
+        echo "remote-session: NOTE using LA_LITELLM_CMD (${_c[0]}) — the OS-trust wrapper is BYPASSED;" >&2
+        echo "  on a TLS-inspecting network upstream HTTPS may fail with a certificate error." >&2
+        cmd=("${_c[@]}")
+    else
+        # Resolve the interpreter behind the console script and re-enter it WITHOUT the
+        # shebang's `-E`: with -E Python ignores PYTHONPATH, the Keychain-trust shim never
+        # reached the proxy, and on a TLS-inspecting corporate network every upstream HTTPS
+        # call failed as a "self-signed certificate" 500 that reads like a provider outage.
+        local litellm_py litellm_shebang trust_wrapper
+        litellm_shebang="$(head -1 "$(command -v litellm)" 2>/dev/null)"
+        litellm_py="${litellm_shebang#\#!}"; litellm_py="${litellm_py%% *}"
+        if [[ ! -x "$litellm_py" ]]; then
+            echo "remote-session: could not resolve the litellm interpreter from: ${litellm_shebang:-<none>}" >&2
+            echo "  reinstall with: pipx install 'litellm[proxy]'" >&2
+            return 1
+        fi
+        trust_wrapper="$SCRIPT_DIR/litellm-with-trust.py"
+        if [[ ! -r "$trust_wrapper" ]]; then
+            echo "remote-session: missing trust wrapper: $trust_wrapper" >&2
+            return 1
+        fi
+        cmd=("$litellm_py" "$trust_wrapper")
+    fi
+    local envassign line _pp
+    envassign="$("$KEYS" --env "$prov")" || return 1
+    for _pp in $SUBAGENT_POOL_PROVIDERS; do
+        envassign+=$'\n'"$("$KEYS" --env "$_pp")" || return 1
+    done
+    ( _clear_provider_env
+      # shellcheck disable=SC2163 # line is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
+      while IFS= read -r line; do [[ -n "$line" ]] && export "$line"; done <<< "$envassign"
+      # shellcheck disable=SC2030,SC2031 # LA_REMOTE_PROVIDER is scoped to the proxy process ON PURPOSE: the parent launcher keeps its own value
+      export LA_REMOTE_PROVIDER="$prov"   # la_proxy_hooks names it in account errors
+      exec "${cmd[@]}" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
+    echo $!
+}
+
+_wait_proxy_ready() { # _wait_proxy_ready <port> <pid> <secs> -> 0 once the health endpoint answers
+    local port="$1" pid="$2" secs="$3" i
+    for i in $(seq 1 "$secs"); do
+        if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
+            return 0
+        fi
+        kill -0 "$pid" 2>/dev/null || {
+            echo "remote-session: proxy died during startup; inspect the private log locally: $RUNDIR/proxy-$port.log" >&2
+            return 1; }
+        sleep 1
+    done
+    echo "remote-session: proxy did not become ready in ${secs}s; inspect the private log locally: $RUNDIR/proxy-$port.log" >&2
+    return 1
+}
+
 start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperature] -> echoes port
     local prov="$1" model="$2" thinking="$3" effort="${4:-}" temperature="${5:-}"
     umask 077
@@ -1089,77 +1157,162 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     export LA_PROXY_FALLBACK_NAMES="${FALLBACK_NAMES[*]:-}"
     _prepare_runtime_file "$log" || return 1
     _prepare_runtime_file "$pidf" || return 1
-    if [[ -n "${LA_LITELLM_CMD:-}" ]]; then
-        # shellcheck disable=SC2206
-        local -a _cmd=(${LA_LITELLM_CMD})
-        command -v "${_cmd[0]}" >/dev/null 2>&1 || [[ -x "${_cmd[0]}" ]] || {
-            echo "remote-session: LA_LITELLM_CMD is not executable: ${_cmd[0]}" >&2; return 1; }
-        echo "remote-session: NOTE using LA_LITELLM_CMD (${_cmd[0]}) — the OS-trust wrapper is BYPASSED;" >&2
-        echo "  on a TLS-inspecting network upstream HTTPS may fail with a certificate error." >&2
-        local envassign_o line_o _pp
-        envassign_o="$("$KEYS" --env "$prov")" || return 1
-        for _pp in $SUBAGENT_POOL_PROVIDERS; do
-            envassign_o+=$'\n'"$("$KEYS" --env "$_pp")" || return 1
-        done
-        ( _clear_provider_env
-          # shellcheck disable=SC2163 # line_o is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
-          while IFS= read -r line_o; do [[ -n "$line_o" ]] && export "$line_o"; done <<< "$envassign_o"
-          export LA_REMOTE_PROVIDER="$prov"   # la_proxy_hooks names it in account errors
-          exec "${_cmd[@]}" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
-        echo $! > "$pidf"; echo "$$ $(_proc_start $$)" > "$RUNDIR/proxy-$port.owner"
-        local j
-        # shellcheck disable=SC2034  # retry counter, not read
-        for j in $(seq 1 60); do
-            if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
-                echo "$port"; return 0
-            fi
-            kill -0 "$(cat "$pidf")" 2>/dev/null || { echo "remote-session: proxy died during startup; inspect the private log locally: $log" >&2; return 1; }
-            sleep 1
-        done
-        echo "remote-session: proxy did not become ready in 60s; inspect the private log locally: $log" >&2
-        return 1
+    # 60s to prove a stub/test command; 300s for real proxies -- the first request's prefill
+    # on a large model can take minutes before the health endpoint answers.
+    local bgpid
+    bgpid="$(_spawn_proxy_on "$port" "$cfg" "$log" "$prov")" || return 1
+    echo "$bgpid" > "$pidf"; echo "$$ $(_proc_start $$)" > "$RUNDIR/proxy-$port.owner"
+    if _wait_proxy_ready "$port" "$bgpid" "$([[ -n "${LA_LITELLM_CMD:-}" ]] && echo 60 || echo 300)"; then
+        echo "$port"; return 0
     fi
+    return 1
+}
 
-    local litellm_py litellm_shebang
-    litellm_shebang="$(head -1 "$(command -v litellm)" 2>/dev/null)"
-    litellm_py="${litellm_shebang#\#!}"; litellm_py="${litellm_py%% *}"
-    if [[ ! -x "$litellm_py" ]]; then
-        echo "remote-session: could not resolve the litellm interpreter from: ${litellm_shebang:-<none>}" >&2
-        echo "  reinstall with: pipx install 'litellm[proxy]'" >&2
-        return 1
-    fi
-    local trust_wrapper="$SCRIPT_DIR/litellm-with-trust.py"
-    if [[ ! -r "$trust_wrapper" ]]; then
-        echo "remote-session: missing trust wrapper: $trust_wrapper" >&2
-        return 1
-    fi
+# ---- 0.40.0: --swap-model — rescue a session whose model is throttled upstream -----------
+# Phase 1's fallback chain covers NEW sessions; this rescues one started before 0.40.0 (or
+# one whose whole chain failed) by relaunching ITS proxy on another model, same port, so
+# the stalled session resumes on its next prompt. The six mechanisms of the proven one-off
+# (la-swap-proxy-model.py, 2026-10-20) with the config now built by write_proxy_config —
+# one source of truth — and every path derived from $RUNDIR/$SCRIPT_DIR, nothing hardcoded.
+LA_SWAP_HEALTHY_WINDOW="${LA_SWAP_HEALTHY_WINDOW:-600}"   # an answer this recent => NOT stalled
+LA_SWAP_PROBE_TIMEOUT="${LA_SWAP_PROBE_TIMEOUT:-420}"      # above the limiter's 300s queue bound
 
-    # Only THIS provider's credential enters the proxy environment.
-    local envassign line _pp
-    envassign="$("$KEYS" --env "$prov")" || return 1
-    # Hybrid subagent pool: its members' keys, too (one NAME=value line each; never logged).
-    for _pp in $SUBAGENT_POOL_PROVIDERS; do
-        envassign+=$'\n'"$("$KEYS" --env "$_pp")" || return 1
+_swap_master_key() { # _swap_master_key <cfg> -> the config's master key
+    python3 - "$1" <<'PY'
+import re, sys
+m = re.search(r"^\s*master_key:\s*(\S+)", open(sys.argv[1]).read(), re.M)
+print(m.group(1) if m else "")
+PY
+}
+
+_swap_probe() { # _swap_probe <port> <cfg> <timeout> -> "HTTPCODE body-snippet"
+    local port="$1" cfg="$2" tmo="$3" key out code
+    key="$(_swap_master_key "$cfg")"
+    [[ -n "$key" ]] || { echo "000 no-master-key-in-config"; return 1; }
+    out="$RUNDIR/swap-probe-$port.out"
+    code="$(curl -s -m "$tmo" -o "$out" -w '%{http_code}' \
+        -H "x-api-key: $key" -H 'content-type: application/json' \
+        -H 'anthropic-version: 2023-06-01' \
+        -d '{"model":"claude-opus-5-5","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}' \
+        "http://127.0.0.1:$port/v1/messages" 2>/dev/null)" || { echo "000 curl-failed"; return 1; }
+    echo "$code $(head -c 120 "$out" | tr '\n' ' ')"
+    [[ "$code" == "200" ]]
+}
+
+_swap_revert() { # _swap_revert <port> <bak-cfg> <cfg> <log> <pidf> <newpid> <prov> [secs]
+    # Put the OLD config back and relaunch it: readiness is verified BEFORE the pidfile is
+    # written, or a dead proxy would look live to teardown and --stop.
+    local port="$1" bak="$2" cfg="$3" log="$4" pidf="$5" newpid="$6" prov="$7" secs="${8:-300}" rpid
+    echo "remote-session: --swap-model: reverting :$port to the previous model" >&2
+    kill "$newpid" 2>/dev/null
+    cp -p "$bak" "$cfg"
+    rpid="$(_spawn_proxy_on "$port" "$cfg" "$log" "$prov")" || return 1
+    if ! _wait_proxy_ready "$port" "$rpid" "$secs"; then
+        echo "remote-session: --swap-model: the REVERTED proxy is not answering on :$port —" >&2
+        echo "  the original config is restored at $cfg; start it with:" >&2
+        echo "    $SCRIPT_DIR/$(basename "$0") ... (or relaunch the session)" >&2
+        echo "$rpid" > "$pidf"
+        return 1
+    fi
+    echo "$rpid" > "$pidf"
+    echo "remote-session: --swap-model: reverted; the previous model is answering again on :$port" >&2
+    return 0
+}
+
+swap_model() { # swap_model <port> <alias> [force]
+    local port="${1:-}" alias="${2:-}" force="${3:-}"
+    local cfg pidf log ownerf pid entry prov model thinking effort temperature
+    [[ -n "$port" && -n "$alias" ]] || { echo "remote-session: --swap-model needs <port> <alias>" >&2; return 2; }
+    _prepare_runtime_dir || return 2
+    cfg="$RUNDIR/proxy-$port.yaml"; pidf="$RUNDIR/proxy-$port.pid"
+    log="$RUNDIR/proxy-$port.log"; ownerf="$RUNDIR/proxy-$port.owner"
+    for f in "$cfg" "$pidf" "$log"; do
+        [[ -r "$f" ]] || { echo "remote-session: --swap-model: missing $f — is a session running on :$port?" >&2; return 2; }
     done
-    ( _clear_provider_env
-      # shellcheck disable=SC2163 # line is a full NAME=VALUE string from remote-keys.sh --env; export "NAME=VALUE" is valid bash
-      while IFS= read -r line; do [[ -n "$line" ]] && export "$line"; done <<< "$envassign"
-      export LA_REMOTE_PROVIDER="$prov"   # la_proxy_hooks names it in account errors
-      exec "$litellm_py" "$trust_wrapper" --config "$cfg" --port "$port" ) > "$log" 2>&1 &
-    echo $! > "$pidf"; echo "$$ $(_proc_start $$)" > "$RUNDIR/proxy-$port.owner"
+    pid="$(cat "$pidf" 2>/dev/null)"
+    _is_our_proxy "$pid" "$port" || {
+        echo "remote-session: --swap-model: pid ${pid:-<none>} on :$port is not one of our proxies; refusing." >&2
+        return 2; }
+    # HEALTHY REFUSAL: a log written inside the window means the proxy answered something
+    # recently — a swap would drop an in-flight turn. Refuse unless --force.
+    local log_age
+    log_age=$(( $(date +%s) - $(stat -f %m "$log") ))
+    if [[ "$log_age" -le "$LA_SWAP_HEALTHY_WINDOW" && "$force" != "force" ]]; then
+        echo "remote-session: --swap-model: :$port was active ${log_age}s ago (<${LA_SWAP_HEALTHY_WINDOW}s window) — the session looks ALIVE; refusing. --force overrides." >&2
+        return 2
+    fi
+    entry="$(_entry_for "$alias")"
+    [[ -n "$entry" ]] || { echo "remote-session: --swap-model: unknown remote alias: $alias" >&2; return 2; }
+    prov="$(_field "$entry" 2)"; model="$(_field "$entry" 3)"
+    _available "$prov" || { echo "remote-session: --swap-model: no key saved for provider $prov" >&2; return 2; }
+    [[ "$model" != "SELECT" ]] || {
+        echo "remote-session: --swap-model: '$alias' has no fixed model (catalog-only); pick a concrete alias." >&2
+        return 2; }
+    # Faithful to the SESSION's own settings: thinking from the alias suffix, effort and
+    # temperature parsed from the config the session actually runs with.
+    thinking="false"; [[ "$alias" == *-thinking ]] && thinking="true"
+    effort="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"^\s+reasoning_effort: (\S+)", t, re.M); print(m.group(1) if m else "")' "$cfg")"
+    temperature="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"^\s+temperature: (\S+)", t, re.M); print(m.group(1) if m else "")' "$cfg")"
 
-    # Bounded readiness wait with real diagnostics on failure.
-    # 5 minutes (300s) for proxy startup — prefill on first request can take several minutes.
-    local i
-    for i in $(seq 1 300); do
-        if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
-            echo "$port"; return 0
-        fi
-        kill -0 "$(cat "$pidf")" 2>/dev/null || { echo "remote-session: proxy died during startup; inspect the private log locally: $log" >&2; return 1; }
+    # --- PRE-FLIGHT: prove the new model on a scratch port; nothing live is touched -------
+    # The scratch proxy runs with the hook limiter OFF: it isolates "does this model serve?"
+    # from the shared 40 RPM queue. The live proxy keeps the limiter.
+    local scratch scratch_cfg scratch_log scratch_pid scratch_pidf probe
+    scratch="$(free_port)" || return 1
+    scratch_cfg="$RUNDIR/swap-scratch-$port.yaml"; scratch_log="$RUNDIR/swap-scratch-$port.log"
+    scratch_pidf="$RUNDIR/swap-scratch-$port.pid"
+    _decide_native_route "$prov" "$model"
+    write_proxy_config "$scratch_cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 2
+    scratch_pid="$(LA_PROXY_HOOKS_RATE_LIMIT=0 _spawn_proxy_on "$scratch" "$scratch_cfg" "$scratch_log" "$prov")" || return 2
+    echo "$scratch_pid" > "$scratch_pidf"
+    if ! _wait_proxy_ready "$scratch" "$scratch_pid" 90; then
+        echo "remote-session: --swap-model: pre-flight proxy did not become ready -> ABORT, nothing changed." >&2
+        kill "$scratch_pid" 2>/dev/null; rm -f "$scratch_pidf" "$scratch_cfg" "$scratch_log"
+        return 1
+    fi
+    probe="$(_swap_probe "$scratch" "$scratch_cfg" 300)"
+    echo "remote-session: --swap-model: pre-flight probe $probe"
+    kill "$scratch_pid" 2>/dev/null; rm -f "$scratch_pidf" "$scratch_cfg" "$scratch_log"
+    [[ "$probe" == 200* ]] || {
+        echo "remote-session: --swap-model: pre-flight FAILED -> ABORT, nothing changed." >&2
+        return 1; }
+
+    # --- THE SWAP: backup, rewrite the SAME path (teardown keys on it), relaunch ------------
+    local stamp bak newpid probe2
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    bak="${cfg}.bak-${stamp}"
+    cp -p "$cfg" "$bak"                      # keeps mode 0600; the paper trail stays on disk
+    write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || {
+        cp -p "$bak" "$cfg"; return 1; }
+    kill "$pid" 2>/dev/null
+    local waited
+    for waited in $(seq 1 30); do            # let the port actually free before rebinding
+        lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 || break
         sleep 1
     done
-    echo "remote-session: proxy did not become ready in 300s (5 min); inspect the private log locally: $log" >&2
-    return 1
+    newpid="$(_spawn_proxy_on "$port" "$cfg" "$log" "$prov")" || {
+        _swap_revert "$port" "$bak" "$cfg" "$log" "$pidf" "" "$prov"; return 1; }
+    # The .owner file is NOT touched: the session keeps its launcher identity, so --stop and
+    # stale-cleanup still recognize this proxy as theirs.
+    echo "$newpid" > "$pidf"
+    if ! _wait_proxy_ready "$port" "$newpid" 300; then
+        _swap_revert "$port" "$bak" "$cfg" "$log" "$pidf" "$newpid" "$prov"
+        return 1
+    fi
+    probe2="$(_swap_probe "$port" "$cfg" "$LA_SWAP_PROBE_TIMEOUT")"
+    echo "remote-session: --swap-model: live probe $probe2"
+    if [[ "$probe2" != 200* ]]; then
+        _swap_revert "$port" "$bak" "$cfg" "$log" "$pidf" "$newpid" "$prov"
+        return 1
+    fi
+    local tty=""
+    if [[ -r "$ownerf" ]]; then
+        tty="$(ps -o tty= -p "$(awk '{print $1}' "$ownerf")" 2>/dev/null | tr -d ' ')"
+    fi
+    echo "remote-session: swapped :$port to $model ($alias). The session there is idle: press Enter (or send any message) in it to resume."
+    [[ -n "$tty" && "$tty" != "?" && "$tty" != "??" ]] && \
+        echo "  (its terminal: $tty)"
+    return 0
 }
 
 # ---- argument parsing (BEFORE any work — --help must never launch anything) --
@@ -1182,6 +1335,11 @@ while [[ $# -gt 0 ]]; do
                           while [[ $# -gt 0 && ( "$1" == --force || "$1" =~ ^[0-9]+$ ) ]]; do
                               STOP_ARGS+=("$1"); shift
                           done ;;
+        --swap-model)     MODE="swap-model"; SWAP_PORT="${2:-}"; SWAP_ALIAS="${3:-}"; shift
+                          [[ -n "$SWAP_PORT" && -n "$SWAP_ALIAS" ]] || {
+                              echo 'remote-session: --swap-model needs <port> <alias>' >&2; exit 2; }
+                          shift 2 ;;
+        --force)          SWAP_FORCE=1; shift ;;
         --verify)         MODE="verify"; ALIAS="${2:-}"; shift 2 || shift ;;
         --models)         MODE="models"; ALIAS="${2:-}"; shift 2 || shift ;;
         --remote-model)   [[ $# -ge 2 ]] || { echo 'remote-session: --remote-model needs an ID' >&2; exit 2; }
@@ -1594,6 +1752,10 @@ if [[ "$MODE" == "install-keys" ]]; then
     echo "Installing remote API keys..."
     exec python3 "$REPO_ROOT/install/setup-api-keys.py" "$@"
     exit 0
+fi
+if [[ "$MODE" == "swap-model" ]]; then
+    swap_model "$SWAP_PORT" "$SWAP_ALIAS" "${SWAP_FORCE:+force}"
+    exit $?
 fi
 
 
