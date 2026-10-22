@@ -1,3 +1,25 @@
+## [0.40.1] — 2026-10-22
+
+### Fixed — the 40 RPM window counted every NVIDIA request twice
+
+- **One request now books one slot**, so 40 RPM means 40 again (it was effectively 20 since
+  the hooks began rate-limiting). A `/v1/messages` request runs LiteLLM's deployment hook
+  twice under one call id — once as the `anthropic_messages` call it arrives as, once as the
+  translated `acompletion` that actually goes upstream (probed on LiteLLM 1.105.1; both from
+  the same wrapper, not two HTTP layers as first assumed). Only the upstream call books now.
+  A dedupe on the call id would have been wrong: a router retry repeats both layers under the
+  same id and needs its own slot. The cooling fast-fail still runs on the outer call. Contract
+  test 8 holds it for both limiter modes, streamed and not.
+
+### Known issue
+
+- A 429 that the OpenAI SDK retries **itself and then wins** reaches no hook, so those
+  attempts go unbooked: at most 2 per throttle event, only while NVIDIA is already answering
+  429, and self-correcting (the next 429 that fails through books its hidden attempts and
+  pauses). Until 0.40.1 the double-booking covered this by accident. `max_retries: 0` is still
+  ignored on `nvidia_nim` (re-probed on LiteLLM 1.105.1). Pinned by contract test 8b
+  (expected failure); the fix needs retry counting at the HTTP-client level.
+
 ## [0.40.0] — 2026-10-22
 
 ### Added — a session survives an upstream model throttle (NVIDIA 429, 2026-10-20)

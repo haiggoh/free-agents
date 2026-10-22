@@ -56,6 +56,7 @@ class Upstream:
     def __init__(self):
         self.requests, self.status, self.body = [], 200, None
         self.path_status = {}  # per-path override, so one path can 429 while another stays healthy
+        self.queue = []        # statuses for the NEXT requests, consumed in order (then the defaults)
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -63,7 +64,8 @@ class Upstream:
                 raw = self.rfile.read(int(self.headers.get("content-length", 0)))
                 body = json.loads(raw or b"{}")
                 outer.requests.append({"path": self.path, "body": body})
-                status = outer.path_status.get(self.path, outer.status)
+                status = (outer.queue.pop(0) if outer.queue
+                          else outer.path_status.get(self.path, outer.status))
                 if status != 200:
                     out = json.dumps(outer.body).encode()
                 elif body.get("stream"):
@@ -295,7 +297,29 @@ class LiteLLMContract(unittest.TestCase):
         must fast-fail a cooling model too, or the whole per-model cooldown is inert there."""
         self._cooling_primary_case("smooth_bucket")
 
-    def _cooling_primary_case(self, mode):
+    def test_8_one_request_books_one_slot(self):
+        """0.40.1 hotfix: a /v1/messages request to an NVIDIA model runs the deployment hook
+        TWICE with one litellm_call_id -- the anthropic_messages call as it arrives and the
+        translated acompletion that goes upstream (probed on LiteLLM 1.105.1: both from
+        utils.py wrapper_async). Each booked a slot, so 40 RPM was really 20. Only the
+        upstream call books now, streaming or not, in both limiter modes."""
+        for mode in ("sliding_window", "smooth_bucket"):
+            for stream in (False, True):
+                with self.subTest(mode=mode, stream=stream):
+                    self._cooling_primary_case(mode, cooling=False, stream=stream)
+
+    @unittest.expectedFailure
+    def test_8b_a_hidden_sdk_retry_that_succeeds_books_its_slot(self):
+        """KNOWN GAP (0.40.1, waypoint): a 429 the OpenAI SDK retries ITSELF and then wins
+        reaches no hook -- no failure event, one deployment-hook pass -- so 2 upstream
+        attempts book 1 slot. max_retries: 0 is still ignored on nvidia_nim (re-probed on
+        LiteLLM 1.105.1). Until 0.40.1 the double-booking hid this by accident. Bounded (at
+        most SDK_HIDDEN_RETRIES per throttle event, only while NVIDIA already 429s) and
+        self-correcting (the next failed 429 books its hidden attempts and pauses). When
+        retries become countable this passes -- then drop the expectedFailure."""
+        self._cooling_primary_case("sliding_window", cooling=False, primary_429=True)
+
+    def _cooling_primary_case(self, mode, cooling=True, stream=False, primary_429=False):
         """0.40.0 Phase 2: a model cooling in the limiter (per-model 429 classification)
         never sees a request -- the pre-call hook raises at once, the router answers from
         the fallback, and the cooling model books NO 40 RPM slot. Own proxy instance: the
@@ -309,8 +333,9 @@ class LiteLLMContract(unittest.TestCase):
             "last_429_time": 0.0,
             # The pre-call hook sees the deployment model WITH its provider prefix
             # (the same string _is_nvidia matches on).
-            "models": {"nvidia_nim/vendor/chat-model":
-                       {"until": time.time() + 300, "n": 3, "last": time.time()}}}))
+            "models": ({"nvidia_nim/vendor/chat-model":
+                        {"until": time.time() + 300, "n": 3, "last": time.time()}}
+                       if cooling else {})}))
         os.symlink(ROOT / "bin/la_proxy_hooks.py", dd / "la_proxy_hooks.py")
         cfg = dd / "proxy.yaml"
         cfg.write_text("model_list:\n"
@@ -369,9 +394,34 @@ class LiteLLMContract(unittest.TestCase):
             self.fail("second proxy not ready in 120s")
 
         self.up.requests.clear()
-        status, body = self.post_at(port, self.msg("claude-opus-5-5"))
-        self.assertEqual(status, 200, body)
-        self.assertEqual(body["content"][0]["text"], "PONG")
+        if primary_429:
+            self.up.body = {"error": {"message": "Too Many Requests", "type": "rate_limit"}}
+            self.addCleanup(setattr, self.up, "body", None)
+            self.up.queue = [429]
+        if stream:
+            status, raw = self.post_raw_at(port, self.msg("claude-opus-5-5", stream=True))
+            self.assertEqual(status, 200, raw)
+            self.assertIn("PONG", raw)
+        else:
+            status, body = self.post_at(port, self.msg("claude-opus-5-5"))
+            self.assertEqual(status, 200, body)
+            self.assertEqual(body["content"][0]["text"], "PONG")
+        st = json.loads(state.read_text())
+        booked = (int(st["tokens"]) if mode == "smooth_bucket" else len(st["stamps"]))
+        log_tail = "proxy log:\n" + (dd / "proxy.log").read_text()[-2000:]
+        if primary_429:
+            # Whichever layer retries (the SDK's own retry inside one LiteLLM call, booked
+            # as a hidden attempt, or the router's failover), every REAL upstream attempt
+            # owns exactly one slot -- no more (the double-booking), no fewer (a dedupe).
+            sent = [r["body"]["model"] for r in self.up.requests]
+            self.assertEqual(len(sent), 2, sent)
+            self.assertEqual(booked, len(sent), f"sent {sent}; " + log_tail)
+            return
+        if not cooling:
+            self.assertEqual([r["body"]["model"] for r in self.up.requests], ["vendor/chat-model"])
+            # ONE slot for ONE upstream request: 1 stamp, or a full bucket (6) minus 1.
+            self.assertEqual(booked, 5 if mode == "smooth_bucket" else 1, log_tail)
+            return
         # THE acceptance: the cooling model saw ZERO requests — exactly one went to the
         # fallback — and the cooling model booked NO slot and did NOT have its cooldown
         # extended (the pre-call raise must not loop back through note_429, or a throttled
@@ -379,25 +429,13 @@ class LiteLLMContract(unittest.TestCase):
         self.assertEqual([r["body"]["model"] for r in self.up.requests],
                          ["vendor/fallback-model-1"],
                          "the cooling primary must not be called upstream")
-        st = json.loads(state.read_text())
         self.assertEqual(st["models"]["nvidia_nim/vendor/chat-model"]["n"], 3,
                          "the fast-fail must not feed back into note_429")
-        # 2 slots, not 0: the fallback's ONE logical request books two — a PRE-EXISTING
-        # double-fire of the deployment hook (utils.py:2025 AND llm_http_handler both run
-        # every registered callback; measured 2026-10-22: every request, fallback or not,
-        # books 2, so the 40 RPM window is effectively 20). Tracked as its own waypoint;
-        # the point HERE is the delta: the cooling model contributed ZERO of these.
-        if mode == "smooth_bucket":
-            # Bucket: the planted state carries no tokens, so it starts full (capacity 6)
-            # and the same double-fired hook takes 2 -- refill during the request adds a
-            # fraction, never a whole token.
-            self.assertEqual(int(st["tokens"]), 4,
-                             "tokens left after the failover; proxy log:\n"
-                             + (dd / "proxy.log").read_text()[-2000:])
-        else:
-            self.assertEqual(len(st["stamps"]), 2,
-                             "booked slots for the failover; proxy log:\n"
-                             + (dd / "proxy.log").read_text()[-2000:])
+        # Exactly ONE slot, the fallback's: the cooling model contributed none (0.40.0), and
+        # the fallback's request books once, not twice (0.40.1). The bucket starts full
+        # (capacity 6; the planted state has no tokens) and refill during the request adds
+        # a fraction, never a whole token.
+        self.assertEqual(booked, 5 if mode == "smooth_bucket" else 1, log_tail)
 
     def post_at(self, port, body):
         req = urllib.request.Request(
@@ -409,6 +447,18 @@ class LiteLLMContract(unittest.TestCase):
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"{}")
+
+    def post_raw_at(self, port, body):
+        """post_at for a streamed reply: (status, raw SSE text)."""
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/messages", data=json.dumps(body).encode(), method="POST",
+            headers={"x-api-key": MASTER, "content-type": "application/json",
+                     "anthropic-version": "2023-06-01"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, (e.read() or b"").decode()
 
 
 if __name__ == "__main__":

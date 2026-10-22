@@ -346,7 +346,9 @@ def _retry_after_seconds(exc) -> float | None:
 # max_retries (measured on LiteLLM 1.102.1: 3 upstream hits per call with max_retries=0 set per
 # request AND per deployment). Those attempts never reach async_pre_call_deployment_hook, so the
 # window never saw them -- yet NVIDIA counted them. A failed 429 call therefore books this many
-# extra slots. Successful calls are unaffected (the SDK only retries on failure).
+# extra slots. KNOWN GAP (re-measured 2026-10-22, LiteLLM 1.105.1, max_retries: 0 still ignored):
+# a 429 the SDK retries and then WINS reaches no hook at all, so those attempts go unbooked --
+# bounded by this number per throttle event; pinned by contract test 8b (expectedFailure).
 SDK_HIDDEN_RETRIES = 2
 
 
@@ -388,6 +390,14 @@ class LAProxyHooks(CustomLogger):
                 raise litellm.RateLimitError(
                     message=f"model cooling {cooling:.0f}s after consecutive upstream 429s",
                     llm_provider="nvidia_nim", model=model)
+            if getattr(call_type, "value", call_type) == "anthropic_messages":
+                # 0.40.1: one /v1/messages request runs this hook TWICE with one call id --
+                # here, as it arrives, and again as the translated acompletion that actually
+                # goes upstream (probed on LiteLLM 1.105.1). NIM has no native /v1/messages,
+                # so the inner call always follows: it books the slot, this one must not, or
+                # 40 RPM is really 20. A router retry repeats BOTH layers, so it still books
+                # exactly one -- which a dedupe on the call id would have swallowed.
+                return normalize_nvidia_kwargs(kwargs)
             waited = await self._bucket.aacquire()
             if waited > 0:
                 print(f"la_proxy_hooks: NVIDIA bucket queued this call {waited:.1f}s",
