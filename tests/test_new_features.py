@@ -381,7 +381,7 @@ class RemoteLiveCatalog(PilotCase):
             await pilot.pause(0.1)
             self.assertLess(time.time() - t0, 0.8)
             self.assertIn("rcat:nvidia-a", app._loading)
-            await h.wait_text("vendor/extra", secs=10)
+            await h.wait_text("Extra  · catalog", secs=10)
             self.assertNotIn("cat:nvidia:vendor/pinned", [r for r in app.row_ids if r])
             await h.goto_row("item", "cat:nvidia:vendor/extra")
             await h.press("enter")
@@ -405,9 +405,9 @@ class RemoteLiveCatalog(PilotCase):
 
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("vendor/cached-old")          # from the cache, instantly
-            await h.wait_text("vendor/extra", secs=10)      # revision adds the new id
-            self.assertNotIn("vendor/cached-old", h.text())  # and removes the vanished one
+            await h.wait_text("Cached Old  · catalog")          # from the cache, instantly
+            await h.wait_text("Extra  · catalog", secs=10)      # revision adds the new id
+            self.assertNotIn("Cached Old  · catalog", h.text())  # and removes the vanished one
         self.run_picker(s, start="remote")
 
 
@@ -433,14 +433,14 @@ class RemoteAgeFilterAndShowOld(PilotCase):
     def test_old_row_hidden_by_default(self):
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("vendor/fresh", secs=10)
-            self.assertNotIn("vendor/ancient", h.text())
+            await h.wait_text("Fresh  · catalog", secs=10)
+            self.assertNotIn("Ancient  · catalog", h.text())
         self.run_picker(s, start="remote")
 
     def test_show_old_flag_shows_the_old_row_from_the_start(self):
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("vendor/ancient", secs=10)
+            await h.wait_text("Ancient  · catalog", secs=10)
         self.run_picker(s, start="remote", show_old=True)
 
     def test_env_cutoff_moves_the_hidden_set(self):
@@ -451,7 +451,7 @@ class RemoteAgeFilterAndShowOld(PilotCase):
 
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("vendor/ancient", secs=10)
+            await h.wait_text("Ancient  · catalog", secs=10)
         self.run_picker(s, start="remote")
 
 

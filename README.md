@@ -241,8 +241,9 @@ Newest first. `CHANGELOG.md` has every release in full.
 
 - **0.40.0**: sessions survive an upstream model throttle — a per-session fallback chain answers from the next model on the same port;
   a 429 is classified (per-model cooldown instead of a machine-wide pause); `remote-session.sh --swap-model`
-  rescues a stalled session in place. The picker's model search is a live filter box at the top of the list, and the
-  `remote-agents.sh` roster is generated from the registry YAML with a drift test.
+  rescues a stalled session in place. The picker's model search is a live filter box at the top of the list (Remote and
+  Local), model names lead with the model's maker instead of the provider (`Z.ai GLM 5.3`, `DeepSeek V4.1 Flash`), session
+  titles are shorter, and the `remote-agents.sh` roster is generated from the registry YAML with a drift test.
 - **0.39.0**: free offloading is the default on a paid session; dispatch follows a set model
   order (Gemini 3.8 Flash first) with automatic failover and says which model ran; new
   `free-session-handover` skill.

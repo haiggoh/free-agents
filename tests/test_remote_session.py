@@ -183,8 +183,10 @@ exit 0
     def test_direct_remote_entry_without_local_config(self):
         result = self.run_cli('remote', '--list', '--include-trials', csl=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        for provider in ('Gemini 3.8', 'Gemini 3.6', 'Cloudflare', 'Cerebras'):
-            self.assertIn(provider, result.stdout)
+        # Model names lead with the MAKER, not the provider (0.40.0), so the provider is
+        # asserted in the KEY column ("✓ cloudflare") and the models by their own names.
+        for text in ('Gemini 3.8', 'Gemini 3.6', '✓ cloudflare', '✓ cerebras'):
+            self.assertIn(text, result.stdout)
         self.assertFalse((self.root / 'local-agents-remote').exists())
 
     def test_help_unknown_flags_and_missing_key(self):

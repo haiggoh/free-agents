@@ -354,7 +354,7 @@
       "alias": "nvidia-glm53-thinking",
       "provider": "nvidia",
       "model_id": "z-ai/glm-5.3-flash",
-      "display": "NVIDIA GLM 5.3 Flash (thinking)",
+      "display": "Z.ai GLM 5.3 Flash (thinking)",
       "tier": "unknown",
       "notes": "PARTIAL: same model as the base alias — thinking is always-on on NIM; this alias just defaults reasoning_effort high. Fast.",
       "autocompact_default": "-"
@@ -363,7 +363,7 @@
       "alias": "nvidia-glm53-full-thinking",
       "provider": "nvidia",
       "model_id": "z-ai/glm-5.3",
-      "display": "NVIDIA GLM 5.3 (thinking)",
+      "display": "Z.ai GLM 5.3 (thinking)",
       "tier": "unknown",
       "notes": "SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.",
       "autocompact_default": "-"
@@ -399,7 +399,7 @@
       "alias": "nvidia-glm53",
       "provider": "nvidia",
       "model_id": "z-ai/glm-5.3-flash",
-      "display": "NVIDIA GLM 5.3 Flash",
+      "display": "Z.ai GLM 5.3 Flash",
       "tier": "unknown",
       "notes": "PARTIAL: fast (1-4s), always-thinking — thinking CANNOT be disabled on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.",
       "autocompact_default": "-"
@@ -408,7 +408,7 @@
       "alias": "nvidia-glm53-full",
       "provider": "nvidia",
       "model_id": "z-ai/glm-5.3",
-      "display": "NVIDIA GLM 5.3",
+      "display": "Z.ai GLM 5.3",
       "tier": "unknown",
       "notes": "SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.",
       "autocompact_default": "-"
@@ -444,7 +444,7 @@
       "alias": "nvidia-laguna",
       "provider": "nvidia",
       "model_id": "poolside/laguna-xs-2.1",
-      "display": "NVIDIA Laguna XS 2.1 (Poolside)",
+      "display": "Poolside Laguna XS 2.1",
       "tier": "unknown",
       "notes": "PARTIAL: Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained (worker limit 32). 33B params / 3B active / 256K context (poolside.ai, 2026-10-15) — sits below the non-thinking models by size; auto-compact window 200k.",
       "autocompact_default": "200k"
@@ -453,7 +453,7 @@
       "alias": "nvidia-muse-glimmer",
       "provider": "nvidia",
       "model_id": "meta/muse-glimmer-30b",
-      "display": "NVIDIA Muse Glimmer 30B (Meta)",
+      "display": "Meta Muse Glimmer 30B",
       "tier": "unknown",
       "notes": "RESTORED 2026-10-13: earlier 'empty' verdicts were the probe max_tokens=24 artifact; fixed probe (512 budget) answers OK. Occasional HTTP 500 historically (1/5).",
       "autocompact_default": "-"
@@ -462,7 +462,7 @@
       "alias": "nvidia-gemma4",
       "provider": "nvidia",
       "model_id": "google/gemma-4-31b-it",
-      "display": "NVIDIA Gemma 4 31B",
+      "display": "Google Gemma 4 31B IT",
       "tier": "unknown",
       "notes": "RESTORED 2026-10-13: the 2026-10-11 timeouts were transient capacity; fixed probe answers OK.",
       "autocompact_default": "-"
@@ -471,7 +471,7 @@
       "alias": "nvidia-kimi-k3",
       "provider": "nvidia",
       "model_id": "moonshotai/kimi-k3",
-      "display": "NVIDIA Kimi K3 (Moonshot)",
+      "display": "Moonshot Kimi K3",
       "tier": "unknown",
       "notes": "⚠️ RETIRED: NVIDIA returns 410 Gone since 2026-10-15 (end of life). Earlier probes timed out (2026-10-10/13). Hidden via broken-nvidia-models.json.",
       "autocompact_default": "-"
@@ -480,7 +480,7 @@
       "alias": "nvidia-deepseek-v4",
       "provider": "nvidia",
       "model_id": "deepseek-ai/deepseek-v4.1-flash",
-      "display": "NVIDIA DeepSeek V4.1 Flash",
+      "display": "DeepSeek V4.1 Flash",
       "tier": "unknown",
       "notes": "WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.",
       "autocompact_default": "-"
@@ -489,7 +489,7 @@
       "alias": "nvidia-gptoss",
       "provider": "nvidia",
       "model_id": "openai/gpt-oss-20b",
-      "display": "NVIDIA gpt-oss-20b",
+      "display": "OpenAI GPT-OSS 20B",
       "tier": "unknown",
       "notes": "⚠️ BROKEN: connect/read timeouts — deployment unresponsive (re-audit 2026-10-13 with fixed probe; earlier 'empty' verdicts were partly the max_tokens=24 artifact). Hidden via broken-nvidia-models.json.",
       "autocompact_default": "-"
@@ -498,7 +498,7 @@
       "alias": "nvidia-kimi-k26",
       "provider": "nvidia",
       "model_id": "moonshotai/kimi-k2.6",
-      "display": "NVIDIA Kimi K2.6 (Moonshot)",
+      "display": "Moonshot Kimi K2.6",
       "tier": "unknown",
       "notes": "⚠️ BROKEN: HTTP 404 on probes — not provisioned for account. Hidden via broken-nvidia-models.json.",
       "autocompact_default": "-"
@@ -516,7 +516,7 @@
       "alias": "nvidia-nemotron4",
       "provider": "nvidia",
       "model_id": "nvidia/nemotron-4-340b-instruct",
-      "display": "NVIDIA Nemotron 4 340B",
+      "display": "NVIDIA Nemotron 4 340B Instruct",
       "tier": "unknown",
       "notes": "⚠️ BROKEN: HTTP 404 on probe — not provisioned. Hidden via broken-nvidia-models.json.",
       "autocompact_default": "-"
@@ -534,7 +534,7 @@
       "alias": "gemini-3.8-flash",
       "provider": "gemini",
       "model_id": "gemini-3.8-flash",
-      "display": "Gemini 3.8 Flash",
+      "display": "Google Gemini 3.8 Flash",
       "tier": "renewing_free",
       "notes": "★ PREFERRED Gemini. Catalog-listed; newer than 3.6. Thinking off for latency.",
       "autocompact_default": "-"
@@ -543,7 +543,7 @@
       "alias": "gemini-3.8-flash-thinking",
       "provider": "gemini",
       "model_id": "gemini-3.8-flash",
-      "display": "Gemini 3.8 Flash (thinking)",
+      "display": "Google Gemini 3.8 Flash (thinking)",
       "tier": "renewing_free",
       "notes": "Preferred Gemini, thinking ON — slower, stronger reasoning.",
       "autocompact_default": "-"
@@ -552,7 +552,7 @@
       "alias": "gemini-flash",
       "provider": "gemini",
       "model_id": "gemini-3.6-flash",
-      "display": "Gemini 3.6 Flash",
+      "display": "Google Gemini 3.6 Flash",
       "tier": "renewing_free",
       "notes": "FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable.",
       "autocompact_default": "-"
@@ -561,7 +561,7 @@
       "alias": "gemini-flash-thinking",
       "provider": "gemini",
       "model_id": "gemini-3.6-flash",
-      "display": "Gemini 3.6 Flash (thinking)",
+      "display": "Google Gemini 3.6 Flash (thinking)",
       "tier": "renewing_free",
       "notes": "VERIFIED weights; thinking ON — slower, stronger reasoning.",
       "autocompact_default": "-"
@@ -570,7 +570,7 @@
       "alias": "gemini-flash-lite",
       "provider": "gemini",
       "model_id": "gemini-3.1-flash-lite",
-      "display": "Gemini 3.1 Flash-Lite",
+      "display": "Google Gemini 3.1 Flash Lite",
       "tier": "renewing_free",
       "notes": "VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use.",
       "autocompact_default": "-"
@@ -579,7 +579,7 @@
       "alias": "groq-oss120",
       "provider": "groq",
       "model_id": "openai/gpt-oss-120b",
-      "display": "Groq gpt-oss-120b",
+      "display": "OpenAI GPT-OSS 120B",
       "tier": "renewing_free",
       "notes": "VERIFIED chat+tools. Very fast; best once Gemini quota is spent.",
       "autocompact_default": "-"
@@ -588,7 +588,7 @@
       "alias": "groq-oss20",
       "provider": "groq",
       "model_id": "openai/gpt-oss-20b",
-      "display": "Groq gpt-oss-20b",
+      "display": "OpenAI GPT-OSS 20B",
       "tier": "renewing_free",
       "notes": "Smaller/faster sibling for utility work.",
       "autocompact_default": "-"
@@ -597,7 +597,7 @@
       "alias": "groq-qwen36",
       "provider": "groq",
       "model_id": "qwen/qwen3.6-27b",
-      "display": "Groq Qwen 3.6 27B",
+      "display": "Alibaba Qwen 3.6 27B",
       "tier": "renewing_free",
       "notes": "Catalog only; account quotas apply.",
       "autocompact_default": "-"
@@ -606,7 +606,7 @@
       "alias": "groq-qwen38",
       "provider": "groq",
       "model_id": "qwen/qwen3.8-27b",
-      "display": "Groq Qwen 3.8 27B",
+      "display": "Alibaba Qwen 3.8 27B",
       "tier": "renewing_free",
       "notes": "Catalog only; account quotas apply.",
       "autocompact_default": "-"
@@ -624,7 +624,7 @@
       "alias": "openrouter-nemotron",
       "provider": "openrouter",
       "model_id": "nvidia/nemotron-3-super-120b-a12b:free",
-      "display": "OpenRouter Nemotron 3 Super (free)",
+      "display": "NVIDIA Nemotron 3 Super 120B-A12B (free)",
       "tier": "renewing_free",
       "notes": "Catalog lists zero token prices and tools; no generation probe.",
       "autocompact_default": "-"
@@ -633,7 +633,7 @@
       "alias": "openrouter-code",
       "provider": "openrouter",
       "model_id": "cohere/north-mini-code:free",
-      "display": "OpenRouter North Mini Code (free)",
+      "display": "Cohere North Mini Code (free)",
       "tier": "renewing_free",
       "notes": "Catalog lists zero token prices and tools; no generation probe.",
       "autocompact_default": "-"
@@ -642,7 +642,7 @@
       "alias": "cloudflare-oss20",
       "provider": "cloudflare",
       "model_id": "@cf/openai/gpt-oss-20b",
-      "display": "Cloudflare gpt-oss-20b",
+      "display": "OpenAI GPT-OSS 20B",
       "tier": "unknown",
       "notes": "Catalog only. Requires cloudflare token and cloudflare-account-id; account billing applies.",
       "autocompact_default": "-"
@@ -651,7 +651,7 @@
       "alias": "cloudflare-qwen38",
       "provider": "cloudflare",
       "model_id": "@cf/qwen/qwen3.8-27b",
-      "display": "Cloudflare Qwen 3.8 27B",
+      "display": "Alibaba Qwen 3.8 27B",
       "tier": "unknown",
       "notes": "Catalog only; free allocation and paid overage depend on the account.",
       "autocompact_default": "-"
@@ -660,7 +660,7 @@
       "alias": "cerebras-oss120",
       "provider": "cerebras",
       "model_id": "gpt-oss-120b",
-      "display": "Cerebras gpt-oss-120b",
+      "display": "OpenAI GPT-OSS 120B",
       "tier": "trial",
       "notes": "Catalog only. Use --include-trials; account billing not verified.",
       "autocompact_default": "-"
@@ -669,7 +669,7 @@
       "alias": "cerebras-qwen38",
       "provider": "cerebras",
       "model_id": "qwen-3.8-27b",
-      "display": "Cerebras Qwen 3.8 27B",
+      "display": "Alibaba Qwen 3.8 27B",
       "tier": "trial",
       "notes": "Catalog only. Use --include-trials; account billing not verified.",
       "autocompact_default": "-"

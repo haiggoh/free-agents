@@ -39,6 +39,7 @@ except ImportError:
 import session_menu_state as sms
 import emoji_constants as ec
 import cloud_session_env as cse
+import model_names
 
 # Session Launcher title - single source of truth
 SESSION_LAUNCHER_TITLE = "Claude Code Free-Agents: Session Launcher"
@@ -833,6 +834,9 @@ class LocalScreen(Screen):
 
     @property
     def policy(self):
+        if self.search and getattr(self, "_models_loaded", False):
+            n = sum(len(g.items) for g in self.accordion.groups if not g.id.startswith("__"))
+            return f'{n} model(s) matching "{self.search}"  — the filter box above the list is live; empty shows all'
         # Restored 0.21 subheadline: "N model(s) on disk (session-capable)".
         n = len(self.models) if getattr(self, "_models_loaded", False) and self.models else None
         return (f"{n} model(s) on disk (session-capable)" if n is not None
@@ -843,6 +847,8 @@ class LocalScreen(Screen):
         super().__init__(settings, owner)
         self._models_loaded = False
         self._choose_model_visible = False  # Model list hidden by default
+        self.search = ""                    # the live model filter, as on the Remote screen
+        self._all_models: list[LocalModel] = []
         if models is not None:
             self.set_models(models)
         else:
@@ -855,8 +861,19 @@ class LocalScreen(Screen):
         # Registered but weights gone: still LISTED, in red, so a deletion never looks like
         # nothing happened (user 2026-10-16); never in self.models, so never launchable.
         self.missing = [a for a in (missing or []) if a not in self.models]
+        self._all_models = list(models)
+        self.unregistered = [x for x in models if x.auto_scanned]
+        self._regroup()
+        self._models_loaded = True
+
+    def _regroup(self):
+        """Build the family groups, narrowed by the live filter (user 2026-10-22: the same
+        search as the Remote list). A search shows only matching rows, opens every group with
+        a match, and hides the "register new models" action header -- the unregistered models
+        themselves still match in their families."""
+        q = self.search.casefold()
         buckets: dict[str, list] = {}
-        for mdl in models:
+        for mdl in self._all_models:
             if mdl.auto_scanned:
                 # On disk but not registered: yellow, and it says so (user 2026-10-17).
                 item = Item(mdl.profile_id or mdl.alias,
@@ -866,20 +883,46 @@ class LocalScreen(Screen):
                             f"{mdl.alias}"
                             + (f" ({mdl.backend}" + (", thinking" if mdl.thinking else "") + ")" if mdl.backend else "")
                             + (f"  [{mdl.roles}]" if mdl.roles else ""))
+            if q and q not in item.label.casefold():
+                continue
             buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(item)
         for alias in self.missing:
+            if q and q not in alias.casefold():
+                continue
             buckets.setdefault(family_for(alias), []).append(
                 Item(alias, f"{alias}  — weights missing from disk", style="red"))
         order = sorted(buckets, key=lambda f: (f == "Other", f.lower()))
         groups = [Group(f, f"{f} ({len(buckets[f])})", buckets[f]) for f in order]
-        self.unregistered = [x for x in models if x.auto_scanned]
-        if self.unregistered:
+        if q and not groups and (self._all_models or self.missing):
+            groups = [Group("__nomatch__", f'No model matches "{self.search}"',
+                            [Item("__nomatch__:x", "Edit the live filter above the list (empty shows every model)")])]
+        if self.unregistered and not q:
             # Temporary entry ABOVE every group, so new models are seen without opening each one.
             groups.insert(0, Group(NEW_MODELS_GROUP,
                                    f"+ Register new local models found on disk ({len(self.unregistered)})",
                                    [], style="bold yellow"))
         self.accordion.set_groups(groups)
-        self._models_loaded = True
+        if q:
+            self.accordion.multi_open = {g.id for g in groups
+                                         if g.id not in self.accordion.multi_open_folded}
+        else:
+            self.accordion.multi_open = None
+
+    def set_search(self, query: str):
+        """Filter the local models by name, live from the box above the list (same contract
+        as RemoteScreen.set_search): empty restores the one-open accordion and forgets the
+        headers folded under the previous query."""
+        self.search = (query or "").strip()
+        if not self.search:
+            self.accordion.multi_open_folded = set()
+            self.accordion.multi_open = None
+            self.accordion.open_group = None
+        keep, open_group = self.accordion.selected_id, self.accordion.open_group
+        self._regroup()
+        if keep and not self.accordion.select(keep):
+            self.accordion.selected_id = None
+        if open_group and not self.search:
+            self.accordion.expand(open_group)
 
     def _toggle_choose_model(self):
         """Toggle the model list visibility."""
@@ -1131,7 +1174,8 @@ class RemoteScreen(Screen):
         for c in size_sorted(cat, lambda c: self._catalog_size(prov, c.model_id)):
             if c.model_id in have:
                 continue                       # already a pinned row, with its own notes
-            if self.search and not self._matches(c.model_id):
+            name = model_names.readable(c.model_id)
+            if self.search and not self._matches(c.model_id, name):
                 continue
             probe = RemoteAgent(f"{CATALOG_PREFIX}{prov}:{c.model_id}", prov, c.model_id, tier,
                                 local_capable=self._catalog_local_capable(prov, c.model_id),
@@ -1140,8 +1184,11 @@ class RemoteScreen(Screen):
             if not self._visible(probe):
                 continue
             # The per-row "tools untested" flag is gone (user 2026-10-20: stale noise on
-            # nearly every row); the row tags a NON-default lane instead.
-            rows.append(Item(probe.alias, f"{c.model_id}  · catalog{lane_tag(prov, c.model_id)}"))
+            # nearly every row); the row tags a NON-default lane instead. The row reads as
+            # the model's own name with its MAKER, not the provider's raw id (user
+            # 2026-10-22: the group header already names the provider); the info box keeps
+            # the exact id.
+            rows.append(Item(probe.alias, f"{name}  · catalog{lane_tag(prov, c.model_id)}"))
         return rows
 
     def _catalog_local_capable(self, prov: str, model_id: str) -> bool:
@@ -1239,7 +1286,8 @@ class RemoteScreen(Screen):
         if item_id and item_id.startswith(CATALOG_PREFIX):
             parts = item_id.split(":", 2)
             if len(parts) == 3 and not parts[2].startswith("__"):
-                return (f"{parts[2]}\n{PROVIDER_LABELS.get(parts[1], parts[1])} catalog · "
+                return (f"{model_names.readable(parts[2])}\n{parts[2]} · "
+                        f"{PROVIDER_LABELS.get(parts[1], parts[1])} catalog · "
                         f"Lane: {lane_for(parts[1], parts[2])}")
         agent = next((a for a in self.agents if a.alias == item_id), None)
         if agent is None:

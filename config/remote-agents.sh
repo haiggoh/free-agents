@@ -69,26 +69,26 @@ LA_REMOTE_AGENTS=(
   # then the non-thinking variants mirrored (Lightning after Super); the remaining visible
   # models and the hidden broken rows follow.
   # Re-probe with: bin/remote-probe-log.py probe --all-nvidia ; report
-  "nvidia-glm53-thinking|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash (thinking)|unknown|PARTIAL: same model as the base alias — thinking is always-on on NIM; this alias just defaults reasoning_effort high. Fast.|-"
-  "nvidia-glm53-full-thinking|nvidia|z-ai/glm-5.3|NVIDIA GLM 5.3 (thinking)|unknown|SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.|-"
+  "nvidia-glm53-thinking|nvidia|z-ai/glm-5.3-flash|Z.ai GLM 5.3 Flash (thinking)|unknown|PARTIAL: same model as the base alias — thinking is always-on on NIM; this alias just defaults reasoning_effort high. Fast.|-"
+  "nvidia-glm53-full-thinking|nvidia|z-ai/glm-5.3|Z.ai GLM 5.3 (thinking)|unknown|SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.|-"
   "nvidia-nemotron-ultra-thinking|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.|1m"
   "nvidia-nemotron3-thinking|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.|-"
   "nvidia-lightning-thinking|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B (thinking)|unknown|Reasoning enabled — stronger reasoning. Verified 2026-10-02.|-"
-  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|NVIDIA GLM 5.3 Flash|unknown|PARTIAL: fast (1-4s), always-thinking — thinking CANNOT be disabled on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.|-"
-  "nvidia-glm53-full|nvidia|z-ai/glm-5.3|NVIDIA GLM 5.3|unknown|SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.|-"
+  "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|Z.ai GLM 5.3 Flash|unknown|PARTIAL: fast (1-4s), always-thinking — thinking CANNOT be disabled on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.|-"
+  "nvidia-glm53-full|nvidia|z-ai/glm-5.3|Z.ai GLM 5.3|unknown|SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.|-"
   "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled by default.|1m"
   "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled by default.|-"
   "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick. Reasoning disabled by default.|-"
-  "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|NVIDIA Laguna XS 2.1 (Poolside)|unknown|PARTIAL: Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained (worker limit 32). 33B params / 3B active / 256K context (poolside.ai, 2026-10-15) — sits below the non-thinking models by size; auto-compact window 200k.|200k"
-  "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|NVIDIA Muse Glimmer 30B (Meta)|unknown|RESTORED 2026-10-13: earlier 'empty' verdicts were the probe max_tokens=24 artifact; fixed probe (512 budget) answers OK. Occasional HTTP 500 historically (1/5).|-"
-  "nvidia-gemma4|nvidia|google/gemma-4-31b-it|NVIDIA Gemma 4 31B|unknown|RESTORED 2026-10-13: the 2026-10-11 timeouts were transient capacity; fixed probe answers OK.|-"
-  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|NVIDIA Kimi K3 (Moonshot)|unknown|⚠️ RETIRED: NVIDIA returns 410 Gone since 2026-10-15 (end of life). Earlier probes timed out (2026-10-10/13). Hidden via broken-nvidia-models.json.|-"
-  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4.1-flash|NVIDIA DeepSeek V4.1 Flash|unknown|WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.|-"
-  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|NVIDIA gpt-oss-20b|unknown|⚠️ BROKEN: connect/read timeouts — deployment unresponsive (re-audit 2026-10-13 with fixed probe; earlier 'empty' verdicts were partly the max_tokens=24 artifact). Hidden via broken-nvidia-models.json.|-"
-  "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|NVIDIA Kimi K2.6 (Moonshot)|unknown|⚠️ BROKEN: HTTP 404 on probes — not provisioned for account. Hidden via broken-nvidia-models.json.|-"
+  "nvidia-laguna|nvidia|poolside/laguna-xs-2.1|Poolside Laguna XS 2.1|unknown|PARTIAL: Generation OK 1/2 probes (1x 503 worker-limit) 2026-09-15. Code-oriented; capacity-constrained (worker limit 32). 33B params / 3B active / 256K context (poolside.ai, 2026-10-15) — sits below the non-thinking models by size; auto-compact window 200k.|200k"
+  "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|Meta Muse Glimmer 30B|unknown|RESTORED 2026-10-13: earlier 'empty' verdicts were the probe max_tokens=24 artifact; fixed probe (512 budget) answers OK. Occasional HTTP 500 historically (1/5).|-"
+  "nvidia-gemma4|nvidia|google/gemma-4-31b-it|Google Gemma 4 31B IT|unknown|RESTORED 2026-10-13: the 2026-10-11 timeouts were transient capacity; fixed probe answers OK.|-"
+  "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|Moonshot Kimi K3|unknown|⚠️ RETIRED: NVIDIA returns 410 Gone since 2026-10-15 (end of life). Earlier probes timed out (2026-10-10/13). Hidden via broken-nvidia-models.json.|-"
+  "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4.1-flash|DeepSeek V4.1 Flash|unknown|WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.|-"
+  "nvidia-gptoss|nvidia|openai/gpt-oss-20b|OpenAI GPT-OSS 20B|unknown|⚠️ BROKEN: connect/read timeouts — deployment unresponsive (re-audit 2026-10-13 with fixed probe; earlier 'empty' verdicts were partly the max_tokens=24 artifact). Hidden via broken-nvidia-models.json.|-"
+  "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|Moonshot Kimi K2.6|unknown|⚠️ BROKEN: HTTP 404 on probes — not provisioned for account. Hidden via broken-nvidia-models.json.|-"
   "nvidia-nano3|nvidia|nvidia/nemotron-nano-3-30b-a3b|NVIDIA Nemotron Nano 3 30B-A3B|unknown|⚠️ BROKEN: HTTP 404 on probes — not provisioned. Hidden via broken-nvidia-models.json.|-"
   # Additional NVIDIA models as requested
-  "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b-instruct|NVIDIA Nemotron 4 340B|unknown|⚠️ BROKEN: HTTP 404 on probe — not provisioned. Hidden via broken-nvidia-models.json.|-"
+  "nvidia-nemotron4|nvidia|nvidia/nemotron-4-340b-instruct|NVIDIA Nemotron 4 340B Instruct|unknown|⚠️ BROKEN: HTTP 404 on probe — not provisioned. Hidden via broken-nvidia-models.json.|-"
   "nvidia-minitron|nvidia|nvidia/minitron-12b|NVIDIA Minitron 12B|unknown|⚠️ BROKEN: HTTP 404 on probe — not provisioned. Hidden via broken-nvidia-models.json.|-"
   # --- TIER 2 — Gemini: still VERIFIED for tool-calling, but DEMOTED from the default.
   # The free quota is reached annoyingly fast, leaving little headroom to get real work
@@ -97,26 +97,26 @@ LA_REMOTE_AGENTS=(
   # quota it is the best-behaved of the free lanes.
   # ★ 3.8 FIRST, preferred over 3.6 for as long as it stays available (operator, 2026-09-15).
   # If 3.8 is withdrawn or starts erroring, 3.6 below is the fallback and is still VERIFIED.
-  "gemini-3.8-flash|gemini|gemini-3.8-flash|Gemini 3.8 Flash|renewing_free|★ PREFERRED Gemini. Catalog-listed; newer than 3.6. Thinking off for latency.|-"
-  "gemini-3.8-flash-thinking|gemini|gemini-3.8-flash|Gemini 3.8 Flash (thinking)|renewing_free|Preferred Gemini, thinking ON — slower, stronger reasoning.|-"
-  "gemini-flash|gemini|gemini-3.6-flash|Gemini 3.6 Flash|renewing_free|FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable.|-"
-  "gemini-flash-thinking|gemini|gemini-3.6-flash|Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning.|-"
-  "gemini-flash-lite|gemini|gemini-3.1-flash-lite|Gemini 3.1 Flash-Lite|renewing_free|VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use.|-"
+  "gemini-3.8-flash|gemini|gemini-3.8-flash|Google Gemini 3.8 Flash|renewing_free|★ PREFERRED Gemini. Catalog-listed; newer than 3.6. Thinking off for latency.|-"
+  "gemini-3.8-flash-thinking|gemini|gemini-3.8-flash|Google Gemini 3.8 Flash (thinking)|renewing_free|Preferred Gemini, thinking ON — slower, stronger reasoning.|-"
+  "gemini-flash|gemini|gemini-3.6-flash|Google Gemini 3.6 Flash|renewing_free|FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable.|-"
+  "gemini-flash-thinking|gemini|gemini-3.6-flash|Google Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning.|-"
+  "gemini-flash-lite|gemini|gemini-3.1-flash-lite|Google Gemini 3.1 Flash Lite|renewing_free|VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use.|-"
   # --- Groq: fastest tokens/sec of any free lane
-  "groq-oss120|groq|openai/gpt-oss-120b|Groq gpt-oss-120b|renewing_free|VERIFIED chat+tools. Very fast; best once Gemini quota is spent.|-"
-  "groq-oss20|groq|openai/gpt-oss-20b|Groq gpt-oss-20b|renewing_free|Smaller/faster sibling for utility work.|-"
-  "groq-qwen36|groq|qwen/qwen3.6-27b|Groq Qwen 3.6 27B|renewing_free|Catalog only; account quotas apply.|-"
-  "groq-qwen38|groq|qwen/qwen3.8-27b|Groq Qwen 3.8 27B|renewing_free|Catalog only; account quotas apply.|-"
+  "groq-oss120|groq|openai/gpt-oss-120b|OpenAI GPT-OSS 120B|renewing_free|VERIFIED chat+tools. Very fast; best once Gemini quota is spent.|-"
+  "groq-oss20|groq|openai/gpt-oss-20b|OpenAI GPT-OSS 20B|renewing_free|Smaller/faster sibling for utility work.|-"
+  "groq-qwen36|groq|qwen/qwen3.6-27b|Alibaba Qwen 3.6 27B|renewing_free|Catalog only; account quotas apply.|-"
+  "groq-qwen38|groq|qwen/qwen3.8-27b|Alibaba Qwen 3.8 27B|renewing_free|Catalog only; account quotas apply.|-"
   # --- OpenRouter: explicit free router or zero-priced, tool-capable catalog rows
   "openrouter-free|openrouter|openrouter/free|OpenRouter free router|renewing_free|Catalog only. Routes among free models; account limits still apply.|-"
-  "openrouter-nemotron|openrouter|nvidia/nemotron-3-super-120b-a12b:free|OpenRouter Nemotron 3 Super (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe.|-"
-  "openrouter-code|openrouter|cohere/north-mini-code:free|OpenRouter North Mini Code (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe.|-"
+  "openrouter-nemotron|openrouter|nvidia/nemotron-3-super-120b-a12b:free|NVIDIA Nemotron 3 Super 120B-A12B (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe.|-"
+  "openrouter-code|openrouter|cohere/north-mini-code:free|Cohere North Mini Code (free)|renewing_free|Catalog lists zero token prices and tools; no generation probe.|-"
   # --- Cloudflare Workers AI: account-specific OpenAI-compatible endpoint
-  "cloudflare-oss20|cloudflare|@cf/openai/gpt-oss-20b|Cloudflare gpt-oss-20b|unknown|Catalog only. Requires cloudflare token and cloudflare-account-id; account billing applies.|-"
-  "cloudflare-qwen38|cloudflare|@cf/qwen/qwen3.8-27b|Cloudflare Qwen 3.8 27B|unknown|Catalog only; free allocation and paid overage depend on the account.|-"
+  "cloudflare-oss20|cloudflare|@cf/openai/gpt-oss-20b|OpenAI GPT-OSS 20B|unknown|Catalog only. Requires cloudflare token and cloudflare-account-id; account billing applies.|-"
+  "cloudflare-qwen38|cloudflare|@cf/qwen/qwen3.8-27b|Alibaba Qwen 3.8 27B|unknown|Catalog only; free allocation and paid overage depend on the account.|-"
   # --- Cerebras: retain explicit trial opt-in until this account is requalified.
-  "cerebras-oss120|cerebras|gpt-oss-120b|Cerebras gpt-oss-120b|trial|Catalog only. Use --include-trials; account billing not verified.|-"
-  "cerebras-qwen38|cerebras|qwen-3.8-27b|Cerebras Qwen 3.8 27B|trial|Catalog only. Use --include-trials; account billing not verified.|-"
+  "cerebras-oss120|cerebras|gpt-oss-120b|OpenAI GPT-OSS 120B|trial|Catalog only. Use --include-trials; account billing not verified.|-"
+  "cerebras-qwen38|cerebras|qwen-3.8-27b|Alibaba Qwen 3.8 27B|trial|Catalog only. Use --include-trials; account billing not verified.|-"
   # Provider selections intentionally pin no speculative default model. General
   # account API endpoints; ZAI Coding Plan is a distinct endpoint, not this route.
   "mistral|mistral|SELECT|Mistral (choose model)|unknown|Select a catalog model; free experiment and paid plans differ. Tool session untested.|-"

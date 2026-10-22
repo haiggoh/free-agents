@@ -375,6 +375,9 @@ class PromptInput(Input):
         # calling it here too inserted every paste twice.
 
 
+MODEL_LIST_SCREENS = (m.LocalScreen, m.RemoteScreen)   # the screens whose list has the live filter
+
+
 class SearchInput(Input):
     """The live model filter at the top of the choose-model list (user, 2026-10-21): always
     typing, never a prompt round-trip — every character narrows the list at once, from the
@@ -935,17 +938,19 @@ class Picker(App):
         # Show/hide the rows container
         rows.display = show_models
 
-        # The live model filter (user, 2026-10-21): the box sits at the top of the open
-        # remote list, seeded with any filter still active, and takes focus the moment the
-        # list opens so typing filters from the very first character — no prompt, no Enter.
+        # The live model filter (user, 2026-10-21; the Local list too since 2026-10-22): the
+        # box sits at the top of the open model list, seeded with any filter still active,
+        # and takes focus the moment the list opens so typing filters from the very first
+        # character — no prompt, no Enter. Tracked per SCREEN, so switching Local <-> Remote
+        # with the list open seeds and focuses the box for the new screen.
         search = self.query_one("#search", Input)
-        was_open = getattr(self, "_remote_list_open", False)
-        search.display = isinstance(sm, m.RemoteScreen) and show_models
+        was_open = getattr(self, "_search_owner", None) is sm
+        search.display = isinstance(sm, MODEL_LIST_SCREENS) and show_models
         if search.display and not was_open:
             search.value = sm.search
             search.placeholder = "type to filter models — results narrow from the first character"
             search.focus()
-        self._remote_list_open = search.display
+        self._search_owner = sm if search.display else None
 
         # Check if screen has accordion with groups (RuntimeManagerScreen has accordion but no groups)
         has_groups = hasattr(sm, 'accordion') and sm.accordion is not None and len(sm.accordion.groups) > 0
@@ -1254,19 +1259,19 @@ class Picker(App):
                         event.stop()
                         return
 
-        # The live filter owns typing while the remote choose-model list is open (user,
-        # 2026-10-21). Escape closes the list first — a second press leaves the screen as
+        # The live filter owns typing while a choose-model list is open (user, 2026-10-21;
+        # Local too since 2026-10-22). Escape closes the list first — a second press leaves the screen as
         # before. A printable character typed with focus on the LIST lands in the filter
         # box, which re-filters from the first character; letters no longer fire action
         # hotkeys in this state. Focus on the ACTIONS list keeps letter hotkeys, so the
         # settings rows stay reachable by arrowing up from the list.
-        remote_list_open = isinstance(sm, m.RemoteScreen) and sm._choose_model_visible
-        if remote_list_open and key == "escape":
+        model_list_open = isinstance(sm, MODEL_LIST_SCREENS) and sm._choose_model_visible
+        if model_list_open and key == "escape":
             sm._choose_model_visible = False
             self.dispatch(None)
             event.stop()
             return
-        if remote_list_open and self.focused is self.query_one("#rows", OptionList):
+        if model_list_open and self.focused is self.query_one("#rows", OptionList):
             ch = " " if key == "space" else (key if len(key) == 1 and key.isprintable() else None)
             if ch:
                 search = self.query_one("#search", Input)
@@ -1534,6 +1539,9 @@ class Picker(App):
                 actions.highlighted = actions.option_count - 1
                 actions.focus()
             return
+        if delta > 0 and h >= rows.option_count - 1:
+            rows.highlighted = 0                # the list's own Down wraps at the bottom; so does the box's
+            return
         rows.highlighted = max(0, min(rows.option_count - 1, h + delta))
 
     def on_input_changed(self, event):
@@ -1542,7 +1550,7 @@ class Picker(App):
         if getattr(event.input, "id", None) != "search":
             return
         sm = self.screen_model
-        if isinstance(sm, m.RemoteScreen):
+        if isinstance(sm, MODEL_LIST_SCREENS):
             sm.set_search(event.value)
             self.render_model()
 

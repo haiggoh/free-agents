@@ -1952,6 +1952,15 @@ export LA_REMOTE_PROVIDER="$PROV"
 
 # Provide resolver inputs so it can emit truthful identity for remote sessions
 export MODEL_ALIAS="$ALIAS"                          # the remote agent alias (e.g. nvidia-nemotron-3-ultra)
+# The session title names the MODEL as a person reads it, never the provider-prefixed alias
+# (user 2026-10-22): the roster's curated name when the launched model IS the roster's, else
+# the readable form of the id that was picked from a catalog or passed with --remote-model.
+if [[ "$MODEL" == "$(_field "$ENTRY" 3)" ]]; then
+    LA_SESSION_TITLE_MODEL="$DISP"
+else
+    LA_SESSION_TITLE_MODEL="$(python3 "$SCRIPT_DIR/model_names.py" "$MODEL" 2>/dev/null || printf '%s' "$MODEL")"
+fi
+export LA_SESSION_TITLE_MODEL
 export LA_CUR_EFFORT="${EFFORT_CHOICE:-medium}"      # effort level from launcher
 export LA_CUR_THINK="$THINKING"                      # thinking mode (true/false)
 export LA_CUR_ROLES="operator"                       # default role for remote sessions

@@ -62,6 +62,30 @@ on the same key served 46/46. Three sessions stalled overnight; the proxy log sa
   (broken models, model notes, dispatch preferences) to the YAML — an alias retired upstream
   can no longer drift silently. Preferences stay out of the YAML on purpose: they are
   maintainer-guided, not objective registry facts.
+- **Model names lead with the model's maker, not the provider** (user 2026-10-22). The group
+  header already names the provider, and only the Nemotron models are NVIDIA's, so the
+  curated roster drops the provider prefix (`NVIDIA GLM 5.3` → `Z.ai GLM 5.3`, `Groq
+  gpt-oss-120b` → `OpenAI GPT-OSS 120B`). Catalog rows, which showed the raw kebab-case id,
+  now show the same kind of name (`deepseek-ai/deepseek-v4.1-flash` → `DeepSeek V4.1 Flash`);
+  the info box keeps the exact id and the search matches both. New `bin/model_names.py`
+  does the conversion (also a CLI); a test holds every curated name to the rule.
+- **The session title is shorter**: `📡 Z.ai GLM 5.3 (thinking) · 42` instead of
+  `📡 nvidia-glm53-full-thinking bra0002h-42` — the readable model name instead of the
+  provider-prefixed alias, and in the home folder Claude Code's `<user>-` part is dropped
+  (there is no project to name). A resumed session's old-format title is converted.
+- **The local model list has the same live filter box** (user 2026-10-22): typing narrows
+  the list from the first character across every family, Escape closes the list first.
+  With it, Down in the filter box wraps from the last row to the first, like the list.
+
+### Fixed
+
+- **The per-model cooldown works in `smooth_bucket` mode too.** It only existed in the
+  default sliding-window limiter; the bucket ignored the model, so a machine whose picker
+  had saved `smooth_bucket` got none of this release's per-model cooldown or fast-fail.
+  The bucket now classifies 429s the same way (the two modes share the backoff code) and no
+  longer resets its backoff when a pause merely expires.
+- The limiter tests and contract test 7 no longer read the user's saved picker settings
+  (they failed on a machine with a non-default cooldown or mode).
 
 ### Known issue
 

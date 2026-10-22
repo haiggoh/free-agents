@@ -319,6 +319,9 @@ class PickerRegistryOffers(PilotCase):
             await self._click_red_row(h)
             await h.press("enter")
             await h.wait_text("moved 1 missing model")
+            # 0.40.0: the open local list's live filter owns letters — Escape closes the list
+            # first (as on the Remote screen), then B goes back.
+            await h.press("escape")
             await h.press("b")
             await h.wait_screen("HomeScreen")
             self.assertNotIn("missing model", h.status())
@@ -624,6 +627,59 @@ class ThemeScreenColors(PilotCase):
             self.assertEqual(len(str(prompt2)), width_before,
                              f"swatch column moved: {prompt!s} -> {prompt2!s}")
         self.run_picker(s)
+
+
+class LocalLiveFilter(PilotCase):
+    """The Remote list's live filter on the LOCAL list too (user 2026-10-22): the box opens
+    with the list, holds focus, narrows from the first character, Escape closes the list."""
+
+    def test_typing_filters_the_local_list(self):
+        async def s(app, pilot, h):
+            from textual.widgets import Input
+            await h.press("c")
+            await h.wait_text("deepseek-r1-architect")
+            box = app.query_one("#search", Input)
+            self.assertTrue(box.display, "the filter box is part of the open local list")
+            self.assertIs(app.focused, box)
+            await h.press(*"qwen")
+            rows = h.labels("rows")
+            self.assertTrue(any("qwen-3.8-operator" in r for r in rows), rows)
+            self.assertFalse(any("deepseek-r1-architect" in r for r in rows), rows)
+            self.assertFalse(any("llama-4-scout" in r for r in rows), rows)
+            for _ in range(4):
+                await h.press("backspace")
+            await h.wait_text("deepseek-r1-architect")
+        self.run_picker(s, start="local")
+
+    def test_enter_launches_the_filtered_model(self):
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("deepseek-r1-architect")
+            await h.press(*"architect")
+            await h.press("down")
+            await h.press("down")
+            await h.press("enter")
+            await h.wait_for(lambda: self.launches(), "a recorded launch")
+            self.assertEqual(self.launches()[0]["argv"][1], "deepseek-r1-architect")
+        self.run_picker(s, start="local")
+
+
+class InputFrames(PilotCase):
+    def test_every_input_keeps_the_round_frame_when_focused(self):
+        """User 2026-10-22: the symmetric rounded frame must be on EVERY text input. Textual's
+        own Input:focus rule draws `tall`; ours must win in the focused state too."""
+        async def s(app, pilot, h):
+            from textual.widgets import Input
+            await h.press("c")
+            await h.wait_text("deepseek-r1-architect")
+            inputs = list(app.query(Input))
+            self.assertGreaterEqual(len(inputs), 2, [i.id for i in inputs])   # search + prompt
+            box = app.query_one("#search", Input)
+            self.assertIs(app.focused, box)
+            for w in inputs:
+                for edge in (w.styles.border_left, w.styles.border_right, w.styles.border_top):
+                    self.assertEqual(edge[0], "round", f"#{w.id}: {edge}")
+        self.run_picker(s, start="local")
 
 
 class RemoteLiveFilter(PilotCase):
