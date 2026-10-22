@@ -981,18 +981,21 @@ with open(os.environ['CLAUDE_STREAM_ENV'],'w') as f:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(capture.exists(), 'claude was never launched')
         self.assertEqual(json.loads(capture.read_text()), {
-            'API_TIMEOUT_MS': '300000',
+            # 30 minutes, matching the LOCAL lanes' precedent: a slow free model (DeepSeek
+            # answers in ~10 min) must not be killed mid-turn by the stock 300000ms cap
+            # (user 2026-10-22, after a timeout stalled an overnight session for hours).
+            'API_TIMEOUT_MS': '1800000',
             'API_FORCE_IDLE_TIMEOUT': '0',
             'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
         })
 
-        # The cap is overridable for a model slower than the default allows.
+        # The cap is overridable in both directions.
         capture.unlink(missing_ok=True)
-        self.env['LA_REMOTE_API_TIMEOUT_MS'] = '1800000'
+        self.env['LA_REMOTE_API_TIMEOUT_MS'] = '600000'
         self.addCleanup(self.env.pop, 'LA_REMOTE_API_TIMEOUT_MS', None)
         result = self.run_cli('nvidia-nemotron-ultra', '-p', 'fixture prompt')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(capture.read_text())['API_TIMEOUT_MS'], '1800000',
+        self.assertEqual(json.loads(capture.read_text())['API_TIMEOUT_MS'], '600000',
                          'LA_REMOTE_API_TIMEOUT_MS must override the default cap')
 
     def test_output_ceiling_reaches_claude_and_is_not_overridden_by_effort(self):

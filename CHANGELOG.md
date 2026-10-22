@@ -1,3 +1,75 @@
+## [0.40.0] — 2026-10-22
+
+### Added — a session survives an upstream model throttle (NVIDIA 429, 2026-10-20)
+
+The incident: `z-ai/glm-5.3-flash` answered 429 in 0.2 s for six hours while `deepseek-ai/deepseek-v4.1-flash`
+on the same key served 46/46. Three sessions stalled overnight; the proxy log said
+"No fallback was attempted", and the only rescue was a hand-written one-off script.
+
+- **New sessions get a per-session fallback chain** (Phase 1). `write_proxy_config` emits one
+  `la-fallback-<n>` deployment per member of `session_fallbacks.order` in
+  `config/dispatch-preferences.json` — same provider only (a session must not drain another
+  provider's free quota), the session's own model skipped, members without a key skipped,
+  order: GLM 5.3 Flash → GLM 5.3 → DeepSeek V4.1 Flash → Nemotron 3 Ultra last (least capable,
+  least likely to be throttled). A throttled primary fails over on the SAME port — no restart,
+  no 429 ever reaches Claude Code — for the spoofed id AND subagent ids (the generic `"*"` key;
+  a `"claude-*"` key does not match one, measured on LiteLLM 1.105.1). `LA_REMOTE_FALLBACKS=off`
+  disables the chain; `LA_REMOTE_FALLBACKS=provider:model,...` overrides it.
+- **A 429 is now classified** (Phase 2). A near-empty window is NVIDIA throttling ONE model —
+  it cools only that model, and every other session runs on; a window at least half full is a
+  real RPM overrun and pauses every proxy as before. The per-model backoff grows 30→60→120 s,
+  and resets only on a SUCCESS (the old code reset the counter when a pause merely expired, so
+  a model throttled for hours was retried twice a minute forever). With a chain configured, the
+  pre-call hook fast-fails a cooling model to the next fallback with ZERO upstream calls and no
+  40 RPM slot spent; without one, the call queues exactly as before.
+- **`remote-session.sh --swap-model <port> <alias> [--force]`** (Phase 3) rescues a session
+  started before this release (or one whose whole chain failed): it pre-flights the new model on
+  a scratch port, backs up and rewrites the SAME config path, relaunches on the same port and
+  leaves the `.owner` file untouched, and reverts to the previous model on any failure —
+  waiting for readiness before the pidfile is written. It refuses a session whose log answered
+  within `LA_SWAP_HEALTHY_WINDOW` (600 s) unless `--force`, because a swap would drop an
+  in-flight turn. On success it prints the resume note ("press Enter in the idle session") and
+  the session's terminal.
+- **Account refusals cannot be papered over** (measured, contract-tested): LiteLLM's generic
+  fallback path is exception-agnostic, so the 402 guarantee rests on the chain sharing the
+  provider's key — an account refusal is key-wide, every member refuses, the chain exhausts
+  within one request and the rewritten 402 still reaches the client. Same-provider-only is a
+  correctness rule, not a preference.
+- **A dispatch's failure now names the real cause** (`fix(dispatch)`, on this branch): the
+  failover used to print the last stderr line of a provider's JSON — often a bare `]`. It now
+  shows the dispatcher's verdict, such as `HTTP 503 [transient]`.
+
+### Changed — the model search is a live filter box; the roster is generated
+
+- **The remote session timeout is 30 minutes** (user 2026-10-22), matching the LOCAL lanes'
+  precedent: the stock 300000 ms cap killed a DeepSeek V4.1 Flash turn mid-flight (it answers
+  in ~10 min) and stalled an overnight session until the user returned hours later — the
+  worst outcome a timeout can produce. `LA_REMOTE_API_TIMEOUT_MS` still overrides.
+- **Every text input in the picker wears a symmetric rounded frame.** Textual's default
+  `tall` border draws barbs on the left that the right side has not (user 2026-10-22), so
+  the input fields looked lopsided; all inputs now share the info box's rounded border.
+- **The remote picker's search is the input line at the top of the open model list**
+  (user 2026-10-21): no separate `W` action row, no prompt round-trip — results narrow from
+  the first typed character (letters and numbers), the box takes focus when the list opens,
+  Up/Down move the list from it, Enter launches the highlighted model, and a character typed
+  with focus on the list lands in the box. Escape closes the list first; the filter text
+  survives a close/reopen. Fixed with it: a latent accordion bug where a background catalog
+  refresh landing mid-search folded every group (the old bookkeeping could not tell
+  "user folded it" from "it left and came back").
+- **`config/remote-agents.sh`'s roster is generated** from `config/remote-registry.yaml` by
+  `bin/remote-registry-generate.py --write` between do-not-edit markers (user decision
+  2026-10-21: no hand-kept copies), and a new drift test holds the model-facts JSON files
+  (broken models, model notes, dispatch preferences) to the YAML — an alias retired upstream
+  can no longer drift silently. Preferences stay out of the YAML on purpose: they are
+  maintainer-guided, not objective registry facts.
+
+### Known issue
+
+- Every request books TWO slots in the 40 RPM window: LiteLLM runs
+  `async_pre_call_deployment_hook` at both the router and HTTP layers, so a 40 RPM setting is
+  effectively 20. Conservative (it can never overrun), pinned by contract test 7, tracked
+  with a fix shape in the waypoints store.
+
 ## [0.39.0] — 2026-10-21
 
 ### Changed — free offloading is the default on a paid session, and every offload says where it went

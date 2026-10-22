@@ -512,7 +512,10 @@ class Picker(App):
     OptionList > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: none; }
     OptionList:focus > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: bold; }
     OptionList > .option-list--option-hover { background: ansi_default; color: ansi_bright_blue; }
-    Input { background: ansi_default; color: ansi_default; }
+    /* Every text input (the live filter, the inline prompts): a SYMMETRIC rounded frame.
+       Textual's default `tall` border draws barbs on the left that the right side has not
+       (user 2026-10-22), so inputs looked lopsided; `round` matches the info box's frame. */
+    Input { background: ansi_default; color: ansi_default; border: round ansi_bright_black; }
     Static { background: ansi_default; color: ansi_default; }
     """
     # Ctrl+C copies the mouse selection when there is one and quits otherwise; Cmd+C (super+c,

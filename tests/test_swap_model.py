@@ -12,6 +12,7 @@ files, so the three contract paths are deterministic:
 Usage: python3 tests/test_swap_model.py [-v]
 """
 import json
+import fcntl
 import os
 import shutil
 import subprocess
@@ -102,6 +103,20 @@ def master_key(cfg_text):
 class SwapModelTests(unittest.TestCase):
     ALIAS_TO = "nvidia-glm53"                  # the rescue model (z-ai/glm-5.3)
 
+    @classmethod
+    def setUpClass(cls):
+        # These tests bind REAL ports through the launcher's own free_port, whose pick is
+        # only momentarily true: two parallel workers can both see a port free and one's
+        # start_proxy then lands on it. Hold a machine-wide lock for the whole class so the
+        # swap tests serialize against each other (other files still run in parallel).
+        cls._lock_fh = open(os.path.join(tempfile.gettempdir(), "free-agents-swap-tests.lock"), "w")
+        fcntl.flock(cls._lock_fh, fcntl.LOCK_EX)
+
+    @classmethod
+    def tearDownClass(cls):
+        fcntl.flock(cls._lock_fh, fcntl.LOCK_UN)
+        cls._lock_fh.close()
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -127,7 +142,13 @@ class SwapModelTests(unittest.TestCase):
                         PATH=str(self.root / 'stubs') + ':' + os.environ['PATH'],
                         CLOUD_BYPASS_PERMISSIONS='0',
                         LA_LITELLM_CMD=str(stub),
-                        LA_SWAP_PROBE_TIMEOUT='15')
+                        LA_SWAP_PROBE_TIMEOUT='15',
+                        # A private port band, far from the real 4141-4151 session range:
+                        # the product band holds ELEVEN ports and several belong to LIVE
+                        # sessions, so a parallel suite exhausts it; these tests claim up
+                        # to 3 ports each and must never collide with a real session.
+                        LA_REMOTE_PROXY_PORT_MIN='47100',
+                        LA_REMOTE_PROXY_PORT_MAX='47200')
         self.rundir = self.root / 'local-agents-remote'
 
     def tearDown(self):

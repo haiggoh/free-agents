@@ -1285,8 +1285,7 @@ swap_model() { # swap_model <port> <alias> [force]
     write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || {
         cp -p "$bak" "$cfg"; return 1; }
     kill "$pid" 2>/dev/null
-    local waited
-    for waited in $(seq 1 30); do            # let the port actually free before rebinding
+    for _ in $(seq 1 30); do                 # let the port actually free before rebinding
         lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 || break
         sleep 1
     done
@@ -1936,8 +1935,12 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$MAX_OUT"
 #   CLAUDE_ENABLE_STREAM_WATCHDOG=0  the separate CLI 2.1.196 idle watchdog, on by default for
 #     ALL providers, which the other two DO NOT cover. This is the one that actually bites.
 # Bounded, not unbounded: API_TIMEOUT_MS still caps the request, so a genuinely dead stream ends.
-# 5 minutes (300s) for prefill + generation; overridable via LA_REMOTE_API_TIMEOUT_MS.
-export API_TIMEOUT_MS="${LA_REMOTE_API_TIMEOUT_MS:-300000}"
+# 30 minutes (1800000ms), matching the LOCAL lanes' precedent (launch-claude-agent.sh): a slow
+# free-API model (DeepSeek V4.1 Flash answers in ~10 min) must not have its session killed
+# mid-turn by the stock 300000ms cap — a timeout that stalls an unattended session until the
+# user returns is the worst outcome (user 2026-10-22, after exactly that hit an EchoPrism
+# overnight run). Overridable via LA_REMOTE_API_TIMEOUT_MS.
+export API_TIMEOUT_MS="${LA_REMOTE_API_TIMEOUT_MS:-1800000}"
 export API_FORCE_IDLE_TIMEOUT=0
 export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1    # no telemetry through a third party

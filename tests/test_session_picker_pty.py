@@ -705,5 +705,23 @@ class RemoteLiveFilter(PilotCase):
         self.run_picker(s, start="remote")
 
 
+    def test_every_text_input_wears_a_symmetric_border(self):
+        """No input may render Textual's default `tall` border — its left side draws barbs
+        the right side has not (user 2026-10-22: "the left side has barbs protruding
+        outward"). Every text input wears the same rounded frame as the info box."""
+        async def s(app, pilot, h):
+            from textual.widgets import Input
+            await h.press("c")
+            await h.wait_text("NVIDIA A")
+            for w, name in ((app.query_one("#search", Input), "#search"),
+                            (app.query_one("#prompt", Input), "#prompt")):
+                sides = (w.styles.border_top, w.styles.border_right,
+                         w.styles.border_bottom, w.styles.border_left)
+                for side in sides:
+                    self.assertEqual(side[0], "round",
+                                     f"{name} border is not round on every side: {sides!r}")
+        self.run_picker(s, start="remote")
+
+
 if __name__ == "__main__":
     unittest.main()

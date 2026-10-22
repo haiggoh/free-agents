@@ -476,17 +476,18 @@ class RemoteModelSearch(PilotCase):
             await h.press("c")
             await h.wait_text("NV Kimi", secs=10)
             self.assertNotIn("Zai GLM", h.text())             # one group open before the search
-            await h.press("w")
-            await h.press(*"glm", "enter")
+            # 0.40.0: the live filter box owns typing — characters narrow the list at once,
+            # no W action and no Enter to apply.
+            await h.press(*"glm")
             await h.wait_text("Zai GLM", secs=10)
             self.assertIn("NV GLM Flash", h.text())
             self.assertNotIn("NV Kimi", h.text())
+            from textual.widgets import Input as _Input
+            self.assertEqual(app.query_one("#search", _Input).value, "glm")
             from textual.widgets import Static
             self.assertIn('matching "glm"', str(app.query_one("#policy", Static).render()))
-            await h.press("w")
             for _ in range(3):
-                await h.press("backspace")
-            await h.press("enter")
+                await h.press("backspace")                    # an empty box restores the list
             await h.wait_text("NV Kimi", secs=10)
             self.assertNotIn("Zai GLM", h.text())
         self.run_picker(s, start="remote")
