@@ -874,23 +874,26 @@ class LocalScreen(Screen):
         q = self.search.casefold()
         buckets: dict[str, list] = {}
         for mdl in self._all_models:
+            # The row reads as a NAME, not the kebab-case alias (user 2026-10-22, same
+            # convention as the remote list); the alias stays the id and shows in the info box.
+            name = model_names.readable(mdl.alias)
             if mdl.auto_scanned:
                 # On disk but not registered: yellow, and it says so (user 2026-10-17).
                 item = Item(mdl.profile_id or mdl.alias,
-                            f"{mdl.alias}  — on disk, not registered yet", style="yellow")
+                            f"{name}  — on disk, not registered yet", style="yellow")
             else:
                 item = Item(mdl.profile_id or mdl.alias,
-                            f"{mdl.alias}"
+                            f"{name}"
                             + (f" ({mdl.backend}" + (", thinking" if mdl.thinking else "") + ")" if mdl.backend else "")
                             + (f"  [{mdl.roles}]" if mdl.roles else ""))
-            if q and q not in item.label.casefold():
+            if q and q not in item.label.casefold() and q not in mdl.alias.casefold():
                 continue
             buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(item)
         for alias in self.missing:
             if q and q not in alias.casefold():
                 continue
             buckets.setdefault(family_for(alias), []).append(
-                Item(alias, f"{alias}  — weights missing from disk", style="red"))
+                Item(alias, f"{model_names.readable(alias)}  — weights missing from disk", style="red"))
         order = sorted(buckets, key=lambda f: (f == "Other", f.lower()))
         groups = [Group(f, f"{f} ({len(buckets[f])})", buckets[f]) for f in order]
         if q and not groups and (self._all_models or self.missing):
@@ -934,6 +937,19 @@ class LocalScreen(Screen):
     def _choose_model_label(self):
         return "Choose model…" if not self._choose_model_visible else "Choose model (shown)"
 
+    def info_text(self, item_id: str | None) -> str:
+        """The info box under the open local list (0.41.0): the readable name over the exact
+        alias -- the one `csl <alias>` takes -- and how the model is served."""
+        mdl = self.models.get(item_id) if item_id else None
+        if mdl is None and item_id in (self.missing or []):
+            return f"{model_names.readable(item_id)}\nAlias: {item_id}\nWeights missing from disk"
+        if mdl is None:
+            return "Highlight a model to see its alias and backend."
+        serve = (f"Backend: {mdl.backend}" + (", thinking" if mdl.thinking else "")
+                 if mdl.backend else "Backend: not registered yet")
+        roles = f" · Roles: {mdl.roles}" if mdl.roles else ""
+        return f"{model_names.readable(mdl.alias)}\nAlias: {mdl.alias}\n{serve}{roles}"
+
     def actions(self):
         s = self.settings
         acts = [
@@ -954,7 +970,7 @@ class LocalScreen(Screen):
         # No `in self.models` check: the list is lazy and usually not loaded yet, and launching
         # only needs alias + effort. A since-deleted model fails in the launcher, visibly.
         if last_local:
-            acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {last_local} session",
+            acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {model_names.readable(last_local)} session",
                            lambda: self._launch_last("local_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=True)
         acts += _tool_actions(backend=True, local_session=True)
@@ -2190,7 +2206,7 @@ class LowkeyScreen(Screen):
             buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(mdl)
         order = sorted(buckets, key=lambda f: (f == "Other", f.lower()))
         self.accordion.set_groups([
-            Group(f, f"{f} ({len(buckets[f])})", [Item(x.alias, x.alias) for x in buckets[f]])
+            Group(f, f"{f} ({len(buckets[f])})", [Item(x.alias, model_names.readable(x.alias)) for x in buckets[f]])
             for f in order])
 
     def _cycle_effort(self):
@@ -2277,7 +2293,7 @@ class DownloadScreen(Screen):
         order = [st for st in ("ABSENT", "METADATA", "PRESENT", "COMPLETE") if st in groups]
         self.accordion.set_groups([
             Group(st, f"{st.title()} ({len(groups[st])})",
-                  [Item(e.alias, f"{e.alias}  ~{e.size_gb:g} GB  {e.groups}") for e in groups[st]])
+                  [Item(e.alias, f"{model_names.readable(e.alias)}  ~{e.size_gb:g} GB  {e.groups}") for e in groups[st]])
             for st in order])
 
     def toggle_selected(self):

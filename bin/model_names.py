@@ -7,7 +7,7 @@
 The name leads with the model's MANUFACTURER when it is known, never the API provider it is
 served from (user 2026-10-22: the picker's group header already names the provider, and only
 the Nemotron models are actually NVIDIA's). Unknown makers get no prefix rather than a guess.
-Used by the session picker's model list and by the session title.
+Used by the session picker's model lists (remote and local) and by the session title.
 
 Usage:  model_names.py <model-id> [...]     print the readable name of each id
         model_names.py --help
@@ -81,6 +81,8 @@ def _word(tok: str) -> str:
         return f"A{m.group(1)}B"
     if m := _LETTER_VER.match(tok):
         return m.group(1).upper() + m.group(2)
+    if m := re.fullmatch(r"(\d+)bit", tok, re.I):
+        return f"{m.group(1)}-bit"                    # 4bit -> 4-bit (quantisation)
     if m := _NUM_SUFFIX.match(tok):
         return m.group(1) + m.group(2).upper()
     if m := _WORD_VER.match(tok):

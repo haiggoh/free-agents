@@ -1,3 +1,17 @@
+## [0.41.0] — 2026-10-22
+
+### Changed — local models read as names too
+
+- **The local model list names each model the way the Remote list does** (user 2026-10-22):
+  `deepseek-r1-architect` reads `DeepSeek R1 Architect`, `qwen-3.6-thinking` reads
+  `Alibaba Qwen 3.6 Thinking` — capitals and spaces, the maker first when it is known. Same
+  for the unregistered (yellow) and missing (red) rows, the `Go launch: …` action, the Lowkey
+  dispatch list and the model downloader. The alias is still the id everywhere, so launching,
+  saved state and `csl <alias>` are unchanged; the search matches the alias as well as the name.
+- **The local list has an info box**, like the Remote one: the highlighted model's readable
+  name over its exact alias, its backend and roles.
+- Quantisation suffixes read `4-bit`, not `4bit`.
+
 ## [0.40.1] — 2026-10-22
 
 ### Fixed — the 40 RPM window counted every NVIDIA request twice

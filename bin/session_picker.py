@@ -1038,13 +1038,14 @@ class Picker(App):
         self._update_info()
 
     def _update_info(self, item_id: str | None = None, from_hover: bool = False):
-        """Show the remote info box while the model list is open; it describes the hovered
-        row (mouse) or else the highlighted one (keyboard)."""
+        """Show the info box while a model list (Remote, or Local since 0.41.0) is open; it
+        describes the hovered row (mouse) or else the highlighted one (keyboard)."""
         info = self.query_one("#info", Static)
         sm = self.screen_model
-        remote_list = isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and sm._models_loaded
+        model_list = (isinstance(sm, MODEL_LIST_SCREENS) and sm._choose_model_visible
+                      and sm._models_loaded)
         # Any other screen opts in by defining info_text (API Keys: the provider's requirements).
-        if not (remote_list or (not isinstance(sm, m.RemoteScreen) and hasattr(sm, "info_text"))):
+        if not (model_list or (not isinstance(sm, MODEL_LIST_SCREENS) and hasattr(sm, "info_text"))):
             info.display = False
             return
         if not from_hover:

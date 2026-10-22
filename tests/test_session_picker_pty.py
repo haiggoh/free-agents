@@ -59,7 +59,7 @@ class PickerNavigation(PilotCase):
     def test_digits_launch_nothing_even_with_twelve_models(self):
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("deepseek-r1-architect")
+            await h.wait_text("DeepSeek R1 Architect")
             await h.press("1", "1", "enter")
             await h.settle(0.8)
             self.assertEqual(self.launches(), [])
@@ -69,7 +69,7 @@ class PickerNavigation(PilotCase):
 class PickerLaunch(PilotCase):
     async def _launch_first_local(self, h):
         await h.press("c")                           # model list is on demand ("Choose model…")
-        await h.wait_text("deepseek-r1-architect")
+        await h.wait_text("DeepSeek R1 Architect")
         await h.goto_row("item", "deepseek-r1-architect")
         await h.press("enter")
         await h.wait_for(lambda: self.launches(), "a recorded launch")
@@ -425,7 +425,7 @@ class PickerTools(PilotCase):
     def test_downloader_lists_catalog_cancel_zero_calls_confirm_exact_aliases(self):
         async def s(app, pilot, h):
             # Regression (0.22.3-0.23.0): the catalog was never loaded, so this list was empty.
-            await h.wait_text("qwen-3.8-operator")
+            await h.wait_text("Alibaba Qwen 3.8 Operator")
             await h.goto_row("item", "qwen-3.8-operator")
             await h.press("space")
             await h.goto_row("item", "gemma-4-26b")
@@ -637,30 +637,46 @@ class LocalLiveFilter(PilotCase):
         async def s(app, pilot, h):
             from textual.widgets import Input
             await h.press("c")
-            await h.wait_text("deepseek-r1-architect")
+            await h.wait_text("DeepSeek R1 Architect")
             box = app.query_one("#search", Input)
             self.assertTrue(box.display, "the filter box is part of the open local list")
             self.assertIs(app.focused, box)
             await h.press(*"qwen")
             rows = h.labels("rows")
-            self.assertTrue(any("qwen-3.8-operator" in r for r in rows), rows)
-            self.assertFalse(any("deepseek-r1-architect" in r for r in rows), rows)
-            self.assertFalse(any("llama-4-scout" in r for r in rows), rows)
+            self.assertTrue(any("Alibaba Qwen 3.8 Operator" in r for r in rows), rows)
+            self.assertFalse(any("DeepSeek R1 Architect" in r for r in rows), rows)
+            self.assertFalse(any("Meta Llama 4 Scout" in r for r in rows), rows)
             for _ in range(4):
                 await h.press("backspace")
-            await h.wait_text("deepseek-r1-architect")
+            await h.wait_text("DeepSeek R1 Architect")
         self.run_picker(s, start="local")
 
     def test_enter_launches_the_filtered_model(self):
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("deepseek-r1-architect")
+            await h.wait_text("DeepSeek R1 Architect")
             await h.press(*"architect")
             await h.press("down")
             await h.press("down")
             await h.press("enter")
             await h.wait_for(lambda: self.launches(), "a recorded launch")
             self.assertEqual(self.launches()[0]["argv"][1], "deepseek-r1-architect")
+        self.run_picker(s, start="local")
+
+
+class LocalInfoBox(PilotCase):
+    def test_info_box_shows_the_alias_of_the_highlighted_model(self):
+        """0.41.0: local rows read as names, so the exact alias -- what `csl <alias>`
+        takes -- lives in the info box under the open list, as on the Remote screen."""
+        async def s(app, pilot, h):
+            from textual.widgets import Static
+            await h.press("c")
+            await h.wait_text("DeepSeek R1 Architect")
+            await h.goto_row("item", "deepseek-r1-architect")
+            await h.settle(0.3)
+            info = app.query_one("#info", Static)
+            self.assertTrue(info.display, "the local list shows the info box")
+            self.assertIn("Alias: deepseek-r1-architect", str(info.render()))
         self.run_picker(s, start="local")
 
 
@@ -671,7 +687,7 @@ class InputFrames(PilotCase):
         async def s(app, pilot, h):
             from textual.widgets import Input
             await h.press("c")
-            await h.wait_text("deepseek-r1-architect")
+            await h.wait_text("DeepSeek R1 Architect")
             inputs = list(app.query(Input))
             self.assertGreaterEqual(len(inputs), 2, [i.id for i in inputs])   # search + prompt
             box = app.query_one("#search", Input)

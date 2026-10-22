@@ -239,6 +239,7 @@ Linux are the same idea on other backends ([docs/CUDA.md](docs/CUDA.md)).
 
 Newest first. `CHANGELOG.md` has every release in full.
 
+- **0.41.0**: local models read as names in the picker (`DeepSeek R1 Architect`), with an info box showing the exact alias.
 - **0.40.1**: hotfix — an NVIDIA request booked TWO slots in the 40 RPM window (40 RPM was really 20); it books one.
 - **0.40.0**: sessions survive an upstream model throttle — a per-session fallback chain answers from the next model on the same port;
   a 429 is classified (per-model cooldown instead of a machine-wide pause); `remote-session.sh --swap-model`

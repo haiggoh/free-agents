@@ -336,11 +336,11 @@ class LastLaunchedPersistence(PilotCase):
     def test_local_launch_offers_go_launch_and_persists(self):
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("deepseek-r1-architect")
+            await h.wait_text("DeepSeek R1 Architect")
             await h.goto_row("item", "deepseek-r1-architect")
             await h.press("enter")
             await h.wait_for(lambda: self.launches(), "a recorded launch")
-            await h.wait_text("Go launch: deepseek-r1-architect session")
+            await h.wait_text("Go launch: DeepSeek R1 Architect session")
             self.assertEqual(self.saved_state()["last_launched"]["local_session"], "deepseek-r1-architect")
         self.run_picker(s, start="local")
 
@@ -537,7 +537,7 @@ class MemoryGuardSettings(PilotCase):
 class DownloaderQueue(PilotCase):
     def test_space_queues_and_unqueues_like_the_status_line_says(self):
         async def s(app, pilot, h):
-            await h.wait_text("qwen-3.8-operator")
+            await h.wait_text("Alibaba Qwen 3.8 Operator")
             self.assertIn("Space/Enter queue", h.status())
             await h.goto_row("item", "qwen-3.8-operator")
             await h.press("space")

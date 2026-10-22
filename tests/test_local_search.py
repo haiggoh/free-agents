@@ -97,5 +97,55 @@ class LocalSearchTests(unittest.TestCase):
         self.assertEqual(req.selected_id, "deepseek-r1-architect")
 
 
+
+class LocalReadableNames(unittest.TestCase):
+    """0.41.0 (user 2026-10-22): local rows read as names in the remote list's convention
+    -- capitals and spaces, the maker first -- while the alias stays the id."""
+
+    def lane(self, missing=None):
+        lane = m.LocalScreen(m.Settings())
+        lane.set_models(models(), missing=missing)
+        return lane
+
+    def labels(self, lane):
+        lane.set_search("")
+        for g in lane.accordion.groups:
+            lane.accordion.expand(g.id)
+        return {obj.id: obj.label for g in lane.accordion.groups for obj in g.items}
+
+    def test_rows_read_as_names_but_keep_the_alias_as_id(self):
+        lane = self.lane(missing=["gone-model-7b"])
+        lab = {}
+        for g in lane.accordion.groups:
+            lab.update({i.id: i.label for i in g.items})
+        self.assertTrue(lab["deepseek-r1-architect"].startswith("DeepSeek R1 Architect"), lab)
+        self.assertTrue(lab["qwen-3.6-thinking"].startswith("Alibaba Qwen 3.6 Thinking"), lab)
+        self.assertIn("Kuaishou KAT V2.5 New", lab["kat-v2.5-new"])
+        self.assertIn("Gone Model 7B", lab["gone-model-7b"])
+        for label in lab.values():
+            self.assertNotRegex(label.split("  ")[0], r"[a-z]-[a-z]", label)
+
+    def test_search_still_matches_the_alias(self):
+        lane = self.lane()
+        lane.set_search("r1-arch")                     # what a user types from `csl` habit
+        self.assertEqual(item_ids(lane), ["deepseek-r1-architect"])
+
+    def test_info_box_shows_the_exact_alias(self):
+        lane = self.lane(missing=["gone-model-7b"])
+        text = lane.info_text("qwen-3.6-thinking")
+        self.assertIn("Alibaba Qwen 3.6 Thinking", text)
+        self.assertIn("Alias: qwen-3.6-thinking", text)
+        self.assertIn("thinking", text.splitlines()[2])
+        self.assertIn("Alias: gone-model-7b", lane.info_text("gone-model-7b"))
+        self.assertIn("Highlight", lane.info_text(None))
+
+    def test_go_launch_names_the_model(self):
+        s = m.Settings()
+        s.last_launched_model = {"local_session": "deepseek-r1-architect"}
+        lane = m.LocalScreen(s)
+        go = [a for a in lane.actions() if a.key == "g"][0]
+        self.assertIn("Go launch: DeepSeek R1 Architect session", go.label)
+
+
 if __name__ == "__main__":
     unittest.main()
