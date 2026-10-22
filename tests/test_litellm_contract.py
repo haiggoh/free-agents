@@ -17,6 +17,8 @@ WHY: 0.38.1 depends on LiteLLM internals that a release can move without breakin
   6. A 429 on the primary is answered by the first healthy fallback on the SAME port (spoofed
      and subagent ids, streaming and not; the generic "*" key rescues subagent ids), and an
      account refusal is NOT papered over by a fallback (test 3 runs with fallbacks configured).
+  7. A model cooling in the rate limiter (per-model 429 classification) fails over with ZERO
+     upstream hits and no 40 RPM slot spent: the pre-call hook raises at once.
 Run after every LiteLLM upgrade (tests/litellm-upgrade-check.sh does). Never calls a real provider.
 
 Usage: python3 tests/test_litellm_contract.py [-v]
@@ -283,6 +285,105 @@ class LiteLLMContract(unittest.TestCase):
         status, raw = self.post_stream(self.msg("claude-opus-5-5", stream=True))
         self.assertEqual(status, 200, raw)
         self.assertIn("PONG", raw)
+
+
+    def test_7_cooling_primary_fails_over_with_no_upstream_hit(self):
+        """0.40.0 Phase 2: a model cooling in the limiter (per-model 429 classification)
+        never sees a request -- the pre-call hook raises at once, the router answers from
+        the fallback, and the cooling model books NO 40 RPM slot. Own proxy instance: the
+        shared one runs with the hooks' limiter disabled."""
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        dd = Path(d.name)
+        state = dd / "limiter-state.json"
+        state.write_text(json.dumps({
+            "stamps": [], "cooldown_until": 0.0, "consecutive_429s": 0,
+            "last_429_time": 0.0,
+            # The pre-call hook sees the deployment model WITH its provider prefix
+            # (the same string _is_nvidia matches on).
+            "models": {"nvidia_nim/vendor/chat-model":
+                       {"until": time.time() + 300, "n": 3, "last": time.time()}}}))
+        os.symlink(ROOT / "bin/la_proxy_hooks.py", dd / "la_proxy_hooks.py")
+        cfg = dd / "proxy.yaml"
+        cfg.write_text("model_list:\n"
+                       f"  - model_name: claude-opus-5-5\n    litellm_params:\n"
+                       f"      model: nvidia_nim/vendor/chat-model\n"
+                       f"      api_key: sk-fixture\n      api_base: {self.up.base}\n"
+                       f"  - model_name: la-fallback-1\n    litellm_params:\n"
+                       f"      model: nvidia_nim/vendor/fallback-model-1\n"
+                       f"      api_key: sk-fixture\n      api_base: {self.up.base}\n"
+                       "litellm_settings:\n  drop_params: true\n"
+                       "  use_chat_completions_url_for_anthropic_messages: true\n"
+                       "  disable_anthropic_gemini_context_caching_transform: true\n"
+                       "  callbacks: [la_proxy_hooks.proxy_hooks]\n"
+                       "router_settings:\n  retry_policy:\n    RateLimitErrorRetries: 0\n"
+                       "  fallbacks: [{\"claude-opus-5-5\": [\"la-fallback-1\"]}, "
+                       "{\"*\": [\"la-fallback-1\"]}]\n"
+                       "  disable_cooldowns: true\n"
+                       f"general_settings:\n  master_key: {MASTER}\n")
+        port = free_port()
+        env = dict(os.environ, LA_PROXY_HOOKS_RATE_LIMIT="1",
+                   LA_NVIDIA_THROTTLE_STATE=str(state),
+                   LA_PROXY_FALLBACK_NAMES="la-fallback-1",
+                   LITELLM_LOCAL_MODEL_COST_MAP="True")
+        log = open(dd / "proxy.log", "w")
+        proc = subprocess.Popen([str(LITELLM_PY), str(ROOT / "bin/litellm-with-trust.py"),
+                                 "--config", str(cfg), "--port", str(port)],
+                                stdout=log, stderr=subprocess.STDOUT, env=env, cwd=dd)
+        self.addCleanup(log.close)
+
+        def _stop():
+            proc.terminate()
+            try:
+                proc.wait(10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        self.addCleanup(_stop)
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                self.fail("proxy died at startup:\n" + (dd / "proxy.log").read_text()[-3000:])
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/health/liveliness", timeout=2)
+                break
+            except Exception:
+                time.sleep(1)
+        else:
+            self.fail("second proxy not ready in 120s")
+
+        self.up.requests.clear()
+        status, body = self.post_at(port, self.msg("claude-opus-5-5"))
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["content"][0]["text"], "PONG")
+        # THE acceptance: the cooling model saw ZERO requests — exactly one went to the
+        # fallback — and the cooling model booked NO slot and did NOT have its cooldown
+        # extended (the pre-call raise must not loop back through note_429, or a throttled
+        # model would cool forever off its own fast-fails).
+        self.assertEqual([r["body"]["model"] for r in self.up.requests],
+                         ["vendor/fallback-model-1"],
+                         "the cooling primary must not be called upstream")
+        st = json.loads(state.read_text())
+        self.assertEqual(st["models"]["nvidia_nim/vendor/chat-model"]["n"], 3,
+                         "the fast-fail must not feed back into note_429")
+        # 2 slots, not 0: the fallback's ONE logical request books two — a PRE-EXISTING
+        # double-fire of the deployment hook (utils.py:2025 AND llm_http_handler both run
+        # every registered callback; measured 2026-10-22: every request, fallback or not,
+        # books 2, so the 40 RPM window is effectively 20). Tracked as its own waypoint;
+        # the point HERE is the delta: the cooling model contributed ZERO of these.
+        self.assertEqual(len(st["stamps"]), 2,
+                         "booked slots for the failover; proxy log:\n"
+                         + (dd / "proxy.log").read_text()[-2000:])
+
+    def post_at(self, port, body):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/messages", data=json.dumps(body).encode(), method="POST",
+            headers={"x-api-key": MASTER, "content-type": "application/json",
+                     "anthropic-version": "2023-06-01"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
 
 
 if __name__ == "__main__":

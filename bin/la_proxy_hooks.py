@@ -375,6 +375,19 @@ class LAProxyHooks(CustomLogger):
             # The rate limiter is NVIDIA's alone: no other provider has a known RPM ceiling.
             return changed
         if self._bucket is not None:
+            model = str(kwargs.get("model") or "")
+            cooling = self._bucket.model_cooling(model)
+            if cooling > 0 and os.environ.get("LA_PROXY_FALLBACK_NAMES", ""):
+                # 0.40.0 fast-fail: probed on LiteLLM 1.105.1, raising here makes the router
+                # answer from the next fallback at once -- ZERO upstream calls to the cooling
+                # model, and no 40 RPM slot spent (the fallback needs it). Only with a chain:
+                # a chain-less proxy keeps queueing in aacquire exactly as before.
+                import litellm
+                print(f"la_proxy_hooks: {model} cooling {cooling:.0f}s after 429s "
+                      f"-> failing over to a fallback at once", file=sys.stderr)
+                raise litellm.RateLimitError(
+                    message=f"model cooling {cooling:.0f}s after consecutive upstream 429s",
+                    llm_provider="nvidia_nim", model=model)
             waited = await self._bucket.aacquire()
             if waited > 0:
                 print(f"la_proxy_hooks: NVIDIA bucket queued this call {waited:.1f}s",
@@ -391,18 +404,35 @@ class LAProxyHooks(CustomLogger):
         lesson = learn_request_fix(kwargs or {}) if cap is None else None
         if lesson:
             print(f"la_proxy_hooks: {lesson}", file=sys.stderr)
-        # Runs once per failed upstream ATTEMPT (router retries included). A 429 means our
-        # window disagrees with NVIDIA's count: pause every proxy on the machine and log how
-        # many requests the window held, which is the number that locates the real limit.
+        # Runs once per failed upstream ATTEMPT (router retries included). A 429 is CLASSIFIED
+        # (0.40.0): a near-empty window is the provider throttling ONE model -- cool only that
+        # model, other proxies run on; a window at least half full is our own RPM overrun --
+        # pause every proxy on the machine. Either way, log how many requests the window held:
+        # that number locates the real limit.
         if self._bucket is None or not _is_nvidia(kwargs or {}):
             return
         exc = (kwargs or {}).get("exception")
         if exc is None or not _is_429(exc):
             return
-        info = self._bucket.note_429(_retry_after_seconds(exc), hidden_attempts=SDK_HIDDEN_RETRIES)
-        print(f"la_proxy_hooks: NVIDIA 429 with {info['in_window']}/{info['limit']} requests "
-              f"in the last 60 s -> all NVIDIA proxies pause {info['pause']:.0f}s",
-              file=sys.stderr)
+        model = str((kwargs or {}).get("model") or "")
+        info = self._bucket.note_429(_retry_after_seconds(exc), hidden_attempts=SDK_HIDDEN_RETRIES,
+                                     model=model)
+        if info.get("kind") == "model_throttle":
+            print(f"la_proxy_hooks: NVIDIA 429 with {info['in_window']}/{info['limit']} requests "
+                  f"in the last 60 s -> model throttle: {info['model']} cools {info['pause']:.0f}s "
+                  f"({info['consecutive_429s']}. in a row)", file=sys.stderr)
+        else:
+            print(f"la_proxy_hooks: NVIDIA 429 with {info['in_window']}/{info['limit']} requests "
+                  f"in the last 60 s -> RPM overrun: all NVIDIA proxies pause {info['pause']:.0f}s",
+                  file=sys.stderr)
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        """A COMPLETED request (0.40.0): clear that model's cooldown entry and reset the
+        global backoff counter. These are the only resets -- an expired pause clears
+        nothing, or a model throttled for hours retried at base cooldown forever."""
+        if self._bucket is None or not _is_nvidia(kwargs or {}):
+            return
+        self._bucket.note_success(str((kwargs or {}).get("model") or ""))
 
     async def async_pre_request_hook(self, model, messages, kwargs):
         # fix 7, native Anthropic lane only (LA_PASSTHROUGH_MODELS set): fold per-turn effort into

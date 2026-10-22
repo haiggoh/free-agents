@@ -1084,6 +1084,9 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     cfg="$RUNDIR/proxy-$port.yaml"; log="$RUNDIR/proxy-$port.log"; pidf="$RUNDIR/proxy-$port.pid"
     _decide_native_route "$prov" "$model"
     write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 1
+    # 0.40.0: the hooks fast-fail a cooling model to this chain instead of queueing; with no
+    # chain they keep waiting in the 40 RPM window exactly as before (see la_proxy_hooks.py).
+    export LA_PROXY_FALLBACK_NAMES="${FALLBACK_NAMES[*]:-}"
     _prepare_runtime_file "$log" || return 1
     _prepare_runtime_file "$pidf" || return 1
     if [[ -n "${LA_LITELLM_CMD:-}" ]]; then

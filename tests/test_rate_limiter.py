@@ -218,6 +218,100 @@ class SavedSettingsTests(unittest.TestCase):
             self.assertEqual(rl._max_wait(None), 30.0)
 
 
+class PerModelCooldownTests(unittest.TestCase):
+    """Phase 2 (0.40.0): a 429 with a NEAR-EMPTY window is NVIDIA's per-MODEL throttle (GLM
+    answered 429 all night while DeepSeek on the same key served 46/46), not our RPM overrun
+    -- it cools only that model and leaves every other proxy alone. A real overrun (window at
+    least half full, or model unknown) keeps today's machine-wide pause. The backoff counter
+    grows across EXPIRED pauses (reset on success, never on expiry) so a model throttled for
+    hours backs off 30 -> 60 -> 120s instead of being retried twice a minute forever."""
+
+    def limiter(self, path, now, **kw):
+        return rl.SlidingWindowLimiter(path, rpm=40, clock=lambda: now[0], **kw)
+
+    def test_near_empty_window_cools_only_that_model(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s")
+            a = self.limiter(path, now)
+            other = self.limiter(path, now)
+            a.try_acquire()
+            a.try_acquire()
+            info = a.note_429(model="nvidia_nim/z-ai/glm-5.3-flash")
+            self.assertEqual(info["kind"], "model_throttle")
+            self.assertEqual(info["consecutive_429s"], 1)
+            self.assertEqual(other.try_acquire(), 0.0)      # NO global pause
+            self.assertGreater(a.model_cooling("nvidia_nim/z-ai/glm-5.3-flash"), 29.0)
+
+    def test_half_full_window_is_still_machine_wide(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s")
+            a = self.limiter(path, now, cooldown=10)
+            other = self.limiter(path, now)
+            for _ in range(20):
+                a.try_acquire()
+            info = a.note_429(model="nvidia_nim/z-ai/glm-5.3-flash")
+            self.assertEqual(info["kind"], "rpm_overrun")
+            self.assertGreater(other.try_acquire(), 0.0)     # every proxy pauses
+
+    def test_model_backoff_grows_across_expired_pauses(self):
+        # The old try_acquire reset consecutive_429s to 0 the moment a pause EXPIRED, before
+        # the next request had even failed: four 429s in a row each read "pause 30s, n=1"
+        # (measured 2026-10-21), so a model throttled for hours was retried ~2x/min forever.
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = self.limiter(os.path.join(d, "s"), now)
+            m = "nvidia_nim/z-ai/glm-5.3-flash"
+            self.assertAlmostEqual(b.note_429(model=m)["pause"], 30.0)
+            now[0] += 31.0
+            self.assertEqual(b.model_cooling(m), 0.0)        # expired: one probe request passes
+            self.assertAlmostEqual(b.note_429(model=m)["pause"], 60.0)   # 2nd consecutive
+            now[0] += 61.0
+            self.assertAlmostEqual(b.note_429(model=m)["pause"], 120.0)  # 3rd consecutive
+
+    def test_global_backoff_survives_an_expired_pause_while_the_window_stays_full(self):
+        # The expiry-reset the 0.40.0 fix removed: a GLOBAL pause lapses but the window is
+        # still full (a real overrun), so the acquire FAILS -- the old code zeroed the
+        # backoff counter anyway and the next 429 restarted at 30 s forever.
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = self.limiter(os.path.join(d, "s"), now)
+            for _ in range(40):
+                b.try_acquire()                             # window full
+            self.assertAlmostEqual(b.note_429()["pause"], 30.0)
+            now[0] += 31.0                                  # the pause expires...
+            self.assertGreater(b.try_acquire(), 0.0)         # ...window still full: no slot
+            self.assertAlmostEqual(b.note_429()["pause"], 60.0)      # 2nd consecutive, not reset
+
+    def test_model_success_clears_the_entry_and_restarts_the_backoff(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = self.limiter(os.path.join(d, "s"), now)
+            m = "nvidia_nim/z-ai/glm-5.3-flash"
+            b.note_429(model=m)
+            b.note_success(m)
+            self.assertEqual(b.model_cooling(m), 0.0)
+            self.assertAlmostEqual(b.note_429(model=m)["pause"], 30.0)   # base again
+
+    def test_request_success_resets_the_global_counter_too(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = self.limiter(os.path.join(d, "s"), now)
+            b.note_429()                                     # model unknown: machine-wide
+            self.assertEqual(b.status()["consecutive_429s"], 1)
+            b.note_success("nvidia_nim/z-ai/glm-5.3-flash")  # a success resets the global count
+            self.assertEqual(b.status()["consecutive_429s"], 0)
+
+    def test_retry_after_wins_for_a_model_throttle_too(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = self.limiter(os.path.join(d, "s"), now)
+            m = "nvidia_nim/z-ai/glm-5.3-flash"
+            self.assertAlmostEqual(b.note_429(model=m, retry_after=25)["pause"], 25.0)
+            self.assertAlmostEqual(b.model_cooling(m), 25.0, places=6)
+
+
 if __name__ == "__main__":
     mp.set_start_method("fork", force=True)
     unittest.main(verbosity=2)

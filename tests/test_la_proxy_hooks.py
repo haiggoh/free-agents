@@ -166,7 +166,9 @@ class NvidiaKwargsTests(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
 class Upstream429Tests(unittest.TestCase):
-    """A real litellm.RateLimitError from NVIDIA must pause every proxy sharing the state file."""
+    """A real litellm.RateLimitError from NVIDIA is CLASSIFIED (0.40.0): a near-empty window
+    is the provider's per-MODEL throttle -- only that model cools, every other proxy runs on;
+    a window at least half full is OUR RPM overrun -- every proxy on the file pauses."""
 
     def setUp(self):
         self.mod = load_hooks()
@@ -194,26 +196,112 @@ class Upstream429Tests(unittest.TestCase):
         return litellm.RateLimitError(message="Too Many Requests", llm_provider="nvidia_nim",
                                       model="x", response=resp)
 
-    def test_429_pauses_other_proxies_and_reports_window(self):
+    def test_near_empty_429_cools_only_that_model(self):
         from rate_limiter import SlidingWindowLimiter
         for _ in range(3):
             self.hooks._bucket.try_acquire()
         log = self._fail(self._rate_limit_error())
         # 3 slots we took + the SDK's 2 hidden retries of the failed call
-        self.assertIn("NVIDIA 429 with 5/40", log)
+        self.assertIn("5/40", log)
+        self.assertIn("model throttle", log)
         other = SlidingWindowLimiter(self.path, rpm=40)       # a second proxy's view
+        self.assertEqual(other.try_acquire(), 0.0)            # NOT paused machine-wide
+        self.assertGreater(other.model_cooling("nvidia_nim/x"), 9.0)
+
+    def test_overrun_429_pauses_every_proxy(self):
+        from rate_limiter import SlidingWindowLimiter
+        for _ in range(20):
+            self.hooks._bucket.try_acquire()
+        log = self._fail(self._rate_limit_error())
+        self.assertIn("RPM overrun", log)
+        other = SlidingWindowLimiter(self.path, rpm=40)
         self.assertGreater(other.status()["cooldown_remaining"], 9.0)
         self.assertGreater(other.try_acquire(), 0.0)
 
     def test_429_uses_retry_after_header(self):
         self._fail(self._rate_limit_error({"retry-after": "30"}))
-        self.assertGreater(self.hooks._bucket.status()["cooldown_remaining"], 29.0)
+        self.assertGreater(self.hooks._bucket.model_cooling("nvidia_nim/x"), 29.0)
 
     def test_non_429_and_non_nvidia_do_not_pause(self):
         import litellm
         self._fail(litellm.BadRequestError(message="bad", model="x", llm_provider="nvidia_nim"))
         self._fail(self._rate_limit_error(), model="gemini/x")
         self.assertEqual(self.hooks._bucket.status()["cooldown_remaining"], 0.0)
+        self.assertEqual(self.hooks._bucket.model_cooling("nvidia_nim/x"), 0.0)
+
+
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class PerModelFailoverTests(unittest.TestCase):
+    """0.40.0: a cooling model fails over AT ONCE (pre-call hook raises, no 40 RPM slot
+    spent, zero upstream calls -- probed on LiteLLM 1.105.1) when the proxy has a fallback
+    chain; with no chain it queues like today, and a completed success clears the entry."""
+
+    def setUp(self):
+        self.mod = load_hooks()
+        self.dir = tempfile.TemporaryDirectory()
+        from rate_limiter import SlidingWindowLimiter
+        self.path = os.path.join(self.dir.name, "s")
+        self.hooks = self.mod.LAProxyHooks()
+        self.hooks._bucket = SlidingWindowLimiter(self.path, rpm=40, cooldown=10)
+        os.environ.pop("LA_PROXY_FALLBACK_NAMES", None)
+
+    def tearDown(self):
+        os.environ.pop("LA_PROXY_FALLBACK_NAMES", None)
+        self.dir.cleanup()
+
+    def test_cooling_model_fails_over_at_once_without_a_slot(self):
+        import litellm
+        self.hooks._bucket.note_429(model="nvidia_nim/z-ai/glm-5.3-flash")
+        os.environ["LA_PROXY_FALLBACK_NAMES"] = "la-fallback-1"
+        with self.assertRaises(litellm.RateLimitError):
+            asyncio.run(self.hooks.async_pre_call_deployment_hook(
+                {"model": "nvidia_nim/z-ai/glm-5.3-flash"}, None))
+        # fast-fail must not book a 40 RPM slot: the fallback needs it
+        self.assertEqual(self.hooks._bucket.status()["in_window"], 0)
+
+    def test_cooling_model_without_a_chain_queues_like_today(self):
+        self.hooks._bucket.note_429(model="nvidia_nim/z-ai/glm-5.3-flash")
+        out = asyncio.run(self.hooks.async_pre_call_deployment_hook(
+            {"model": "nvidia_nim/z-ai/glm-5.3-flash"}, None))
+        self.assertNotIn("safeguards", out or {})          # the normal path ran
+        self.assertEqual(self.hooks._bucket.status()["in_window"], 1)   # slot taken
+
+    def test_other_model_is_unaffected(self):
+        import litellm
+        self.hooks._bucket.note_429(model="nvidia_nim/z-ai/glm-5.3-flash")
+        os.environ["LA_PROXY_FALLBACK_NAMES"] = "la-fallback-1"
+        out = asyncio.run(self.hooks.async_pre_call_deployment_hook(
+            {"model": "nvidia_nim/deepseek-ai/deepseek-v4.1-flash"}, None))
+        self.assertIsNotNone(out)                           # no raise: only the chain runs
+        self.assertEqual(self.hooks._bucket.status()["in_window"], 1)
+
+    def test_success_event_clears_the_model_entry(self):
+        self.hooks._bucket.note_429(model="nvidia_nim/x")
+        asyncio.run(self.hooks.async_log_success_event(
+            {"model": "nvidia_nim/x"}, None, None, None))
+        self.assertEqual(self.hooks._bucket.model_cooling("nvidia_nim/x"), 0.0)
+
+    def test_success_event_resets_the_global_counter(self):
+        from rate_limiter import SlidingWindowLimiter
+        for _ in range(20):
+            self.hooks._bucket.try_acquire()
+        self._fail_429()                                    # overrun: machine-wide
+        self.assertEqual(self.hooks._bucket.status()["consecutive_429s"], 1)
+        asyncio.run(self.hooks.async_log_success_event(
+            {"model": "nvidia_nim/x"}, None, None, None))
+        self.assertEqual(SlidingWindowLimiter(self.path, rpm=40).status()["consecutive_429s"], 0)
+
+    def _fail_429(self):
+        import httpx
+        import litellm
+        resp = httpx.Response(429, request=httpx.Request("POST", "https://integrate.api.nvidia.com"))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            asyncio.run(self.hooks.async_log_failure_event(
+                {"model": "nvidia_nim/x",
+                 "exception": litellm.RateLimitError(message="Too Many Requests",
+                     llm_provider="nvidia_nim", model="x", response=resp)}, None, None, None))
+        return err.getvalue()
 
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")

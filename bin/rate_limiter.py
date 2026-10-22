@@ -287,8 +287,13 @@ class SmoothTokenBucket:
         fcntl.flock(fd, fcntl.LOCK_EX)
         return fd
 
-    def note_429(self, retry_after: float | None = None, hidden_attempts: int = 0) -> dict:
+    def note_429(self, retry_after: float | None = None, hidden_attempts: int = 0,
+                 model: str | None = None) -> dict:
         """Record an upstream 429: pause every proxy with exponential backoff.
+
+        The legacy smooth-bucket mode has no per-model view: `model` is accepted (the hook
+        always passes one) and IGNORED — a 429 always pauses machine-wide here. The default
+        sliding-window limiter classifies; this mode keeps 0.39 behaviour.
 
         Tracks consecutive 429s and increases cooldown exponentially:
         - 1st 429: base_cooldown (30s)
@@ -323,10 +328,28 @@ class SmoothTokenBucket:
             # Estimate requests in window: capacity - current tokens + hidden attempts booked
             in_window = int(self.capacity - self._tokens + hidden_attempts)
             return {"in_window": in_window, "limit": int(self.rate * 60), "pause": pause,
-                    "consecutive_429s": self._consecutive_429s, "backoff_cooldown": backoff_cooldown}
+                    "consecutive_429s": self._consecutive_429s, "backoff_cooldown": backoff_cooldown,
+                    "kind": "rpm_overrun", "model": model or ""}
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
+
+    def note_success(self, model: str | None = None) -> None:
+        """Legacy mode: a success resets the global counter; per-model entries do not exist."""
+        fd = self._locked()
+        try:
+            now = self._clock()
+            self._load_state(fd, now)
+            self._consecutive_429s = 0
+            self._last_429_time = 0.0
+            self._save_state(fd)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def model_cooling(self, model: str) -> float:
+        """Legacy mode has no per-model view: never cooling, so the hook never fast-fails."""
+        return 0.0
 
     def acquire(self, max_wait: float | None = None) -> float:
         limit = _max_wait(max_wait)
@@ -397,7 +420,7 @@ class SlidingWindowLimiter:
         fcntl.flock(fd, fcntl.LOCK_EX)
         return fd
 
-    def _read(self, fd: int, now: float) -> tuple[list[float], float, int, float]:
+    def _read(self, fd: int, now: float) -> tuple[list[float], float, int, float, dict]:
         os.lseek(fd, 0, os.SEEK_SET)
         raw = os.read(fd, 65536)
         try:
@@ -406,22 +429,25 @@ class SlidingWindowLimiter:
             cooldown_until = float(state.get("cooldown_until", 0.0))
             consecutive_429s = int(state.get("consecutive_429s", 0))
             last_429_time = float(state.get("last_429_time", 0.0))
+            models = state.get("models", {}) if isinstance(state.get("models", {}), dict) else {}
         except Exception:
             # A missing, corrupt or old-format (token bucket) file starts EMPTY: the safe
             # failure is one extra window, never a permanently full one that wedges every session.
-            return [], 0.0, 0, 0.0
+            return [], 0.0, 0, 0.0, {}
         # A stamp in the future (clock step) is treated as now, so a skewed clock can hold a
         # slot for at most one window, never forever.
         stamps = [min(s, now) for s in stamps if s > now - WINDOW_SECONDS]
         stamps.sort()
-        return stamps, cooldown_until, consecutive_429s, last_429_time
+        return stamps, cooldown_until, consecutive_429s, last_429_time, models
 
     def _write(self, fd: int, stamps: list[float], cooldown_until: float,
-           consecutive_429s: int = 0, last_429_time: float = 0.0) -> None:
+               consecutive_429s: int = 0, last_429_time: float = 0.0,
+               models: dict | None = None) -> None:
         data = json.dumps({"stamps": stamps, "cooldown_until": cooldown_until,
                            "limit": self.limit,
                            "consecutive_429s": consecutive_429s,
-                           "last_429_time": last_429_time}).encode()
+                           "last_429_time": last_429_time,
+                           "models": models or {}}).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
         os.write(fd, data)
@@ -431,47 +457,50 @@ class SlidingWindowLimiter:
 
         The whole read-prune-append-write runs under one exclusive lock, so two processes can
         never both take the last slot.
-        Resets exponential backoff on successful acquisition OR when cooldown expires naturally.
+        Resets exponential backoff on successful acquisition. An EXPIRED cooldown no longer
+        resets the backoff counter (0.40.0): the counter used to be cleared the moment a pause
+        lapsed, before the next request had even failed, so four 429s in a row each read
+        "pause 30s, consecutive=1" and a model throttled for hours was retried ~2x/min forever.
+        Only a success (an acquisition, or note_success from a completed request) resets it.
         """
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until, consecutive_429s, last_429_time = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time, models = self._read(fd, now)
             self._consecutive_429s = consecutive_429s
             self._last_429_time = last_429_time
 
-            # Check if cooldown expired naturally - if so, reset backoff
-            if cooldown_until > 0 and now >= cooldown_until:
-                consecutive_429s = 0
-                last_429_time = 0.0
-                cooldown_until = 0.0
-
             if now < cooldown_until:
-                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time)
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return cooldown_until - now
             if len(stamps) < self.limit:
                 stamps.append(now)
                 # SUCCESS: Reset exponential backoff counter
                 self._consecutive_429s = 0
                 self._last_429_time = 0.0
-                self._write(fd, stamps, cooldown_until, 0, 0.0)
+                self._write(fd, stamps, cooldown_until, 0, 0.0, models)
                 return 0.0
-            self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time)
+            self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
             # The oldest request leaves the window first; wait for exactly that.
             return max(1e-3, stamps[-self.limit] + WINDOW_SECONDS - now)
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def note_429(self, retry_after: float | None = None, hidden_attempts: int = 0) -> dict:
-        """Record an upstream 429: pause every proxy with exponential backoff.
+    def note_429(self, retry_after: float | None = None, hidden_attempts: int = 0,
+                 model: str | None = None) -> dict:
+        """Record an upstream 429, CLASSIFIED (0.40.0):
 
-        Tracks consecutive 429s and increases cooldown exponentially:
-        - 1st 429: base_cooldown (30s)
-        - 2nd 429: base_cooldown * multiplier (60s)
-        - 3rd 429: base_cooldown * multiplier^2 (120s)
-        - etc., capped at max_cooldown (300s)
-        Resets on successful request acquisition.
+        - window at least half full, or model unknown -> RPM overrun: pause EVERY proxy
+          sharing the file with exponential backoff (today's behaviour).
+        - window near-empty and a model given -> NVIDIA's per-MODEL throttle (measured
+          2026-10-20: GLM 5.3 Flash answered 429 in 0.2 s for 6+ h while DeepSeek on the
+          same key served 46/46): cool ONLY that model, in the same locked state file.
+          Other models' proxies never notice.
+
+        Per-model backoff grows exactly like the global one (base * mult^(n-1), capped),
+        and n resets only on a real success of THAT model (note_success), never on expiry.
+        Returns the usual dict plus "kind" ("model_throttle" | "rpm_overrun") and "model".
 
         hidden_attempts: upstream requests that were sent but never passed through acquire()
         (the OpenAI SDK's own retries inside one LiteLLM call). NVIDIA counted them, so the
@@ -480,12 +509,29 @@ class SlidingWindowLimiter:
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until, consecutive_429s, last_429_time = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time, models = self._read(fd, now)
 
             # Book hidden attempts
             stamps.extend([now] * max(0, int(hidden_attempts)))
 
-            # Exponential backoff: increase consecutive_429s, calculate cooldown
+            if model and len(stamps) < self.limit / 2:
+                # Per-model throttle: no global pause, one entry per upstream model id.
+                entry = models.get(model, {"until": 0.0, "n": 0, "last": 0.0})
+                entry["n"] = int(entry.get("n", 0)) + 1
+                if now - float(entry.get("last", 0.0)) > self.max_cooldown:
+                    entry["n"] = 1                    # quiet period: a new situation, not a run
+                backoff_cooldown = self.base_cooldown * (self.backoff_multiplier ** (entry["n"] - 1))
+                backoff_cooldown = min(backoff_cooldown, self.max_cooldown)
+                pause = float(retry_after) if retry_after and retry_after > 0 else backoff_cooldown
+                entry["until"] = max(float(entry.get("until", 0.0)), now + pause)
+                entry["last"] = now
+                models[model] = entry
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
+                return {"in_window": len(stamps), "limit": self.limit, "pause": pause,
+                        "consecutive_429s": entry["n"], "backoff_cooldown": backoff_cooldown,
+                        "kind": "model_throttle", "model": model}
+
+            # RPM overrun (or model unknown): today's machine-wide exponential backoff.
             consecutive_429s += 1
             # If it's been a while since last 429, reset backoff (session recovered)
             if now - last_429_time > self.max_cooldown:
@@ -500,9 +546,37 @@ class SlidingWindowLimiter:
             cooldown_until = max(cooldown_until, now + pause)
             last_429_time = now
 
-            self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time)
+            self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
             return {"in_window": len(stamps), "limit": self.limit, "pause": pause,
-                    "consecutive_429s": consecutive_429s, "backoff_cooldown": backoff_cooldown}
+                    "consecutive_429s": consecutive_429s, "backoff_cooldown": backoff_cooldown,
+                    "kind": "rpm_overrun", "model": model or ""}
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def note_success(self, model: str | None = None) -> None:
+        """A completed request: clear that model's cooldown entry, and reset the global
+        backoff counter. The ONLY resets (0.40.0) — an expired pause no longer clears
+        anything, or a model throttled for hours retried at base cooldown forever."""
+        fd = self._locked()
+        try:
+            now = self._clock()
+            stamps, cooldown_until, consecutive_429s, last_429_time, models = self._read(fd, now)
+            if model and model in models:
+                models.pop(model)
+            self._write(fd, stamps, cooldown_until, 0, 0.0, models)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def model_cooling(self, model: str) -> float:
+        """Seconds left in that model's cooldown (0.0 = free to try). Read under the lock."""
+        fd = self._locked()
+        try:
+            now = self._clock()
+            _, _, _, _, models = self._read(fd, now)
+            entry = models.get(model)
+            return max(0.0, float(entry.get("until", 0.0)) - now) if entry else 0.0
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -537,7 +611,7 @@ class SlidingWindowLimiter:
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until, consecutive_429s, last_429_time = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time, models = self._read(fd, now)
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -545,6 +619,9 @@ class SlidingWindowLimiter:
                 "window_seconds": WINDOW_SECONDS,
                 "cooldown_remaining": round(max(0.0, cooldown_until - now), 3),
                 "consecutive_429s": consecutive_429s,
+                "cooling_models": {m: round(max(0.0, float(e.get("until", 0.0)) - now), 1)
+                                   for m, e in models.items()
+                                   if float(e.get("until", 0.0)) > now},
                 "base_cooldown": self.base_cooldown,
                 "max_cooldown": self.max_cooldown,
                 "backoff_multiplier": self.backoff_multiplier}
