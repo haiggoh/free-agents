@@ -14,6 +14,9 @@ WHY: 0.38.1 depends on LiteLLM internals that a release can move without breakin
   5. Native lane (supported_endpoints): the body is forwarded to /v1/messages with thinking and
      output_config.effort intact -- LiteLLM drops both for an unregistered id -- and per-turn
      effort is folded into the request.
+  6. A 429 on the primary is answered by the first healthy fallback on the SAME port (spoofed
+     and subagent ids, streaming and not; the generic "*" key rescues subagent ids), and an
+     account refusal is NOT papered over by a fallback (test 3 runs with fallbacks configured).
 Run after every LiteLLM upgrade (tests/litellm-upgrade-check.sh does). Never calls a real provider.
 
 Usage: python3 tests/test_litellm_contract.py [-v]
@@ -50,14 +53,33 @@ class Upstream:
 
     def __init__(self):
         self.requests, self.status, self.body = [], 200, None
+        self.path_status = {}  # per-path override, so one path can 429 while another stays healthy
         outer = self
 
         class H(BaseHTTPRequestHandler):
             def do_POST(self):
                 raw = self.rfile.read(int(self.headers.get("content-length", 0)))
-                outer.requests.append({"path": self.path, "body": json.loads(raw or b"{}")})
-                if outer.status != 200:
+                body = json.loads(raw or b"{}")
+                outer.requests.append({"path": self.path, "body": body})
+                status = outer.path_status.get(self.path, outer.status)
+                if status != 200:
                     out = json.dumps(outer.body).encode()
+                elif body.get("stream"):
+                    self.send_response(200)
+                    self.send_header("content-type", "text/event-stream")
+                    self.end_headers()
+                    if self.path.endswith("/v1/messages"):
+                        events = ('data: {"type":"content_block_delta","index":0,'
+                                  '"delta":{"type":"text_delta","text":"PONG"}}',
+                                  'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{}}',
+                                  'data: [DONE]')
+                    else:
+                        events = ('data: {"id":"c1","object":"chat.completion.chunk",'
+                                  '"choices":[{"index":0,"delta":{"content":"PONG"}}]}',
+                                  'data: [DONE]')
+                    for e in events:
+                        self.wfile.write(e.encode() + b"\n\n")
+                    return
                 elif self.path.endswith("/v1/messages"):
                     out = json.dumps({"id": "msg_1", "type": "message", "role": "assistant", "model": "x",
                                       "content": [{"type": "text", "text": "PONG"}], "stop_reason": "end_turn",
@@ -67,7 +89,7 @@ class Upstream:
                                       "service_tier": "on_demand", "choices": [{"index": 0, "finish_reason": "stop",
                                                    "message": {"role": "assistant", "content": "PONG"}}],
                                       "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
-                self.send_response(outer.status)
+                self.send_response(status)
                 self.send_header("content-type", "application/json")
                 self.send_header("content-length", str(len(out)))
                 self.end_headers()
@@ -94,21 +116,40 @@ class LiteLLMContract(unittest.TestCase):
                     "  disable_anthropic_gemini_context_caching_transform: true\n"
                     "  callbacks: [la_proxy_hooks.proxy_hooks]\n"
                     "router_settings:\n  retry_policy:\n    BadRequestErrorRetries: 1\n"
+                    "    RateLimitErrorRetries: 0\n"
+                    # The product shape (write_proxy_config): every spoofed id, the subagent
+                    # catch-all, and the generic "*" key list the chain in order. A "claude-*"
+                    # KEY does not match a subagent id (measured 2026-10-21) -- the "*" key is
+                    # what rescues them.
+                    "  fallbacks: [{\"claude-opus-5-5\": [\"la-fallback-1\", \"la-fallback-2\"]}, "
+                    "{\"claude-*\": [\"la-fallback-1\", \"la-fallback-2\"]}, "
+                    "{\"*\": [\"la-fallback-1\", \"la-fallback-2\"]}]\n"
                     "  disable_cooldowns: true\n"
                     f"general_settings:\n  master_key: {MASTER}\n")
         dep = lambda name, model, extra="": (  # noqa: E731
             f"  - model_name: {name}\n    litellm_params:\n      model: {model}\n"
             f"      api_key: sk-fixture\n      api_base: {cls.up.base}\n{extra}")
+        native = '    model_info:\n      supported_endpoints: ["/v1/messages"]\n'
         cfg = d / "proxy.yaml"
         cfg.write_text("model_list:\n"
                        + dep("chat-route", "openai/vendor/chat-model")
                        + dep("groq-route", "groq/openai/gpt-oss-120b")
-                       + dep("native-route", "openai/vendor/native-model",
-                             '    model_info:\n      supported_endpoints: ["/v1/messages"]\n')
+                       + dep("native-route", "openai/vendor/native-model", native)
+                       # 0.40.0 contract: the SESSION shape -- spoofed id + subagent catch-all
+                       # + fallback chain, exactly as write_proxy_config emits them. The
+                       # fallbacks sit on the NATIVE path so a planted status can throttle
+                       # the primary (/chat/completions) while the fallbacks stay healthy
+                       # (/v1/messages) -- fixture plumbing, the failover mechanics are
+                       # path-agnostic.
+                       + dep("claude-opus-5-5", "openai/vendor/chat-model")
+                       + dep("claude-*", "openai/vendor/chat-model")
+                       + dep("la-fallback-1", "openai/vendor/fallback-model-1", native)
+                       + dep("la-fallback-2", "openai/vendor/fallback-model-2", native)
                        + settings)
         cls.port = free_port()
         env = dict(os.environ, LA_REMOTE_PROVIDER="fixture", LA_PROXY_HOOKS_RATE_LIMIT="0",
-                   LA_PASSTHROUGH_MODELS="vendor/native-model", LITELLM_LOCAL_MODEL_COST_MAP="True")
+                   LA_PASSTHROUGH_MODELS="vendor/native-model,vendor/fallback-model-1,vendor/fallback-model-2",
+                   LITELLM_LOCAL_MODEL_COST_MAP="True")
         cls.log = open(d / "proxy.log", "w")
         cls.proc = subprocess.Popen([str(LITELLM_PY), str(ROOT / "bin/litellm-with-trust.py"),
                                      "--config", str(cfg), "--port", str(cls.port)],
@@ -140,6 +181,7 @@ class LiteLLMContract(unittest.TestCase):
     def setUp(self):
         self.up.requests.clear()
         self.up.status, self.up.body = 200, None
+        self.up.path_status = {}
 
     def post(self, body):
         req = urllib.request.Request(
@@ -151,6 +193,18 @@ class LiteLLMContract(unittest.TestCase):
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"{}")
+
+    def post_stream(self, body):
+        """Same request with stream:true, returning (status, raw SSE text)."""
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/v1/messages", data=json.dumps(body).encode(), method="POST",
+            headers={"x-api-key": MASTER, "content-type": "application/json",
+                     "anthropic-version": "2023-06-01"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, (e.read() or b"").decode()
 
     def msg(self, model, **extra):
         return {"model": model, "max_tokens": 64, "messages": [{"role": "user", "content": "hi"}], **extra}
@@ -166,6 +220,13 @@ class LiteLLMContract(unittest.TestCase):
         self.assertEqual(codes, [404, 404, 404], "a cooldown 429 would hide the real error")
 
     def test_3_account_refusal_reaches_client_as_402(self):
+        # 0.40.0: an account refusal is KEY-WIDE, and the fallback chain is same-provider
+        # same-key, so every chain member refuses identically, the chain exhausts within this
+        # one request, and the rewritten 402 still reaches the client -- a fallback can never
+        # paper it over. (A healthy-fallback + account-primary combination is unreachable in
+        # the product; LiteLLM's generic fallback path is exception-agnostic, so the 402
+        # guarantee rests on the chain sharing the key, which write_proxy_config enforces by
+        # building the chain from ONE provider.) The global plant models exactly that shape.
         self.up.status = 429
         self.up.body = {"error": {"message": "Insufficient balance or no resource package. Please recharge."}}
         status, body = self.post(self.msg("chat-route"))
@@ -192,6 +253,36 @@ class LiteLLMContract(unittest.TestCase):
         self.assertEqual(req["body"].get("thinking"), {"type": "adaptive"})
         self.assertEqual(req["body"].get("output_config"), {"effort": "max"}, "per-turn effort folded")
         self.assertTrue(all("output_config" not in m for m in req["body"]["messages"]))
+
+
+    def test_6_primary_throttle_fails_over_in_place(self):
+        """0.40.0: a 429 on the session model is answered by the first HEALTHY fallback on the
+        same port -- no restart, and no 429 ever reaches Claude Code. Covers the spoofed id
+        AND a subagent id (the generic "*" key rescues those; a "claude-*" KEY does not match
+        one -- measured 2026-10-21), streaming and non-streaming, and proves the answer came
+        from the first fallback in the chain, not the throttled primary."""
+        self.up.path_status["/chat/completions"] = 429
+        self.up.body = {"error": {"message": "fixture: upstream throttled"}}
+
+        # Spoofed session id, non-streaming.
+        status, body = self.post(self.msg("claude-opus-5-5"))
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["content"][0]["text"], "PONG")
+        self.assertEqual(self.up.requests[-1]["body"]["model"], "vendor/fallback-model-1",
+                         "the first fallback in the chain answers")
+
+        # Subagent id through the claude-* catch-all deployment -> the "*" fallback key.
+        self.up.requests.clear()
+        status, body = self.post(self.msg("claude-haiku-9"))
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["content"][0]["text"], "PONG")
+        self.assertEqual(self.up.requests[-1]["body"]["model"], "vendor/fallback-model-1",
+                         "a subagent id is rescued by the generic key")
+
+        # Streaming, spoofed id: the SSE body carries the fallback's answer.
+        status, raw = self.post_stream(self.msg("claude-opus-5-5", stream=True))
+        self.assertEqual(status, 200, raw)
+        self.assertIn("PONG", raw)
 
 
 if __name__ == "__main__":

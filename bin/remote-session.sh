@@ -870,6 +870,13 @@ _model_param_lines() { # _model_param_lines <provider> <model> <thinking> [effor
 # The proxy then answers from the next model in the session chain (bin/session-fallbacks.py:
 # config/dispatch-preferences.json session_fallbacks, same provider only, own model skipped), on
 # the same port, with no restart. Members without a key are skipped. LA_REMOTE_FALLBACKS=off.
+#
+# ACCOUNT ERRORS are why the chain is SAME-PROVIDER ONLY (measured, contract test 3 with
+# fallbacks): LiteLLM 1.105's generic fallback path is exception-agnostic, so nothing stops a
+# fallback from answering after ANY failure. An account refusal (insufficient balance, quota
+# exhausted) is KEY-WIDE, and same-provider means same-key: every chain member refuses
+# identically, the chain exhausts within one request, and la_proxy_hooks' 402 rewrite reaches
+# the client. A cross-provider member would drain another account and PAPER OVER the refusal.
 _session_fallbacks() { # _session_fallbacks <provider> <model> -> "provider:model" lines (keyed)
     local line fprov fmodel
     while IFS= read -r line; do
