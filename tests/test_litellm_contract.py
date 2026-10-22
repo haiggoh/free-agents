@@ -288,6 +288,14 @@ class LiteLLMContract(unittest.TestCase):
 
 
     def test_7_cooling_primary_fails_over_with_no_upstream_hit(self):
+        self._cooling_primary_case("sliding_window")
+
+    def test_7b_same_in_smooth_bucket_mode(self):
+        """The picker can save mode=smooth_bucket (the maintainer's machine had): the bucket
+        must fast-fail a cooling model too, or the whole per-model cooldown is inert there."""
+        self._cooling_primary_case("smooth_bucket")
+
+    def _cooling_primary_case(self, mode):
         """0.40.0 Phase 2: a model cooling in the limiter (per-model 429 classification)
         never sees a request -- the pre-call hook raises at once, the router answers from
         the fallback, and the cooling model books NO 40 RPM slot. Own proxy instance: the
@@ -322,7 +330,16 @@ class LiteLLMContract(unittest.TestCase):
                        "  disable_cooldowns: true\n"
                        f"general_settings:\n  master_key: {MASTER}\n")
         port = free_port()
-        env = dict(os.environ, LA_PROXY_HOOKS_RATE_LIMIT="1",
+        # The proxy's limiter reads the picker's SAVED settings (user-level, live machine
+        # state). A saved mode=smooth_bucket made this proxy run the legacy bucket, whose
+        # model_cooling is always 0 -> no fast-fail -> the cooling primary was called and
+        # this test failed on the user's machine only (2026-10-22). Defaults, not the user.
+        cfg_home = dd / "session-menu"
+        cfg_home.mkdir()
+        env = {k: v for k, v in os.environ.items() if not k.startswith("LA_NVIDIA_")}
+        env.update(LA_PROXY_HOOKS_RATE_LIMIT="1",
+                   LA_SESSION_MENU_CONFIG_DIR=str(cfg_home),
+                   LA_NVIDIA_MODE=mode,
                    LA_NVIDIA_THROTTLE_STATE=str(state),
                    LA_PROXY_FALLBACK_NAMES="la-fallback-1",
                    LITELLM_LOCAL_MODEL_COST_MAP="True")
@@ -370,9 +387,17 @@ class LiteLLMContract(unittest.TestCase):
         # every registered callback; measured 2026-10-22: every request, fallback or not,
         # books 2, so the 40 RPM window is effectively 20). Tracked as its own waypoint;
         # the point HERE is the delta: the cooling model contributed ZERO of these.
-        self.assertEqual(len(st["stamps"]), 2,
-                         "booked slots for the failover; proxy log:\n"
-                         + (dd / "proxy.log").read_text()[-2000:])
+        if mode == "smooth_bucket":
+            # Bucket: the planted state carries no tokens, so it starts full (capacity 6)
+            # and the same double-fired hook takes 2 -- refill during the request adds a
+            # fraction, never a whole token.
+            self.assertEqual(int(st["tokens"]), 4,
+                             "tokens left after the failover; proxy log:\n"
+                             + (dd / "proxy.log").read_text()[-2000:])
+        else:
+            self.assertEqual(len(st["stamps"]), 2,
+                             "booked slots for the failover; proxy log:\n"
+                             + (dd / "proxy.log").read_text()[-2000:])
 
     def post_at(self, port, body):
         req = urllib.request.Request(

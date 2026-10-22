@@ -125,6 +125,28 @@ class RateLimitTimeout(Exception):
     """No slot became available within max_wait."""
 
 
+def _cool_model(models: dict, model: str, now: float, retry_after: float | None,
+                base: float, mult: float, cap: float) -> tuple[float, float, int]:
+    """Book one per-model 429 into `models` (mutated): backoff base * mult^(n-1), capped,
+    n reset only after a quiet period longer than `cap`. Shared by both limiter modes so
+    their per-model behaviour cannot drift. Returns (pause, backoff_cooldown, n)."""
+    entry = models.get(model, {"until": 0.0, "n": 0, "last": 0.0})
+    entry["n"] = int(entry.get("n", 0)) + 1
+    if now - float(entry.get("last", 0.0)) > cap:
+        entry["n"] = 1                    # quiet period: a new situation, not a run
+    backoff_cooldown = min(base * (mult ** (entry["n"] - 1)), cap)
+    pause = float(retry_after) if retry_after and retry_after > 0 else backoff_cooldown
+    entry["until"] = max(float(entry.get("until", 0.0)), now + pause)
+    entry["last"] = now
+    models[model] = entry
+    return pause, backoff_cooldown, entry["n"]
+
+
+def _cooling(models: dict, now: float) -> dict:
+    return {m: round(max(0.0, float(e.get("until", 0.0)) - now), 1)
+            for m, e in models.items() if float(e.get("until", 0.0)) > now}
+
+
 class SmoothTokenBucket:
     """Token bucket with small capacity and continuous refill for smooth 40 RPM.
 
@@ -155,6 +177,7 @@ class SmoothTokenBucket:
         # Exponential backoff state
         self._consecutive_429s = 0
         self._last_429_time = 0.0
+        self._models: dict = {}           # per-model cooldowns, same shape as the window's
         self._load()
 
     def _load(self):
@@ -210,19 +233,14 @@ class SmoothTokenBucket:
 
         Reads state from file on EVERY call (like SlidingWindowLimiter) so concurrent
         processes see each other's token consumption immediately.
-        Resets exponential backoff on successful acquisition OR when cooldown expires naturally.
+        Resets exponential backoff on successful acquisition only -- an EXPIRED pause no
+        longer resets it (0.40.0, same fix as the sliding window).
         """
         fd = self._locked()
         try:
             now = self._clock()
             # Read current state from file (handles concurrent updates)
             self._load_state(fd, now)
-
-            # Check if cooldown expired naturally - if so, reset backoff
-            if self._cooldown_until > 0 and now >= self._cooldown_until:
-                self._consecutive_429s = 0
-                self._last_429_time = 0.0
-                self._cooldown_until = 0.0
 
             if now < self._cooldown_until:
                 self._save_state(fd)
@@ -255,12 +273,15 @@ class SmoothTokenBucket:
             self._cooldown_until = float(state.get('cooldown_until', 0.0))
             self._consecutive_429s = int(state.get('consecutive_429s', 0))
             self._last_429_time = float(state.get('last_429_time', 0.0))
+            models = state.get('models', {})
+            self._models = models if isinstance(models, dict) else {}
         except Exception:
             self._tokens = float(self.capacity)
             self._last_refill = now
             self._cooldown_until = 0.0
             self._consecutive_429s = 0
             self._last_429_time = 0.0
+            self._models = {}
         # Refill based on elapsed since last_refill
         elapsed = now - self._last_refill
         if elapsed > 0:
@@ -275,7 +296,8 @@ class SmoothTokenBucket:
             'rate': self.rate,
             'cooldown_until': self._cooldown_until,
             'consecutive_429s': self._consecutive_429s,
-            'last_429_time': self._last_429_time
+            'last_429_time': self._last_429_time,
+            'models': self._models
         }).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
@@ -289,11 +311,10 @@ class SmoothTokenBucket:
 
     def note_429(self, retry_after: float | None = None, hidden_attempts: int = 0,
                  model: str | None = None) -> dict:
-        """Record an upstream 429: pause every proxy with exponential backoff.
-
-        The legacy smooth-bucket mode has no per-model view: `model` is accepted (the hook
-        always passes one) and IGNORED — a 429 always pauses machine-wide here. The default
-        sliding-window limiter classifies; this mode keeps 0.39 behaviour.
+        """Record an upstream 429, CLASSIFIED like SlidingWindowLimiter.note_429 (0.40.0):
+        bucket more than half full (few recent requests) and a model given -> NVIDIA's
+        per-MODEL throttle, cool only that model; otherwise an RPM overrun that pauses
+        every proxy with exponential backoff.
 
         Tracks consecutive 429s and increases cooldown exponentially:
         - 1st 429: base_cooldown (30s)
@@ -308,6 +329,16 @@ class SmoothTokenBucket:
             self._load_state(fd, now)
             # Book hidden attempts
             self._tokens = max(0.0, self._tokens - float(hidden_attempts))
+            in_window = int(self.capacity - self._tokens)
+
+            if model and self._tokens > self.capacity / 2:
+                pause, backoff_cooldown, n = _cool_model(
+                    self._models, model, now, retry_after,
+                    self.base_cooldown, self.backoff_multiplier, self.max_cooldown)
+                self._save_state(fd)
+                return {"in_window": in_window, "limit": int(self.rate * 60), "pause": pause,
+                        "consecutive_429s": n, "backoff_cooldown": backoff_cooldown,
+                        "kind": "model_throttle", "model": model}
 
             # Exponential backoff: increase consecutive_429s, calculate cooldown
             self._consecutive_429s += 1
@@ -325,8 +356,6 @@ class SmoothTokenBucket:
             self._last_429_time = now
 
             self._save_state(fd)
-            # Estimate requests in window: capacity - current tokens + hidden attempts booked
-            in_window = int(self.capacity - self._tokens + hidden_attempts)
             return {"in_window": in_window, "limit": int(self.rate * 60), "pause": pause,
                     "consecutive_429s": self._consecutive_429s, "backoff_cooldown": backoff_cooldown,
                     "kind": "rpm_overrun", "model": model or ""}
@@ -335,11 +364,13 @@ class SmoothTokenBucket:
             os.close(fd)
 
     def note_success(self, model: str | None = None) -> None:
-        """Legacy mode: a success resets the global counter; per-model entries do not exist."""
+        """A completed request: clear that model's entry and reset the global counter."""
         fd = self._locked()
         try:
             now = self._clock()
             self._load_state(fd, now)
+            if model:
+                self._models.pop(model, None)
             self._consecutive_429s = 0
             self._last_429_time = 0.0
             self._save_state(fd)
@@ -348,8 +379,16 @@ class SmoothTokenBucket:
             os.close(fd)
 
     def model_cooling(self, model: str) -> float:
-        """Legacy mode has no per-model view: never cooling, so the hook never fast-fails."""
-        return 0.0
+        """Seconds left in that model's cooldown (0.0 = free to try). Read under the lock."""
+        fd = self._locked()
+        try:
+            now = self._clock()
+            self._load_state(fd, now)
+            entry = self._models.get(model)
+            return max(0.0, float(entry.get("until", 0.0)) - now) if entry else 0.0
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     def acquire(self, max_wait: float | None = None) -> float:
         limit = _max_wait(max_wait)
@@ -389,6 +428,7 @@ class SmoothTokenBucket:
                 "cooldown_remaining": round(max(0.0, self._cooldown_until - now), 3),
                 "mode": "smooth_bucket",
                 "consecutive_429s": self._consecutive_429s,
+                "cooling_models": _cooling(self._models, now),
                 "base_cooldown": self.base_cooldown,
                 "max_cooldown": self.max_cooldown,
                 "backoff_multiplier": self.backoff_multiplier
@@ -516,19 +556,12 @@ class SlidingWindowLimiter:
 
             if model and len(stamps) < self.limit / 2:
                 # Per-model throttle: no global pause, one entry per upstream model id.
-                entry = models.get(model, {"until": 0.0, "n": 0, "last": 0.0})
-                entry["n"] = int(entry.get("n", 0)) + 1
-                if now - float(entry.get("last", 0.0)) > self.max_cooldown:
-                    entry["n"] = 1                    # quiet period: a new situation, not a run
-                backoff_cooldown = self.base_cooldown * (self.backoff_multiplier ** (entry["n"] - 1))
-                backoff_cooldown = min(backoff_cooldown, self.max_cooldown)
-                pause = float(retry_after) if retry_after and retry_after > 0 else backoff_cooldown
-                entry["until"] = max(float(entry.get("until", 0.0)), now + pause)
-                entry["last"] = now
-                models[model] = entry
+                pause, backoff_cooldown, n = _cool_model(
+                    models, model, now, retry_after,
+                    self.base_cooldown, self.backoff_multiplier, self.max_cooldown)
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return {"in_window": len(stamps), "limit": self.limit, "pause": pause,
-                        "consecutive_429s": entry["n"], "backoff_cooldown": backoff_cooldown,
+                        "consecutive_429s": n, "backoff_cooldown": backoff_cooldown,
                         "kind": "model_throttle", "model": model}
 
             # RPM overrun (or model unknown): today's machine-wide exponential backoff.
@@ -619,9 +652,7 @@ class SlidingWindowLimiter:
                 "window_seconds": WINDOW_SECONDS,
                 "cooldown_remaining": round(max(0.0, cooldown_until - now), 3),
                 "consecutive_429s": consecutive_429s,
-                "cooling_models": {m: round(max(0.0, float(e.get("until", 0.0)) - now), 1)
-                                   for m, e in models.items()
-                                   if float(e.get("until", 0.0)) > now},
+                "cooling_models": _cooling(models, now),
                 "base_cooldown": self.base_cooldown,
                 "max_cooldown": self.max_cooldown,
                 "backoff_multiplier": self.backoff_multiplier}

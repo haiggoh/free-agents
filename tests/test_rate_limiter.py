@@ -226,6 +226,22 @@ class PerModelCooldownTests(unittest.TestCase):
     grows across EXPIRED pauses (reset on success, never on expiry) so a model throttled for
     hours backs off 30 -> 60 -> 120s instead of being retried twice a minute forever."""
 
+    def setUp(self):
+        # The limiter reads the PICKER'S SAVED SETTINGS (user-level: ~/.claude/free-agents/
+        # session-menu) for every knob the constructor does not take. Without this
+        # isolation the tests assert whatever the USER'S machine currently has saved --
+        # a live cooldown=10 / multiplier=1.5 made the 30/60/120 growth expectations read
+        # as failures (2026-10-22). Strip the LA_NVIDIA_* env and point the config dir at
+        # an empty tempdir: defaults everywhere.
+        import unittest.mock
+        env = {k: v for k, v in os.environ.items() if not k.startswith("LA_NVIDIA_")}
+        cfg_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(cfg_dir.cleanup)
+        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg_dir.name
+        patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def limiter(self, path, now, **kw):
         return rl.SlidingWindowLimiter(path, rpm=40, clock=lambda: now[0], **kw)
 
@@ -310,6 +326,36 @@ class PerModelCooldownTests(unittest.TestCase):
             m = "nvidia_nim/z-ai/glm-5.3-flash"
             self.assertAlmostEqual(b.note_429(model=m, retry_after=25)["pause"], 25.0)
             self.assertAlmostEqual(b.model_cooling(m), 25.0, places=6)
+
+
+class PerModelCooldownBucketTests(PerModelCooldownTests):
+    """The same contract for the smooth_bucket mode. Before this, the bucket ignored the
+    model and model_cooling was always 0 -- and the picker can SAVE smooth_bucket (the
+    maintainer's machine had), so the whole per-model cooldown was inert for that user
+    (found 2026-10-22). "Near-empty window" maps to "bucket more than half full"."""
+
+    def limiter(self, path, now, **kw):
+        return rl.SmoothTokenBucket(path, rpm=kw.pop("rpm", 40), clock=lambda: now[0], **kw)
+
+    def test_global_backoff_survives_an_expired_pause_while_the_window_stays_full(self):
+        # Bucket shape of the same defect: a 1 RPM bucket drained, the pause lapses while
+        # the bucket is still short of a token, the acquire FAILS -- that must not reset the
+        # counter (the old try_acquire zeroed it on expiry alone).
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = self.limiter(os.path.join(d, "s"), now, rpm=1, capacity=1)
+            b.try_acquire()                                 # bucket empty
+            self.assertAlmostEqual(b.note_429()["pause"], 30.0)
+            now[0] += 31.0                                  # pause over, ~0.5 token back
+            self.assertGreater(b.try_acquire(), 0.0)         # still no token
+            self.assertAlmostEqual(b.note_429()["pause"], 60.0)      # 2nd consecutive, not reset
+
+    def test_status_lists_cooling_models(self):
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            b = self.limiter(os.path.join(d, "s"), now)
+            b.note_429(model="nvidia_nim/z-ai/glm-5.3")
+            self.assertEqual(list(b.status()["cooling_models"]), ["nvidia_nim/z-ai/glm-5.3"])
 
 
 if __name__ == "__main__":
