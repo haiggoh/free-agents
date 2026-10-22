@@ -192,7 +192,11 @@ class TerminalInput:
         self.fd = sys.stdin.fileno()
         self.original = termios.tcgetattr(self.fd)
         settings = termios.tcgetattr(self.fd)
-        settings[3] &= ~(termios.ECHO | termios.ICANON)
+        # ISIG off too: Ctrl-C then arrives as the byte read() turns into KeyboardInterrupt,
+        # instead of a SIGINT that a process started with SIGINT IGNORED (any background job
+        # of a non-interactive shell, e.g. a test gate run with `&`) silently drops -- cancel
+        # did nothing there (found 2026-10-22). The original modes come back on exit.
+        settings[3] &= ~(termios.ECHO | termios.ICANON | termios.ISIG)
         settings[6][termios.VMIN] = 1
         settings[6][termios.VTIME] = 0
         termios.tcsetattr(self.fd, termios.TCSADRAIN, settings)

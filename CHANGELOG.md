@@ -12,6 +12,14 @@
   name over its exact alias, its backend and roles.
 - Quantisation suffixes read `4-bit`, not `4bit`.
 
+### Fixed
+
+- **Ctrl-C cancels the API-key setup even when it was started with SIGINT ignored** (any
+  background job of a non-interactive shell). Its hidden-input mode left `ISIG` on, so Ctrl-C
+  became a signal that such a process drops — and the setup's own Ctrl-C byte handler never
+  ran. `ISIG` is now off while it reads, like `ECHO` and `ICANON`; found because the ship
+  script's new parallel gates run the suites as background jobs.
+
 ## [0.40.1] — 2026-10-22
 
 ### Fixed — the 40 RPM window counted every NVIDIA request twice
