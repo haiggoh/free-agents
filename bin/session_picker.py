@@ -375,6 +375,25 @@ class PromptInput(Input):
         # calling it here too inserted every paste twice.
 
 
+class SearchInput(Input):
+    """The live model filter at the top of the choose-model list (user, 2026-10-21): always
+    typing, never a prompt round-trip — every character narrows the list at once, from the
+    first one, with no Enter needed. Up/Down move the list's highlight (the caret stays in
+    the box), Enter launches the highlighted model; a character typed with focus on the
+    LIST lands in the box too (App.on_key routes it), so the filter accepts input no matter
+    where the highlight is."""
+    BINDINGS = [
+        Binding("up", "filter_arrow_up", show=False),
+        Binding("down", "filter_arrow_down", show=False),
+    ]
+
+    def action_filter_arrow_up(self):
+        self.app._filter_arrow(-1)
+
+    def action_filter_arrow_down(self):
+        self.app._filter_arrow(1)
+
+
 class ConfirmPanel(ModalScreen):
     """The picker's one confirmation idiom (user 2026-10-16): the QUESTION is the first line at
     full emphasis, the explanation sits under it, and the answers are selectable rows —
@@ -483,6 +502,8 @@ class Picker(App):
     #info { height: auto; display: none; border: round ansi_bright_black; padding: 0 1; margin: 0 1; color: ansi_default; }
     #status { height: auto; padding: 0 1; color: ansi_bright_black; }
     #prompt { display: none; }
+    /* The live model filter: hidden until the remote choose-model list opens (render_model). */
+    #search { display: none; height: auto; padding: 0 1; margin-top: 1; color: ansi_default; }
     OptionList { background: ansi_default; color: ansi_default; border: none; }
     OptionList:focus { background: ansi_default; color: ansi_default; border: none; }
     /* Highlight and hover never paint a block: soft-blue text (ANSI bright-blue, which every
@@ -653,6 +674,7 @@ class Picker(App):
             yield Static("", id="title")
             yield Static("", id="policy")
             yield OptionList(id="actions")
+            yield SearchInput(id="search")
             yield HoverOptionList(id="rows")
             yield Static("", id="info")
             yield PromptInput(id="prompt")
@@ -910,6 +932,18 @@ class Picker(App):
         # Show/hide the rows container
         rows.display = show_models
 
+        # The live model filter (user, 2026-10-21): the box sits at the top of the open
+        # remote list, seeded with any filter still active, and takes focus the moment the
+        # list opens so typing filters from the very first character — no prompt, no Enter.
+        search = self.query_one("#search", Input)
+        was_open = getattr(self, "_remote_list_open", False)
+        search.display = isinstance(sm, m.RemoteScreen) and show_models
+        if search.display and not was_open:
+            search.value = sm.search
+            search.placeholder = "type to filter models — results narrow from the first character"
+            search.focus()
+        self._remote_list_open = search.display
+
         # Check if screen has accordion with groups (RuntimeManagerScreen has accordion but no groups)
         has_groups = hasattr(sm, 'accordion') and sm.accordion is not None and len(sm.accordion.groups) > 0
 
@@ -988,6 +1022,8 @@ class Picker(App):
                                                else f"no installed {sm.backend} versions")
         if isinstance(sm, m.DownloadScreen):
             status = "  ↑↓ move · Space/Enter queue · c review"
+        if isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and sm._models_loaded and not waiting:
+            status = "  type to filter · ↑↓ move · Enter launch · ←→ fold · Esc close list"
         if self.state_warnings:
             status += f"\n  {ec.EMOJI_WARNING_STR}  " + self.state_warnings[-1]   # 2 spaces: VS16 emoji
         self.query_one("#status", Static).update(status)
@@ -1215,6 +1251,27 @@ class Picker(App):
                         event.stop()
                         return
 
+        # The live filter owns typing while the remote choose-model list is open (user,
+        # 2026-10-21). Escape closes the list first — a second press leaves the screen as
+        # before. A printable character typed with focus on the LIST lands in the filter
+        # box, which re-filters from the first character; letters no longer fire action
+        # hotkeys in this state. Focus on the ACTIONS list keeps letter hotkeys, so the
+        # settings rows stay reachable by arrowing up from the list.
+        remote_list_open = isinstance(sm, m.RemoteScreen) and sm._choose_model_visible
+        if remote_list_open and key == "escape":
+            sm._choose_model_visible = False
+            self.dispatch(None)
+            event.stop()
+            return
+        if remote_list_open and self.focused is self.query_one("#rows", OptionList):
+            ch = " " if key == "space" else (key if len(key) == 1 and key.isprintable() else None)
+            if ch:
+                search = self.query_one("#search", Input)
+                search.value += ch
+                search.focus()
+                event.stop()
+                return
+
         if key == "escape" or (len(key) == 1 and key.isalpha() and key.islower()):
             keep = self._highlighted()
             idx = next((i for i, a in enumerate(getattr(self, "action_ids", [])) if a.key == key), None)
@@ -1322,7 +1379,6 @@ class Picker(App):
     # --- inline prompts (text entry, confirmations) ------------------------------------------
     PROMPTS = {"prompt:session": "Session name (letters, digits, - _; empty = ephemeral):",
                "prompt:oneshot": "One-shot prompt:",
-               "prompt:search": "Find model (part of its name, every provider; empty Enter clears):",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
                "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically, or type it and press Enter; empty Enter skips):"}
 
@@ -1444,7 +1500,7 @@ class Picker(App):
             prompt.password = True  # Hidden input for API key
             prompt.submit_on_paste = True
         prompt.placeholder = ""   # the label is shown once, in #status below the input
-        prompt.value = getattr(self.screen_model, "search", "") if kind == "prompt:search" else ""
+        prompt.value = ""
         prompt.display = True
         self.query_one("#status", Static).update("  " + label)
         prompt.focus()
@@ -1458,7 +1514,41 @@ class Picker(App):
         self.query_one("#rows", OptionList).focus()
         self.render_model()
 
+    def _filter_arrow(self, delta: int):
+        """The filter box's Up/Down move the model list's highlight (SearchInput bindings);
+        the caret stays in the box, so typing can resume mid-navigation. At the first row,
+        Up continues into the actions list — the same seamless hand-off the list itself has."""
+        rows = self.query_one("#rows", OptionList)
+        if not rows.display:
+            return
+        h = rows.highlighted
+        if h is None:
+            rows.highlighted = 0 if delta > 0 else rows.option_count - 1
+            return
+        if delta < 0 and h == 0:
+            actions = self.query_one("#actions", OptionList)
+            if actions.option_count:
+                actions.highlighted = actions.option_count - 1
+                actions.focus()
+            return
+        rows.highlighted = max(0, min(rows.option_count - 1, h + delta))
+
+    def on_input_changed(self, event):
+        """The live model filter: every character re-filters the list at once, no Enter
+        (user, 2026-10-21). The #prompt modal's changes are not ours to act on."""
+        if getattr(event.input, "id", None) != "search":
+            return
+        sm = self.screen_model
+        if isinstance(sm, m.RemoteScreen):
+            sm.set_search(event.value)
+            self.render_model()
+
     def on_input_submitted(self, event):
+        if getattr(event.input, "id", None) == "search":
+            # Enter from the live filter: exactly the list's own Enter — launch the
+            # highlighted model, or fold/unfold the highlighted group header.
+            self.enter()
+            return
         kind, value = self.pending_prompt, event.value.strip()
         self._close_prompt()
         sm = self.screen_model
@@ -1468,10 +1558,6 @@ class Picker(App):
                 self.state_warnings.append("session name rejected: use letters, digits, - or _")
             else:
                 sm.session_name = value
-            self.render_model()
-        elif kind == "prompt:search" and isinstance(sm, m.RemoteScreen):
-            self._handle_lazy_load()
-            sm.set_search(value)
             self.render_model()
         elif kind == "prompt:oneshot":
             req = sm.one_shot(value)

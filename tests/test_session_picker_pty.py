@@ -143,6 +143,9 @@ class PickerLaunch(PilotCase):
         async def s(app, pilot, h):
             await h.press("c")
             await h.wait_text("Cerebras (1)")
+            # The live filter box owns typing while the list is open (2026-10-21), so the
+            # list closes first — 'y' reaches the Filter submenu from the actions menu.
+            await h.press("escape")
             await h.press("y")                       # Filter settings… submenu
             await h.wait_screen("RemoteFiltersScreen")
             await h.wait_text("Limited trials: SHOWN")
@@ -522,7 +525,7 @@ class RemoteInfoBox(PilotCase):
             self.assertIn(app.screen_model.agents[0].display, str(info.render()))
             app.on_hover_option_list_hovered(app.query_one("#rows").Hovered(0))   # group header
             self.assertIn("Hover or highlight", str(info.render()))
-            await h.press("c")                                 # hide the list again
+            await h.press("escape")                            # the live filter owns typing: Esc closes
             self.assertFalse(info.display)
             await h.press("q")
         self.run_picker(s, start="remote")
@@ -621,6 +624,85 @@ class ThemeScreenColors(PilotCase):
             self.assertEqual(len(str(prompt2)), width_before,
                              f"swatch column moved: {prompt!s} -> {prompt2!s}")
         self.run_picker(s)
+
+
+class RemoteLiveFilter(PilotCase):
+    """The live model filter (user, 2026-10-21): the input line sits at the top of the open
+    remote model list, takes focus the moment the list opens, and narrows the list from the
+    FIRST typed character — no separate search action row, no Enter to apply."""
+
+    def test_box_opens_with_the_list_and_filters_from_the_first_character(self):
+        async def s(app, pilot, h):
+            from textual.widgets import Input
+            await h.press("c")
+            await h.wait_text("NVIDIA A")
+            box = app.query_one("#search", Input)
+            self.assertTrue(box.display, "the filter box is part of the open list")
+            self.assertIs(app.focused, box, "typing works the moment the list opens")
+            # One character already narrows: 'v' matches NVIDIA A, not Gemini Flash. The
+            # GROUP HEADER is the discriminator — the folded group already hides its items
+            # in the unfiltered list, so asserting on an item would pass with no filter.
+            await h.press("v")
+            rows = h.labels("rows")
+            self.assertTrue(any("NVIDIA A" in r for r in rows), rows)
+            self.assertFalse(any("Gemini (1)" in r for r in rows), rows)
+            await h.press("backspace")               # an empty box shows every provider again
+            rows = h.labels("rows")
+            self.assertTrue(any("Gemini (1)" in r for r in rows), rows)
+        self.run_picker(s, start="remote")
+
+    def test_digits_filter_too_and_nomatch_points_at_the_box(self):
+        async def s(app, pilot, h):
+            from textual.widgets import Input
+            await h.press("c")
+            await h.wait_text("NVIDIA A")
+            await h.press("7")                       # numbers filter too, not just letters
+            self.assertEqual(app.query_one("#search", Input).value, "7")
+            rows = h.labels("rows")
+            self.assertTrue(any("No model matches" in r for r in rows), rows)
+            self.assertTrue(any("Edit the live filter" in r for r in rows), rows)
+        self.run_picker(s, start="remote")
+
+    def test_enter_from_the_box_launches_the_highlighted_model(self):
+        async def s(app, pilot, h):
+            await h.press("c")
+            await h.wait_text("NVIDIA A")
+            await h.press("v")
+            await h.goto_row("item", "nvidia-a")     # downs move the list; the caret stays
+            await h.press("enter")
+            await h.wait_for(lambda: self.launches(), "a recorded launch")
+            rec = self.launches()[0]
+            self.assertEqual(rec["prog"], "remote-session.sh")
+            self.assertEqual(rec["argv"][-1], "nvidia-a")
+        self.run_picker(s, start="remote")
+
+    def test_typing_with_focus_on_the_list_lands_in_the_box(self):
+        async def s(app, pilot, h):
+            from textual.widgets import Input, OptionList
+            await h.press("c")
+            await h.wait_text("NVIDIA A")
+            app.query_one("#rows", OptionList).focus()   # e.g. after a mouse click
+            await h.press("v")
+            box = app.query_one("#search", Input)
+            self.assertEqual(box.value, "v")
+            self.assertIs(app.focused, box, "focus follows the typing into the box")
+            self.assertFalse(any("Gemini Flash" in r for r in h.labels("rows")))
+        self.run_picker(s, start="remote")
+
+    def test_escape_closes_the_list_and_the_filter_survives_reopening(self):
+        async def s(app, pilot, h):
+            from textual.widgets import Input
+            await h.press("c")
+            await h.wait_text("NVIDIA A")
+            await h.press("v")
+            await h.press("escape")                     # first escape closes the list, not the app
+            box = app.query_one("#search", Input)
+            self.assertFalse(box.display)
+            self.assertEqual(h.screen(), "RemoteScreen", "still on the remote screen")
+            await h.press("c")                       # reopen: the box carries the filter
+            self.assertEqual(box.value, "v")
+            self.assertFalse(any("Gemini Flash" in r for r in h.labels("rows")))
+        self.run_picker(s, start="remote")
 
 
 if __name__ == "__main__":

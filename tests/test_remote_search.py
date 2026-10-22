@@ -103,13 +103,16 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(item_ids(lane), ["__nomatch__:x"])
         self.assertIn("does-not-exist", lane.accordion.groups[0].label)
 
-    def test_find_action_and_policy_line(self):
+    def test_no_find_action_the_live_filter_replaced_it(self):
+        """The search IS the live filter box at the top of the open model list (user,
+        2026-10-21): typing there narrows the list from the first character, so there is
+        no separate 'find model' action row — and the policy line points at the box."""
         lane = self.lane()
-        find = next(a for a in lane.actions() if a.key == "w")
-        self.assertEqual(find.run(), m.Nav("prompt:search"))
+        self.assertFalse(any(a.key == "w" for a in lane.actions()),
+                         "the filter box replaced the W action row")
         lane.set_search("glm")
-        self.assertIn("glm", next(a for a in lane.actions() if a.key == "w").label)
         self.assertIn("matching", lane.policy)
+        self.assertIn("filter box", lane.policy)
 
     def test_filters_still_apply_under_search(self):
         lane = self.lane()

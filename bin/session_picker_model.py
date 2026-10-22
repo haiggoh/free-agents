@@ -602,6 +602,9 @@ class Accordion:
         self.open_group: str | None = None
         self.selected_id: str | None = None
         self.multi_open: set | None = None
+        # In multi-open (search) mode: the groups the USER folded. A regroup recomputes
+        # multi_open from this — never from what happened to be open last time.
+        self.multi_open_folded: set = set()
 
     def is_open(self, group_id: str) -> bool:
         if self.multi_open is not None:
@@ -632,6 +635,7 @@ class Accordion:
             self.open_group = group_id
             if self.multi_open is not None:
                 self.multi_open.add(group_id)
+                self.multi_open_folded.discard(group_id)
             return True
         return False
 
@@ -640,8 +644,10 @@ class Accordion:
         if self.multi_open is not None:
             if group_id is None:
                 self.multi_open.clear()
+                self.multi_open_folded |= {g.id for g in self.groups}
             else:
                 self.multi_open.discard(group_id)
+                self.multi_open_folded.add(group_id)
             if group_id is None or group_id == self.open_group:
                 self.open_group = None
             return
@@ -1000,7 +1006,7 @@ class RemoteScreen(Screen):
             return "Free/paid cloud API (provider quotas apply)"
         if self.search:
             n = sum(len(g.items) for g in self.accordion.groups if not g.id.startswith("__"))
-            return f'{n} model(s) matching "{self.search}"  (W to change, empty clears)'
+            return f'{n} model(s) matching "{self.search}"  — the filter box above the list is live; empty shows all'
         vis = sum(1 for a in self.agents if self._visible(a) and a.model_id != "SELECT")
         return f"{vis} model(s) visible  (hidden: {self.hidden_count()})"
 
@@ -1015,8 +1021,7 @@ class RemoteScreen(Screen):
         # revision this session; provider -> refresh error message, cleared on success.
         self._catalog_stale: set = set()
         self.catalog_refresh_error: dict = {}
-        self.search = ""                     # model-name search (T7); "" = no search
-        self._search_seen: set = set()       # groups shown so far in this search
+        self.search = ""                     # the live model filter; "" = show every provider
         if agents is not None:
             self.agents = agents
             self._regroup()
@@ -1061,7 +1066,7 @@ class RemoteScreen(Screen):
             groups.append(Group(prov, label, items))
         if self.search and not groups and any(self._visible(a) for a in self.agents):
             groups = [Group("__nomatch__", f'No model matches "{self.search}"',
-                            [Item("__nomatch__:x", "Press W to change the search (empty clears it)")])]
+                            [Item("__nomatch__:x", "Edit the live filter above the list (empty shows every provider)")])]
         if not groups and not any(a.has_key for a in self.agents):
             # No provider key at all: the list is an instruction, not a roster of unusable models.
             groups = [Group("__nokeys__", f"{ec.EMOJI_KEY_STR} No API key saved yet",
@@ -1069,12 +1074,15 @@ class RemoteScreen(Screen):
         self.accordion.set_groups(groups)
         if self.search:
             # The one exception to the one-open rule: every matching provider is open, and a
-            # group that appears later (its catalog just landed) opens too. A header the user
-            # folded during this search stays folded across refreshes.
-            was_open = self.accordion.multi_open or set()
+            # group that appears later (its catalog just landed) opens too. Only a header the
+            # USER folded stays folded. The previous _search_seen bookkeeping could not tell
+            # "the user folded it" from "it left the list and came back", so under the live
+            # filter a background catalog refresh folded EVERYTHING the moment one group's
+            # match status flipped (measured 2026-10-22: typing a digit, rcat lands, the
+            # no-match group returns already folded). The fold now lives in the accordion,
+            # where collapse() records it and a regroup recomputes from it.
             self.accordion.multi_open = {g.id for g in groups
-                                         if g.id not in self._search_seen or g.id in was_open}
-            self._search_seen |= {g.id for g in groups}
+                                         if g.id not in self.accordion.multi_open_folded}
         else:
             self.accordion.multi_open = None
         self._models_loaded = True
@@ -1084,12 +1092,13 @@ class RemoteScreen(Screen):
         return q in (model_id or "").casefold() or q in (display or "").casefold()
 
     def set_search(self, query: str):
-        """Search model names across every provider (T7). Empty clears it and restores the
-        ordinary accordion (the first group open)."""
+        """Filter model names across every provider. Driven LIVE by the filter box above the
+        model list (user, 2026-10-21): every character narrows the list at once, no Enter.
+        Empty clears it and restores the ordinary accordion (the first group open) — and
+        forgets the headers folded under the previous query, so a new search starts fresh."""
         self.search = (query or "").strip()
-        self._search_seen = set()
-        self.accordion.multi_open = None
         if not self.search:
+            self.accordion.multi_open_folded = set()
             self.accordion.multi_open = None
             self.accordion.open_group = None
         self._refresh_keep_open()
@@ -1279,11 +1288,6 @@ class RemoteScreen(Screen):
             # The picker will lazy-load the models
             pass
 
-    def _open_search(self):
-        """W: ask for a model name (the picker's inline prompt); the list opens with it."""
-        self._choose_model_visible = True
-        return Nav("prompt:search")
-
     def _choose_model_label(self):
         return "Choose model…" if not self._choose_model_visible else "Choose model (shown)"
 
@@ -1295,8 +1299,9 @@ class RemoteScreen(Screen):
             setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
                     TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v)),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
-            Action("w", f"{ec.EMOJI_SEARCH_STR}  Find model: {self.search or '<all providers>'}",
-                   self._open_search),
+            # No "find model" action row (user, 2026-10-21): the filter box at the top of
+            # the open model list IS the search — typing there filters live from the first
+            # character, so a separate menu entry would only duplicate it.
             Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
             Action("y", f"{ec.EMOJI_FILTER_STR}  Filter settings…", lambda: Nav("remote_filters", self.owner), section="tools"),
