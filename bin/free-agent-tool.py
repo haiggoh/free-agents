@@ -37,11 +37,14 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Add the repo root to path for config-lib
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "config"))
+sys.path.insert(0, str(REPO_ROOT / "bin"))
+import fa_fallback_mark  # noqa: E402  (the session-scoped "free exhausted" mark)
 
 # Role mapping from subagent_type to our internal roles
 ROLE_MAP = {
@@ -400,6 +403,30 @@ def attach_files(prompt: str, files) -> str:
     return "\n".join(parts)
 
 
+# Honest-exhaustion policy (cloud-screen plan Task 4): only sent-and-failed requests count;
+# the values are tunable in config/dispatch-preferences.json under "paid_fallback".
+DEFAULT_PAID_FALLBACK = {"min_real_attempts": 3, "min_providers": 2,
+                         "retry_after_max_s": 30, "wall_clock_cap_s": 600}
+# remote-agent-dispatch.py does not surface Retry-After to its caller (verified 2026-10-24:
+# its stderr carries only error_class + HTTP status + reason), so a 429 is a real failure
+# with no retry; retry_after_max_s stays in the policy for the day the dispatch surfaces it.
+
+
+def exhausted(attempts: list, available: list, policy: dict) -> bool:
+    """True when the free attempts are honestly exhausted: at least `min_real_attempts`
+    sent-and-failed requests across at least `min_providers` distinct providers — or every
+    available entry was tried and failed (a one-key machine gets the paid escape too).
+    Skipped entries (no key, no weights) never enter `attempts` and never count."""
+    fails = [a for a in attempts if not a.get("ok")]
+    if not fails:
+        return False
+    if available and len(fails) >= len(available):
+        return True
+    providers = {a.get("provider") for a in fails}
+    return (len(fails) >= policy.get("min_real_attempts", 3)
+            and len(providers) >= policy.get("min_providers", 2))
+
+
 def run(input_data, env) -> int:
     prompt = input_data.get("prompt", "")
     if not prompt:
@@ -425,18 +452,25 @@ def run(input_data, env) -> int:
               file=sys.stderr)
     shown_avoid = avoid if family_avoided else None
     shown_role = role if role_matched else None
+    policy = dict(DEFAULT_PAID_FALLBACK, **(prefs.get("paid_fallback") or {}))
+    started = time.monotonic()
     attempts = []
     for entry in order:
+        if time.monotonic() - started > policy["wall_clock_cap_s"]:
+            print(f"free-agents: wall-clock cap ({policy['wall_clock_cap_s']}s) reached — "
+                  f"{entry['id']} and the remaining preferences are not attempted", file=sys.stderr)
+            break
         print(f"free-agents: offloading to {entry.get('display', entry['id'])} "
               f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"
               f"{', not ' + shown_avoid if shown_avoid else ''})", file=sys.stderr)
         try:
             text = dispatch_entry(entry, full_prompt, env)
         except DispatchFailed as err:
-            attempts.append({"id": entry["id"], "ok": False, "error": str(err)})
+            attempts.append({"id": entry["id"], "provider": entry.get("provider") or route_of(entry),
+                             "ok": False, "error": str(err)})
             print(f"free-agents: {entry['id']} failed ({err}) — trying the next preference", file=sys.stderr)
             continue
-        attempts.append({"id": entry["id"], "ok": True})
+        attempts.append({"id": entry["id"], "provider": entry.get("provider") or route_of(entry), "ok": True})
         print(json.dumps({"content": text, "model_used": entry["id"],
                           "display": entry.get("display", entry["id"]), "route": route_of(entry),
                           "family": entry.get("family"), "role": role,
@@ -445,7 +479,17 @@ def run(input_data, env) -> int:
                           "family_avoided": family_avoided if avoid else None,
                           "attempts": attempts}))
         return 0
-    print(json.dumps({"error": "every dispatch preference failed", "attempts": attempts}), file=sys.stderr)
+    allowed = exhausted(attempts, order, policy)
+    err_obj = {"error": "every dispatch preference failed", "attempts": attempts,
+               "paid_fallback_allowed": allowed}
+    if allowed:
+        sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+        if sid:
+            try:
+                fa_fallback_mark.write_mark(sid, attempts)
+            except OSError as err:
+                print(f"free-agents: could not write the paid-fallback mark ({err})", file=sys.stderr)
+    print(json.dumps(err_obj), file=sys.stderr)
     return 1
 
 

@@ -343,3 +343,140 @@ class HelpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class Exhaustion(unittest.TestCase):
+    """Honest exhaustion (cloud-screen plan Task 4): only sent-and-failed attempts count; the
+    paid escape arms at min_real_attempts across min_providers, or when everything available
+    failed — and run() writes the session-scoped mark only then."""
+
+    POLICY = {"min_real_attempts": 3, "min_providers": 2, "retry_after_max_s": 30,
+              "wall_clock_cap_s": 600}
+
+    @staticmethod
+    def order(n):
+        """n available remote entries: two nvidia, then gemini, then nvidia."""
+        providers = ["nvidia", "nvidia", "gemini", "nvidia"][:n]
+        return [{"id": f"e{i}", "kind": "remote", "provider": prov, "model": "m",
+                 "display": f"E{i}", "smoke_tested": True} for i, prov in enumerate(providers)]
+
+    def test_three_failures_on_one_provider_are_not_exhaustion(self):
+        atts = [{"id": f"n{i}", "provider": "nvidia", "ok": False} for i in range(3)]
+        self.assertFalse(fat.exhausted(atts, self.order(4), self.POLICY))  # one entry never tried
+
+    def test_three_failures_across_two_providers_are_exhaustion(self):
+        atts = [{"id": "n1", "provider": "nvidia", "ok": False},
+                {"id": "n2", "provider": "nvidia", "ok": False},
+                {"id": "g1", "provider": "gemini", "ok": False}]
+        self.assertTrue(fat.exhausted(atts, self.order(3), self.POLICY))
+
+    def test_skipped_entries_do_not_count(self):
+        atts = [{"id": "n1", "provider": "nvidia", "ok": False},
+                {"id": "n2", "provider": "nvidia", "ok": False}]
+        self.assertFalse(fat.exhausted(atts, self.order(4), self.POLICY))
+
+    def test_every_available_failed_counts_when_fewer_exist(self):
+        self.assertTrue(fat.exhausted(
+            [{"id": "g1", "provider": "gemini", "ok": False}], self.order(1), self.POLICY))
+
+    def test_no_attempts_is_not_exhaustion(self):
+        self.assertFalse(fat.exhausted([], self.order(2), self.POLICY))
+
+    def run_main(self, payload, fake, monotonic=None, keys_dir=None):
+        """Run fat.run with recorded dispatches; keys_dir makes entries available."""
+        env = {"LA_API_KEYS_DIR": keys_dir or "missing"}
+        old_env = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        calls = {"n": 0}
+
+        def fake_dispatch(entry, prompt, e):
+            ok, text = fake.get(entry["id"], (False, "boom"))
+            if ok:
+                return text
+            raise fat.DispatchFailed(text)
+
+        def fake_clock():
+            seq = monotonic or [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+            v = seq[min(calls["n"], len(seq) - 1)]
+            calls["n"] += 1
+            return v
+
+        class FakeTime:
+            monotonic = staticmethod(fake_clock)
+            time = staticmethod(lambda: 0.0)
+
+        real = (fat.dispatch_entry, fat.local_on_disk, fat.time)
+        fat.dispatch_entry, fat.local_on_disk, fat.time = fake_dispatch, (lambda a: True), FakeTime
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                code = fat.run(payload, env)
+        finally:
+            fat.dispatch_entry, fat.local_on_disk, fat.time = real
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return code, out.getvalue(), err.getvalue()
+
+    @staticmethod
+    def last_json(err: str) -> dict:
+        return json.loads([ln for ln in err.splitlines() if ln.startswith("{")][-1])
+
+    def test_wall_clock_cap_stops_new_attempts(self):
+        code, _out, err = self.run_main({"prompt": "hi"}, {}, monotonic=[0.0, 601.0, 602.0, 603.0])
+        self.assertEqual(code, 1)
+        res = self.last_json(err)
+        self.assertEqual(len(res["attempts"]), 0, "the cap fires before any new attempt starts")
+        self.assertIn("wall-clock cap", err)
+        self.assertFalse(res["paid_fallback_allowed"])
+
+    def test_total_failure_arms_the_mark_for_this_session(self):
+        keys = tempfile.mkdtemp()
+        Path(keys, "gemini").write_text("fixture-key")
+        mark_dir = tempfile.mkdtemp()
+        old_dir, old_sid = os.environ.get("FA_FALLBACK_MARK_DIR"), os.environ.get("CLAUDE_CODE_SESSION_ID")
+        os.environ["FA_FALLBACK_MARK_DIR"] = mark_dir
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-arm-1"
+        try:
+            code, _out, err = self.run_main({"prompt": "hi"}, {}, keys_dir=keys)
+            self.assertEqual(code, 1)
+            res = self.last_json(err)
+            self.assertTrue(res["paid_fallback_allowed"], "one key, one real failure = exhausted")
+            sys.path.insert(0, str(ROOT / "bin"))
+            import fa_fallback_mark as fm
+            doc = fm.consume_mark("sess-arm-1")          # inside the sandboxed env
+            self.assertIsNotNone(doc, "the mark is written when CLAUDE_CODE_SESSION_ID is set")
+            self.assertIsNone(fm.consume_mark("sess-arm-1"), "single use")
+        finally:
+            if old_dir is None:
+                os.environ.pop("FA_FALLBACK_MARK_DIR", None)
+            else:
+                os.environ["FA_FALLBACK_MARK_DIR"] = old_dir
+            if old_sid is None:
+                os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+            else:
+                os.environ["CLAUDE_CODE_SESSION_ID"] = old_sid
+
+    def test_total_failure_without_a_session_writes_no_mark(self):
+        keys = tempfile.mkdtemp()
+        Path(keys, "gemini").write_text("fixture-key")
+        mark_dir = tempfile.mkdtemp()
+        old_dir, old_sid = os.environ.get("FA_FALLBACK_MARK_DIR"), os.environ.get("CLAUDE_CODE_SESSION_ID")
+        os.environ["FA_FALLBACK_MARK_DIR"] = mark_dir
+        os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+        try:
+            code, _out, err = self.run_main({"prompt": "hi"}, {}, keys_dir=keys)
+        finally:
+            if old_dir is None:
+                os.environ.pop("FA_FALLBACK_MARK_DIR", None)
+            else:
+                os.environ["FA_FALLBACK_MARK_DIR"] = old_dir
+            if old_sid is None:
+                os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+            else:
+                os.environ["CLAUDE_CODE_SESSION_ID"] = old_sid
+        self.assertEqual(self.last_json(err)["paid_fallback_allowed"], True)
+        self.assertEqual(list(Path(mark_dir).iterdir()), [], "no session id, no mark")
