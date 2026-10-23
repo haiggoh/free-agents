@@ -1,3 +1,17 @@
+## [0.42.2] — 2026-10-23
+
+### Docs
+
+- **Roadmap-vs-tags audit re-run over `v0.26.0`–`v0.42.1` (56 tags)**, with the verdict table
+  folded into `docs/ROADMAP.md`: the span is clean — no claimed-and-never-built feature. Flagged
+  artifacts resolved to honest renames (`local-agent-dispatch.py` → `lowkey-cli.py`;
+  update-check scripts superseded by `manage-backend.py`), to private gitignored overlays (which
+  since 0.42.1 live in the machine-stable state dir), and to three invisible releases
+  (`0.34.8`/`0.34.11`/`0.34.12`, the theme picker) that shipped with no changelog section — now
+  recorded so the gap is visible. The `docs/roadmap-unshipped-audit` branch (16 releases stale,
+  tip `69b6218`) is retired: its shipped-findings table was already folded into the roadmap in
+  the 2026-10-08 section above it, and its tip is recorded in the maintainer's backup.
+
 ## [0.42.1] — 2026-10-23
 
 ### Fixed

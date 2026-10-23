@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.42.1`. See `CHANGELOG.md`.
+`0.42.2`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -874,6 +874,25 @@ plans live in the `docs/roadmap-unshipped-audit` branch history and in
 - **Remote session watcher** (deferred in `0.14.0`): still waiting on live-reasoning visibility.
 
 ---
+
+## Roadmap-vs-tags audit — `main` @ `0.42.1` (2026-10-23)
+
+Re-ran the 2026-10-08 audit's method over every tag from `v0.26.0` to `v0.42.1` (56 tags): each
+tag's changelog claims were checked against `main`'s tree — every `bin/…`/`config/…`/`install/…`
+artifact a claim names must still exist, or the section must explain its absence. With the
+`docs/roadmap-unshipped-audit` branch retired (its tip `69b6218` is recorded in the maintainer's
+backup; its shipped-findings table is preserved above), this section is the standing record for
+the new span.
+
+**Verdict: the span is clean — no claimed-and-never-built feature.** All flagged artifacts
+resolved to one of three honest classes:
+
+| Finding | Tags | Verdict |
+|---|---|---|
+| `bin/local-agent-dispatch.py` referenced by name | `0.27.0`, `0.29.2` | Renamed to `lowkey-cli.py`; every referring site carries the "formerly local-agent-dispatch.py" note. Feature shipped and present. |
+| `install/local-stack-update-check.sh`, `scripts/check-backend-updates.py` | `0.29.1`, `0.29.2` | Superseded by `manage-backend.py check-updates`/`upgrade` + `backend_upgrades.py` (both in the gates). Update checking shipped, under new names. |
+| `config/removed-models.local.psv`, `config/dispatch-preferences.local.json` | `0.36.0`, `0.39.0` | Private overlays, gitignored by design — never tree artifacts. Since `0.42.1` they live in the machine-stable state dir (`~/.local/share/free-agents/config/`), which every copy of the code resolves as the live config. |
+| **Three releases with no changelog section at all** | `0.34.8`, `0.34.11`, `0.34.12` | Each tag is a real feature commit (theme color picker with accordion UI and refinements) that shipped WITHOUT a changelog entry — invisible releases, the reverse of the unshipped-feature failure this file exists for. The feature line shipped and survives: theme colours persist through the stable user store, held by a gate test since `0.35.3`. Recorded here so the gap is at least visible; changelogs are history and were not rewritten. |
 
 ## Deliberately deferred
 
