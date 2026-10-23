@@ -132,9 +132,23 @@ class PluginGateTests(_Sandbox):
         self.write_settings(doc)
         self.assertFalse(cse.plugin_status()[0])
 
-    def test_a_leftover_override_stays_visible_so_it_can_be_cleared(self):
-        """Plugin removed after we set 'off': hiding the option would hide live state."""
+    def test_a_leftover_override_is_cleared_and_reported_not_kept_visible(self):
+        """Plugin inactive with our override still set (0.42.0, user 2026-10-23): the row is hidden
+        AND the leftover removed, so nothing hidden stays live; the caller is told what went."""
+        self.write_settings({"env": {"SECURITY_REVIEW_MODEL": "claude-sonnet-4-6", "OTHER": "kept"},
+                             "theme": "dark"})
+        removed = cse.clear_stale_override()
+        self.assertEqual(removed, ["SECURITY_REVIEW_MODEL"])
+        doc = json.loads(self.settings.read_text())
+        self.assertEqual(doc, {"env": {"OTHER": "kept"}, "theme": "dark"})
+        self.assertFalse(cse.offered())
+        self.assertEqual(cse.clear_stale_override(), [])      # idempotent: nothing left to remove
+
+    def test_an_active_plugin_keeps_the_override(self):
+        self.install(enabled=True)
         cse.save(2)
+        self.assertEqual(cse.clear_stale_override(), [])
+        self.assertEqual(cse.load()["security_review"], 2)
         self.assertTrue(cse.offered())
 
 

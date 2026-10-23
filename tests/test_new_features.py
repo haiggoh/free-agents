@@ -516,6 +516,27 @@ class ModelParamCountUnits(unittest.TestCase):
         self.assertEqual(sp.model_param_count("mistral", "vendor/nameless"), 4.0)
 
 
+class StaleSecurityReviewOverride(PilotCase):
+    def test_startup_removes_a_leftover_override_and_says_so(self):
+        # Plugin not installed, our override still in Claude Code's settings.json: csl removes ONLY
+        # our key and shows the removal (0.42.0). Runs against the sandboxed CLAUDE_CONFIG_DIR.
+        real = Path.home() / ".claude" / "settings.json"
+        real_before = real.read_bytes() if real.exists() else None
+        cfg = Path(os.environ["CLAUDE_CONFIG_DIR"])
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "settings.json").write_text(json.dumps(
+            {"env": {"SECURITY_REVIEW_MODEL": "claude-sonnet-4-6", "KEEP": "1"}}))
+
+        async def s(app, pilot, h):
+            self.assertTrue(any("SECURITY_REVIEW_MODEL" in w for w in app.state_warnings),
+                            app.state_warnings)
+            self.assertNotIn("s", {a.key for a in self.m.CloudConfigScreen(app.settings).actions()})
+        self.run_picker(s, start="home")
+        self.assertEqual(json.loads((cfg / "settings.json").read_text()), {"env": {"KEEP": "1"}})
+        self.assertEqual(real.read_bytes() if real.exists() else None, real_before,
+                         "the user's real ~/.claude/settings.json must never be touched by a test")
+
+
 class MemoryGuardSettings(PilotCase):
     def test_local_u_opens_guard_and_a_change_is_saved_and_reloaded(self):
         # Local lane only (user 2026-10-23): reached from the Local screen, not from Home.

@@ -536,6 +536,17 @@ class Picker(App):
         self.theme = "textual-ansi"
         state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
         self.state_warnings = list(state.warnings)
+        # A security-review override left behind while the plugin is not active is removed, and the
+        # removal is SHOWN (0.42.0): the row is hidden then, so a kept override would be stale state.
+        try:
+            removed = cse.clear_stale_override()
+        except (OSError, ValueError) as exc:
+            removed = []
+            self.state_warnings.append(f"could not clear a leftover security-review setting: {exc}")
+        if removed:
+            self.state_warnings.append(
+                f"removed {', '.join(removed)} from ~/.claude/settings.json: the security-guidance "
+                "plugin is not active, so the setting did nothing")
         cloud = cse.load()      # read-only; reflects ~/.claude/settings.json + installed plugins
         self.settings = m.Settings(
             local_effort=state.effort["local_session"],
@@ -558,7 +569,7 @@ class Picker(App):
             on_temperature_saved=self._save_temperature,
             security_review=cloud["security_review"],
             security_review_custom=cloud["custom_model"],
-            security_review_offered=cloud["plugin_active"] or cloud["override_present"],
+            security_review_offered=cloud["plugin_active"],
             replace_agents=cse.replace_agents(),
             on_cloud_saved=self._save_cloud,
             # "Go last": restored from the store; written when a launch request is made.

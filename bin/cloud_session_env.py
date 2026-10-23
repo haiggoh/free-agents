@@ -20,8 +20,10 @@ Settings:
                    -1 = custom:  SECURITY_REVIEW_MODEL set by hand to something else (left alone
                         until the user cycles the option)
 
-The option is only OFFERED when the security-guidance plugin is installed and enabled — or when an
-override from us is still present, so it can always be cleared (a hidden leftover would be stale state).
+The option is only OFFERED when the security-guidance plugin is installed and enabled. A leftover
+override from us while the plugin is NOT active is removed (clear_stale_override, called when csl
+starts, which reports what it removed) rather than kept visible: a hidden row over live state would
+be stale state, a removed one is not (0.42.0, user 2026-10-23).
 
   replace_agents    FA_REPLACE_AGENTS in env, read by hooks/cloud-agent-intercept.py (PreToolUse on Agent):
                     unset = undecided (the hook asks ONCE, the first time a cloud session calls Agent)
@@ -120,8 +122,19 @@ def load() -> dict:
 
 
 def offered() -> bool:
-    st = load()
-    return st["plugin_active"] or st["override_present"]
+    return load()["plugin_active"]
+
+
+def clear_stale_override() -> list:
+    """Remove OUR security-review keys when the plugin is not active, so a hidden row never hides
+    live state. Returns the keys removed ([] when the plugin is active or nothing was set)."""
+    s = _read_json(settings_path())
+    if plugin_status(s)[0]:
+        return []
+    present = [k for k in _OWNED_KEYS if k in _env(s)]
+    if present:
+        _write_env(_OWNED_KEYS, {})
+    return present
 
 
 def next_state(current: int) -> int:

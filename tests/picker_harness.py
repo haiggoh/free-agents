@@ -96,7 +96,10 @@ class _StubbedEnv(unittest.TestCase):
                     "LA_HF_PARAMS_CACHE": str(t / "hf-params.json"),
                     # The catalog disk cache (T2) reads and writes at picker runtime: tests
                     # must never see nor poison the user's real ~/.local/state catalogs.
-                    "LA_REMOTE_CATALOG_CACHE_DIR": str(t / "catalog-cache")}
+                    "LA_REMOTE_CATALOG_CACHE_DIR": str(t / "catalog-cache"),
+                    # The picker reads AND (0.42.0, stale security-review cleanup) writes Claude
+                    # Code's settings.json at startup: never the user's real ~/.claude.
+                    "CLAUDE_CONFIG_DIR": str(t / "claude-config")}
 
     def launches(self):
         if not self.log.exists():
