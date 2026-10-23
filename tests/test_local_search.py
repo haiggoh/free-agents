@@ -120,7 +120,7 @@ class LocalReadableNames(unittest.TestCase):
             lab.update({i.id: i.label for i in g.items})
         self.assertTrue(lab["deepseek-r1-architect"].startswith("DeepSeek R1 Architect"), lab)
         self.assertTrue(lab["qwen-3.6-thinking"].startswith("Alibaba Qwen 3.6 Thinking"), lab)
-        self.assertIn("Kuaishou KAT V2.5 New", lab["kat-v2.5-new"])
+        self.assertIn("Kwaipilot KAT V2.5 New", lab["kat-v2.5-new"])
         self.assertIn("Gone Model 7B", lab["gone-model-7b"])
         for label in lab.values():
             self.assertNotRegex(label.split("  ")[0], r"[a-z]-[a-z]", label)

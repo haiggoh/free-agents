@@ -21,6 +21,14 @@ check() {
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/la-remote-auto-test.XXXXXX")"
 trap 'rm -rf "$TEST_DIR"' EXIT INT TERM HUP
 
+# Own keys dir with a fixture nvidia key: remote-session --check must never depend on the
+# ambient environment. Under the full gate an xdist worker inherited a LEAKED
+# LA_API_KEYS_DIR from another test module and every dry-run refused the provider
+# ("no credential for 'nvidia'", 2026-10-23).
+mkdir -p "$TEST_DIR/keys"
+printf 'fixture-not-a-real-key\n' > "$TEST_DIR/keys/nvidia"
+chmod 600 "$TEST_DIR/keys/nvidia"
+
 cat > "$TEST_DIR/claude" <<'STUBEOF'
 #!/usr/bin/env bash
 # Stub claude that writes its args to a file
@@ -35,10 +43,11 @@ run_remote_session() {
   local args="$3"
   local output_file="$4"
   
+  # shellcheck disable=SC2086  # $args is one string of words by this suite's calling contract
   if [ -n "$env_var" ]; then
-    env "$env_var=$env_val" PATH="$TEST_DIR:$PATH" "$REPO/bin/remote-session.sh" $args 2>&1 | tee "$output_file"
+    env "$env_var=$env_val" LA_API_KEYS_DIR="$TEST_DIR/keys" PATH="$TEST_DIR:$PATH" "$REPO/bin/remote-session.sh" $args 2>&1 | tee "$output_file"
   else
-    PATH="$TEST_DIR:$PATH" "$REPO/bin/remote-session.sh" $args 2>&1 | tee "$output_file"
+    LA_API_KEYS_DIR="$TEST_DIR/keys" PATH="$TEST_DIR:$PATH" "$REPO/bin/remote-session.sh" $args 2>&1 | tee "$output_file"
   fi
 }
 

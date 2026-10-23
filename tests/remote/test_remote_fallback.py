@@ -54,7 +54,12 @@ def load(name, filename):
 
 
 # Provider.key() falls back to ${LA_API_KEYS_DIR:-~/.api_keys}/<id>. Point it at an EMPTY temp
-# dir for the whole run, so "key unset" scenarios never read the user's real key files.
+# dir while this module's checks run, so "key unset" scenarios never read the user's real key
+# files. The reads are lazy, so the value is restored at the BOTTOM of this module: pytest runs
+# later tests in THIS process, and the leak poisoned them — an xdist worker's shell-suite
+# subprocess inherited a keys dir from here and remote-session refused its fixture provider
+# ("no credential for 'nvidia'", gate run 2026-10-23).
+_saved_keys_dir = os.environ.get("LA_API_KEYS_DIR")
 os.environ["LA_API_KEYS_DIR"] = _tempfile.mkdtemp(prefix="rf-keys-")
 
 core = load("rpc", "remote_provider_core.py")
@@ -510,6 +515,12 @@ check(reg.CATALOG_SCANABLE == {
     "sambanova", "modelscope", "streamlake",
     "cerebras", "github"},
       "catalog-scannable: 15 providers have a callable /models endpoint")
+
+# Restore the ambient env (see the _saved_keys_dir note at the top).
+if _saved_keys_dir is None:
+    os.environ.pop("LA_API_KEYS_DIR", None)
+else:
+    os.environ["LA_API_KEYS_DIR"] = _saved_keys_dir
 
 if __name__ == "__main__":
     sys.exit(1 if failed else 0)

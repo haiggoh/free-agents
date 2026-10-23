@@ -14,7 +14,7 @@ separate on purpose, user 2026-10-21), so this test is what stops them drifting:
 Usage: python3 tests/test_model_facts_drift.py [-v]   (needs pyyaml: run under the LiteLLM venv)
 """
 import json
-import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -37,12 +37,25 @@ class ModelFactsDrift(unittest.TestCase):
         cls.entries = {e["alias"]: e for e in reg["entries"]}
         cls.ids = {(e["provider"], e["model_id"]) for e in reg["entries"]}
         cls.providers = set(reg["providers"])
-        local = ""
-        for f in ("config/config.example.sh", "config/config.local.sh"):
-            p = ROOT / f
-            if p.is_file():
-                local += p.read_text()
-        cls.local_aliases = set(re.findall(r"^la_register\s+(\S+)", local, re.M))
+        # The registered LOCAL aliases, read the way the launchers read them (the live-config
+        # resolution in config-lib.sh), from a probe with the ambient overrides STRIPPED —
+        # an xdist worker can carry a leaked LA_CONFIG_DIR from an unrelated test module.
+        # Reading the tree's own files made this test worktree-state-dependent: a fresh
+        # worktree judged the user's personal aliases against the 9-model example roster
+        # (gate run 2026-10-23). When only example defaults are available there is no live
+        # registry to judge against, so the guard skips judgment (empty set).
+        probe = subprocess.run(
+            ["env", "-u", "LA_CONFIG_DIR", "-u", "LA_LIVE_CONFIG_DIR", "-u", "LA_USER_STATE_DIR",
+             "bash", "-c",
+             '. "$1" >/dev/null 2>&1; la_load_config >/dev/null 2>&1; '
+             'printf "%s\\t%s\\t%s" "${LA_ALIASES[*]:-}" "${LA_FALLBACK_CONFIG:-0}" "${LA_CONFIG_SOURCE:-}"',
+             "probe", str(ROOT / "config/config-lib.sh")],
+            capture_output=True, text=True)
+        cls.local_aliases: set[str] = set()
+        if probe.returncode == 0:
+            aliases, fallback, _source = (probe.stdout.split("\t", 2) + ["", "0", ""])[:3]
+            if fallback.strip() != "1":
+                cls.local_aliases = set(aliases.split())
 
     def test_broken_list_names_yaml_entries(self):
         for m in load("config/broken-nvidia-models.json")["models"]:
