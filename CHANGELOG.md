@@ -1,3 +1,40 @@
+## [0.42.1] — 2026-10-23
+
+### Fixed
+
+- **A tree's own `config.local.sh` outranks the machine state dir** (regression in 0.41.1:
+  found by the newly-gated shell suites). The state-wins precedence hijacked any tree that
+  HAD its own file — test sandboxes loaded the real machine roster instead of their fixture,
+  and a standalone install's seeded file would be shadowed the same way. Precedence is now:
+  explicit `LA_CONFIG_DIR` > the own tree's `config.local.sh` when present > the
+  machine-stable state dir > example defaults. One registry per machine comes from moving
+  the live file into the state dir, not from the state dir outranking an existing one.
+  The contract test now runs against controlled fake trees, so the own-tree half of the
+  contract no longer depends on which checkout runs it.
+- **Six shell test suites are green again** (and can no longer rot unseen — see next item).
+  The Rapid Auto Mode sandbox never copied `la-memguard-run.sh`, which the launcher sources
+  unconditionally — every dry-run assertion failed since that commit. The rtk-lane
+  pass-through case read the ambient `LA_RTK_HOOK` (every free-API
+  session exports it) and its real-rtk probe could hang on a caller's stdin. The hotswap
+  RAM-preflight and KV suites' scratch trees have no own config, so they loaded the
+  machine registry and scanned REAL ports (the preflight under test never fired) — both
+  now pin `LA_CONFIG_DIR` to the scratch tree, the documented override for exactly this.
+
+### Changed
+
+- **The ~50 bash test suites run in the pytest gates.** They predate the gates and were
+  never collected: a fixture could rot for weeks while every gate stayed green (six
+  suites red on 2026-10-23, one since the memguard phase-1 commit). Each suite is now one
+  parametrized pytest test — 48 suites, ~50 s wall under `-n auto`, mutation-checked
+  (re-breaking a fixture turns the collector red for that suite).
+- **Local names spell quantisation as brand + bits** (user choice 2026-10-23, grounded in
+  the model folders' own quantization configs): `kat-coder-oq6e` reads
+  `Kwaipilot KAT Coder OptiQ 6-bit`, `kat-coder-6xl` reads `Kuaipilot KAT Coder 6-bit XL`,
+  `bf16` reads `BF16`. The instruct (`-it`) and format (`-MLX`) tokens are dropped — every
+  chat model is instruct-tuned and the info box names the backend. **KAT Coder's team names
+  itself Kwaipilot on HuggingFace** (Kuaishou is the parent company); the list shows the
+  team's own name.
+
 ## [0.42.0] — 2026-10-23
 
 ### Changed
