@@ -37,7 +37,9 @@ VENDORS = {
     "meituan": "Meituan", "meituan-longcat": "Meituan", "ai21labs": "AI21", "upstage": "Upstage",
     "arcee-ai": "Arcee", "liquid": "Liquid AI", "inclusionai": "inclusionAI",
     "01-ai": "01.AI", "snowflake": "Snowflake", "databricks": "Databricks", "writer": "Writer",
-    "kwaipilot": "Kuaishou", "openrouter": "OpenRouter",   # its own free router
+    # KAT Coder's team names itself Kwaipilot on HuggingFace (Kuaishou is the parent company;
+    # the list shows the team's own name — user 2026-10-23).
+    "kwaipilot": "Kwaipilot", "openrouter": "OpenRouter",   # its own free router
 }
 
 # Model-family word (the name's first word) -> manufacturer, for ids with no vendor segment
@@ -53,15 +55,21 @@ FAMILIES = {
     "magistral": "Mistral", "ministral": "Mistral", "pixtral": "Mistral",
     "laguna": "Poolside", "granite": "IBM", "phi": "Microsoft",
     "claude": "Anthropic", "grok": "xAI", "minimax": "MiniMax", "mimo": "Xiaomi",
-    "kat": "Kuaishou", "seed": "ByteDance", "command": "Cohere", "north": "Cohere",
+    "kat": "Kwaipilot", "seed": "ByteDance", "command": "Cohere", "north": "Cohere",
 }
 
-# Words whose spelling is not plain capitalisation.
+# Words whose spelling is not plain capitalisation. An empty value DROPS the token: "it"
+# (instruct — every chat model is) and "mlx" (the format — the row's info box names the
+# backend) read as noise in a picker line (user-approved preview 2026-10-23).
+# Quantisation/profile tokens spell brand + bits (grounded in the model folders' own
+# quantization configs: oq6e/oq8e/oq6 = OptiQ 6/8-bit; 6xl = the 6-bit XL profile).
 WORDS = {
-    "glm": "GLM", "gpt": "GPT", "oss": "OSS", "gpt-oss": "GPT-OSS", "it": "IT", "vl": "VL",
-    "fp8": "FP8", "fp4": "FP4", "awq": "AWQ", "gguf": "GGUF", "mlx": "MLX", "moe": "MoE",
+    "glm": "GLM", "gpt": "GPT", "oss": "OSS", "gpt-oss": "GPT-OSS", "it": "", "vl": "VL",
+    "fp8": "FP8", "fp4": "FP4", "awq": "AWQ", "gguf": "GGUF", "mlx": "", "moe": "MoE",
     "deepseek": "DeepSeek", "minimax": "MiniMax", "mimo": "MiMo", "qwq": "QwQ",
     "kat": "KAT", "xs": "XS", "ai": "AI", "r1": "R1", "o3": "o3", "o4": "o4",
+    "optiq": "OptiQ", "oq6e": "OptiQ 6-bit", "oq8e": "OptiQ 8-bit", "oq6": "OptiQ 6-bit",
+    "6xl": "6-bit XL", "bf16": "BF16",
 }
 
 _SIZE = re.compile(r"^(\d+(?:\.\d+)?)([bmkt])$", re.I)        # 120b, 1.5b, 8x7b handled below
@@ -122,6 +130,7 @@ def readable(model_id: str, with_maker: bool = True) -> str:
     name = re.sub(r"(?i)gpt-oss", "gptoss", name)     # one word, written GPT-OSS
     toks = [t for t in re.split(r"[-_ ]+", name) if t]
     words = [WORDS["gpt-oss"] if t.lower() == "gptoss" else _word(t) for t in toks]
+    words = [w for w in words if w]          # dropped tokens (it, mlx) leave no double space
     out: list[str] = []
     for w in words:
         if out and re.fullmatch(r"A\d+(?:\.\d+)?B", w) and re.fullmatch(r"[\d.]+B", out[-1]):

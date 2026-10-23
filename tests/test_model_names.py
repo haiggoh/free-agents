@@ -36,6 +36,18 @@ class Readable(unittest.TestCase):
         "z-ai/glm-4.5v": "Z.ai GLM 4.5V",
         "mistral-medium-2604": "Mistral Medium 2604",
         "someone/odd-model-7b": "Odd Model 7B",           # unknown maker: no guessed prefix
+        # Local profile/quant tokens read as brand + bits (user 2026-10-23, from the model
+        # folders' own quantization configs: oq6e/oq8e/oq6 = OptiQ 6/8-bit, 6xl = 6-bit XL).
+        "kat-coder-oq6e": "Kwaipilot KAT Coder OptiQ 6-bit",
+        "kat-coder-oq8e": "Kwaipilot KAT Coder OptiQ 8-bit",
+        "kat-coder-6xl": "Kwaipilot KAT Coder 6-bit XL",
+        "gemma-4-31b-optiq": "Google Gemma 4 31B OptiQ",
+        "qwen-3.8-oq6": "Alibaba Qwen 3.8 OptiQ 6-bit",
+        "agents-a1-kimi-bf16": "Agents A1 Kimi BF16",
+        # The instruct (-it) and format (-MLX) suffixes are dropped: the row already says the
+        # backend, and every chat model is instruct-tuned (user-approved preview 2026-10-23).
+        # Size + active params keep the house hyphen convention (26B-A4B, like 550B-A55B).
+        "gemma-4-26b-a4b-it-MLX-8bit": "Google Gemma 4 26B-A4B 8-bit",
     }
 
     def test_cases(self):
