@@ -35,7 +35,7 @@ token lever saves, and every row does exactly what its label says on the lane it
 
 **Goals**
 - G1. Subagent routing on paid cloud sessions is configurable **per delegation path**, deterministic,
-  default **everything through free agents**.
+  default **free first, paid only after free options are honestly exhausted**.
 - G2. Bypass permissions can be made the **default permission mode** for cloud sessions from the Cloud
   screen, with a cost explanation shown only to users for whom it is true.
 - G3. A token-profile submenu: per lane, categories with levels, and a live, **measured** tally of the
@@ -102,20 +102,41 @@ token lever saves, and every row does exactly what its label says on the lane it
 The screen's rule [decided]: it lists only settings that change cloud sessions, not free sessions
 launched from csl.
 
-### A1. Subagent routing per delegation path [decided: per path, deterministic, default all free]
+### A1. Subagent routing per delegation path [decided: per path, deterministic]
 
-- One row per delegation path, each cycling **free / free, fall back to paid / paid** [decided
-  2026-10-23: the fallback is a per-path choice]. Default **free** (strict): when no free model can
-  answer, the call fails with the dispatch's reason and how to switch the path in csl, and never
-  spends paid tokens. "Free, fall back to paid" runs the native paid subagent only then, and says so
-  in the result (model and why). Paths, initially [my call]:
-  `Agent` subagents (incl. review agents) · Workflow / ultracode runs. More rows only if the
-  interception can tell them apart [verify].
-- Default for a user who never touched it: **free** on every path. The ask-once prompt is removed
-  (today: undecided → ask once → native forever, which contradicts the paid-session nudge).
-- Storage: `~/.claude/settings.json` `env`, like `FA_REPLACE_AGENTS` today [my call: one variable per
-  path, e.g. `FA_ROUTE_AGENT`, `FA_ROUTE_WORKFLOW`, values `free|free-fallback|paid`; `FA_REPLACE_AGENTS` read as a
-  legacy alias for the Agent path so existing settings keep working].
+One row per delegation path. Paths, initially [my call]: `Agent` subagents (incl. review agents) ·
+Workflow / ultracode runs; more rows only if the interception can tell them apart [verify]. Each row
+cycles through three modes [decided 2026-10-23], and each mode has an **info box** that says in plain
+words what it does, since the names alone were not clear enough:
+
+| Mode | What happens on that path | Info box (gist) |
+|---|---|---|
+| **Free first, paid as last resort** (DEFAULT) | The delegation runs on free models; the paid subagent runs only after free options were honestly exhausted (rule below), and the result says so with every attempt and its error. | "Runs on free models. Only if several free models really fail does this one task fall back to the paid model, and you are told." |
+| **Free only** | Free models only; if they are exhausted the call fails with the reason and how to change the mode. Never spends paid tokens. | "Never spends paid tokens on this kind of task. If no free model can answer, the task fails and says why." |
+| **Paid (free-agents stays out)** | No interception; the native paid subagent runs. The startup nudge no longer tells the agent to offload this path; free agents are used for it only when the user explicitly asks in the conversation. | "This kind of task always runs on your paid model. Free agents are used for it only if you ask for that yourself." |
+
+- Default for a user who never touched it: **Free first, paid as last resort** on every path. The
+  ask-once prompt is removed.
+- **"Honestly exhausted"** [my call, for the maintainer to check]: the dispatch walks the preference
+  order as today; only REAL attempts count (a request was sent and failed: quota/429 after one retry
+  that honours a Retry-After of at most 30 s, 5xx, timeout, or an empty/unusable answer). Entries
+  skipped for a missing key or missing weights do not count. The paid fallback is allowed once **at
+  least 3 real attempts on at least 2 different providers** have failed, or every available entry has
+  failed when fewer exist, and no new free attempt starts after a 10-minute wall-clock cap (local
+  models can take minutes). Numbers live in `config/dispatch-preferences.json` so they are tunable,
+  not code.
+- **Mechanism for the fallback** [verify]: today the hook denies the `Agent` call and the agent runs
+  `free-agent-tool.py` itself; the fallback therefore needs the tool to record a short-lived,
+  session-scoped "free exhausted" mark (with the attempt list) that the hook honours by letting the
+  NEXT native `Agent` call for that task through. Establish that the mark is session-scoped and expires,
+  so one exhaustion never opens paid routing for the rest of the session.
+- **The startup nudge follows the modes**: `hooks/offload-nudge.py` reads the per-path settings; a path
+  set to *Paid* is not described as offload-by-default, and a path set to *Free only* says it never
+  falls back. Otherwise a *Paid* path would still be offloaded by the agent on the nudge's advice.
+- Storage: `~/.claude/settings.json` `env` [my call: `FA_ROUTE_AGENT`, `FA_ROUTE_WORKFLOW`, values
+  `free-first|free-only|paid`; the legacy `FA_REPLACE_AGENTS=1` maps to `free-first`, `0` to `paid`].
+  Reach is cloud-only because the only readers (the intercept hook and the nudge) already skip FREE
+  sessions (`is_free_session`).
 - **[verify] before building the Workflow row**: whether workflow/ultracode agents pass through the
   `PreToolUse` `Agent` hook at all, or need their own interception point. If no interception point
   exists, the Workflow row is not offered (a row that cannot act is the anti-goal), and the gap is
@@ -227,8 +248,8 @@ until a measurement exists].
 ## 6b. Builder-check answers (independent review, DeepSeek V4.1 Flash, 2026-10-23)
 
 - **A1 reach** (answered): the routing variables live in `settings.json` `env` and so reach every
-  session, but the only reader is `hooks/cloud-agent-intercept.py`, which already passes FREE sessions
-  through (`is_free_session`, localhost base URL). The effect is cloud-only by that lane check; keep it.
+  session, but the only readers (`hooks/cloud-agent-intercept.py`, `hooks/offload-nudge.py`) already
+  pass FREE sessions through (`is_free_session`, localhost base URL). The effect is cloud-only.
 - **Probe representativeness** [my call]: eligibility depends on the endpoint and account, not on
   plugins or tools, but the endpoint itself is set at launch (JoyIA exports `ANTHROPIC_BASE_URL` only
   when `joyia agent claude` starts; `settings.json` holds none). So the probe runs **through the user's
