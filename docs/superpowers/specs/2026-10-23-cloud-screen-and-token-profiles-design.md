@@ -203,6 +203,14 @@ until a measurement exists].
 
 ## 6. Carry-overs and coordination
 
+- **Registry auto-sync leaves the OOM-protection screen** [decided 2026-10-23: it is not an
+  out-of-memory setting]. "Auto-sync local registry with the disk (no prompts)" (row `a`, setting
+  `memguard.registry_auto_sync`, exported as `LA_REGISTRY_AUTO_SYNC`) moves to the **Local screen**:
+  it runs when the Local model list loads (`bin/session_picker.py` ~728) and, when OFF, the
+  register / clean-up panels on that screen ask instead. The saved key and env stay as they are so no
+  setting resets [my call]; the row needs a key other than `a` (Auto-mode on the Local screen). Can
+  ship on its own before the rest of this release.
+
 - The GLM 5.3 Flash branch `fix/rapid-auto-mode-tests` (unpushed) ships as **0.42.1** before or
   independently of this release; this release takes the next minor number at build time.
 - Picker settings persistence (`csl-settings-persistence`, queue #2) overlaps B2's storage; build B2 on
