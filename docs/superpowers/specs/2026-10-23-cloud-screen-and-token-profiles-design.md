@@ -250,11 +250,16 @@ until a measurement exists].
 - **A1 reach** (answered): the routing variables live in `settings.json` `env` and so reach every
   session, but the only readers (`hooks/cloud-agent-intercept.py`, `hooks/offload-nudge.py`) already
   pass FREE sessions through (`is_free_session`, localhost base URL). The effect is cloud-only.
-- **Probe representativeness** [my call]: eligibility depends on the endpoint and account, not on
-  plugins or tools, but the endpoint itself is set at launch (JoyIA exports `ANTHROPIC_BASE_URL` only
-  when `joyia agent claude` starts; `settings.json` holds none). So the probe runs **through the user's
-  cloud launcher** in print mode: a configured launcher command (default: `joyia agent claude` when
-  installed, else `claude`), with `-p --permission-mode auto --output-format stream-json`. Env that
+- **Probe representativeness** [my call, revised by the maintainer 2026-10-23]: eligibility depends on
+  the endpoint and account, not on plugins or tools, but the endpoint is set at launch (JoyIA exports
+  `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` only into the child; `settings.json` holds none). The
+  probe runs **plain `claude`** with the cloud credentials loaded from a **credential source**, in order:
+  (1) `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` already in the environment, or a
+  native Claude login; (2) a configured "credential command" that prints the env as JSON, default
+  **`joyia agent claude --setup-only --json`** when `joyia` is installed (it prints the exports without
+  launching; recorded in memory `llm-gateway-budget-limit`). Then
+  `claude -p --permission-mode auto --output-format stream-json`. The token is passed only through the
+  child's environment, never on a command line, in a log, in the verdict cache or in a receipt. Env that
   changes eligibility (`CLAUDE_CODE_AUTO_MODE_SERVER`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`) is read
   from the same layers and shown with the result.
 - **One write rule for higher layers** [my call, revised by the 2026-10-23 decision]: token levers
