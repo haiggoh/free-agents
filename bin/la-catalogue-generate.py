@@ -12,6 +12,7 @@ Commands:
 """
 
 import sys
+import os
 import argparse
 try:
     import yaml  # needed by generate/validate/merge only; `acquisitions` is stdlib
@@ -23,7 +24,24 @@ from typing import Dict, List, Optional, Any
 REPO_ROOT = Path(__file__).parent.parent
 YAML_PATH = REPO_ROOT / "config" / "model-catalogue-context-list.yaml"
 DERIVED_PSV_PATH = REPO_ROOT / "config" / "model-catalogue-derived.psv"
-CONFIG_LOCAL_PATH = REPO_ROOT / "config" / "config.local.sh"
+
+
+def _config_local_path() -> Path:
+    """The LIVE config.local.sh (0.41.1): LA_LIVE_CONFIG_DIR when config-lib exported it,
+    else the machine-stable state dir when it holds one, else this repo's own — the same
+    resolution as config-lib.sh, so the merge view reads what csl actually reads."""
+    env = os.environ.get("LA_LIVE_CONFIG_DIR")
+    if env:
+        return Path(env) / "config.local.sh"
+    state = Path(os.environ.get("LA_USER_STATE_DIR", "")) if os.environ.get("LA_USER_STATE_DIR") \
+        else Path.home() / ".local" / "share" / "free-agents"
+    state_cfg = state / "config" / "config.local.sh"
+    if state_cfg.is_file():
+        return state_cfg
+    return REPO_ROOT / "config" / "config.local.sh"
+
+
+CONFIG_LOCAL_PATH = _config_local_path()
 
 # Required YAML fields for session models
 REQUIRED_SESSION_FIELDS = {"folder", "entry_type", "session_model", "context_window_tokens", "autocompaction_tokens"}

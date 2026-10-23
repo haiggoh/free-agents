@@ -21,8 +21,32 @@ if [[ -z "${LA_CONFIG_DIR:-}" ]]; then
         _cl_src="${0}"
     fi
     LA_CONFIG_DIR="$(cd "$(dirname "${_cl_src}")" && pwd)"
+    _LA_CONFIG_DIR_EXPLICIT=0
+else
+    _LA_CONFIG_DIR_EXPLICIT=1
 fi
 LA_ROOT="$(cd "$LA_CONFIG_DIR/.." && pwd)"
+
+# The LIVE config (0.41.1): config.local.sh is machine state that is deliberately GITIGNORED,
+# so a second copy of this code (an installed plugin, a fresh worktree) has none of it and
+# silently falls back to shipped example defaults — every registered model reads as "on disk,
+# not registered yet" there (user report 2026-10-23; the registry itself was never lost).
+# When a machine-stable state dir holds a config.local.sh, EVERY copy reads and writes that
+# ONE file (registrations and pins land in the same place no matter which copy ran). The own
+# tree stays authoritative where no state dir exists (standalone installs). An explicit
+# LA_CONFIG_DIR (tests, one-off overrides) still beats the state dir, so a test fixture can
+# never read real machine state. LA_CONFIG_DIR itself stays code-adjacent: LA_ROOT below
+# locates bin/install relative to it.
+LA_USER_STATE_DIR="${LA_USER_STATE_DIR:-$HOME/.local/share/free-agents}"
+_LA_STATE_CONFIG_DIR="$LA_USER_STATE_DIR/config"
+if [[ -n "${LA_LIVE_CONFIG_DIR:-}" ]]; then
+    :
+elif [[ "$_LA_CONFIG_DIR_EXPLICIT" == 0 && -f "$_LA_STATE_CONFIG_DIR/config.local.sh" ]]; then
+    LA_LIVE_CONFIG_DIR="$_LA_STATE_CONFIG_DIR"
+else
+    LA_LIVE_CONFIG_DIR="$LA_CONFIG_DIR"
+fi
+export LA_LIVE_CONFIG_DIR
 
 # --- roles: the STABLE vocabulary the routing rules refer to -------------------
 # The offload rules (skill + CLAUDE.md) route by ROLE, never by a specific model name, so the
@@ -526,12 +550,13 @@ la_get_autocompaction() {
   return 1
 }
 
-# Load config.local.sh (private) if it exists, else config.example.sh (shipped defaults).
+# Load the LIVE config.local.sh (see the LA_LIVE_CONFIG_DIR resolution above) if it exists,
+# else config.example.sh (shipped defaults) from the code tree.
 la_load_config() {
-  if [ -f "$LA_CONFIG_DIR/config.local.sh" ]; then
+  if [ -f "$LA_LIVE_CONFIG_DIR/config.local.sh" ]; then
     # shellcheck source=/dev/null
-    . "$LA_CONFIG_DIR/config.local.sh"
-    LA_CONFIG_SOURCE="config.local.sh"
+    . "$LA_LIVE_CONFIG_DIR/config.local.sh"
+    LA_CONFIG_SOURCE="$LA_LIVE_CONFIG_DIR/config.local.sh"
     LA_FALLBACK_CONFIG=0
   elif [ -f "$LA_CONFIG_DIR/config.example.sh" ]; then
     # shellcheck source=/dev/null
@@ -541,7 +566,7 @@ la_load_config() {
     # fallback notice without parsing the human-facing LA_CONFIG_SOURCE string.
     LA_FALLBACK_CONFIG=1
   else
-    echo "❌ local-agents: no config found in $LA_CONFIG_DIR" >&2
+    echo "❌ local-agents: no config found in $LA_LIVE_CONFIG_DIR (code tree: $LA_CONFIG_DIR)" >&2
     return 1
   fi
   # Machine defaults (only set if the config file didn't).

@@ -128,3 +128,18 @@ There are **two separate leaks**. Fix both.
      Fix direction: a machine-stable config dir (`~/.local/share/free-agents/config/`, beside
      the existing picker-venv) that wins over own-tree when it holds a config.local.sh, with a
      one-time migration seeded from the canonical checkout — one registry, no per-copy state.
+- 2026-10-23 01:35 — **Milestone 1 committed (`0168e0d`)**: backend-manager repo wiring
+  (DEFAULT_REPO + --repo on install + not-a-git-checkout remedy in tracked_repo_clean), both
+  tests mutation-checked.
+- 2026-10-23 01:50 — **Milestone 2 implemented + migrated**: config-lib resolves
+  LA_LIVE_CONFIG_DIR (explicit LA_CONFIG_DIR > machine-stable state dir when it holds a
+  config.local.sh > own tree); la_load_config + csl's register/tombstone writers + the
+  catalogue tool's merge view all follow it. tests/test_live_config_dir.sh 10/10
+  (mutation-checked; 4b self-skips until the resolution exists so the RED state can never
+  write into a real checkout), neighbors green (registry hygiene 26/26, inventory auto-scan
+  10/10). MIGRATED on this machine: ~/.local/share/free-agents/config/{config.local.sh
+  (mode 600 preserved),removed-models.local.psv} seeded from the canonical checkout; fixed
+  csl --inventory reads 45 rows / 0 auto-scanned through the new path.
+  NOTE for the user: until this branch merges, the TERMINAL picker (canonical checkout, old
+  code) still writes registrations into the canonical file — after the merge, run the
+  migration copy again (or register via the updated plugin picker) so both agree.

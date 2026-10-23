@@ -159,10 +159,11 @@ la_load_config || exit 1
 # --- registry hygiene: picker-offered registration and removal -------------------------------
 # The picker lists on-disk models the registry does not know (auto-scan) and needs a way to
 # make them launchable, and a way to retire registrations whose weights are gone from disk.
-# Both commands write ONLY $LA_CONFIG_DIR/config.local.sh (+ the tombstone), keep a timestamped
-# backup next to it, and verify the result — restoring the backup when the rewritten config
-# would not parse, so a broken write can never strand the user's model list.
-_LA_CFG="$LA_CONFIG_DIR/config.local.sh"
+# Both commands write ONLY the LIVE config ($LA_LIVE_CONFIG_DIR/config.local.sh — the
+# machine-stable one every copy of the code resolves to, 0.41.1) plus the tombstone, keep a
+# timestamped backup next to it, and verify the result — restoring the backup when the
+# rewritten config would not parse, so a broken write can never strand the user's model list.
+_LA_CFG="$LA_LIVE_CONFIG_DIR/config.local.sh"
 _cfg_mode() { stat -f '%Lp' "$1" 2>/dev/null; }
 _register_model_cmd() {
   local folder="${1:-}"
@@ -271,7 +272,7 @@ _unregister_model_cmd() {
   done
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$_LA_CFG"
-  local tomb="$LA_CONFIG_DIR/removed-models.local.psv"
+  local tomb="$LA_LIVE_CONFIG_DIR/removed-models.local.psv"
   for a in "$@"; do
     printf '%s|%s|%s|%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$a" "${LA_SUBDIR[$a]:-}" \
       "weights removed from disk; retired via csl" >> "$tomb"
