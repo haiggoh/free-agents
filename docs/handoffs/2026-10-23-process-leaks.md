@@ -143,3 +143,14 @@ There are **two separate leaks**. Fix both.
   NOTE for the user: until this branch merges, the TERMINAL picker (canonical checkout, old
   code) still writes registrations into the canonical file — after the merge, run the
   migration copy again (or register via the updated plugin picker) so both agree.
+- 2026-10-23 02:20 — **Milestone 3 committed (`e2a17e1`) + release prep pushed (`ef8b6e6`)**:
+  Leak A guard+discovery-kill (mutation-checked), Leak B watchdog (mutation-checked), gates
+  green (840 main / 57 litellm contract / 77 picker), 0 stub orphans after runs; 0.41.1
+  bumped in all four surfaces (test_version_consistency 4/4); branch
+  `fix/test-process-leaks` pushed — **stopped at the handover boundary: merge, tag and
+  release are the user's / paid session's step.** Machine state: 4 launchd-parented tail
+  orphans (3–6 days old) killed; 7 monitor/tail pairs with a LIVE or zombie parent pid left
+  untouched (verify their claude is really gone before killing — a budget-killed session can
+  leave a zombie that keeps the pid chain alive). KNOWN PRE-EXISTING (not this branch):
+  `bash tests/test_rapid_auto_mode.sh` fails 6/39 at pristine f7a8066 too — separate defect,
+  reported to the user.
