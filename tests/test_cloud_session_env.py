@@ -218,3 +218,60 @@ class CloudScreenTests(_Sandbox):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RouteModes(_Sandbox):
+    """Per-path routing modes (0.43.0, cloud-screen plan Task 3): agent and workflow each route
+    free-first (default), free-only or paid, stored in settings.json env. The legacy
+    FA_REPLACE_AGENTS key maps onto the agent path and is retired by the first route write."""
+
+    def test_route_defaults_to_free_first(self):
+        self.assertEqual(cse.route("agent"), "free-first")
+        self.assertEqual(cse.route("workflow"), "free-first")
+
+    def test_route_rejects_an_unknown_path(self):
+        with self.assertRaises(ValueError):
+            cse.route("bash")
+
+    def test_legacy_replace_agents_maps_1_free_first_0_paid(self):
+        # Review Focus 4: an upgrading user with FA_REPLACE_AGENTS=0 reads as paid — no surprise
+        # interception and no offload nudge for that path. The legacy key never touches workflow.
+        self.write_settings({"env": {"FA_REPLACE_AGENTS": "1"}})
+        self.assertEqual(cse.route("agent"), "free-first")
+        self.assertEqual(cse.route("workflow"), "free-first")
+        self.write_settings({"env": {"FA_REPLACE_AGENTS": "0"}})
+        self.assertEqual(cse.route("agent"), "paid")
+        self.assertEqual(cse.route("workflow"), "free-first")
+
+    def test_settings_env_beats_the_passed_env(self):
+        # The hook passes its process env; the registered state is authoritative over it.
+        self.write_settings({"env": {cse.ROUTE_ENV["agent"]: "free-only"}})
+        self.assertEqual(cse.route("agent", {cse.ROUTE_ENV["agent"]: "paid"}), "free-only")
+
+    def test_save_route_round_trips_and_drops_the_legacy_key(self):
+        self.write_settings({"env": {"FA_REPLACE_AGENTS": "0", "KEEP": "1"}})
+        cse.save_route("agent", "free-only")
+        self.assertEqual(cse.route("agent"), "free-only")
+        env = json.loads(self.settings.read_text())["env"]
+        self.assertNotIn("FA_REPLACE_AGENTS", env)            # retired by the first route write
+        self.assertEqual(env.get("KEEP"), "1")                # owned-key editing, nothing else
+        cse.save_route("workflow", "paid")
+        self.assertEqual(cse.route("workflow"), "paid")
+        self.assertEqual(cse.route("agent"), "free-only")     # paths are independent
+
+    def test_invalid_route_writes_nothing(self):
+        before = self.settings.read_text() if self.settings.exists() else None
+        with self.assertRaises(ValueError):
+            cse.save_route("agent", "bogus")
+        with self.assertRaises(ValueError):
+            cse.save_route("bogus", "paid")
+        after = self.settings.read_text() if self.settings.exists() else None
+        self.assertEqual(before, after)
+
+    def test_corrupt_settings_refuses_to_write(self):
+        # Review Focus 2: a non-object settings.json must never be rewritten by a route save.
+        self.settings.write_text("[]")
+        before = self.settings.read_text()
+        with self.assertRaises(ValueError):
+            cse.save_route("agent", "paid")
+        self.assertEqual(self.settings.read_text(), before)

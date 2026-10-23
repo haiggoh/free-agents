@@ -166,6 +166,43 @@ def save_replace_agents(value: str | None) -> Path:
     return _write_env((REPLACE_AGENTS_KEY,), {} if value is None else {REPLACE_AGENTS_KEY: value})
 
 
+# --- per-path routing modes (0.43.0, cloud-screen plan Task 3) -------------------------------
+# Each interceptable path routes independently: free-first (a free attempt first, one paid
+# escape after honest exhaustion — the fallback mark), free-only (never paid), paid (this
+# module stays out). Stored in settings.json env; the legacy FA_REPLACE_AGENTS key maps onto
+# the agent path and is retired by the first route write.
+ROUTE_PATHS = ("agent", "workflow")
+ROUTE_ENV = {"agent": "FA_ROUTE_AGENT", "workflow": "FA_ROUTE_WORKFLOW"}
+ROUTE_MODES = ("free-first", "free-only", "paid")
+
+
+def route(path: str, env: dict | None = None) -> str:
+    """The mode for `path`: settings.json env merged over `env` (the registered state is
+    authoritative over a hook's process env), then the legacy FA_REPLACE_AGENTS mapping
+    (agent only: "1" -> free-first, "0" -> paid), then the free-first default."""
+    if path not in ROUTE_PATHS:
+        raise ValueError(f"unknown route path: {path!r} (allowed: {', '.join(ROUTE_PATHS)})")
+    merged = dict(env or {})
+    merged.update(_env(_read_json(settings_path())))
+    if path == "agent":
+        legacy = merged.get(REPLACE_AGENTS_KEY)
+        if legacy is not None and str(legacy) in ("0", "1"):
+            return "paid" if str(legacy) == "0" else "free-first"
+    v = merged.get(ROUTE_ENV[path])
+    return v if v in ROUTE_MODES else "free-first"
+
+
+def save_route(path: str, mode: str) -> Path:
+    """Persist the mode for `path`; raises ValueError and writes nothing on an unknown
+    path or mode. Writing the agent path retires the legacy FA_REPLACE_AGENTS key."""
+    if path not in ROUTE_PATHS:
+        raise ValueError(f"unknown route path: {path!r} (allowed: {', '.join(ROUTE_PATHS)})")
+    if mode not in ROUTE_MODES:
+        raise ValueError(f"unknown route mode: {mode!r} (allowed: {', '.join(ROUTE_MODES)})")
+    owned = (ROUTE_ENV[path], REPLACE_AGENTS_KEY) if path == "agent" else (ROUTE_ENV[path],)
+    return _write_env(owned, {ROUTE_ENV[path]: mode})
+
+
 def _write_env(owned: tuple, updates: dict) -> Path:
     """Drop `owned` env keys, apply `updates`; preserve every other byte, the mode and symlinks."""
     path = settings_path()
@@ -221,11 +258,17 @@ def main(argv=None) -> int:
         epilog="Env: CLAUDE_CONFIG_DIR selects the Claude Code config dir (default ~/.claude).")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("show", help="print plugin status, the current mode and the env keys behind it")
-    s = sub.add_parser("set", help="set security_review {0,1,2} or replace_agents {0,1,unset}")
-    s.add_argument("key", choices=["security_review", "replace_agents"])
-    s.add_argument("value", choices=["0", "1", "2", "unset"])
+    s = sub.add_parser("set", help="set security_review {0,1,2} or replace_agents {0,1,unset} or route <path> <mode>")
+    s.add_argument("key", choices=["security_review", "replace_agents", "route"])
+    s.add_argument("value", choices=["0", "1", "2", "unset", "agent", "workflow"])
+    s.add_argument("extra", nargs="?", default=None,
+                   help="route mode (with `set route <path>`): free-first, free-only or paid")
     a = p.parse_args(argv)
-    if a.cmd == "set" and a.key == "replace_agents":
+    if a.cmd == "set" and a.key == "route":
+        if a.extra not in ROUTE_MODES:
+            p.error(f"route takes a path (agent, workflow) and a mode ({', '.join(ROUTE_MODES)})")
+        print(f"updated {save_route(a.value, a.extra)}")
+    elif a.cmd == "set" and a.key == "replace_agents":
         if a.value not in ("0", "1", "unset"):
             p.error("replace_agents takes 0, 1 or unset")
         print(f"updated {save_replace_agents(None if a.value == 'unset' else a.value)}")
@@ -246,6 +289,8 @@ def main(argv=None) -> int:
         if k in env:
             print(f"  settings.json env: {k}={env[k]}")
     print(f"replace_agents = {REPLACE_AGENTS_LABELS[replace_agents()]}")
+    for path in ROUTE_PATHS:
+        print(f"route[{path}] = {route(path)}")
     return 0
 
 
