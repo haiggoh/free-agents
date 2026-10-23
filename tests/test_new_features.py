@@ -517,18 +517,23 @@ class ModelParamCountUnits(unittest.TestCase):
 
 
 class MemoryGuardSettings(PilotCase):
-    def test_home_u_opens_guard_and_a_change_is_saved_and_reloaded(self):
+    def test_local_u_opens_guard_and_a_change_is_saved_and_reloaded(self):
+        # Local lane only (user 2026-10-23): reached from the Local screen, not from Home.
         async def s(app, pilot, h):
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
             await h.press("u")
-            await h.wait_text("Memory guard (local sessions)")
+            await h.wait_text("RAM usage out-of-memory protection (local sessions)")
             await h.press("a")                                  # auto-sync OFF -> ON
             await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
             self.assertEqual(self.saved_state()["memguard"], {"registry_auto_sync": True})
             await h.press("escape")
-            await h.wait_screen("HomeScreen")                   # Escape returns, never quits
+            await h.wait_screen("LocalScreen")                  # Escape returns, never quits
         self.run_picker(s, start="home")
         # A fresh picker reads it back.
         async def again(app, pilot, h):
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
             await h.press("u")
             await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
         self.run_picker(again, start="home")

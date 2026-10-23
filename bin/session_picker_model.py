@@ -746,6 +746,11 @@ def _common_toggles(s: Settings, include_watcher: bool):
     return acts
 
 
+# User-facing name of the memory guard (user 2026-10-23): "memory guard" read like memory.md /
+# auto-memory. Internal keys stay "memguard" / LA_MEMGUARD_* so saved settings keep working.
+OOM_PROTECTION_NAME = "RAM usage out-of-memory protection"
+
+
 def _tool_actions(backend: bool = True, local_session: bool = False, home: bool = False):
     # The backend manager drives LOCAL runtimes (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM),
     # so the Remote lane does not offer it (user, 2026-10-04).
@@ -755,9 +760,10 @@ def _tool_actions(backend: bool = True, local_session: bool = False, home: bool 
         Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
                lambda: Nav("runtime_manager"), section="tools"),
     ]
-    if local_session or home:
-        # The memory guard protects LOCAL sessions only, so Remote does not offer it.
-        acts.append(Action("u", f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}Memory guard", lambda: Nav("memguard"),
+    if local_session:
+        # It protects LOCAL sessions only, so only the Local screen offers it — not Remote, and not
+        # Home either, where it read as a global setting (user 2026-10-23).
+        acts.append(Action("u", f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}{OOM_PROTECTION_NAME}", lambda: Nav("memguard"),
                            section="tools"))
     if not local_session:
         acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section="tools"))
@@ -1785,13 +1791,14 @@ class RateLimiterScreen(Screen):
 
 
 class MemoryGuardScreen(Screen):
-    """Memory guard settings, persisted in session-menu.local.json (memguard, schema 5).
+    """RAM usage out-of-memory protection settings (internally "memguard"), persisted in
+    session-menu.local.json (memguard, schema 5).
 
     The launchers export these as LA_MEMGUARD_* (session_menu_state.py memguard-env); a variable
     the user exported still wins. Every cycle includes sms.DEFAULT_MEMGUARD, so the screen never
     shows a value the guard does not use.
     """
-    title = f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}Memory guard (local sessions)"
+    title = f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}{OOM_PROTECTION_NAME} (local sessions)"
     SOFT_STEPS = (75, 80, 85, 90)
     HARD_STEPS = (90, 93, 95, 97)
     QUIET_STEPS = (2, 3, 5, 10)
@@ -1834,7 +1841,7 @@ class MemoryGuardScreen(Screen):
         def onoff(v):
             return "ON" if v else "OFF"
         acts = [
-            Action("g", f"Memory guard: {onoff(on)}", lambda: self._toggle("enabled")),
+            Action("g", f"{OOM_PROTECTION_NAME}: {onoff(on)}", lambda: self._toggle("enabled")),
             Action("t", f"Start sessions inside tmux (lets the guard type /compact): {onoff(self.value('tmux'))}",
                    lambda: self._toggle("tmux"), enabled=on),
             Action("s", f"Compact at RAM ≥ {self.value('soft_pct')}% (when the session is idle)",

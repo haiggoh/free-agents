@@ -206,7 +206,7 @@ def decide(
         return actions, new_state
 
     reason_str = (
-        f"Memory guard: RAM at {pct}% of the {cap:g} GB ceiling — compacting to keep this session alive"
+        f"OOM protection: RAM at {pct}% of the {cap:g} GB ceiling — compacting to keep this session alive"
     )
 
     old_pending = state.get("pending", {})
@@ -298,7 +298,7 @@ def decide_abort(sessions: list[dict[str, Any]], state: dict[str, Any], now: flo
         st.setdefault("last_compact_at", {})[sid] = now
         st["inflight"] = {"id": sid, "at": now}
         actions.append({"kind": "compact", "session": sid, "level": "abort",
-                        "reason": "Memory guard: the last turn hit the backend's memory limit — "
+                        "reason": "OOM protection: the last turn hit the backend's memory limit — "
                                   + ("compacting now, then continuing automatically" if auto_continue
                                      else "compacting now; send your next prompt when it is done")})
     for sid, w in list(st["await_continue"].items()):

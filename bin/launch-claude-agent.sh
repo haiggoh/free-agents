@@ -426,7 +426,7 @@ if [ "${LA_MEMGUARD_WINDOW}" = "1" ] && [ -z "${LA_AUTO_COMPACT_WINDOW:-}" ] && 
         --soft-pct "${MG_SOFT:-85}" --context-tokens "$effective" 2>/dev/null || true)"
     if [ -n "$MG_WINDOW" ]; then
         export LA_AUTO_COMPACT_WINDOW="$MG_WINDOW"
-        echo "🧠 Memory guard: RAM-calibrated auto-compact window = $MG_WINDOW tokens (seeded figures; LA_MEMGUARD_WINDOW=1)."
+        echo "🧠 RAM usage out-of-memory protection: RAM-calibrated auto-compact window = $MG_WINDOW tokens (seeded figures; LA_MEMGUARD_WINDOW=1)."
     fi
 fi
 
@@ -524,11 +524,11 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     [ -n "${LA_CLAUDE_TOOLS:-}" ] && echo "  Tools         : $LA_CLAUDE_TOOLS"
     [ -n "${LA_AUTO_COMPACT_WINDOW:-}" ] && echo "  Autocompact   : $LA_AUTO_COMPACT_WINDOW"
     if [ "${LA_MEMGUARD_WINDOW:-0}" = "1" ] && [ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]; then
-        echo "  Memory guard  : window ON ($LA_AUTO_COMPACT_WINDOW), KV precision $MG_KV_CUR"
+        echo "  OOM protection: window ON ($LA_AUTO_COMPACT_WINDOW), KV precision $MG_KV_CUR"
     elif [ "${LA_MEMGUARD_WINDOW:-0}" = "1" ]; then
-        echo "  Memory guard  : window ON but NOT SET (backend ${LA_CUR_SERVE:-rapid} uncalibrated, no manifest context, or context below the 100k floor), KV precision $MG_KV_CUR"
+        echo "  OOM protection: window ON but NOT SET (backend ${LA_CUR_SERVE:-rapid} uncalibrated, no manifest context, or context below the 100k floor), KV precision $MG_KV_CUR"
     else
-        echo "  Memory guard  : window off (LA_MEMGUARD_WINDOW=0), KV precision $MG_KV_CUR"
+        echo "  OOM protection: window off (LA_MEMGUARD_WINDOW=0), KV precision $MG_KV_CUR"
     fi
     [ -n "${LA_MCP_CONFIG:-}" ] && echo "  MCP config    : $LA_MCP_CONFIG"
     [ -n "${LA_TEMPERATURE:-}" ] && echo "  Temperature   : $LA_TEMPERATURE"

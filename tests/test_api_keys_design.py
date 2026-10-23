@@ -278,8 +278,15 @@ class HomeScreenCleanTests(unittest.TestCase):
             sections[a.section] = sections.get(a.section, 0) + 1
 
         self.assertEqual(sections.get("lanes", 0), 2)
-        self.assertEqual(sections.get("tools", 0), 7)   # + Memory guard (0.38.0)
+        self.assertEqual(sections.get("tools", 0), 6)   # OOM protection moved to the Local screen (0.42.0)
         self.assertEqual(sections.get("nav", 0), 1)
+
+    def test_oom_protection_is_local_only(self):
+        """It protects LOCAL sessions only, so Home does not list it and Local does (0.42.0)."""
+        self.assertNotIn("u", {a.key for a in m.HomeScreen(self.settings).actions()})
+        local = {a.key: a.label for a in m.LocalScreen(self.settings, []).actions()}
+        self.assertIn("RAM usage out-of-memory protection", local.get("u", ""))
+        self.assertNotIn("Memory guard", " ".join(local.values()))
 
 
 class LocalScreenMCPTests(unittest.TestCase):

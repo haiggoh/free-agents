@@ -202,7 +202,7 @@ def test_run_once_end_to_end(tmp_path):
 
     assert inj_out.exists()
     inj_text = inj_out.read_text()
-    assert "test-sess /compact Memory guard: RAM at 90% of the 100 GB ceiling" in inj_text
+    assert "test-sess /compact OOM protection: RAM at 90% of the 100 GB ceiling" in inj_text
 
     log_file = state_dir / "watchdog.log"
     assert log_file.exists()

@@ -257,7 +257,7 @@ MG_KV="$(python3 "$HOTSWAP_DIR/session_menu_state.py" kv-get "$MODEL_NAME" 2>/de
 MG_KV_FLAGS=""
 if [ "$SERVE" = "rapid" ] && [ "$MG_KV" != "auto" ]; then
     if ! MG_KV_FLAGS="$(python3 "$HOTSWAP_DIR/la-memguard-window.py" kv-flags --backend rapid --model-id "${LA_REPO[$MODEL_NAME]:-$MODEL_DIR}" --kv "$MG_KV")"; then
-        echo "🛑 Not launching $MODEL_NAME — the memory guard refused its saved KV precision." >&2
+        echo "🛑 Not launching $MODEL_NAME — the RAM usage out-of-memory protection refused its saved KV precision." >&2
         echo "   Back to the backend default with:  session_menu_state.py kv-set $MODEL_NAME auto" >&2
         exit 1
     fi
@@ -362,7 +362,7 @@ if [ "$SERVE" = "rapid" ]; then
     # architecture (rapid-mlx rejects explicit int8/int4 for sliding-window and MLA models, so a
     # server started with it would die at startup anyway).
     if ! MG_KV_FLAGS="$(python3 "$HOTSWAP_DIR/la-memguard-window.py" kv-flags --backend rapid --model-id "${LA_REPO[$MODEL_NAME]:-$MODEL_DIR}" --kv "$MG_KV")"; then
-        echo "🛑 Not launching $MODEL_NAME — the memory guard refused its saved KV precision." >&2
+        echo "🛑 Not launching $MODEL_NAME — the RAM usage out-of-memory protection refused its saved KV precision." >&2
         echo "   Back to the backend default with:  session_menu_state.py kv-set $MODEL_NAME auto" >&2
         exit 1
     fi
@@ -721,7 +721,7 @@ if [ "$CUDA_TIER" = "B" ]; then
         fi
 
         if ! MG_KV_FLAGS="$(python3 "$HOTSWAP_DIR/la-memguard-window.py" kv-flags --backend llama --model-id "${LA_REPO[$MODEL_NAME]:-$MODEL_DIR}" --kv "$MG_KV")"; then
-            echo "🛑 Not launching $MODEL_NAME — the memory guard refused its saved KV precision ($MG_KV)." >&2
+            echo "🛑 Not launching $MODEL_NAME — the RAM usage out-of-memory protection refused its saved KV precision ($MG_KV)." >&2
             echo "   Back to the backend default with:  session_menu_state.py kv-set $MODEL_NAME auto" >&2
             exit 1
         fi
@@ -762,7 +762,7 @@ if [ "$CUDA_TIER" = "C" ] || [ "$LA_HARDWARE" = "cpu-only" ]; then
     fi
 
     if ! MG_KV_FLAGS="$(python3 "$HOTSWAP_DIR/la-memguard-window.py" kv-flags --backend llama --model-id "${LA_REPO[$MODEL_NAME]:-$MODEL_DIR}" --kv "$MG_KV")"; then
-        echo "🛑 Not launching $MODEL_NAME — the memory guard refused its saved KV precision ($MG_KV)." >&2
+        echo "🛑 Not launching $MODEL_NAME — the RAM usage out-of-memory protection refused its saved KV precision ($MG_KV)." >&2
         echo "   Back to the backend default with:  session_menu_state.py kv-set $MODEL_NAME auto" >&2
         exit 1
     fi

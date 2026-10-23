@@ -252,7 +252,7 @@ Newest first. `CHANGELOG.md` has every release in full.
 - **0.38.1**: remote sessions work past the first prompt on every keyed provider (the
   chat/completions switch LiteLLM actually reads); a native Anthropic lane, chosen per model, for
   OpenRouter, Kilo, Z.ai and LLM7; account refusals (balance, card) shown at once as a named 402.
-- **0.38.0**: the [memory guard](#the-memory-guard-auto-compact-instead-of-a-dead-session-0380):
+- **0.38.0**: the [RAM usage out-of-memory protection](#ram-usage-out-of-memory-protection-auto-compact-instead-of-a-dead-session-0380) (called the memory guard before 0.42.0):
   local sessions compact before they run out of RAM; per-model KV cache precision.
 
 - **0.29.x**: acquisition-catalogue reader with load-time validation; backend-manager CLI parity
@@ -1016,10 +1016,11 @@ for genuinely high-risk actions. And the airtight offline proof (block the gatew
 still outstanding; the evidence above is a positive observation of the request arriving locally, not
 a demonstration that no fallback path exists.
 
-### The memory guard: auto-compact instead of a dead session (0.38.0)
+### RAM usage out-of-memory protection: auto-compact instead of a dead session (0.38.0)
 
 A local model that runs out of RAM mid-turn kills the session (oMLX aborts the request; other
-backends wedge or get OOM-killed). The memory guard compacts the session before that happens:
+backends wedge or get OOM-killed). The out-of-memory protection (internally `memguard`; named the
+memory guard before 0.42.0) compacts the session before that happens:
 
 - **Watchdog** (`bin/la-memguard.py`, one per machine). It reads the same wired-vs-Metal-cap figure as
   the status line. Above the soft threshold (default 85%) it types `/compact` into the **idle**
@@ -1036,7 +1037,8 @@ backends wedge or get OOM-killed). The memory guard compacts the session before 
   derives the token count at which the model's KV would reach the soft threshold and sets the
   auto-compact window to it. An explicit `LA_AUTO_COMPACT_WINDOW` always wins.
 
-Configure it in the picker (`csl`, **Memory guard** screen, `u` on Home or Local): on/off, tmux,
+Configure it in the picker (`csl`, **RAM usage out-of-memory protection** screen, `u` on the Local
+screen; it affects local sessions only): on/off, tmux,
 soft/hard thresholds, quiet window, auto-continue. An environment variable you export
 (`LA_MEMGUARD_SOFT_PCT`, `LA_MEMGUARD_HARD_PCT`, `LA_MEMGUARD_QUIET_S`, …) beats the saved setting.
 `LA_MEMGUARD=0` skips the guard for one launch.
