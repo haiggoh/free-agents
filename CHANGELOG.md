@@ -1,3 +1,40 @@
+## [0.41.1] — 2026-10-23
+
+### Fixed
+
+- **Rapid-MLX updates actually take effect now** (user report 2026-10-23: "can't get Rapid-MLX
+  to update in the backend manager"). The backend manager's only update route — install a
+  release, then promote the pins — could never promote: nothing wired the documented
+  "default: script repository" into the manager, the `install` subparser had no `--repo`, so
+  `install_version` silently left `pin_update: "pending"` and `promote` died with
+  "Repository required for pin promotion". The launcher kept running the pinned old version
+  no matter what was installed. The repo is now resolved once and wired everywhere;
+  `--repo` exists on `install` too. When the resolved repo is not a git checkout (an
+  installed plugin copy is a derived cache), the refusal says so and names the remedy
+  instead of a generic git error — pin edits there would be lost on the next update.
+- **Every copy of the code reads ONE live registry** (user report 2026-10-23: local sessions
+  listed registered models as "on disk, not registered yet"). `config.local.sh` is
+  deliberately gitignored machine state, so the installed plugin copy (and any fresh
+  worktree) found none and fell back to the shipped example defaults — 9 default models
+  registered, every other on-disk model falsely "not registered". The real registry was
+  never lost. config-lib now resolves a live config dir: an explicit `LA_CONFIG_DIR`
+  (tests) still wins, then a machine-stable state dir
+  (`~/.local/share/free-agents/config`, beside the picker venv) when it holds a
+  `config.local.sh`, then the own tree as before. The loader and csl's register/tombstone
+  writers all follow it, so registrations and pins land in the same file no matter which
+  copy ran. On this machine the registry and the removed-models tombstone were migrated
+  into the state dir (mode-preserving copy) — note: registrations made from the TERMINAL
+  picker before this version is merged still write into the canonical checkout's file.
+- **Tests no longer leak stub LiteLLM proxies** (the "71 orphaned processes" that started
+  this work). A swap test overwrites a proxy pidfile with a foreign pid, so tearDown's
+  pidfile pass could not reach the real stub; tearDown now also kills by matching the
+  test's own temp dir, and a guard fails if any stub of the run's tmp path survives.
+- **Remote sessions no longer leave their telemetry monitor and `tail -f` behind** (48
+  measured on 2026-10-20, still orphan pairs up to 2 days old on 2026-10-23). The wrapper
+  `exec`s claude, so its EXIT trap can never fire; the monitor now watches for the
+  exec'd claude to exit (reparenting to init) and kills its own `tail` pipeline — by
+  parent scope only, never by name, so a live session's monitor is untouchable.
+
 ## [0.41.0] — 2026-10-22
 
 ### Changed — local models read as names too
