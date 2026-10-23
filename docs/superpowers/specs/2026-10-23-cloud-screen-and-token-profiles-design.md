@@ -104,13 +104,17 @@ launched from csl.
 
 ### A1. Subagent routing per delegation path [decided: per path, deterministic, default all free]
 
-- One row per delegation path, each cycling **free / paid**. Paths, initially [my call]:
+- One row per delegation path, each cycling **free / free, fall back to paid / paid** [decided
+  2026-10-23: the fallback is a per-path choice]. Default **free** (strict): when no free model can
+  answer, the call fails with the dispatch's reason and how to switch the path in csl, and never
+  spends paid tokens. "Free, fall back to paid" runs the native paid subagent only then, and says so
+  in the result (model and why). Paths, initially [my call]:
   `Agent` subagents (incl. review agents) · Workflow / ultracode runs. More rows only if the
   interception can tell them apart [verify].
 - Default for a user who never touched it: **free** on every path. The ask-once prompt is removed
   (today: undecided → ask once → native forever, which contradicts the paid-session nudge).
 - Storage: `~/.claude/settings.json` `env`, like `FA_REPLACE_AGENTS` today [my call: one variable per
-  path, e.g. `FA_ROUTE_AGENT`, `FA_ROUTE_WORKFLOW`, values `free|paid`; `FA_REPLACE_AGENTS` read as a
+  path, e.g. `FA_ROUTE_AGENT`, `FA_ROUTE_WORKFLOW`, values `free|free-fallback|paid`; `FA_REPLACE_AGENTS` read as a
   legacy alias for the Agent path so existing settings keep working].
 - **[verify] before building the Workflow row**: whether workflow/ultracode agents pass through the
   `PreToolUse` `Agent` hook at all, or need their own interception point. If no interception point
@@ -173,11 +177,13 @@ user cycles a level, the tally updates and each row shows the percentage it save
 - **Free lanes** (local, remote): csl launches these, so it can pass flags (`--tools`,
   `--strict-mcp-config` / `--mcp-config`) and a `--settings` profile directly. Choices persist in csl's
   own store (`session-menu.local.json`).
-- **Cloud lane**: csl does not launch cloud sessions. When a launcher passes a `--settings` profile that
-  csl can identify (today `~/.claude/launch-profiles/lean-cloud-general.json`), csl edits **that file**,
-  because it outranks `~/.claude/settings.json`; otherwise it edits `~/.claude/settings.json`.
-  [verify] how csl identifies the active profile (configured path in csl's store [my call], not
-  guessed from running processes).
+- **Cloud lane** [decided 2026-10-23: requires a cloud profile]: csl does not launch cloud sessions,
+  and `~/.claude/settings.json` is read by EVERY session, csl's free ones included, where list keys
+  (e.g. permission deny rules) merge and cannot be undone. So the cloud lane's token choices are
+  written **only into a registered cloud profile** (a `--settings` file; path kept in csl's store,
+  e.g. the maintainer's `lean-cloud-general.json`). Without one, the cloud rows offer to CREATE
+  `~/.claude/launch-profiles/csl-cloud.json` and show the exact `--settings <path>` addition for the
+  user's launcher; until a launcher passes it, plain cloud sessions are untouched, and the rows say so.
 - **[verify] cloud-lane reach per category**: tools and MCPs are launch flags. Establish which
   settings-file keys can reduce them (e.g. permission deny rules for whole tools, MCP server enable/
   disable keys, `enabledPlugins`) and whether they actually remove the definitions from the prefill or
@@ -217,6 +223,42 @@ until a measurement exists].
   the read/write-symmetric store that item establishes, or fix the symmetry for the new rows here.
 - Every new picker test runs under the harness with `CLAUDE_CONFIG_DIR` sandboxed; the conftest
   tripwire must stay green.
+
+## 6b. Builder-check answers (independent review, DeepSeek V4.1 Flash, 2026-10-23)
+
+- **A1 reach** (answered): the routing variables live in `settings.json` `env` and so reach every
+  session, but the only reader is `hooks/cloud-agent-intercept.py`, which already passes FREE sessions
+  through (`is_free_session`, localhost base URL). The effect is cloud-only by that lane check; keep it.
+- **Probe representativeness** [my call]: eligibility depends on the endpoint and account, not on
+  plugins or tools, but the endpoint itself is set at launch (JoyIA exports `ANTHROPIC_BASE_URL` only
+  when `joyia agent claude` starts; `settings.json` holds none). So the probe runs **through the user's
+  cloud launcher** in print mode: a configured launcher command (default: `joyia agent claude` when
+  installed, else `claude`), with `-p --permission-mode auto --output-format stream-json`. Env that
+  changes eligibility (`CLAUDE_CODE_AUTO_MODE_SERVER`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`) is read
+  from the same layers and shown with the result.
+- **One write rule for higher layers** [my call, revised by the 2026-10-23 decision]: token levers
+  (B2) go only into the ONE registered cloud profile (candidates offered from
+  `~/.claude/launch-profiles/*.json`). The bypass default (A2) stays in `~/.claude/settings.json`: a
+  single scalar whose purpose is to reach plain `joyia agent claude` sessions; if the registered
+  profile sets `defaultMode`, the A2 row shows that it is overruled. An unregistered `--settings` file
+  cannot be detected from csl, so the A2 row carries one line: "If your launcher passes its own
+  --settings file that sets a permission mode, it wins." Read-only display otherwise applies only to
+  managed policy.
+- **Tally per lane** [my call]: measured per lane, with each lane's own flags and profile; the cache
+  key is the lane plus its inputs (installed plugins, MCP config, profile file hash, CLAUDE.md hash).
+  The cloud lane is measured by running a FREE-lane session with the cloud lane's profile and flags
+  applied (definitions do not depend on the serving model; one cloud spot-check confirms it).
+- **Probe action outside every allow rule** [my call]: never reimplement the merge. Use a Bash command
+  whose first word is a unique nonexistent token (`fa-eligibility-probe-<random>`): prefix allow rules
+  cannot match it. Only a blanket `Bash` / `Bash(*)` allow rule in any layer can, and then the probe
+  reports "unknown" without running.
+- **Editing a profile csl does not own** [my call]: in-place edit of the owned keys only, everything else
+  byte-preserved (the `cloud_session_env._write_env` pattern: mode kept, symlinks followed), a
+  timestamped backup next to the file before the first write, and one configured profile at a time.
+- **Tally baseline** [my call]: "saves X%" is relative to *everything on* (all installed tools, MCPs,
+  plugins), and the screen shows the current total too. With no free lane to measure on, the tally reads
+  "not measured" and offers a cloud measurement with an explicit cost estimate and a confirmation, never
+  automatically.
 
 ## 7. Left to the builder
 
