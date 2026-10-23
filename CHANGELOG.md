@@ -1,3 +1,30 @@
+## [0.42.0] — 2026-10-23
+
+### Changed
+
+- **A cross-family review works on a one-family setup** (user 2026-10-23). A user with one API key
+  or one local model got exit 1 and "no keys, no local weights" whenever a dispatch asked for
+  `"avoid_family"`, or for a `"role"` no model on the machine fills. Both are preferences now:
+  the dispatch runs on what is available, stderr recommends adding another model (csl → API keys),
+  and the result says so: `"family_avoided"` / `"role_matched"` are `false` when the request could
+  not be honoured (`null` when it was not made). "No model available" is left for a machine with
+  nothing set up.
+- **"Memory guard" is now "RAM usage out-of-memory protection"**, on the Local screen only. The old
+  name read like memory.md or auto-memory, and Home listed it although it only affects local
+  sessions. The launcher's summary row reads `OOM protection`; saved settings and the
+  `LA_MEMGUARD_*` variables are unchanged.
+- **The Cloud screen no longer lists the classifier source.** It only reaches free sessions, and
+  this screen holds settings that change cloud sessions; the setting stays on the lane screens.
+- **Security Review is listed only while the security-guidance plugin is active.** When it is not,
+  csl removes the override it had written (`SECURITY_REVIEW_MODEL` / `ENABLE_CODE_SECURITY_REVIEW`
+  in `~/.claude/settings.json`) at startup and says so; before, the row showed a setting with no
+  effect.
+
+### Fixed
+
+- **Picker tests no longer read the real `~/.claude/settings.json`.** The test harness never
+  sandboxed `CLAUDE_CONFIG_DIR`; it does now, and a test checks the real file is left alone.
+
 ## [0.41.2] — 2026-10-23
 
 ### Fixed
