@@ -151,6 +151,13 @@ class SwapModelTests(unittest.TestCase):
                         LA_REMOTE_PROXY_PORT_MAX='47200')
         self.rundir = self.root / 'local-agents-remote'
 
+    def _stub_proxies_for_root(self):
+        """PIDs of stub proxies whose command line names THIS test's own temp dir — never any
+        other process on the machine (the match includes this run's unique tmp path)."""
+        out = subprocess.run(["pgrep", "-f", f"{self.root}/stubs/litellm"],
+                             capture_output=True, text=True)
+        return [int(p) for p in out.stdout.split()]
+
     def tearDown(self):
         # every proxy this test launched, through its own pidfile
         for pf in sorted(self.rundir.glob('proxy-*.pid')) + sorted(self.rundir.glob('swap-scratch-*.pid')):
@@ -158,6 +165,18 @@ class SwapModelTests(unittest.TestCase):
                 os.kill(int(pf.read_text().strip() or 0), 9)
             except (ProcessLookupError, ValueError):
                 pass
+        # Guard (0.41.1): a pidfile can lie — test_a_foreign_pid_is_refused overwrites one with
+        # a foreign pid, so the pidfile pass can no longer reach the REAL stub and it survived
+        # every full-suite run (the "71 orphaned processes" that motivated this handover).
+        # Kill by matching this test's own temp dir, then assert nothing of ours survived.
+        for pid in self._stub_proxies_for_root():
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.3)
+        self.assertEqual(self._stub_proxies_for_root(), [],
+                         "stub proxy(es) survived tearDown — Leak A is back")
 
     def start_old_session(self):
         """A running session: start_proxy's artifacts (cfg/pid/log/owner) on a real port."""

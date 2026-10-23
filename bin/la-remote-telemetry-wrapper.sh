@@ -8,7 +8,9 @@
 # 1. Runs claude with --debug-file pointing to a temp file
 # 2. Starts a background monitor that reads the debug file and extracts token rate
 # 3. Writes token rate (timestamp tok/s cumulative_tokens) to ~/.claude/logs/remote-streaming-<session_id>.log
-# 4. Cleans up on exit
+# 4. Cleans up when the session ends: the monitor watches for the exec'd claude to exit
+#    (reparenting to init) and then kills its own tail -f — the EXIT trap below can never
+#    fire, because exec replaces this shell in place (0.41.1, Leak B).
 # --help prints this header and exits BEFORE anything runs (config sourcing, osascript, network).
 case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 
@@ -51,6 +53,12 @@ monitor_debug_file() {
     local debug_file="$1"
     local log_file="$2"
 
+    # This function runs as a background SUBSHELL of the wrapper; after the wrapper `exec`s
+    # claude, that same pid IS claude. So: my pid (bash 3.2 has no BASHPID; a sh child's PPID
+    # is this subshell), and my parent = the session process.
+    local my_pid
+    my_pid=$(sh -c 'echo $PPID')
+
     # Wait for debug file to be created
     local waited=0
     while [[ ! -f "$debug_file" && $waited -lt 30 ]]; do
@@ -61,6 +69,26 @@ monitor_debug_file() {
     if [[ ! -f "$debug_file" ]]; then
         return 0
     fi
+
+    # Watchdog (0.41.1, Leak B): the wrapper `exec`s claude, so the EXIT trap can never fire
+    # and the MONITOR_PID cleanup is dead code — every session left this monitor and its
+    # tail -f behind, parented to init. When claude exits, this subshell is REPARENTED to
+    # init (ppid 1): that is the session-over signal. Kill the tail pipeline (children of
+    # this subshell, never anything else) and exit. Never matches by name, so a real
+    # session's monitor is untouchable from here.
+    (
+        local self child ppid
+        self=$(sh -c 'echo $PPID')
+        while :; do
+            ppid="$(ps -o ppid= -p "$my_pid" 2>/dev/null | tr -d ' ')"
+            [[ -z "$ppid" || "$ppid" = "1" ]] && break
+            sleep 2
+        done
+        for child in $(pgrep -P "$my_pid" 2>/dev/null); do
+            [[ "$child" = "$self" ]] && continue
+            kill "$child" 2>/dev/null
+        done
+    ) &
 
     local last_token_count=0
     local last_timestamp=""
