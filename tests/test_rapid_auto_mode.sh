@@ -146,6 +146,9 @@ mkdir -p \
 cp "$LAUNCHER" "$SB/bin/launch-claude-agent-rapid-auto.sh"
 cp "$GATE" "$SB/bin/omlx-auto-prewarm-gate.sh"
 cp "$PROGRESS" "$SB/bin/omlx-progress.sh"
+# The launcher sources la-memguard-run.sh unconditionally (memguard phase 1, e750184);
+# a sandbox without it died at that source line and every dry-run assertion failed.
+cp "$REPO/bin/la-memguard-run.sh" "$SB/bin/"
 cp "$HELPER" "$SB/bin/omlx-auto-prewarm.py"
 cp "$CONFIG_LIB" "$SB/config/config-lib.sh"
 cp "$PROMPT" "$SB/config/local-agent-system-prompt.txt"

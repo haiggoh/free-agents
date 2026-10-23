@@ -30,7 +30,7 @@ echo "rtk lane shim"
 out="$(echo "$PAYLOAD" | LA_RTK_HOOK=off PATH="$SHIM_DIR:$T/fake:$BASE" rtk hook claude)"; rc=$?
 check "LA_RTK_HOOK=off: hook call emits no decision (no rewrite)" "$out" ""
 check "LA_RTK_HOOK=off: hook call exits 0" "$rc" "0"
-out="$(echo "$PAYLOAD" | PATH="$SHIM_DIR:$T/fake:$BASE" rtk hook claude)"
+out="$(echo "$PAYLOAD" | env -u LA_RTK_HOOK PATH="$SHIM_DIR:$T/fake:$BASE" rtk hook claude)"
 case "$out" in *updatedInput*) ok "without LA_RTK_HOOK=off the hook reaches the real rtk" ;;
   *) bad "without LA_RTK_HOOK=off the hook reaches the real rtk" "got [$out]" ;; esac
 out="$(LA_RTK_HOOK=off PATH="$SHIM_DIR:$T/fake:$BASE" rtk gain --daily)"
@@ -84,10 +84,10 @@ before="$(cat "$T/c.toml")"
 LA_RTK_BIN="$T/fake/rtk" LA_RTK_CONFIG="$T/c.toml" "$SETUP" >/dev/null
 check "second run is a no-op" "$(cat "$T/c.toml")" "$before"
 LA_RTK_BIN="$T/fake/rtk" LA_RTK_CONFIG="$T/c.toml" "$SETUP" --check >/dev/null; check "--check passes once merged" "$?" "0"
-if command -v rtk >/dev/null 2>&1 && rtk hook check 'git status' >/dev/null 2>&1; then
+if command -v rtk >/dev/null 2>&1 && rtk hook check 'git status' </dev/null >/dev/null 2>&1; then
   # Real rtk present: confirm it honours what we write (it reads its config from a fixed path,
   # so this only reads the user's config, never writes it).
-  case "$(rtk hook check 'git show HEAD:README.md' 2>&1)" in
+  case "$(rtk hook check 'git show HEAD:README.md' </dev/null 2>&1)" in
     *"No rewrite"*) ok "installed rtk does not rewrite git show (excludes active)" ;;
     *) printf 'INFO  installed rtk still rewrites git show — run install/setup-rtk-excludes.sh\n' ;;
   esac

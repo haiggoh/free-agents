@@ -134,7 +134,10 @@ chmod +x "$WORK/bin/la-ram-preflight.sh"
 cp "$WORK/bin/la-ram-preflight.sh" "$SCRATCH/bin/la-ram-preflight.sh"
 
 CFGSTORE="$WORK/menu-store"; mkdir -p "$CFGSTORE"
-run_swap() { FREE_AGENTS_CONFIG_DIR="$CFGSTORE" "$SCRATCH/bin/local-llm-hotswap.sh" "$1" 2>&1; }
+# LA_CONFIG_DIR pins the scratch tree as authoritative: it has no config.local.sh (the
+# registrations live in its config.example.sh), so without the pin the live-config resolution
+# would load the machine state dir's real registry and the kvtest-* aliases would not exist.
+run_swap() { FREE_AGENTS_CONFIG_DIR="$CFGSTORE" LA_CONFIG_DIR="$SCRATCH/config" "$SCRATCH/bin/local-llm-hotswap.sh" "$1" 2>&1; }
 kv_set()   { FREE_AGENTS_CONFIG_DIR="$CFGSTORE" python3 "$REPO/bin/session_menu_state.py" kv-set "$1" "$2"; }
 
 # a) UNSET kv (= auto) must never be refused — and must reach the STAGE AFTER the gate (the

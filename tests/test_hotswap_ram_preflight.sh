@@ -104,7 +104,10 @@ cp "$WORK/bin/la-ram-preflight.sh" "$SCRATCH/bin/la-ram-preflight.sh"
   echo 'LA_RAPID_BIN=/nonexistent/rapid-mlx'
 } >> "$SCRATCH/config/config.local.sh"
 
-out=$(LA_TEST_PREFLIGHT_EXIT=1 \
+# LA_CONFIG_DIR pins the scratch tree as authoritative: without it the scratch has no
+# config.local.sh, the live-config resolution would fall to the machine state dir, and
+# hotswap would scan the REAL port range (reuse path) — the preflight never fires.
+out=$(LA_TEST_PREFLIGHT_EXIT=1 LA_CONFIG_DIR="$SCRATCH/config" \
       "$SCRATCH/bin/local-llm-hotswap.sh" "$alias_to_try" 2>&1); rc=$?
 if [ "$rc" -ne 0 ]; then
   ok "a failing preflight makes hotswap exit non-zero (rc=$rc)"
@@ -124,7 +127,7 @@ fi
 
 # 5. The override must let it through: same stub, same failure, LA_SKIP_RAM_PREFLIGHT=1 set.
 : > "$LA_TEST_PREFLIGHT_LOG"
-out=$(LA_TEST_PREFLIGHT_EXIT=1 LA_SKIP_RAM_PREFLIGHT=1 \
+out=$(LA_TEST_PREFLIGHT_EXIT=1 LA_SKIP_RAM_PREFLIGHT=1 LA_CONFIG_DIR="$SCRATCH/config" \
       "$SCRATCH/bin/local-llm-hotswap.sh" "$alias_to_try" 2>&1); rc=$?
 if printf '%s' "$out" | grep -qi 'at your own risk\|continuing'; then
   ok "LA_SKIP_RAM_PREFLIGHT=1 continues past a failing preflight"
