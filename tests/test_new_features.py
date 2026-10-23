@@ -538,24 +538,19 @@ class StaleSecurityReviewOverride(PilotCase):
 
 
 class MemoryGuardSettings(PilotCase):
-    def test_local_u_opens_guard_and_a_change_is_saved_and_reloaded(self):
-        # Local lane only (user 2026-10-23): reached from the Local screen, not from Home.
+    def test_local_y_toggles_auto_sync_and_it_is_saved_and_reloaded(self):
+        # 0.43.0: the row lives ON the Local screen (user 2026-10-23); no guard detour.
         async def s(app, pilot, h):
             await h.press("l")
             await h.wait_screen("LocalScreen")
-            await h.press("u")
-            await h.wait_text("RAM usage out-of-memory protection (local sessions)")
-            await h.press("a")                                  # auto-sync OFF -> ON
+            await h.press("y")                                  # auto-sync OFF -> ON
             await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
             self.assertEqual(self.saved_state()["memguard"], {"registry_auto_sync": True})
-            await h.press("escape")
-            await h.wait_screen("LocalScreen")                  # Escape returns, never quits
         self.run_picker(s, start="home")
         # A fresh picker reads it back.
         async def again(app, pilot, h):
             await h.press("l")
             await h.wait_screen("LocalScreen")
-            await h.press("u")
             await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
         self.run_picker(again, start="home")
 

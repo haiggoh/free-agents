@@ -122,15 +122,16 @@ class MemoryGuardScreenTests(unittest.TestCase):
         labels = {a.key: a.label for a in S(m.Settings()).actions()}
         self.assertIn(f"{d['soft_pct']}%", labels["s"])
         self.assertIn(f"{d['hard_pct']}%", labels["h"])
-        self.assertIn("OFF", labels["a"])                         # auto-sync off = 0.36.2 behaviour
+        self.assertFalse(any("Auto-sync" in a.label for a in S(m.Settings()).actions()),
+                         "registry auto-sync lives on the Local screen now (0.43.0)")
 
     def test_rows_persist_through_on_save_and_cycle_never_breaks_soft_below_hard(self):
         saved = {}
         s = m.Settings()
         screen = m.MemoryGuardScreen(s, on_save=saved.update)
-        for key in "tca":
+        for key in "tc":
             screen.handle_key(key)
-        self.assertEqual(saved, {"tmux": False, "auto_continue": False, "registry_auto_sync": True})
+        self.assertEqual(saved, {"tmux": False, "auto_continue": False})
         seen = set()
         for _ in range(12):                                      # every soft step, twice over
             screen.handle_key("s")
@@ -147,7 +148,16 @@ class MemoryGuardScreenTests(unittest.TestCase):
         s.memguard["enabled"] = False
         acts = {a.key: a for a in m.MemoryGuardScreen(s).actions()}
         self.assertFalse(any(acts[k].enabled for k in "tshwc"))
-        self.assertTrue(acts["a"].enabled)                       # registry sync is independent
+
+    def test_auto_sync_is_a_local_screen_setting_not_an_oom_one(self):
+        s = m.Settings()
+        saved = []
+        s.on_memguard_saved = saved.append
+        local = {a.key: a for a in m.LocalScreen(s, []).actions()}
+        self.assertIn("Auto-sync local registry with the disk", local["y"].label)
+        local["y"].run()
+        self.assertEqual(saved[-1], {"registry_auto_sync": True})
+        self.assertTrue(s.memguard["registry_auto_sync"])
 
     def test_entry_on_local_only(self):
         # Local sessions only, so Home no longer lists it (0.42.0, user 2026-10-23).

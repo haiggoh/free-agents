@@ -473,6 +473,8 @@ class Settings:
     security_review_offered: bool = False
     # Called with {"security_review": n} or {"replace_agents": v} when the user changes it; persists it.
     on_cloud_saved: Callable[[dict], object] | None = None
+    # Called with {"registry_auto_sync": v} when the Local screen's auto-sync row toggles; persists it.
+    on_memguard_saved: Callable[[dict], object] | None = None
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
     # Called with (lane, value) when the user CONFIRMS a temperature change; persists it.
@@ -970,8 +972,12 @@ class LocalScreen(Screen):
                    section="hidden"),
             setting("m", f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp")),
+            Action("y", f"Auto-sync local registry with the disk (no prompts): "
+                        f"{'ON' if s.memguard.get('registry_auto_sync') else 'OFF'}",
+                   self._toggle_registry_auto_sync),
         ]
         # Add "Launch last model" if we have a saved last model
+        last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
         # No `in self.models` check: the list is lazy and usually not loaded yet, and launching
         # only needs alias + effort. A since-deleted model fails in the launcher, visibly.
@@ -983,6 +989,14 @@ class LocalScreen(Screen):
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
+
+    def _toggle_registry_auto_sync(self):
+        """The Local screen's auto-sync row (0.43.0): same store key the guard screen used,
+        persisted through the on_memguard_saved callback the Picker wires to sms.save_memguard."""
+        v = not self.settings.memguard.get("registry_auto_sync")
+        self.settings.memguard["registry_auto_sync"] = v
+        if self.settings.on_memguard_saved:
+            self.settings.on_memguard_saved({"registry_auto_sync": v})
 
     def _launch_last(self, lane: str):
         """Launch the last used model for the given lane."""
@@ -1847,9 +1861,6 @@ class MemoryGuardScreen(Screen):
                    lambda: self._cycle("quiet_s", self.QUIET_STEPS), enabled=on),
             Action("c", f"After a memory-limit abort, continue by itself: {onoff(self.value('auto_continue'))}",
                    lambda: self._toggle("auto_continue"), enabled=on),
-            Action("a", f"Auto-sync local registry with the disk (no prompts): "
-                        f"{onoff(self.value('registry_auto_sync'))}",
-                   lambda: self._toggle("registry_auto_sync")),
         ]
         acts += self.nav_actions()
         check_action_table(acts)

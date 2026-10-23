@@ -118,7 +118,7 @@ MISSING_MODELS: list[str] = []
 
 
 def auto_sync_registry(models) -> str:
-    """Memory guard screen's "auto-sync" ON: register every on-disk unregistered model and move
+    """Local screen's "auto-sync" ON: register every on-disk unregistered model and move
     every registered-but-missing one to the removed list, without asking (OFF = the panels).
 
     Uses the same csl subcommands as the panels (each backs the registry up first). Returns the
@@ -572,6 +572,7 @@ class Picker(App):
             security_review_offered=cloud["plugin_active"],
             replace_agents=cse.replace_agents(),
             on_cloud_saved=self._save_cloud,
+            on_memguard_saved=self._save_mg,
             # "Go last": restored from the store; written when a launch request is made.
             last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
                                  **state.last_launched},
