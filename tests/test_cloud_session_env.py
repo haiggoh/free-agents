@@ -169,8 +169,9 @@ class CloudScreenTests(_Sandbox):
 
     def test_options_that_cannot_reach_a_cloud_session_say_so(self):
         actions = {a.key: a for a in m.CloudConfigScreen(m.Settings(security_review_offered=True)).actions()}
-        for key in ("y", "p"):
-            self.assertIn(m.NOT_GATEWAY_NOTE, actions[key].label, key)
+        # The classifier row (y) left this screen in 0.42.0; p still cannot reach a cloud session.
+        self.assertNotIn("y", actions)
+        self.assertIn(m.NOT_GATEWAY_NOTE, actions["p"].label)
         # s (security review) and x (replace subagents, 0.27.0) live in settings.json env, so they
         # DO reach every cloud session and must not carry the note.
         for key in ("s", "x"):

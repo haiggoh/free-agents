@@ -1529,8 +1529,9 @@ class CloudConfigScreen(Screen):
       PreToolUse hook. Opt-in; undecided = the hook asks once on the first Agent call.
 
     Does NOT reach cloud sessions (audit 2026-10-08; labelled so in the menu):
-    - Classifier Source: NVIDIA API / local default classifier / Auto (local + free-API only)
     - Bypass Permissions: blind-trust for free-API remote sessions (the gateway launcher hardcodes it)
+    The Classifier Source row left this screen in 0.42.0 (user 2026-10-23): it only reaches free
+    sessions and stays on the lane screens; a working cloud reroute would earn a row back.
     """
     title = f"{ec.EMOJI_CLOUD_CONFIG_STR}  {ec.EMOJI_TOOLS_STR} Cloud Session Configuration"
 
@@ -1551,8 +1552,6 @@ class CloudConfigScreen(Screen):
             Action("x", f"{ec.EMOJI_SHIELD_STR}  Replace subagents with free agents (all cloud sessions): "
                         f"{cse.REPLACE_AGENTS_LABELS[s.replace_agents]}",
                    lambda: self._cycle_replace_agents()),
-            Action("y", f"Classifier: {CLASSIFIER_SOURCE_LABELS[s.classifier_source]}  {NOT_GATEWAY_NOTE}",
-                   lambda: self._cycle_classifier()),
             Action("p", f"{ec.EMOJI_AUTO_MODE_STR}  Bypass Permissions (blind-trust): {'ON' if s.cloud_bypass_permissions else 'OFF'}"
                         f"  {NOT_GATEWAY_NOTE}",
                    lambda: self._toggle("cloud_bypass_permissions")),
@@ -1563,10 +1562,6 @@ class CloudConfigScreen(Screen):
 
     def _toggle(self, attr):
         setattr(self.settings, attr, not getattr(self.settings, attr))
-
-    def _cycle_classifier(self):
-        s = self.settings
-        s.classifier_source = (s.classifier_source + 1) % 3
 
     def _cycle_replace_agents(self):
         s = self.settings

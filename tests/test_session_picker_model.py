@@ -149,8 +149,9 @@ class MemoryGuardScreenTests(unittest.TestCase):
         self.assertFalse(any(acts[k].enabled for k in "tshwc"))
         self.assertTrue(acts["a"].enabled)                       # registry sync is independent
 
-    def test_entry_on_home_and_local_only(self):
-        self.assertEqual(m.HomeScreen(m.Settings()).handle_key("u"), m.Nav("memguard"))
+    def test_entry_on_local_only(self):
+        # Local sessions only, so Home no longer lists it (0.42.0, user 2026-10-23).
+        self.assertNotIn("u", [a.key for a in m.HomeScreen(m.Settings()).actions()])
         self.assertEqual(m.LocalScreen(m.Settings(), []).handle_key("u"), m.Nav("memguard"))
         self.assertNotIn("u", [a.key for a in m.RemoteScreen(m.Settings(), []).actions()])
 
@@ -588,13 +589,19 @@ class GroupingTests(unittest.TestCase):
         self.assertTrue(cloud.title.startswith(m.ec.EMOJI_CLOUD_CONFIG_STR))
         self.assertIn(m.ec.EMOJI_TOOLS_STR, cloud.title)
 
-        # Has three toggle actions + nav
+        # Two toggle actions + nav
         actions = {a.key: a for a in cloud.actions()}
         self.assertIn("x", actions, "Missing Replace-subagents toggle (x)")
-        self.assertIn("y", actions, "Missing Classifier toggle (y)")
         self.assertIn("p", actions, "Missing Bypass Permissions toggle (p)")
+        # The Classifier row is gone (0.42.0): this screen holds settings that change CLOUD sessions,
+        # and the classifier source only reaches free sessions (user 2026-10-23). It lives on the
+        # lanes, where it acts; a cloud reroute would bring a cloud row back.
+        self.assertNotIn("y", actions)
+        self.assertFalse(any("Classifier" in a.label for a in actions.values()))
+        lane = {a.key: a.label for a in m._common_toggles(m.Settings(auto_mode=1), include_watcher=False)}
+        self.assertIn("Classifier:", lane.get("z", ""))
 
-        # y/p never reach a gateway session (audit 2026-10-08), and their labels say so;
+        # p never reaches a gateway session (audit 2026-10-08), and its label says so;
         # the state text is what precedes that note. x DOES reach every cloud session (0.27.0).
         def state(key):
             label = actions[key].label
@@ -604,10 +611,6 @@ class GroupingTests(unittest.TestCase):
         # Replace subagents toggle: reaches every cloud session, so it carries no NOT_GATEWAY note.
         self.assertIn("Replace subagents with free agents (all cloud sessions)", actions["x"].label)
         self.assertFalse(actions["x"].label.endswith(m.NOT_GATEWAY_NOTE))
-
-        # Classifier toggle
-        self.assertIn("Classifier:", actions["y"].label)
-        self.assertIn(m.CLASSIFIER_SOURCE_LABELS[s.classifier_source], actions["y"].label)
 
         # Bypass Permissions toggle
         self.assertIn("Bypass Permissions", actions["p"].label)
@@ -623,10 +626,6 @@ class GroupingTests(unittest.TestCase):
             self.assertEqual(s.replace_agents, want)
             self.assertEqual(saved[-1], {"replace_agents": want}, "the change is persisted, not just shown")
             self.assertIn(m.cse.REPLACE_AGENTS_LABELS[want], {a.key: a for a in cloud.actions()}["x"].label)
-
-        initial_classifier = s.classifier_source
-        actions["y"].run()
-        self.assertEqual(s.classifier_source, (initial_classifier + 1) % 3)
 
         initial_bypass = s.cloud_bypass_permissions
         actions["p"].run()
