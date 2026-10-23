@@ -205,6 +205,68 @@ class FailoverTests(Base):
         self.assertIn("notes.txt", self.prompts[0])
 
 
+class SparseSetupTests(Base):
+    """A user with ONE model family (one key, or one local model): avoid_family and role are
+    preferences, so they degrade to what is there instead of failing (user 2026-10-23). Probed
+    on 0.41.2: every case below exited 1 claiming 'no keys, no local weights'."""
+
+    G = dict(R1, family="google", roles=["operator", "validator"])
+    N = dict(R2, family="zhipu", roles=["reasoner"])
+    K = dict(L1, family="kwaipilot", roles=["operator"])
+
+    def run_sparse(self, payload, keys=(), local=(), order=None):
+        for k in keys:
+            self.key(k)
+        p = Path(self.tmp.name) / "p.json"
+        p.write_text(json.dumps(prefs(*(order or (self.G, self.N, self.K)))))
+        env = dict(self.env, FA_DISPATCH_PREFS=str(p))
+        out, err = io.StringIO(), io.StringIO()
+        real = (fat.dispatch_entry, fat.local_on_disk)
+        fat.dispatch_entry = lambda entry, prompt, env_: f"answer from {entry['id']}"
+        fat.local_on_disk = lambda a: a in local
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                code = fat.run(payload, env)
+        finally:
+            fat.dispatch_entry, fat.local_on_disk = real
+        return code, (json.loads(out.getvalue()) if out.getvalue() else None), err.getvalue()
+
+    def test_one_key_review_falls_back_to_the_same_family_and_recommends_another(self):
+        code, res, err = self.run_sparse({"prompt": "review", "role": "validator", "avoid_family": "google"},
+                                         keys=["gemini"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(res["model_used"], "r1")
+        self.assertIs(res["family_avoided"], False)
+        self.assertIn("same family", err)
+        self.assertIn("API keys", err)                  # the recommendation names where to add one
+
+    def test_one_local_model_avoiding_its_own_family_still_runs(self):
+        code, res, err = self.run_sparse({"prompt": "review", "avoid_family": "kwaipilot"}, local=["loc-a"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(res["model_used"], "l1")
+        self.assertIs(res["family_avoided"], False)
+
+    def test_a_role_nobody_on_this_machine_fills_degrades_with_a_note(self):
+        code, res, err = self.run_sparse({"prompt": "think", "role": "reasoner"}, local=["loc-a"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(res["model_used"], "l1")
+        self.assertIs(res["role_matched"], False)
+        self.assertIn("reasoner", err)
+
+    def test_avoid_is_honoured_whenever_another_family_is_available(self):
+        code, res, err = self.run_sparse({"prompt": "review", "avoid_family": "google"},
+                                         keys=["gemini", "nvidia"])
+        self.assertEqual(res["model_used"], "r2")
+        self.assertIs(res["family_avoided"], True)
+        self.assertNotIn("same family", err)
+
+    def test_nothing_set_up_is_the_only_hard_failure_and_says_so(self):
+        code, res, err = self.run_sparse({"prompt": "hi", "avoid_family": "google"})
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(res)
+        self.assertIn("no keys", err)
+
+
 class RemoteDispatchTests(Base):
     def test_remote_dispatch_uses_a_fresh_outdir_and_the_entry_settings(self):
         seen = []

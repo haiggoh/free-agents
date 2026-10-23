@@ -89,6 +89,9 @@ is strong at (operator, reasoner, validator, utility) and its model family. Ask 
 adversarial review add `"avoid_family": "<family that did the work>"`. A different family often
 finds what a stronger model of the same family misses, so for review, family diversity beats raw
 capability. Example: work drafted by Gemini (`google`) gets its review from DeepSeek or GLM.
+On a machine with only one family (or no model for the role), the dispatch still runs on what is
+there and returns `"family_avoided": false` / `"role_matched": false` plus a recommendation to add a
+model; pass that on to the user rather than treating the review as cross-family.
 
 | Role | Who fills it (preference order) |
 |---|---|

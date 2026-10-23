@@ -17,7 +17,9 @@ stderr (model + route), and the JSON result names the model, its route and every
 Council routing: each entry lists the roles it is strong at and its model family. A "role" (or a
 subagent_type such as code-reviewer -> validator) keeps only entries with that role, still in
 preference order. "avoid_family" skips the family that did the work: an adversarial review from a
-different family often finds what a stronger same-family model misses.
+different family often finds what a stronger same-family model misses. Both are preferences: when
+nothing on this machine satisfies them, the dispatch runs on what is available, prints a
+recommendation to add another model, and the result says so ("family_avoided"/"role_matched": false).
 
 This is a STATELESS dispatch: one request, text in, text out. The model cannot read files or run
 commands, so pass what it needs in the prompt or as "files" (their contents are attached). Work
@@ -335,6 +337,18 @@ def candidates(prefs, env, local_ok=None, role=None, avoid_family=None) -> list:
     return out
 
 
+def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None):
+    """candidates(), relaxing the filters when they would leave nothing: role and avoid_family
+    are PREFERENCES, so a machine with one model family still gets an answer (user 2026-10-23).
+    avoid_family gives way first (a same-family review is weaker, not wrong), then role.
+    Returns (order, role_matched, family_avoided); an empty order means nothing is set up."""
+    for r, a in ((role, avoid_family), (role, None), (None, avoid_family), (None, None)):
+        order = candidates(prefs, env, local_ok=local_ok, role=r, avoid_family=a)
+        if order:
+            return order, (r == role), (a == avoid_family)
+    return [], False, False
+
+
 def route_of(entry) -> str:
     if entry.get("kind") == "remote":
         return f"remote {entry['provider']} · stateless dispatch"
@@ -396,16 +410,26 @@ def run(input_data, env) -> int:
                                input_data.get("files"))
     prefs = load_preferences(env)
     role, avoid = request_role(input_data), input_data.get("avoid_family")
-    order = candidates(prefs, env, role=role, avoid_family=avoid)
+    order, role_matched, family_avoided = degraded_candidates(prefs, env, role=role, avoid_family=avoid)
     if not order:
         print(json.dumps({"error": "no dispatch model is available (no keys, no local weights) — "
                                    "run free-agent-tool.py --list"}), file=sys.stderr)
         return 1
+    if avoid and not family_avoided:
+        print(f"free-agents: only the {avoid} model family is available, so this review comes from the "
+              "same family as the work it checks. A second family catches more: add one, e.g. an API "
+              "key in csl -> API keys.", file=sys.stderr)
+    if role and not role_matched:
+        print(f"free-agents: no available model is listed for the {role} role, so the first available "
+              "model runs instead. Add one that fills it, e.g. an API key in csl -> API keys.",
+              file=sys.stderr)
+    shown_avoid = avoid if family_avoided else None
+    shown_role = role if role_matched else None
     attempts = []
     for entry in order:
         print(f"free-agents: offloading to {entry.get('display', entry['id'])} "
-              f"({route_of(entry)}{', role ' + role if role else ''}"
-              f"{', not ' + avoid if avoid else ''})", file=sys.stderr)
+              f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"
+              f"{', not ' + shown_avoid if shown_avoid else ''})", file=sys.stderr)
         try:
             text = dispatch_entry(entry, full_prompt, env)
         except DispatchFailed as err:
@@ -416,6 +440,9 @@ def run(input_data, env) -> int:
         print(json.dumps({"content": text, "model_used": entry["id"],
                           "display": entry.get("display", entry["id"]), "route": route_of(entry),
                           "family": entry.get("family"), "role": role,
+                          # null = not requested; false = requested but could not be honoured
+                          "role_matched": role_matched if role else None,
+                          "family_avoided": family_avoided if avoid else None,
                           "attempts": attempts}))
         return 0
     print(json.dumps({"error": "every dispatch preference failed", "attempts": attempts}), file=sys.stderr)
