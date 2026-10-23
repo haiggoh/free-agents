@@ -538,7 +538,7 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
     and stop at the retry ceiling.
   - `continue-on-fallback` — keeps work moving on a free lane when the local model cannot serve and
     the cloud budget is spent.
-- **hooks** (`hooks/hooks.json`) — SessionStart `offload-nudge.py` (routing reminder) and
+- **hooks** (`hooks/hooks.json`) — SessionStart `offload-nudge.py` (paid session: free offloading is the default; free session: cross-family review only) and
   `transcript-identity.py` (marks local and free-API transcripts); UserPromptSubmit
   `session-title-prefix.py` (emoji + model on the session name); PreToolUse `guard-own-endpoint.py`
   (refuses killing the endpoint serving this session), `guard-tool-owned-state.py` (refuses

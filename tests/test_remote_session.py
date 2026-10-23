@@ -1272,6 +1272,36 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
                       '--local-capable-shown must make the classified-hidden model appear in --list too, '
                       'not just in the interactive menu')
 
+    def test_local_capable_filter_works_under_system_bash(self):
+        """The filter must hide the same model under macOS /bin/bash 3.2, which has no `declare -A`.
+
+        run_cli uses the first `bash` on PATH (Homebrew bash 5 here), which hid the bug: under
+        /bin/bash the associative array failed with 'declare: -A: invalid option' and --list
+        still exited 0 (2026-10-23). Asserts the outcome AND the absence of that error.
+        """
+        if not Path('/bin/bash').exists():
+            self.skipTest('no /bin/bash')
+        shutil.copy2(ROOT / 'bin/local-capable-filter.sh', self.root / 'bin/local-capable-filter.sh')
+        (self.root / 'config/remote-agents.sh').write_text(
+            'LA_REMOTE_AGENTS=(\n'
+            '  "visibleone|gemini|gemini-3.8-flash|Visible One|renewing_free|note"\n'
+            '  "hiddenone|nvidia|nvidia/local-capable-model|Hidden One|renewing_free|note"\n'
+            ')\n'
+        )
+        (self.root / 'config/local-capable-remote-models.psv').write_text(
+            'nvidia|nvidia/local-capable-model|local-capable|SomeLocalModel|rapid|20|has a local MLX artifact\n'
+        )
+        for args in (('--list',), ('--local-capable-shown', '--list')):
+            r = subprocess.run(['/bin/bash', str(self.root / 'bin/remote-session.sh'), *args],
+                               env=self.env, text=True, capture_output=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn('invalid option', r.stderr)
+            self.assertIn('visibleone', r.stdout)
+            if args == ('--list',):
+                self.assertNotIn('hiddenone', r.stdout, 'hidden by default under /bin/bash too')
+            else:
+                self.assertIn('hiddenone', r.stdout, '--local-capable-shown reveals it under /bin/bash')
+
     def test_broken_models_json_hides_by_default_and_show_broken_reveals(self):
         """Aliases in config/broken-nvidia-models.json are absent from --list unless --show-broken.
 

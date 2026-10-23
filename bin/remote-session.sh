@@ -312,26 +312,27 @@ _tier_label() {
 }
 
 # ---- local-capable filter helpers -------------------------------------------
-# Build a bash associative array from _POLICY_JSON for fast lookup.
-declare -A _LC_VISIBLE
+# Collect the HIDDEN "provider|model_id" keys from _POLICY_JSON into one newline-wrapped
+# string. Not an associative array: macOS /bin/bash 3.2 has no `declare -A`, and the only
+# question ever asked is "is this key hidden?" (unlisted keys stay visible).
+_LC_HIDDEN=$'\n'
 _lc_load_policy() {
-    _LC_VISIBLE=()
+    _LC_HIDDEN=$'\n'
     if [[ -z "${_POLICY_JSON:-}" ]]; then return; fi
     # ONE python call for the whole policy, emitting "provider|model_id<TAB>true|false" per row.
     # It used to spawn four python processes per row (177 on the 0.22 roster), which cost
     # 3-5 s on EVERY invocation, --help included, while Terminal still showed the launch line.
     local key v
     while IFS=$'\t' read -r key v; do
-        [[ -n "$key" ]] && _LC_VISIBLE["$key"]="${v:-true}"
+        [[ -n "$key" && "$v" == "false" ]] && _LC_HIDDEN+="$key"$'\n'
     done <<< "$(printf '%s' "$_POLICY_JSON" | python3 -c 'import json,sys
 for r in json.loads(sys.stdin.read()).get("rows",[]):
     print("%s|%s\t%s" % (r.get("provider",""), r.get("remote_model_id",""), "true" if r.get("visible",True) else "false"))' 2>/dev/null)"
 }
 _lc_is_hidden() {
     # $1=provider $2=model_id -> 0 if hidden, 1 if visible
-    local key="${1}|${2}"
-    local v="${_LC_VISIBLE[$key]:-true}"
-    [[ "$v" == "false" ]]
+    # The quoted key matches literally, so '|' '/' '.' in model ids are not glob syntax.
+    [[ "$_LC_HIDDEN" == *$'\n'"${1}|${2}"$'\n'* ]]
 }
 
 # _broken_aliases -> prints the aliases listed in config/broken-nvidia-models.json, one per

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """hooks/offload-nudge.py: a PAID session is told free offloading is the default (fan-out included)
-and to announce the model; a FREE session keeps the local-offload nudge.
+and to announce the model; a FREE session gets the council nudge (no cost reason, but cross-family review still pays).
 
 Usage: python3 tests/test_offload_nudge.py [-v]
 """
@@ -34,10 +34,17 @@ class NudgeTests(unittest.TestCase):
                          "STATELESS", "SESSION", "Gemini 3.8 Flash"):
                 self.assertIn(word, text, word)
 
-    def test_free_session_keeps_the_local_nudge(self):
-        text = nudge("http://127.0.0.1:4143")
-        self.assertNotIn("FREE OFFLOADING IS THE DEFAULT", text)
-        self.assertIn("local:<role>", text)
+    def test_free_session_gets_the_council_nudge_not_the_cost_one(self):
+        # On a free session offloading saves no money, but a cross-family review still adds quality
+        # (user 2026-10-23). The old local nudge told free sessions they were "on the paid model".
+        for base in ("http://127.0.0.1:4143", "http://localhost:8000", "http://[::1]:4141"):
+            text = nudge(base)
+            self.assertNotIn("FREE OFFLOADING IS THE DEFAULT", text, base)
+            self.assertNotIn("paid model", text, base)
+            for word in ("saves no money", "DIFFERENT model family", "cross-check", '"avoid_family"',
+                         '"files"', "/plug/bin/free-agent-tool.py", "Announce"):
+                self.assertIn(word, text, word)
+            self.assertNotIn("}}", text)
 
 
 if __name__ == "__main__":

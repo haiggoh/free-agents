@@ -10,6 +10,12 @@ When your main session runs a capable cloud model (Opus/Sonnet), keep that model
 **delegate the bulk/mechanical legwork to a local model** via dispatch. This applies to anyone who
 wants to save cost, with or without a spending cap.
 
+**Already on a FREE session?** (`ANTHROPIC_BASE_URL` is `localhost` — a local model or a free-API
+proxy; check the endpoint, never a label or a document.) Then offloading saves no money, so never
+delegate to cut cost. The reason that still holds is QUALITY: an adversarial review or an
+independent cross-check from a different model family (see *Council routing* below,
+`"avoid_family"`) often finds what the session's own model misses.
+
 ## ⛔ READ THIS FIRST — the built-in `Agent` tool CANNOT reach a free model
 
 This is the single most common way this skill gets "used" without saving a cent, so it is

@@ -7,6 +7,9 @@ fresh session planned a textbook bulk task entirely on cloud despite the rule be
 sibling plugin (no-hidden-changes, measure-twice, audit-loose-ends, run-to-completion, brief-agents)
 injects its nudge at SessionStart; this brings offload up to that bar.
 
+A PAID session gets the free-offload-by-default nudge; a FREE one (localhost base URL) gets the
+council nudge instead: no cost reason to offload, but a cross-family review still adds quality.
+
 Fail-safe: any error → no output, exit 0. Never break or slow a session start.
 """
 import json
@@ -49,38 +52,28 @@ def paid_nudge(root: str) -> str:
     )
 
 
+def free_nudge(root: str) -> str:
+    """A FREE session: offloading saves no money here, but a second model family still buys quality."""
+    tool = f"{root}/bin/free-agent-tool.py" if root else "the plugin's bin/free-agent-tool.py"
+    return (
+        "free-agents: this session already runs on FREE inference, so offloading saves no money "
+        "here; do not delegate to cut cost. A dispatch still pays off for QUALITY: an adversarial "
+        "review or an independent cross-check from a DIFFERENT model family often finds what this "
+        "session's own model misses. For that, run a stateless dispatch: "
+        f"`python3 {tool}` with {{\"prompt\": ..., \"files\": [paths], \"role\": \"validator\", "
+        "\"avoid_family\": \"<this session's model family>\"} (attach the files; a dispatch cannot "
+        "read the disk). Announce the model and route before offloading. Guidance: the offload-to-local "
+        "skill (council routing)."
+    )
+
 def main():
     try:
         root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-        if not is_free_session(os.environ.get("ANTHROPIC_BASE_URL", "")):
-            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
-                                                     "additionalContext": paid_nudge(root)}}))
-            return 0
-        resolver = f"{root}/bin/la-roles.sh" if root else "the plugin's bin/la-roles.sh (or `csl roles`)"
-        nudge = (
-            "local-agents (offload-to-local): before executing a multi-step or file-touching task, "
-            "decide offload PER STEP up front — annotate each planned step `local:<role>` or "
-            "`cloud:<reason>`. DEFAULT each delegatable step to `local:operator` (free local compute); "
-            "keep a step on cloud with a named reason — quality/capability (frontier reasoning, "
-            "security-critical, final review/verification) OR plain cost-benefit: for small or "
-            "one-off work where spin-up/briefing overhead "
-            "would exceed the saving, `cloud:not worth offloading` is a perfectly good reason. Offload "
-            "is the DEFAULT, not a mandate. Roles are a spectrum: operator (broad default) · reasoner · "
-            "validator · utility — one model fills several by varying effort. Resolve on-disk models "
-            f"(and effort) with `{resolver}`; dispatch via curl, or bin/librarian-dispatch.py (SSE) "
-            "for long/open-ended generations (stall watchdog, no timeout death). Tool use is NOT a "
-            "cloud reason — a local SESSION drives tools fine (only a stateless dispatch can't); "
-            "coupled tool-work usually stays on cloud, and a parallel local session is a deliberate "
-            "option for a big isolated chunk (see the skill). The smell is reflexively doing BULK/"
-            "mechanical work yourself on the paid model — not skipping offload on trivia. Full "
-            "guidance: the offload-to-local skill."
-        )
-        print(json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "SessionStart",
-                "additionalContext": nudge,
-            }
-        }))
+        # A FREE session saves nothing by offloading, so it gets the council nudge instead of the
+        # cost one: a different model family is the reason to dispatch there (user 2026-10-23).
+        free = is_free_session(os.environ.get("ANTHROPIC_BASE_URL", ""))
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                 "additionalContext": (free_nudge if free else paid_nudge)(root)}}))
     except Exception:
         pass
     return 0

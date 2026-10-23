@@ -1,3 +1,21 @@
+## [0.41.2] — 2026-10-23
+
+### Fixed
+
+- **A free session no longer gets the cost-saving offload nudge** (user 2026-10-23). Since 0.39.0
+  a paid session got the "free offloading is the default" nudge, but a free session (localhost
+  base URL) still got the old one, which told it to stop "doing BULK/mechanical work yourself on
+  the paid model". On a free lane offloading saves no money, so the free nudge now says the
+  reason that still holds: an adversarial review or an independent cross-check from a DIFFERENT
+  model family (`"avoid_family"`, council routing) often finds what the session's own model
+  misses. The offload-to-local skill says the same for free sessions.
+- **`remote-session.sh` works under macOS `/bin/bash` 3.2 again.** The local-capable filter kept
+  its lookup in an associative array (`declare -A`), which bash 3.2 does not have: a bare
+  `/bin/bash` run crashed (`nvidia: unbound variable`) or, on other rosters, exited 0 with the
+  filter silently broken. csl and the brew wrappers put bash 5 first, so normal launches were
+  fine. The hidden keys are now a plain newline-delimited string; a test runs the filter under
+  `/bin/bash` explicitly, because the suite's `bash` on PATH is bash 5 and hid the bug.
+
 ## [0.41.1] — 2026-10-23
 
 ### Fixed
