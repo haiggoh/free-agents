@@ -8,8 +8,10 @@ driver writes, under the picker venv. Real Apple Terminal confirmation is the us
 """
 import io
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -37,7 +39,11 @@ print("BYTES", repr(out.getvalue()))
 @unittest.skipUnless(VENV_PY.exists(), "picker venv missing: run install/setup-session-picker.sh")
 class StrayPDriver(unittest.TestCase):
     def probe(self, term_program):
-        env = dict(os.environ, LA_SESSION_MENU_CONFIG_DIR=str(ROOT / "tests"))
+        # The picker reads and (0.42.0) writes Claude Code's settings.json at startup: sandbox it,
+        # never the user's real ~/.claude (this probe once removed a real setting).
+        cfg = tempfile.mkdtemp(prefix="fa-stray-p-claude-")
+        self.addCleanup(shutil.rmtree, cfg, True)
+        env = dict(os.environ, LA_SESSION_MENU_CONFIG_DIR=str(ROOT / "tests"), CLAUDE_CONFIG_DIR=cfg)
         env.pop("TERM_PROGRAM", None)
         if term_program:
             env["TERM_PROGRAM"] = term_program
