@@ -292,6 +292,19 @@ print(json.dumps(out, sort_keys=True))
 
     def tracked_repo_clean(self, repo: Path) -> None:
         """Refuse to promote over uncommitted tracked work (tests may replace this)."""
+        try:
+            inside = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo,
+                                    capture_output=True, text=True, check=False)
+        except OSError:
+            inside = None
+        if inside is None or inside.returncode != 0 or inside.stdout.strip() != "true":
+            # A derived copy (installed plugin cache, extracted archive) is not a checkout:
+            # pin edits there are silently lost on the next update, so say so and name the
+            # remedy instead of the generic clean-worktree error git would produce.
+            raise ManagerError(
+                f"{repo} is not a git checkout — pin promotion edits tracked repo files, and "
+                "a derived copy would lose them on the next update. Run manage-backend.py "
+                "from a real free-agents checkout, or pass --repo <path-to-checkout>.")
         unstaged = subprocess.run(["git", "diff", "--quiet"], cwd=repo, check=False).returncode
         staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo, check=False).returncode
         if unstaged or staged:

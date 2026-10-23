@@ -70,6 +70,43 @@ def test_cli_info():
     assert exit_code in (0, 2)
 
 
+def test_cli_promote_defaults_repo_to_script_repository():
+    """0.41.0 bug (user report: Rapid-MLX would not update in the backend manager): promote
+    without --repo died with "Repository required for pin promotion" although --help promises
+    "default: script repository" — nothing wired the default, get_manager_instance passed no
+    repo and the install subparser had no --repo at all. The picker's install+promote (the
+    only update route in the backend manager UI) therefore left pin_update "pending" forever
+    and the launcher kept running the pinned old version. Dry-run reads the real pin surfaces
+    of this repo and writes nothing."""
+    exit_code, stdout, stderr = run_cli("--dry-run", "--backend", "rapid-mlx", "promote", "0.16.1")
+    combined = stdout + stderr
+    assert "Repository required for pin promotion" not in combined
+    assert exit_code == 0, f"promote --dry-run failed: {stderr or stdout}"
+
+
+def test_tracked_repo_clean_refuses_non_git_dir_with_remedy(tmp_path):
+    """Promoting pins into a directory that is not a git checkout must say so and name the
+    remedy — an installed plugin copy resolves "script repository" to its own derived cache,
+    where the old code's generic "requires a clean tracked worktree" (git diff failing inside
+    a non-repo) told the user nothing actionable. Tested on the method directly: a full promote
+    would first validate an installed venv, which would make this test depend on machine
+    state; the promote path reaches this check by composition."""
+    sys.path.insert(0, str(Path(__file__).parent.parent / "install"))
+    from managers.rapid_mlx import RapidMLXManager
+
+    mgr = RapidMLXManager()
+    missing = tmp_path / "not-a-checkout"
+    missing.mkdir()                       # exists, but is not a git repo
+    with _pytest.raises(Exception) as excinfo:
+        mgr.tracked_repo_clean(missing)
+    message = str(excinfo.value)
+    assert "not a git checkout" in message
+    assert "--repo" in message           # the remedy names the flag
+    with _pytest.raises(Exception) as excinfo:
+        mgr.tracked_repo_clean(tmp_path / "does-not-exist")   # typo'd --repo: same remedy
+    assert "not a git checkout" in str(excinfo.value)
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

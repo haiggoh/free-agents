@@ -45,6 +45,18 @@ from managers import (
     list_managers,
 )
 
+# The repository this script ships in — the documented "default: script repository" of --repo
+# (0.41.1: it was documented but never wired, so pin promotion was impossible without --repo
+# and the picker's install+promote silently left pin_update "pending"). For an installed
+# plugin copy this resolves to the derived plugin cache, which is NOT a git checkout;
+# tracked_repo_clean refuses that with the remedy instead of a generic git failure.
+DEFAULT_REPO = Path(__file__).resolve().parents[1]
+
+
+def _resolve_repo(args: argparse.Namespace) -> Path:
+    """--repo when given, else the repository this script ships in."""
+    return Path(args.repo) if getattr(args, "repo", None) else DEFAULT_REPO
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser with subcommands."""
@@ -92,6 +104,7 @@ Examples:
     inst_p.add_argument("--refresh-deps", action="store_true", help="ignore existing lock file")
     inst_p.add_argument("--source", choices=["pypi", "github"], default="pypi", help="install source (vllm-mlx)")
     inst_p.add_argument("--skip-pin-update", action="store_true", help="install/validate without promoting repository/private active pins (rapid-mlx)")
+    inst_p.add_argument("--repo", type=Path, help="local-agents repository (default: script repository)")
 
     # validate command
     val_p = sub.add_parser("validate", help="validate an installed version")
@@ -164,6 +177,8 @@ def _require_backend(args: argparse.Namespace) -> BackendManager:
     if mgr is None:
         print(f"ERROR: Unknown backend: {args.backend}", file=sys.stderr)
         sys.exit(2)
+    if hasattr(mgr, "_repo"):
+        mgr._repo = _resolve_repo(args)     # pin promotion needs the repo even without --repo
     return mgr
 
 
@@ -240,7 +255,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         if hasattr(mgr, 'install_version') and 'skip_pin_update' in mgr.install_version.__code__.co_varnames:
             install_kwargs["skip_pin_update"] = getattr(args, 'skip_pin_update', False)
         if hasattr(mgr, 'install_version') and 'repo' in mgr.install_version.__code__.co_varnames:
-            install_kwargs["repo"] = getattr(args, 'repo', None)
+            install_kwargs["repo"] = _resolve_repo(args)
 
         info = mgr.install_version(**install_kwargs)
         print(json.dumps({

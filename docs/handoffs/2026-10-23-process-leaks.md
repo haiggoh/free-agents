@@ -107,3 +107,24 @@ There are **two separate leaks**. Fix both.
 ## Progress log
 
 - 2026-10-23 00:30 — handoff written by the paid session; branch created from `main` f7a8066.
+- 2026-10-23 00:55 — **handover session picked this up** (this GLM 5.3 Flash session IS the
+  successor the budget kill prevented from launching; context recovered from the killed
+  session's transcript). User folded TWO NEW 0.41.0 bugs into this branch's scope, so 0.41.1
+  now = bug fixes + the leaks work below. Both new bugs ROOT-CAUSED (evidence in waypoints
+  `fa-0410-rapid-mlx-update` / `fa-0410-false-unregistered`):
+  1. **Rapid-MLX update in the backend manager** — `manage-backend.py` never wires its
+     documented default repo: `get_manager_instance` passes no repo, the `install` subparser
+     has no `--repo`, so `repo is always None` → `install_version` silently skips pin
+     promotion (`pin_update: "pending"`) and `promote` errors "Repository required for pin
+     promotion". Net effect: install "succeeds", `LA_RAPID_BIN` in config.local.sh stays on
+     the old version (currently 0.16.1 while 0.16.8 is out). Reproduced both copies.
+  2. **Local list says "on disk, not registered yet" for registered models** — the picker's
+     inventory comes from `csl --inventory`, and `csl` resolves config relative to its OWN
+     tree. From the installed plugin cache there is no `config.local.sh` (correctly gitignored),
+     so config-lib falls back to shipped example defaults: 9-model roster + 30 on-disk models
+     auto-scanned = 39 rows, 30 falsely "not registered". The REAL registry (45 registered) is
+     intact in the canonical checkout. Measured: installed csl 39 rows/30 auto-scanned vs
+     worktree csl 45 rows/0 auto-scanned, same moment.
+     Fix direction: a machine-stable config dir (`~/.local/share/free-agents/config/`, beside
+     the existing picker-venv) that wins over own-tree when it holds a config.local.sh, with a
+     one-time migration seeded from the canonical checkout — one registry, no per-copy state.
