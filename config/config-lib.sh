@@ -27,20 +27,25 @@ else
 fi
 LA_ROOT="$(cd "$LA_CONFIG_DIR/.." && pwd)"
 
-# The LIVE config (0.41.1): config.local.sh is machine state that is deliberately GITIGNORED,
-# so a second copy of this code (an installed plugin, a fresh worktree) has none of it and
-# silently falls back to shipped example defaults — every registered model reads as "on disk,
-# not registered yet" there (user report 2026-10-23; the registry itself was never lost).
-# When a machine-stable state dir holds a config.local.sh, EVERY copy reads and writes that
-# ONE file (registrations and pins land in the same place no matter which copy ran). The own
-# tree stays authoritative where no state dir exists (standalone installs). An explicit
-# LA_CONFIG_DIR (tests, one-off overrides) still beats the state dir, so a test fixture can
-# never read real machine state. LA_CONFIG_DIR itself stays code-adjacent: LA_ROOT below
-# locates bin/install relative to it.
+# The LIVE config (0.41.1; precedence fixed 2026-10-23): config.local.sh is machine state that
+# is deliberately GITIGNORED, so a second copy of this code (an installed plugin, a fresh
+# worktree) has none of it and silently fell back to shipped example defaults — every
+# registered model read as "on disk, not registered yet" there (user report 2026-10-23; the
+# registry itself was never lost). The state dir serves exactly those trees.
+# PRECEDENCE: an explicit LA_CONFIG_DIR (tests, one-off overrides) wins; then the OWN tree's
+# config.local.sh when it has one (a standalone install's seeded file, a test sandbox's
+# fixture — the 0.41.1 state-wins order hijacked sandboxes and loaded the real machine roster
+# into them); then the machine-stable state dir when it holds a config.local.sh; else the own
+# tree's example defaults. One registry comes from MOVING the live file into the state dir, so
+# real checkouts have no own file left to shadow it — not from the state dir outranking an
+# existing one. LA_CONFIG_DIR itself stays code-adjacent: LA_ROOT below locates bin/install
+# relative to it.
 LA_USER_STATE_DIR="${LA_USER_STATE_DIR:-$HOME/.local/share/free-agents}"
 _LA_STATE_CONFIG_DIR="$LA_USER_STATE_DIR/config"
 if [[ -n "${LA_LIVE_CONFIG_DIR:-}" ]]; then
     :
+elif [[ -f "$LA_CONFIG_DIR/config.local.sh" ]]; then
+    LA_LIVE_CONFIG_DIR="$LA_CONFIG_DIR"
 elif [[ "$_LA_CONFIG_DIR_EXPLICIT" == 0 && -f "$_LA_STATE_CONFIG_DIR/config.local.sh" ]]; then
     LA_LIVE_CONFIG_DIR="$_LA_STATE_CONFIG_DIR"
 else
