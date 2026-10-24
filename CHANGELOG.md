@@ -1,3 +1,14 @@
+## [0.43.1] — 2026-10-24
+
+### Fixed
+
+- **Shell mode (`!`) is visually distinct again.** The themes set the input's `bashBorder` to the
+  same accent as every other surface, overwriting stock Claude Code's magenta shell-mode signal —
+  pressing `!` looked exactly like normal input (user 2026-10-23). The colour is now **derived**
+  from the theme's main colour: hue +20°, saturation and value at 100% (the user's recipe) — yellow
+  `#FFD700` reads `#D2FF00`, the remote green reads `#45FF00`. Derived, never a second hand-kept
+  value; `promptBorder` keeps the muted accent.
+
 ## [0.43.0] — 2026-10-24
 
 ### Added — the Cloud screen acts as labelled (cloud-screen plan, Release 1)
