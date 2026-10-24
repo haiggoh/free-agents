@@ -1,3 +1,18 @@
+## [0.43.3] — 2026-10-24
+
+### Changed — StepFun Step 5 Preview joins the first rank (user 2026-10-24)
+
+- **StepFun Step 5 Preview is now a curated roster entry, listed above Nemotron 3 Ultra** —
+  with DeepSeek V4.1 Flash moved above it too. Session-proven on the NVIDIA free lane: an
+  18-hour run, 589 turns, ZERO API errors, shipping cost-tracker 0.16.0–0.18.0 across three
+  worktrees; median turn 23 s. The info box carries the measured note (config/remote-model-notes.json).
+- **In the dispatch priority and the session fallback chain**, StepFun slots above Nemotron
+  3 Ultra (dispatch order: Gemini 3.8 Flash, DeepSeek V4.1 Flash, GLM 5.3, GLM 5.3 Flash,
+  **StepFun Step 5 Preview**, Nemotron 3 Ultra) — so handovers and throttled-session rescues
+  reach it before the fallback of last resort. `model_names.py` knows the maker: catalog rows
+  read `StepFun Step 5 Preview`.
+
+
 ## [0.43.2] — 2026-10-24 — the savings ledger reads its own history again
 
 ### Fixed — the savings ledger reads its own history again
@@ -37,6 +52,7 @@ the staleness check is correct), but the "fast path" comment overstates what shi
 total exceeds the live-only total by the legacy event, `by_session` reconciles and is ordered,
 an append never moves or deletes the legacy file, and an explicit directory is honoured alone.
 Mutation-checked by dropping the legacy location from the merge.
+
 ## [0.43.1] — 2026-10-24
 
 ### Fixed

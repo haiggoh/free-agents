@@ -151,10 +151,13 @@ exit 0
         self.assertEqual(rows[4][0], 'nvidia-lightning-thinking')
         self.assertEqual(rows[5][0], 'nvidia-glm53')
         self.assertEqual(rows[6][0], 'nvidia-glm53-full')
-        self.assertEqual(rows[7][0], 'nvidia-nemotron-ultra')
-        self.assertEqual(rows[8][0], 'nvidia-nemotron3')
-        self.assertEqual(rows[9][0], 'nvidia-lightning')
-        self.assertEqual(rows[10][0], 'nvidia-laguna')
+        # stepfun + deepseek above Nemotron 3 Ultra (user 2026-10-24)
+        self.assertEqual(rows[7][0], 'nvidia-step5-preview')
+        self.assertEqual(rows[8][0], 'nvidia-deepseek-v4')
+        self.assertEqual(rows[9][0], 'nvidia-nemotron-ultra')
+        self.assertEqual(rows[10][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[11][0], 'nvidia-lightning')
+        self.assertEqual(rows[12][0], 'nvidia-laguna')
         self.assertEqual(rows[0][1], 'nvidia')
         # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
         leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
@@ -345,11 +348,12 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         text, _ = self._write_cfg(model='z-ai/glm-5.3-flash')
         models, block = self._fallbacks(text)
         self.assertEqual(models, ['nvidia_nim/z-ai/glm-5.3', 'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
+                                  'nvidia_nim/stepfun-ai/step-5-preview',
                                   'nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b'])
         # Every spoofed id AND the generic "*" key (measured: a "claude-*" key does not match a
         # subagent id such as claude-haiku-9) list the chain in order.
-        self.assertIn('"*": ["la-fallback-1", "la-fallback-2", "la-fallback-3"]', block)
-        self.assertIn('"claude-opus-5-5": ["la-fallback-1", "la-fallback-2", "la-fallback-3"]', block)
+        self.assertIn('"*": ["la-fallback-1", "la-fallback-2", "la-fallback-3", "la-fallback-4"]', block)
+        self.assertIn('"claude-opus-5-5": ["la-fallback-1", "la-fallback-2", "la-fallback-3", "la-fallback-4"]', block)
         self.assertNotIn('"claude-*":', block)
         # A throttled model fails over at once instead of retrying itself three times.
         self.assertIn('    RateLimitErrorRetries: 0\n', text)
@@ -358,7 +362,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
 
     def test_fallbacks_reuse_the_model_specific_params(self):
         text, _ = self._write_cfg(model='z-ai/glm-5.3-flash')
-        ultra = text.split('  - model_name: "la-fallback-3"\n', 1)[1].split('  - model_name:', 1)[0]
+        ultra = text.split('  - model_name: "la-fallback-4"\n', 1)[1].split('  - model_name:', 1)[0]
         self.assertIn('enable_thinking: false', ultra.split('litellm_settings:')[0])
         glm = text.split('  - model_name: "la-fallback-1"\n', 1)[1].split('  - model_name:', 1)[0]
         self.assertIn('      reasoning_effort: low\n', glm)
@@ -368,7 +372,8 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         text, _ = self._write_cfg()
         models, _ = self._fallbacks(text)
         self.assertEqual(models, ['nvidia_nim/z-ai/glm-5.3-flash', 'nvidia_nim/z-ai/glm-5.3',
-                                  'nvidia_nim/deepseek-ai/deepseek-v4.1-flash'])
+                                  'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
+                                  'nvidia_nim/stepfun-ai/step-5-preview'])
 
     def test_fallbacks_off_and_override_and_other_providers(self):
         text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'off'}, model='z-ai/glm-5.3-flash')

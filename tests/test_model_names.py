@@ -35,6 +35,7 @@ class Readable(unittest.TestCase):
         "gemma4:31b": "Google Gemma 4 31B",
         "z-ai/glm-4.5v": "Z.ai GLM 4.5V",
         "mistral-medium-2604": "Mistral Medium 2604",
+        "stepfun-ai/step-5-preview": "StepFun Step 5 Preview",   # the maker leads; NVIDIA only serves it
         "someone/odd-model-7b": "Odd Model 7B",           # unknown maker: no guessed prefix
         # Local profile/quant tokens read as brand + bits (user 2026-10-23, from the model
         # folders' own quantization configs: oq6e/oq8e/oq6 = OptiQ 6/8-bit, 6xl = 6-bit XL).

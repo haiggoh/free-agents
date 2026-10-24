@@ -414,6 +414,24 @@
       "autocompact_default": "-"
     },
     {
+      "alias": "nvidia-step5-preview",
+      "provider": "nvidia",
+      "model_id": "stepfun-ai/step-5-preview",
+      "display": "StepFun Step 5 Preview",
+      "tier": "unknown",
+      "notes": "SESSION-PROVEN (user 2026-10-24): an 18-hour session, 589 turns, ZERO API errors — shipped cost-tracker 0.16.0-0.18.0 across three worktrees. Median turn 23 s. Now ranks above Nemotron 3 Ultra; also in the dispatch order and session fallbacks.",
+      "autocompact_default": "1m"
+    },
+    {
+      "alias": "nvidia-deepseek-v4",
+      "provider": "nvidia",
+      "model_id": "deepseek-ai/deepseek-v4.1-flash",
+      "display": "DeepSeek V4.1 Flash",
+      "tier": "unknown",
+      "notes": "WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.",
+      "autocompact_default": "-"
+    },
+    {
       "alias": "nvidia-nemotron-ultra",
       "provider": "nvidia",
       "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
@@ -474,15 +492,6 @@
       "display": "Moonshot Kimi K3",
       "tier": "unknown",
       "notes": "⚠️ RETIRED: NVIDIA returns 410 Gone since 2026-10-15 (end of life). Earlier probes timed out (2026-10-10/13). Hidden via broken-nvidia-models.json.",
-      "autocompact_default": "-"
-    },
-    {
-      "alias": "nvidia-deepseek-v4",
-      "provider": "nvidia",
-      "model_id": "deepseek-ai/deepseek-v4.1-flash",
-      "display": "DeepSeek V4.1 Flash",
-      "tier": "unknown",
-      "notes": "WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.",
       "autocompact_default": "-"
     },
     {

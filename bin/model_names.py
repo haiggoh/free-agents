@@ -40,6 +40,7 @@ VENDORS = {
     # KAT Coder's team names itself Kwaipilot on HuggingFace (Kuaishou is the parent company;
     # the list shows the team's own name — user 2026-10-23).
     "kwaipilot": "Kwaipilot", "openrouter": "OpenRouter",   # its own free router
+    "stepfun-ai": "StepFun",
 }
 
 # Model-family word (the name's first word) -> manufacturer, for ids with no vendor segment
