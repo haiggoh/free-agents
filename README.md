@@ -280,13 +280,36 @@ across the session model and every pool member: different models answering in pa
 original council idea. A member without a key in `~/.api_keys/` is skipped with a note. A member
 that hangs times out after `LA_SUBAGENT_POOL_TIMEOUT` (120 s) and is retried on another.
 
-**Cloud replacement.** When `FA_REPLACE_AGENTS=1`, the `hooks/cloud-agent-intercept.py` PreToolUse hook
-denies `Agent` and hands the model a ready-to-run command for `bin/free-agent-tool.py`, which routes
-by role through `council-router.sh` to a free model. The prompt goes through a quoted heredoc, so no
-quote in it can break the command. While the setting is unset, the hook **asks once**, the first
-time a cloud session calls `Agent`. That way the choice also surfaces outside `csl`. Change it in
-`csl` → Cloud Session Configuration → `x`, or with `bin/cloud_session_env.py set replace_agents 1|0|unset`.
-Free sessions are never touched by the hook.
+**Cloud replacement.** The `hooks/cloud-agent-intercept.py` PreToolUse hook routes the native
+`Agent` tool per the session's mode (0.43.0; the legacy `FA_REPLACE_AGENTS=1|0` maps onto it):
+
+- **Free first** (default): `Agent` is denied with a ready-to-run command for
+  `bin/free-agent-tool.py` (role routing through `council-router.sh`; the prompt goes through a
+  quoted heredoc, so no quote in it can break the command). After the session's free attempts are
+  honestly exhausted — the dispatch result reports `"paid_fallback_allowed": true` — **one** native
+  paid call is let through automatically (the fallback mark; session-scoped, single-use, expires).
+- **Free only**: every `Agent` call is denied and the hook never falls back to paid.
+- **Paid**: the hook stays out; the native Agent runs as usual.
+
+Change the mode in `csl` → Cloud Session Configuration → `x`, or with
+`bin/cloud_session_env.py set route agent free-first|free-only|paid`. Undecided users get the
+redirect (no prompt). Free sessions are never touched by the hook; a corrupt settings layer never
+blocks a call.
+
+**Default permission mode (0.43.0).** Cloud Session Configuration → `d` sets
+`permissions.defaultMode` (`auto` / `bypassPermissions`) in the user `settings.json` — the default
+for every session started without a mode flag, including a plain native `claude`; csl's own lanes
+pass `--permission-mode` explicitly and are unaffected. A managed policy that disables bypass
+shows the row disabled, and csl never works around it.
+
+**Auto-mode eligibility probe (0.43.0).** Cloud Session Configuration → `e` runs
+`bin/fa-eligibility-probe.py`: one small request measures whether auto mode's safety checks are
+free on this setup. The verdict comes from evidence only — a `system` notice means the checks are
+**billed** (the cost box appears next to the row); absence is `unknown` and claims nothing. The
+verdict is cached with its date; the probe refuses on a free lane and never runs on its own.
+
+**Registry auto-sync moved (0.43.0).** The "Auto-sync local registry with the disk" toggle lives
+on the **Local** screen (`y`) now, not in the OOM guard; the store key and behaviour are unchanged.
 
 Measured 2026-10-09: a real `claude -p` free-API session told to use `Agent` returned the subagent's
 answer through 6 proxy calls, all `200`. The same run against a config **without** the catch-all

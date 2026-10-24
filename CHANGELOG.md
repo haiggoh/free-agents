@@ -1,3 +1,38 @@
+## [0.43.0] — 2026-10-24
+
+### Added — the Cloud screen acts as labelled (cloud-screen plan, Release 1)
+
+- **Per-path routing modes.** The Agent tool on cloud sessions routes free-first (default), free-only
+  or paid, stored per path in settings.json env (`bin/cloud_session_env.py set route <path> <mode>`,
+  Cloud Session Configuration → `x`). free-first redirects every Agent call to a free dispatch and,
+  **after honest exhaustion**, lets exactly ONE native paid call through: a session-scoped,
+  single-use, expiring mark (`bin/fa_fallback_mark.py`) written only when the dispatch result says
+  `"paid_fallback_allowed": true` — which itself arms only on sent-and-failed attempts (3 across 2
+  providers, or everything available failed) under a wall-clock cap. A mark from one session never
+  unlocks another. The legacy `FA_REPLACE_AGENTS` key maps onto the agent path; an explicit mode on
+  the new key wins. The ask-once prompt is gone — an undecided user gets the redirect, which IS the
+  explanation.
+- **Default permission mode.** Cloud Session Configuration → `d` sets `permissions.defaultMode`
+  (auto / bypassPermissions) in the user settings — the default for every session started without a
+  mode flag. A managed policy disabling bypass shows the row disabled and the action refuses.
+- **Auto-mode eligibility probe.** Cloud Session Configuration → `e` runs
+  `bin/fa-eligibility-probe.py`: one small request (user-confirmed) measures whether auto mode's
+  safety checks are free on this setup. The verdict is evidence-only — a `system` notice means
+  billed (the cost box appears; it shows for nobody else), absence is `unknown` and claims nothing.
+  Cached with its date; refuses on a free lane; the credential command's secret travels only in the
+  child env (tested against argv, output and cache).
+
+### Changed
+
+- **Registry auto-sync lives on the Local screen** (`y`), not the OOM guard; same store key, same
+  behaviour. The startup nudge speaks the Agent path's mode: a paid path is never told offloading
+  is its default; free-only says it never falls back.
+
+### Fixed
+
+- The intercept hook fails open on a corrupt settings layer (never blocks a call); `route()` reads
+  its layer strictly so that refusal is deliberate.
+
 ## [0.42.2] — 2026-10-23
 
 ### Docs
