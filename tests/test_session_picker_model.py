@@ -925,13 +925,25 @@ class BypassDefaultRows(unittest.TestCase):
     cached not-eligible verdict."""
 
     def test_bypass_row_round_trips_and_policy_disables_it(self):
-        s = m.Settings()
-        cloud = m.CloudConfigScreen(s)
-        acts = {a.key: a for a in cloud.actions()}
-        self.assertIn("d", acts)
-        acts["d"].run()
-        self.assertIn(s.default_mode, ("auto", "bypassPermissions"))
-        self.assertIsNotNone(m.cse.default_mode())
+        # SANDBOXED CLAUDE_CONFIG_DIR: the row writes the USER settings — without the sandbox
+        # this test edited the real ~/.claude/settings.json (conftest tripwire caught it,
+        # 2026-10-24). Same pattern as the cse tests.
+        tmp = tempfile.mkdtemp()
+        old_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = tmp
+        try:
+            s = m.Settings()
+            cloud = m.CloudConfigScreen(s)
+            acts = {a.key: a for a in cloud.actions()}
+            self.assertIn("d", acts)
+            acts["d"].run()
+            self.assertIn(s.default_mode, ("auto", "bypassPermissions"))
+            self.assertIsNotNone(m.cse.default_mode())
+        finally:
+            if old_cfg is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = old_cfg
 
     def test_bypass_row_disabled_with_the_policy_reason(self):
         pol = Path(tempfile.mkdtemp())
