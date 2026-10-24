@@ -131,3 +131,31 @@ class EligibilityProbe(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CredentialCommandRobustness(unittest.TestCase):
+    """The default credential command wraps its JSON in an ANSI banner (measured 2026-10-24
+    against `joyia agent claude --setup-only --json`): prose lines, then a multi-line JSON
+    object. The probe must find the object, not fail on the first line."""
+
+    def test_credential_command_with_a_banner_prefix_parses(self):
+        cred = Path(tempfile.mkdtemp()) / "cred.sh"
+        banner = ("#!/bin/sh\n"
+                  "echo '\\033[34msetting up\\033[0m'\n"
+                  "echo 'API URL: https://gw.example'\n"
+                  "echo '{\n"
+                  '  "ANTHROPIC_AUTH_TOKEN": "sk-fixture-abc",\n'
+                  '  "ANTHROPIC_BASE_URL": "https://gw.example"\n'
+                  "echo '}'  # oops balanced below"
+                  "}\n")
+        # simpler: banner lines then a JSON object, all on stdout
+        cred.write_text("#!/bin/sh\n"
+                        "printf 'banner line\\\\n'\n"
+                        "printf '{\\\"ANTHROPIC_AUTH_TOKEN\\\": \\\"sk-fixture-abc\\\", \\\"ANTHROPIC_BASE_URL\\\": \\\"https://gw.example\\\"}\\\\n'\n")
+        cred.chmod(0o755)
+        out = fp.probe(lambda argv, env, stdin: (0, ""),
+                       env={"ANTHROPIC_BASE_URL": None, "FA_CREDENTIAL_COMMAND": str(cred),
+                            "PATH": os.environ.get("PATH", "")},
+                       cfg_dir=Path(tempfile.mkdtemp()))
+        self.assertNotEqual(out["verdict"], "refused",
+                            f"a banner before the JSON is not a refusal: {out['evidence'][:120]}")

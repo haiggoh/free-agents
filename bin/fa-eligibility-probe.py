@@ -96,6 +96,29 @@ def resolve_credential_command(env: dict) -> str | None:
     return " ".join(DEFAULT_CREDENTIAL_COMMAND) if shutil.which("joyia") else None
 
 
+def _extract_json_object(text: str) -> dict:
+    """The first balanced JSON object in `text` — the default credential command wraps its
+    JSON in an ANSI banner (measured 2026-10-24 against joyia's setup output), so a plain
+    json.loads on the whole stdout fails on the banner line."""
+    import re
+    clean = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    start = clean.find("{")
+    if start < 0:
+        raise ValueError("no JSON object found")
+    depth = 0
+    for i in range(start, len(clean)):
+        if clean[i] == "{":
+            depth += 1
+        elif clean[i] == "}":
+            depth -= 1
+            if depth == 0:
+                doc = json.loads(clean[start:i + 1])
+                if not isinstance(doc, dict):
+                    raise ValueError("not a JSON object")
+                return doc
+    raise ValueError("unbalanced JSON object")
+
+
 def probe(run_child, env: dict | None = None, cfg_dir: Path | None = None,
           now: float | None = None, force: bool = False) -> dict:
     """Run the probe and return the verdict dict {verdict, evidence, at}. A cached verdict is
@@ -120,10 +143,10 @@ def probe(run_child, env: dict | None = None, cfg_dir: Path | None = None,
     if cred_cmd:
         r = subprocess.run(cred_cmd, shell=True, capture_output=True, text=True, timeout=60)
         try:
-            injected = json.loads(r.stdout)
-        except ValueError:
+            injected = _extract_json_object(r.stdout)
+        except ValueError as exc:
             return {"verdict": "refused", "evidence": f"the credential command printed no JSON "
-                    f"({(r.stderr or r.stdout or '').strip()[:120]})", "at": now}
+                    f"({exc}: {(r.stderr or r.stdout or '').strip()[:120]})", "at": now}
         for k, v in injected.items():
             if k.startswith("ANTHROPIC_"):
                 child_env[k] = v
@@ -169,9 +192,12 @@ def main(argv=None) -> int:
     env = dict(os.environ)
     if a.credential_command:
         env["FA_CREDENTIAL_COMMAND"] = a.credential_command
-    verdict = probe(lambda argv_, env_, stdin_: subprocess.run(
-        argv_, capture_output=True, text=True, env=env_, input=stdin_, timeout=300), env,
-        force=a.force)
+    def _run(argv_, env_, stdin_):
+        r = subprocess.run(argv_, capture_output=True, text=True, env=env_, input=stdin_,
+                           timeout=300)
+        return r.returncode, r.stdout
+
+    verdict = probe(_run, env, force=a.force)
     cached_hit = verdict.get("at") is not None and verdict.get("probe_action") is None
     if verdict["verdict"] == "refused":
         print(f"fa-eligibility-probe: {verdict['evidence']}", file=sys.stderr)

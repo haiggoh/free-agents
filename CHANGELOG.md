@@ -1,3 +1,14 @@
+## [0.43.4] — 2026-10-24
+
+### Fixed
+
+- **The eligibility probe survives the credential command's banner.** `joyia agent claude
+  --setup-only --json` wraps its JSON in an ANSI-decorated preamble, so the probe refused with
+  "printed no JSON"; it now extracts the first balanced JSON object from the output (tested
+  against a banner-prefixed fixture) and its CLI runner returns what probe() expects. First
+  real run (user-authorized): verdict `unknown` — no system notice in the stream, and absence
+  is never positive, so no cost claim; cached with its date.
+
 ## [0.43.3] — 2026-10-24
 
 ### Changed — StepFun Step 5 Preview joins the first rank (user 2026-10-24)
