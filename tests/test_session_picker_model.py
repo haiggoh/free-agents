@@ -5,7 +5,10 @@ Covers the navigation contract (home-owned vs direct-root), the one-action-table
 key rule, family/provider grouping, the one-open-group accordion, stable selection by id,
 and the launch argv each screen produces. Each test names the change that breaks it.
 """
+import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -914,3 +917,47 @@ class ThemeStoreLayering(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BypassDefaultRows(unittest.TestCase):
+    """A2 + A3 (0.43.0): the bypass-default row respects managed policy and a registered
+    profile; the eligibility-probe row asks before spending; the cost box shows ONLY for a
+    cached not-eligible verdict."""
+
+    def test_bypass_row_round_trips_and_policy_disables_it(self):
+        s = m.Settings()
+        cloud = m.CloudConfigScreen(s)
+        acts = {a.key: a for a in cloud.actions()}
+        self.assertIn("d", acts)
+        acts["d"].run()
+        self.assertIn(s.default_mode, ("auto", "bypassPermissions"))
+        self.assertIsNotNone(m.cse.default_mode())
+
+    def test_bypass_row_disabled_with_the_policy_reason(self):
+        pol = Path(tempfile.mkdtemp())
+        (pol / "managed-settings.d").mkdir()
+        (pol / "managed-settings.d" / "org.json").write_text(
+            json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
+        old = os.environ.get("FA_MANAGED_SETTINGS_DIR")
+        os.environ["FA_MANAGED_SETTINGS_DIR"] = str(pol)
+        try:
+            s = m.Settings()
+            cloud = m.CloudConfigScreen(s)
+            acts = {a.key: a for a in cloud.actions()}
+            self.assertFalse(acts["d"].enabled)
+            self.assertIn("managed policy", acts["d"].label)
+            before = m.cse.default_mode()
+            acts["d"].run()
+            self.assertEqual(m.cse.default_mode(), before, "csl never works around a policy")
+        finally:
+            (os.environ.pop("FA_MANAGED_SETTINGS_DIR", None) if old is None
+             else os.environ.__setitem__("FA_MANAGED_SETTINGS_DIR", old))
+
+    def test_cost_box_only_for_not_eligible(self):
+        s = m.Settings()
+        cloud = m.CloudConfigScreen(s)
+        self.assertNotIn("billed", cloud.info_text(None))
+        s.eligibility = {"verdict": "not-eligible", "evidence": "the notice arrived", "at": 1.0}
+        self.assertIn("billed", cloud.info_text(None))
+        s.eligibility = {"verdict": "unknown", "evidence": "absence", "at": 1.0}
+        self.assertNotIn("billed", cloud.info_text(None))

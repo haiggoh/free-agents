@@ -225,28 +225,7 @@ def save_route(path: str, mode: str) -> Path:
     return _write_env(owned, {ROUTE_ENV[path]: mode})
 
 
-def _write_env(owned: tuple, updates: dict) -> Path:
-    """Drop `owned` env keys, apply `updates`; preserve every other byte, the mode and symlinks."""
-    path = settings_path()
-    real = Path(os.path.realpath(path))          # a dotfiles symlink stays a symlink
-    try:
-        raw = real.read_text(encoding="utf-8")
-        doc = json.loads(raw) if raw.strip() else {}
-        mode = os.stat(real).st_mode & 0o777
-    except FileNotFoundError:
-        raw, doc, mode = None, {}, 0o600
-    if not isinstance(doc, dict):
-        raise ValueError(f"{path} is not a JSON object; refusing to rewrite it")
-    had_env = "env" in doc
-    env = dict(_env(doc))
-    for k in owned:
-        env.pop(k, None)
-    env.update(updates)
-    if env or had_env:
-        doc["env"] = env
-    body = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
-    if body == raw:
-        return path
+def _atomic_write(real: Path, body: str, mode: int) -> None:
     real.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".settings.", suffix=".tmp", dir=real.parent)
     try:
@@ -262,7 +241,54 @@ def _write_env(owned: tuple, updates: dict) -> Path:
         except OSError:
             pass
         raise
-    return path
+
+
+def _read_strict() -> tuple[Path, str, dict, int]:
+    """settings_path() resolved (a dotfiles symlink stays a symlink), with its raw text, parsed
+    doc and mode. A missing file reads as empty; a corrupt or non-object file RAISES — writers
+    refuse and the hook fails open; only best-effort readers use _read_json."""
+    path = settings_path()
+    real = Path(os.path.realpath(path))
+    try:
+        raw = real.read_text(encoding="utf-8")
+        doc = json.loads(raw) if raw.strip() else {}
+        mode = os.stat(real).st_mode & 0o777
+    except FileNotFoundError:
+        raw, doc, mode = None, {}, 0o600
+    except ValueError as exc:
+        raise ValueError(f"settings.json is corrupt: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ValueError(f"{path} is not a JSON object; refusing to rewrite it")
+    return real, raw, doc, mode
+
+
+def _write_doc(mutate) -> Path:
+    """Strict-read settings.json, apply mutate(doc) in place, atomic write preserving the mode
+    and symlinks. Shared by the env writer and the permissions writer."""
+    real, raw, doc, mode = _read_strict()
+    mutate(doc)
+    body = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    if body == raw:
+        return settings_path()
+    _atomic_write(real, body, mode)
+    return settings_path()
+
+
+def _write_env(owned: tuple, updates: dict) -> Path:
+    """Drop `owned` env keys, apply `updates`; preserve every other byte, the mode and symlinks."""
+
+    def mutate(doc: dict) -> None:
+        nonlocal had_env
+        had_env = "env" in doc
+        env = dict(_env(doc))
+        for k in owned:
+            env.pop(k, None)
+        env.update(updates)
+        if env or had_env:
+            doc["env"] = env
+
+    had_env = False
+    return _write_doc(mutate)
 
 
 def describe(st: dict | None = None) -> str:
@@ -318,3 +344,64 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- the default permission mode for sessions the user starts themselves (A2, 0.43.0) --------
+# Written to permissions.defaultMode in the USER settings.json: it applies to EVERY session
+# started without a mode flag, including a plain native `claude`. csl's own lanes pass
+# --permission-mode explicitly and are unaffected. Values: auto | bypassPermissions only.
+
+DEFAULT_MODES = ("auto", "bypassPermissions")
+
+
+def default_mode() -> str | None:
+    """permissions.defaultMode from the user settings, or None when unset. Best-effort read:
+    a corrupt layer shows as unset here; the writers refuse it loudly."""
+    try:
+        _real, _raw, doc, _mode = _read_strict()
+    except ValueError:
+        return None
+    perms = doc.get("permissions")
+    if not isinstance(perms, dict):
+        return None
+    v = perms.get("defaultMode")
+    return v if v in DEFAULT_MODES else None
+
+
+def save_default_mode(mode: str) -> Path:
+    """Set permissions.defaultMode, preserving every other key, byte-format and mode."""
+    if mode not in DEFAULT_MODES:
+        raise ValueError(f"invalid default mode: {mode!r} (allowed: {', '.join(DEFAULT_MODES)})")
+
+    def mutate(doc: dict) -> None:
+        perms = doc.get("permissions")
+        if not isinstance(perms, dict):
+            perms = {}
+            doc["permissions"] = perms
+        perms["defaultMode"] = mode
+
+    return _write_doc(mutate)
+
+
+def bypass_blocked_by_policy() -> str | None:
+    """The reason a managed policy disables bypass mode, or None. Reads the macOS managed
+    settings (managed-settings.json + managed-settings.d/*.json); FA_MANAGED_SETTINGS_DIR
+    overrides the base dir for tests. csl never works around a policy [spec A2, decided]."""
+    import glob
+    base = Path(os.environ.get("FA_MANAGED_SETTINGS_DIR")
+                or "/Library/Application Support/ClaudeCode")
+    docs = []
+    try:
+        main = base / "managed-settings.json"
+        if main.is_file():
+            docs.append(json.loads(main.read_text(encoding="utf-8")))
+        for f in sorted(glob.glob(str(base / "managed-settings.d" / "*.json"))):
+            docs.append(json.loads(Path(f).read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return None                      # an unreadable policy layer is not a block
+    for d in docs:
+        perms = d.get("permissions") if isinstance(d, dict) else None
+        if isinstance(perms, dict) and perms.get("disableBypassPermissionsMode") == "disable":
+            return ("a managed policy disables bypass mode "
+                    "(permissions.disableBypassPermissionsMode: \"disable\")")
+    return None

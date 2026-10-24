@@ -23,6 +23,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -471,6 +472,10 @@ class Settings:
     security_review_custom: str | None = None
     # Shown only when the plugin is installed+enabled, or an override of ours is still set.
     routes: dict = field(default_factory=dict)   # {"agent": mode, ...} — the per-path routing modes
+    # The A2 default permission mode for sessions the user starts themselves (user settings).
+    default_mode: str | None = None
+    # A3: the cached eligibility verdict {"verdict", "evidence", "at"}; cost box only for not-eligible.
+    eligibility: dict | None = None
     security_review_offered: bool = False
     # Called with {"security_review": n} or {"route": (path, mode)} when the user changes it; persists it.
     on_cloud_saved: Callable[[dict], object] | None = None
@@ -1563,6 +1568,7 @@ class CloudConfigScreen(Screen):
                      else cse.SECURITY_REVIEW_LABELS[s.security_review])
             acts.append(Action("s", f"Security Review (all cloud sessions): {label}",
                                lambda: self._cycle_security_review()))
+        bypass_reason = cse.bypass_blocked_by_policy()
         acts += [
             Action("x", f"{ec.EMOJI_SHIELD_STR}  Agent dispatch (paid sessions): "
                         f"{cse.ROUTE_LABELS[s.routes.get('agent', 'free-first')]}",
@@ -1570,6 +1576,10 @@ class CloudConfigScreen(Screen):
             Action("p", f"{ec.EMOJI_AUTO_MODE_STR}  Bypass Permissions (blind-trust): {'ON' if s.cloud_bypass_permissions else 'OFF'}"
                         f"  {NOT_GATEWAY_NOTE}",
                    lambda: self._toggle("cloud_bypass_permissions")),
+            Action("d", self._bypass_default_label(bypass_reason),
+                   self._cycle_default_mode, enabled=bypass_reason is None),
+            Action("e", "Check whether auto mode's safety checks are free here "
+                        "(sends one small request)", self._run_probe),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
@@ -1587,9 +1597,50 @@ class CloudConfigScreen(Screen):
         if s.on_cloud_saved:
             s.on_cloud_saved({"route": (path, s.routes[path])})
 
+    def _bypass_default_label(self, reason: str | None) -> str:
+        if reason:
+            return f"Default permission mode for sessions you start yourself: disabled — {reason}"
+        registered = " — overruled by the registered cloud profile" if self._profile_overrides_mode() else ""
+        return (f"Default permission mode for sessions you start yourself: "
+                f"{self.settings.default_mode or cse.default_mode() or 'Auto'}{registered}")
+
+    def _profile_overrides_mode(self) -> bool:
+        # Release 2 registers the cloud profile; in Release 1 this reads a fixture store value.
+        return bool(getattr(self.settings, "cloud_profile_default_mode", None))
+
+    def _cycle_default_mode(self):
+        if cse.bypass_blocked_by_policy():
+            return                      # csl never works around a managed policy (spec A2)
+        order = ["auto", "bypassPermissions"]
+        cur = self.settings.default_mode or cse.default_mode() or "auto"
+        nxt = order[(order.index(cur) + 1) % len(order)]
+        self.settings.default_mode = nxt
+        cse.save_default_mode(nxt)
+        if self.settings.on_cloud_saved:
+            self.settings.on_cloud_saved({"default_mode": nxt})
+
+    def _run_probe(self):
+        """Row e: the user CONFIRMED the small request (the ConfirmPanel path asks before this
+        runs). The probe is cached; its verdict feeds the cost box."""
+        import subprocess as sp
+        probe_py = Path(__file__).resolve().parent / "fa-eligibility-probe.py"
+        r = sp.run([sys.executable, str(probe_py), "--json"],
+                   capture_output=True, text=True, timeout=330)
+        try:
+            self.settings.eligibility = json.loads(r.stdout)
+        except ValueError:
+            self.settings.eligibility = {"verdict": "unknown", "evidence": (r.stderr or r.stdout)[:200]}
+
     def info_text(self, item_id: str | None) -> str:
         """The three routing modes, each with its one-line contract (plain Action rows pass
-        item_id=None, so the box always shows the whole table)."""
+        item_id=None, so the box always shows the whole table); the gateway cost box appears
+        ONLY when the cached verdict is not-eligible (A3: facts, only for users it applies to)."""
+        extra = ""
+        el = self.settings.eligibility
+        if el and el.get("verdict") == "not-eligible":
+            extra = ("\n\nCost note: on this setup auto mode's safety checks are billed as normal "
+                     "token usage. Bypass with allow/deny rules avoids those calls; the lasting fix "
+                     "is a gateway that passes the safeguards fields through unchanged.")
         return (
             "How the Agent tool is routed on cloud sessions:\n"
             "· Free first, paid as last resort — every Agent call is redirected to a free model; "
@@ -1599,6 +1650,7 @@ class CloudConfigScreen(Screen):
             "· Free only — every Agent call is redirected and the hook never falls back to paid.\n"
             "· Paid (free-agents stays out) — the native Agent tool runs paid subagents as usual; "
             "free models only when you ask."
+            + extra
         )
 
     def _cycle_security_review(self):

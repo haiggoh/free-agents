@@ -290,3 +290,49 @@ class RouteModes(_Sandbox):
         with self.assertRaises(ValueError):
             cse.save_route("agent", "paid")
         self.assertEqual(self.settings.read_text(), before)
+
+
+class BypassDefault(_Sandbox):
+    """A2 (0.43.0): permissions.defaultMode in the user's settings.json — the default for
+    sessions the user starts WITHOUT a mode flag. csl's own lanes pass --permission-mode
+    explicitly and are unaffected. A managed policy disabling bypass shows the row disabled;
+    csl never works around it."""
+
+    def test_default_mode_round_trip_preserves_every_other_key(self):
+        self.write_settings({"env": {"KEEP": "1"}, "model": "opus", "permissions": {"allow": ["Bash(ls)"]}})
+        cse.save_default_mode("bypassPermissions")
+        doc = json.loads(self.settings.read_text())
+        self.assertEqual(doc["permissions"]["defaultMode"], "bypassPermissions")
+        self.assertEqual(doc["permissions"]["allow"], ["Bash(ls)"])
+        self.assertEqual(doc["env"], {"KEEP": "1"})
+        self.assertEqual(doc["model"], "opus")
+        cse.save_default_mode("auto")
+        self.assertEqual(json.loads(self.settings.read_text())["permissions"]["defaultMode"], "auto")
+
+    def test_default_mode_rejects_unknown_values_and_writes_nothing(self):
+        self.write_settings({"model": "opus"})
+        before = self.settings.read_text()
+        with self.assertRaises(ValueError):
+            cse.save_default_mode("acceptEdits")
+        self.assertEqual(self.settings.read_text(), before)
+
+    def test_default_mode_refuses_a_corrupt_settings_layer(self):
+        self.settings.write_text("[]")
+        with self.assertRaises(ValueError):
+            cse.save_default_mode("auto")
+        self.assertEqual(self.settings.read_text(), "[]")
+
+    def test_managed_policy_disables_the_row(self):
+        pol = Path(self.tmp.name) / "managed"
+        (pol / "managed-settings.d").mkdir(parents=True)
+        (pol / "managed-settings.json").write_text(json.dumps({"permissions": {"allow": ["Bash"]}}))
+        (pol / "managed-settings.d" / "org.json").write_text(
+            json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
+        os.environ["FA_MANAGED_SETTINGS_DIR"] = str(pol)
+        self.addCleanup(os.environ.pop, "FA_MANAGED_SETTINGS_DIR", None)
+        reason = cse.bypass_blocked_by_policy()
+        self.assertIsNotNone(reason)
+        self.assertIn("disable", reason.lower())
+        # without the disable key: not blocked
+        (pol / "managed-settings.d" / "org.json").write_text(json.dumps({"permissions": {"allow": []}}))
+        self.assertIsNone(cse.bypass_blocked_by_policy())
