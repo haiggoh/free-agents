@@ -68,6 +68,30 @@ def events_path():
     return os.path.join(ledger_dir(), "savings.jsonl")
 
 
+# The location the ledger lived in BEFORE 3da0899 renamed the plugin's directory. Read-only:
+# appends go to ledger_dir(), so history becomes visible without anything being moved.
+LEGACY_LEDGER_DIR = os.path.join(os.path.expanduser("~"), ".claude", "local-agents")
+
+
+def _event_paths():
+    """Every location an events file may live in, live first.
+
+    An explicit FREE_AGENTS_LEDGER_DIR pins it to exactly one place — a caller that names the
+    directory has said where the data is, and silently adding another would surprise them.
+    """
+    if os.environ.get("FREE_AGENTS_LEDGER_DIR"):
+        return [events_path()]
+    live, legacy = events_path(), os.path.join(LEGACY_LEDGER_DIR, "savings.jsonl")
+    # A symlinked or identical path would double every event, so list each real file once.
+    out, seen = [], set()
+    for p in (live, legacy):
+        real = os.path.realpath(p)
+        if real not in seen:
+            seen.add(real)
+            out.append(p)
+    return out
+
+
 def rollup_path():
     return os.path.join(ledger_dir(), "rollup.json")
 
@@ -141,22 +165,31 @@ def append_event(event):
 
 def read_events():
     """Every readable event, oldest first. A corrupt line is skipped, not fatal — a
-    half-written line from a killed process must not make the whole ledger unreadable."""
-    path = events_path()
-    if not os.path.exists(path):
-        return []
+    half-written line from a killed process must not make the whole ledger unreadable.
+
+    COMPAT: 3da0899 moved the ledger from ~/.claude/local-agents to ~/.claude/free-agents and
+    took the history with it — new events were appended to the new file while the old one still
+    held everything written before, so every report read the new (empty) file and reported
+    $0.00 saved forever. Measured 2026-10-24: 35 events stranded in the legacy location,
+    `report --since 2026-01-01` returning 0. Both locations are now read and MERGED; appends
+    still go to the live one only, so nothing is moved and the merge is idempotent (an event is
+    identified by its own ts/session/model, which a re-read cannot duplicate).
+    """
     out = []
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(obj, dict):
-                out.append(obj)
+    for path in _event_paths():
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(obj, dict):
+                    out.append(obj)
     return out
 
 
@@ -319,14 +352,33 @@ def main(argv=None):
         tin = sum(int(e.get("input_tokens") or 0) for e in events)
         tout = sum(int(e.get("output_tokens") or 0) for e in events)
         if args.json:
-            print(json.dumps({
+            payload = {
                 "contract": 1, "period": label, "since": start,
                 "events": len(events), "unpriced_events": unpriced,
                 "output_only_events": output_only,
                 "unmeasured_input_chars": unmeasured_chars,
                 "input_tokens": tin, "output_tokens": tout,
                 "saved_usd": round(total, 6),
-            }, indent=2))
+            }
+            # Per-session savings: WHICH session's dispatches saved how much. Additive — the
+            # aggregate fields above are unchanged, so a consumer that ignores this is unaffected.
+            # The rollup already groups by (session, day), but NOTHING regenerates it in
+            # production (there is no caller for `savings-ledger.py rollup`), so this is derived
+            # here from the same events the aggregate is derived from rather than read from a
+            # file that does not exist.
+            by_session = {}
+            for e in events:
+                if e.get("saved_usd") is None:
+                    continue
+                sid = e.get("session") or "unknown"
+                g = by_session.setdefault(sid, {"session": sid, "saved_usd": 0.0, "events": 0})
+                g["saved_usd"] += float(e["saved_usd"])
+                g["events"] += 1
+            payload["by_session"] = sorted(
+                ({"session": g["session"], "saved_usd": round(g["saved_usd"], 6),
+                  "events": g["events"]} for g in by_session.values()),
+                key=lambda g: (-g["saved_usd"], g["session"]))
+            print(json.dumps(payload, indent=2))
             return 0
         if not events:
             print("local offload (%s): no dispatches recorded" % label)

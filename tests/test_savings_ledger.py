@@ -232,6 +232,72 @@ check("OUTPUT side only" not in run(["report"], d10).stdout,
 check(json.loads(run(["report", "--json"], d10).stdout)["output_only_events"] == 0,
       "and reports zero output-only events")
 
+# --- per-session savings, and the legacy-location merge (0.34.0) -----------------------
+# The ledger moved from ~/.claude/local-agents to ~/.claude/free-agents in 3da0899 and took the
+# history with it: new events went to the new file while the old one held everything before, so
+# every report read an empty file and understated savings forever (measured 2026-10-24: 35 events
+# stranded, `report --since 2026-01-01` returning 0). Both are now read; appends stay live-only.
+
+
+def run_home(argv, home):
+    """Run with HOME pointed at a fixture, so the ledger location is the REAL default path."""
+    env = {k: v for k, v in os.environ.items() if k != "FREE_AGENTS_LEDGER_DIR"}
+    env["HOME"] = home
+    return subprocess.run([sys.executable, SCRIPT] + argv, env=env,
+                          capture_output=True, text=True)
+
+
+h = tempfile.mkdtemp()
+live = os.path.join(h, ".claude", "free-agents", "savings.jsonl")
+legacy = os.path.join(h, ".claude", "local-agents", "savings.jsonl")
+os.makedirs(os.path.dirname(live))
+os.makedirs(os.path.dirname(legacy))
+with open(legacy, "w") as fh:
+    fh.write(json.dumps({"ts": "2026-10-01T10:00:00Z", "session": "legacy-sess",
+                         "model": "m", "input_tokens": 10, "output_tokens": 5,
+                         "saved_usd": 0.5}) + "\n")
+run_home(["record", "--model", "m", "--in", "20", "--out", "10", "--session", "live-sess"], h)
+
+out = json.loads(run_home(["report", "--json"], h).stdout)
+check(out["events"] == 2, "events from BOTH the live and the legacy location are counted")
+# Compare against the live file ALONE: the merge must add exactly the legacy event's $0.50.
+# (Asserting "$0.50 is in the total" would pass trivially; asserting it is MORE than the live-only
+# total is what proves the legacy event was actually read.)
+live_only = json.loads(subprocess.run(
+    [sys.executable, SCRIPT, "report", "--json"],
+    env=dict(os.environ, FREE_AGENTS_LEDGER_DIR=os.path.dirname(live), HOME=h),
+    capture_output=True, text=True).stdout)
+check(live_only["events"] == 1, "the live directory alone holds just the new event")
+check(abs(out["saved_usd"] - (live_only["saved_usd"] + 0.5)) < 1e-9,
+      "the merged total exceeds the live-only total by the legacy event's saving")
+check(len(out["by_session"]) == 2, "by_session lists each session from both files")
+check(sorted(r["session"] for r in out["by_session"]) == ["legacy-sess", "live-sess"],
+      "a legacy-location session is not silently dropped")
+check(abs(sum(r["saved_usd"] for r in out["by_session"]) - out["saved_usd"]) < 1e-9,
+      "by_session reconciles to the total it is drawn from")
+check(sorted(r["saved_usd"] for r in out["by_session"])[::-1]
+      == [r["saved_usd"] for r in out["by_session"]],
+      "by_session is ordered biggest saving first")
+
+check(os.path.exists(live) and os.path.exists(legacy),
+      "an append does not move or delete the legacy file")
+check(sum(1 for _ in open(legacy)) == 1, "the legacy file keeps exactly its own events")
+check(sum(1 for _ in open(live)) == 1, "a new event lands in the live file")
+
+# An explicit directory pins it: a caller that names the location must not get a surprise merge.
+pinned = tempfile.mkdtemp()
+run(["record", "--model", "m", "--in", "1", "--out", "1"], pinned)
+legacy_home = tempfile.mkdtemp()
+os.makedirs(os.path.join(legacy_home, ".claude", "local-agents"))
+with open(os.path.join(legacy_home, ".claude", "local-agents", "savings.jsonl"), "w") as fh:
+    fh.write(json.dumps({"ts": "2026-10-02T10:00:00Z", "model": "m", "input_tokens": 1,
+                         "output_tokens": 1, "saved_usd": 9.0}) + "\n")
+env = dict(os.environ, FREE_AGENTS_LEDGER_DIR=pinned, HOME=legacy_home)
+q = subprocess.run([sys.executable, SCRIPT, "report", "--json"], env=env,
+                   capture_output=True, text=True)
+check(json.loads(q.stdout)["events"] == 1,
+      "an explicit FREE_AGENTS_LEDGER_DIR is honoured alone, with no legacy merge")
+
 print("\n%d passed, %d failed" % (passed, failed))
 if __name__ == "__main__":
     sys.exit(1 if failed else 0)

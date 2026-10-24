@@ -1,3 +1,42 @@
+## [0.43.2] — 2026-10-24 — the savings ledger reads its own history again
+
+### Fixed — the savings ledger reads its own history again
+
+`3da0899` moved the ledger from `~/.claude/local-agents/` to `~/.claude/free-agents/` and took the
+history with it: new events were appended to the new file while the old one still held everything
+written before, so every report read the new (empty) file and **understated savings forever**.
+Measured 2026-10-24: 35 events stranded in the legacy location, with
+`savings-ledger.py report --since 2026-01-01` returning 0.
+
+`read_events()` now reads both locations and merges them. **Appends still go to the live file
+only**, so nothing is moved and the merge is idempotent. An explicit
+`FREE_AGENTS_LEDGER_DIR` still pins the ledger to exactly one place — a caller that names the
+directory has said where the data is, and silently adding another would surprise them.
+
+### Added — per-session dispatch savings
+
+`report --json` now carries `by_session`: which session's dispatches saved how much, ordered
+biggest first, reconciling to the total. This is what makes "which session saved how much"
+answerable for *dispatches*, complementing the per-free-lane-session phantom that
+cost-tracker 0.17.1 already reads from the cost-ledger.
+
+Additive: the existing aggregate fields are unchanged, so a consumer that ignores the new key is
+unaffected. Events recorded before `--session` existed show as `unknown` rather than being
+silently folded into a wrong bucket.
+
+### Also noted while fixing it
+
+Nothing ever regenerates `rollup.json` — there is no caller for `savings-ledger.py rollup` — so
+cost-tracker's `read_savings_fast()` (which reads that rollup) has never once run in production
+and always returns `None`. The subprocess path is the live one. Left as-is (it is harmless and
+the staleness check is correct), but the "fast path" comment overstates what ships.
+
+### Verification
+
+`tests/test_savings_ledger.py` +9 (84 total): events from both locations are counted, the merged
+total exceeds the live-only total by the legacy event, `by_session` reconciles and is ordered,
+an append never moves or deletes the legacy file, and an explicit directory is honoured alone.
+Mutation-checked by dropping the legacy location from the merge.
 ## [0.43.1] — 2026-10-24
 
 ### Fixed
