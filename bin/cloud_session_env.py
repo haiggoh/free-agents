@@ -178,18 +178,37 @@ ROUTE_MODES = ("free-first", "free-only", "paid")
 
 def route(path: str, env: dict | None = None) -> str:
     """The mode for `path`: settings.json env merged over `env` (the registered state is
-    authoritative over a hook's process env), then the legacy FA_REPLACE_AGENTS mapping
-    (agent only: "1" -> free-first, "0" -> paid), then the free-first default."""
+    authoritative over a hook's process env). An explicit per-path key wins; the legacy
+    FA_REPLACE_AGENTS mapping (agent only: "1" -> free-first, "0" -> paid) applies only when
+    the new key is absent; then the free-first default."""
     if path not in ROUTE_PATHS:
         raise ValueError(f"unknown route path: {path!r} (allowed: {', '.join(ROUTE_PATHS)})")
     merged = dict(env or {})
-    merged.update(_env(_read_json(settings_path())))
+    # STRICT read for the routing decision: an absent settings.json is a normal fresh
+    # install (no settings), but a corrupt or non-object file must RAISE — the hook fails
+    # open on it (never blocks the user) and the picker shows the warning. The lenient
+    # _read_json stays for callers that only want best-effort values.
+    try:
+        raw = settings_path().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raw = ""
+    except OSError as exc:
+        raise ValueError(f"settings layer unreadable: {exc}") from exc
+    try:
+        doc = json.loads(raw) if raw.strip() else {}
+    except ValueError as exc:
+        raise ValueError(f"settings.json is corrupt: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ValueError("settings.json is not a JSON object")
+    merged.update(_env(doc))
+    v = merged.get(ROUTE_ENV[path])
+    if v in ROUTE_MODES:
+        return v
     if path == "agent":
         legacy = merged.get(REPLACE_AGENTS_KEY)
         if legacy is not None and str(legacy) in ("0", "1"):
             return "paid" if str(legacy) == "0" else "free-first"
-    v = merged.get(ROUTE_ENV[path])
-    return v if v in ROUTE_MODES else "free-first"
+    return "free-first"
 
 
 def save_route(path: str, mode: str) -> Path:

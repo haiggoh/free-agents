@@ -1,28 +1,33 @@
 #!/usr/bin/env python3
 """
-Claude Code PreToolUse hook: intercept paid Sonnet subagents on cloud sessions.
+Claude Code PreToolUse hook: route the native `Agent` tool per the session's routing mode.
 
-WHY: On paid cloud sessions (ANTHROPIC_BASE_URL not localhost), the native `Agent`
-tool uses expensive Sonnet subagents. This hook lets users opt in to replace those
-with FREE models (NVIDIA Nemotron, Gemini, local) via `free-agent-tool.py`.
+WHY: On paid cloud sessions (ANTHROPIC_BASE_URL not localhost), the native `Agent` tool uses
+expensive Sonnet subagents. free-agents routes it per path (cloud_session_env.py): free-first
+(deny + redirect to free-agent-tool.py; ONE native call is allowed once THIS session's free
+attempts are honestly exhausted — the fallback mark), free-only (deny, never falls back), paid
+(pass through). FREE sessions (localhost base URL) always pass through.
 
-Behavior:
-- FREE sessions (localhost base URL): always pass through (native Agent).
-- FA_REPLACE_AGENTS=0: pass through (user chose native).
-- FA_REPLACE_AGENTS=1: deny native Agent, instruct model to call free-agent-tool.py via Bash.
-- Undecided: ask ONCE per machine (state file), then default to pass-through.
-
-Fail-open: any error -> silent pass-through.
+Fail-open: any error — including a corrupt settings layer — passes the call through; the hook
+must never block the user because its own configuration is unreadable.
 """
 
 import json
 import os
 import sys
-import tempfile
 import urllib.parse
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+_BIN = Path(__file__).resolve().parent.parent / "bin"
+if str(_BIN) not in sys.path:
+    sys.path.insert(0, str(_BIN))
+try:
+    import cloud_session_env as cse
+    import fa_fallback_mark as fm
+except ImportError:                                   # standalone deploy without bin/: fail open
+    cse = None
+    fm = None
 
 
 def is_free_session(base_url: Optional[str]) -> bool:
@@ -37,29 +42,8 @@ def is_free_session(base_url: Optional[str]) -> bool:
         return False
 
 
-def get_state_path(env: Dict[str, str]) -> Path:
-    """Get the state file path for 'ask once' tracking."""
-    state_env = env.get("FA_INTERCEPT_STATE")
-    if state_env:
-        return Path(state_env)
-    home = Path.home()
-    return home / ".claude" / "free-agents" / "agent-intercept-asked"
-
-
-def read_state(state_path: Path) -> bool:
-    """Return True if state file exists (already asked)."""
-    return state_path.exists()
-
-
-def write_state(state_path: Path) -> None:
-    """Create state file with ISO timestamp, mode 0600."""
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(datetime.now().isoformat())
-    state_path.chmod(0o600)
-
-
-def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str) -> str:
-    """Build the deny reason with exact Bash invocation instructions."""
+def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str) -> str:
+    """Build the deny reason: the exact Bash invocation, then the mode's tail."""
     prompt = tool_input.get("prompt", "")
     subagent_type = tool_input.get("subagent_type", "general-purpose")
     description = tool_input.get("description", "")
@@ -73,6 +57,19 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str) -> str:
     delim = "FA_AGENT_JSON"
     while delim in payload_json:
         delim += "_"
+    if mode == "free-only":
+        tail = (
+            "This lane is set to Free only — it NEVER falls back to paid for Agent calls. "
+            "Change it in csl -> Cloud Session Configuration, or "
+            "`bin/cloud_session_env.py set route agent free-first` / `paid`.\n"
+        )
+    else:
+        tail = (
+            "Free-first lane: after this session's free attempts are honestly exhausted "
+            "(the dispatch result then says \"paid_fallback_allowed\": true), ONE native Agent "
+            "call is let through automatically. Check the attempts in free-agent-tool.py's "
+            "output; force the mode with `bin/cloud_session_env.py set route agent paid`.\n"
+        )
     return (
         f"Free-agents replacement: run this subagent for FREE via Bash instead of paid Sonnet.\n"
         f"  python3 \"{free_tool}\" <<'{delim}'\n{payload_json}\n{delim}\n"
@@ -84,74 +81,48 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str) -> str:
         f"belongs in a free session (remote-session.sh / csl), not here.\n"
         f"Independent tasks may be launched as several parallel Bash calls.\n"
         f"Original description: {description}\n"
-        f"Configure: csl -> Cloud Session Configuration -> Replace subagents with free agents, "
-        f"or `bin/cloud_session_env.py set replace_agents 0` to turn off."
-    )
-
-
-def build_ask_reason(tool_input: Dict[str, Any]) -> str:
-    """Build the ask reason for first-time prompt."""
-    description = tool_input.get("description", "")
-    return (
-        f"free-agents can replace paid Sonnet subagents with FREE models "
-        f"(NVIDIA Nemotron / Gemini / local) on cloud sessions. "
-        f"Approve to run THIS subagent natively. "
-        f"To decide permanently: csl -> Cloud Session Configuration -> Replace subagents with free agents, "
-        f"or run `bin/cloud_session_env.py set replace_agents 1` (free) / `0` (native). "
-        f"You will not be asked again.\n"
-        f"Original description: {description}"
+        f"{tail}"
     )
 
 
 def decide(payload: Dict[str, Any], env: Dict[str, str]) -> Optional[Dict[str, Any]]:
     """
-    Pure decision function for testing.
-    Returns hookSpecificOutput dict or None (pass through).
+    Pure decision function for testing. Returns hookSpecificOutput dict or None (pass through).
     """
     tool_name = payload.get("tool_name")
     if tool_name != "Agent":
         return None
 
+    if is_free_session(env.get("ANTHROPIC_BASE_URL")):
+        return None
+
+    # Resolve the mode; an unreadable settings layer never blocks the user (fail open).
+    try:
+        mode = cse.route("agent", env) if cse else "free-first"
+    except Exception:
+        return None
+
+    if mode == "paid":
+        return None
+
     tool_input = payload.get("tool_input", {})
-    base_url = env.get("ANTHROPIC_BASE_URL")
-
-    # Rule 3: free session -> pass through
-    if is_free_session(base_url):
-        return None
-
-    # Rule 4: read FA_REPLACE_AGENTS
-    fa_replace = env.get("FA_REPLACE_AGENTS", "")
-
-    # Rule 5: explicitly native
-    if fa_replace == "0":
-        return None
-
     plugin_root = env.get("CLAUDE_PLUGIN_ROOT", "<plugin>")
 
-    # Rule 6: explicitly replace
-    if fa_replace == "1":
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": build_deny_reason(tool_input, plugin_root),
-            }
-        }
+    if mode == "free-first" and fm is not None:
+        try:
+            mark = fm.consume_mark(str(payload.get("session_id") or ""))
+        except Exception:
+            mark = None
+        if mark:
+            return None               # the ONE native paid call: this session earned it
 
-    # Rule 7: undecided -> ask once
-    state_path = get_state_path(env)
-    if not read_state(state_path):
-        write_state(state_path)
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "ask",
-                "permissionDecisionReason": build_ask_reason(tool_input),
-            }
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": build_deny_reason(tool_input, plugin_root, mode),
         }
-
-    # Already asked -> pass through
-    return None
+    }
 
 
 def print_usage() -> None:
@@ -159,13 +130,16 @@ def print_usage() -> None:
     print(
         "Usage: hooks/cloud-agent-intercept.py [--help|-h|--self-test]\n"
         "\n"
-        "Claude Code PreToolUse hook: intercept paid Sonnet subagents on cloud sessions.\n"
-        "Replaces native Agent tool with free-agent-tool.py (opt-in).\n"
+        "Claude Code PreToolUse hook: route the native Agent tool per the session's mode.\n"
+        "free-first (default): deny + redirect to free-agent-tool.py; one native call is let\n"
+        "  through once this session's free attempts are honestly exhausted (the mark).\n"
+        "free-only: deny, never falls back. paid: pass through (free-agents stays out).\n"
         "\n"
         "Environment variables:\n"
         "  ANTHROPIC_BASE_URL    - Base URL; localhost = free session, else cloud\n"
-        "  FA_REPLACE_AGENTS     - \"1\" = replace with free, \"0\" = native, unset = ask once\n"
-        "  FA_INTERCEPT_STATE    - Override state file path (default ~/.claude/free-agents/agent-intercept-asked)\n"
+        "  FA_ROUTE_AGENT        - free-first | free-only | paid (settings.json env; the\n"
+        "                          legacy FA_REPLACE_AGENTS 1/0 maps onto it)\n"
+        "  FA_FALLBACK_MARK_DIR  - Override the mark dir (default ~/.claude/free-agents/paid-fallback)\n"
         "  CLAUDE_PLUGIN_ROOT    - Plugin root for free-agent-tool.py path (default \"<plugin>\")\n"
         "\n"
         "Arguments:\n"
@@ -180,114 +154,102 @@ def run_self_test() -> int:
 
     def run_case(name: str, payload: Dict[str, Any], env: Dict[str, str], expected: Optional[Dict[str, Any]]) -> bool:
         nonlocal all_pass
-        with tempfile.TemporaryDirectory() as tmpdir:
-            test_env = dict(env)
-            test_env["FA_INTERCEPT_STATE"] = os.path.join(tmpdir, "state")
-            result = decide(payload, test_env)
-            if result == expected:
-                print(f"PASS: {name}")
-                return True
-            else:
-                print(f"FAIL: {name}")
-                print(f"  Expected: {json.dumps(expected)}")
-                print(f"  Got:      {json.dumps(result)}")
-                all_pass = False
-                return False
+        result = decide(payload, dict(env))
+        if result == expected:
+            print(f"PASS: {name}")
+            return True
+        print(f"FAIL: {name}")
+        print(f"  Expected: {json.dumps(expected)}")
+        print(f"  Got:      {json.dumps(result)}")
+        all_pass = False
+        return False
+
+    CLOUD = {"ANTHROPIC_BASE_URL": "https://gateway.example.com"}
 
     # a) non-Agent tool -> None
-    run_case(
-        "non-Agent tool",
-        {"tool_name": "Bash", "tool_input": {}, "session_id": "s1"},
-        {},
-        None,
-    )
+    run_case("non-Agent tool", {"tool_name": "Bash", "tool_input": {}, "session_id": "s1"}, {}, None)
 
-    # b) Agent + localhost + FA_REPLACE_AGENTS=1 -> None (free session)
-    run_case(
-        "Agent + localhost + replace=1",
-        {"tool_name": "Agent", "tool_input": {"prompt": "hi"}, "session_id": "s1"},
-        {"ANTHROPIC_BASE_URL": "http://localhost:4141", "FA_REPLACE_AGENTS": "1"},
-        None,
-    )
+    # b) free session -> None even with free-only
+    run_case("free session + free-only",
+             {"tool_name": "Agent", "tool_input": {"prompt": "hi"}, "session_id": "s1"},
+             {**CLOUD, "ANTHROPIC_BASE_URL": "http://localhost:4141", "FA_ROUTE_AGENT": "free-only"}, None)
 
-    # c) Agent + cloud + FA_REPLACE_AGENTS=0 -> None
-    run_case(
-        "Agent + cloud + replace=0",
-        {"tool_name": "Agent", "tool_input": {"prompt": "hi"}, "session_id": "s1"},
-        {"ANTHROPIC_BASE_URL": "https://gateway.example.com", "FA_REPLACE_AGENTS": "0"},
-        None,
-    )
+    # c) paid mode -> None; the legacy FA_REPLACE_AGENTS=0 maps onto paid
+    run_case("paid mode", {"tool_name": "Agent", "tool_input": {"prompt": "hi"}, "session_id": "s1"},
+             {**CLOUD, "FA_ROUTE_AGENT": "paid"}, None)
+    run_case("legacy replace=0", {"tool_name": "Agent", "tool_input": {"prompt": "hi"}, "session_id": "s1"},
+             {**CLOUD, "FA_REPLACE_AGENTS": "0"}, None)
 
-    # d) Agent + cloud + FA_REPLACE_AGENTS=1 -> deny, reason contains free-agent-tool.py and prompt
+    # d) free-first (also via the legacy 1) -> deny; the reason carries the heredoc + the mode tail
     result_d = decide(
-        {"tool_name": "Agent", "tool_input": {"prompt": "test prompt", "subagent_type": "coder", "description": "desc"}, "session_id": "s1"},
-        {"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "FA_REPLACE_AGENTS": "1", "CLAUDE_PLUGIN_ROOT": "/my/plugin"},
-    )
+        {"tool_name": "Agent", "tool_input": {"prompt": "test prompt", "subagent_type": "coder",
+                                              "description": "desc"}, "session_id": "s1"},
+        {"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "FA_REPLACE_AGENTS": "1",
+         "CLAUDE_PLUGIN_ROOT": "/my/plugin"})
     if result_d and result_d.get("hookSpecificOutput", {}).get("permissionDecision") == "deny":
         reason = result_d["hookSpecificOutput"].get("permissionDecisionReason", "")
         if "free-agent-tool.py" in reason and "test prompt" in reason:
-            print("PASS: Agent + cloud + replace=1 -> deny with correct reason")
+            print("PASS: free-first -> deny with the redirect")
         else:
-            print(f"FAIL: Agent + cloud + replace=1 -> deny but reason missing expected content: {reason}")
+            print(f"FAIL: free-first -> deny but reason missing expected content: {reason}")
             all_pass = False
     else:
-        print(f"FAIL: Agent + cloud + replace=1 -> expected deny, got {result_d}")
+        print(f"FAIL: free-first -> expected deny, got {result_d}")
         all_pass = False
 
-    # e) Agent + cloud + undecided + no state file -> ask, state file created
+    # e) undecided (no env at all) -> deny, NEVER ask
+    result_e = decide({"tool_name": "Agent", "tool_input": {"prompt": "hi", "description": "task 1"},
+                       "session_id": "s1"}, dict(CLOUD))
+    if result_e and result_e["hookSpecificOutput"]["permissionDecision"] == "deny":
+        print("PASS: undecided -> deny (no ask-once prompt)")
+    else:
+        print(f"FAIL: undecided -> expected deny, got {result_e}")
+        all_pass = False
+
+    # f) free-only -> deny, and the reason says it never falls back
+    result_f = decide({"tool_name": "Agent", "tool_input": {"prompt": "hi", "description": "task 1"},
+                       "session_id": "s1"}, {**CLOUD, "FA_ROUTE_AGENT": "free-only"})
+    if result_f and result_f["hookSpecificOutput"]["permissionDecision"] == "deny" \
+            and "never falls back" in result_f["hookSpecificOutput"]["permissionDecisionReason"]:
+        print("PASS: free-only -> deny, never falls back")
+    else:
+        print(f"FAIL: free-only -> expected deny with the never-fallback tail, got {result_f}")
+        all_pass = False
+
+    # g) free-first with an ARMED mark -> None (the one native call)
+    import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
-        state_file = Path(tmpdir) / "state"
-        env_e = {"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "FA_INTERCEPT_STATE": str(state_file)}
-        result_e = decide(
-            {"tool_name": "Agent", "tool_input": {"prompt": "hi", "description": "task 1"}, "session_id": "s1"},
-            env_e,
-        )
-        if result_e and result_e.get("hookSpecificOutput", {}).get("permissionDecision") == "ask":
-            if state_file.exists():
-                print("PASS: undecided + no state -> ask, state created")
+        old = os.environ.get("FA_FALLBACK_MARK_DIR")
+        os.environ["FA_FALLBACK_MARK_DIR"] = tmpdir
+        try:
+            if fm is not None:
+                fm.write_mark("s1", [{"id": "g", "provider": "gemini", "ok": False}])
+            result_g = decide({"tool_name": "Agent", "tool_input": {"prompt": "cloud prompt",
+                                                                   "description": "cloud task"},
+                               "session_id": "s1"},
+                              {"FA_ROUTE_AGENT": "free-first", "CLAUDE_PLUGIN_ROOT": "/plugin"})
+            if result_g is None:
+                print("PASS: armed mark lets the one native call through")
             else:
-                print("FAIL: undecided + no state -> ask but state not created")
+                print(f"FAIL: armed mark -> expected pass-through, got {result_g}")
                 all_pass = False
-        else:
-            print(f"FAIL: undecided + no state -> expected ask, got {result_e}")
-            all_pass = False
-
-    # f) same as e again -> None (asked once)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        state_file = Path(tmpdir) / "state"
-        state_file.write_text("2024-01-01T00:00:00")
-        env_f = {"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "FA_INTERCEPT_STATE": str(state_file)}
-        result_f = decide(
-            {"tool_name": "Agent", "tool_input": {"prompt": "hi", "description": "task 1"}, "session_id": "s1"},
-            env_f,
-        )
-        if result_f is None:
-            print("PASS: undecided + state exists -> None")
-        else:
-            print(f"FAIL: undecided + state exists -> expected None, got {result_f}")
-            all_pass = False
-
-    # g) Agent + base url unset (native Anthropic login) + FA_REPLACE_AGENTS=1 -> deny
-    result_g = decide(
-        {"tool_name": "Agent", "tool_input": {"prompt": "cloud prompt", "description": "cloud task"}, "session_id": "s1"},
-        {"FA_REPLACE_AGENTS": "1", "CLAUDE_PLUGIN_ROOT": "/plugin"},
-    )
-    if result_g and result_g.get("hookSpecificOutput", {}).get("permissionDecision") == "deny":
-        reason = result_g["hookSpecificOutput"].get("permissionDecisionReason", "")
-        if "cloud prompt" in reason:
-            print("PASS: unset base url + replace=1 -> deny")
-        else:
-            print(f"FAIL: unset base url + replace=1 -> deny but missing prompt in reason: {reason}")
-            all_pass = False
-    else:
-        print(f"FAIL: unset base url + replace=1 -> expected deny, got {result_g}")
-        all_pass = False
+            result_g2 = decide({"tool_name": "Agent", "tool_input": {"prompt": "again"}, "session_id": "s1"},
+                               {"FA_ROUTE_AGENT": "free-first", "CLAUDE_PLUGIN_ROOT": "/plugin"})
+            if result_g2 is not None and result_g2["hookSpecificOutput"]["permissionDecision"] == "deny":
+                print("PASS: the mark is single use — the next call is denied again")
+            else:
+                print(f"FAIL: consumed mark -> expected deny, got {result_g2}")
+                all_pass = False
+        finally:
+            if old is None:
+                os.environ.pop("FA_FALLBACK_MARK_DIR", None)
+            else:
+                os.environ["FA_FALLBACK_MARK_DIR"] = old
 
     return 0 if all_pass else 1
 
 
 def main() -> int:
-    # Rule 1: argument handling
     args = sys.argv[1:]
     if "--help" in args or "-h" in args:
         print_usage()
@@ -299,9 +261,7 @@ def main() -> int:
         print_usage()
         return 2
 
-    # Rule 9: fail open wrapper
     try:
-        # Rule 2: read stdin
         stdin_data = sys.stdin.read()
         if not stdin_data:
             return 0
@@ -309,11 +269,9 @@ def main() -> int:
     except Exception:
         return 0
 
-    # Rule 2 continued: non-Agent -> pass through
     if payload.get("tool_name") != "Agent":
         return 0
 
-    # Decide using pure function
     result = decide(payload, dict(os.environ))
 
     if result:

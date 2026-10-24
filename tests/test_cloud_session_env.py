@@ -248,6 +248,21 @@ class RouteModes(_Sandbox):
         self.write_settings({"env": {cse.ROUTE_ENV["agent"]: "free-only"}})
         self.assertEqual(cse.route("agent", {cse.ROUTE_ENV["agent"]: "paid"}), "free-only")
 
+    def test_explicit_route_beats_the_legacy_key(self):
+        # A stale FA_REPLACE_AGENTS must not override a mode the user set on the new key.
+        self.write_settings({"env": {"FA_REPLACE_AGENTS": "0", cse.ROUTE_ENV["agent"]: "free-only"}})
+        self.assertEqual(cse.route("agent"), "free-only")
+
+    def test_route_raises_on_a_corrupt_settings_layer(self):
+        # The hook fails OPEN on this; the picker shows the warning. route() itself must
+        # never silently read a corrupt file as "no mode set".
+        self.settings.write_text("not an object{")
+        with self.assertRaises(ValueError):
+            cse.route("agent")
+
+    def test_route_with_no_settings_file_at_all_is_the_default(self):
+        self.assertEqual(cse.route("agent"), "free-first")
+
     def test_save_route_round_trips_and_drops_the_legacy_key(self):
         self.write_settings({"env": {"FA_REPLACE_AGENTS": "0", "KEEP": "1"}})
         cse.save_route("agent", "free-only")
