@@ -1,0 +1,15 @@
+{
+  "_comment": "How rtc-ship.sh ships free-agents (run-to-completion 0.6.4). Data here; the free-agents-only commands move to .rtc/*.sh when they are extracted from the old fa-ship.sh.",
+
+  "tag_prefix": "v",
+  "default_branch": "main",
+
+  "manifest": ".claude-plugin/plugin.json",
+  "changelog": "CHANGELOG.md",
+  "version_file": "VERSION",
+  "roadmap": "docs/ROADMAP.md",
+
+  "assets": "",
+  "refresh_plugin": "free-agents",
+  "test_workers": 12
+}
