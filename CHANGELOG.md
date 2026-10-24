@@ -1,3 +1,17 @@
+## [0.43.5] — 2026-10-24
+
+### Docs — the eligibility verdict, measured and documented
+
+- **NOT-ELIGIBLE on the JoyIA gateway: auto mode's safety checks are billed.** The evidence is
+  cross-validated, not inferred: budget-tally's 9-day least-squares fit against the gateway's own
+  cost counter ($0.0265 per classifier call, rms $2.85/day, 2026-09-15..26), auto-mode-classifier
+  error dumps measuring 60–97k tokens per call, and today's ledger estimate (0.0795 = exactly
+  3 × 0.0265). Three user-authorized probe runs (~$0.10) showed no `system` notice — a successful
+  classifier round-trip is silent, so the stream alone can never prove eligibility; the spec's
+  [verify] branches are answered in §8b and the verdict is cached with its evidence at
+  ~/.local/state/free-agents/eligibility.json, so the gateway cost box (A3) now shows on this
+  machine. V1's Agent-half finding is documented alongside.
+
 ## [0.43.4] — 2026-10-24
 
 ### Fixed

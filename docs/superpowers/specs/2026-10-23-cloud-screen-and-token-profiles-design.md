@@ -182,6 +182,25 @@ words what it does, since the names alone were not clear enough:
 - The JoyIA feature request (pass the fields through) is drafted only once the probe reads
   "not eligible" [decided].
 
+## 8b. Spike outcomes (dated facts, 2026-10-24)
+
+- **V3 eligibility — VERDICT: NOT-ELIGIBLE on the JoyIA gateway.** Auto mode's safety check is a
+  second billed `claude-sonnet-5` request per non-read-only tool call: budget-tally's 9-day
+  least-squares fit against the gateway's own cost counter puts it at $0.0265/call (rms $2.85/day,
+  2026-09-15..26), with auto-mode-classifier-error dumps measuring 60–97k tokens per call. The
+  user-authorized probes (3 runs, ~$0.10 total) showed no `system` notice — a *successful*
+  classifier round-trip leaves no notice, so the stream alone is not a sufficient detector; the
+  daily ledger's `estimated_classifier_usd: 0.0795` = exactly 3 × $0.0265 confirms live calls.
+  Consequences: the gateway cost box (A3) now shows for this machine (verdict cached at
+  ~/.local/state/free-agents/eligibility.json); the JoyIA pass-through feature request may be
+  drafted (per the [decided] rule); and a POSITIVE eligibility signal remains unfound —
+  stream-json, the init message and the debug log carry no server-review state, so "eligible"
+  is unreachable by the probe on this gateway, only not-eligible/unknown.
+- **V1 Workflow interception — AGENT half answered** (a subagent dispatch surfaces as an `Agent`
+  PreToolUse event, nested claude + sandboxed hook, 2026-10-23); the WORKFLOW half is unresolved
+  (the first nested-claude run from a session shell hit the PAID gateway, ~$0.19 — the injected
+  session env; a free-lane headless vehicle is the prerequisite, tracked on csl-cloud-session).
+
 ## 5. Part B — Token-profile submenu
 
 ### B1. What it is [decided by the plan]
