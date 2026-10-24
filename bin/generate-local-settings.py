@@ -92,6 +92,9 @@ def select_spinner_verbs(family: str, spinner_data: dict) -> list:
     return unique
 
 
+import theme_colors
+
+
 def theme_config_path(config_dir, name):
     """Where THEME colours live (user 2026-10-15: colours must survive plugin version
     installs and be shared by every copy — the version-keyed cache is wiped on update):
@@ -119,9 +122,13 @@ def build_theme_file(config_dir):
     accent = theme.get('accent_color') or '#00BFFF'
     border = theme.get('border_color') or accent      # softer prompt outline, same as remote
     overrides = {role: accent for role in (
-        "claude", "permission", "planMode", "bashBorder", "suggestion", "thinking",
+        "claude", "permission", "planMode", "suggestion", "thinking",
         "clawd_body")}
-    overrides.update(promptBorder=border, promptBorderShimmer=border)
+    # Shell mode (`!`) gets its OWN derived colour, not the accent: stock Claude Code paints
+    # it magenta, and painting it with the accent made shell mode indistinguishable from
+    # normal input (user 2026-10-23; the recipe is the theme colour shifted +20 deg, S/V 100%).
+    overrides.update(promptBorder=border, promptBorderShimmer=border,
+                     bashBorder=theme_colors.shell_mode_color(accent))
     return {
         "name": theme.get('identity_label') or 'Local inference session',
         "base": "dark",

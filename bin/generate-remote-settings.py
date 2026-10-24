@@ -76,6 +76,9 @@ def select_spinner_verbs(family: str, spinner_data: dict) -> list:
     return unique
 
 
+import theme_colors
+
+
 def theme_config_path(config_dir, name):
     """Where THEME colours live (user 2026-10-15: colours must survive plugin version
     installs and be shared by every copy — the version-keyed cache is wiped on update):
@@ -117,9 +120,12 @@ def build_theme_file(config_dir):
             "claude": accent,
             "permission": accent,
             "planMode": accent,
-            "bashBorder": accent,
             "suggestion": accent,
             "thinking": accent,
+            # Shell mode (`!`) gets its OWN derived colour, not the accent — stock Claude Code
+            # paints it magenta, and the accent made shell mode look like normal input
+            # (user 2026-10-23; the recipe is the theme colour shifted +20 deg, S/V 100%).
+            "bashBorder": theme_colors.shell_mode_color(accent),
             # The prompt input's outline (user request 2026-10-14). The CLI draws the border
             # with promptBorder and animates it with promptBorderShimmer; overriding only one
             # would flash the default grey on every shimmer frame.
