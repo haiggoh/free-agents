@@ -76,6 +76,7 @@ def select_spinner_verbs(family: str, spinner_data: dict) -> list:
     return unique
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # bin/: sibling theme_colors, also under importlib test loaders
 import theme_colors
 
 
