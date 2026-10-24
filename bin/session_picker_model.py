@@ -460,9 +460,9 @@ class Settings:
     classifier_source: int = 2
     # Cloud sessions only: replace paid Sonnet subagents with free agents. None = undecided (the
     # hooks/cloud-agent-intercept.py hook asks once), "1" = free agents, "0" = native Sonnet. Kept in
-    # ~/.claude/settings.json env as FA_REPLACE_AGENTS (cloud_session_env). Free sessions (local,
-    # free-API) have no toggle: their subagents already run on the free endpoint.
-    replace_agents: str | None = None
+    # Per-path routing modes (0.43.0): the legacy FA_REPLACE_AGENTS env key is mapped by
+    # cloud_session_env.route(); free sessions (local, free-API) have no toggle: their
+    # subagents already run on the free endpoint.
     # Bypass permissions mode for cloud sessions (blind-trust auto mode)
     cloud_bypass_permissions: bool = False
     # security-guidance LLM reviews in every cloud session: 0=default (opus-4-7), 1=sonnet-4-6,
@@ -470,8 +470,9 @@ class Settings:
     security_review: int = 0
     security_review_custom: str | None = None
     # Shown only when the plugin is installed+enabled, or an override of ours is still set.
+    routes: dict = field(default_factory=dict)   # {"agent": mode, ...} — the per-path routing modes
     security_review_offered: bool = False
-    # Called with {"security_review": n} or {"replace_agents": v} when the user changes it; persists it.
+    # Called with {"security_review": n} or {"route": (path, mode)} when the user changes it; persists it.
     on_cloud_saved: Callable[[dict], object] | None = None
     # Called with {"registry_auto_sync": v} when the Local screen's auto-sync row toggles; persists it.
     on_memguard_saved: Callable[[dict], object] | None = None
@@ -1563,9 +1564,9 @@ class CloudConfigScreen(Screen):
             acts.append(Action("s", f"Security Review (all cloud sessions): {label}",
                                lambda: self._cycle_security_review()))
         acts += [
-            Action("x", f"{ec.EMOJI_SHIELD_STR}  Replace subagents with free agents (all cloud sessions): "
-                        f"{cse.REPLACE_AGENTS_LABELS[s.replace_agents]}",
-                   lambda: self._cycle_replace_agents()),
+            Action("x", f"{ec.EMOJI_SHIELD_STR}  Agent dispatch (paid sessions): "
+                        f"{cse.ROUTE_LABELS[s.routes.get('agent', 'free-first')]}",
+                   lambda: self._cycle_route("agent")),
             Action("p", f"{ec.EMOJI_AUTO_MODE_STR}  Bypass Permissions (blind-trust): {'ON' if s.cloud_bypass_permissions else 'OFF'}"
                         f"  {NOT_GATEWAY_NOTE}",
                    lambda: self._toggle("cloud_bypass_permissions")),
@@ -1577,12 +1578,28 @@ class CloudConfigScreen(Screen):
     def _toggle(self, attr):
         setattr(self.settings, attr, not getattr(self.settings, attr))
 
-    def _cycle_replace_agents(self):
+    def _cycle_route(self, path: str):
+        """Cycle the path's routing mode through free-first -> free-only -> paid and persist."""
         s = self.settings
-        order = [None, "1", "0"]
-        s.replace_agents = order[(order.index(s.replace_agents) + 1) % 3] if s.replace_agents in order else "1"
+        order = list(cse.ROUTE_MODES)
+        current = s.routes.get(path, "free-first")
+        s.routes[path] = order[(order.index(current) + 1) % len(order)] if current in order else "free-only"
         if s.on_cloud_saved:
-            s.on_cloud_saved({"replace_agents": s.replace_agents})
+            s.on_cloud_saved({"route": (path, s.routes[path])})
+
+    def info_text(self, item_id: str | None) -> str:
+        """The three routing modes, each with its one-line contract (plain Action rows pass
+        item_id=None, so the box always shows the whole table)."""
+        return (
+            "How the Agent tool is routed on cloud sessions:\n"
+            "· Free first, paid as last resort — every Agent call is redirected to a free model; "
+            "after this session's free attempts are honestly exhausted "
+            "(\"paid_fallback_allowed\": true in the dispatch result), ONE native paid call is "
+            "let through automatically.\n"
+            "· Free only — every Agent call is redirected and the hook never falls back to paid.\n"
+            "· Paid (free-agents stays out) — the native Agent tool runs paid subagents as usual; "
+            "free models only when you ask."
+        )
 
     def _cycle_security_review(self):
         s = self.settings

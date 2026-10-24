@@ -570,7 +570,7 @@ class Picker(App):
             security_review=cloud["security_review"],
             security_review_custom=cloud["custom_model"],
             security_review_offered=cloud["plugin_active"],
-            replace_agents=cse.replace_agents(),
+            routes={p: cse.route(p) for p in cse.ROUTE_PATHS},
             on_cloud_saved=self._save_cloud,
             on_memguard_saved=self._save_mg,
             # "Go last": restored from the store; written when a launch request is made.
@@ -611,8 +611,9 @@ class Picker(App):
         # launcher). A failed write is shown, never swallowed: an unsaved toggle would look applied
         # while the next session ignores it.
         try:
-            if "replace_agents" in values:
-                cse.save_replace_agents(values["replace_agents"])
+            if "route" in values:
+                path, mode = values["route"]
+                cse.save_route(path, mode)
             if "security_review" in values:
                 cse.save(values["security_review"])
         except (OSError, ValueError) as exc:

@@ -15,6 +15,7 @@ Fail-safe: any error → no output, exit 0. Never break or slow a session start.
 import json
 import os
 import sys
+from pathlib import Path
 
 
 def is_free_session(base_url: str) -> bool:
@@ -26,9 +27,37 @@ def is_free_session(base_url: str) -> bool:
         return False
 
 
-def paid_nudge(root: str) -> str:
-    """A PAID session: free offloading is the DEFAULT for delegated work, fan-out included."""
+def paid_nudge(root: str, modes: dict | None = None) -> str:
+    """A PAID session, per the Agent path's routing mode (cloud_session_env.route).
+
+    free-first (default): free offloading is THE DEFAULT for delegated work, and one honest
+    paid escape exists after exhaustion. free-only: every Agent call is redirected, never
+    paid. paid: the native Agent runs as usual — free models only when the user asks.
+    `modes` is {"agent": mode} (other paths pass through unchanged here)."""
     tool = f"{root}/bin/free-agent-tool.py" if root else "the plugin's bin/free-agent-tool.py"
+    modes = modes or {}
+    agent_mode = modes.get("agent", "free-first")
+    if agent_mode == "paid":
+        return (
+            "free-agents is installed, but the Agent path is set to PAID: the native Agent tool "
+            "runs paid subagents AS USUAL, and free models are used ONLY WHEN YOU ASK — run the "
+            f"stateless dispatch yourself when you want one: `python3 {tool} <<'JSON'` with "
+            '{{"prompt": ..., "files": [paths]}} (attach the files; a dispatch cannot read them; '
+            "`--list` shows the preference order). Nothing here changes how the native Agent "
+            "behaves. Change the mode in csl -> Cloud Session Configuration, or "
+            "`python3 "
+            f"{tool.rsplit('/', 2)[0]}/cloud_session_env.py set route agent free-first`."
+        )
+    if agent_mode == "free-only":
+        return (
+            "free-agents is installed and the Agent path is set to FREE ONLY: EVERY Agent/Task "
+            "call is redirected to a free model and the hook NEVER FALLS BACK to paid — not on "
+            "quota, not on errors, not after retries. The redirect message carries the exact "
+            f"dispatch to run: `python3 {tool} <<'JSON'` with {{\"prompt\": ..., \"files\": [paths]}} "
+            "(attach the files; a dispatch cannot read them). Announce the model and route to the "
+            "user before offloading — free models are not equal. Change the mode in csl -> Cloud "
+            "Session Configuration."
+        )
     return (
         "free-agents is installed and this session runs on PAID inference, so FREE OFFLOADING IS "
         "THE DEFAULT for delegated work. Before ANY Agent/Task call, Workflow, fan-out, parallel "
@@ -47,8 +76,10 @@ def paid_nudge(root: str) -> str:
         "free-session-handover skill, which also covers overnight handovers. ALWAYS ANNOUNCE the model and route to the user BEFORE offloading — "
         "free models are not equal. A paid subagent needs a stated reason (security-critical, "
         "final verification of the free result, or a free lane measured as failing now). Keep "
-        "judgment, integration and the final check on this session. Full guidance: the "
-        "offload-to-local skill."
+        "judgment, integration and the final check on this session. After this session's free "
+        "attempts are honestly exhausted (a dispatch result says \"paid_fallback_allowed\": true), "
+        "ONE native Agent call is let through automatically — the honest-exhaustion escape; a "
+        "corrupt settings layer never blocks the call. Full guidance: the offload-to-local skill."
     )
 
 
@@ -72,8 +103,21 @@ def main():
         # A FREE session saves nothing by offloading, so it gets the council nudge instead of the
         # cost one: a different model family is the reason to dispatch there (user 2026-10-23).
         free = is_free_session(os.environ.get("ANTHROPIC_BASE_URL", ""))
+        modes = None
+        if not free:
+            try:
+                # The repo's own bin first (always real for this deploy), then the plugin root.
+                own_bin = str(Path(__file__).resolve().parent.parent / "bin")
+                if own_bin not in sys.path:
+                    sys.path.insert(0, own_bin)
+                if root and os.path.isdir(os.path.join(root, "bin")):
+                    sys.path.insert(0, os.path.join(root, "bin"))
+                import cloud_session_env as cse
+                modes = {path: cse.route(path, dict(os.environ)) for path in cse.ROUTE_PATHS}
+            except Exception:
+                modes = None                       # fail open to the free-first nudge
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
-                                                 "additionalContext": (free_nudge if free else paid_nudge)(root)}}))
+                                                 "additionalContext": (free_nudge(root) if free else paid_nudge(root, modes))}}))
     except Exception:
         pass
     return 0

@@ -174,6 +174,9 @@ def save_replace_agents(value: str | None) -> Path:
 ROUTE_PATHS = ("agent", "workflow")
 ROUTE_ENV = {"agent": "FA_ROUTE_AGENT", "workflow": "FA_ROUTE_WORKFLOW"}
 ROUTE_MODES = ("free-first", "free-only", "paid")
+ROUTE_LABELS = {"free-first": "Free first, paid as last resort",
+                "free-only": "Free only",
+                "paid": "Paid (free-agents stays out)"}
 
 
 def route(path: str, env: dict | None = None) -> str:

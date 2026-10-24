@@ -601,7 +601,7 @@ class GroupingTests(unittest.TestCase):
 
         # Two toggle actions + nav
         actions = {a.key: a for a in cloud.actions()}
-        self.assertIn("x", actions, "Missing Replace-subagents toggle (x)")
+        self.assertIn("x", actions, "Missing Agent-routing row (x)")
         self.assertIn("p", actions, "Missing Bypass Permissions toggle (p)")
         # The Classifier row is gone (0.42.0): this screen holds settings that change CLOUD sessions,
         # and the classifier source only reaches free sessions (user 2026-10-23). It lives on the
@@ -618,25 +618,15 @@ class GroupingTests(unittest.TestCase):
             self.assertTrue(label.endswith(m.NOT_GATEWAY_NOTE), label)
             return label[: -len(m.NOT_GATEWAY_NOTE)].rstrip()
 
-        # Replace subagents toggle: reaches every cloud session, so it carries no NOT_GATEWAY note.
-        self.assertIn("Replace subagents with free agents (all cloud sessions)", actions["x"].label)
+        # Agent routing row: reaches every cloud session, so it carries no NOT_GATEWAY note.
+        self.assertIn("Agent dispatch", actions["x"].label)
         self.assertFalse(actions["x"].label.endswith(m.NOT_GATEWAY_NOTE))
 
         # Bypass Permissions toggle
         self.assertIn("Bypass Permissions", actions["p"].label)
         self.assertTrue(state("p").endswith("ON") or state("p").endswith("OFF"))
 
-        # Toggles actually work - test each one
-        saved = []
-        s.on_cloud_saved = saved.append
-        s.replace_agents = None
-        for want in ("1", "0", None):                 # undecided -> ON -> OFF -> undecided
-            actions = {a.key: a for a in cloud.actions()}
-            actions["x"].run()
-            self.assertEqual(s.replace_agents, want)
-            self.assertEqual(saved[-1], {"replace_agents": want}, "the change is persisted, not just shown")
-            self.assertIn(m.cse.REPLACE_AGENTS_LABELS[want], {a.key: a for a in cloud.actions()}["x"].label)
-
+        # Bypass Permissions toggle actually toggles
         initial_bypass = s.cloud_bypass_permissions
         actions["p"].run()
         self.assertEqual(s.cloud_bypass_permissions, not initial_bypass)
@@ -646,6 +636,27 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(len(nav_actions), 1)
         self.assertEqual(nav_actions[0].key, "q")
         self.assertIs(nav_actions[0].run(), m.QUIT)
+
+    def test_agent_routing_row_cycles_the_three_modes_and_persists(self):
+        """0.43.0: the x row cycles free-first -> free-only -> paid and persists each."""
+        s = m.Settings()
+        cloud = m.CloudConfigScreen(s)
+        saved = []
+        s.on_cloud_saved = saved.append
+        s.routes = {}
+        for want in ("free-only", "paid", "free-first"):   # default -> free-only -> paid -> free-first
+            actions = {a.key: a for a in cloud.actions()}
+            actions["x"].run()
+            self.assertEqual(s.routes.get("agent"), want)
+            self.assertEqual(saved[-1], {"route": ("agent", want)}, "the change is persisted, not just shown")
+            self.assertIn(m.cse.ROUTE_LABELS[want], {a.key: a for a in cloud.actions()}["x"].label)
+
+    def test_cloud_screen_info_box_explains_each_mode(self):
+        s = m.Settings()
+        info = m.CloudConfigScreen(s).info_text(None)
+        for gist in ("Free first, paid as last resort", "never falls back",
+                     "free-agents stays out"):
+            self.assertIn(gist, info), gist
 
     def test_cloud_config_screen_owner_sub_nav_is_back(self):
         """CloudConfigScreen with SUB owner has Back nav, not Quit."""
