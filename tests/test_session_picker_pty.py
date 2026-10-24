@@ -724,12 +724,17 @@ class RemoteLiveFilter(PilotCase):
         self.run_picker(s, start="remote")
 
     def test_digits_filter_too_and_nomatch_points_at_the_box(self):
+        # The needle must be digits-LED (the point: numbers filter too) but collision-proof:
+        # a bare "7" matches real catalog ids (Cerebras lists llama-3.3-70b), and under load
+        # the search triggers every provider's catalog to load unprompted
+        # (session_picker_model:1277) — so a bare digit is machine-state-dependent and
+        # raced the loader in 3 of 4 gate runs (measured 2026-10-24).
         async def s(app, pilot, h):
             from textual.widgets import Input
             await h.press("c")
             await h.wait_text("NVIDIA A")
-            await h.press("7")                       # numbers filter too, not just letters
-            self.assertEqual(app.query_one("#search", Input).value, "7")
+            await h.press("7", "z", "9", "q")        # digits filter too, not just letters
+            self.assertEqual(app.query_one("#search", Input).value, "7z9q")
             rows = h.labels("rows")
             self.assertTrue(any("No model matches" in r for r in rows), rows)
             self.assertTrue(any("Edit the live filter" in r for r in rows), rows)
