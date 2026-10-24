@@ -581,6 +581,18 @@ _prepare_runtime_file() {
     ( umask 077; : > "$path" ) && chmod 600 "$path"
 }
 
+# The swap pre-flight's scratch port: a band PAST the live session range (user 2026-10-24,
+# Phase-4 dogfood: the scratch landed on 4144, inside 4141-4151, where the next live session
+# could pick it). A rescue must never occupy a port a live session may be about to launch on.
+swap_scratch_port() {
+    local p
+    for ((p = LA_REMOTE_PROXY_PORT_MAX + 1; p <= LA_REMOTE_PROXY_PORT_MAX + 20; p++)); do
+        if ! lsof -ti tcp:"$p" >/dev/null 2>&1; then echo "$p"; return 0; fi
+    done
+    echo "remote-session: no free scratch port in ${LA_REMOTE_PROXY_PORT_MAX}+1..+20" >&2
+    return 1
+}
+
 free_port() {
     local p
     for ((p=LA_REMOTE_PROXY_PORT_MIN; p<=LA_REMOTE_PROXY_PORT_MAX; p++)); do
@@ -1259,7 +1271,7 @@ swap_model() { # swap_model <port> <alias> [force]
     # The scratch proxy runs with the hook limiter OFF: it isolates "does this model serve?"
     # from the shared 40 RPM queue. The live proxy keeps the limiter.
     local scratch scratch_cfg scratch_log scratch_pid scratch_pidf probe
-    scratch="$(free_port)" || return 1
+    scratch="$(swap_scratch_port)" || return 1
     scratch_cfg="$RUNDIR/swap-scratch-$port.yaml"; scratch_log="$RUNDIR/swap-scratch-$port.log"
     scratch_pidf="$RUNDIR/swap-scratch-$port.pid"
     _decide_native_route "$prov" "$model"
@@ -1419,7 +1431,10 @@ esac
 # Back). The picker launches the chosen alias by calling this script again WITH an alias, as
 # a child, and returns to the picker when that session ends — so every direct-alias path
 # below (proxy, cleanup trap, trial guard) is the one and only launch path.
-if [[ -z "$ALIAS" ]]; then
+# Special MODEs carry no alias BY DESIGN (2026-10-24, Phase-4 dogfood finding: --swap-model
+# and --install-keys died here at the picker exec before their handlers ever ran — the swap
+# was unreachable from the CLI, and headless it surfaced as a TTY error).
+if [[ -z "$ALIAS" && "$MODE" == "launch" ]]; then
     # If running under csl ownership (--csl-owner), use the internal menu loop instead of
     # delegating to session-picker, so we can return navigation state via CSL_NAV_FILE.
     # For csl_owner, we don't require a tty since csl manages the interaction.

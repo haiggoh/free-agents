@@ -284,6 +284,37 @@ class SwapModelTests(unittest.TestCase):
             (self.rundir / f'proxy-{port}.yaml').read_text())), 200,
             "the revert returns only once the old proxy ANSWERS — readiness, not just a pid")
 
+    def test_the_swap_scratch_port_stays_outside_the_live_band(self):
+        """2026-10-24 live dogfood: the pre-flight scratch landed on 4144 — inside the live
+        band. The scratch port must come from a band PAST the configured live range, so a
+        rescue can never occupy a port a live session may be about to launch on."""
+        scratch = sh(self.root, 'scratch="$(swap_scratch_port)"; echo "SCRATCH=$scratch"', self.env)
+        line = next(l for l in scratch.stdout.splitlines() if l.startswith("SCRATCH="))
+        port = int(line.split("=")[1])
+        self.assertGreater(port, 47200, "past the configured live band")
+        self.assertLessEqual(port, 47200 + 20)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+class SwapModelCLIDispatch(unittest.TestCase):
+    """0.43.x dogfood finding (2026-10-24, Phase-4 live run): the no-alias picker block exec'd
+    session-picker BEFORE the swap-model dispatch, so `remote-session.sh --swap-model ...`
+    never reached swap_model — dead in the CLI (headless AND interactive). The stub tests
+    called swap_model() directly, so only the live dogfood could catch it."""
+
+    def test_the_cli_reaches_swap_model_not_the_picker(self):
+        # Port 49999 has no session: swap_model's OWN refusal must be the output — not the
+        # picker's TTY error (which is how the bug manifested headless).
+        r = subprocess.run(
+            ["bash", str(ROOT / "bin" / "remote-session.sh"),
+             "--swap-model", "49999", "nvidia-deepseek-v4"],
+            capture_output=True, text=True, timeout=30)
+        combined = r.stdout + r.stderr
+        self.assertNotIn("session-picker", combined,
+                         "the no-alias picker block must not intercept --swap-model")
+        self.assertIn("missing", combined,
+                      "swap_model's own refusal for a port with no session")
+        self.assertEqual(r.returncode, 2)
+

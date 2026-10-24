@@ -1,3 +1,21 @@
+## [0.43.6] — 2026-10-25
+
+### Fixed — the Phase-4 live dogfood's findings
+
+- **`--swap-model` was unreachable from the CLI.** The no-alias picker block exec'd
+  session-picker before the swap-model dispatch — the rescue tool died at "needs an
+  interactive terminal" headless, and even interactively the picker replaced the process.
+  Found by the Phase-4 live dogfood (the stub tests called swap_model() directly). Special
+  modes now dispatch before the picker block; a CLI test proves the swap path's own refusal
+  is what a bad port gets.
+- **The swap pre-flight's scratch port comes from a scratch band now.** It took free_port()
+  from the live session range — the live dogfood watched it land on 4144, inside
+  4141-4151, where the next live session could pick it. swap_scratch_port() serves a band
+  past the configured live max; mutation-checked.
+- The live dogfood also verified the headless free-lane passthrough end-to-end (proxy up on
+  a scratch port, real generation through GLM 5.3 Flash thinking, clean proxy teardown) —
+  the free-lane measurement vehicle Release 2 needs.
+
 ## [0.43.5] — 2026-10-24
 
 ### Docs — the eligibility verdict, measured and documented
