@@ -163,11 +163,22 @@ class FailoverTests(Base):
         out, err = io.StringIO(), io.StringIO()
         real = (fat.dispatch_entry, fat.local_on_disk)
         fat.dispatch_entry, fat.local_on_disk = fake_dispatch, (lambda a: True)
+        # Total-failure scenarios now ARM the session's paid-fallback mark: pin the mark dir
+        # to a temp sandbox for EVERY run, or the test writes into the real
+        # ~/.claude/free-agents/paid-fallback under the ambient CLAUDE_CODE_SESSION_ID
+        # (measured 2026-10-24: this very test left a mark there).
+        mark_tmp = tempfile.mkdtemp()
+        old_mark = os.environ.get("FA_FALLBACK_MARK_DIR")
+        os.environ["FA_FALLBACK_MARK_DIR"] = mark_tmp
         try:
             with redirect_stdout(out), redirect_stderr(err):
                 code = fat.run(payload, env)
         finally:
             fat.dispatch_entry, fat.local_on_disk = real
+            if old_mark is None:
+                os.environ.pop("FA_FALLBACK_MARK_DIR", None)
+            else:
+                os.environ["FA_FALLBACK_MARK_DIR"] = old_mark
         return code, tried, out.getvalue(), err.getvalue()
 
     def test_first_available_wins_and_is_announced(self):
