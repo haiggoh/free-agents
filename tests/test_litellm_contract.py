@@ -365,6 +365,14 @@ class LiteLLMContract(unittest.TestCase):
         env.update(LA_PROXY_HOOKS_RATE_LIMIT="1",
                    LA_SESSION_MENU_CONFIG_DIR=str(cfg_home),
                    LA_NVIDIA_MODE=mode,
+                   # CONTENTION PIN (2026-10-25, the fa-gate-test-flakes pattern): the bucket
+                   # refills at rpm/60 tokens/s. At the default 40 that is ~0.67 tokens/s, so
+                   # a post-consumption write-back lagging 1.5 s under a loaded gate refills
+                   # the consumed token and the booked read comes back 6, not 5 (measured
+                   # twice today, once blocking a release). Pin rpm=1: one token of refill
+                   # then takes 60 s — no realistic lag crosses it — and the arithmetic
+                   # (capacity 6, one consumed) stays exact. The assertion is unchanged.
+                   LA_NVIDIA_RPM="1",
                    LA_NVIDIA_THROTTLE_STATE=str(state),
                    LA_PROXY_FALLBACK_NAMES="la-fallback-1",
                    LITELLM_LOCAL_MODEL_COST_MAP="True")

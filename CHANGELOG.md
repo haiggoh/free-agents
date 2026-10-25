@@ -24,6 +24,13 @@ The re-ship gate surfaced two more contention finds, both fixed:
   processed the key yet and the "filters from the first character" assertion failed on the
   unfiltered list. The same condition-based pattern as the other flake fixes: wait for the
   discriminating state (the Gemini group folding away, then reappearing), never a fixed sleep.
+- **The smooth-bucket contract test** (`test_8_one_request_books_one_slot`, mode
+  `smooth_bucket`) assumed "refill during the request adds a fraction, never a whole token" —
+  at the default 40 RPM that is ~0.67 tokens/s, and a post-consumption write-back lagging 1.5 s
+  under a loaded gate refills the consumed token and reads 6 instead of 5 (measured twice
+  today, once blocking a release). The test now pins `LA_NVIDIA_RPM=1`: one token of refill
+  takes 60 s, no realistic lag crosses it, capacity (6) is independent of rpm, and the
+  assertion is unchanged.
 
 ## [0.44.0] — 2026-10-25
 
