@@ -8,6 +8,7 @@ mlx-lm<0.32: "upgrading" that inside rapid's venv would break rapid, so it is no
 
   backend    installed through          upgrade command
   omlx       Homebrew tap jundot/omlx   brew upgrade jundot/omlx/omlx
+  moespresso Homebrew tap steadfastgaze  brew upgrade steadfastgaze/tap/moespresso@3
   llama-cpp  Homebrew                   brew upgrade llama.cpp
   litellm    pipx                       pipx upgrade litellm   (keeps pipx-injected packages, e.g. prisma)
   rapid-mlx  versioned venv (manager)   manage-backend.py --backend rapid-mlx install <latest>
@@ -96,7 +97,10 @@ def _pypi_latest(package: str) -> str | None:
 # --- detection per install route ------------------------------------------------------------
 def brew_upgrades(run: Runner = _run) -> list[Upgrade]:
     """Homebrew's own verdict (handles revisions like 0.6.0_1 and tap rc versions)."""
-    names = {"jundot/omlx/omlx": "omlx", "llama.cpp": "llama-cpp"}
+    names = {"jundot/omlx/omlx": "omlx", "llama.cpp": "llama-cpp",
+             # The @3 formula, not `moespresso`: 4.x cannot load a MoEspresso-packaged
+             # DeepSeek V4 artifact, and it is the one `brew upgrade` would otherwise move.
+             "steadfastgaze/tap/moespresso@3": "moespresso"}
     installed = [n for n in names if run(["brew", "list", "--versions", n.split("/")[-1]]).returncode == 0]
     if not installed:
         return []
