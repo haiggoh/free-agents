@@ -137,3 +137,51 @@ yours: propose, record, and move on.
   Finding 5 (stored True not in the row cycle) verified benign: setting()'s except path
   routes it to the default, no crash — recorded, no change.
 
+- 2026-10-25 08:3x — **0.44.0 SHIPPED** (tag v0.44.0, release published, installed copy verified,
+  get-haiggoh sees 0.44.0 (current), brew bumped). One merge hiccup: the canonical checkout held the
+  predecessor's UNTRACKED handoff copy at this path, so the ff-merge refused; verified it identical
+  to the branch's commit up to the Progress log, removed the stale duplicate, re-shipped clean.
+  0.44.0 carries: the thinking toggle + review fixes + the two gate-flake fixes (item 3) + the
+  Task-10 prefill tool + the JoyIA DRAFT (item 4).
+- 2026-10-25 1x:xx — the tool's FIRST LIVE RUN found two defects the stubbed tests could not
+  (obs 0047 logged): a timed-out launch ORPHANED the launcher's LiteLLM proxy on scratch :4146
+  (wrapper-only kill; the proxy ignored SIGTERM and needed SIGKILL), and the hardcoded 900s
+  timeout was a false-failure generator under the shared limiter. Fixed in 0.44.1: the launch runs
+  in its own session and the timeout kills the whole process GROUP; FA_PREFILL_TIMEOUT tunes it
+  (default 1800s). The 0.44.1 ship gate then caught TWO more contention finds, both fixed and
+  mutation-checked: package-release.sh ignored --help and ran its real work (now parses args
+  first), and the PTY live-filter pilot read rows after a fixed 0.15s gap (now waits on the
+  discriminating state). A THIRD gate run caught the smooth-bucket contract test (test_8's
+  booked==6: at 40 RPM refill is ~0.67 tokens/s and a lagging write-back crossed a whole token;
+  pinned LA_NVIDIA_RPM=1 so a token of refill takes 60s — assertion unchanged).
+- 2026-10-25 14:0x — **0.44.1 SHIPPED** (three gate attempts; the second and third surfaced the
+  findings above). Tag pushed, release published, installed copy refreshed, brew bumped,
+  visibility verified (0.44.1 current, HEAD manifest serves 0.44.1).
+- 2026-10-25 14:2x — item 2 (dogfood swap) LIVE ATTEMPT: session on scratch :4149
+  (nvidia-glm53-full, multi-request tool task). Mid-flight swap to nvidia-glm53 --force: the
+  pre-flight probe returned 200 ON THE SCRATCH BAND (0.43.6's fix verified live, fast, limiter-off),
+  the swap executed, but the LIVE probe read 000 curl-failed and the AUTOMATIC REVERT restored
+  the previous model (the 0.43.6 rescue path verified live). The session SURVIVED the whole cycle
+  and completed its task end-to-end (result JSON at 14:56, 27.5 min, all three tool results).
+  Suspect for the live-probe 000: the old proxy ignoring SIGTERM and holding the port while the
+  new one tries to bind (same linger my morning orphan showed). NOT yet the clean swap the
+  waypoint owes — the kill-then-wait-before-bind fix is the path to it (swap stub suite exists).
+- 2026-10-25 15:0x — user mid-turn asks (both handled): (a) gemma _override_ evidence — found
+  three-source: transformers 5.14.1 refuses to build Gemma4Processor without
+  video_preprocessor_config.json, neither publisher ships it (config.local.sh block +
+  local-roster-RESULTS-MANIFEST.md 'BLOCKER found pre-load and fixed' + the symlink-farm artifact
+  itself, 412K); the config comment's stale plans pointer fixed in place. (b) the Devstral
+  duplicate the user suspected traced to the 2026-10-19 auto-register sweep (not two catalog
+  rows): ~/.models/Devstral-Small-2-24B-4bit is byte-identical to devstral-small2-uniform4
+  (shasum match, 14G wasted); disk-wide scan of 40 weight folders found NO other true duplicates
+  (the gemma _override_ pair is intended symlink sharing). Recommendation recorded on the
+  waypoint: delete the unregistered copy — user's confirmation, it is destructive.
+- 2026-10-25 15:3x — user mid-turn asks (both handled): merged chore/rtc-hooks to main (0acc85b,
+  pushed; 37-check branch test green in its worktree, version surfaces 0.44.1 agree, the new test
+  joins the shell-suite gate) — this also UNBLOCKS item D's rtc-ship.sh route. Then item D of the
+  rule-memories-into-plugins waypoint: GATED — the predecessor's transcript (41a9f4ff) was
+  written 21 min before the check, inside the 30-minute window; the gate says skip while that
+  session works. Re-check after 30 min of quiet. The four target skills read; the method is the
+  plan's section 5.
+- 2026-10-25 1x:xx — item 5 receipt IN FLIGHT: baseline prefill run launched through the shipped
+  0.44.1 tool (fixed timeout). mcp=all run + the §5 B3 table + the Task-11 proposal follow.
