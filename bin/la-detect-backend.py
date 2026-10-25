@@ -15,7 +15,8 @@ Backends (the `serve` value a registration should declare):
                `laguna`, oMLX serves it)
   drafter      a speculative-decoding helper (model_type *_mtp / *_assistant) — loaded by a target
                model's spec config, never served alone
-  unsupported  neither engine knows the architecture
+  unsupported  neither engine knows the architecture, OR the architecture is fine but the WEIGHTS
+               are in a serialization no MLX engine reads (a custom runtime's bundle)
   unknown      no readable config.json / model_type
 
 How support is decided: each engine's OWN interpreter (taken from the shebang of its binary) lists
@@ -23,6 +24,22 @@ the module names under its mlx_lm/models (and, for oMLX, mlx_vlm/models) plus ml
 MODEL_REMAPPING keys. Nothing is imported from mlx, and no list is hard-coded here, so an engine
 upgrade that adds an architecture changes the verdict with no edit to this file. When an engine
 cannot be inspected, its support is UNKNOWN: an uninspectable rapid never causes an omlx pin.
+
+★ 2026-10-25 — architecture support is necessary, NOT sufficient. A second, independent question
+is whether any installed engine can read the weights' SERIALIZATION, and answering only the first
+produced a confident false positive measured on this machine:
+~/.models/deepseek-v4-flash-0731-coder declares model_type=deepseek_v4 (oMLX's mlx_vlm has it) and
+weight_format="mxtq" (2-bit MoEspresso TurboQuant bundles) — so the verdict was `omlx`, the launch
+loaded 53 GB, and the load then died in mlx's strict load_weights: "Received 46 parameters not in
+model: embed.biases, embed.scales, head.scales, model.layers.N.ffn.experts.tq_bundle". The session
+saw only a 409 "unavailable after a previous load failure", which names no cause and no fix. So the
+weights' own format is now read too, from two places that cannot both be missing: config.json's
+`weight_format`, and the safetensors header keys (a `*.tq_bundle` bundle is a custom runtime's, not
+an MLX quantization — plain MLX quantized layers legitimately write *.scales / *.biases, so only
+the bundle suffix is a signal). A foreign format yields `unsupported` with the format named, plus
+the runtime the model catalog says that artifact needs (read from the catalog, never duplicated
+here). Extension point: an engine that learns to read a foreign format adds it to
+LA_MLX_WEIGHT_FORMATS.
 
 Environment:
   LA_RAPID_BIN         Rapid-MLX executable (default: discovered like config-lib's la_discover_rapid_bin)
@@ -38,9 +55,22 @@ import argparse
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
+
+# Weight serializations an MLX engine can read: absent/empty means plain safetensors (the normal
+# case, optionally with MLX's own `quantization` block, which needs no marker of its own). Any
+# OTHER value names a foreign runtime's bundle. Override for an engine that adds one.
+MLX_WEIGHT_FORMATS = frozenset(
+    f.strip() for f in os.environ.get("LA_MLX_WEIGHT_FORMATS", "").split(",") if f.strip())
+
+# A header-key suffix only a custom runtime writes. Deliberately NOT "*.scales" or "*.biases":
+# those are ordinary MLX quantization keys and matching them would gate out every 4-bit model.
+BUNDLE_SUFFIX = ".tq_bundle"
+# A header larger than this is not a model we want to parse for a verdict (or a sane one).
+_MAX_HEADER_BYTES = 8 << 20
 
 # Runs INSIDE an engine's interpreter. Stdlib only: locates packages with find_spec (no import of
 # mlx, which would load Metal) and reads MODEL_REMAPPING with ast instead of importing mlx_lm.
@@ -148,6 +178,79 @@ def _omlx_interpreter() -> str | None:
         ("/opt/homebrew/bin/omlx" if os.access("/opt/homebrew/bin/omlx", os.X_OK) else shutil.which("omlx")))
 
 
+def _first_shard_header(folder: Path) -> dict | None:
+    """The safetensors header of the folder's first shard, or None.
+
+    Only 8 bytes of framing plus the JSON header are read, so this is cheap even for a 53 GB
+    model, and it never touches the tensor data. Any surprise — a huge, absent or malformed
+    header — returns None: an unreadable weight file is not evidence about the format.
+    """
+    try:
+        shards = sorted(p for p in folder.iterdir() if p.suffix == ".safetensors")
+    except OSError:
+        return None
+    for shard in shards[:1]:
+        try:
+            with shard.open("rb") as fh:
+                (n,) = struct.unpack("<Q", fh.read(8))
+                if n <= 0 or n > _MAX_HEADER_BYTES:
+                    return None
+                header = json.loads(fh.read(n).decode("utf-8", "replace"))
+        except (OSError, ValueError, struct.error):
+            continue
+        if isinstance(header, dict):
+            return header
+    return None
+
+
+def _declared_weight_format(folder: Path) -> str | None:
+    """config.json's `weight_format` when it names something no MLX engine reads, else None."""
+    try:
+        config = json.loads((folder / "config.json").read_text())
+    except (OSError, ValueError):
+        return None
+    fmt = config.get("weight_format") if isinstance(config, dict) else None
+    if isinstance(fmt, str) and fmt and fmt not in MLX_WEIGHT_FORMATS:
+        return fmt
+    return None
+
+
+def _foreign_weight_format(folder: Path) -> str | None:
+    """A weight serialization no installed MLX backend reads, from the weights' own evidence.
+
+    Two independent sources, because either alone can lie: a config whose `weight_format` was
+    stripped, or a shard carrying bundles the config never mentions. Returns a description for
+    the error message, or None when the artifact is ordinary MLX weights.
+    """
+    fmt = _declared_weight_format(folder)
+    if fmt:
+        return f"config.json declares weight_format={fmt}"
+    header = _first_shard_header(folder)
+    if header:
+        bundled = sorted(k for k in header if isinstance(k, str) and k.endswith(BUNDLE_SUFFIX))
+        if bundled:
+            return f"{len(bundled)} weight key(s) are {BUNDLE_SUFFIX.lstrip('.')} bundles"
+    return None
+
+
+def _catalog_runtime(folder: Path) -> str | None:
+    """The runtime the model catalog says this artifact needs, read from the catalog itself.
+
+    Derived, never duplicated: the catalog's `runtime` column already carries it (this machine's
+    row for the deepseek coder build has said `MoEspresso>=2.1` since 2026-09-01). Silent when the
+    catalog is absent — the verdict must not depend on a file this tool does not own.
+    """
+    catalog = Path(__file__).resolve().parents[1] / "config" / "model-catalog.local.psv"
+    try:
+        for line in catalog.read_text().splitlines():
+            fields = line.split("|")
+            if len(fields) >= 10 and fields[4] == folder.name and fields[9].strip():
+                return fields[9].strip()
+    except OSError:
+        return None
+    return None
+
+
 def detect(folder: Path, rapid: dict | None, omlx: dict | None) -> tuple[str, str]:
     if folder.is_dir() and any(p.suffix.lower() == ".gguf" for p in folder.iterdir()):
         return "llama_cpp", "GGUF artifact: MLX backends cannot load GGUF"
@@ -161,6 +264,15 @@ def detect(folder: Path, rapid: dict | None, omlx: dict | None) -> tuple[str, st
         # oMLX's helper rule (omlx/model_discovery.py): a speculative-decoding drafter, loaded BY
         # a target model's spec config — never served on its own.
         return "drafter", f"model_type={model_type} is a speculative-decoding drafter, not a model"
+    # Weight format, checked before any engine verdict: an engine that could build the
+    # architecture still cannot read another runtime's bundle, and "omlx" would be a confident
+    # lie that spends a 45-second load to disprove itself.
+    foreign = _foreign_weight_format(folder)
+    if foreign:
+        runtime = f" (catalog says: {_catalog_runtime(folder)})" if _catalog_runtime(folder) else ""
+        return ("unsupported",
+                f"model_type={model_type} but the weights are not MLX-readable: {foreign}"
+                f"{runtime} — no installed backend can load it")
     if rapid is None:
         # Absence of evidence about rapid is not evidence against it: keep the default.
         return "mlx", f"model_type={model_type}; rapid-mlx could not be inspected, keeping the default"
@@ -182,6 +294,10 @@ def main(argv: list[str]) -> int:
         epilog=(__doc__ or "").split("\n\n", 1)[-1],
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json", action="store_true", help="print a JSON list instead of TSV")
+    ap.add_argument("--gate", action="store_true",
+                    help="print ONLY artifacts no MLX backend can load (one reason per folder, "
+                         "exit 3); silent and exit 0 when every folder is launchable. Skips the "
+                         "engine probes entirely — launchers call this before starting a server")
     ap.add_argument("folders", nargs="*", help="model folders (absolute, or relative to cwd)")
     args = ap.parse_args(argv)
     if not args.folders:
@@ -194,6 +310,19 @@ def main(argv: list[str]) -> int:
     for f in args.folders:
         backend, reason = detect(Path(f), rapid, omlx)
         results.append({"folder": f, "backend": backend, "reason": reason})
+    if args.gate:
+        # The launch guard: name what cannot be loaded and exit non-zero, so a caller refuses
+        # BEFORE it starts a server that would burn a full weight load to fail late and cryptic.
+        # Engine probes are deliberately skipped — the format verdict does not need them.
+        blocked = 0
+        for f in args.folders:
+            foreign = _foreign_weight_format(Path(f))
+            if foreign:
+                blocked += 1
+                runtime = _catalog_runtime(Path(f))
+                suffix = f" (catalog says: {runtime})" if runtime else ""
+                print(f"{Path(f).name}: weights are not MLX-readable — {foreign}{suffix}")
+        return 3 if blocked else 0
     if args.json:
         print(json.dumps(results, indent=2))
     else:

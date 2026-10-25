@@ -346,6 +346,36 @@ la_finalize_serve() {
         esac ;;
     esac
   done
+  # ★ 2026-10-25 — the net over EVERY launch route. local-llm-hotswap.sh carries the HARD gate
+  # (it refuses before the port scan); this catches the routes that do not go through it — the
+  # auto-mode launchers, the prewarm gate, and csl's own offer — at config-load time, when the
+  # operator can still read it. An MLX backend can only read an MLX serialization: a foreign bundle
+  # loads for tens of seconds and then dies inside strict load_weights, which reaches the session
+  # as a 409 naming no cause (measured on deepseek-v4-flash-0731-coder: 53 GB, then "Received 46
+  # parameters not in model"). ONE spawn for the whole roster, and the verdict is
+  # bin/la-detect-backend.py's — never a second copy of the rule. A warning by design: failing the
+  # load here would break every listing tool for one unlaunchable artifact, and the hard gate is
+  # what actually protects a launch.
+  local _fmt_dirs="" _a _d _line
+  for _a in "${LA_ALIASES[@]:-}"; do
+    [ -n "$_a" ] || continue
+    case "${LA_SERVE[$_a]:-}" in
+      rapid|vllm|mlx_lm|omlx) ;;
+      *) continue ;;
+    esac
+    _d="$LA_MODELS_DIR/${LA_SUBDIR[$_a]:-}"
+    [ -n "${LA_SUBDIR[$_a]:-}" ] && [ -d "$_d" ] && _fmt_dirs="$_fmt_dirs $_d"
+  done
+  if [ -n "$_fmt_dirs" ]; then
+    # $_fmt_dirs is deliberately unquoted: it is a PATH LIST, and splitting it is the point.
+    # shellcheck disable=SC2086
+    while IFS= read -r _line; do
+      [ -n "$_line" ] || continue
+      echo "⚠️  local-agents: $_line" >&2
+      echo "    Its weights are another runtime's format — launching it will fail after a full" >&2
+      echo "    weight load, surfacing to the session as a 409 that names no cause." >&2
+    done < <(python3 "$LA_ROOT/bin/la-detect-backend.py" --gate $_fmt_dirs 2>/dev/null)
+  fi
   [ "$bad" = 0 ]
 }
 

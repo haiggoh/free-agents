@@ -268,6 +268,28 @@ if [ "$SERVE" = "rapid" ] && [ "$MG_KV" != "auto" ]; then
     fi
 fi
 
+# Weight-format gate (2026-10-25). An MLX backend can only read an MLX serialization: a foreign
+# bundle loads for tens of seconds and then dies inside strict load_weights, which reaches the
+# session as a 409 "unavailable after a previous load failure" naming no cause and no fix —
+# measured on ~/.models/deepseek-v4-flash-0731-coder (weight_format=mxtq plus *.tq_bundle keys:
+# 53 GB loaded, then `ValueError: Received 46 parameters not in model`). Read the artifact's own
+# declaration BEFORE the port scan, exactly like the KV refusal above, so a refusal can never take
+# a running server down with it. The verdict comes from bin/la-detect-backend.py --gate, so this
+# rule has ONE implementation (and one set of tests); LA_GATE_WEIGHT_FORMAT=0 is the escape hatch
+# for an operator whose engine does read the format (a newer runtime than this checkout knows).
+if [ "${LA_GATE_WEIGHT_FORMAT:-1}" != "0" ]; then
+  case "$SERVE" in
+    rapid|vllm|mlx_lm|omlx)
+      if ! _fmt_gate="$(python3 "$HOTSWAP_DIR/la-detect-backend.py" --gate "$MODEL_DIR" 2>/dev/null)"; then
+        echo "🛑 Not launching $MODEL_NAME — its weights are not readable by any installed backend." >&2
+        [ -n "$_fmt_gate" ] && echo "   $_fmt_gate" >&2
+        echo "   Install the runtime that artifact needs, or re-point the alias at an MLX build." >&2
+        echo "   Override once you know your engine reads it:  LA_GATE_WEIGHT_FORMAT=0" >&2
+        exit 1
+      fi ;;
+  esac
+fi
+
 echo "Scanning ports $LA_PORT_START-$LA_PORT_MAX for a free slot (config: ${LA_CONFIG_SOURCE})..."
 TARGET_PORT=""
 for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do

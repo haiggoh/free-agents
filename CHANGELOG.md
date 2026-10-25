@@ -1,3 +1,45 @@
+## [0.44.2] — 2026-10-25
+
+### Fixed — an unlaunchable model was offered, then failed with a 409 that named no cause
+
+Reported live: launching the local `deepseek-v4-flash-0731-coder` session retried ten times and
+died on `409 Model 'claude-opus-5-5' is unavailable after a previous load failure`. The server log
+carried the real story — `ValueError: Received 46 parameters not in model: embed.biases,
+embed.scales, head.scales, model.layers.N.ffn.experts.tq_bundle` — after 53 GB of weights had
+loaded.
+
+**Root cause: two independent questions were collapsed into one.** `la-detect-backend.py` decided a
+model's backend from its *architecture* (`model_type=deepseek_v4` → oMLX's `mlx_vlm` has it), which
+was correct. It never read the weights' *serialization*: that artifact declares
+`weight_format: "mxtq"` (2-bit MoEspresso TurboQuant bundles) and carries `*.tq_bundle` keys, which
+no installed engine reads — oMLX 0.7.1 has no reference to either. The catalog row has said
+`MoEspresso>=2.1` in a **required** field since 2026-09-01, and no code ever read it. The verdict
+`omlx` was therefore a confident lie that only a 45-second load could disprove.
+
+Three layers, each with its own test:
+
+- **`la-detect-backend.py` reads the weight format now**, from two places that cannot both be
+  missing: `config.json`'s `weight_format`, and the safetensors header keys. A foreign
+  serialization yields `unsupported` with the format named — not `omlx`. Matching is deliberately
+  on the `.tq_bundle` suffix alone: plain MLX quantized layers legitimately write `*.scales` and
+  `*.biases`, so matching those would gate out every 4-bit model on the machine (a 43-artifact
+  survey confirmed exactly one declares a `weight_format`). The reason line carries the runtime
+  the catalog says the artifact needs, read from the catalog rather than duplicated here.
+- **`local-llm-hotswap.sh` refuses before it starts anything.** The gate sits *before* the port
+  scan, next to the existing KV refusal, so a refusal can never take a running server down — the
+  mirror image of the RAM preflight, which is deliberately after it because reusing a live server
+  loads no weights. `LA_GATE_WEIGHT_FORMAT=0` is the documented escape hatch.
+- **`la_finalize_serve` warns for every other route** (the auto-mode launchers, the prewarm gate,
+  `csl`'s offer) at config-load time, one spawn for the whole roster. A warning by design: failing
+  the load would break every listing tool for one unlaunchable artifact.
+
+`--gate` is a new mode of the detector (`la-detect-backend.py --gate <folder>`): it prints only
+what no installed backend can load and exits 3, skipping the engine probes a launcher does not
+need. The verdict therefore has **one** implementation and one set of tests, on every route.
+
+Verified by mutation: neutering the format check turns the new detector tests red (2), and removing
+the hotswap gate turns the new shell test red (2) — a negative result that cannot show itself.
+
 ## [0.44.1] — 2026-10-25
 
 ### Fixed — the prefill tool's first live run found two defects
