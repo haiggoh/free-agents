@@ -524,8 +524,11 @@ def run(input_data, env) -> int:
         print(f"free-agents: offloading to {entry.get('display', entry['id'])} "
               f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"
               f"{', not ' + shown_avoid if shown_avoid else ''}"
-              f"{'; thinking ' + resolved_thinking if resolved_thinking == 'on' or think_overridden else ''})", file=sys.stderr)
-        if think_overridden and think_note:
+              f"{'; thinking ' + resolved_thinking if resolved_thinking == 'on' or think_overridden or think_note else ''})", file=sys.stderr)
+        if think_note:
+            # Any constraint note discloses on stderr, not only overrides: a GLM OFF with no
+            # explicit effort sends reasoning_effort low, and the human watching the dispatch
+            # gets the same fact the session banner shows (review finding 6, 2026-10-25).
             print(f"free-agents: thinking note: {think_note}", file=sys.stderr)
         try:
             text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort)

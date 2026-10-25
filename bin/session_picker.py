@@ -555,6 +555,7 @@ class Picker(App):
             local_temperature=state.temperature.get("local_session", sms.DEFAULT_TEMPERATURE["local_session"]),
             remote_temperature=state.temperature.get("remote_api_session", sms.DEFAULT_TEMPERATURE["remote_api_session"]),
             lowkey_temperature=state.temperature.get("lowkey", sms.DEFAULT_TEMPERATURE["lowkey"]),
+            thinking_session=state.thinking_session,
             rate_limiter=dict(state.rate_limiter),
             memguard=dict(state.memguard),
             auto_mode=int(os.environ.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
@@ -567,6 +568,7 @@ class Picker(App):
             show_old=getattr(flags, "show_old", False),
             on_effort_saved=self._save_effort,
             on_temperature_saved=self._save_temperature,
+            on_thinking_saved=self._save_thinking,
             security_review=cloud["security_review"],
             security_review_custom=cloud["custom_model"],
             security_review_offered=cloud["plugin_active"],
@@ -603,6 +605,11 @@ class Picker(App):
 
     def _save_temperature(self, lane, value):
         warning = sms.save_temperature(self._config_dir(), lane, value)
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
+
+    def _save_thinking(self, value):
+        warning = sms.save_thinking_session(self._config_dir(), value)
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
 

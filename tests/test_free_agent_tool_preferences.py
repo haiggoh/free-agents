@@ -587,9 +587,11 @@ class ThinkingPolicyTests(Base):
     def test_run_reports_the_resolution_in_the_result_json(self):
         # Fails if the resolution happens but never reaches the caller: the JSON must carry
         # the resolved choice, the override flag and the constraint note, and the dispatcher
-        # argv must carry the measured off-equivalent for an operator dispatch to GLM.
-        code, out, _err, cmds = self._run_real_dispatch({"prompt": "hi", "role": "operator"},
-                                                        [dict(self.GLM)])
+        # argv must carry the measured off-equivalent for an operator dispatch to GLM. The
+        # stderr carries the note too — the launcher banner discloses a GLM OFF, so the
+        # dispatch lane must not be quieter about the same fact (review finding 6).
+        code, out, err, cmds = self._run_real_dispatch({"prompt": "hi", "role": "operator"},
+                                                       [dict(self.GLM)])
         self.assertEqual(code, 0)
         res = json.loads(out)
         self.assertEqual(res["thinking"], "off")
@@ -597,6 +599,8 @@ class ThinkingPolicyTests(Base):
         self.assertIn("always", res["thinking_note"].lower())
         self.assertEqual(cmd_effort(cmds[0]), "low",
                          "operator dispatch to GLM sends the measured off-equivalent")
+        self.assertIn("always", err.lower(),
+                      "a GLM OFF discloses the constraint on stderr, override or not")
 
     def test_run_validator_dispatch_thinks_by_default(self):
         # Fails if the council rule (cross-family validator thinks) is lost in the policy.

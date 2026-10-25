@@ -1627,11 +1627,15 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
     def test_thinking_glm_on_nim_constraint_reported_when_off(self):
         # Fails if OFF is reported as honored on GLM: chat_template_kwargs are INERT on NIM
         # GLM (measured 2026-10-13) — the template always runs, and the session must SAY the
-        # truth (reasoning_effort low ≈ 0 reasoning tokens), not claim it was disabled.
+        # truth (reasoning_effort low ≈ 0 reasoning tokens), not claim it was disabled. The
+        # wording must also not overclaim: an explicit --effort wins over the low default
+        # (review finding 2, 2026-10-25), so the notice says "unless you set an explicit
+        # --effort" instead of an unconditional "is applied".
         for alias in ('nvidia-glm53', 'nvidia-glm53-thinking'):
             thinking, notice, _ = self._resolve_thinking(alias, 'nvidia', 'z-ai/glm-5.3-flash', 'false')
             self.assertEqual(thinking, 'false')
             self.assertIn('always', notice.lower())
+            self.assertIn('explicit --effort', notice.lower())
         # ON is native on GLM: no constraint notice.
         _, notice, _ = self._resolve_thinking('nvidia-glm53', 'nvidia', 'z-ai/glm-5.3-flash', 'true')
         self.assertNotIn('always', notice.lower())

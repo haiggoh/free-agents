@@ -649,3 +649,30 @@ class EmojiConstants(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThinkingToggleWiring(PilotCase):
+    """The thinking toggle's PICKER wiring (review finding, 2026-10-25): the model layer had
+    the fields, but nothing hydrated the stored value into Settings or wired the persist
+    callback — the row would reset on every picker restart. End to end through the real
+    Picker: hydrate from the store, cycle the row, find it persisted."""
+
+    def test_hydrates_the_stored_choice_and_persists_through_the_row(self):
+        import session_menu_state as sms
+        sms.save_thinking_session(self.cfg, False)      # the store already says OFF
+
+        async def s(app, pilot, h):
+            self.assertIs(app.settings.thinking_session, False, "hydrated from the store")
+            self.assertIsNotNone(app.settings.on_thinking_saved, "persist callback wired")
+            await h.press("l")                          # Home -> Local lane
+            await h.wait_screen("LocalScreen")
+            await h.press("j")                          # OFF -> back to the default (None)
+            self.assertIsNone(app.settings.thinking_session)
+            self.assertNotIn("thinking", self.saved_state(),
+                             "None is the default: the key is dropped, not stored")
+            await h.press("j")                          # and OFF again
+            self.assertIs(app.settings.thinking_session, False)
+        self.run_picker(s)
+        state = self.saved_state()
+        self.assertIs(state.get("thinking", {}).get("session"), False,
+                      "the choice reaches the store the picker will load next time")

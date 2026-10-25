@@ -29,6 +29,20 @@ applied everywhere a session or dispatch starts, with model constraints stated h
   files load unchanged; a thinking write bumps the version so an old reader refuses loudly
   instead of half-reading.
 
+Independent cross-family review (StepFun Step 5, 2026-10-25) — every finding verified against
+the code; two confirmed and fixed, one was a real miss:
+- **The picker wiring was missing** (the review's best catch): the Settings fields existed but
+  `session_picker.py` never hydrated the stored value into the app, nor wired
+  `on_thinking_saved` to the store — the toggle would have reset on every picker restart.
+  Now wired, with an end-to-end pilot test (store → hydrate → cycle → persisted).
+- The GLM notice no longer overclaims: an explicit `--effort` wins over the low default, so
+  the notice says "unless you set an explicit --effort" instead of an unconditional "applied".
+- The dispatch lane discloses a GLM OFF on stderr just like the session banner does (the
+  note prints whether or not the choice counts as overridden).
+Three other findings were checked and closed as false positives or accepted behavior (the
+swap path's `prov`/`model` are established locally before the call; the store's tuple change
+has no external unpackers; a stored explicit True cycles cleanly back to the default).
+
 Tests at every layer: the store round-trip and refusal paths, the picker rows/env/info box,
 `_resolve_thinking` (defaults, flips, the GLM constraint, the invalid-value warning),
 `la_lookup` (both directions, sandboxed registry), the dispatch policy (role defaults, the

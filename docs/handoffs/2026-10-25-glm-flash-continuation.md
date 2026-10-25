@@ -122,4 +122,18 @@ yours: propose, record, and move on.
   recorded: the picker row cycles ON (default) ↔ OFF only — None and True behave
   identically at launch, so the row never stores an indistinguishable third state; the
   tri-state stays in the API/store. Full suite ran as the gate (FA_TEST_WORKERS=6).
+- 2026-10-25 07:1x — item 1 review (handoff rule 5): two dispatch attempts timed out (Gemini
+  read-timeout ×2, DeepSeek 1800s hang — remote lanes degraded with 3 live sessions on the
+  shared limiter); the third attempt via a prefs override (step5 → nemotron → local fallback,
+  cap 2400s) landed from StepFun Step 5 Preview (family stepfun, cross-family ✓). Verdict
+  FIX-FIRST, 6 findings; each verified against the code per rule 5: FALSE POSITIVES — the
+  swap path's prov/model are locally established before my call (the reviewer flagged them as
+  unseen), and the store tuple change has no external unpackers; CONFIRMED — the picker
+  wiring was genuinely missing (hydration + on_thinking_saved never reached
+  session_picker.py: the row would have reset every restart; the model-layer tests masked it
+  exactly like observation 0031's harness-context trap), the GLM notice overclaimed with an
+  explicit --effort, and the dispatch stderr stayed silent on a non-overridden GLM OFF.
+  All three fixed TDD (pilot wiring test end-to-end; wording test; stderr disclosure test).
+  Finding 5 (stored True not in the row cycle) verified benign: setting()'s except path
+  routes it to the default, no crash — recorded, no change.
 

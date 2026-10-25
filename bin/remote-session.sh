@@ -919,7 +919,7 @@ _resolve_thinking() { # _resolve_thinking <alias> <provider> <model>
         # GLM is the alias's own long-standing meaning (no notice); the toggle asking OFF on
         # GLM is a choice the model cannot honor, so the banner says what the session gets.
         if [[ "$override" == "false" && "$prov" == "nvidia" && "$model" == *glm* ]]; then
-            local constraint="GLM on NIM always runs its thinking template — OFF cannot disable it; reasoning_effort low is applied (≈0 reasoning tokens, measured 2026-10-13)"
+            local constraint="GLM on NIM always runs its thinking template — OFF cannot disable it; reasoning_effort low is used unless you set an explicit --effort (≈0 reasoning tokens at low, measured 2026-10-13)"
             RV_NOTICE="${RV_NOTICE:+$RV_NOTICE — }$constraint"
         fi
     fi
