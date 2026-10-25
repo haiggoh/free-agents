@@ -135,7 +135,7 @@ class DetectBackend(unittest.TestCase):
         (d / "config.json").write_text(json.dumps(
             {"model_type": "deepseek_v4", "weight_format": "mxtq",
              "mxtq_bits": 2, "expert_dtype": "fp4"}))
-        v = self.verdicts(d)["dsv4-mxtq"]
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": ""})["dsv4-mxtq"]
         self.assertEqual(v["backend"], "unsupported")
         self.assertIn("mxtq", v["reason"])
 
@@ -147,7 +147,7 @@ class DetectBackend(unittest.TestCase):
         d = self.folder("dsv4-bundle", "deepseek_v4")
         _safetensors(d, "model-00001-of-00002.safetensors",
                      ["model.layers.0.ffn.experts.tq_bundle", "model.layers.0.ffn.experts.weight"])
-        v = self.verdicts(d)["dsv4-bundle"]
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": ""})["dsv4-bundle"]
         self.assertEqual(v["backend"], "unsupported")
 
     def test_plain_mlx_quantization_keys_stay_launchable(self):
@@ -160,6 +160,51 @@ class DetectBackend(unittest.TestCase):
                       "model.layers.0.self_attn.q_proj.biases"])
         v = self.verdicts(d)["qwen-q4"]
         self.assertEqual(v["backend"], "mlx")
+
+    # --- MoEspresso: the artifact becomes launchable when a capable runtime is installed -------
+    # The 0.44.2 gate refuses a foreign format outright, correct at the time: nothing on the
+    # machine could read `mxtq`. With MoEspresso's 3.x line installed it CAN, so the verdict
+    # moves from `unsupported` to `moespresso` — and, critically, a 4.x binary must NOT unlock
+    # it (measured: 4.0.0 refuses the package with "unsupported required package feature").
+    def test_moespresso_binary_makes_the_artifact_launchable(self):
+        d = self.folder("dsv4-moespresso", "deepseek_v4")
+        (d / "config.json").write_text(json.dumps(
+            {"model_type": "deepseek_v4", "weight_format": "mxtq"}))
+        stub = _exe(self.t / "moe-bin", "#!/bin/sh\necho 'moespresso 3.0.0'\n")
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": str(stub)})["dsv4-moespresso"]
+        self.assertEqual(v["backend"], "moespresso")
+        self.assertIn("mxtq", v["reason"])
+
+    def test_moespresso_4x_is_not_a_capable_binary(self):
+        """A 4.x MoEspresso cannot load the package, so it must not unlock the artifact."""
+        d = self.folder("dsv4-moe4", "deepseek_v4")
+        (d / "config.json").write_text(json.dumps(
+            {"model_type": "deepseek_v4", "weight_format": "mxtq"}))
+        stub = _exe(self.t / "moe4-bin", "#!/bin/sh\necho 'moespresso 4.0.0'\n")
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": str(stub)})["dsv4-moe4"]
+        self.assertEqual(v["backend"], "unsupported")
+
+    def test_moespresso_never_wins_for_an_ordinary_artifact(self):
+        """MoEspresso serves packaged MoE models only; it must not capture plain MLX artifacts."""
+        d = self.folder("qwen-with-moe", "qwen3")
+        stub = _exe(self.t / "moe-bin2", "#!/bin/sh\necho 'moespresso 3.0.0'\n")
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": str(stub)})["qwen-with-moe"]
+        self.assertEqual(v["backend"], "mlx")
+
+    def test_gate_lets_an_moespresso_servable_artifact_through(self):
+        """The launch guard must NOT refuse what MoEspresso can serve, once it is installed."""
+        d = self.folder("dsv4-gate", "deepseek_v4")
+        (d / "config.json").write_text(json.dumps(
+            {"model_type": "deepseek_v4", "weight_format": "mxtq"}))
+        stub = _exe(self.t / "moe-bin3", "#!/bin/sh\necho 'moespresso 3.0.0'\n")
+        r = self.run_tool("--gate", str(d), env_extra={"LA_MOESPRESSO_BIN": str(stub)})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.strip(), "")
+        # ...and still refuses it with no MoEspresso present (explicit empty pin = "none",
+        # so the assertion cannot silently change when this machine gains a runtime).
+        r2 = self.run_tool("--gate", str(d), env_extra={"LA_MOESPRESSO_BIN": ""})
+        self.assertEqual(r2.returncode, 3)
+        self.assertIn("mxtq", r2.stdout)
 
     def test_gguf_still_wins_before_the_format_check(self):
         # Order matters: a GGUF artifact gets llama_cpp regardless of any weight_format key.

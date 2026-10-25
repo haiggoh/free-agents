@@ -251,6 +251,73 @@ def _catalog_runtime(folder: Path) -> str | None:
     return None
 
 
+def _capable_moespresso() -> tuple[str, str] | None:
+    """(version, path) of a MoEspresso that can load a MoEspresso package, or None.
+
+    Capable means the **3.x line**. Measured 2026-10-25: 4.0.0 refuses a MoEspresso-packaged
+    DeepSeek V4 model with `Error: unsupported required package feature` (the manifest requires
+    `calibration` + `deepseek_v4_per_layer_experts`, and 4.0.0 is a Qwen engine). So the version
+    is asked of the binary, never assumed from which path it was found at.
+
+    Resolution order mirrors config-lib.sh's la_discover_moespresso_bin: an explicit pin, then the
+    @3 kegs newest-first, then Homebrew's versioned symlink, then the unversioned PATH entry. The
+    pin chooses WHICH binary to ask, never whether it is capable — a pin to a 4.x binary is
+    itself the mistake this check exists to catch.
+
+    An explicit LA_MOESPRESSO_BIN set to the EMPTY STRING means "this machine has no MoEspresso"
+    and skips discovery entirely — an override that cannot be expressed cannot be tested, and
+    without it the "nothing can read this format" case is only observable on a machine that
+    happens to lack the runtime. Only DISCOVERY is memoised (`csl` calls this per folder); a pin
+    is re-read every time so one caller's pin cannot become another caller's answer.
+    """
+    pinned = os.environ.get("LA_MOESPRESSO_BIN")
+    if pinned is not None:
+        if not pinned.strip():
+            return None
+        return _scan_moespresso([pinned])
+
+    if "moe" in _MOESPRESSO_CACHE:
+        return _MOESPRESSO_CACHE["moe"]
+    kegs: list[str] = []
+    for root in (Path("/opt/homebrew/Cellar/moespresso@3"),
+                 Path("/usr/local/Cellar/moespresso@3")):
+        if root.is_dir():
+            kegs += [str(p) for p in root.glob("*/bin/moespresso")]
+    # Newest keg first, by version rather than mtime (reinstalling an older version would
+    # otherwise look newest).
+    kegs.sort(key=lambda p: [int(x) if x.isdigit() else x
+                             for x in Path(p).parent.parent.name.replace("-", ".").split(".")],
+              reverse=True)
+    found = _scan_moespresso(kegs + ["/opt/homebrew/bin/moespresso@3",
+                                     "/usr/local/bin/moespresso@3",
+                                     shutil.which("moespresso") or "",
+                                     "/opt/homebrew/bin/moespresso", "/usr/local/bin/moespresso"])
+    _MOESPRESSO_CACHE["moe"] = found
+    return found
+
+
+def _scan_moespresso(paths: list[str]) -> tuple[str, str] | None:
+    """The first path that reports a 3.x MoEspresso, as (version, path)."""
+    for path in paths:
+        if not path or not os.access(path, os.X_OK):
+            continue
+        try:
+            r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        text = (r.stdout or "") + (r.stderr or "")
+        for token in text.replace(",", " ").split():
+            head = token.lstrip("vV")
+            if head[:1].isdigit() and "." in head:
+                if head.split(".", 1)[0] == "3":
+                    return head, path
+                break
+    return None
+
+
+_MOESPRESSO_CACHE: dict = {}
+
+
 def detect(folder: Path, rapid: dict | None, omlx: dict | None) -> tuple[str, str]:
     if folder.is_dir() and any(p.suffix.lower() == ".gguf" for p in folder.iterdir()):
         return "llama_cpp", "GGUF artifact: MLX backends cannot load GGUF"
@@ -269,6 +336,12 @@ def detect(folder: Path, rapid: dict | None, omlx: dict | None) -> tuple[str, st
     # lie that spends a 45-second load to disprove itself.
     foreign = _foreign_weight_format(folder)
     if foreign:
+        moe = _capable_moespresso()
+        if moe is not None:
+            version, _path = moe
+            return ("moespresso",
+                    f"model_type={model_type} is not MLX-readable ({foreign}); MoEspresso "
+                    f"{version} serves this format")
         runtime = f" (catalog says: {_catalog_runtime(folder)})" if _catalog_runtime(folder) else ""
         return ("unsupported",
                 f"model_type={model_type} but the weights are not MLX-readable: {foreign}"
@@ -313,15 +386,20 @@ def main(argv: list[str]) -> int:
     if args.gate:
         # The launch guard: name what cannot be loaded and exit non-zero, so a caller refuses
         # BEFORE it starts a server that would burn a full weight load to fail late and cryptic.
-        # Engine probes are deliberately skipped — the format verdict does not need them.
+        # Engine probes are deliberately skipped — the format verdict does not need them. An
+        # artifact a CAPABLE MoEspresso can serve is not blocked: it is launched by that backend.
         blocked = 0
+        moespresso = _capable_moespresso() if any(_foreign_weight_format(Path(f)) for f in args.folders) else None
         for f in args.folders:
             foreign = _foreign_weight_format(Path(f))
-            if foreign:
-                blocked += 1
-                runtime = _catalog_runtime(Path(f))
-                suffix = f" (catalog says: {runtime})" if runtime else ""
-                print(f"{Path(f).name}: weights are not MLX-readable — {foreign}{suffix}")
+            if not foreign:
+                continue
+            if moespresso is not None:
+                continue
+            blocked += 1
+            runtime = _catalog_runtime(Path(f))
+            suffix = f" (catalog says: {runtime})" if runtime else ""
+            print(f"{Path(f).name}: weights are not MLX-readable — {foreign}{suffix}")
         return 3 if blocked else 0
     if args.json:
         print(json.dumps(results, indent=2))
