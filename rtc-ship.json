@@ -1,0 +1,19 @@
+{
+  "_comment": "How rtc-ship.sh ships free-agents (run-to-completion 0.6.8). DATA lives here; the free-agents-only COMMANDS live in .rtc/*.sh, extracted verbatim from the old ~/.claude/scripts/fa-ship.sh. Adding this file is config-only: no version bump, no release.",
+
+  "tag_prefix": "v",
+  "default_branch": "main",
+
+  "manifest": ".claude-plugin/plugin.json",
+  "changelog": "CHANGELOG.md",
+  "version_file": "VERSION",
+  "roadmap": "docs/ROADMAP.md",
+
+  "_comment_assets": "The release tarball and both installer names. Version-free globs are deliberate: scripts/package-release.sh reads VERSION and wipes dist/ each run, so exactly one tarball exists when these resolve. A glob that matches nothing now FAILS the ship (rtc-ship.sh 0.6.6) rather than silently publishing without it.",
+  "assets": "dist/free-agents-*.tar.gz dist/install-free-agents.sh dist/install-free-agents.command",
+
+  "refresh_plugin": "free-agents",
+  "test_workers": 12,
+
+  "_comment_tests": "No test_cmd: the main suite is the pytest default, and the two extra venv gates run from .rtc/pre-flight.sh."
+}
