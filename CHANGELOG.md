@@ -14,6 +14,17 @@ stubbed tests could not:
   `FA_PREFILL_TIMEOUT` tunes it. The defect was found the honest way: the run itself, not a
   review of the run.
 
+The re-ship gate surfaced two more contention finds, both fixed:
+- **`scripts/package-release.sh` ignored `--help` and ran its real work** (packaging, `rm -rf
+  dist` and all) — under load the help checker's alarm caught it (exit 142). It now parses
+  arguments before any work: `--help` prints the usage, an unknown flag refuses with exit 2,
+  and the no-argument path is unchanged.
+- **The PTY pilot of the live-filter test** (`test_box_opens_with_the_list_and_filters_from_the_first_character`)
+  read the rows immediately after a fixed 0.15 s key gap — under a loaded gate the app had not
+  processed the key yet and the "filters from the first character" assertion failed on the
+  unfiltered list. The same condition-based pattern as the other flake fixes: wait for the
+  discriminating state (the Gemini group folding away, then reappearing), never a fixed sleep.
+
 ## [0.44.0] — 2026-10-25
 
 ### Added — the session thinking toggle, both lanes, and the dispatch thinking policy

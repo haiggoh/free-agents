@@ -714,13 +714,18 @@ class RemoteLiveFilter(PilotCase):
             # One character already narrows: 'v' matches NVIDIA A, not Gemini Flash. The
             # GROUP HEADER is the discriminator — the folded group already hides its items
             # in the unfiltered list, so asserting on an item would pass with no filter.
+            # CONTENTION NOTE (2026-10-25, the fa-gate-test-flakes pattern): the press()
+            # helper's fixed 0.15 s gap is not a promise the app has PROCESSED the key —
+            # under a loaded gate the labels were still the unfiltered list and the test
+            # failed on a pass-anywhere assertion. Condition waits on the discriminating
+            # state, never a fixed sleep.
             await h.press("v")
-            rows = h.labels("rows")
-            self.assertTrue(any("NVIDIA A" in r for r in rows), rows)
-            self.assertFalse(any("Gemini (1)" in r for r in rows), rows)
+            await h.wait_for(lambda: not any("Gemini (1)" in r for r in h.labels("rows")),
+                             "the 'v' filter to fold Gemini away", secs=8)
+            self.assertTrue(any("NVIDIA A" in r for r in h.labels("rows")), h.labels("rows"))
             await h.press("backspace")               # an empty box shows every provider again
-            rows = h.labels("rows")
-            self.assertTrue(any("Gemini (1)" in r for r in rows), rows)
+            await h.wait_for(lambda: any("Gemini (1)" in r for r in h.labels("rows")),
+                             "the empty filter to show every provider again", secs=8)
         self.run_picker(s, start="remote")
 
     def test_digits_filter_too_and_nomatch_points_at_the_box(self):
