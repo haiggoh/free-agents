@@ -1344,6 +1344,16 @@ swap_model() { # swap_model <port> <alias> [force]
     write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || {
         cp -p "$bak" "$cfg"; return 1; }
     kill "$pid" 2>/dev/null
+    # LiteLLM exits GRACEFULLY on SIGTERM (uvicorn finishes in-flight work before
+    # exiting), so a proxy mid-shutdown can hold its port for minutes. Give the
+    # graceful exit a short, tunable grace, then escalate — SIGKILL is the only prompt
+    # kill, and spawning onto a HELD port is what turned live swaps into probe-000
+    # auto-reverts with the old model still answering (2026-10-25, twice).
+    for _ in $(seq 1 "${LA_SWAP_TERM_GRACE:-8}"); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+    done
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
     for _ in $(seq 1 30); do                 # let the port actually free before rebinding
         lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 || break
         sleep 1

@@ -185,3 +185,21 @@ yours: propose, record, and move on.
   plan's section 5.
 - 2026-10-25 1x:xx — item 5 receipt IN FLIGHT: baseline prefill run launched through the shipped
   0.44.1 tool (fixed timeout). mcp=all run + the §5 B3 table + the Task-11 proposal follow.
+- 2026-10-26 00:5x — successor session 84b42f6c resumed this queue after 732b0153 died mid-turn
+  (21:03:49 CET, API request never returned). Swap kill-then-wait fix LANDED on feat/swap-kill-wait
+  (../free-agents-wt-swap-kill): swap_model gives the graceful SIGTERM a tunable grace
+  (LA_SWAP_TERM_GRACE, default 8s) then SIGKILLs a proxy that ignored TERM, and only rebinds once
+  the port is free. TDD: the new stubborn-proxy test was watched RED first (the old code produced a
+  SILENT WRONG-MODEL SUCCESS — the TERM-ignoring proxy answered BOTH probes), GREEN with the fix,
+  and the escalation was mutation-checked (removed → RED, restored → GREEN). Full suite: 972 passed;
+  the 15 test_shell_suite failures are PRE-EXISTING on origin/main a933e6a — verified identical on a
+  pristine baseline worktree (machine-state coupling: live config.local.sh/roster, not this change).
+  Measurement receipt status: glm53 receipt impossible (NVIDIA per-model 429 cascade — 60 throttles,
+  900s cooldowns); gemini-3.8-flash = provider 402, free allowance exhausted (resets daily);
+  deepseek-v4 timed out at my 900s override (default 1800) — retry pending. New find for the item-5
+  tool: a failed launch reports stderr[-400:], which is a German shell job-done notice ("Fertig")
+  for the telemetry monitor pipeline — it buried the real 402 diagnosis for an hour; the measure
+  tool's error path should parse the stdout result JSON first. Item D gate: SATISFIED (41a9f4ff
+  quiet since 16:44). NOTE: canonical checkout is on fix/weight-format-gate with live edits by the
+  StepFun · 90 session — do not touch it; feat/la-evict-port carries another session's uncommitted
+  la-evict --port work (last touched 21:17, owner unknown).

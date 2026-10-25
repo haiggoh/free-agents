@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # exists (.fail -> 500, .slow -> wait before binding, so the revert's readiness wait has
 # something real to wait for).
 STUB = """#!/usr/bin/env python3
-import http.server, json, os, sys, time
+import http.server, json, os, signal, sys, time
 
 port = None
 cfg = None
@@ -43,6 +43,15 @@ ctrl = os.environ["LA_SWAP_TEST_DIR"]
 
 if os.path.exists(os.path.join(ctrl, f"{port}.slow")):
     time.sleep(3)
+
+def _on_term(signum, frame):
+    # Checked at SIGNAL time, not startup: the swap test writes this file only after
+    # the proxy is up (the port isn't known before), so stubbornness must be lazy.
+    if os.path.exists(os.path.join(ctrl, f"ignore-term-{port}")):
+        return
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _on_term)
 
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -246,6 +255,24 @@ class SwapModelTests(unittest.TestCase):
                         "the backup must stay on disk as the paper trail")
         self.assertIn("pre-flight probe 200", r.stdout)
         self.assertIn("live probe 200", r.stdout)
+
+    def test_a_sigterm_stubborn_proxy_is_escalated_to_kill_before_rebind(self):
+        """2026-10-25 live dogfood, twice: LiteLLM exits GRACEFULLY on SIGTERM (uvicorn
+        finishes in-flight work first), so a proxy mid-shutdown keeps its port past the
+        bare kill+wait; the new proxy then binds a HELD port and the live probe reads
+        000 (auto-revert) while the old model still owns the session. The swap must
+        escalate TERM->KILL and only rebind once the port is actually free."""
+        port, old_pid = self.start_old_session()
+        self.age_log(port)
+        (self.root / 'ctrl' / f'ignore-term-{port}').write_text('1')
+        r = self.swap(port, self.ALIAS_TO)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(old_pid, 0)          # the stubborn proxy did NOT survive the swap
+        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text())
+        os.kill(new_pid, 0)              # the new proxy owns the port now
+        self.assertEqual(probe(port, master_key(
+            (self.rundir / f'proxy-{port}.yaml').read_text())), 200)
 
     def test_a_failing_new_model_is_reverted(self):
         port, _ = self.start_old_session()
