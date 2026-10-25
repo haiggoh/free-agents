@@ -1,3 +1,19 @@
+## [0.44.1] — 2026-10-25
+
+### Fixed — the prefill tool's first live run found two defects
+
+Running the Task-10 tool against the real lane (scratch port, shared limiter) found what the
+stubbed tests could not:
+
+- **A timed-out launch orphaned the launcher's proxy.** The tool's subprocess timeout killed
+  the `remote-session.sh` wrapper but not the LiteLLM proxy it had spawned — the orphan stayed
+  on its scratch port, ignored SIGTERM, and had to be SIGKILLed by hand. The launch now runs in
+  its own session and the timeout kills the whole process GROUP, proxy included.
+- **The 900 s default was a false-failure generator under load.** The shared 40 RPM limiter
+  queue is the reality of a machine carrying live sessions; the default is 1800 s now, and
+  `FA_PREFILL_TIMEOUT` tunes it. The defect was found the honest way: the run itself, not a
+  review of the run.
+
 ## [0.44.0] — 2026-10-25
 
 ### Added — the session thinking toggle, both lanes, and the dispatch thinking policy

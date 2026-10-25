@@ -30,6 +30,9 @@ Environment:
   FA_PREFILL_STATE_DIR        cache directory (default ~/.local/state/free-agents)
   FA_PREFILL_LAUNCHER         launcher override (tests; default the repo's remote-session.sh)
   FA_PREFILL_ALIAS            default --alias
+  FA_PREFILL_TIMEOUT          launch timeout seconds (default 1800; the shared limiter queue
+                              makes short timeouts a false failure under load — a timed-out
+                              launch kills the launcher's whole process group, proxy included)
   FA_PREFILL_CLAUDE_MD        extra CLAUDE.md path folded into the inputs hash (tests)
   FA_PREFILL_CLOUD_PROFILE    settings file applied on the cloud lane (LA_REMOTE_CLAUDE_SETTINGS)
 
@@ -41,6 +44,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -198,10 +202,23 @@ def measure(lane: str, levers: dict, env: dict | None = None) -> dict:
     child_env = dict(env)
     child_env.update(_lever_env(lane, levers))
     started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    timeout = float(env.get("FA_PREFILL_TIMEOUT") or 1800)   # the shared limiter queue is real
+    # start_new_session: the launcher spawns its OWN children (the LiteLLM proxy), so the
+    # timeout must kill the whole process GROUP — a wrapper-only kill orphaned a live proxy
+    # on a scratch port (measured 2026-10-25; it ignored SIGTERM and had to be SIGKILLed).
+    proc = subprocess.Popen(argv, env=child_env, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, start_new_session=True)
     try:
-        r = subprocess.run(argv, env=child_env, capture_output=True, text=True, timeout=900)
-    except subprocess.TimeoutExpired as err:
-        raise RuntimeError(f"the launch timed out after {err.timeout}s") from err
+        out, errtxt = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        proc.communicate()          # reap the group so no pipe holder survives
+        raise RuntimeError(f"the launch timed out after {timeout}s "
+                           "(the launcher's process group was killed)") from None
+    r = subprocess.CompletedProcess(argv, proc.returncode, stdout=out, stderr=errtxt)
     if r.returncode != 0:
         raise RuntimeError(f"launch failed (exit {r.returncode}): "
                            f"{(r.stderr or r.stdout or '').strip()[-400:]}")

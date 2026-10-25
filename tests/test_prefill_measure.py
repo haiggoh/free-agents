@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -145,3 +146,50 @@ class MeasureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TimeoutCleanupTests(unittest.TestCase):
+    """A timed-out launch must kill the launcher's whole process GROUP, not just the
+    launcher: remote-session.sh spawns the proxy as its own child, and a wrapper-only kill
+    orphaned a live LiteLLM proxy on a scratch port (measured 2026-10-25: the 08:46
+    measurement run's proxy outlived its 900 s timeout and had to be killed by hand)."""
+
+    def test_timeout_kills_the_whole_process_group(self):
+        # Fails if only the launcher process is killed: the stub launcher backgrounds a
+        # sleeper and traps SIGTERM itself, so a bare process kill leaves the sleeper alive.
+        tmp = Path(tempfile.mkdtemp())
+        stub = tmp / "slow-launcher.sh"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "trap '' TERM INT\n"
+            "# The background child must NOT hold the captured stdout/stderr pipes, or the\n"
+            "# caller blocks on EOF for the full sleep even after the launcher is killed.\n"
+            "sleep 300 >/dev/null 2>&1 </dev/null &\n"
+            "echo $! > \"$STUB_CHILD_PID\"\n"
+            "# The launcher's own foreground wait is what survives to the timeout; it must\n"
+            "# also be pipe-detached, or ITS orphan holds the pipes for the same reason.\n"
+            "sleep 300 >/dev/null 2>&1 </dev/null\n")
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+        env = {"FA_PREFILL_STATE_DIR": str(tmp / "state"),
+               "FA_PREFILL_LAUNCHER": str(stub),
+               "FA_PREFILL_ALIAS": "fixture",
+               "FA_PREFILL_TIMEOUT": "2",
+               "ANTHROPIC_BASE_URL": "",
+               "STUB_CHILD_PID": str(tmp / "child-pid")}
+        child_pid_file = Path(env["STUB_CHILD_PID"])
+        with self.assertRaises(RuntimeError) as cm:
+            fpm.measure("remote", {}, env=env)
+        self.assertIn("timed out", str(cm.exception))
+        deadline = time.time() + 5
+        while not child_pid_file.exists() and time.time() < deadline:
+            time.sleep(0.05)
+        child = int(child_pid_file.read_text().strip())
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break                       # the sleeper is gone: the group kill worked
+            time.sleep(0.1)
+        else:
+            self.fail(f"the launcher's child (pid {child}) survived the timeout — orphaned")
