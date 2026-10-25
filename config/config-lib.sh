@@ -805,6 +805,14 @@ la_lookup() {
   LA_CUR_TOOLP="${LA_TOOLP[$a]}"
   LA_CUR_REASONP="${LA_REASONP[$a]}"
   LA_CUR_THINK="${LA_THINK[$a]}"
+  # Session thinking override (waypoint fa-thinking-toggle): the picker's remembered choice
+  # beats the alias's configured value. ONE consumption point, so the launcher, hotswap, RAM
+  # preflight and session identity all agree. An invalid value is ignored LOUDLY.
+  case "${LA_THINKING_OVERRIDE:-}" in
+    true|false) LA_CUR_THINK="$LA_THINKING_OVERRIDE" ;;
+    "") ;;
+    *) echo "config-lib: ignoring invalid LA_THINKING_OVERRIDE '$LA_THINKING_OVERRIDE' (use true|false)" >&2 ;;
+  esac
   LA_CUR_SPOOF="${LA_SPOOF[$a]}"
   LA_CUR_EFFORT="${LA_EFFORT[$a]}"
   LA_CUR_RAPID_SPEC_CONFIG="${LA_RAPID_SPEC_CONFIG[$a]:-}"

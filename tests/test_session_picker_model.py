@@ -973,3 +973,109 @@ class BypassDefaultRows(unittest.TestCase):
         self.assertIn("billed", cloud.info_text(None))
         s.eligibility = {"verdict": "unknown", "evidence": "absence", "at": 1.0}
         self.assertNotIn("billed", cloud.info_text(None))
+
+
+class ThinkingToggleTests(unittest.TestCase):
+    """The session thinking toggle (waypoint fa-thinking-toggle): one remembered choice for
+    both lanes, None = the launch default (thinking ON), model constraints override last and
+    the info box says so. Each test names the change that breaks it."""
+
+    def row(self, screen):
+        return next(a for a in screen.actions() if a.key == "j")
+
+    def test_row_on_both_lanes_after_temperature(self):
+        # Fails if the row is missing from a lane, or ordered before the effort/temperature
+        # pair it was designed to follow (user design 2026-10-24: after effort and temperature).
+        for screen in (m.LocalScreen(m.Settings(), local_models(), owner=m.DIRECT_ROOT),
+                       m.RemoteScreen(m.Settings(), remote_agents(), owner=m.DIRECT_ROOT)):
+            keys = [a.key for a in screen.actions()]
+            self.assertIn("j", keys)
+            self.assertLess(keys.index("o"), keys.index("j"), f"{type(screen).__name__} order")
+            self.assertLess(keys.index("e"), keys.index("j"), f"{type(screen).__name__} order")
+
+    def test_label_reflects_state(self):
+        s = m.Settings()
+        self.assertIn("ON (default)", self.row(m.LocalScreen(s, local_models(), owner=m.DIRECT_ROOT)).label)
+        s.thinking_session = True
+        self.assertIn("ON", self.row(m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)).label)
+        self.assertNotIn("default", self.row(m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)).label)
+        s.thinking_session = False
+        self.assertIn("OFF", self.row(m.LocalScreen(s, local_models(), owner=m.DIRECT_ROOT)).label)
+
+    def test_row_cycles_default_off_default_and_persists(self):
+        # Fails if the row cannot return to the launch default, or the change does not reach
+        # the on_thinking_saved callback the Picker wires to save_thinking_session.
+        saved = []
+        s = m.Settings(on_thinking_saved=lambda v: saved.append(v))
+        lane = m.LocalScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        row = self.row(lane)
+        row.run()
+        self.assertIs(s.thinking_session, False)
+        self.assertEqual(saved, [False])
+        row.run()
+        self.assertIsNone(s.thinking_session)
+        self.assertEqual(saved, [False, None])
+
+    def test_remote_launch_env_exports_the_override(self):
+        # Fails if a launch leaves the launcher to guess: the picker decides the override,
+        # None (default) and True both mean ON, False means OFF. Always exported — the
+        # picker-owned default must reach direct CLI launches started from it too.
+        def env_for(setting_value):
+            s = m.Settings(thinking_session=setting_value)
+            lane = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
+            lane.accordion.select("nvidia-a")
+            return lane.activate_selected().env
+        self.assertEqual(env_for(None).get("LA_THINKING_OVERRIDE"), "true")
+        self.assertEqual(env_for(True).get("LA_THINKING_OVERRIDE"), "true")
+        self.assertEqual(env_for(False).get("LA_THINKING_OVERRIDE"), "false")
+
+    def test_local_launch_env_exports_the_override(self):
+        # Fails if only the remote lane got the toggle: the design is BOTH lanes.
+        s = m.Settings(thinking_session=False)
+        lane = m.LocalScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        lane.accordion.select("gemma-4-26b")
+        self.assertEqual(lane.activate_selected().env.get("LA_THINKING_OVERRIDE"), "false")
+
+    def test_constraint_notice_glm_off_only(self):
+        # Fails if the constraint table claims more than the measured facts: GLM on NIM is
+        # ALWAYS-thinking (chat_template_kwargs inert, 2026-10-13) — only OFF on it is
+        # constrained, and only it.
+        notice = m.thinking_constraint("nvidia", "z-ai/glm-5.3-flash", False)
+        self.assertIsNotNone(notice)
+        self.assertIn("always", notice.lower())
+        self.assertIsNone(m.thinking_constraint("nvidia", "z-ai/glm-5.3-flash", True))
+        self.assertIsNone(m.thinking_constraint("nvidia", "z-ai/glm-5.3-flash", None))
+        self.assertIsNone(m.thinking_constraint("nvidia", "deepseek-ai/deepseek-v4.1-flash", False))
+        self.assertIsNone(m.thinking_constraint("gemini", "gemini-3.8-flash", False))
+        self.assertIsNone(m.thinking_constraint("groq", "llama-4-scout", False))
+
+    def test_info_box_appends_the_glm_notice_when_off(self):
+        # Fails if the user only learns the model ignores their OFF choice after launch:
+        # the info box must state the constraint for the highlighted model.
+        s = m.Settings(thinking_session=False)
+        lane = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
+        lane.set_catalog("nvidia", [m.CatalogModel("z-ai/glm-5.3-flash")], None)
+        text = lane.info_text("cat:nvidia:z-ai/glm-5.3-flash")
+        self.assertIn("always", text.lower())
+        # A model that honors the choice says nothing, and ON says nothing anywhere.
+        s2 = m.Settings(thinking_session=False)
+        lane2 = m.RemoteScreen(s2, remote_agents(), owner=m.DIRECT_ROOT)
+        lane2.set_catalog("nvidia", [m.CatalogModel("deepseek-ai/deepseek-v4.1-flash")], None)
+        self.assertNotIn("always", lane2.info_text("cat:nvidia:deepseek-ai/deepseek-v4.1-flash"))
+        s3 = m.Settings(thinking_session=True)
+        lane3 = m.RemoteScreen(s3, remote_agents(), owner=m.DIRECT_ROOT)
+        lane3.set_catalog("nvidia", [m.CatalogModel("z-ai/glm-5.3-flash")], None)
+        self.assertNotIn("always", lane3.info_text("cat:nvidia:z-ai/glm-5.3-flash"))
+
+    def test_cleared_callback_wiring_matches_persistence(self):
+        # Fails if the picker persists a value the store cannot load back: the saved value
+        # must round-trip through the same store the next picker reads.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            s = m.Settings(on_thinking_saved=lambda v: __import__("session_menu_state")
+                           .save_thinking_session(tmp, v))
+            s.thinking_session = False
+            if s.on_thinking_saved:
+                s.on_thinking_saved(s.thinking_session)
+            import session_menu_state as sms
+            self.assertIs(sms.load(tmp).thinking_session, False)

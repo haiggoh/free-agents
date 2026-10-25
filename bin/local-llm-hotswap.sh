@@ -191,6 +191,11 @@ if [ "$USE_PROFILE" = "true" ]; then
     TOOLP="${TOOLP:-$LA_CUR_TOOLP}"
     REASONP="${REASONP:-$LA_CUR_REASONP}"
     THINK="${THINK:-$LA_CUR_THINK}"
+    # Session thinking override (waypoint fa-thinking-toggle): the picker's choice beats the
+    # profile's THINK too — it is a session-level decision, not a per-model default.
+    case "${LA_THINKING_OVERRIDE:-}" in
+        true|false) THINK="$LA_THINKING_OVERRIDE" ;;
+    esac
 fi
 
 # State the backend BEFORE anything loads, and say where it came from.

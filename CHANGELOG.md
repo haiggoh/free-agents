@@ -1,3 +1,39 @@
+## [0.44.0] — 2026-10-25
+
+### Added — the session thinking toggle, both lanes, and the dispatch thinking policy
+
+The `fa-thinking-toggle` waypoint (user design 2026-10-24): one remembered session choice,
+applied everywhere a session or dispatch starts, with model constraints stated honestly.
+
+- **Picker rows `j` on both lane screens** (after effort and temperature). The default —
+  never touched — is thinking ON for session launches; the row cycles ON (default) ↔ OFF and
+  persists through the same store as effort and temperature.
+- **The launchers consume `LA_THINKING_OVERRIDE`** (the picker always exports it: None and
+  True both mean ON). `remote-session.sh` resolves alias suffix → override → constraint in
+  one place used by the main launch AND `--swap-model`; `config-lib.sh`'s `la_lookup` is the
+  local lane's one consumption point (launcher, hotswap, RAM preflight and session identity
+  all read through it), and hotswap's profile mode respects the session choice over the
+  profile's THINK. An invalid override value is ignored loudly, never silently honored.
+- **The GLM-on-NIM constraint is stated, not papered over.** GLM's thinking template always
+  runs (chat_template_kwargs inert, measured 2026-10-13): an OFF choice there travels as
+  `reasoning_effort low` (≈0 reasoning tokens) and the banner, dry-run, picker info box and
+  dispatch note all say so instead of claiming a disable. Nemotron honors enable_thinking
+  both ways in a session; a stateless dispatch cannot send that kwarg, so an OFF dispatch to
+  Nemotron is reported `thinking_overridden: true`.
+- **Dispatches get a policy, not a toggle**: `dispatch-preferences.json` entries take
+  `"thinking": "on"|"off"|"auto"` (absent = auto), resolved by role first — reasoner/validator
+  dispatches think, operator/utility do not (the council's cross-family validator keeps its
+  thinking) — model constraints last, reported in the result JSON as
+  `thinking` / `thinking_overridden` / `thinking_note`.
+- **Store schema 6 → 7** (`session-menu.local.json` gains the `thinking` section). Schema-6
+  files load unchanged; a thinking write bumps the version so an old reader refuses loudly
+  instead of half-reading.
+
+Tests at every layer: the store round-trip and refusal paths, the picker rows/env/info box,
+`_resolve_thinking` (defaults, flips, the GLM constraint, the invalid-value warning),
+`la_lookup` (both directions, sandboxed registry), the dispatch policy (role defaults, the
+GLM low dial, the Nemotron override, argv + JSON), each failing before its change.
+
 ## [0.43.6] — 2026-10-25
 
 ### Fixed — the Phase-4 live dogfood's findings

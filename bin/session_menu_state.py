@@ -41,10 +41,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 6
-READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6)
+SCHEMA_VERSION = 7
+READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7)
 SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature",
-            "intercept_agents", "memguard")
+            "intercept_agents", "memguard", "thinking")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown",
@@ -106,6 +106,22 @@ KV_CHOICES = ("auto", "int8", "int4")
 INTERCEPT_AGENTS_CHOICES = ("0", "1")
 DEFAULT_INTERCEPT_AGENTS = "1"
 
+# Session thinking toggle (schema 7; waypoint fa-thinking-toggle): True/False = a remembered
+# choice the launchers apply to every session of both lanes via LA_THINKING_OVERRIDE; None (the
+# key is absent) = the launch default, which is thinking ON for session launches. Per-model
+# constraint overrides live in the launchers, not here.
+THINKING_SECTION_DEFAULT: dict = {}          # {} = unset; {"session": bool} = chosen
+
+
+def _validate_thinking(values: dict) -> None:
+    if not isinstance(values, dict):
+        raise ValueError("thinking section must be a JSON object")
+    for key, value in values.items():
+        if key != "session":
+            raise ValueError(f"unknown thinking setting {key!r}")
+        if not isinstance(value, bool):
+            raise ValueError("thinking session must be true or false")
+
 # A launcher alias: what csl / remote-session.sh / lowkey accept as a model name.
 _ALIAS_RE = __import__("re").compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}")
 
@@ -133,6 +149,8 @@ class State:
     # able to mutate) the module-level default.
     memguard: dict = field(default_factory=lambda: {**DEFAULT_MEMGUARD,
                                                     "kv_dtype": dict(DEFAULT_MEMGUARD["kv_dtype"])})
+    # None = the launch default (thinking ON for session launches); True/False = remembered choice.
+    thinking_session: bool | None = None
     warnings: list = field(default_factory=list)
 
 
@@ -214,8 +232,9 @@ def _unsafe_dir(config_dir: Path) -> str | None:
     return None
 
 
-def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict]:
-    """Return (effort, rate_limiter, last_launched, temperature, intercept_agents, memguard) or raise ValueError with a short reason."""
+def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict]:
+    """Return (effort, rate_limiter, last_launched, temperature, intercept_agents, memguard,
+    thinking) or raise ValueError with a short reason."""
     if len(raw) > MAX_BYTES:
         raise ValueError("preference file is too large")
     try:
@@ -233,10 +252,14 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict]:
         raise ValueError("last_launched needs schema_version 2")
     if doc["schema_version"] < 5 and "memguard" in doc:
         raise ValueError("memguard needs schema_version 5")
+    if doc["schema_version"] < 7 and "thinking" in doc:
+        raise ValueError("thinking needs schema_version 7")
     memguard = doc.get("memguard", {})
     if not isinstance(memguard, dict):
         raise ValueError("preference sections must be JSON objects")
     _validate_memguard(memguard)
+    thinking = doc.get("thinking", {})
+    _validate_thinking(thinking)
     effort = doc.get("effort", {})
     limiter = doc.get("rate_limiter", {})
     last = doc.get("last_launched", {})
@@ -262,10 +285,10 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict]:
     # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
     for lane, tier in tiers.items():
         last[f"{lane}:tier"] = tier
-    return effort, limiter, last, temperature, intercept_agents, memguard
+    return effort, limiter, last, temperature, intercept_agents, memguard, thinking
 
 
-def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict] | None:
+def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict, dict] | None:
     """None when absent; raises ValueError when present but unusable."""
     try:
         st = os.lstat(path)
@@ -294,7 +317,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.warnings.append(f"{exc}; using built-in defaults and leaving the file untouched")
         return state
     if found:
-        effort, limiter, last, temperature, intercept_agents, memguard = found
+        effort, limiter, last, temperature, intercept_agents, memguard, thinking = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
@@ -302,6 +325,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.temperature.update(temperature)
         state.intercept_agents = intercept_agents
         state.memguard.update(memguard)
+        state.thinking_session = thinking.get("session")
     return state
 
 
@@ -404,7 +428,7 @@ def _write(config_dir: Path, doc: dict) -> None:
         pass
 
 
-def _doc(effort, limiter, last, temperature, intercept_agents, memguard) -> dict:
+def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking=None) -> dict:
     doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
            "last_launched": {k: v for k, v in last.items() if ":" not in k},
            "temperature": temperature,
@@ -414,14 +438,17 @@ def _doc(effort, limiter, last, temperature, intercept_agents, memguard) -> dict
         doc["last_launched_tier"] = tiers
     if memguard:
         doc["memguard"] = memguard
+    if thinking:
+        doc["thinking"] = thinking
     return doc
 
 
-def _update(config_dir: Path | str, mutate, mutate_memguard=None) -> str | None:
-    """Apply `mutate(effort, limiter, last_launched, temperature)` under the lock. Returns a warning or None.
+def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinking=None) -> str | None:
+    """Apply `mutate(effort, limiter, last_launched, temperature)` (or one of the section hooks)
+    under the lock. Returns a warning or None.
 
-    Always writes schema 5, so a schema-1/2/3/4 file is migrated here (and only here), carrying every
-    section it already had."""
+    Always writes the current schema, so a schema-1..6 file is migrated here (and only here),
+    carrying every section it already had."""
     config_dir = Path(config_dir)
     reason = _unsafe_dir(config_dir)
     if reason:
@@ -430,14 +457,17 @@ def _update(config_dir: Path | str, mutate, mutate_memguard=None) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, intercept_agents, memguard = found
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking = found
             else:
-                effort, limiter, last, temperature, intercept_agents, memguard = {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}
-            if mutate_memguard is not None:
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking = \
+                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}
+            if mutate_thinking is not None:
+                mutate_thinking(thinking)
+            elif mutate_memguard is not None:
                 mutate_memguard(memguard)
             else:
                 mutate(effort, limiter, last, temperature)
-            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard)
+            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking)
             _write(config_dir, doc)
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
@@ -522,6 +552,20 @@ def save_temperature(config_dir: Path | str, lane: str, value: str) -> str | Non
     return _update(config_dir, mutate)
 
 
+def save_thinking_session(config_dir: Path | str, value: bool | None) -> str | None:
+    """Persist the session thinking toggle (both lanes). None = back to the launch default;
+    the stored key is dropped so the file carries no thinking section at all."""
+    if value is not None and not isinstance(value, bool):
+        raise ValueError("thinking session must be true, false or None (the default)")
+
+    def mutate_thinking(thinking):
+        if value is None:
+            thinking.pop("session", None)
+        else:
+            thinking["session"] = value
+    return _update(config_dir, None, mutate_thinking=mutate_thinking)
+
+
 def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
     if value not in INTERCEPT_AGENTS_CHOICES:
         raise ValueError(f"intercept_agents must be one of {', '.join(INTERCEPT_AGENTS_CHOICES)}")
@@ -538,10 +582,10 @@ def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, _, memguard = found
+                effort, limiter, last, temperature, _, memguard, thinking = found
             else:
-                effort, limiter, last, temperature, memguard = {}, {}, {}, {}, {}
-            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard))
+                effort, limiter, last, temperature, memguard, thinking = {}, {}, {}, {}, {}, {}
+            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking))
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
     except OSError as exc:
@@ -572,6 +616,11 @@ def main(argv: list[str]) -> int:
                                         "NAME=value lines (the launchers source them)")
     ia = sub.add_parser("set-intercept", help="persist intercept agents toggle")
     ia.add_argument("value", choices=list(INTERCEPT_AGENTS_CHOICES))
+    gt2 = sub.add_parser("get-thinking", help="print the session thinking toggle "
+                                              "(default | true | false)")
+    st2 = sub.add_parser("set-thinking", help="persist the session thinking toggle "
+                                              "(true | false | default clears it)")
+    st2.add_argument("value", choices=("true", "false", "default"))
     kg = sub.add_parser("kv-get", help="print the saved KV cache precision for a model (default auto)")
     kg.add_argument("alias")
     ks = sub.add_parser("kv-set", help="persist one model's KV cache precision (auto clears it)")
@@ -609,6 +658,17 @@ def main(argv: list[str]) -> int:
             print(f"session_menu_state: warning: {warning}", file=sys.stderr)
             return 1
         return 0
+    if args.cmd == "set-thinking":
+        value = {"true": True, "false": False, "default": None}[args.value]
+        try:
+            warning = save_thinking_session(REPO_CONFIG_DIR, value)
+        except ValueError as exc:
+            print(f"session_menu_state: {exc}", file=sys.stderr)
+            return 2
+        if warning:
+            print(f"session_menu_state: warning: {warning}", file=sys.stderr)
+            return 1
+        return 0
     if args.cmd == "kv-set":
         try:
             current = dict(load(REPO_CONFIG_DIR).memguard["kv_dtype"])
@@ -634,6 +694,9 @@ def main(argv: list[str]) -> int:
         print(state.effort[args.lane])
     elif args.cmd == "get-temp":
         print(state.temperature[args.lane])
+    elif args.cmd == "get-thinking":
+        print("default" if state.thinking_session is None
+              else "true" if state.thinking_session else "false")
     elif args.cmd == "kv-get":
         print(state.memguard["kv_dtype"].get(args.alias, "auto"))
     else:
@@ -642,7 +705,8 @@ def main(argv: list[str]) -> int:
                           "last_launched_tier": state.last_launched_tier,
                           "temperature": state.temperature,
                           "intercept_agents": state.intercept_agents,
-                          "memguard": state.memguard}, indent=2))
+                          "memguard": state.memguard,
+                          "thinking_session": state.thinking_session}, indent=2))
     return 0
 
 

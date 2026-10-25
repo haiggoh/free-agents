@@ -304,8 +304,8 @@ class StateTests(unittest.TestCase):
         # schema_version") instead. (Workflow finding #7.)
         sms.save_memguard(self.cfg, {"kv_dtype": {"qwen-3.8-operator": "int8"}})
         doc = json.loads(self.file.read_text())
-        self.assertEqual(doc["schema_version"], 6)
-        self.assertGreaterEqual(sms.SCHEMA_VERSION, 6)
+        self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)   # always the CURRENT schema
+        self.assertGreaterEqual(sms.SCHEMA_VERSION, 6)                # ≥ the kv_dtype bump
         self.assertIn(5, sms.READABLE_SCHEMAS)          # schema-5 files still load
 
 
@@ -408,6 +408,102 @@ class StateTests(unittest.TestCase):
         self.assertEqual(state.rate_limiter,
                          {"mode": "sliding_window", "rpm": 40, "max_wait": 120, "cooldown": 10})
         self.assertEqual(path.read_bytes(), raw)
+
+    # --- session thinking toggle (schema 7) --------------------------------------
+    def test_thinking_session_defaults_to_none_and_writes_nothing(self):
+        # Fails if load() invents a thinking value or creates the file on a read.
+        state = sms.load(self.cfg)
+        self.assertIsNone(state.thinking_session)
+        self.assertEqual(state.warnings, [])
+        self.assertFalse(self.file.exists())
+        self.assertFalse(self.lock.exists())
+
+    def test_thinking_session_round_trips_and_keeps_other_sections(self):
+        # Fails if saving thinking rewrites the whole document from defaults.
+        sms.save_effort(self.cfg, "local_session", "low")
+        self.assertIsNone(sms.save_thinking_session(self.cfg, False))
+        state = sms.load(self.cfg)
+        self.assertIs(state.thinking_session, False)
+        self.assertEqual(state.effort["local_session"], "low")     # other sections untouched
+        self.assertIsNone(sms.save_thinking_session(self.cfg, True))
+        self.assertIs(sms.load(self.cfg).thinking_session, True)
+
+    def test_thinking_session_clear_returns_to_default(self):
+        # Fails if None cannot be stored again: once set, the user could never go back
+        # to the launch default (None = thinking ON for session launches).
+        sms.save_thinking_session(self.cfg, False)
+        self.assertIsNone(sms.save_thinking_session(self.cfg, None))
+        self.assertIsNone(sms.load(self.cfg).thinking_session)
+        doc = json.loads(self.file.read_text())
+        self.assertNotIn("thinking", doc)                          # cleared, not stored as null
+
+    def test_thinking_session_invalid_value_refused_file_untouched(self):
+        # Fails if a bad value lands in the store (or a refusal writes a file).
+        for bad in ("yes", "on", 1, "TRUE", object()):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    sms.save_thinking_session(self.cfg, bad)
+        self.assertFalse(self.file.exists())
+
+    def test_thinking_bool_values_only(self):
+        # Fails if a truthy non-bool (1, "true") is accepted: the store holds real booleans,
+        # so the launcher env can only ever be the strings true/false.
+        with self.assertRaises(ValueError):
+            sms.save_thinking_session(self.cfg, 1)
+        with self.assertRaises(ValueError):
+            sms.save_thinking_session(self.cfg, "true")
+        self.assertIsNone(sms.save_thinking_session(self.cfg, True))   # bool accepted
+        self.assertIs(sms.load(self.cfg).thinking_session, True)
+
+    def test_schema6_file_still_loads_with_thinking_default(self):
+        # Fails if the schema bump makes an existing preferences file unreadable: the
+        # user's saved efforts would silently fall back to defaults.
+        path = self.cfg / sms.PREFS_NAME
+        path.write_text(json.dumps({"schema_version": 6,
+                                    "effort": {"local_session": "low"},
+                                    "memguard": {"enabled": True, "tmux": True, "soft_pct": 85,
+                                                 "hard_pct": 93, "quiet_s": 3,
+                                                 "auto_continue": True,
+                                                 "registry_auto_sync": False, "kv_dtype": {}}}))
+        state = sms.load(self.cfg)
+        self.assertEqual(state.warnings, [])
+        self.assertIsNone(state.thinking_session)
+        self.assertEqual(state.effort["local_session"], "low")
+
+    def test_thinking_write_bumps_schema_so_old_readers_refuse(self):
+        # Fails if the new store key ships under the old schema number: a pre-thinking reader
+        # would reject a file its schema claim says it understands (workflow finding #7 pattern).
+        sms.save_thinking_session(self.cfg, False)
+        doc = json.loads(self.file.read_text())
+        self.assertEqual(doc["schema_version"], 7)
+        self.assertIn(6, sms.READABLE_SCHEMAS)          # schema-6 files still load
+        # Simulate the OLD reader: schemas 1..6 only. It must refuse LOUDLY, not load.
+        with mock.patch.object(sms, "READABLE_SCHEMAS", (1, 2, 3, 4, 5, 6)):
+            state = sms.load(self.cfg)
+            self.assertTrue(any("schema_version" in w for w in state.warnings))
+            self.assertIsNone(state.thinking_session)   # defaults, not a silent half-read
+
+    def test_thinking_get_set_cli(self):
+        # Fails if the CLI cannot read or persist the toggle (the Bash entry points use it).
+        import subprocess
+
+        def run(*args):
+            return subprocess.run([sys.executable, str(ROOT / "bin/session_menu_state.py"), *args],
+                                  env=dict(os.environ, FREE_AGENTS_CONFIG_DIR=str(self.cfg)),
+                                  capture_output=True, text=True)
+
+        r = run("get-thinking")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "default"))
+        self.assertEqual(run("set-thinking", "false").returncode, 0)
+        self.assertEqual(run("get-thinking").stdout.strip(), "false")
+        self.assertEqual(run("set-thinking", "true").returncode, 0)
+        self.assertEqual(run("get-thinking").stdout.strip(), "true")
+        self.assertEqual(run("set-thinking", "default").returncode, 0)
+        self.assertEqual(run("get-thinking").stdout.strip(), "default")     # cleared again
+        self.assertNotEqual(run("set-thinking", "yes").returncode, 0)       # bad value refused
+        self.assertEqual(run("get-thinking").stdout.strip(), "default")     # unchanged by refusal
+        shown = json.loads(run("show").stdout)
+        self.assertIsNone(shown["thinking_session"])                        # show() carries it
 
 
 if __name__ == "__main__":

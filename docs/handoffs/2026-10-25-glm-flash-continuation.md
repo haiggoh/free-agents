@@ -108,3 +108,18 @@ yours: propose, record, and move on.
 
 - 2026-10-25 01:45 — handoff written by session 41a9f4ff (the predecessor, still live in a
   Terminal window — do not kill 4141-4143). Queue adopted: start at item 1.
+- 2026-10-25 04:2x — item 1 (fa-thinking-toggle) implemented on feat/thinking-toggle in
+  ../free-agents-wt-thinking-toggle (worktree of origin/main 5bbb4db; the handoff doc itself
+  committed there first, 19c2286). TDD every layer, each new test watched to fail first:
+  store schema 7 + thinking section (44 store tests green; schema guard mutation-checked:
+  a simulated schema-6 reader refuses a thinking file), picker rows `j` on both lanes +
+  always-exported LA_THINKING_OVERRIDE + GLM constraint in the info box (89 picker tests
+  green), remote _resolve_thinking (alias suffix → override → constraint; 51 remote tests
+  green incl. main-flow + --swap-model wiring + dry-run line), local lane via config-lib
+  la_lookup (13/13 sandbox tests green; mutation-checked — reverting the guard fails 3),
+  hotswap profile-mode pin, dispatch policy resolve_thinking (role defaults → constraint
+  last; 43 dispatch tests green; the council-rule test mutation-checked). Design decision
+  recorded: the picker row cycles ON (default) ↔ OFF only — None and True behave
+  identically at launch, so the row never stores an indistinguishable third state; the
+  tri-state stays in the API/store. Full suite ran as the gate (FA_TEST_WORKERS=6).
+

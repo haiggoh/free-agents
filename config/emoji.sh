@@ -36,6 +36,7 @@ EMOJI_BROKEN_MODELS="🚧"  # unworking models filter (remote menu `u`)
 EMOJI_OLD_MODELS="🕰️"      # old-models filter, T6 age cutoff (remote filters menu `o`)
 EMOJI_SEARCH="🔎"          # model-name search (remote picker `w`)
 EMOJI_TEMPERATURE="🌡️"     # temperature preset (picker `o`, bash remote menu `O`)
+EMOJI_THINKING="🧠"         # session thinking toggle (picker `j`, both lanes)
 EMOJI_GO_LAUNCH="🚀"       # picker `g`: launch the last-launched model
 EMOJI_TRIALS="🔖"          # picker remote `h`: limited-trial providers shown/hidden
 EMOJI_LOCAL_CAPABLE="🏷️"   # picker remote `f`: locally-runnable models shown/hidden

@@ -40,6 +40,9 @@
 #   LA_CLASSIFIER_MODEL=prov:model  auto-mode classifier (-a once) on a DEDICATED free model, e.g.
 #                                 nvidia:nvidia/nemotron-3-super-120b-a12b (recommended; measured 3s/8s)
 #                                 unset = the session model answers claude-sonnet-5 (works, slower)
+#   LA_THINKING_OVERRIDE=true|false  session thinking toggle (picker `j`); unset = thinking follows
+#                                 the alias suffix (-thinking = on). A model constraint may
+#                                 override the choice; the banner says so when it does.
 #   LA_SUBAGENT_ROUTING=same|hybrid, LA_SUBAGENT_POOL=prov:model,…  subagent routing (see README)
 #
 # Cost: provider quota and billing apply; see the selected tier. This session
@@ -883,6 +886,46 @@ _model_param_lines() { # _model_param_lines <provider> <model> <thinking> [effor
     MP_THINK_LINE="$think_line"; MP_EFFORT_LINE="$effort_line"
 }
 
+# THINKING RESOLUTION (waypoint fa-thinking-toggle): one place that turns (alias, provider,
+# model, env) into the session's thinking mode and the notice the banner must show. Sets
+# RV_THINKING ("true"|"false") and RV_NOTICE ("" or one line). Order of precedence:
+#   1. the alias suffix (today's behavior, unchanged when no override is set);
+#   2. LA_THINKING_OVERRIDE=true|false (the picker's remembered session choice) — an invalid
+#      value is ignored LOUDLY, never silently honored or silently dropped;
+#   3. the model-constraint table LAST: GLM on NIM always runs its thinking template
+#      (chat_template_kwargs inert, measured 2026-10-13, docs/nvidia-nim-serving-notes.md),
+#      so OFF cannot disable it — reasoning_effort low (≈0 reasoning tokens, verified
+#      direct) is the closest the session gets, and the notice says exactly that instead
+#      of claiming an off it cannot deliver. Nemotron honors enable_thinking both ways;
+#      Gemini is disabled unless asked; other families take the choice as given.
+_resolve_thinking() { # _resolve_thinking <alias> <provider> <model>
+    local alias="$1" prov="$2" model="$3"
+    local thinking="false"; [[ "$alias" == *-thinking ]] && thinking="true"
+    RV_NOTICE=""
+    local override="${LA_THINKING_OVERRIDE:-}"
+    if [[ -n "$override" ]]; then
+        case "$override" in
+            true)   if [[ "$thinking" == "false" ]]; then
+                        thinking="true"
+                        RV_NOTICE="thinking override: ON (alias '$alias' has no -thinking suffix)"
+                    fi ;;
+            false)  if [[ "$thinking" == "true" ]]; then
+                        thinking="false"
+                        RV_NOTICE="thinking override: OFF (alias '$alias' is a -thinking variant)"
+                    fi ;;
+            *)      echo "remote-session: ignoring invalid LA_THINKING_OVERRIDE '$override' (use true|false)" >&2 ;;
+        esac
+        # The constraint answers the USER'S choice, not the alias: an alias-derived false on
+        # GLM is the alias's own long-standing meaning (no notice); the toggle asking OFF on
+        # GLM is a choice the model cannot honor, so the banner says what the session gets.
+        if [[ "$override" == "false" && "$prov" == "nvidia" && "$model" == *glm* ]]; then
+            local constraint="GLM on NIM always runs its thinking template — OFF cannot disable it; reasoning_effort low is applied (≈0 reasoning tokens, measured 2026-10-13)"
+            RV_NOTICE="${RV_NOTICE:+$RV_NOTICE — }$constraint"
+        fi
+    fi
+    RV_THINKING="$thinking"
+}
+
 # FALLBACK CHAIN (0.40.0). NVIDIA can throttle ONE model upstream for hours (GLM 5.3 Flash
 # answered 429 in 0.2 s all night on 2026-10-20 while DeepSeek on the same key answered 46/46).
 # The proxy then answers from the next model in the session chain (bin/session-fallbacks.py:
@@ -1261,9 +1304,12 @@ swap_model() { # swap_model <port> <alias> [force]
     [[ "$model" != "SELECT" ]] || {
         echo "remote-session: --swap-model: '$alias' has no fixed model (catalog-only); pick a concrete alias." >&2
         return 2; }
-    # Faithful to the SESSION's own settings: thinking from the alias suffix, effort and
-    # temperature parsed from the config the session actually runs with.
-    thinking="false"; [[ "$alias" == *-thinking ]] && thinking="true"
+    # Faithful to the SESSION's own settings: thinking through the same resolution the
+    # launch used (alias suffix, then LA_THINKING_OVERRIDE, then the constraint table), and
+    # effort/temperature parsed from the config the session actually runs with.
+    _resolve_thinking "$alias" "$prov" "$model"
+    thinking="$RV_THINKING"
+    [[ -n "$RV_NOTICE" ]] && echo "remote-session: --swap-model: $RV_NOTICE" >&2
     effort="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"^\s+reasoning_effort: (\S+)", t, re.M); print(m.group(1) if m else "")' "$cfg")"
     temperature="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"^\s+temperature: (\S+)", t, re.M); print(m.group(1) if m else "")' "$cfg")"
 
@@ -1844,8 +1890,9 @@ fi
 if [[ -n "$REMOTE_MODEL" && "$REMOTE_MODEL" != "$(_field "$ENTRY" 3)" && "$TIER" != trial ]]; then
     TIER=unknown
 fi
-THINKING=false
-[[ "$ALIAS" == *-thinking ]] && THINKING=true
+_resolve_thinking "$ALIAS" "$PROV" "$MODEL"
+THINKING="$RV_THINKING"
+THINKING_NOTICE="$RV_NOTICE"
 
 if [[ "$TIER" == "trial" && $INCLUDE_TRIALS -eq 0 ]]; then
     echo "remote-session: '$ALIAS' is TRIAL tier (not free). Re-run with --include-trials to use it." >&2
@@ -1912,6 +1959,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
         echo "     telemetry      : OFF (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1)"
     fi
     echo "     effort         : ${EFFORT_CHOICE:-<provider default>}"
+    echo "     thinking       : $THINKING${THINKING_NOTICE:+ — $THINKING_NOTICE}"
     [[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]] && echo "     autocompact    : --autocompact $LA_AUTO_COMPACT_WINDOW"
     echo
     exit 0
@@ -2083,7 +2131,7 @@ cat <<BANNER
 ╰──────────────────────────────────────────────────────────────╯
    provider : $PROV      tier: $(_tier_label "$TIER" "$PROV")
    agent    : $ALIAS
-   thinking : $THINKING
+   thinking : $THINKING${THINKING_NOTICE:+ — $THINKING_NOTICE}
    cost     : $COST_NOTE
    privacy  : prompts and file contents LEAVE this machine → $PROV
 $BLIND_TRUST_BANNER

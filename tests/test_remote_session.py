@@ -1585,6 +1585,70 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
 
 
 
+    def _resolve_thinking(self, alias, prov, model, override=None):
+        """Run the launcher's thinking-resolution function offline and return
+        (resolved thinking, notice, stderr)."""
+        env = dict(self.env)
+        env.pop('LA_THINKING_OVERRIDE', None)
+        if override is not None:
+            env['LA_THINKING_OVERRIDE'] = override
+        r = subprocess.run(
+            ['bash', '-c',
+             'source "$1"; _resolve_thinking "$2" "$3" "$4"; printf "%s\\n%s" "$RV_THINKING" "$RV_NOTICE"',
+             'config', str(self.root / 'bin/library.sh'), alias, prov, model],
+            env=env, text=True, capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.split('\n')
+        return lines[0], (lines[1] if len(lines) > 1 else ''), r.stderr
+
+    def test_thinking_resolution_defaults_follow_the_alias_suffix(self):
+        # Fails if a launch without the env changes today's behavior: base alias thinks
+        # off, -thinking alias thinks on, and no notice fires for either.
+        self.assertEqual(self._resolve_thinking('nvidia-glm53', 'nvidia', 'z-ai/glm-5.3-flash')[0], 'false')
+        self.assertEqual(self._resolve_thinking('nvidia-glm53-thinking', 'nvidia', 'z-ai/glm-5.3-flash')[0], 'true')
+        self.assertEqual(self._resolve_thinking('nvidia-glm53', 'nvidia', 'z-ai/glm-5.3-flash')[1], '')
+        self.assertEqual(self._resolve_thinking('nvidia-glm53-thinking', 'nvidia', 'z-ai/glm-5.3-flash')[1], '')
+
+    def test_thinking_override_flips_the_alias_suffix(self):
+        # Fails if the picker's remembered choice cannot turn thinking on for a base alias
+        # or off for a -thinking alias: the toggle would silently do nothing.
+        thinking, notice, _ = self._resolve_thinking('nvidia-glm53', 'nvidia', 'z-ai/glm-5.3-flash', 'true')
+        self.assertEqual(thinking, 'true')
+        self.assertIn('override', notice.lower())
+        thinking, notice, _ = self._resolve_thinking('nvidia-glm53-thinking', 'nvidia', 'z-ai/glm-5.3-flash', 'false')
+        self.assertEqual(thinking, 'false')
+        self.assertIn('override', notice.lower())
+        # A no-op override stays silent: the value already matches. (GLM is excluded — an
+        # OFF *choice* there always surfaces the constraint notice, flip or not.)
+        thinking, notice, _ = self._resolve_thinking('nvidia-deepseek', 'nvidia', 'deepseek-ai/deepseek-v4.1-flash', 'false')
+        self.assertEqual(thinking, 'false')
+        self.assertEqual(notice, '')
+
+    def test_thinking_glm_on_nim_constraint_reported_when_off(self):
+        # Fails if OFF is reported as honored on GLM: chat_template_kwargs are INERT on NIM
+        # GLM (measured 2026-10-13) — the template always runs, and the session must SAY the
+        # truth (reasoning_effort low ≈ 0 reasoning tokens), not claim it was disabled.
+        for alias in ('nvidia-glm53', 'nvidia-glm53-thinking'):
+            thinking, notice, _ = self._resolve_thinking(alias, 'nvidia', 'z-ai/glm-5.3-flash', 'false')
+            self.assertEqual(thinking, 'false')
+            self.assertIn('always', notice.lower())
+        # ON is native on GLM: no constraint notice.
+        _, notice, _ = self._resolve_thinking('nvidia-glm53', 'nvidia', 'z-ai/glm-5.3-flash', 'true')
+        self.assertNotIn('always', notice.lower())
+        # A model without the constraint reports no constraint notice when off.
+        thinking, notice, _ = self._resolve_thinking('nvidia-deepseek', 'nvidia', 'deepseek-ai/deepseek-v4.1-flash', 'false')
+        self.assertEqual(thinking, 'false')
+        self.assertNotIn('always', notice.lower())
+
+    def test_thinking_override_invalid_value_is_ignored_loudly(self):
+        # Fails if a typo'd env value silently wins or silently does nothing: the resolver
+        # must keep the alias-derived value AND warn on stderr.
+        thinking, notice, err = self._resolve_thinking('nvidia-glm53-thinking', 'nvidia', 'z-ai/glm-5.3-flash', 'yes')
+        self.assertEqual(thinking, 'true')
+        self.assertEqual(notice, '')
+        self.assertIn('LA_THINKING_OVERRIDE', err)
+
+
 if __name__ == '__main__':
     if '--help' in sys.argv or '-h' in sys.argv:
         print(__doc__)

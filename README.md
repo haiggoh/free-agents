@@ -317,6 +317,14 @@ logged 8 × `400` and 17 × `500` before recovering.
 
 ### Picker settings that reach the session (0.27.2)
 
+- **Session thinking** (`j` on both lane screens, 0.44.0) travels as `LA_THINKING_OVERRIDE` and is
+  consumed by `remote-session.sh`, `local-session.sh` / config-lib's `la_lookup`, and hotswap's
+  profile mode. The default (never touched) is thinking ON for session launches; a model
+  constraint may override the choice and the banner / info box say so — GLM on NVIDIA always
+  runs its thinking template (OFF there travels as `reasoning_effort low`). Stateless dispatches
+  have no toggle: `dispatch-preferences.json` entries take `"thinking": "on"|"off"|"auto"`,
+  resolved by role (reasoner/validator on, operator/utility off) with model constraints applied
+  last and reported in the result JSON.
 - **Local temperature** (`o` on the Local screen) travels as `LA_TEMPERATURE`, and hotswap passes it
   to Rapid-MLX as `--default-temperature`. It is part of the server-reuse identity: a running server
   started at another temperature is not reused. Before this, the picker sent a trailing
