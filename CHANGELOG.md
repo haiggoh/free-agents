@@ -48,6 +48,43 @@ Tests at every layer: the store round-trip and refusal paths, the picker rows/en
 `la_lookup` (both directions, sandboxed registry), the dispatch policy (role defaults, the
 GLM low dial, the Nemotron override, argv + JSON), each failing before its change.
 
+### Fixed — the contention-flaky gate tests (the `fa-gate-test-flakes` waypoint)
+
+Three tests made the gates a retry lottery whenever the machine carries live sessions (each
+passed solo every time; 0.43.2 needed 3 ship attempts, 0.43.4 needed 3, 0.43.6 needed 2):
+
+- **`test_5_recent_activity_becomes_quiet`** — the fake tmux reports integer-second activity
+  and the injector adds a 1.0 s truncation grace, so quiet needed ≥1.2 s of the test's 1.5 s
+  budget; on a loaded runner the four fake-tmux spawns per loop overran it and the injector
+  exited 3 (a false "session busy"). The activity is static there, so quiet always arrives:
+  the budget is pure false-failure surface, raised to 10 s (test_4 keeps 1.5 s — its timeout
+  IS the behavior under test).
+- **`test_librarian_retries_after_a_429`** (the plan's own documented flake) — the recovery
+  raced a polling thread against the dispatcher's immediate retry (cooldown=0): the retry
+  could take a second 429 before the poller woke, pushing hits to 3. The fake now serves a
+  deterministic per-hit sequence (429 then 200), no thread, and the test's env writes are
+  restored instead of leaking into later tests in the same worker.
+- The third waypoint item (RemoteLiveFilter) was already fixed in 0.43.3 and stands as the
+  pattern both fixes follow: replace a wall-clock race with a deterministic condition.
+
+### Added — the prefill measurement tool (cloud-screen plan Task 10)
+
+`bin/fa-prefill-measure.py` measures a session's true prefill on a FREE lane only: one headless
+`claude -p` through the lane's own launcher (never a bare claude — a nested one inherits the
+ambient base URL and bills the paid gateway, so a remote-looking `ANTHROPIC_BASE_URL` is
+refused before anything launches), usage summed from the result JSON, cached under lane +
+levers + an inputs hash (CLAUDE.md, settings, `.claude.json`, installed plugins) so a stale
+number cannot masquerade as current. Known lever: `mcp=all|none` (→ `LA_REMOTE_ENABLE_MCP`).
+The live measurement receipt lands with the Task 11 level proposal, which stops for user
+approval per the plan.
+
+### Docs — the JoyIA safeguards pass-through request (DRAFT, not sent)
+
+`docs/joyia/2026-10-25-safeguards-passthrough-request.md` — the [decided] follow-up to the
+not-eligible verdict (0.43.5): the gateway should pass `safeguards` / `safeguard_results`
+through unchanged so auto mode's safety checks stop billing as normal token usage. Evidence
+cited from the cached verdict; presented to the user for sending — this session sends nothing.
+
 ## [0.43.6] — 2026-10-25
 
 ### Fixed — the Phase-4 live dogfood's findings

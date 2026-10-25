@@ -125,7 +125,7 @@ save()
     return faketmux_path
 
 
-def setup_test_env(tmp_path, session_id="s1", idle=True, initial_state=None):
+def setup_test_env(tmp_path, session_id="s1", idle=True, initial_state=None, quiet_max_s="1.5"):
     state_dir = tmp_path / "state"
     sessions_dir = state_dir / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -158,7 +158,7 @@ def setup_test_env(tmp_path, session_id="s1", idle=True, initial_state=None):
     env["LA_MEMGUARD_STATE_DIR"] = str(state_dir)
     env["LA_MEMGUARD_TMUX_BIN"] = str(faketmux)
     env["LA_MEMGUARD_QUIET_S"] = "0.2"
-    env["LA_MEMGUARD_QUIET_MAX_S"] = "1.5"
+    env["LA_MEMGUARD_QUIET_MAX_S"] = quiet_max_s
     env["LA_MEMGUARD_RESTORE_WAIT_S"] = "0.5"
     env["FAKE_TMUX_STATE"] = str(fake_state_file)
 
@@ -233,7 +233,17 @@ def test_4_user_typing(tmp_path):
 
 
 def test_5_recent_activity_becomes_quiet(tmp_path):
-    env, state_file = setup_test_env(tmp_path, initial_state={"box": "", "activity": int(time.time())})
+    # CONTENTION NOTE (fa-gate-test-flakes): the fake tmux reports INTEGER-second activity,
+    # and the injector adds a 1.0 s truncation grace, so quiet needs >=1.2 s of waiting whose
+    # exact length depends on where in the second the test starts. The old 1.5 s budget left
+    # ~0.3 s for four fake-tmux subprocess spawns — on a loaded gate runner those spawns
+    # overran it and the injector exited 3 (a false "session busy"), a race that passed solo
+    # every time. The activity here is STATIC (nothing keeps refreshing it), so quiet is
+    # always eventually established: the budget is pure false-failure surface, and the
+    # generous one only bounds a pathological hang. test_4 keeps the tight budget — there
+    # the timeout IS the behavior under test (typing keeps activity fresh forever).
+    env, state_file = setup_test_env(tmp_path, initial_state={"box": "", "activity": int(time.time())},
+                                     quiet_max_s="10")
     res = run_injector(env, "s1", "/compact R")
     assert res.returncode == 0
 

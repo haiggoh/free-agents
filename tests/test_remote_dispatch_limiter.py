@@ -39,8 +39,11 @@ rl = _load("rate_limiter", "rate_limiter.py")
 
 class _Fake:
     def __init__(self, status=200, body=b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n",
-                 headers=None):
+                 headers=None, responses=None):
+        # `responses` (list of (status, body)) makes the fake DETERMINISTIC: hit N gets
+        # responses[N-1], the last entry repeating. Without it every hit gets status/body.
         self.status, self.body, self.headers = status, body, headers or {}
+        self.responses = list(responses) if responses else None
         self.hits = 0
         self.auth = []
         fake = self
@@ -53,12 +56,15 @@ class _Fake:
                 fake.hits += 1
                 fake.auth.append(self.headers.get("Authorization"))
                 self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                self.send_response(fake.status)
+                st, bd = fake.status, fake.body
+                if fake.responses:
+                    st, bd = fake.responses[min(fake.hits - 1, len(fake.responses) - 1)]
+                self.send_response(st)
                 for k, v in fake.headers.items():
                     self.send_header(k, v)
-                self.send_header("Content-Length", str(len(fake.body)))
+                self.send_header("Content-Length", str(len(bd)))
                 self.end_headers()
-                self.wfile.write(fake.body)
+                self.wfile.write(bd)
 
         self.srv = HTTPServer(("127.0.0.1", 0), H)
         self.port = self.srv.server_address[1]
@@ -198,17 +204,20 @@ class TestLibrarianProvider(Base):
 
     def test_librarian_retries_after_a_429(self):
         """First call 429s; the dispatch books the pause and retries instead of failing."""
-        import threading
-        import time as _tm
-        fake = _Fake(status=429, body=b'{"status":429,"title":"Too Many Requests"}')
+        # CONTENTION NOTE (fa-gate-test-flakes): the old version raced a polling thread
+        # (flip to 200 once hits>=1) against the dispatcher's own retry — with cooldown=0
+        # the retry can reach the fake BEFORE the poller wakes up, take a second 429, and
+        # push hits to 3, failing `hits == 2` on a loaded runner while passing solo. The
+        # fake now serves a deterministic per-hit sequence (hit 1 = 429, hit 2 = 200), so
+        # the retry always finds the recovery response; `hits == 2` stays the real check.
+        # The env writes are restored too: they used to leak into later tests in the
+        # same pytest worker (a latent order-dependent flake of its own).
         ok_body = _Fake().body
+        env_keys = ("LA_NVIDIA_429_COOLDOWN", "LA_NVIDIA_MAX_WAIT", "LA_NVIDIA_RPM")
+        old_env = {k: os.environ.get(k) for k in env_keys}
         os.environ.update(LA_NVIDIA_429_COOLDOWN="0", LA_NVIDIA_MAX_WAIT="5", LA_NVIDIA_RPM="40")
-
-        def restore():
-            while fake.hits < 1:
-                _tm.sleep(0.02)
-            fake.status, fake.body = 200, ok_body
-        threading.Thread(target=restore, daemon=True).start()
+        fake = _Fake(responses=[(429, b'{"status":429,"title":"Too Many Requests"}'),
+                                (200, ok_body)])
         try:
             res, out = self._run(fake)
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
@@ -217,6 +226,11 @@ class TestLibrarianProvider(Base):
             self.assertEqual((out / "output.txt").read_text(), "hi")
         finally:
             fake.close()
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
     def test_librarian_refuses_when_window_full(self):
         fake = _Fake()
