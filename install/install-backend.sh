@@ -5,6 +5,7 @@
 #   1. Rapid-MLX (DEFAULT) — versioned venvs via manage-backend.py
 #   2. vllm-mlx (LEGACY) — versioned venvs via manage-backend.py
 #   3. oMLX — via Homebrew (or binary)
+#   4. MoEspresso — via Homebrew (the 3.x line; only it loads MoEspresso-packaged models)
 #   4. llama.cpp — binary releases via manage-backend.py
 #   5. litellm — versioned venv via manage-backend.py (for remote free-API routing)
 #   6. CUDA backends (vllm-cuda, llama-cpp-cuda) — versioned venvs via manage-cuda-backend.py
@@ -31,7 +32,7 @@ Usage: install-backend.sh [OPTIONS]
 
 Options:
   --all                 Install all backends (default: rapid-mlx only)
-  --backend NAME        Install specific backend (rapid-mlx|vllm-mlx|omlx|llama-cpp|litellm|vllm-cuda|llama-cpp-cuda)
+  --backend NAME        Install specific backend (rapid-mlx|vllm-mlx|omlx|moespresso|llama-cpp|litellm|vllm-cuda|llama-cpp-cuda)
   --dry-run             Show what would be installed without doing it
   --python EXE          Python executable to use (default: python3)
   --rapid-version VER   Rapid-MLX version to install (default: latest stable)
@@ -44,7 +45,8 @@ Options:
 Examples:
   install-backend.sh                          # Install Rapid-MLX (default)
   install-backend.sh --all                    # Install all backends (MLX + CUDA if available)
-  install-backend.sh --backend vllm-cuda      # Install CUDA vLLM
+  install-backend.sh --backend moespresso      # Install MoEspresso (3.x, for MoEspresso packages)
+ install-backend.sh --backend vllm-cuda      # Install CUDA vLLM
   install-backend.sh --backend llama-cpp-cuda # Install CUDA llama.cpp
   install-backend.sh --all --dry-run          # Show what would be installed
 HELP
@@ -58,6 +60,7 @@ DRY_RUN=0
 RAPID_VERSION=""
 VLLM_VERSION=""
 OMLX_VERSION=""
+MOESPRESSO_VERSION=""
 LLAMA_VERSION=""
 LITELLM_VERSION=""
 
@@ -92,6 +95,10 @@ while [[ $# -gt 0 ]]; do
             OMLX_VERSION="$2"
             shift 2
             ;;
+        --moespresso-version)
+            MOESPRESSO_VERSION="$2"
+            shift 2
+            ;;
         --llama-version)
             LLAMA_VERSION="$2"
             shift 2
@@ -117,9 +124,9 @@ done
 # Determine which backends to install
 if [[ $INSTALL_ALL -eq 1 ]]; then
     if [[ "$LA_HARDWARE" = "cuda" ]]; then
-        BACKENDS=("rapid-mlx" "vllm-mlx" "omlx" "llama-cpp" "litellm" "vllm-cuda" "llama-cpp-cuda")
+        BACKENDS=("rapid-mlx" "vllm-mlx" "omlx" "moespresso" "llama-cpp" "litellm" "vllm-cuda" "llama-cpp-cuda")
     else
-        BACKENDS=("rapid-mlx" "vllm-mlx" "omlx" "llama-cpp" "litellm")
+        BACKENDS=("rapid-mlx" "vllm-mlx" "omlx" "moespresso" "llama-cpp" "litellm")
     fi
 elif [[ ${#BACKENDS[@]} -eq 0 ]]; then
     BACKENDS=("rapid-mlx")
@@ -160,6 +167,7 @@ install_backend() {
             vllm-mlx) extra_args+=("0.5.0") ;;
             litellm) extra_args+=("1.60.0") ;;
             llama-cpp) extra_args+=("b5000") ;;
+            moespresso) extra_args+=("3.0.0") ;;
             vllm-cuda) extra_args+=("0.7.0") ;;
             llama-cpp-cuda) extra_args+=("b5000") ;;
         esac
@@ -170,7 +178,7 @@ install_backend() {
 
     # Route CUDA backends to manage-cuda-backend.py
     case "$backend" in
-        rapid-mlx|vllm-mlx|litellm|omlx|llama-cpp)
+        rapid-mlx|vllm-mlx|litellm|omlx|moespresso|llama-cpp)
             if [[ $DRY_RUN -eq 1 ]]; then
                 "$PYTHON" "$MANAGE_BACKEND" --dry-run --backend "$backend" install "${extra_args[@]}"
             else
@@ -201,6 +209,7 @@ for backend in "${BACKENDS[@]}"; do
         vllm-mlx) version="$VLLM_VERSION" ;;
         omlx) version="$OMLX_VERSION" ;;
         llama-cpp) version="$LLAMA_VERSION" ;;
+        moespresso) version="$MOESPRESSO_VERSION" ;;
         litellm) version="$LITELLM_VERSION" ;;
     esac
     install_backend "$backend" "$version"
@@ -212,11 +221,9 @@ echo "  1. cp config/config.example.sh config/config.local.sh  &&  edit for your
 echo "  2. ./install/download-models.sh        # fetch the models you registered"
 echo "  3. ./bin/launch-claude-agent.sh <alias>  (or ./bin/csl)"
 
-# Show update check command
+# Show update check command — derived from the MANAGER REGISTRY, not a second hand-written list.
+# When this list was hardcoded it went stale silently: adding a backend manager updated the
+# installer but not this hint, so a user was told to check five of the six backends they had.
 echo ""
 echo "To check for updates later:"
-echo "  $PYTHON $MANAGE_BACKEND --backend rapid-mlx check-updates"
-echo "  $PYTHON $MANAGE_BACKEND --backend vllm-mlx check-updates"
-echo "  $PYTHON $MANAGE_BACKEND --backend omlx check-updates"
-echo "  $PYTHON $MANAGE_BACKEND --backend llama-cpp check-updates"
-echo "  $PYTHON $MANAGE_BACKEND --backend litellm check-updates"
+"$PYTHON" "$MANAGE_BACKEND" list 2>/dev/null | awk 'NR>1 && NF {print "  '"$PYTHON"' '"$MANAGE_BACKEND"' --backend " $1 " check-updates"}'

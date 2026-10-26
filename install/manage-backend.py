@@ -33,6 +33,10 @@ try:
 except ImportError:
     pass
 try:
+    import managers.moespresso  # noqa: F401
+except ImportError:
+    pass
+try:
     import managers.litellm  # noqa: F401
 except ImportError:
     pass

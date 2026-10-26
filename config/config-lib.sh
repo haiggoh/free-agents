@@ -94,7 +94,7 @@ LA_CANONICAL_ROLES="operator reasoner validator utility"
 # omlx is a legal PIN (oMLX, Homebrew tap jundot/omlx) for architectures only oMLX's bundled
 # mlx_lm/mlx_vlm can build — measured 2026-10-15: rapid-mlx 0.16.1 rejects `laguna` and lacks
 # `deepseek_v4`. bin/la-detect-backend.py chooses it per model; it is never the machine default.
-LA_SERVE_BACKENDS="rapid vllm mlx_lm omlx llama_cpp litellm api"
+LA_SERVE_BACKENDS="rapid vllm mlx_lm omlx moespresso llama_cpp litellm api"
 LA_SERVE_GENERIC="mlx auto"
 # Which backends a GENERIC value may resolve to. Narrower than LA_SERVE_BACKENDS on purpose:
 # llama_cpp, litellm and api are legal PINS but must never be the MLX default, or flipping one line would reroute
@@ -265,6 +265,46 @@ la_discover_rapid_bin() {
   while IFS= read -r c; do
     [ -x "$c" ] && { echo "$c"; return 0; }
   done < <(find "$HOME"/.venvs -maxdepth 2 -name "rapid-mlx-*" -type d 2>/dev/null | sed 's|$|/bin/rapid-mlx|' | sort -V -r)
+  echo ""
+  return 1
+}
+
+# --- MoEspresso: pinned to the 3.x line, resolved by KEG PATH never by PATH name --------------
+# ★ The order below is load-bearing, and the reason is measured (2026-10-25). Homebrew links the
+# UNVERSIONED `moespresso` (currently 4.0.0) at /opt/homebrew/bin/moespresso, and it STAYS there
+# after `brew install moespresso@3` — brew says so out loud: "the following moespresso@3
+# executables are shadowed by linked moespresso commands". 4.0.0 is a Qwen engine that REFUSES a
+# MoEspresso-packaged DeepSeek V4 model with `Error: unsupported required package feature`
+# (the package manifest requires `calibration` + `deepseek_v4_per_layer_experts`). So a discovery
+# that accepts the PATH name reports a healthy install which fails at load time — silent-wrong,
+# and the worst kind: every command succeeds until 53 GB have been read.
+la_moespresso_reports_3x() {
+  local v
+  v="$("$1" --version 2>&1 | head -1 | awk '{for (i=1; i<=NF; i++) if ($i ~ /^v?[0-9]+\./) {print $i; exit}}')"
+  case "$v" in
+    3.*|v3.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+la_discover_moespresso_bin() {
+  local root c
+  # 1. An operator pin (LA_MOESPRESSO_BIN) always wins.
+  if [ -n "${LA_MOESPRESSO_BIN:-}" ] && [ -x "$LA_MOESPRESSO_BIN" ]; then
+    echo "$LA_MOESPRESSO_BIN"; return 0
+  fi
+  # 2. The @3 kegs, newest first. Same `sort -V` rule as rapid above: version, not mtime.
+  root="${LA_MOESPRESSO_CELLAR_ROOT:-/opt/homebrew/Cellar/moespresso@3}"
+  while IFS= read -r c; do
+    [ -x "$c" ] && { echo "$c"; return 0; }
+  done < <(find "$root" -maxdepth 3 -path '*/bin/moespresso' 2>/dev/null | sort -V -r)
+  # 3. Homebrew's versioned symlink, then the unversioned PATH entry — accepted ONLY when the
+  #    binary itself reports a 3.x version. This is where a 4.x machine correctly yields nothing.
+  for c in /opt/homebrew/bin/moespresso@3 /usr/local/bin/moespresso@3 \
+           "${LA_MOESPRESSO_PATH_BIN:-}" /opt/homebrew/bin/moespresso /usr/local/bin/moespresso; do
+    [ -n "$c" ] && [ -x "$c" ] || continue
+    la_moespresso_reports_3x "$c" && { echo "$c"; return 0; }
+  done
   echo ""
   return 1
 }
@@ -627,6 +667,11 @@ la_load_config() {
     if [ -x /opt/homebrew/bin/omlx ]; then LA_OMLX_BIN=/opt/homebrew/bin/omlx
     else LA_OMLX_BIN="$(command -v omlx 2>/dev/null || true)"; fi
   fi
+  # MoEspresso (the 3.x line) — resolves by keg path, see la_discover_moespresso_bin above.
+  if [ -z "${LA_MOESPRESSO_BIN:-}" ]; then
+    LA_MOESPRESSO_BIN="$(la_discover_moespresso_bin)"
+  fi
+  export LA_MOESPRESSO_BIN="${LA_MOESPRESSO_BIN:-}"
   # oMLX session server knobs (serve=omlx). The paged SSD cache persists prefixes across restarts;
   # it is PER ALIAS under ~/.cache so a session model never shares the Auto Mode classifier's cache.
   : "${LA_OMLX_SESSION_CACHE_MAX_SIZE:=40GB}"

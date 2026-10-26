@@ -117,6 +117,24 @@
 
 ---
 
+### Task 6: Upgrades past the 3.x line are prohibited (added 2026-10-26, user requirement)
+
+**Files:**
+- Modify: `install/managers/moespresso.py`
+- Test: `tests/test_moespresso_manager.py` (extend)
+
+**Interfaces:**
+- Consumes: `MoespressoManager.check_updates()`, `get_available_versions()`, `install_version()` from Task 1; `REQUIRED_MAJOR` from the same file.
+- Produces: the same three methods, now bounded by a hard major-version ceiling.
+
+- [ ] **Step 1: Write the failing tests** — `check_updates()` returns `[]` when the tap's stable version is 4.x (with the reason recorded for the caller to show); `get_available_versions()` never returns a non-3.x version; `install_version("4.0.0")` raises `ManagerError` naming the ceiling and the consequence instead of running brew. Use a stubbed `brew info` and a stubbed `_scan_moespresso`.
+- [ ] **Step 2: Run, verify they fail.**
+- [ ] **Step 3: Implement** — a `MAX_MAJOR = 3` ceiling checked in all three methods, so no path (`manage-backend.py upgrade`, `backend_upgrades.py`'s weekly check, a direct `install_version`) can move a working install to a version that cannot load the model.
+- [ ] **Step 4: Verify by RUNNING** — `python3 install/manage-backend.py --backend moespresso check-updates` reports nothing to do on a machine at the ceiling; the manager tests green; `tests/test_backend_upgrades.py` still green.
+- [ ] **Step 5: Commit** — `fix(install): MoEspresso cannot be upgraded past the 3.x line`.
+
+---
+
 ## Self-review against the spec
 
 **Coverage:** provisioning (Task 1), registration/discovery (Task 2), detection (Task 3), launch (Task 4), surfaces/docs/version (Task 5). The user's two stated requirements — "everyone who installs free-agents installs all the backends" and "full backend-manager support" — map to Tasks 1–2; "make the model work" maps to Tasks 3–4.

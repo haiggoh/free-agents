@@ -1,3 +1,48 @@
+## [0.45.0] — 2026-10-26
+
+### Added — MoEspresso as a first-class backend, provisioned with every install
+
+MoEspresso serves *MoEspresso-packaged* models: artifacts whose weights are a custom `mxtq`
+TurboQuant serialization (`weight_format: "mxtq"`, `*.tq_bundle` keys) that no MLX engine can
+read. The 0.44.2 gate proved that the hard way — it refused such an artifact with "no installed
+backend can load it", which was true then and is now incomplete. This release closes the gap.
+
+**Provisioned, not just detectable.** `install-backend.sh` already provisioned every backend the
+launcher can drive, so MoEspresso joins that family: `install/managers/moespresso.py`, registered
+in `manage-backend.py`, added to `--all`, `--backend moespresso`, the version table and the usage
+text. The "check for updates later" hint was a sixth hand-written copy of the roster that had
+already gone stale for every future backend, so it now derives from `manage-backend.py list`.
+
+**It is pinned to the 3.x line, and the ceiling is enforced in one place.** Measured: 4.0.0 refuses
+a DeepSeek V4 package with `Error: unsupported required package feature` (the manifest requires
+`calibration` + `deepseek_v4_per_layer_experts`; 4.0.0 self-describes as "native Qwen
+inference"), and it stays linked at `/opt/homebrew/bin/moespresso` even after
+`brew install moespresso@3` — Homebrew reports the executable as shadowed. So:
+
+- install and validate use the `@3` formula only; `brew install moespresso` is never invoked;
+- binary resolution is by **keg path**, newest first by `sort -V`, with the unversioned PATH entry
+  accepted only when the binary itself reports 3.x;
+- `get_available_versions`, `check_updates` and `install_version` are bounded by that ceiling, so
+  the weekly check cannot propose an upgrade that would break the only model the runtime serves. A
+  past-ceiling install raises rather than clamping — a silent clamp reports success for something
+  the caller never asked for. A machine behind on 3.x patches still gets them.
+
+**Three launch facts were measured against the real server, not assumed:**
+
+1. **The spoof id is irrelevant** — `/v1/chat/completions` accepts and echoes any model name, so
+   the oMLX per-port symlink farm is not built and the package dir is served directly.
+2. **`GET /v1/models` does not exist** (`{"error": ...}`). Readiness therefore polls a *completion*
+   rather than the model list — the shared `wait_ready` never returns for this backend — and the
+   healthy-reuse check keys on the meta file, because the advertised-id match can never succeed.
+   Without that, every launch would start a fresh 57 GB server.
+3. `LA_MOESPRESSO_BIN` set-but-empty means "this machine has no MoEspresso" in bash exactly as in
+   the detector; a disagreement there gives a gate and a launcher opposite answers about one model.
+
+`la-detect-backend.py` now resolves a foreign-format artifact to `moespresso` when a capable binary
+is present (asking the binary its version, never assuming it from the path), and `csl` labels it
+`moespresso (auto)` rather than a backend that cannot load it. `--gate` steps aside for exactly
+those artifacts, so 0.44.2's refusal no longer blocks the models this release enables.
+
 ## [0.44.2] — 2026-10-25
 
 ### Fixed — an unlaunchable model was offered, then failed with a 409 that named no cause
