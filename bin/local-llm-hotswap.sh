@@ -281,9 +281,9 @@ if [ "${LA_GATE_WEIGHT_FORMAT:-1}" != "0" ]; then
   case "$SERVE" in
     rapid|vllm|mlx_lm|omlx)
       if ! _fmt_gate="$(python3 "$HOTSWAP_DIR/la-detect-backend.py" --gate "$MODEL_DIR" 2>/dev/null)"; then
-        echo "🛑 Not launching $MODEL_NAME — its weights are not readable by any installed backend." >&2
+        echo "🛑 Not launching $MODEL_NAME on $SERVE — its weights are not readable by an MLX engine." >&2
         [ -n "$_fmt_gate" ] && echo "   $_fmt_gate" >&2
-        echo "   Install the runtime that artifact needs, or re-point the alias at an MLX build." >&2
+        echo "   Set the alias's serve to the runtime named above, install it, or re-point the alias at an MLX build." >&2
         echo "   Override once you know your engine reads it:  LA_GATE_WEIGHT_FORMAT=0" >&2
         exit 1
       fi ;;

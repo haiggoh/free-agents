@@ -369,8 +369,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--json", action="store_true", help="print a JSON list instead of TSV")
     ap.add_argument("--gate", action="store_true",
                     help="print ONLY artifacts no MLX backend can load (one reason per folder, "
-                         "exit 3); silent and exit 0 when every folder is launchable. Skips the "
-                         "engine probes entirely — launchers call this before starting a server")
+                         "exit 3), naming MoEspresso as the fix when it can serve them; silent and "
+                         "exit 0 when every folder is MLX-launchable. Skips the engine probes "
+                         "entirely — launchers call this before starting an MLX server")
     ap.add_argument("folders", nargs="*", help="model folders (absolute, or relative to cwd)")
     args = ap.parse_args(argv)
     if not args.folders:
@@ -386,20 +387,26 @@ def main(argv: list[str]) -> int:
     if args.gate:
         # The launch guard: name what cannot be loaded and exit non-zero, so a caller refuses
         # BEFORE it starts a server that would burn a full weight load to fail late and cryptic.
-        # Engine probes are deliberately skipped — the format verdict does not need them. An
-        # artifact a CAPABLE MoEspresso can serve is not blocked: it is launched by that backend.
+        # Engine probes are deliberately skipped — the format verdict does not need them. Every
+        # caller asks on behalf of an MLX engine (serve in rapid|vllm|mlx_lm|omlx), so a foreign
+        # bundle is ALWAYS blocked here, MoEspresso installed or not: 0.45.0 let it through on
+        # the assumption it would be "launched by that backend", the alias was pinned omlx, and
+        # the original causeless 409 came back (2026-10-26). An installed MoEspresso changes the
+        # remedy, not the verdict — the message then names the one-word fix.
         blocked = 0
         moespresso = _capable_moespresso() if any(_foreign_weight_format(Path(f)) for f in args.folders) else None
         for f in args.folders:
             foreign = _foreign_weight_format(Path(f))
             if not foreign:
                 continue
-            if moespresso is not None:
-                continue
             blocked += 1
-            runtime = _catalog_runtime(Path(f))
-            suffix = f" (catalog says: {runtime})" if runtime else ""
-            print(f"{Path(f).name}: weights are not MLX-readable — {foreign}{suffix}")
+            if moespresso is not None:
+                fix = (f"; MoEspresso {moespresso[0]} serves this format: set the alias to "
+                       f"serve moespresso (or auto)")
+            else:
+                runtime = _catalog_runtime(Path(f))
+                fix = f" (catalog says: {runtime})" if runtime else ""
+            print(f"{Path(f).name}: weights are not MLX-readable — {foreign}{fix}")
         return 3 if blocked else 0
     if args.json:
         print(json.dumps(results, indent=2))

@@ -191,15 +191,21 @@ class DetectBackend(unittest.TestCase):
         v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": str(stub)})["qwen-with-moe"]
         self.assertEqual(v["backend"], "mlx")
 
-    def test_gate_lets_an_moespresso_servable_artifact_through(self):
-        """The launch guard must NOT refuse what MoEspresso can serve, once it is installed."""
+    def test_gate_refuses_for_an_mlx_serve_even_when_moespresso_could_serve_it(self):
+        """--gate is asked by callers about to run an MLX engine (hotswap, config-lib: serve in
+        rapid|vllm|mlx_lm|omlx). MoEspresso being installed does not make THAT engine able to
+        read the bundle. Measured 2026-10-26: 0.45.0 let the artifact through here, the alias
+        was pinned `omlx`, and the user got the original causeless 409 back. The refusal names
+        the backend that can serve it, so the fix is one config word."""
         d = self.folder("dsv4-gate", "deepseek_v4")
         (d / "config.json").write_text(json.dumps(
             {"model_type": "deepseek_v4", "weight_format": "mxtq"}))
         stub = _exe(self.t / "moe-bin3", "#!/bin/sh\necho 'moespresso 3.0.0'\n")
         r = self.run_tool("--gate", str(d), env_extra={"LA_MOESPRESSO_BIN": str(stub)})
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(r.stdout.strip(), "")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("mxtq", r.stdout)
+        self.assertIn("MoEspresso 3.0.0", r.stdout)
+        self.assertIn("serve moespresso", r.stdout)
         # ...and still refuses it with no MoEspresso present (explicit empty pin = "none",
         # so the assertion cannot silently change when this machine gains a runtime).
         r2 = self.run_tool("--gate", str(d), env_extra={"LA_MOESPRESSO_BIN": ""})

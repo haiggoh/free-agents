@@ -136,7 +136,7 @@ else
   ok "no SUCCESS_PORT is printed for an unloadable artifact"
 fi
 if printf '%s' "$out" | grep -q 'Not launching ds-coder' \
-   && printf '%s' "$out" | grep -q 'not readable by any installed backend'; then
+   && printf '%s' "$out" | grep -q 'not readable by an MLX engine'; then
   ok "the refusal explains that the WEIGHTS are the problem (not a vague 409)"
 else
   bad "the refusal does not name the real problem: $out"
