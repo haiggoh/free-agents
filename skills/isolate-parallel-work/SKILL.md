@@ -52,3 +52,15 @@ If launching a parallel local session:
 1. **Use a disjoint file set:** Ensure the two agents do not touch the same files.
 2. **Use separate ports:** If possible, run each session on its own server instance to avoid contention.
 
+## One goal-holder per worktree
+Any agent fed "follow the handoff, continue autonomously" believes it is THE executor — it will
+commit, ship, and write progress to the shared docs. Starting a second one over the same tree
+does not parallelise the work; it creates two executors fighting over one branch, one handoff
+doc and one set of worktrees (measured 2026-10-25: two sessions both resumed the same dead
+session's batches).
+
+- **One goal-holder per tree.** A second agent observes, reviews or waits — it does not execute.
+- **Never run full suites or mutation batteries** against a tree another agent is writing.
+- If the holder is dead, resume IT (read its handoff, adopt its state) rather than starting a
+  fresh executor over the same scope.
+

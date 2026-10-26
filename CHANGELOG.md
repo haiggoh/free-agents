@@ -1,3 +1,35 @@
+## [0.46.0] — 2026-10-26
+
+### Added — C0: a launch carries its first prompt; the launch-refusal guard; handover verify
+
+- **`remote-session.sh --prompt-file <path>` / `--prompt <text>`**: the launch's first prompt,
+  passed to claude as its positional initial prompt (the file's CONTENT is read and passed —
+  the path never reaches claude). A launch without its first prompt yields an idle session
+  (measured twice on 2026-10-25 — the Step 5 launch, then the GLM launch that motivated
+  handoff item C0). Validation happens at parse time, BEFORE any catalog or proxy work: a
+  missing, empty or whitespace-only file is refused with its path named (C0c), as are the
+  mutually-exclusive pair and prompt flags on a non-launch mode. `--dry-run` names the prompt
+  SOURCE (file path or char count), never the content.
+- **`guard-own-endpoint.py` blocks an agent-side launch without a prompt** (C0a): the alias
+  position is what is detected, so every route matches (direct, `sudo-in-terminal.sh
+  --command`, osascript, `open -a Terminal`); `--list/--help/--dry-run/--verify/--models/
+  --inventory/--stop/--swap-model` stay allowed. The user's own picker/shell launches never
+  pass through the hook. Proven by mutation: removing the check flips the four should-block
+  cases back to allowed.
+- **`bin/handover-verify.sh`** (C0b): a launch's verify proves the first prompt ARRIVED — a
+  transcript for the new session's sessionId (read from `~/.claude/sessions/<pid>.json`,
+  found by globbing the projects root, never by guessing the project dir) containing the
+  handoff path — instead of the old `lsof -sTCP:LISTEN`, which was true for an idle session
+  and reported success on the failure.
+- **Skill bodies**: `free-session-handover` (launch with `--prompt-file`; verify via
+  `handover-verify.sh`; never type a handover into an existing session's terminal; log
+  progress at every receipt, not per batch), `isolate-parallel-work` (one goal-holder per
+  worktree), `guard-shared-runtime` (make-before-break).
+- Tests: `tests/test_c0_prompt_launch.sh` (26 checks — validation, help, dry-run surface,
+  a stub-claude argv proof through the REAL launch choreography via the documented
+  LA_LITELLM_CMD stub seam, and the handover-verify cases) and 14 new guard self-test
+  cases; the launch check proven by mutation.
+
 ## [0.45.5] — 2026-10-26
 
 ### Fixed — an occupied port is named; dry runs stop writing; one installer, not two

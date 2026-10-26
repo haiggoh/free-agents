@@ -40,18 +40,29 @@ read. The handoff doc holds:
 4. **Standing rules**: numbered, blunt, written for a reader with zero context (template below).
 5. **Next action**: one concrete step ("Phase 1 of `docs/plans/<plan>.md`", never "continue").
 
-The ending session amends the doc with its own progress and commits it before it stops. First
+The ending session amends the doc with its own progress and commits it before it stops. Log
+progress at every RECEIPT or gate, not per batch: append one progress line at each receipt and
+commit it with the next commit — a kill mid-batch then loses at most one receipt's worth of state
+(measured 2026-10-25: an executor died mid-review after 7 hours and an empty progress log forced
+the successor to reconstruct everything from a 708-record transcript). First
 prompt for the successor: *"Read `<handoff>` first and follow it exactly: adopt its standing rules
 for the whole session, then continue autonomously from its Next action."*
 
 ## Handover order (getting this wrong killed a live session)
 
 1. Ending session: stop at a task seam, commit by path, amend the handoff, secret-scan.
-2. **Launch the successor FIRST.** The launcher takes its own free port in 4141–4151; nothing
-   needs stopping beforehand.
-3. Confirm it is up: a new LISTEN in the band whose process start time matches the launch
-   (`lsof -nP -iTCP:4141-4151 -sTCP:LISTEN`, then `ps -o pid,lstart <pid>`). Never print process
-   argv, which can contain keys.
+2. **Launch the successor FIRST — WITH its first prompt.** The launcher takes its own free port in
+   4141–4151; nothing needs stopping beforehand. A launch without its first prompt yields an IDLE
+   session (measured twice, 2026-10-25): pass the handoff as the launch's initial prompt —
+   `remote-session.sh <alias> --prompt-file <handoff.md>` (v0.46.0; the file must exist and be
+   non-empty). If the flag is unavailable, make "paste this first prompt" the single top-line
+   action to the user — never type into a terminal.
+3. Confirm it STARTED WORK, not that its port listens: `bin/handover-verify.sh --expect '<handoff
+   path>' --pid <pid> --timeout 120` — VERIFIED only when the new session's transcript contains
+   the handoff path (the sessionId is read from `~/.claude/sessions/<pid>.json`; the transcript is
+   found by globbing, never by guessing the project dir). A listening port proves nothing: the
+   measured failure was exactly a LISTEN over an idle session. Never print process argv, which
+   can contain keys.
 4. **Then** stop the old session, by its own pid or port only. Never `remote-session.sh --stop`,
    never a blanket stop: other proxies in the band serve sessions you cannot see.
 
@@ -71,6 +82,11 @@ and no handle back. Sessions started with "follow the handoff" believe they are 
 two of them fight over one worktree. **A free session never starts another remote session.** The
 one exception is a user-ordered handover: a single successor, linear (A→B, never A→B and C),
 launched before its predecessor stops.
+
+The handover reaches the successor as its INITIAL PROMPT (`--prompt-file`), never typed into an
+existing session's terminal: typing it mid-session stacks a new executor's goal loop onto a live
+one, and the typed text lands in whatever context the session happens to hold (measured
+2026-10-25).
 
 ## Standing rules template (paste into the handoff)
 

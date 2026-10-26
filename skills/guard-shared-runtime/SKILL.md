@@ -19,6 +19,14 @@ Before installing or upgrading any dependency in the shared virtual environment:
 2. **Verify stability:** Ensure no critical packages are downgraded or removed.
 3. **Defer if risky:** If the dry-run shows significant churn, defer the upgrade to a supervised moment or use an isolated environment for that specific task.
 
+## Make-before-break
+Replacing anything live — a session, a proxy, a service, a LaunchAgent, a symlink a tool resolves
+through — follows one order: bring the replacement UP and VERIFY it before stopping the original.
+A config change never justifies restarting the thing you are running on (measured 2026-09-14/15:
+three sessions `pkill`-ed their own proxy mid-turn and died reading the failure as a network
+fault); a second port is cheaper than a dead session. Start the new one, prove it serves, switch,
+and only then retire the old — by its own pid or port, never a blanket stop.
+
 ## Verify fork patches survived reinstall
 If you maintain local fork patches (e.g., for vllm-mlx or Claude Code hooks):
 1. **Check integrity:** After any reinstall or update, verify that your patches are still applied.

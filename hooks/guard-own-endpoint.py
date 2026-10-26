@@ -82,6 +82,14 @@ SERVICE_STOP_RE = re.compile(
 )
 # Our own supported stopper, which takes the proxy down deliberately.
 REMOTE_STOP_RE = re.compile(r"remote-session(?:\.sh)?\b[^;|&]*--stop", re.IGNORECASE)
+# C0 (v0.46.0): an agent-side LAUNCH of a remote session. The alias position is what is
+# detected, so every launch route matches (direct, sudo-in-terminal.sh --command,
+# osascript, open -a Terminal). The user's own picker/shell launches never pass through
+# this hook, so they are unaffected with no env plumbing.
+LAUNCH_RE = re.compile(r"\bremote-session(?:\.sh)?\s+(\S+)", re.IGNORECASE)
+# Subcommands that do NOT start a session: they list, verify, dry-run, or stop.
+LAUNCH_PASS_SUBCOMMANDS = ("--list", "--help", "-h", "--dry-run", "--verify",
+                           "--models", "--inventory", "--stop", "--swap-model")
 
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1")
 
@@ -133,6 +141,38 @@ def offending_port(command, ports):
     return None
 
 
+def launch_without_prompt(command):
+    """True for an agent Bash command that would start a remote session without carrying
+    its first prompt. The alias position is what is detected, so any launch route matches
+    (direct, wrapped in sudo-in-terminal.sh --command, osascript, open -a Terminal). The
+    documented non-launching subcommands pass, as does any --prompt/--prompt-file."""
+    for m in LAUNCH_RE.finditer(command):
+        first = m.group(1)
+        if first.startswith("-"):
+            for sub in LAUNCH_PASS_SUBCOMMANDS:
+                if first.lower().startswith(sub):
+                    break
+            else:
+                continue  # an unknown flag-first invocation: narrow guard, let it pass
+        elif not re.search(r"--prompt(?:-file)?\b", command):
+            return True  # an alias position and no prompt flag anywhere: an idle launch
+    return False
+
+
+LAUNCH_BLOCK_MESSAGE = (
+    "BLOCKED: this launch starts a remote session WITHOUT its first prompt.\n\n"
+    "A launch with no initial prompt yields an IDLE session: the launch's verify\n"
+    "reported success while nothing was working (measured twice on 2026-10-25 —\n"
+    "the Step 5 launch, then the GLM launch that motivated handoff item C0).\n\n"
+    "Instead:\n"
+    "  - pass the handoff:  remote-session.sh <alias> --prompt-file <handoff.md>\n"
+    "    (the file must exist and be non-empty; an empty one is refused too);\n"
+    "  - or:  remote-session.sh <alias> --prompt 'first instruction';\n"
+    "  - --list/--help/--dry-run/--verify/--models/--inventory/--stop/--swap-model\n"
+    "    stay allowed: none of them starts a session.\n"
+)
+
+
 def decide(payload):
     """Return (allow: bool, reason: str)."""
     if os.environ.get("LA_GUARD_DISABLE") == "1":
@@ -142,24 +182,26 @@ def decide(payload):
     command = (payload.get("tool_input") or {}).get("command", "")
     ports = protected_ports()
     port = offending_port(command, ports)
-    if not port:
-        return True, ""
-    return False, (
-        f"BLOCKED: this command would kill the endpoint serving THIS session.\n\n"
-        f"ANTHROPIC_BASE_URL points at port {port}, so stopping that process ends "
-        f"the current turn with a misleading "
-        f'"API Error: Connection refused - a firewall or proxy may be blocking it". '
-        f"It looks like a network fault but is self-inflicted. This happened three "
-        f"times on 2026-09-14/15 and cost four sessions.\n\n"
-        f"Instead:\n"
-        f"  - to apply a new config, start a SECOND proxy on a free port and switch "
-        f"to it, rather than restarting this one;\n"
-        f"  - to restart this endpoint, do it from a different session or an "
-        f"independent terminal window;\n"
-        f"  - if freeing port {port} really is required, stop and ask the user.\n\n"
-        f"Override for this one command by prefixing LA_GUARD_DISABLE=1 only if you "
-        f"are certain the port is NOT your own endpoint."
-    )
+    if port:
+        return False, (
+            f"BLOCKED: this command would kill the endpoint serving THIS session.\n\n"
+            f"ANTHROPIC_BASE_URL points at port {port}, so stopping that process ends "
+            f"the current turn with a misleading "
+            f'"API Error: Connection refused - a firewall or proxy may be blocking it". '
+            f"It looks like a network fault but is self-inflicted. This happened three "
+            f"times on 2026-09-14/15 and cost four sessions.\n\n"
+            f"Instead:\n"
+            f"  - to apply a new config, start a SECOND proxy on a free port and switch "
+            f"to it, rather than restarting this one;\n"
+            f"  - to restart this endpoint, do it from a different session or an "
+            f"independent terminal window;\n"
+            f"  - if freeing port {port} really is required, stop and ask the user.\n\n"
+            f"Override for this one command by prefixing LA_GUARD_DISABLE=1 only if you "
+            f"are certain the port is NOT your own endpoint."
+        )
+    if launch_without_prompt(command):
+        return False, LAUNCH_BLOCK_MESSAGE
+    return True, ""
 
 
 SELF_TESTS = [
@@ -176,6 +218,27 @@ SELF_TESTS = [
     ("", 'pkill -f "litellm.*4141"', True),  # unknown endpoint: fail open
     ("http://localhost:4141", "lsof -nP -iTCP:4141 -sTCP:LISTEN", True),  # inspection only
     ("http://localhost:4141", "grep -n 4141 notes.txt", True),
+    # C0 (v0.46.0): an agent-side launch WITHOUT its first prompt starts an idle session
+    # (measured twice on 2026-10-25 — the Step 5 launch, then this GLM launch). The user's
+    # own picker/shell launches never pass through this hook, so they are unaffected.
+    ("http://localhost:4141", "remote-session.sh nvidia-glm53-full-thinking", False),
+    ("http://localhost:4141",
+     'sudo-in-terminal.sh --command "remote-session.sh glm-thinking --effort high"', False),
+    ("http://localhost:4141", "open -a Terminal remote-session.sh glm-thinking", False),
+    ("http://localhost:4141",
+     "osascript -e 'do script \"remote-session.sh glm-thinking\"'", False),
+    ("http://localhost:4141",
+     "remote-session.sh glm-thinking --prompt-file ~/.claude/plans/handoff.md", True),
+    ("http://localhost:4141",
+     "remote-session.sh glm-thinking --prompt 'read the handoff first'", True),
+    ("http://localhost:4141", "remote-session.sh --list", True),
+    ("http://localhost:4141", "remote-session.sh --help", True),
+    ("http://localhost:4141", "remote-session.sh --dry-run glm-thinking", True),
+    ("http://localhost:4141", "remote-session.sh --verify glm-thinking", True),
+    ("http://localhost:4141", "remote-session.sh --models glm-thinking", True),
+    ("http://localhost:4141", "remote-session.sh --inventory", True),
+    ("http://localhost:4141", "remote-session.sh --stop 4145", True),  # not this session's port
+    ("http://localhost:4141", "remote-session.sh --swap-model 4145 other-alias", True),
 ]
 
 

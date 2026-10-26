@@ -24,6 +24,9 @@
 #   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
 #   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
 #   remote-session.sh <alias> --effort LEVEL  # request low|medium|high|xhigh|max (omit = provider default)
+#   remote-session.sh <alias> --prompt-file <path>  # the launch's first prompt, from a file
+#   remote-session.sh <alias> --prompt <text>       # the launch's first prompt, inline
+#                             # (C0: a launch without its first prompt yields an idle session)
 #   remote-session.sh --inventory          # machine-readable roster for the picker (TSV)
 #
 # Environment:
@@ -198,6 +201,8 @@ usage() {
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
     echo "  --temperature VALUE   Set temperature (0.0-2.0, controls randomness/creativity)"
+    echo "  --prompt-file PATH    The launch's first prompt, from a file (C0: a launch without its first prompt yields an idle session)"
+    echo "  --prompt TEXT         The launch's first prompt, inline (mutually exclusive with --prompt-file)"
     echo "  --show-broken         Show unworking models (config/broken-nvidia-models.json) in picker (default: hidden; menu key u)"
     echo "  --show-old            Show catalog models over the age cutoff in picker (default: hidden; LA_REMOTE_MAX_MODEL_AGE_MONTHS, default 18 months; filter menu key o)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
@@ -1394,6 +1399,9 @@ SELECTED_EFFORT=""
 EFFORT_CHOICE=""
 PERMISSION_MODE="auto"   # resolved from AUTO_MODE_STATE below
 STOP_ARGS=()
+# C0: the launch's first prompt. Deliberately NOT initialised — the ${VAR+set} sentinel
+# in the validation below distinguishes "flag seen" from "flag empty", which a
+# pre-initialised empty string would erase.
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)        usage; exit 0 ;;
@@ -1451,6 +1459,10 @@ while [[ $# -gt 0 ]]; do
         --show-broken)    SHOW_BROKEN_MODELS=1; shift ;;
         --show-old)       SHOW_OLD_MODELS=1; shift ;;
         --enable-mcp)     export LA_REMOTE_ENABLE_MCP=1; shift ;;
+        --prompt-file)    [[ $# -ge 2 ]] || { echo 'remote-session: --prompt-file needs a path' >&2; exit 2; }
+                          PROMPT_FILE="$2"; shift 2 ;;
+        --prompt)         [[ $# -ge 2 ]] || { echo 'remote-session: --prompt needs text' >&2; exit 2; }
+                          PROMPT_TEXT="$2"; shift 2 ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
         -*)               if [[ -z "$ALIAS" ]]; then
                               echo "remote-session: unknown option: $1; use --help or put Claude options after an alias / --." >&2
@@ -1460,6 +1472,35 @@ while [[ $# -gt 0 ]]; do
         *)                if [[ -z "$ALIAS" && ${#PASSTHRU[@]} -eq 0 ]]; then ALIAS="$1"; else PASSTHRU+=("$1"); fi; shift ;;
     esac
 done
+
+# C0 (v0.46.0): a launch can carry its first prompt. Validation happens HERE — before any
+# catalog read or proxy work — because a prompt-less launch yields an idle session
+# (measured twice on 2026-10-25), and a bad prompt file must never cost a proxy start.
+# An empty or whitespace-only file is refused exactly like a missing one (C0c): falling
+# back to a prompt-less interactive session is the failure this flag exists to prevent.
+if [[ -n "${PROMPT_FILE:-}" || ${PROMPT_TEXT+set} ]]; then
+    if [[ -n "${PROMPT_FILE:-}" && ${PROMPT_TEXT+set} ]]; then
+        echo 'remote-session: --prompt-file and --prompt are mutually exclusive' >&2; exit 2
+    fi
+    # A launch is MODE="launch"; every other MODE (--list/--stop/…) cannot carry a prompt.
+    if [[ -n "$MODE" && "$MODE" != "launch" ]]; then
+        echo "remote-session: --prompt/--prompt-file only apply to a launch, not --$MODE" >&2; exit 2
+    fi
+    if [[ -z "$ALIAS" ]]; then
+        echo 'remote-session: --prompt/--prompt-file need an alias (a launch), not the picker' >&2; exit 2
+    fi
+    if [[ -n "${PROMPT_FILE:-}" ]]; then
+        if [[ ! -f "$PROMPT_FILE" ]]; then
+            echo "remote-session: --prompt-file: no such file: $PROMPT_FILE" >&2; exit 2
+        fi
+        if [[ ! -s "$PROMPT_FILE" ]] || [[ -z "$(tr -d '[:space:]' < "$PROMPT_FILE")" ]]; then
+            echo "remote-session: --prompt-file is empty or whitespace-only: $PROMPT_FILE" >&2
+            exit 2
+        fi
+    elif [[ -z "$(printf '%s' "$PROMPT_TEXT" | tr -d '[:space:]')" ]]; then
+        echo 'remote-session: --prompt is empty' >&2; exit 2
+    fi
+fi
 
 if [[ "$ALIAS" == github-models || "$ALIAS" == github ]]; then
     _available github
@@ -1936,6 +1977,13 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "     spoof          : $SPOOF_PRIMARY"
     echo "     provider       : $PROV"
     echo "     cost note      : $COST_NOTE"
+    # C0: name the prompt SOURCE, never its content — the handoff path is operational
+    # information; its text is not (and a dry run that echoed it would leak it).
+    if [[ -n "${PROMPT_FILE:-}" ]]; then
+        echo "     initial prompt : from $PROMPT_FILE ($(\wc -c < "$PROMPT_FILE" | tr -d ' ') bytes)"
+    elif [[ -n "${PROMPT_TEXT:-}" ]]; then
+        echo "     initial prompt : from --prompt (${#PROMPT_TEXT} chars)"
+    fi
     # Print the RESOLVED toggle state and the flags claude would actually receive.
     # A dry run that stops before this point is how the dead-switch bugs stayed hidden:
     # the toggles parsed, printed nothing, and were never applied. Showing the resolved
@@ -2322,6 +2370,14 @@ fi
 # LA_AUTO_COMPACT_WINDOW: pass --autocompact to claude if set
 if [[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]]; then
     claude_cmd+=(--autocompact "$LA_AUTO_COMPACT_WINDOW")
+fi
+# C0 (v0.46.0): the first prompt rides the launch as claude's positional initial prompt —
+# BEFORE any passthrough options, so it is the first positional claude sees. The FILE PATH
+# never reaches claude; its CONTENT does (read here, once).
+if [[ -n "${PROMPT_FILE:-}" ]]; then
+    claude_cmd+=("$(<"$PROMPT_FILE")")
+elif [[ -n "${PROMPT_TEXT:-}" ]]; then
+    claude_cmd+=("$PROMPT_TEXT")
 fi
 if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
     claude_cmd+=("${PASSTHRU[@]}")
