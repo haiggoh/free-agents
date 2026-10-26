@@ -1,3 +1,28 @@
+## [0.44.3] — 2026-10-26
+
+### Added — the dispatch-rule memories now live in the skills they govern (rule-migration item D)
+
+Four standing-rule memories moved into the bodies of the skills that own their task, per the
+Phase-7 method (a rule frees memory-index space only when it lands in an existing skill's body):
+
+- **offload-to-local** gains the replace-agents shape-check: the `FA_REPLACE_AGENTS` hook's
+  substitution does not verify that a stateless dispatch can do the work — check the shape
+  yourself (measured: a file-reading review re-routed to a stateless dispatch returned narration
+  and no findings).
+- **verify-delegated-work** gains the dispatched-review protocol: chunk to ≤~650 lines at commit
+  boundaries and serialize (8 parallel big-diff validators: 4 of 8 died on timeouts/429s);
+  findings are hypotheses to verify by execution; split them into *names* (checkable, often
+  right) vs *policy* (needs premises a dispatch does not have); and a uniformly weird result
+  indicts the dispatch pipeline, not the model.
+- **brief-the-delegate** gains the empty/absent/malformed-input brief line, a ground-truth-your-
+  expected-values rule (measured: a fixture asserting the 2nd prime above 1000 is 1039 — it is
+  1013), and the Council pattern (planner + cross-family judge, decide independently).
+- **compose-the-payload** already carried the placeholder rule; no change needed there.
+
+The four source memories are archived (`consolidation-20261024-wys/*.p7`) and their inbound
+links repointed; the memory index shrinks accordingly. The announce rule was already enforced
+by the offload nudge hook (grep-verified) — no new hook needed.
+
 ## [0.45.2] — 2026-10-26
 
 ### Fixed — a graceful-SIGTERM proxy held the port through the swap's rebind

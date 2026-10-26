@@ -26,7 +26,10 @@ Its `model` parameter accepts only first-party paid tiers — `sonnet`, `opus`, 
 and the org allowlist blocks adding one. (Two exceptions, since 0.27.0: inside a FREE session, local
 or free-API, `Agent` and `Workflow` subagents already run on that session's free endpoint. And if the
 user opted into `FA_REPLACE_AGENTS=1`, a hook redirects a cloud session's `Agent` call to
-`bin/free-agent-tool.py`; follow its instructions.) So, in a cloud session:
+`bin/free-agent-tool.py`; follow its instructions — and check the task shape yourself first:
+the hook's substitution does not verify that a stateless dispatch can actually do the work
+(measured: a review that needed file reads was re-routed to a stateless dispatch, which
+returned narration and no findings).) So, in a cloud session:
 
 | What you do | What actually runs | Cost |
 |---|---|---|
