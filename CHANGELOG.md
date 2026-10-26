@@ -1,3 +1,52 @@
+## [0.46.2] — 2026-10-26
+
+User report: backend upgrades still failed and DeepSeek V4 Flash coder still died on the old
+409, although both had "been fixed". Every earlier fix had landed; each missed the path that
+actually failed. Three root causes, each verified live and pinned by a test watched failing.
+
+### Fixed — an upgrade offer replayed a deleted worktree's manager
+
+`backend_upgrades.py --check` stored the full argv, absolute paths included, in the
+machine-global pending list. A check run from a since-deleted worktree left
+`…/free-agents-moespresso/install/manage-backend.py` there; every csl start replayed it
+(`Errno 2`) and the failure kept the dead offer pending. Versioned-venv offers are now rebuilt at
+prompt time from this checkout's manager: state records WHAT to upgrade, never WHERE the code
+lived.
+
+### Fixed — venvs were built on Python 3.15, where torch has no wheels
+
+Homebrew moved `python3` to 3.15. The picker runs the manager as `python3`, `choose_python()`
+took `sys.executable` first, and the rapid-mlx venv died on `No matching distribution found for
+torch>=2.3.0` (2026-10-23, 2026-10-26). `BackendManager.PYTHON_MAX` caps the implicit choice
+(rapid-mlx, vllm-mlx, litellm, MoEspresso: 3.14), falling back to 3.14/3.13/3.12 and naming the
+ceiling when only newer Pythons exist; an explicit `--python` / `LA_BASE_PYTHON` still wins.
+vllm-mlx and litellm drop private choosers that shadowed the base one (and ignored
+`LA_BASE_PYTHON`). The chooser now returns the stable symlink it found
+(`/opt/homebrew/bin/python3.14`), not its Cellar patch keg, which `brew cleanup` deletes after
+the next patch upgrade — the live rapid-mlx-0.16.1 venv was one cleanup away from breaking.
+
+### Fixed — `brew upgrade && brew upgrade --greedy && pipx upgrade-all` cannot move litellm or MoEspresso past 3.14
+
+User decision: neither ever runs on Python >= 3.15; litellm stays on its newest release;
+MoEspresso takes 3.x patches and never 4.x (4.x cannot load the DeepSeek V4 package).
+
+- **litellm (pipx):** `pipx upgrade` keeps a venv's interpreter, so it is safe — but pipx's
+  default is now 3.15, so a reinstall would not be. A venv found on > 3.14 is offered
+  `pipx reinstall --python <3.14> litellm` (newest release, injected packages kept). The
+  `pipx install` hint names `--python python3.14`.
+- **MoEspresso (brew `@3`):** installed **pinned**, so a blanket `brew upgrade` skips it. Its
+  offer is the one route that moves it — unpin, upgrade, re-pin — and is held when the formula
+  now depends on `python@>3.14`; `install` refuses such a build before brew runs.
+
+### Fixed — the weight-format gate stepped aside for an alias pinned to oMLX
+
+0.45.0 let a foreign-format artifact through `--gate` whenever a capable MoEspresso existed,
+assuming it would be "launched by that backend". Both callers ask on behalf of an MLX engine;
+the `deepseek-v4-flash-0731-coder` row was pinned `omlx`, so oMLX loaded 53 GB and the session
+got the original causeless 409 — and 0.44.2's clear refusal never appeared. An installed
+MoEspresso now changes the remedy, not the verdict: the refusal names it and the one-word fix
+(`serve moespresso`, or `auto`).
+
 ## [0.46.1] — 2026-10-26
 
 ### Fixed — the picker no longer crashes on a keystroke mid-load
