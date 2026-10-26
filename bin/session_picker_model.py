@@ -1325,7 +1325,11 @@ class RemoteScreen(Screen):
             self._catalog_pending.add(agent.provider)
             self._refresh_keep_open()           # show the loading row at once
             return f"rcat:{agent.alias}"
-        for prov in self._catalog_stale:        # cached rosters: one background revision
+        # Snapshot: the loop DISCARDS dead providers from _catalog_stale (below), and mutating a
+        # set while iterating it raises "Set changed size during iteration" — measured as a
+        # picker-wide crash (2026-10-25) whenever a re-render landed mid-load, because every
+        # keystroke in the live search re-runs this path.
+        for prov in list(self._catalog_stale):  # cached rosters: one background revision
             if prov in self._catalog_pending:
                 continue
             anchor = next((a for a in self.agents if a.provider == prov and self._visible(a)), None)
@@ -1989,7 +1993,10 @@ class MemoryGuardScreen(Screen):
 
 
 # install/manage-backend.py --backend choices; tests compare this against its registry.
-RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm")
+# ★ Keep in step with install/manage-backend.py's manager imports: adding a backend manager
+# without adding it here leaves the picker unable to name it, and the contract test below is the
+# only guard (it caught `moespresso` missing here for three releases — 0.45.0/0.45.1/0.45.5).
+RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm", "moespresso")
 # Per-version operations beyond install/validate/info, by backend: only the ones that backend's
 # manager actually implements (the base class raises "not supported"), so the menu never offers
 # a row that can only fail. Tests compare this against the managers' real overrides.

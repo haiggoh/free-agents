@@ -6,11 +6,42 @@ Environment: none required; no provider is called (catalog rows are handed in).
 """
 from pathlib import Path
 import os
+import shutil
 import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 import session_picker_model as m  # noqa: E402
+
+CAT_CACHE_ENV = m.CATALOG_CACHE_DIR_ENV   # the override the model itself reads
+
+
+
+
+# --- test hygiene: the catalog cache must never be the real one ---------------------------
+# set_catalog() WRITES this cache, so a test that calls it without isolating the directory
+# overwrites the user's real provider lists with fixture rows. Measured 2026-10-26: running this
+# suite left cerebras.json holding exactly the `qwen-3.8-27b` fixture from this file, mistral.json
+# holding 3 fixture rows, and groq/gemini 1 each — and the picker then painted those partial lists
+# on first show, loading the real catalog only when the group was opened. That is the reported
+# "nvidia starts with 9, gemini with 5" symptom; the caching itself works.
+
+def _cat_cache_setup():
+    import tempfile
+    global _CAT_CACHE
+    _CAT_CACHE = tempfile.mkdtemp(prefix="cat-cache-")
+    os.environ[CAT_CACHE_ENV] = _CAT_CACHE
+
+def _cat_cache_teardown():
+    import shutil
+    os.environ.pop(CAT_CACHE_ENV, None)
+    shutil.rmtree(_CAT_CACHE, ignore_errors=True)
+
+def setUpModule():
+    _cat_cache_setup()
+
+def tearDownModule():
+    _cat_cache_teardown()
 
 
 def agents():
@@ -221,5 +252,40 @@ class CatalogAccordionTests(unittest.TestCase):
         self.assertEqual(m.CatalogModel.from_line("a/b\tnot json").tools, "unknown")
 
 
+class CatalogStaleIterationTests(unittest.TestCase):
+    """A stale provider with no visible anchor must not crash the render.
+
+    Reproduces the user-reported crash (2026-10-25, free-agents 0.44.1): typing in the live
+    search while the provider catalogs are still loading raised
+        RuntimeError: Set changed size during iteration
+    from catalog_kind_needed(). The cause is in this file's own loop: it iterates
+    `self._catalog_stale` and DISCARDS from that same set (the `anchor is None` branch), so the
+    set changes size mid-iteration and the next `__next__` raises. The render path calls this on
+    every keystroke, so any re-render landing mid-load crashed the whole picker.
+    """
+
+    def screen(self):
+        s = m.Settings()
+        lane = m.RemoteScreen(s, agents(), owner=m.DIRECT_ROOT)
+        lane._choose_model_visible = True
+        return lane
+
+    def test_a_stale_provider_with_no_anchor_does_not_raise(self):
+        lane = self.screen()
+        lane.catalogs.clear()
+        # Every real provider is in flight, so the earlier loops in catalog_kind_needed fire
+        # nothing and we reach the stale loop; 'groq' has no agent at all.
+        lane._catalog_pending = {"mistral", "zai", "gemini", "cerebras"}
+        lane._catalog_stale = {"groq", "mistral2"}     # a second entry AFTER the one discarded
+        try:
+            lane.catalog_kind_needed()
+        except RuntimeError as exc:
+            self.fail(f"catalog_kind_needed raised while pruning stale providers: {exc}")
+        # ...and the dead provider is actually pruned, rather than left to be retried forever.
+        self.assertNotIn("groq", lane._catalog_stale)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+

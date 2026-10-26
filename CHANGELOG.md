@@ -1,3 +1,58 @@
+## [0.46.1] — 2026-10-26
+
+### Fixed — the picker no longer crashes on a keystroke mid-load
+
+`RuntimeError: Set changed size during iteration`, user-reported and reproducible
+(reported against 0.44.1, still present on 0.46.0): typing in the remote picker's
+live search while the provider catalogs were still loading killed the process, and
+so did simply clicking "choose model" without waiting. `catalog_kind_needed()`
+iterated `self._catalog_stale` and discarded dead providers from that same set
+inside the loop. The fix is a snapshot — which also makes the loop immune to a
+re-entrant mutation from the refresh it triggers mid-loop.
+
+### Fixed — the remote catalog cache was being overwritten with test fixtures
+
+Root cause of the reported "nvidia starts with 9, gemini with 5" symptom, and it
+was never the caching. Four test files called `set_catalog()` — which WRITES the
+on-disk cache — without isolating it, so running the suite left `cerebras.json`
+holding the `qwen-3.8-27b` fixture from
+`tests/test_remote_catalog_accordion.py:152`, `mistral.json` holding that file's
+three-row fixture, and groq/gemini one each. The picker then painted those partial
+lists as "cached" on first show and replaced them only when the group was opened —
+exactly the reported behaviour. The mechanism was never broken; the disk held
+fixtures. The four files now isolate the cache the way
+`tests/test_new_features.py` and `tests/picker_harness.py` already do, and the
+poisoned files were removed so those providers re-fetch live.
+
+### Fixed — a red test shipped in three releases, and a cycle count was hardcoded
+
+`RUNTIME_BACKENDS` was missing `moespresso` (since 0.45.1), so the contract test
+against `manage-backend.py`'s registry was RED in 0.45.0, 0.45.1 and 0.45.5 — it
+was never run. Its cycle assertion also carried a hardcoded `% 5`, which a sixth
+backend silently breaks; it is `len(RUNTIME_BACKENDS)` now.
+
+### Changed — llama.cpp prefers Homebrew
+
+User decision: use the brew install rather than the manual one. The manager
+already READ `brew list --versions llama.cpp`, but `install_version()` only ever
+fetched a GitHub release into `~/.local/llama-cpp/<version>/`, so two copies
+could coexist and `brew upgrade llama.cpp` did nothing for the backend
+free-agents resolves. Homebrew install now wins when brew has the formula; the
+GitHub release remains the fallback for a revision brew does not carry, and
+validation accepts either so preferring brew cannot orphan an install that
+already works.
+
+`--dry-run` also claimed it would install `b5000` into `/opt/homebrew/bin` — the
+requested version printed next to a target chosen for a different route. A manager
+can now report `effective_version()`, and the CLI prints it: `b5000` no longer
+appears beside a Homebrew prefix that holds 0.7.0. Other managers are unchanged
+(identity default).
+
+Still open, deliberately: the picker's `(N listed)` and "visible/hidden" counts
+count the agent roster, not the catalog models, so they do not yet show the full
+sum over the providers the user has keys for. That is a design change (fetch
+policy on a first run), not a defect — waypointed rather than half-built.
+
 ## [0.46.0] — 2026-10-26
 
 ### Added — C0: a launch carries its first prompt; the launch-refusal guard; handover verify

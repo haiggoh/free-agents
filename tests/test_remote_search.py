@@ -12,11 +12,43 @@ Usage: python3 tests/test_remote_search.py [-v]
 Environment: none required; no provider is called (catalogs are injected).
 """
 from pathlib import Path
+import os
+import shutil
 import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 import session_picker_model as m  # noqa: E402
+
+CAT_CACHE_ENV = m.CATALOG_CACHE_DIR_ENV   # the override the model itself reads
+
+
+
+
+# --- test hygiene: the catalog cache must never be the real one ---------------------------
+# set_catalog() WRITES this cache, so a test that calls it without isolating the directory
+# overwrites the user's real provider lists with fixture rows. Measured 2026-10-26: running this
+# suite left cerebras.json holding exactly the `qwen-3.8-27b` fixture from this file, mistral.json
+# holding 3 fixture rows, and groq/gemini 1 each — and the picker then painted those partial lists
+# on first show, loading the real catalog only when the group was opened. That is the reported
+# "nvidia starts with 9, gemini with 5" symptom; the caching itself works.
+
+def _cat_cache_setup():
+    import tempfile
+    global _CAT_CACHE
+    _CAT_CACHE = tempfile.mkdtemp(prefix="cat-cache-")
+    os.environ[CAT_CACHE_ENV] = _CAT_CACHE
+
+def _cat_cache_teardown():
+    import shutil
+    os.environ.pop(CAT_CACHE_ENV, None)
+    shutil.rmtree(_CAT_CACHE, ignore_errors=True)
+
+def setUpModule():
+    _cat_cache_setup()
+
+def tearDownModule():
+    _cat_cache_teardown()
 
 
 def agents():
@@ -140,3 +172,5 @@ class AccordionMultiOpenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+

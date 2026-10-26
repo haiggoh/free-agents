@@ -57,6 +57,12 @@ from managers import (
 DEFAULT_REPO = Path(__file__).resolve().parents[1]
 
 
+def _effective_version(mgr, version):
+    """The version this manager's route would really install (identity unless it overrides)."""
+    fn = getattr(mgr, "effective_version", None)
+    return fn(version) if callable(fn) else version
+
+
 def _resolve_repo(args: argparse.Namespace) -> Path:
     """--repo when given, else the repository this script ships in."""
     return Path(args.repo) if getattr(args, "repo", None) else DEFAULT_REPO
@@ -243,7 +249,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             lock = mgr.locked_requirements(version) if not args.refresh_deps else None
             print(json.dumps({
                 "result": "dry_run",
-                "version": version,
+                "version": _effective_version(mgr, version),
                 "target": str(mgr.target_for(version)),
                 "installation_mode": "locked_recreation" if lock else "fresh_resolution",
             }, indent=2))

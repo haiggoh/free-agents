@@ -131,6 +131,43 @@ class LlamaCppManager(BackendManager):
     def _get_latest_package_version(self, package: str) -> str:
         return self.get_latest_version()
 
+    def brew_available(self) -> str | None:
+        """The version brew has installed for llama.cpp, or None (no brew, or no formula).
+
+        The manager has READ this for `get_installed_versions` since the beginning; install and
+        validate now read it too, so a brew install is one code path rather than a second copy.
+        """
+        try:
+            result = subprocess.run(["brew", "list", "--versions", "llama.cpp"],
+                                    capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        parts = result.stdout.split()
+        return parts[1] if len(parts) >= 2 and parts[1] else None
+
+    def effective_version(self, version: str) -> str:
+        """brew installs the formula's own version, not the one requested — say so, so a dry run
+        cannot claim b5000 into a Homebrew prefix that holds 0.7.0."""
+        return self.brew_available() or version
+
+    def brew_prefix(self) -> Path:
+        """Where brew's llama.cpp binaries live — resolved, not guessed."""
+        for candidate in ("/opt/homebrew/bin/llama-server", "/usr/local/bin/llama-server"):
+            p = Path(candidate)
+            if p.exists():
+                return p.parent
+        return Path("/opt/homebrew/bin")
+
+    def target_for(self, version: str, home: Path | None = None) -> Path:
+        """The brew prefix when brew can provide it, else the historical GitHub unpack path.
+
+        Without this, `--dry-run` claimed `~/.local/llama-cpp/<version>` for a machine whose
+        llama.cpp comes from Homebrew — a directory that is then never created.
+        """
+        return self.brew_prefix() if self.brew_available() else self.home / ".local" / "llama-cpp" / version
+
     def install_version(
         self,
         version: str,
@@ -139,6 +176,17 @@ class LlamaCppManager(BackendManager):
         refresh_deps: bool = False,
         dry_run: bool = False,
     ) -> BackendInfo:
+        # Preferred route (user decision 2026-10-26): let Homebrew install/upgrade, so
+        # `brew upgrade llama.cpp` and this manager can never describe two different copies.
+        brew_version = self.brew_available()
+        if brew_version:
+            if dry_run:
+                return BackendInfo(
+                    name=self.BACKEND_NAME, version=brew_version, path=str(self.brew_prefix()),
+                    status="dry_run", metadata={"method": "homebrew", "formula": "llama.cpp"})
+            self.run_command(["brew", "install", "llama.cpp"])
+            return self.validate_environment(brew_version)
+
         target = self.home / ".local" / "llama-cpp" / version
         if dry_run:
             return BackendInfo(
@@ -189,18 +237,30 @@ class LlamaCppManager(BackendManager):
         if server.exists():
             server.chmod(0o755)
 
+    def _validate_candidates(self, version: str) -> list[Path]:
+        """Where llama-server may legitimately live, brew first (the user's preference), then the
+        historical GitHub unpack. Both must validate: a machine that already installed via GitHub
+        has a working binary, and preferring brew must not orphan it."""
+        out = []
+        if self.brew_available():
+            out.append(self.brew_prefix() / "llama-server")
+        out.append(self.home / ".local" / "llama-cpp" / version / "llama-server")
+        return out
+
     def validate_environment(self, version: str) -> BackendInfo:
-        target = self.home / ".local" / "llama-cpp" / version
-        server = target / "llama-server"
-        if not server.exists() or not os.access(server, os.X_OK):
-            raise ManagerError(f"llama-server not found or not executable: {server}")
+        server = next((p for p in self._validate_candidates(version)
+                       if p.exists() and os.access(p, os.X_OK)), None)
+        if server is None:
+            raise ManagerError(
+                f"llama-server not found or not executable in: "
+                f"{', '.join(str(p) for p in self._validate_candidates(version))}")
 
         result = self.run_command([str(server), "--version"], capture=True)
 
         return BackendInfo(
             name=self.BACKEND_NAME,
             version=version,
-            path=str(target),
+            path=str(server.parent),
             status="validated",
             metadata={
                 "binary_path": str(server),
