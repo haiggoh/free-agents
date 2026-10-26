@@ -87,9 +87,10 @@ printf '#!/usr/bin/env bash\necho tarball > "dist/free-agents-0.99.0.tar.gz"\n' 
 chmod +x "$PD/scripts/package-release.sh"
 out=$(cd "$PD" && bash ./.rtc-pre-package.sh 2>&1); rc=$?
 is "pre-package passes when the assets exist" "0" "$rc"
-has "and reports how many it built" "$out" "3 assets"
+has "and reports how many it built" "$out" "2 assets"
 n=0; for f in "$PD/dist"/install-free-agents*; do [ -f "$f" ] && n=$((n+1)); done
-is "and produced both installer names" "2" "$n"
+is "and produced ONE installer (the .command name is no longer shipped)" "1" "$n"
+is "and no legacy .command asset survives" "0" "$([ -f "$PD/dist/install-free-agents.command" ] && echo 1 || echo 0)"
 
 # --- post-release: the installed-copy check is FATAL, and it must speak on STDERR because
 #     rtc-ship.sh discards the hook's stdout.
@@ -121,8 +122,9 @@ is "rtc-ship.json exists" "0" "$r"
 cfg() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],"") or "")' "$ROOT/rtc-ship.json" "$1"; }
 is "the tag prefix is v (0.40.0+ tags are v-prefixed)" "v" "$(cfg tag_prefix)"
 is "it ships the tarball" "dist/free-agents-*.tar.gz" "$(cfg assets | tr ' ' '\n' | grep tar.gz)"
-is "it ships the installer under both names" "2" "$(cfg assets | tr ' ' '\n' | grep -c install-free-agents)"
-is "and that is 3 assets in total" "3" "$(cfg assets | tr ' ' '\n' | grep -c .)"
+is "it ships ONE installer name (the .command superseded since 0.29.3)" "1" "$(cfg assets | tr ' ' '\n' | grep -c install-free-agents)"
+is "and that is 2 assets in total" "2" "$(cfg assets | tr ' ' '\n' | grep -c .)"
+is "with no .command asset left in the config" "0" "$(cfg assets | tr ' ' '\n' | grep -c '\.command')"
 is "it refreshes the installed plugin" "free-agents" "$(cfg refresh_plugin)"
 
 printf '\npassed %d, failed %d\n' "$pass" "$fail"
