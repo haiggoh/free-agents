@@ -1,4 +1,4 @@
-## [0.45.1] — 2026-10-26
+## [0.45.2] — 2026-10-26
 
 ### Fixed — a graceful-SIGTERM proxy held the port through the swap's rebind
 
