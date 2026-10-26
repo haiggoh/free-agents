@@ -1,3 +1,14 @@
+## [0.45.1] — 2026-10-26
+
+### Fixed — the MoEspresso dry run told the user a venv would be created
+
+Found by dogfooding the installed 0.45.0: `install-backend.sh --backend
+moespresso --dry-run` reported `"target": "~/.venvs/moespresso-3.0.0"`, a path that is
+never created — the real install runs `brew install steadfastgaze/tap/moespresso@3`. The
+base class's `target_for` comes from VenvMixin and only rapid-mlx overrides it, so every
+non-venv manager inherits a venv-shaped answer. MoEspresso now reports the binary that will
+exist. oMLX and llama.cpp are bottles with the same gap and are left for their own change.
+
 ## [0.45.0] — 2026-10-26
 
 ### Added — MoEspresso as a first-class backend, provisioned with every install
