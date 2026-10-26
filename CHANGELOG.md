@@ -1,3 +1,13 @@
+## [0.46.3] — 2026-10-27
+
+### Changed — Rapid-MLX pinned to 0.16.9
+
+- The launcher's version gate, the config library default, the example config, the readonly
+  inventory and the Rapid Auto Mode test now pin `rapid-mlx 0.16.9` (was 0.16.1). The 0.16.9
+  venv is present on this machine and reports `rapid-mlx 0.16.9`.
+- First release cut end to end by `rtc-ship.sh` (run-to-completion 0.8.1) — gates, merge, tag,
+  push, release, refresh — using the config and hooks that shipped with 0.46.2.
+
 ## [0.46.2] — 2026-10-26
 
 User report: backend upgrades still failed and DeepSeek V4 Flash coder still died on the old
