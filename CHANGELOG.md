@@ -1,3 +1,48 @@
+## [0.45.5] — 2026-10-26
+
+### Fixed — an occupied port is named; dry runs stop writing; one installer, not two
+
+Four defects found while shipping and dogfooding 0.45.0–0.45.4, each verified by a
+test watched failing first.
+
+- **"Port N busy serving ''"** — the occupied-port message used `CURRENT_MODEL`,
+  parsed from `GET /v1/models`, which MoEspresso does not implement; so for that
+  backend the message named nothing and a declined reuse was a dead end. The port
+  scan already read the meta file moments earlier for the reuse check, so the
+  alias (then the model-dir basename) is now the fallback. This helps every
+  backend whose model list fails to parse, not only MoEspresso.
+- **Bottle backends promised venvs.** `VenvMixin.target_for` is what
+  `install-backend.sh --dry-run` reports, and every Homebrew-bottle manager
+  inherited it, so `--backend omlx --dry-run` claimed `~/.venvs/omlx-0.7.1` — a
+  path that is never created. oMLX and MoEspresso now report the binary that will
+  exist. llama.cpp is deliberately NOT in that set: it unpacks a GitHub release
+  into `~/.local/llama-cpp/<version>`, so its target is neither a venv nor a
+  bottle path — a real but separate gap, not half-fixed here.
+- **A `--dry-run` that writes.** `install-backend.sh` ran `chmod +x` on
+  `manage-cuda-backend.py` on every invocation, `--dry-run` included, so a
+  read-only probe left the file dirty (100644 → 100755) and it read as a mystery
+  uncommitted change across several sessions. The chmod now sits behind the
+  dry-run guard; the real install path still chmods, asserted by the same test.
+- **`LA_MOESPRESSO_BIN` set-but-empty meant "discover" in bash but "none" in the
+  Python detector** — two implementations disagreeing about whether a binary
+  exists, which is how a gate and a launcher can give opposite answers about the
+  same model. Bash now matches Python. The tests asserting it had shipped in
+  0.45.0 while the fix had not, so this also closes a test that could only fail on
+  a machine with the runtime installed.
+
+### Changed — releases ship ONE installer
+
+`install-free-agents.sh` superseded the `.command` name in 0.29.3; shipping both
+was the same bytes under a legacy name and offered no benefit, so the dual upload
+is dropped (user decision 2026-10-26). A stale
+`.../releases/latest/download/install-free-agents.command` link will 404 from this
+release onward — accepted deliberately and recorded in all three places the
+mechanism lives: `.rtc/pre-package.sh`, the `rtc-ship.json` asset glob, and the
+(unversioned, out-of-repo) `~/.claude/scripts/fa-ship.sh`. `pre-package.sh` now
+also deletes a stale `.command` from `dist/`, and its stdout is no longer
+discarded — the blind spot where a packaging step that died silently looked
+identical to one that ran quietly.
+
 ## [0.45.4] — 2026-10-26
 
 ### Added — `la-evict` targets one known port, and the ladder is three steps deep
