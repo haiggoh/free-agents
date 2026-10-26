@@ -8,6 +8,7 @@ mlx-lm<0.32: "upgrading" that inside rapid's venv would break rapid, so it is no
 
   backend    installed through          upgrade command
   omlx       Homebrew tap jundot/omlx   brew upgrade jundot/omlx/omlx
+  moespresso Homebrew tap steadfastgaze  brew upgrade steadfastgaze/tap/moespresso@3
   llama-cpp  Homebrew                   brew upgrade llama.cpp
   litellm    pipx                       pipx upgrade litellm   (keeps pipx-injected packages, e.g. prisma)
   rapid-mlx  versioned venv (manager)   manage-backend.py --backend rapid-mlx install <latest>
@@ -45,6 +46,41 @@ from typing import Callable
 
 HERE = Path(__file__).resolve().parent
 MANAGE_BACKEND = HERE / "manage-backend.py"
+
+# Homebrew formulae kept PINNED so a blanket `brew upgrade` (the user's own, or the daily job)
+# cannot move them unchecked; their offer is the one route that moves them, and it unpins,
+# upgrades and re-pins. moespresso@3: a 3.x patch rebuilt on python@3.15 must be held back,
+# and 4.x is a different engine that cannot load the DeepSeek V4 package (user 2026-10-26).
+PINNED_FORMULAE = ("steadfastgaze/tap/moespresso@3",)
+# Newest Python litellm and MoEspresso may run on. One value with the venv managers'
+# BackendManager.PYTHON_MAX: torch-era wheels lag each CPython release.
+PYTHON_MAX = (3, 14)
+
+
+def _minor(text: str) -> tuple[int, int] | None:
+    """'Python 3.15.1' / 'python@3.15' / '3.15' -> (3, 15); None when nothing parses."""
+    import re
+    m = re.search(r"(\d+)\.(\d+)", text or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def ceiling_python() -> str:
+    """A <= PYTHON_MAX interpreter, by the venv managers' own chooser (stable symlink path)."""
+    sys.path.insert(0, str(HERE))
+    import importlib
+    importlib.import_module("managers.litellm")
+    return str(importlib.import_module("managers").get_manager_instance("litellm").choose_python(None))
+
+
+def formula_python_too_new(formula: str, run: "Runner") -> bool:
+    """True when the formula, as Homebrew would install it now, depends on python@>PYTHON_MAX."""
+    r = run(["brew", "info", "--json=v2", formula])
+    try:
+        deps = json.loads(r.stdout or "{}")["formulae"][0].get("dependencies", [])
+    except (ValueError, KeyError, IndexError):
+        return True    # unreadable is not "safe": hold the upgrade rather than guess
+    pys = [v for d in deps if d.startswith("python@") and (v := _minor(d))]
+    return any(v > PYTHON_MAX for v in pys)
 
 
 @dataclass
@@ -96,7 +132,10 @@ def _pypi_latest(package: str) -> str | None:
 # --- detection per install route ------------------------------------------------------------
 def brew_upgrades(run: Runner = _run) -> list[Upgrade]:
     """Homebrew's own verdict (handles revisions like 0.6.0_1 and tap rc versions)."""
-    names = {"jundot/omlx/omlx": "omlx", "llama.cpp": "llama-cpp"}
+    names = {"jundot/omlx/omlx": "omlx", "llama.cpp": "llama-cpp",
+             # The @3 formula, not `moespresso`: 4.x cannot load a MoEspresso-packaged
+             # DeepSeek V4 artifact, and it is the one `brew upgrade` would otherwise move.
+             "steadfastgaze/tap/moespresso@3": "moespresso"}
     installed = [n for n in names if run(["brew", "list", "--versions", n.split("/")[-1]]).returncode == 0]
     if not installed:
         return []
@@ -112,6 +151,8 @@ def brew_upgrades(run: Runner = _run) -> list[Upgrade]:
         if key is None:
             continue
         cur = (f.get("installed_versions") or ["?"])[-1]
+        if key in PINNED_FORMULAE and formula_python_too_new(key, run):
+            continue   # held: this release would put the backend on Python > PYTHON_MAX
         out.append(Upgrade(names[key], cur, f.get("current_version", "?"), ["brew", "upgrade", key], "homebrew"))
     return out
 
@@ -122,14 +163,28 @@ def pipx_upgrades(run: Runner = _run, latest: Callable[[str], str | None] = _pyp
         venvs = json.loads(r.stdout or "{}").get("venvs", {})
     except ValueError:
         return []
-    meta = venvs.get("litellm", {}).get("metadata", {}).get("main_package", {})
-    cur = meta.get("package_version")
+    md = venvs.get("litellm", {}).get("metadata", {})
+    cur = md.get("main_package", {}).get("package_version")
     if not cur:
         return []
+    py = _minor(md.get("python_version", ""))
+    if py and py > PYTHON_MAX:
+        # `pipx upgrade` keeps a venv's interpreter, so it can never repair this; a reinstall on a
+        # <= PYTHON_MAX Python does, keeps injected packages, and lands the newest release.
+        return [Upgrade("litellm", cur, latest("litellm") or cur,
+                        ["pipx", "reinstall", "--python", "<ceiling>", "litellm"], "pipx-python")]
     new = latest("litellm")
     if not new or not _newer(new, cur):
         return []
     return [Upgrade("litellm", cur, new, ["pipx", "upgrade", "litellm"], "pipx")]
+
+
+def _pipx_litellm_python(run: "Runner") -> tuple[int, int] | None:
+    try:
+        meta = json.loads(run(["pipx", "list", "--json"]).stdout or "{}")
+        return _minor(meta["venvs"]["litellm"]["metadata"].get("python_version", ""))
+    except (ValueError, KeyError):
+        return None
 
 
 def venv_upgrades(mgrs: dict | None = None) -> list[Upgrade]:
@@ -155,6 +210,21 @@ def venv_upgrades(mgrs: dict | None = None) -> list[Upgrade]:
                                [sys.executable, str(MANAGE_BACKEND), "--backend", name, "install", new],
                                "versioned venv"))
     return out
+
+
+def live_command(u: Upgrade) -> list[str]:
+    """The argv to run NOW. A versioned-venv offer is rebuilt from this checkout's manager: the
+    stored argv names the interpreter and script of whichever tree ran --check, and that tree may
+    be gone (measured 2026-10-26: a deleted worktree's manage-backend.py, replayed on every launch).
+    State records WHAT to upgrade; WHERE the code lives is resolved at use time."""
+    if u.via == "versioned venv":
+        return [sys.executable, str(MANAGE_BACKEND), "--backend", u.backend, "install", u.latest]
+    if u.via == "pipx-python":
+        return ["pipx", "reinstall", "--python", ceiling_python(), "litellm"]
+    if u.via == "homebrew" and u.command[-1] in PINNED_FORMULAE:
+        f = u.command[-1]
+        return ["/bin/sh", "-c", f"brew unpin {f}; brew upgrade {f}; rc=$?; brew pin {f}; exit $rc"]
+    return u.command
 
 
 def _newer(a: str, b: str, mgr=None) -> bool:
@@ -200,9 +270,14 @@ def still_needed(u: Upgrade, run: Runner = _run) -> bool:
     # "Needed" means the installed version is OLDER than the offer -- not merely different. A user
     # who upgraded past the cached offer by hand (litellm 1.106.0 installed, 1.105.1 offered,
     # measured 2026-10-20) must not be asked to "upgrade" to the older release.
+    if u.via == "pipx-python":
+        py = _pipx_litellm_python(run)
+        return bool(py and py > PYTHON_MAX)
     if u.via == "homebrew":
         r = run(["brew", "list", "--versions", u.command[-1].split("/")[-1]])
         parts = r.stdout.split()
+        if u.command[-1] in PINNED_FORMULAE and formula_python_too_new(u.command[-1], run):
+            return False   # the formula moved to a too-new Python since the check: hold it
         return r.returncode == 0 and len(parts) > 1 and _newer(u.latest, parts[-1])
     if u.via == "pipx":
         try:
@@ -229,11 +304,12 @@ def prompt(assume_yes: bool, ask: Callable[[str], str] = input, run_live: Callab
     failed = 0
     print(f"⬆️  {len(todo)} backend upgrade(s) available.", file=out)
     for u in todo:
-        q = f"Upgrade {u.backend} {u.current} -> {u.latest}?  runs: {' '.join(u.command)}  [Y/n] "
+        cmd = live_command(u)
+        q = f"Upgrade {u.backend} {u.current} -> {u.latest}?  runs: {' '.join(cmd)}  [Y/n] "
         answer = "y" if assume_yes else ask(q).strip().lower()
         if answer in ("", "y", "yes"):
-            print(f"→ {' '.join(u.command)}", file=out)
-            rc = run_live(u.command)
+            print(f"→ {' '.join(cmd)}", file=out)
+            rc = run_live(cmd)
             if rc == 0:
                 print(f"✅ {u.backend} upgraded to {u.latest}", file=out)
                 data["pending"] = [p for p in data.get("pending", []) if p.get("backend") != u.backend]
@@ -265,7 +341,7 @@ def main(argv: list[str]) -> int:
             print(json.dumps([asdict(u) for u in items], indent=2))
         else:
             for u in items:
-                print(f"{u.backend}\t{u.current} -> {u.latest}\t{' '.join(u.command)}")
+                print(f"{u.backend}\t{u.current} -> {u.latest}\t{' '.join(live_command(u))}")
             if not items:
                 print("no backend upgrades pending")
         return 0

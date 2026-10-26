@@ -21,6 +21,11 @@ different family often finds what a stronger same-family model misses. Both are 
 nothing on this machine satisfies them, the dispatch runs on what is available, prints a
 recommendation to add another model, and the result says so ("family_avoided"/"role_matched": false).
 
+Thinking (waypoint fa-thinking-toggle): a dispatch has NO manual thinking toggle. An entry's
+optional "thinking": "on"|"off"|"auto" field (absent = auto) resolves by ROLE first —
+reasoner/validator dispatches think, operator/utility do not — then by MODEL CONSTRAINT last,
+and the result JSON reports it ("thinking", "thinking_overridden", "thinking_note").
+
 This is a STATELESS dispatch: one request, text in, text out. The model cannot read files or run
 commands, so pass what it needs in the prompt or as "files" (their contents are attached). Work
 that must drive tools belongs in a free SESSION (remote-session.sh / csl), not here.
@@ -72,6 +77,57 @@ def get_council_router_path():
 def resolve_role(subagent_type: str) -> str:
     """Map subagent_type to our internal role."""
     return ROLE_MAP.get(subagent_type, "operator")
+
+
+# THINKING POLICY (waypoint fa-thinking-toggle). NO manual toggle for a stateless dispatch —
+# fire-and-forget work pays in wall-clock, not money. Instead: an optional "thinking":
+# "on"|"off"|"auto" field per dispatch-preferences entry (absent = "auto"), resolved by ROLE
+# first, then constrained by the MODEL last. The council's cross-family validator is a
+# validator, so the council rule (think ON where the model supports it) rides the role
+# default. The resolution reaches the caller as "thinking" / "thinking_overridden" /
+# "thinking_note" in the result JSON.
+ROLE_THINKING_DEFAULT = {"reasoner": "on", "validator": "on", "operator": "off", "utility": "off"}
+_UNRESOLVED = object()   # sentinel: dispatch_entry called without a resolution (legacy path)
+
+
+def resolve_thinking(entry, role):
+    """-> (resolved "on"|"off", reasoning_effort to send or None, overridden, note).
+
+    Order of precedence: the entry's own thinking field, then the role default, then the
+    model-constraint table LAST (the same measured facts remote-session.sh resolves — GLM on
+    NIM always runs its thinking template, so OFF travels as reasoning_effort low; Nemotron
+    gates reasoning with enable_thinking, which a stateless dispatch cannot send, so OFF is
+    reported overridden rather than claimed)."""
+    choice = entry.get("thinking", "auto")
+    if choice not in ("on", "off", "auto"):
+        choice = "auto"
+    resolved = choice if choice in ("on", "off") else ROLE_THINKING_DEFAULT.get(role or "", "off")
+    prov = entry.get("provider", "")
+    model = (entry.get("model") or "").lower()
+    explicit = entry.get("reasoning_effort")
+    if prov == "nvidia" and "glm" in model:
+        if resolved == "off":
+            if explicit:
+                # The maintainer's per-model dial is the more specific fact: it stands, and
+                # the result says the OFF choice could not be honored.
+                return resolved, explicit, True, (
+                    f"GLM on NIM always thinks; the entry's reasoning_effort={explicit} "
+                    "stands — the OFF choice cannot disable the thinking template")
+            return resolved, "low", False, (
+                "GLM on NIM always thinks; reasoning_effort low is the OFF choice "
+                "(≈0 reasoning tokens, measured 2026-10-13)")
+        return resolved, explicit or "high", False, None
+    if prov == "nvidia" and "nemotron" in model:
+        # Nemotron does NOT take reasoning_effort at all (it gates reasoning with
+        # enable_thinking inside chat_template_kwargs): nothing to send in either direction.
+        if resolved == "off":
+            return resolved, None, True, (
+                "Nemotron gates reasoning with enable_thinking, which a stateless dispatch "
+                "cannot send — the OFF choice is not honored; the model still reasons")
+        return resolved, None, False, None
+    if resolved == "on":
+        return resolved, explicit or "high", False, None
+    return resolved, None, False, None      # off elsewhere: do not ask for reasoning
 
 
 def select_model(role: str) -> str:
@@ -358,8 +414,11 @@ def route_of(entry) -> str:
     return f"local {entry['alias']} · stateless dispatch"
 
 
-def dispatch_entry(entry, prompt: str, env) -> str:
-    """Run one preference entry; raise DispatchFailed so the caller tries the next."""
+def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED) -> str:
+    """Run one preference entry; raise DispatchFailed so the caller tries the next.
+
+    thinking_effort: the resolved reasoning_effort from resolve_thinking(). Left at the
+    sentinel (direct callers, older tests) the entry's own reasoning_effort stands."""
     if entry.get("kind") == "remote":
         import tempfile
         outdir = tempfile.mkdtemp(prefix="fa-free-agent-")   # fresh: never a previous run's output
@@ -367,8 +426,9 @@ def dispatch_entry(entry, prompt: str, env) -> str:
                "--provider", entry["provider"], "--model", entry["model"],
                "--prompt", prompt, "--max-tokens", str(entry.get("max_tokens", 16384)),
                "--outdir", outdir]
-        if entry.get("reasoning_effort"):
-            cmd += ["--reasoning-effort", entry["reasoning_effort"]]
+        effort = entry.get("reasoning_effort") if thinking_effort is _UNRESOLVED else thinking_effort
+        if effort:
+            cmd += ["--reasoning-effort", str(effort)]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=entry.get("timeout", 1800))
         except subprocess.TimeoutExpired as err:
@@ -460,11 +520,18 @@ def run(input_data, env) -> int:
             print(f"free-agents: wall-clock cap ({policy['wall_clock_cap_s']}s) reached — "
                   f"{entry['id']} and the remaining preferences are not attempted", file=sys.stderr)
             break
+        resolved_thinking, think_effort, think_overridden, think_note = resolve_thinking(entry, role)
         print(f"free-agents: offloading to {entry.get('display', entry['id'])} "
               f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"
-              f"{', not ' + shown_avoid if shown_avoid else ''})", file=sys.stderr)
+              f"{', not ' + shown_avoid if shown_avoid else ''}"
+              f"{'; thinking ' + resolved_thinking if resolved_thinking == 'on' or think_overridden or think_note else ''})", file=sys.stderr)
+        if think_note:
+            # Any constraint note discloses on stderr, not only overrides: a GLM OFF with no
+            # explicit effort sends reasoning_effort low, and the human watching the dispatch
+            # gets the same fact the session banner shows (review finding 6, 2026-10-25).
+            print(f"free-agents: thinking note: {think_note}", file=sys.stderr)
         try:
-            text = dispatch_entry(entry, full_prompt, env)
+            text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort)
         except DispatchFailed as err:
             attempts.append({"id": entry["id"], "provider": entry.get("provider") or route_of(entry),
                              "ok": False, "error": str(err)})
@@ -477,6 +544,9 @@ def run(input_data, env) -> int:
                           # null = not requested; false = requested but could not be honoured
                           "role_matched": role_matched if role else None,
                           "family_avoided": family_avoided if avoid else None,
+                          "thinking": resolved_thinking,
+                          "thinking_overridden": think_overridden,
+                          "thinking_note": think_note,
                           "attempts": attempts}))
         return 0
     allowed = exhausted(attempts, order, policy)

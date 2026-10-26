@@ -13,6 +13,7 @@ of the engine binary (LA_RAPID_BIN / LA_OMLX_BIN), with the LA_DETECT_*_PY overr
 import json
 import os
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,20 @@ TOOL = ROOT / "bin" / "la-detect-backend.py"
 def _exe(path: Path, body: str) -> Path:
     path.write_text(body)
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def _safetensors(folder: Path, name: str, keys) -> Path:
+    """A minimal safetensors file: 8-byte little-endian header length, then the JSON header.
+
+    Only the header is ever read (that is all an MLX loader consults before mapping keys onto
+    modules), so the data block can be a stub.
+    """
+    header = {k: {"dtype": "F16", "shape": [1]} for k in keys}
+    header["__metadata__"] = {"format": "pt"}
+    blob = json.dumps(header).encode()
+    path = folder / name
+    path.write_bytes(struct.pack("<Q", len(blob)) + blob + b"\0" * 16)
     return path
 
 
@@ -106,6 +121,104 @@ class DetectBackend(unittest.TestCase):
     def test_missing_config_is_unknown_not_a_guess(self):
         v = self.verdicts(self.folder("empty"))["empty"]
         self.assertEqual(v["backend"], "unknown")
+
+    # --- weight format: architecture support is necessary, NOT sufficient --------------------
+    # Measured 2026-10-25: ~/.models/deepseek-v4-flash-0731-coder declares model_type=deepseek_v4
+    # (which oMLX's mlx_vlm CAN build) AND weight_format="mxtq" (a 2-bit MoEspresso TurboQuant
+    # bundle only the MoEspresso runtime reads). oMLX 0.7.1 loads 53 GB of weights and then dies
+    # at load_weights(strict=True): "Received 46 parameters not in model: embed.biases,
+    # embed.scales, head.scales, model.layers.N.ffn.experts.tq_bundle". The old verdict said
+    # `omlx` — architecture-correct, format-wrong — so csl offered a model that cannot launch and
+    # the session surfaced a 409 "unavailable after a previous load failure" instead of a cause.
+    def test_foreign_weight_format_is_not_launched(self):
+        d = self.folder("dsv4-mxtq", "deepseek_v4")
+        (d / "config.json").write_text(json.dumps(
+            {"model_type": "deepseek_v4", "weight_format": "mxtq",
+             "mxtq_bits": 2, "expert_dtype": "fp4"}))
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": ""})["dsv4-mxtq"]
+        self.assertEqual(v["backend"], "unsupported")
+        self.assertIn("mxtq", v["reason"])
+
+    def test_bundle_keys_in_the_weights_are_foreign_too(self):
+        # A config whose weight_format was stripped still betrays itself in the shard header:
+        # *.tq_bundle is a custom-runtime bundle, not an MLX quantization key. Note that plain
+        # MLX quantized layers legitimately write *.scales / *.biases, so only the bundle suffix
+        # is a signal — matching on scales/biases would flag every 4-bit model on this machine.
+        d = self.folder("dsv4-bundle", "deepseek_v4")
+        _safetensors(d, "model-00001-of-00002.safetensors",
+                     ["model.layers.0.ffn.experts.tq_bundle", "model.layers.0.ffn.experts.weight"])
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": ""})["dsv4-bundle"]
+        self.assertEqual(v["backend"], "unsupported")
+
+    def test_plain_mlx_quantization_keys_stay_launchable(self):
+        # The complement: ordinary MLX quantization (weight + scales + biases) must NOT be
+        # flagged, or this guard would gate out every quantized model on the machine.
+        d = self.folder("qwen-q4", "qwen3")
+        _safetensors(d, "model.safetensors",
+                     ["model.layers.0.self_attn.q_proj.weight",
+                      "model.layers.0.self_attn.q_proj.scales",
+                      "model.layers.0.self_attn.q_proj.biases"])
+        v = self.verdicts(d)["qwen-q4"]
+        self.assertEqual(v["backend"], "mlx")
+
+    # --- MoEspresso: the artifact becomes launchable when a capable runtime is installed -------
+    # The 0.44.2 gate refuses a foreign format outright, correct at the time: nothing on the
+    # machine could read `mxtq`. With MoEspresso's 3.x line installed it CAN, so the verdict
+    # moves from `unsupported` to `moespresso` — and, critically, a 4.x binary must NOT unlock
+    # it (measured: 4.0.0 refuses the package with "unsupported required package feature").
+    def test_moespresso_binary_makes_the_artifact_launchable(self):
+        d = self.folder("dsv4-moespresso", "deepseek_v4")
+        (d / "config.json").write_text(json.dumps(
+            {"model_type": "deepseek_v4", "weight_format": "mxtq"}))
+        stub = _exe(self.t / "moe-bin", "#!/bin/sh\necho 'moespresso 3.0.0'\n")
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": str(stub)})["dsv4-moespresso"]
+        self.assertEqual(v["backend"], "moespresso")
+        self.assertIn("mxtq", v["reason"])
+
+    def test_moespresso_4x_is_not_a_capable_binary(self):
+        """A 4.x MoEspresso cannot load the package, so it must not unlock the artifact."""
+        d = self.folder("dsv4-moe4", "deepseek_v4")
+        (d / "config.json").write_text(json.dumps(
+            {"model_type": "deepseek_v4", "weight_format": "mxtq"}))
+        stub = _exe(self.t / "moe4-bin", "#!/bin/sh\necho 'moespresso 4.0.0'\n")
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": str(stub)})["dsv4-moe4"]
+        self.assertEqual(v["backend"], "unsupported")
+
+    def test_moespresso_never_wins_for_an_ordinary_artifact(self):
+        """MoEspresso serves packaged MoE models only; it must not capture plain MLX artifacts."""
+        d = self.folder("qwen-with-moe", "qwen3")
+        stub = _exe(self.t / "moe-bin2", "#!/bin/sh\necho 'moespresso 3.0.0'\n")
+        v = self.verdicts(d, env_extra={"LA_MOESPRESSO_BIN": str(stub)})["qwen-with-moe"]
+        self.assertEqual(v["backend"], "mlx")
+
+    def test_gate_refuses_for_an_mlx_serve_even_when_moespresso_could_serve_it(self):
+        """--gate is asked by callers about to run an MLX engine (hotswap, config-lib: serve in
+        rapid|vllm|mlx_lm|omlx). MoEspresso being installed does not make THAT engine able to
+        read the bundle. Measured 2026-10-26: 0.45.0 let the artifact through here, the alias
+        was pinned `omlx`, and the user got the original causeless 409 back. The refusal names
+        the backend that can serve it, so the fix is one config word."""
+        d = self.folder("dsv4-gate", "deepseek_v4")
+        (d / "config.json").write_text(json.dumps(
+            {"model_type": "deepseek_v4", "weight_format": "mxtq"}))
+        stub = _exe(self.t / "moe-bin3", "#!/bin/sh\necho 'moespresso 3.0.0'\n")
+        r = self.run_tool("--gate", str(d), env_extra={"LA_MOESPRESSO_BIN": str(stub)})
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("mxtq", r.stdout)
+        self.assertIn("MoEspresso 3.0.0", r.stdout)
+        self.assertIn("serve moespresso", r.stdout)
+        # ...and still refuses it with no MoEspresso present (explicit empty pin = "none",
+        # so the assertion cannot silently change when this machine gains a runtime).
+        r2 = self.run_tool("--gate", str(d), env_extra={"LA_MOESPRESSO_BIN": ""})
+        self.assertEqual(r2.returncode, 3)
+        self.assertIn("mxtq", r2.stdout)
+
+    def test_gguf_still_wins_before_the_format_check(self):
+        # Order matters: a GGUF artifact gets llama_cpp regardless of any weight_format key.
+        d = self.folder("dsv4-gguf", "deepseek_v4")
+        (d / "config.json").write_text(json.dumps(
+            {"model_type": "deepseek_v4", "weight_format": "mxtq"}))
+        (d / "model-Q4_K_M.gguf").write_bytes(b"x")
+        self.assertEqual(self.verdicts(d)["dsv4-gguf"]["backend"], "llama_cpp")
 
     # --- discriminants: the verdict follows the ENGINE's registry, not a list in this tool ---
     def test_rapid_learning_an_architecture_moves_it_back_to_the_default(self):

@@ -177,6 +177,20 @@ class OMLXManager(BackendManager):
 
         return self.validate_environment(version)
 
+    def target_for(self, version: str, home: Path | None = None) -> Path:
+        """oMLX is a Homebrew bottle, so the dry run must not promise a venv path.
+
+        Without this, `install-backend.sh --backend omlx --dry-run` reports
+        `~/.venvs/omlx-<version>` — a path that is never created, because the real install runs
+        `brew install`. Report the binary that will exist instead.
+        """
+        binary = Path("/opt/homebrew/bin/omlx")
+        if not binary.exists():
+            binary = Path("/usr/local/bin/omlx")
+        if not binary.exists():
+            return Path("<brew formula omlx on /opt/homebrew/bin/omlx>")
+        return binary
+
     def validate_environment(self, version: str) -> BackendInfo:
         binary = Path("/opt/homebrew/bin/omlx")
         if not binary.exists():

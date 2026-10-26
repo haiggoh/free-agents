@@ -59,6 +59,8 @@ Environment (set by csl or caller):
   LA_ENABLE_MCP=1                   Enable MCP tools in blind-trust auto mode (default 0)
                                     Ignored when LA_STRICT_MCP=true (MCP servers excluded from prompt)
   LA_TEMPERATURE=0.0-2.0            Sampling temperature for local models (Rapid-MLX --default-temperature)
+  LA_THINKING_OVERRIDE=true|false   Session thinking toggle (picker `j`): beats the alias's
+                                    configured thinking; unset = the alias value stands
 
 Examples:
   local-session.sh
@@ -210,13 +212,26 @@ _apply_session_profile() {
 }
 _apply_session_profile "$ALIAS"
 
+# Resolve the session thinking override (waypoint fa-thinking-toggle): the picker's choice
+# beats the alias's configured value. One place, so dry-run shows what a launch would get.
+LOCAL_THINK_RESOLVED="${LA_THINK[$ALIAS]:-false}"
+LOCAL_THINK_NOTE=""
+case "${LA_THINKING_OVERRIDE:-}" in
+    true|false)
+        LOCAL_THINK_RESOLVED="$LA_THINKING_OVERRIDE"
+        LOCAL_THINK_NOTE=" (override: LA_THINKING_OVERRIDE=$LA_THINKING_OVERRIDE, alias config: ${LA_THINK[$ALIAS]:-?})"
+        ;;
+    "") ;;
+    *) echo "local-session.sh: ignoring invalid LA_THINKING_OVERRIDE '$LA_THINKING_OVERRIDE' (use true|false)" >&2 ;;
+esac
+
 # DRY-RUN: show plan and exit
 if [[ $DRY_RUN -eq 1 ]]; then
     echo "=== DRY RUN — local-session.sh configuration ==="
     echo "Alias: $ALIAS"
     echo "Backend: $(la_serve_display "$ALIAS")"
     echo "Effort: ${LA_EFFORT[$ALIAS]:-?}"
-    echo "Thinking: ${LA_THINK[$ALIAS]:-?}"
+    echo "Thinking: $LOCAL_THINK_RESOLVED$LOCAL_THINK_NOTE"
     roles="$(la_roles_for_alias "$ALIAS")"
     [ -n "$roles" ] && echo "Roles: $roles" || echo "Roles: untagged"
     # Show precedence chain

@@ -1,3 +1,518 @@
+## [0.46.2] — 2026-10-26
+
+User report: backend upgrades still failed and DeepSeek V4 Flash coder still died on the old
+409, although both had "been fixed". Every earlier fix had landed; each missed the path that
+actually failed. Three root causes, each verified live and pinned by a test watched failing.
+
+### Fixed — an upgrade offer replayed a deleted worktree's manager
+
+`backend_upgrades.py --check` stored the full argv, absolute paths included, in the
+machine-global pending list. A check run from a since-deleted worktree left
+`…/free-agents-moespresso/install/manage-backend.py` there; every csl start replayed it
+(`Errno 2`) and the failure kept the dead offer pending. Versioned-venv offers are now rebuilt at
+prompt time from this checkout's manager: state records WHAT to upgrade, never WHERE the code
+lived.
+
+### Fixed — venvs were built on Python 3.15, where torch has no wheels
+
+Homebrew moved `python3` to 3.15. The picker runs the manager as `python3`, `choose_python()`
+took `sys.executable` first, and the rapid-mlx venv died on `No matching distribution found for
+torch>=2.3.0` (2026-10-23, 2026-10-26). `BackendManager.PYTHON_MAX` caps the implicit choice
+(rapid-mlx, vllm-mlx, litellm, MoEspresso: 3.14), falling back to 3.14/3.13/3.12 and naming the
+ceiling when only newer Pythons exist; an explicit `--python` / `LA_BASE_PYTHON` still wins.
+vllm-mlx and litellm drop private choosers that shadowed the base one (and ignored
+`LA_BASE_PYTHON`). The chooser now returns the stable symlink it found
+(`/opt/homebrew/bin/python3.14`), not its Cellar patch keg, which `brew cleanup` deletes after
+the next patch upgrade — the live rapid-mlx-0.16.1 venv was one cleanup away from breaking.
+
+### Fixed — `brew upgrade && brew upgrade --greedy && pipx upgrade-all` cannot move litellm or MoEspresso past 3.14
+
+User decision: neither ever runs on Python >= 3.15; litellm stays on its newest release;
+MoEspresso takes 3.x patches and never 4.x (4.x cannot load the DeepSeek V4 package).
+
+- **litellm (pipx):** `pipx upgrade` keeps a venv's interpreter, so it is safe — but pipx's
+  default is now 3.15, so a reinstall would not be. A venv found on > 3.14 is offered
+  `pipx reinstall --python <3.14> litellm` (newest release, injected packages kept). The
+  `pipx install` hint names `--python python3.14`.
+- **MoEspresso (brew `@3`):** installed **pinned**, so a blanket `brew upgrade` skips it. Its
+  offer is the one route that moves it — unpin, upgrade, re-pin — and is held when the formula
+  now depends on `python@>3.14`; `install` refuses such a build before brew runs.
+
+### Fixed — the weight-format gate stepped aside for an alias pinned to oMLX
+
+0.45.0 let a foreign-format artifact through `--gate` whenever a capable MoEspresso existed,
+assuming it would be "launched by that backend". Both callers ask on behalf of an MLX engine;
+the `deepseek-v4-flash-0731-coder` row was pinned `omlx`, so oMLX loaded 53 GB and the session
+got the original causeless 409 — and 0.44.2's clear refusal never appeared. An installed
+MoEspresso now changes the remedy, not the verdict: the refusal names it and the one-word fix
+(`serve moespresso`, or `auto`).
+
+## [0.46.1] — 2026-10-26
+
+### Fixed — the picker no longer crashes on a keystroke mid-load
+
+`RuntimeError: Set changed size during iteration`, user-reported and reproducible
+(reported against 0.44.1, still present on 0.46.0): typing in the remote picker's
+live search while the provider catalogs were still loading killed the process, and
+so did simply clicking "choose model" without waiting. `catalog_kind_needed()`
+iterated `self._catalog_stale` and discarded dead providers from that same set
+inside the loop. The fix is a snapshot — which also makes the loop immune to a
+re-entrant mutation from the refresh it triggers mid-loop.
+
+### Fixed — the remote catalog cache was being overwritten with test fixtures
+
+Root cause of the reported "nvidia starts with 9, gemini with 5" symptom, and it
+was never the caching. Four test files called `set_catalog()` — which WRITES the
+on-disk cache — without isolating it, so running the suite left `cerebras.json`
+holding the `qwen-3.8-27b` fixture from
+`tests/test_remote_catalog_accordion.py:152`, `mistral.json` holding that file's
+three-row fixture, and groq/gemini one each. The picker then painted those partial
+lists as "cached" on first show and replaced them only when the group was opened —
+exactly the reported behaviour. The mechanism was never broken; the disk held
+fixtures. The four files now isolate the cache the way
+`tests/test_new_features.py` and `tests/picker_harness.py` already do, and the
+poisoned files were removed so those providers re-fetch live.
+
+### Fixed — a red test shipped in three releases, and a cycle count was hardcoded
+
+`RUNTIME_BACKENDS` was missing `moespresso` (since 0.45.1), so the contract test
+against `manage-backend.py`'s registry was RED in 0.45.0, 0.45.1 and 0.45.5 — it
+was never run. Its cycle assertion also carried a hardcoded `% 5`, which a sixth
+backend silently breaks; it is `len(RUNTIME_BACKENDS)` now.
+
+### Changed — llama.cpp prefers Homebrew
+
+User decision: use the brew install rather than the manual one. The manager
+already READ `brew list --versions llama.cpp`, but `install_version()` only ever
+fetched a GitHub release into `~/.local/llama-cpp/<version>/`, so two copies
+could coexist and `brew upgrade llama.cpp` did nothing for the backend
+free-agents resolves. Homebrew install now wins when brew has the formula; the
+GitHub release remains the fallback for a revision brew does not carry, and
+validation accepts either so preferring brew cannot orphan an install that
+already works.
+
+`--dry-run` also claimed it would install `b5000` into `/opt/homebrew/bin` — the
+requested version printed next to a target chosen for a different route. A manager
+can now report `effective_version()`, and the CLI prints it: `b5000` no longer
+appears beside a Homebrew prefix that holds 0.7.0. Other managers are unchanged
+(identity default).
+
+Still open, deliberately: the picker's `(N listed)` and "visible/hidden" counts
+count the agent roster, not the catalog models, so they do not yet show the full
+sum over the providers the user has keys for. That is a design change (fetch
+policy on a first run), not a defect — waypointed rather than half-built.
+
+## [0.46.0] — 2026-10-26
+
+### Added — C0: a launch carries its first prompt; the launch-refusal guard; handover verify
+
+- **`remote-session.sh --prompt-file <path>` / `--prompt <text>`**: the launch's first prompt,
+  passed to claude as its positional initial prompt (the file's CONTENT is read and passed —
+  the path never reaches claude). A launch without its first prompt yields an idle session
+  (measured twice on 2026-10-25 — the Step 5 launch, then the GLM launch that motivated
+  handoff item C0). Validation happens at parse time, BEFORE any catalog or proxy work: a
+  missing, empty or whitespace-only file is refused with its path named (C0c), as are the
+  mutually-exclusive pair and prompt flags on a non-launch mode. `--dry-run` names the prompt
+  SOURCE (file path or char count), never the content.
+- **`guard-own-endpoint.py` blocks an agent-side launch without a prompt** (C0a): the alias
+  position is what is detected, so every route matches (direct, `sudo-in-terminal.sh
+  --command`, osascript, `open -a Terminal`); `--list/--help/--dry-run/--verify/--models/
+  --inventory/--stop/--swap-model` stay allowed. The user's own picker/shell launches never
+  pass through the hook. Proven by mutation: removing the check flips the four should-block
+  cases back to allowed.
+- **`bin/handover-verify.sh`** (C0b): a launch's verify proves the first prompt ARRIVED — a
+  transcript for the new session's sessionId (read from `~/.claude/sessions/<pid>.json`,
+  found by globbing the projects root, never by guessing the project dir) containing the
+  handoff path — instead of the old `lsof -sTCP:LISTEN`, which was true for an idle session
+  and reported success on the failure.
+- **Skill bodies**: `free-session-handover` (launch with `--prompt-file`; verify via
+  `handover-verify.sh`; never type a handover into an existing session's terminal; log
+  progress at every receipt, not per batch), `isolate-parallel-work` (one goal-holder per
+  worktree), `guard-shared-runtime` (make-before-break).
+- Tests: `tests/test_c0_prompt_launch.sh` (26 checks — validation, help, dry-run surface,
+  a stub-claude argv proof through the REAL launch choreography via the documented
+  LA_LITELLM_CMD stub seam, and the handover-verify cases) and 14 new guard self-test
+  cases; the launch check proven by mutation.
+
+## [0.45.5] — 2026-10-26
+
+### Fixed — an occupied port is named; dry runs stop writing; one installer, not two
+
+Four defects found while shipping and dogfooding 0.45.0–0.45.4, each verified by a
+test watched failing first.
+
+- **"Port N busy serving ''"** — the occupied-port message used `CURRENT_MODEL`,
+  parsed from `GET /v1/models`, which MoEspresso does not implement; so for that
+  backend the message named nothing and a declined reuse was a dead end. The port
+  scan already read the meta file moments earlier for the reuse check, so the
+  alias (then the model-dir basename) is now the fallback. This helps every
+  backend whose model list fails to parse, not only MoEspresso.
+- **Bottle backends promised venvs.** `VenvMixin.target_for` is what
+  `install-backend.sh --dry-run` reports, and every Homebrew-bottle manager
+  inherited it, so `--backend omlx --dry-run` claimed `~/.venvs/omlx-0.7.1` — a
+  path that is never created. oMLX and MoEspresso now report the binary that will
+  exist. llama.cpp is deliberately NOT in that set: it unpacks a GitHub release
+  into `~/.local/llama-cpp/<version>`, so its target is neither a venv nor a
+  bottle path — a real but separate gap, not half-fixed here.
+- **A `--dry-run` that writes.** `install-backend.sh` ran `chmod +x` on
+  `manage-cuda-backend.py` on every invocation, `--dry-run` included, so a
+  read-only probe left the file dirty (100644 → 100755) and it read as a mystery
+  uncommitted change across several sessions. The chmod now sits behind the
+  dry-run guard; the real install path still chmods, asserted by the same test.
+- **`LA_MOESPRESSO_BIN` set-but-empty meant "discover" in bash but "none" in the
+  Python detector** — two implementations disagreeing about whether a binary
+  exists, which is how a gate and a launcher can give opposite answers about the
+  same model. Bash now matches Python. The tests asserting it had shipped in
+  0.45.0 while the fix had not, so this also closes a test that could only fail on
+  a machine with the runtime installed.
+
+### Changed — releases ship ONE installer
+
+`install-free-agents.sh` superseded the `.command` name in 0.29.3; shipping both
+was the same bytes under a legacy name and offered no benefit, so the dual upload
+is dropped (user decision 2026-10-26). A stale
+`.../releases/latest/download/install-free-agents.command` link will 404 from this
+release onward — accepted deliberately and recorded in all three places the
+mechanism lives: `.rtc/pre-package.sh`, the `rtc-ship.json` asset glob, and the
+(unversioned, out-of-repo) `~/.claude/scripts/fa-ship.sh`. `pre-package.sh` now
+also deletes a stale `.command` from `dist/`, and its stdout is no longer
+discarded — the blind spot where a packaging step that died silently looked
+identical to one that ran quietly.
+
+## [0.45.4] — 2026-10-26
+
+### Added — `la-evict` targets one known port, and the ladder is three steps deep
+
+The eviction fallback could only rank-and-sweep. It now takes an explicit target and walks a
+documented escalation ladder:
+
+- **`--port N` (repeatable, additive).** Evicts exactly the named ports, in the order given. It
+  is orthogonal to the ladder: any number of `--port` invocations leave the bare-run tier
+  exactly where it was, and a `--port` run never writes escalation state — a known target must
+  not consume an escalation step. A port outside the configured range is refused (exit 2)
+  before any state is touched.
+- **The three-step ladder, advanced only by an argument-less run.** Tier 0 sweeps every
+  unattached (orphaned) server in one pass and WARNS which ports are still attached; tier 1
+  evicts one server by the existing ranking and holds back (exit 3) when the sole candidate is
+  attached; tier 2+ is the emergency tier, where attached and unrecognised listeners become
+  eligible — still one server per run, never a sweep.
+- **The LiteLLM proxy band (4141–4151) is hard-excluded**, with no environment override: an
+  operator (or a stale profile) pointing `LA_PORT_START` at 4141 must not be able to kill a
+  proxy that live sessions depend on. Killing one reads as "Connection refused" from every
+  session at once.
+- **Honest exit codes.** 4 for a `--port` request with no listener, 5 when a `--port` run
+  stopped nothing, 3 for the tier-1 hold-back, 2 for usage errors decided before any work. A
+  `--port` request never ends in the generic success line.
+- **PID-reuse re-check and a ports-before snapshot**, so a refusal or a failed kill is never
+  reported as a freed server.
+
+### Fixed — a leftover oMLX server was classified `unknown`
+
+A hyphen is not a space. The classifier knew `omlx serve` (the Homebrew 0.7.1 entry point,
+itself a python3 shim) and `omlx.cli` (the module), but not the standalone `omlx-server` binary
+an older install leaves behind. Measured 2026-10-25 by the Qwen MTP smoke test: two live
+`omlx-server` processes held the local-inference ports, were classified `unknown`, and removing
+either required `--allow-unknown` — the flag that means "I have already decided to risk this".
+An orphan sweep should not need that flag for a backend we ship; the case now also matches
+`omlx-server` and `omlx_server`.
+
+Both changes are pinned by the suite (126 integration tests) and mutation-verified: a forced
+tier that bypasses the tier-1 guard turns the new assertions red, and so does the classifier
+with the `omlx-server` pattern removed.
+## [0.45.3] — 2026-10-26
+
+### Added — the dispatch-rule memories now live in the skills they govern (rule-migration item D)
+
+Four standing-rule memories moved into the bodies of the skills that own their task, per the
+Phase-7 method (a rule frees memory-index space only when it lands in an existing skill's body):
+
+- **offload-to-local** gains the replace-agents shape-check: the `FA_REPLACE_AGENTS` hook's
+  substitution does not verify that a stateless dispatch can do the work — check the shape
+  yourself (measured: a file-reading review re-routed to a stateless dispatch returned narration
+  and no findings).
+- **verify-delegated-work** gains the dispatched-review protocol: chunk to ≤~650 lines at commit
+  boundaries and serialize (8 parallel big-diff validators: 4 of 8 died on timeouts/429s);
+  findings are hypotheses to verify by execution; split them into *names* (checkable, often
+  right) vs *policy* (needs premises a dispatch does not have); and a uniformly weird result
+  indicts the dispatch pipeline, not the model.
+- **brief-the-delegate** gains the empty/absent/malformed-input brief line, a ground-truth-your-
+  expected-values rule (measured: a fixture asserting the 2nd prime above 1000 is 1039 — it is
+  1013), and the Council pattern (planner + cross-family judge, decide independently).
+- **compose-the-payload** already carried the placeholder rule; no change needed there.
+
+The four source memories are archived (`consolidation-20261024-wys/*.p7`) and their inbound
+links repointed; the memory index shrinks accordingly. The announce rule was already enforced
+by the offload nudge hook (grep-verified) — no new hook needed.
+
+## [0.45.2] — 2026-10-26
+
+### Fixed — a graceful-SIGTERM proxy held the port through the swap's rebind
+
+Live dogfood hit it twice on 2026-10-25: the mid-flight swap SIGTERMed the old
+LiteLLM proxy, waited 30 s for the port to free, and spawned the new proxy onto a
+port the old one still held — uvicorn finishes in-flight work before exiting, so a
+proxy mid-shutdown keeps its port for minutes. The rebind then failed the live
+probe (000) and the automatic revert put the old model back, or worse: the old
+proxy answered both probes and the swap reported a silent wrong-model success.
+
+`swap_model` now gives the graceful exit a tunable grace (`LA_SWAP_TERM_GRACE`,
+default 8 s) and SIGKILLs a proxy that ignored TERM — SIGKILL is the only prompt
+kill — then rebinds only once the port is actually free. The swap stub suite
+gains a lazy ignore-term control and a test that was watched to fail first (the
+old code answered both probes with the OLD model), passes with the fix, and
+fails again with the escalation mutated out.
+
+## [0.45.1] — 2026-10-26
+
+### Fixed — the MoEspresso dry run told the user a venv would be created
+
+Found by dogfooding the installed 0.45.0: `install-backend.sh --backend
+moespresso --dry-run` reported `"target": "~/.venvs/moespresso-3.0.0"`, a path that is
+never created — the real install runs `brew install steadfastgaze/tap/moespresso@3`. The
+base class's `target_for` comes from VenvMixin and only rapid-mlx overrides it, so every
+non-venv manager inherits a venv-shaped answer. MoEspresso now reports the binary that will
+exist. oMLX and llama.cpp are bottles with the same gap and are left for their own change.
+
+## [0.45.0] — 2026-10-26
+
+### Added — MoEspresso as a first-class backend, provisioned with every install
+
+MoEspresso serves *MoEspresso-packaged* models: artifacts whose weights are a custom `mxtq`
+TurboQuant serialization (`weight_format: "mxtq"`, `*.tq_bundle` keys) that no MLX engine can
+read. The 0.44.2 gate proved that the hard way — it refused such an artifact with "no installed
+backend can load it", which was true then and is now incomplete. This release closes the gap.
+
+**Provisioned, not just detectable.** `install-backend.sh` already provisioned every backend the
+launcher can drive, so MoEspresso joins that family: `install/managers/moespresso.py`, registered
+in `manage-backend.py`, added to `--all`, `--backend moespresso`, the version table and the usage
+text. The "check for updates later" hint was a sixth hand-written copy of the roster that had
+already gone stale for every future backend, so it now derives from `manage-backend.py list`.
+
+**It is pinned to the 3.x line, and the ceiling is enforced in one place.** Measured: 4.0.0 refuses
+a DeepSeek V4 package with `Error: unsupported required package feature` (the manifest requires
+`calibration` + `deepseek_v4_per_layer_experts`; 4.0.0 self-describes as "native Qwen
+inference"), and it stays linked at `/opt/homebrew/bin/moespresso` even after
+`brew install moespresso@3` — Homebrew reports the executable as shadowed. So:
+
+- install and validate use the `@3` formula only; `brew install moespresso` is never invoked;
+- binary resolution is by **keg path**, newest first by `sort -V`, with the unversioned PATH entry
+  accepted only when the binary itself reports 3.x;
+- `get_available_versions`, `check_updates` and `install_version` are bounded by that ceiling, so
+  the weekly check cannot propose an upgrade that would break the only model the runtime serves. A
+  past-ceiling install raises rather than clamping — a silent clamp reports success for something
+  the caller never asked for. A machine behind on 3.x patches still gets them.
+
+**Three launch facts were measured against the real server, not assumed:**
+
+1. **The spoof id is irrelevant** — `/v1/chat/completions` accepts and echoes any model name, so
+   the oMLX per-port symlink farm is not built and the package dir is served directly.
+2. **`GET /v1/models` does not exist** (`{"error": ...}`). Readiness therefore polls a *completion*
+   rather than the model list — the shared `wait_ready` never returns for this backend — and the
+   healthy-reuse check keys on the meta file, because the advertised-id match can never succeed.
+   Without that, every launch would start a fresh 57 GB server.
+3. `LA_MOESPRESSO_BIN` set-but-empty means "this machine has no MoEspresso" in bash exactly as in
+   the detector; a disagreement there gives a gate and a launcher opposite answers about one model.
+
+`la-detect-backend.py` now resolves a foreign-format artifact to `moespresso` when a capable binary
+is present (asking the binary its version, never assuming it from the path), and `csl` labels it
+`moespresso (auto)` rather than a backend that cannot load it. `--gate` steps aside for exactly
+those artifacts, so 0.44.2's refusal no longer blocks the models this release enables.
+
+## [0.44.2] — 2026-10-25
+
+### Fixed — an unlaunchable model was offered, then failed with a 409 that named no cause
+
+Reported live: launching the local `deepseek-v4-flash-0731-coder` session retried ten times and
+died on `409 Model 'claude-opus-5-5' is unavailable after a previous load failure`. The server log
+carried the real story — `ValueError: Received 46 parameters not in model: embed.biases,
+embed.scales, head.scales, model.layers.N.ffn.experts.tq_bundle` — after 53 GB of weights had
+loaded.
+
+**Root cause: two independent questions were collapsed into one.** `la-detect-backend.py` decided a
+model's backend from its *architecture* (`model_type=deepseek_v4` → oMLX's `mlx_vlm` has it), which
+was correct. It never read the weights' *serialization*: that artifact declares
+`weight_format: "mxtq"` (2-bit MoEspresso TurboQuant bundles) and carries `*.tq_bundle` keys, which
+no installed engine reads — oMLX 0.7.1 has no reference to either. The catalog row has said
+`MoEspresso>=2.1` in a **required** field since 2026-09-01, and no code ever read it. The verdict
+`omlx` was therefore a confident lie that only a 45-second load could disprove.
+
+Three layers, each with its own test:
+
+- **`la-detect-backend.py` reads the weight format now**, from two places that cannot both be
+  missing: `config.json`'s `weight_format`, and the safetensors header keys. A foreign
+  serialization yields `unsupported` with the format named — not `omlx`. Matching is deliberately
+  on the `.tq_bundle` suffix alone: plain MLX quantized layers legitimately write `*.scales` and
+  `*.biases`, so matching those would gate out every 4-bit model on the machine (a 43-artifact
+  survey confirmed exactly one declares a `weight_format`). The reason line carries the runtime
+  the catalog says the artifact needs, read from the catalog rather than duplicated here.
+- **`local-llm-hotswap.sh` refuses before it starts anything.** The gate sits *before* the port
+  scan, next to the existing KV refusal, so a refusal can never take a running server down — the
+  mirror image of the RAM preflight, which is deliberately after it because reusing a live server
+  loads no weights. `LA_GATE_WEIGHT_FORMAT=0` is the documented escape hatch.
+- **`la_finalize_serve` warns for every other route** (the auto-mode launchers, the prewarm gate,
+  `csl`'s offer) at config-load time, one spawn for the whole roster. A warning by design: failing
+  the load would break every listing tool for one unlaunchable artifact.
+
+`--gate` is a new mode of the detector (`la-detect-backend.py --gate <folder>`): it prints only
+what no installed backend can load and exits 3, skipping the engine probes a launcher does not
+need. The verdict therefore has **one** implementation and one set of tests, on every route.
+
+Verified by mutation: neutering the format check turns the new detector tests red (2), and removing
+the hotswap gate turns the new shell test red (2) — a negative result that cannot show itself.
+
+## [0.44.1] — 2026-10-25
+
+### Fixed — the prefill tool's first live run found two defects
+
+Running the Task-10 tool against the real lane (scratch port, shared limiter) found what the
+stubbed tests could not:
+
+- **A timed-out launch orphaned the launcher's proxy.** The tool's subprocess timeout killed
+  the `remote-session.sh` wrapper but not the LiteLLM proxy it had spawned — the orphan stayed
+  on its scratch port, ignored SIGTERM, and had to be SIGKILLed by hand. The launch now runs in
+  its own session and the timeout kills the whole process GROUP, proxy included.
+- **The 900 s default was a false-failure generator under load.** The shared 40 RPM limiter
+  queue is the reality of a machine carrying live sessions; the default is 1800 s now, and
+  `FA_PREFILL_TIMEOUT` tunes it. The defect was found the honest way: the run itself, not a
+  review of the run.
+
+The re-ship gate surfaced two more contention finds, both fixed:
+- **`scripts/package-release.sh` ignored `--help` and ran its real work** (packaging, `rm -rf
+  dist` and all) — under load the help checker's alarm caught it (exit 142). It now parses
+  arguments before any work: `--help` prints the usage, an unknown flag refuses with exit 2,
+  and the no-argument path is unchanged.
+- **The PTY pilot of the live-filter test** (`test_box_opens_with_the_list_and_filters_from_the_first_character`)
+  read the rows immediately after a fixed 0.15 s key gap — under a loaded gate the app had not
+  processed the key yet and the "filters from the first character" assertion failed on the
+  unfiltered list. The same condition-based pattern as the other flake fixes: wait for the
+  discriminating state (the Gemini group folding away, then reappearing), never a fixed sleep.
+- **The smooth-bucket contract test** (`test_8_one_request_books_one_slot`, mode
+  `smooth_bucket`) assumed "refill during the request adds a fraction, never a whole token" —
+  at the default 40 RPM that is ~0.67 tokens/s, and a post-consumption write-back lagging 1.5 s
+  under a loaded gate refills the consumed token and reads 6 instead of 5 (measured twice
+  today, once blocking a release). The test now pins `LA_NVIDIA_RPM=1`: one token of refill
+  takes 60 s, no realistic lag crosses it, capacity (6) is independent of rpm, and the
+  assertion is unchanged.
+
+## [0.44.0] — 2026-10-25
+
+### Added — the session thinking toggle, both lanes, and the dispatch thinking policy
+
+The `fa-thinking-toggle` waypoint (user design 2026-10-24): one remembered session choice,
+applied everywhere a session or dispatch starts, with model constraints stated honestly.
+
+- **Picker rows `j` on both lane screens** (after effort and temperature). The default —
+  never touched — is thinking ON for session launches; the row cycles ON (default) ↔ OFF and
+  persists through the same store as effort and temperature.
+- **The launchers consume `LA_THINKING_OVERRIDE`** (the picker always exports it: None and
+  True both mean ON). `remote-session.sh` resolves alias suffix → override → constraint in
+  one place used by the main launch AND `--swap-model`; `config-lib.sh`'s `la_lookup` is the
+  local lane's one consumption point (launcher, hotswap, RAM preflight and session identity
+  all read through it), and hotswap's profile mode respects the session choice over the
+  profile's THINK. An invalid override value is ignored loudly, never silently honored.
+- **The GLM-on-NIM constraint is stated, not papered over.** GLM's thinking template always
+  runs (chat_template_kwargs inert, measured 2026-10-13): an OFF choice there travels as
+  `reasoning_effort low` (≈0 reasoning tokens) and the banner, dry-run, picker info box and
+  dispatch note all say so instead of claiming a disable. Nemotron honors enable_thinking
+  both ways in a session; a stateless dispatch cannot send that kwarg, so an OFF dispatch to
+  Nemotron is reported `thinking_overridden: true`.
+- **Dispatches get a policy, not a toggle**: `dispatch-preferences.json` entries take
+  `"thinking": "on"|"off"|"auto"` (absent = auto), resolved by role first — reasoner/validator
+  dispatches think, operator/utility do not (the council's cross-family validator keeps its
+  thinking) — model constraints last, reported in the result JSON as
+  `thinking` / `thinking_overridden` / `thinking_note`.
+- **Store schema 6 → 7** (`session-menu.local.json` gains the `thinking` section). Schema-6
+  files load unchanged; a thinking write bumps the version so an old reader refuses loudly
+  instead of half-reading.
+
+Independent cross-family review (StepFun Step 5, 2026-10-25) — every finding verified against
+the code; two confirmed and fixed, one was a real miss:
+- **The picker wiring was missing** (the review's best catch): the Settings fields existed but
+  `session_picker.py` never hydrated the stored value into the app, nor wired
+  `on_thinking_saved` to the store — the toggle would have reset on every picker restart.
+  Now wired, with an end-to-end pilot test (store → hydrate → cycle → persisted).
+- The GLM notice no longer overclaims: an explicit `--effort` wins over the low default, so
+  the notice says "unless you set an explicit --effort" instead of an unconditional "applied".
+- The dispatch lane discloses a GLM OFF on stderr just like the session banner does (the
+  note prints whether or not the choice counts as overridden).
+Three other findings were checked and closed as false positives or accepted behavior (the
+swap path's `prov`/`model` are established locally before the call; the store's tuple change
+has no external unpackers; a stored explicit True cycles cleanly back to the default).
+
+Tests at every layer: the store round-trip and refusal paths, the picker rows/env/info box,
+`_resolve_thinking` (defaults, flips, the GLM constraint, the invalid-value warning),
+`la_lookup` (both directions, sandboxed registry), the dispatch policy (role defaults, the
+GLM low dial, the Nemotron override, argv + JSON), each failing before its change.
+
+### Fixed — the contention-flaky gate tests (the `fa-gate-test-flakes` waypoint)
+
+Three tests made the gates a retry lottery whenever the machine carries live sessions (each
+passed solo every time; 0.43.2 needed 3 ship attempts, 0.43.4 needed 3, 0.43.6 needed 2):
+
+- **`test_5_recent_activity_becomes_quiet`** — the fake tmux reports integer-second activity
+  and the injector adds a 1.0 s truncation grace, so quiet needed ≥1.2 s of the test's 1.5 s
+  budget; on a loaded runner the four fake-tmux spawns per loop overran it and the injector
+  exited 3 (a false "session busy"). The activity is static there, so quiet always arrives:
+  the budget is pure false-failure surface, raised to 10 s (test_4 keeps 1.5 s — its timeout
+  IS the behavior under test).
+- **`test_librarian_retries_after_a_429`** (the plan's own documented flake) — the recovery
+  raced a polling thread against the dispatcher's immediate retry (cooldown=0): the retry
+  could take a second 429 before the poller woke, pushing hits to 3. The fake now serves a
+  deterministic per-hit sequence (429 then 200), no thread, and the test's env writes are
+  restored instead of leaking into later tests in the same worker.
+- The third waypoint item (RemoteLiveFilter) was already fixed in 0.43.3 and stands as the
+  pattern both fixes follow: replace a wall-clock race with a deterministic condition.
+
+### Added — the prefill measurement tool (cloud-screen plan Task 10)
+
+`bin/fa-prefill-measure.py` measures a session's true prefill on a FREE lane only: one headless
+`claude -p` through the lane's own launcher (never a bare claude — a nested one inherits the
+ambient base URL and bills the paid gateway, so a remote-looking `ANTHROPIC_BASE_URL` is
+refused before anything launches), usage summed from the result JSON, cached under lane +
+levers + an inputs hash (CLAUDE.md, settings, `.claude.json`, installed plugins) so a stale
+number cannot masquerade as current. Known lever: `mcp=all|none` (→ `LA_REMOTE_ENABLE_MCP`).
+The live measurement receipt lands with the Task 11 level proposal, which stops for user
+approval per the plan.
+
+### Docs — the JoyIA safeguards pass-through request (DRAFT, not sent)
+
+`docs/joyia/2026-10-25-safeguards-passthrough-request.md` — the [decided] follow-up to the
+not-eligible verdict (0.43.5): the gateway should pass `safeguards` / `safeguard_results`
+through unchanged so auto mode's safety checks stop billing as normal token usage. Evidence
+cited from the cached verdict; presented to the user for sending — this session sends nothing.
+
+## [0.43.6] — 2026-10-25
+
+### Fixed — the Phase-4 live dogfood's findings
+
+- **`--swap-model` was unreachable from the CLI.** The no-alias picker block exec'd
+  session-picker before the swap-model dispatch — the rescue tool died at "needs an
+  interactive terminal" headless, and even interactively the picker replaced the process.
+  Found by the Phase-4 live dogfood (the stub tests called swap_model() directly). Special
+  modes now dispatch before the picker block; a CLI test proves the swap path's own refusal
+  is what a bad port gets.
+- **The swap pre-flight's scratch port comes from a scratch band now.** It took free_port()
+  from the live session range — the live dogfood watched it land on 4144, inside
+  4141-4151, where the next live session could pick it. swap_scratch_port() serves a band
+  past the configured live max; mutation-checked.
+- The live dogfood also verified the headless free-lane passthrough end-to-end (proxy up on
+  a scratch port, real generation through GLM 5.3 Flash thinking, clean proxy teardown) —
+  the free-lane measurement vehicle Release 2 needs.
+
+## [0.43.5] — 2026-10-24
+
+### Docs — the eligibility verdict, measured and documented
+
+- **NOT-ELIGIBLE on the JoyIA gateway: auto mode's safety checks are billed.** The evidence is
+  cross-validated, not inferred: budget-tally's 9-day least-squares fit against the gateway's own
+  cost counter ($0.0265 per classifier call, rms $2.85/day, 2026-09-15..26), auto-mode-classifier
+  error dumps measuring 60–97k tokens per call, and today's ledger estimate (0.0795 = exactly
+  3 × 0.0265). Three user-authorized probe runs (~$0.10) showed no `system` notice — a successful
+  classifier round-trip is silent, so the stream alone can never prove eligibility; the spec's
+  [verify] branches are answered in §8b and the verdict is cached with its evidence at
+  ~/.local/state/free-agents/eligibility.json, so the gateway cost box (A3) now shows on this
+  machine. V1's Agent-half finding is documented alongside.
+
 ## [0.43.4] — 2026-10-24
 
 ### Fixed

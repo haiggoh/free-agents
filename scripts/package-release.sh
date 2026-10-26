@@ -1,8 +1,22 @@
 #!/usr/bin/env bash
 # Package free-agents plugin for GitHub release distribution
 # Creates a tarball that users can extract into ~/.claude/plugins/free-agents/
+#
+# Usage: package-release.sh [--help]
+#
+# No arguments: builds dist/free-agents-<VERSION>.tar.gz from the repo's TRACKED files.
+# Environment: none beyond the repo itself (VERSION file names the release version).
 
 set -euo pipefail
+
+usage() {
+    sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    -?*) echo "package-release.sh: unrecognised option: $1 (use --help)" >&2; usage >&2; exit 2 ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

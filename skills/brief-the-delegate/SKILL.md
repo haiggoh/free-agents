@@ -12,6 +12,11 @@ A stateless dispatch inherits no context. If you do not specify it, the delegate
 2. **Boundaries:** Define what is in scope and what is out.
 3. **Locale/Format:** Specify date formats, number formats, or language.
 4. **First-vs-last-write-wins:** If multiple sources conflict, specify which takes precedence.
+5. **Empty / absent / malformed input:** State what the output should be when input is missing,
+   empty, or not the expected shape — a silent gap here becomes a plausible guess asserted as fact.
+6. **Ground-truth every `expected` value yourself:** never freeze a fixture on the delegate's own
+   arithmetic or word-knowledge answers — compute the right answer independently before shipping
+   the fixture (measured wrong answers: "the 2nd prime above 1000 is 1039" — it is 1013).
 
 ## Use placeholders for bulk content
 If the delegate needs to generate large amounts of text (e.g., boilerplate, lists):
@@ -35,6 +40,16 @@ If the delegate needs to generate large amounts of text (e.g., boilerplate, list
   ]
 }
 ```
+
+## Briefing a council (planner + cross-family judge) for lasting decisions
+For a *lasting* decision or a plan — not a mechanical edit — convene two delegates instead of one:
+1. **Planner:** gets the question plus the full relevant context; ask for the plan and its reasoning.
+2. **Judge:** gets the *plan* plus adversarial criteria, and must come from a **different model
+   family** than the planner — a same-family judge shares the planner's blind spots.
+3. **Decide independently:** synthesize both outputs with your own reasoning; neither delegate's
+   output is the decision, and a judge that merely agrees is not a check. If no cross-family model
+   is available for the judge role, record that in the decision rather than treating the review as
+   cross-family.
 
 ## Fold in standing rules (if available)
 If a standing-rules index for delegated work exists (e.g., from a separate plugin), fold the relevant lines into the prompt. This skill does not maintain the index; it only uses it.

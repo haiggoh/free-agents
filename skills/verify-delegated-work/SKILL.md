@@ -47,6 +47,30 @@ Verification is cheap, but infinite loops are not. If a delegate fails verificat
 
 Do not keep retrying the same delegate with the same briefing. The compute is free, but your time is not.
 
+## Dispatched reviews: chunk, serialize, and treat findings as hypotheses
+When the verification itself is dispatched (a big diff sent to validators), **chunk it to
+≤~650 lines split at commit boundaries and run the chunks ONE at a time.** Measured: eight
+PARALLEL validator dispatches of 600–3100-line diffs — only 4 of 8 returned (read timeouts,
+503s, 429s, the wall-clock cap); the same reviews re-run as small serialized chunks mostly
+succeeded.
+
+Returned findings are **hypotheses, not verdicts** — check each by execution before acting on
+it. Measured: a review predicted "this test FAILS" for a defect that actually passed
+*vacuously* — right defect, wrong symptom; only running it told the difference. Split what
+comes back into **names vs policy**: claims a reviewer could *check* (does this symbol, file or
+flag exist? does this command run?) are worth re-verifying and are often right; its judgements
+about *whether something is allowed* are unreviewed opinion unless it had the project's
+premises. And when a search comes back empty, re-grep the *concept* with several precise
+patterns before believing it — one broad term manufactured three phantom "violations" that a
+ten-pattern re-check disproved.
+
+**A uniformly weird result means a DISPATCH bug, not a model failure.** If a provider returns
+non-JSON, empty output, or the same pathology across attempts, suspect the dispatch pipeline
+first — the same models run fine in real sessions. Diagnose the dispatcher (payload shape,
+parsing, effort/token settings) before concluding the model "can't do it", and never let one
+bad run demote a model: latency alone is not a failure signal either (long waits can be
+warm-up, not death).
+
 ## Universal application
 This skill applies to **any** handoff: local models, cloud subagents, or external scripts. The principle is identical: capture truth, delegate, compare, and enforce a ceiling.
 

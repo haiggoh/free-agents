@@ -96,6 +96,38 @@ def check_action_table(actions) -> None:
         seen[action.key] = action.label
 
 
+def thinking_constraint(provider: str, model_id: str, choice: bool | None) -> str | None:
+    """The picker-side mirror of the launchers' thinking-constraint table (waypoint
+    fa-thinking-toggle). Returns the notice to show when the remembered choice cannot be
+    honored as-is, else None. Measured facts only (remote-session.sh _model_param_lines):
+    GLM on NIM always runs its thinking template — chat_template_kwargs are inert
+    (2026-10-13) — so OFF cannot disable it; reasoning_effort low (≈0 reasoning tokens,
+    verified direct) is the closest the session gets. Nemotron honors enable_thinking both
+    ways; Gemini is disabled unless asked; other families take the choice. None (no choice)
+    never constrains: the default is ON and every model in the table runs with thinking."""
+    if choice is False and (provider or "") == "nvidia" and "glm" in (model_id or "").lower():
+        return ("GLM on NIM always runs its thinking template — the OFF choice cannot disable "
+                "it. The session uses reasoning_effort low (≈0 reasoning tokens, measured "
+                "2026-10-13); expect a short reasoning preamble.")
+    return None
+
+
+def thinking_row(s: Settings, key: str = "j") -> Action:
+    """The thinking toggle row: ON (default) ↔ OFF. The row stores only the two states that
+    differ behaviorally — None and True both launch with thinking ON — so cycling back from
+    OFF returns to the launch default rather than to a second, indistinguishable ON."""
+    def label():
+        return "ON (default)" if s.thinking_session is None else "ON" if s.thinking_session else "OFF"
+
+    def put(v):
+        s.thinking_session = v
+        if s.on_thinking_saved:
+            s.on_thinking_saved(s.thinking_session)
+
+    return setting(key, f"{ec.EMOJI_THINKING_STR} Thinking: {label()}", (None, False),
+                   lambda: s.thinking_session, put)
+
+
 # --- data --------------------------------------------------------------------------------
 @dataclass
 class LocalModel:
@@ -454,6 +486,11 @@ class Settings:
     local_temperature: str = sms.DEFAULT_TEMPERATURE["local_session"]
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
     lowkey_temperature: str = sms.DEFAULT_TEMPERATURE["lowkey"]
+    # Session thinking toggle (both lanes; waypoint fa-thinking-toggle). None = the launch
+    # default, which is thinking ON for session launches; True/False = a remembered choice the
+    # launchers apply via LA_THINKING_OVERRIDE (model constraints may override it, and the info
+    # box says so). Persisted by the Picker through on_thinking_saved -> sms.save_thinking_session.
+    thinking_session: bool | None = None
     rate_limiter: dict = field(default_factory=dict)
     memguard: dict = field(default_factory=lambda: dict(sms.DEFAULT_MEMGUARD))
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
@@ -485,6 +522,8 @@ class Settings:
     on_effort_saved: Callable[[str, str], object] | None = None
     # Called with (lane, value) when the user CONFIRMS a temperature change; persists it.
     on_temperature_saved: Callable[[str, str], object] | None = None
+    # Called with (bool | None) when the user changes the session thinking toggle; persists it.
+    on_thinking_saved: Callable[[bool | None], object] | None = None
     # Last launched model per lane (for R15: remember last launched)
     last_launched_model: dict = field(default_factory=lambda: {
         "local_session": None,
@@ -971,6 +1010,7 @@ class LocalScreen(Screen):
                     lambda: s.local_effort, lambda v: self._set_effort(v)),
             setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.local_temperature or '<provider default>'}",
                     TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v)),
+            thinking_row(s),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
@@ -1066,6 +1106,9 @@ class LocalScreen(Screen):
                "LA_ENABLE_MCP": "1" if s.enable_mcp else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
                "CSL_WATCH": "1" if s.watcher else "0"}
+        # The thinking toggle always exports: None (the launch default) and True both mean ON,
+        # so the launcher never has to guess the picker's intent (waypoint fa-thinking-toggle).
+        env["LA_THINKING_OVERRIDE"] = "false" if s.thinking_session is False else "true"
         # Use profile_id for the launcher if available, else alias
         launch_alias = mdl.profile_id if mdl.profile_id else mdl.alias
         argv = ["local", launch_alias, s.local_effort]
@@ -1282,7 +1325,11 @@ class RemoteScreen(Screen):
             self._catalog_pending.add(agent.provider)
             self._refresh_keep_open()           # show the loading row at once
             return f"rcat:{agent.alias}"
-        for prov in self._catalog_stale:        # cached rosters: one background revision
+        # Snapshot: the loop DISCARDS dead providers from _catalog_stale (below), and mutating a
+        # set while iterating it raises "Set changed size during iteration" — measured as a
+        # picker-wide crash (2026-10-25) whenever a re-render landed mid-load, because every
+        # keystroke in the live search re-runs this path.
+        for prov in list(self._catalog_stale):  # cached rosters: one background revision
             if prov in self._catalog_pending:
                 continue
             anchor = next((a for a in self.agents if a.provider == prov and self._visible(a)), None)
@@ -1324,20 +1371,26 @@ class RemoteScreen(Screen):
     def info_text(self, item_id: str | None) -> str:
         """The info box under the model list: the model's display name, its lane, and its
         short-form note (config/remote-model-notes.json), or a hint when nothing is pointed
-        at. Only models get a box — group headers and the no-keys instruction get the hint."""
+        at. Only models get a box — group headers and the no-keys instruction get the hint.
+        A model constraint on the thinking choice is appended, so the user learns BEFORE the
+        launch that the model overrides their toggle (waypoint fa-thinking-toggle)."""
         if item_id and item_id.startswith(CATALOG_PREFIX):
             parts = item_id.split(":", 2)
             if len(parts) == 3 and not parts[2].startswith("__"):
-                return (f"{model_names.readable(parts[2])}\n{parts[2]} · "
+                base = (f"{model_names.readable(parts[2])}\n{parts[2]} · "
                         f"{PROVIDER_LABELS.get(parts[1], parts[1])} catalog · "
                         f"Lane: {lane_for(parts[1], parts[2])}")
+                notice = thinking_constraint(parts[1], parts[2], self.settings.thinking_session)
+                return f"{base}\n{notice}" if notice else base
         agent = next((a for a in self.agents if a.alias == item_id), None)
         if agent is None:
             return "Hover or highlight a model to see notes about it."
         lane_line = f"Lane: {lane_for(agent.provider, agent.model_id)}"
+        notice = thinking_constraint(agent.provider, agent.model_id, self.settings.thinking_session)
         note = model_note(agent.alias)
-        return (f"{agent.display}\n{lane_line}\n{note}" if note
+        base = (f"{agent.display}\n{lane_line}\n{note}" if note
                 else f"{agent.display}\n{lane_line}\nNo notes for this model yet.")
+        return f"{base}\n{notice}" if notice else base
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings
@@ -1388,6 +1441,7 @@ class RemoteScreen(Screen):
                     effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v)),
             setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
                     TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v)),
+            thinking_row(s),
             Action("c", self._choose_model_label(), self._toggle_choose_model),
             # No "find model" action row (user, 2026-10-21): the filter box at the top of
             # the open model list IS the search — typing there filters live from the first
@@ -1488,6 +1542,8 @@ class RemoteScreen(Screen):
                "LA_DENY_GH_RELEASE": "1" if s.deny_gh_release else "0",
                "LA_CLASSIFIER_SOURCE": str(s.classifier_source),
                "CLOUD_BYPASS_PERMISSIONS": "1" if s.cloud_bypass_permissions else "0"}
+        # The thinking toggle always exports (both lanes): None/True = ON, False = OFF.
+        env["LA_THINKING_OVERRIDE"] = "false" if s.thinking_session is False else "true"
         return LaunchRequest("remote", argv, env, alias)
 
 
@@ -1937,7 +1993,10 @@ class MemoryGuardScreen(Screen):
 
 
 # install/manage-backend.py --backend choices; tests compare this against its registry.
-RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm")
+# ★ Keep in step with install/manage-backend.py's manager imports: adding a backend manager
+# without adding it here leaves the picker unable to name it, and the contract test below is the
+# only guard (it caught `moespresso` missing here for three releases — 0.45.0/0.45.1/0.45.5).
+RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm", "moespresso")
 # Per-version operations beyond install/validate/info, by backend: only the ones that backend's
 # manager actually implements (the base class raises "not supported"), so the menu never offers
 # a row that can only fail. Tests compare this against the managers' real overrides.

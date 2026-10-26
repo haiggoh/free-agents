@@ -31,6 +31,7 @@ class LitellmManager(BackendManager):
     DEFAULT_VERSION = "1.60.0"
     PACKAGE_NAME = "litellm"
     PYPI_URL = PYPI_URL
+    PYTHON_MAX = (3, 14)  # kept with the other venv backends; never a 3.15 venv (user 2026-10-26)
     VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:([a-zA-Z]+)(\d+))?$")
 
     def is_proxy(self) -> bool:
@@ -201,22 +202,6 @@ class LitellmManager(BackendManager):
         )
 
     # Helper methods
-    def choose_python(self, explicit: str | None) -> Path:
-        candidates: list[str] = []
-        if explicit:
-            candidates.append(explicit)
-        candidates.extend([sys.executable, "/opt/homebrew/bin/python3.12", "python3.12", "python3"])
-        for candidate in candidates:
-            resolved = shutil.which(candidate) if "/" not in candidate else candidate
-            if not resolved:
-                continue
-            path = Path(resolved).expanduser().resolve()
-            if not os.access(path, os.X_OK):
-                continue
-            if subprocess.run([str(path), "-c", "import venv"], capture_output=True).returncode == 0:
-                return path
-        raise ManagerError("no Python with the stdlib venv module was found; pass --python")
-
     def _package_inventory(self, python: Path) -> dict[str, str]:
         code = """
 import importlib.metadata, json

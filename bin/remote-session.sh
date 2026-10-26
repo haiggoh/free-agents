@@ -24,6 +24,9 @@
 #   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
 #   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
 #   remote-session.sh <alias> --effort LEVEL  # request low|medium|high|xhigh|max (omit = provider default)
+#   remote-session.sh <alias> --prompt-file <path>  # the launch's first prompt, from a file
+#   remote-session.sh <alias> --prompt <text>       # the launch's first prompt, inline
+#                             # (C0: a launch without its first prompt yields an idle session)
 #   remote-session.sh --inventory          # machine-readable roster for the picker (TSV)
 #
 # Environment:
@@ -40,6 +43,9 @@
 #   LA_CLASSIFIER_MODEL=prov:model  auto-mode classifier (-a once) on a DEDICATED free model, e.g.
 #                                 nvidia:nvidia/nemotron-3-super-120b-a12b (recommended; measured 3s/8s)
 #                                 unset = the session model answers claude-sonnet-5 (works, slower)
+#   LA_THINKING_OVERRIDE=true|false  session thinking toggle (picker `j`); unset = thinking follows
+#                                 the alias suffix (-thinking = on). A model constraint may
+#                                 override the choice; the banner says so when it does.
 #   LA_SUBAGENT_ROUTING=same|hybrid, LA_SUBAGENT_POOL=prov:model,…  subagent routing (see README)
 #
 # Cost: provider quota and billing apply; see the selected tier. This session
@@ -195,6 +201,8 @@ usage() {
     echo "  -t, --telemetry       Toggle telemetry: OFF — no nonessential outbound traffic"
     echo "  -c, --choose-effort   Choose effort level for the selected model"
     echo "  --temperature VALUE   Set temperature (0.0-2.0, controls randomness/creativity)"
+    echo "  --prompt-file PATH    The launch's first prompt, from a file (C0: a launch without its first prompt yields an idle session)"
+    echo "  --prompt TEXT         The launch's first prompt, inline (mutually exclusive with --prompt-file)"
     echo "  --show-broken         Show unworking models (config/broken-nvidia-models.json) in picker (default: hidden; menu key u)"
     echo "  --show-old            Show catalog models over the age cutoff in picker (default: hidden; LA_REMOTE_MAX_MODEL_AGE_MONTHS, default 18 months; filter menu key o)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
@@ -581,6 +589,18 @@ _prepare_runtime_file() {
     ( umask 077; : > "$path" ) && chmod 600 "$path"
 }
 
+# The swap pre-flight's scratch port: a band PAST the live session range (user 2026-10-24,
+# Phase-4 dogfood: the scratch landed on 4144, inside 4141-4151, where the next live session
+# could pick it). A rescue must never occupy a port a live session may be about to launch on.
+swap_scratch_port() {
+    local p
+    for ((p = LA_REMOTE_PROXY_PORT_MAX + 1; p <= LA_REMOTE_PROXY_PORT_MAX + 20; p++)); do
+        if ! lsof -ti tcp:"$p" >/dev/null 2>&1; then echo "$p"; return 0; fi
+    done
+    echo "remote-session: no free scratch port in ${LA_REMOTE_PROXY_PORT_MAX}+1..+20" >&2
+    return 1
+}
+
 free_port() {
     local p
     for ((p=LA_REMOTE_PROXY_PORT_MIN; p<=LA_REMOTE_PROXY_PORT_MAX; p++)); do
@@ -871,6 +891,46 @@ _model_param_lines() { # _model_param_lines <provider> <model> <thinking> [effor
     MP_THINK_LINE="$think_line"; MP_EFFORT_LINE="$effort_line"
 }
 
+# THINKING RESOLUTION (waypoint fa-thinking-toggle): one place that turns (alias, provider,
+# model, env) into the session's thinking mode and the notice the banner must show. Sets
+# RV_THINKING ("true"|"false") and RV_NOTICE ("" or one line). Order of precedence:
+#   1. the alias suffix (today's behavior, unchanged when no override is set);
+#   2. LA_THINKING_OVERRIDE=true|false (the picker's remembered session choice) — an invalid
+#      value is ignored LOUDLY, never silently honored or silently dropped;
+#   3. the model-constraint table LAST: GLM on NIM always runs its thinking template
+#      (chat_template_kwargs inert, measured 2026-10-13, docs/nvidia-nim-serving-notes.md),
+#      so OFF cannot disable it — reasoning_effort low (≈0 reasoning tokens, verified
+#      direct) is the closest the session gets, and the notice says exactly that instead
+#      of claiming an off it cannot deliver. Nemotron honors enable_thinking both ways;
+#      Gemini is disabled unless asked; other families take the choice as given.
+_resolve_thinking() { # _resolve_thinking <alias> <provider> <model>
+    local alias="$1" prov="$2" model="$3"
+    local thinking="false"; [[ "$alias" == *-thinking ]] && thinking="true"
+    RV_NOTICE=""
+    local override="${LA_THINKING_OVERRIDE:-}"
+    if [[ -n "$override" ]]; then
+        case "$override" in
+            true)   if [[ "$thinking" == "false" ]]; then
+                        thinking="true"
+                        RV_NOTICE="thinking override: ON (alias '$alias' has no -thinking suffix)"
+                    fi ;;
+            false)  if [[ "$thinking" == "true" ]]; then
+                        thinking="false"
+                        RV_NOTICE="thinking override: OFF (alias '$alias' is a -thinking variant)"
+                    fi ;;
+            *)      echo "remote-session: ignoring invalid LA_THINKING_OVERRIDE '$override' (use true|false)" >&2 ;;
+        esac
+        # The constraint answers the USER'S choice, not the alias: an alias-derived false on
+        # GLM is the alias's own long-standing meaning (no notice); the toggle asking OFF on
+        # GLM is a choice the model cannot honor, so the banner says what the session gets.
+        if [[ "$override" == "false" && "$prov" == "nvidia" && "$model" == *glm* ]]; then
+            local constraint="GLM on NIM always runs its thinking template — OFF cannot disable it; reasoning_effort low is used unless you set an explicit --effort (≈0 reasoning tokens at low, measured 2026-10-13)"
+            RV_NOTICE="${RV_NOTICE:+$RV_NOTICE — }$constraint"
+        fi
+    fi
+    RV_THINKING="$thinking"
+}
+
 # FALLBACK CHAIN (0.40.0). NVIDIA can throttle ONE model upstream for hours (GLM 5.3 Flash
 # answered 429 in 0.2 s all night on 2026-10-20 while DeepSeek on the same key answered 46/46).
 # The proxy then answers from the next model in the session chain (bin/session-fallbacks.py:
@@ -1134,7 +1194,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     local prov="$1" model="$2" thinking="$3" effort="${4:-}" temperature="${5:-}"
     umask 077
     command -v litellm >/dev/null 2>&1 || {
-        echo "remote-session: litellm not found. Install with: pipx install litellm[proxy]" >&2; return 1; }
+        echo "remote-session: litellm not found. Install with: pipx install --python python3.14 'litellm[proxy]'  (3.14: never a 3.15 venv)" >&2; return 1; }
     # RESOLVE THE INTERPRETER BEHIND THE CONSOLE SCRIPT, and start the proxy through our
     # own wrapper instead of the script itself. The pipx console script's shebang carries
     # `-E`, which makes Python IGNORE PYTHONPATH -- so the Keychain-trust shim this file
@@ -1249,9 +1309,12 @@ swap_model() { # swap_model <port> <alias> [force]
     [[ "$model" != "SELECT" ]] || {
         echo "remote-session: --swap-model: '$alias' has no fixed model (catalog-only); pick a concrete alias." >&2
         return 2; }
-    # Faithful to the SESSION's own settings: thinking from the alias suffix, effort and
-    # temperature parsed from the config the session actually runs with.
-    thinking="false"; [[ "$alias" == *-thinking ]] && thinking="true"
+    # Faithful to the SESSION's own settings: thinking through the same resolution the
+    # launch used (alias suffix, then LA_THINKING_OVERRIDE, then the constraint table), and
+    # effort/temperature parsed from the config the session actually runs with.
+    _resolve_thinking "$alias" "$prov" "$model"
+    thinking="$RV_THINKING"
+    [[ -n "$RV_NOTICE" ]] && echo "remote-session: --swap-model: $RV_NOTICE" >&2
     effort="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"^\s+reasoning_effort: (\S+)", t, re.M); print(m.group(1) if m else "")' "$cfg")"
     temperature="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"^\s+temperature: (\S+)", t, re.M); print(m.group(1) if m else "")' "$cfg")"
 
@@ -1259,7 +1322,7 @@ swap_model() { # swap_model <port> <alias> [force]
     # The scratch proxy runs with the hook limiter OFF: it isolates "does this model serve?"
     # from the shared 40 RPM queue. The live proxy keeps the limiter.
     local scratch scratch_cfg scratch_log scratch_pid scratch_pidf probe
-    scratch="$(free_port)" || return 1
+    scratch="$(swap_scratch_port)" || return 1
     scratch_cfg="$RUNDIR/swap-scratch-$port.yaml"; scratch_log="$RUNDIR/swap-scratch-$port.log"
     scratch_pidf="$RUNDIR/swap-scratch-$port.pid"
     _decide_native_route "$prov" "$model"
@@ -1286,6 +1349,16 @@ swap_model() { # swap_model <port> <alias> [force]
     write_proxy_config "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || {
         cp -p "$bak" "$cfg"; return 1; }
     kill "$pid" 2>/dev/null
+    # LiteLLM exits GRACEFULLY on SIGTERM (uvicorn finishes in-flight work before
+    # exiting), so a proxy mid-shutdown can hold its port for minutes. Give the
+    # graceful exit a short, tunable grace, then escalate — SIGKILL is the only prompt
+    # kill, and spawning onto a HELD port is what turned live swaps into probe-000
+    # auto-reverts with the old model still answering (2026-10-25, twice).
+    for _ in $(seq 1 "${LA_SWAP_TERM_GRACE:-8}"); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+    done
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
     for _ in $(seq 1 30); do                 # let the port actually free before rebinding
         lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 || break
         sleep 1
@@ -1326,6 +1399,9 @@ SELECTED_EFFORT=""
 EFFORT_CHOICE=""
 PERMISSION_MODE="auto"   # resolved from AUTO_MODE_STATE below
 STOP_ARGS=()
+# C0: the launch's first prompt. Deliberately NOT initialised — the ${VAR+set} sentinel
+# in the validation below distinguishes "flag seen" from "flag empty", which a
+# pre-initialised empty string would erase.
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)        usage; exit 0 ;;
@@ -1383,6 +1459,10 @@ while [[ $# -gt 0 ]]; do
         --show-broken)    SHOW_BROKEN_MODELS=1; shift ;;
         --show-old)       SHOW_OLD_MODELS=1; shift ;;
         --enable-mcp)     export LA_REMOTE_ENABLE_MCP=1; shift ;;
+        --prompt-file)    [[ $# -ge 2 ]] || { echo 'remote-session: --prompt-file needs a path' >&2; exit 2; }
+                          PROMPT_FILE="$2"; shift 2 ;;
+        --prompt)         [[ $# -ge 2 ]] || { echo 'remote-session: --prompt needs text' >&2; exit 2; }
+                          PROMPT_TEXT="$2"; shift 2 ;;
         --)               shift; PASSTHRU+=("$@"); break ;;
         -*)               if [[ -z "$ALIAS" ]]; then
                               echo "remote-session: unknown option: $1; use --help or put Claude options after an alias / --." >&2
@@ -1392,6 +1472,35 @@ while [[ $# -gt 0 ]]; do
         *)                if [[ -z "$ALIAS" && ${#PASSTHRU[@]} -eq 0 ]]; then ALIAS="$1"; else PASSTHRU+=("$1"); fi; shift ;;
     esac
 done
+
+# C0 (v0.46.0): a launch can carry its first prompt. Validation happens HERE — before any
+# catalog read or proxy work — because a prompt-less launch yields an idle session
+# (measured twice on 2026-10-25), and a bad prompt file must never cost a proxy start.
+# An empty or whitespace-only file is refused exactly like a missing one (C0c): falling
+# back to a prompt-less interactive session is the failure this flag exists to prevent.
+if [[ -n "${PROMPT_FILE:-}" || ${PROMPT_TEXT+set} ]]; then
+    if [[ -n "${PROMPT_FILE:-}" && ${PROMPT_TEXT+set} ]]; then
+        echo 'remote-session: --prompt-file and --prompt are mutually exclusive' >&2; exit 2
+    fi
+    # A launch is MODE="launch"; every other MODE (--list/--stop/…) cannot carry a prompt.
+    if [[ -n "$MODE" && "$MODE" != "launch" ]]; then
+        echo "remote-session: --prompt/--prompt-file only apply to a launch, not --$MODE" >&2; exit 2
+    fi
+    if [[ -z "$ALIAS" ]]; then
+        echo 'remote-session: --prompt/--prompt-file need an alias (a launch), not the picker' >&2; exit 2
+    fi
+    if [[ -n "${PROMPT_FILE:-}" ]]; then
+        if [[ ! -f "$PROMPT_FILE" ]]; then
+            echo "remote-session: --prompt-file: no such file: $PROMPT_FILE" >&2; exit 2
+        fi
+        if [[ ! -s "$PROMPT_FILE" ]] || [[ -z "$(tr -d '[:space:]' < "$PROMPT_FILE")" ]]; then
+            echo "remote-session: --prompt-file is empty or whitespace-only: $PROMPT_FILE" >&2
+            exit 2
+        fi
+    elif [[ -z "$(printf '%s' "$PROMPT_TEXT" | tr -d '[:space:]')" ]]; then
+        echo 'remote-session: --prompt is empty' >&2; exit 2
+    fi
+fi
 
 if [[ "$ALIAS" == github-models || "$ALIAS" == github ]]; then
     _available github
@@ -1419,7 +1528,10 @@ esac
 # Back). The picker launches the chosen alias by calling this script again WITH an alias, as
 # a child, and returns to the picker when that session ends — so every direct-alias path
 # below (proxy, cleanup trap, trial guard) is the one and only launch path.
-if [[ -z "$ALIAS" ]]; then
+# Special MODEs carry no alias BY DESIGN (2026-10-24, Phase-4 dogfood finding: --swap-model
+# and --install-keys died here at the picker exec before their handlers ever ran — the swap
+# was unreachable from the CLI, and headless it surfaced as a TTY error).
+if [[ -z "$ALIAS" && "$MODE" == "launch" ]]; then
     # If running under csl ownership (--csl-owner), use the internal menu loop instead of
     # delegating to session-picker, so we can return navigation state via CSL_NAV_FILE.
     # For csl_owner, we don't require a tty since csl manages the interaction.
@@ -1829,8 +1941,9 @@ fi
 if [[ -n "$REMOTE_MODEL" && "$REMOTE_MODEL" != "$(_field "$ENTRY" 3)" && "$TIER" != trial ]]; then
     TIER=unknown
 fi
-THINKING=false
-[[ "$ALIAS" == *-thinking ]] && THINKING=true
+_resolve_thinking "$ALIAS" "$PROV" "$MODEL"
+THINKING="$RV_THINKING"
+THINKING_NOTICE="$RV_NOTICE"
 
 if [[ "$TIER" == "trial" && $INCLUDE_TRIALS -eq 0 ]]; then
     echo "remote-session: '$ALIAS' is TRIAL tier (not free). Re-run with --include-trials to use it." >&2
@@ -1864,6 +1977,13 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "     spoof          : $SPOOF_PRIMARY"
     echo "     provider       : $PROV"
     echo "     cost note      : $COST_NOTE"
+    # C0: name the prompt SOURCE, never its content — the handoff path is operational
+    # information; its text is not (and a dry run that echoed it would leak it).
+    if [[ -n "${PROMPT_FILE:-}" ]]; then
+        echo "     initial prompt : from $PROMPT_FILE ($(\wc -c < "$PROMPT_FILE" | tr -d ' ') bytes)"
+    elif [[ -n "${PROMPT_TEXT:-}" ]]; then
+        echo "     initial prompt : from --prompt (${#PROMPT_TEXT} chars)"
+    fi
     # Print the RESOLVED toggle state and the flags claude would actually receive.
     # A dry run that stops before this point is how the dead-switch bugs stayed hidden:
     # the toggles parsed, printed nothing, and were never applied. Showing the resolved
@@ -1897,6 +2017,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
         echo "     telemetry      : OFF (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1)"
     fi
     echo "     effort         : ${EFFORT_CHOICE:-<provider default>}"
+    echo "     thinking       : $THINKING${THINKING_NOTICE:+ — $THINKING_NOTICE}"
     [[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]] && echo "     autocompact    : --autocompact $LA_AUTO_COMPACT_WINDOW"
     echo
     exit 0
@@ -2068,7 +2189,7 @@ cat <<BANNER
 ╰──────────────────────────────────────────────────────────────╯
    provider : $PROV      tier: $(_tier_label "$TIER" "$PROV")
    agent    : $ALIAS
-   thinking : $THINKING
+   thinking : $THINKING${THINKING_NOTICE:+ — $THINKING_NOTICE}
    cost     : $COST_NOTE
    privacy  : prompts and file contents LEAVE this machine → $PROV
 $BLIND_TRUST_BANNER
@@ -2249,6 +2370,14 @@ fi
 # LA_AUTO_COMPACT_WINDOW: pass --autocompact to claude if set
 if [[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]]; then
     claude_cmd+=(--autocompact "$LA_AUTO_COMPACT_WINDOW")
+fi
+# C0 (v0.46.0): the first prompt rides the launch as claude's positional initial prompt —
+# BEFORE any passthrough options, so it is the first positional claude sees. The FILE PATH
+# never reaches claude; its CONTENT does (read here, once).
+if [[ -n "${PROMPT_FILE:-}" ]]; then
+    claude_cmd+=("$(<"$PROMPT_FILE")")
+elif [[ -n "${PROMPT_TEXT:-}" ]]; then
+    claude_cmd+=("$PROMPT_TEXT")
 fi
 if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
     claude_cmd+=("${PASSTHRU[@]}")

@@ -317,6 +317,14 @@ logged 8 × `400` and 17 × `500` before recovering.
 
 ### Picker settings that reach the session (0.27.2)
 
+- **Session thinking** (`j` on both lane screens, 0.44.0) travels as `LA_THINKING_OVERRIDE` and is
+  consumed by `remote-session.sh`, `local-session.sh` / config-lib's `la_lookup`, and hotswap's
+  profile mode. The default (never touched) is thinking ON for session launches; a model
+  constraint may override the choice and the banner / info box say so — GLM on NVIDIA always
+  runs its thinking template (OFF there travels as `reasoning_effort low`). Stateless dispatches
+  have no toggle: `dispatch-preferences.json` entries take `"thinking": "on"|"off"|"auto"`,
+  resolved by role (reasoner/validator on, operator/utility off) with model constraints applied
+  last and reported in the result JSON.
 - **Local temperature** (`o` on the Local screen) travels as `LA_TEMPERATURE`, and hotswap passes it
   to Rapid-MLX as `--default-temperature`. It is part of the server-reuse identity: a running server
   started at another temperature is not reused. Before this, the picker sent a trailing
@@ -403,13 +411,30 @@ auto-discovers brew → `PATH` → newest `~/.venvs/rapid-mlx-*`, so a machine t
 install still works. The weekly `backend-update-check` launchd job (installed via `manage-backend.py --backend rapid-mlx launchd install`) watches PyPI for all backend releases (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) and only *notifies* — it never installs.
 
 **What does install is `install/manage-backend.py`**, the unified runtime lifecycle manager for
-every backend (`--backend rapid-mlx|vllm-mlx|omlx|llama-cpp|litellm`). It closes the notify loop
+every backend (`--backend rapid-mlx|vllm-mlx|omlx|moespresso|llama-cpp|litellm`). It closes the notify loop
 without ever starting a model server. In `csl` it is `v` (Backend manager).
 
 ```bash
 ./install/manage-backend.py --backend rapid-mlx releases
 ./install/manage-backend.py --backend rapid-mlx installed
 ./install/manage-backend.py --backend rapid-mlx install 0.14.0
+```
+
+**MoEspresso** (`serve=moespresso`) is a separate, full runtime for *MoEspresso-packaged* artifacts —
+models shipped as `weight_format: "mxtq"` TurboQuant bundles, which no MLX engine can read (oMLX
+and rapid-mlx both load through `mlx_lm`, and they fail at `load_weights` with
+`Received 46 parameters not in model`). It comes from the `steadfastgaze/tap` Homebrew tap and is
+installed by `install-backend.sh` like every other backend.
+
+Two consequences worth knowing before you use it:
+
+- **It is pinned to the 3.x line.** 4.x is a Qwen-only engine that refuses a DeepSeek V4 package
+  with `unsupported required package feature`, so the backend manager will neither install nor
+  upgrade past 3.x — an upgrade that would break the only model the runtime serves would arrive
+  with every command succeeding.
+- **It needs no spoof id, and advertises no model list.** The server accepts and echoes any model
+  name, so no oMLX-style symlink farm is built; and because `GET /v1/models` 404s, this backend
+  reuses a healthy server from its own metadata instead of an advertised id.
 ./install/manage-backend.py --backend litellm check-updates
 ```
 
@@ -488,12 +513,19 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   before any weights are read. Asks three questions cheapest-first (does it fit / are other models
   loaded / are they attached) and stops as soon as the answer is settled.
 - **`bin/la-evict.sh`** — emergency memory-recovery fallback for when the machine is already out of
-  RAM and the terminal is unresponsive. It is **not** ordinary lifecycle management: it evicts **one
-  server at a time** (ranked, least-costly first), escalating one step per repeat invocation, and
-  never touches a server with a live session attached on its first pass. Escalation applies only
-  within the window (default 600 s, `LA_EVICT_WINDOW` to change); once it expires the next invocation
-  is a first run again, and `--reset` clears the saved escalation state and exits without evicting.
-  See [Safety](#safety).
+  RAM and the terminal is unresponsive. It is **not** ordinary lifecycle management. It climbs a
+  three-step ladder and **only an argument-less run advances it**: the **first run (tier 0)** sweeps
+  every *unattached* (orphaned) server in one pass — dead servers are safe to evict, so there is no
+  reason to tier them — and then warns which ports still have a live session attached; the **second
+  run (tier 1)** evicts exactly **one** server (ranked, least-costly first) and *holds back* rather
+  than take one with a live session attached; the **third and later runs (tier 2+)** are the emergency
+  tier, where attached and unrecognised backends become eligible, still one server at a time.
+  Escalation applies only within the window (default 600 s, `LA_EVICT_WINDOW` to change); once it
+  expires the next invocation is a first run again, and `--reset` clears the saved escalation state
+  and exits without evicting. `--port N` (repeatable) evicts one named port and is deliberately
+  **outside** the ladder — it never advances the tier and never writes state — but N must lie inside
+  the configured model-server range, so the proxy band live sessions depend on cannot be named by a
+  typo. See [Safety](#safety).
 - **`bin/la-reboot.sh`** — `la-evict`'s sibling for the opposite problem: a session whose backend
   **already crashed**. It restarts the *same* model on the *same* port with the *same* arguments, so
   a still-open Claude Code session reconnects on its next request — no exit, no `/resume`, no context
@@ -1327,7 +1359,7 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   verdict means no execution, not a silent allow.
 - **No reasoning leakage.** The nudge forbids emitting `<think>` markup / raw chain-of-thought into
   visible output or tool arguments.
-- **`la-evict` is a last resort, and a conservative one.** The escape hatch for when the machine is already out of RAM and the normal lifecycle is unresponsive: it never bulk-kills the roster, never touches a server with a live session on its first pass, and escalates only one step per repeat call inside the window — so a healthy stack is left alone. Deliberately standalone (no `config-lib.sh`, no registry): a fallback that runs while the stack is sick must not depend on the stack.
+- **`la-evict` is a last resort, and a conservative one.** The escape hatch for when the machine is already out of RAM and the normal lifecycle is unresponsive: it never bulk-kills servers with a live session attached, never touches a server with a live session on its first pass, and escalates only one step per repeat call inside the window — so a healthy stack is left alone. (Its first run does sweep every *unattached* server at once: those are dead, so there is nothing to conserve.) Deliberately standalone (no `config-lib.sh`, no registry): a fallback that runs while the stack is sick must not depend on the stack.
 
 ## Testing
 

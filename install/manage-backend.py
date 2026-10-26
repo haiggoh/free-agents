@@ -33,6 +33,10 @@ try:
 except ImportError:
     pass
 try:
+    import managers.moespresso  # noqa: F401
+except ImportError:
+    pass
+try:
     import managers.litellm  # noqa: F401
 except ImportError:
     pass
@@ -51,6 +55,12 @@ from managers import (
 # plugin copy this resolves to the derived plugin cache, which is NOT a git checkout;
 # tracked_repo_clean refuses that with the remedy instead of a generic git failure.
 DEFAULT_REPO = Path(__file__).resolve().parents[1]
+
+
+def _effective_version(mgr, version):
+    """The version this manager's route would really install (identity unless it overrides)."""
+    fn = getattr(mgr, "effective_version", None)
+    return fn(version) if callable(fn) else version
 
 
 def _resolve_repo(args: argparse.Namespace) -> Path:
@@ -239,7 +249,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             lock = mgr.locked_requirements(version) if not args.refresh_deps else None
             print(json.dumps({
                 "result": "dry_run",
-                "version": version,
+                "version": _effective_version(mgr, version),
                 "target": str(mgr.target_for(version)),
                 "installation_mode": "locked_recreation" if lock else "fresh_resolution",
             }, indent=2))

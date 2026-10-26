@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # exists (.fail -> 500, .slow -> wait before binding, so the revert's readiness wait has
 # something real to wait for).
 STUB = """#!/usr/bin/env python3
-import http.server, json, os, sys, time
+import http.server, json, os, signal, sys, time
 
 port = None
 cfg = None
@@ -43,6 +43,15 @@ ctrl = os.environ["LA_SWAP_TEST_DIR"]
 
 if os.path.exists(os.path.join(ctrl, f"{port}.slow")):
     time.sleep(3)
+
+def _on_term(signum, frame):
+    # Checked at SIGNAL time, not startup: the swap test writes this file only after
+    # the proxy is up (the port isn't known before), so stubbornness must be lazy.
+    if os.path.exists(os.path.join(ctrl, f"ignore-term-{port}")):
+        return
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _on_term)
 
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -247,6 +256,24 @@ class SwapModelTests(unittest.TestCase):
         self.assertIn("pre-flight probe 200", r.stdout)
         self.assertIn("live probe 200", r.stdout)
 
+    def test_a_sigterm_stubborn_proxy_is_escalated_to_kill_before_rebind(self):
+        """2026-10-25 live dogfood, twice: LiteLLM exits GRACEFULLY on SIGTERM (uvicorn
+        finishes in-flight work first), so a proxy mid-shutdown keeps its port past the
+        bare kill+wait; the new proxy then binds a HELD port and the live probe reads
+        000 (auto-revert) while the old model still owns the session. The swap must
+        escalate TERM->KILL and only rebind once the port is actually free."""
+        port, old_pid = self.start_old_session()
+        self.age_log(port)
+        (self.root / 'ctrl' / f'ignore-term-{port}').write_text('1')
+        r = self.swap(port, self.ALIAS_TO)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(old_pid, 0)          # the stubborn proxy did NOT survive the swap
+        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text())
+        os.kill(new_pid, 0)              # the new proxy owns the port now
+        self.assertEqual(probe(port, master_key(
+            (self.rundir / f'proxy-{port}.yaml').read_text())), 200)
+
     def test_a_failing_new_model_is_reverted(self):
         port, _ = self.start_old_session()
         old_cfg = (self.rundir / f'proxy-{port}.yaml').read_bytes()
@@ -284,6 +311,37 @@ class SwapModelTests(unittest.TestCase):
             (self.rundir / f'proxy-{port}.yaml').read_text())), 200,
             "the revert returns only once the old proxy ANSWERS — readiness, not just a pid")
 
+    def test_the_swap_scratch_port_stays_outside_the_live_band(self):
+        """2026-10-24 live dogfood: the pre-flight scratch landed on 4144 — inside the live
+        band. The scratch port must come from a band PAST the configured live range, so a
+        rescue can never occupy a port a live session may be about to launch on."""
+        scratch = sh(self.root, 'scratch="$(swap_scratch_port)"; echo "SCRATCH=$scratch"', self.env)
+        line = next(l for l in scratch.stdout.splitlines() if l.startswith("SCRATCH="))
+        port = int(line.split("=")[1])
+        self.assertGreater(port, 47200, "past the configured live band")
+        self.assertLessEqual(port, 47200 + 20)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+class SwapModelCLIDispatch(unittest.TestCase):
+    """0.43.x dogfood finding (2026-10-24, Phase-4 live run): the no-alias picker block exec'd
+    session-picker BEFORE the swap-model dispatch, so `remote-session.sh --swap-model ...`
+    never reached swap_model — dead in the CLI (headless AND interactive). The stub tests
+    called swap_model() directly, so only the live dogfood could catch it."""
+
+    def test_the_cli_reaches_swap_model_not_the_picker(self):
+        # Port 49999 has no session: swap_model's OWN refusal must be the output — not the
+        # picker's TTY error (which is how the bug manifested headless).
+        r = subprocess.run(
+            ["bash", str(ROOT / "bin" / "remote-session.sh"),
+             "--swap-model", "49999", "nvidia-deepseek-v4"],
+            capture_output=True, text=True, timeout=30)
+        combined = r.stdout + r.stderr
+        self.assertNotIn("session-picker", combined,
+                         "the no-alias picker block must not intercept --swap-model")
+        self.assertIn("missing", combined,
+                      "swap_model's own refusal for a port with no session")
+        self.assertEqual(r.returncode, 2)
+

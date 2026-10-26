@@ -152,7 +152,7 @@ class FailoverTests(Base):
         env = dict(self.env, FA_DISPATCH_PREFS=str(p))
         tried = []
 
-        def fake_dispatch(entry, prompt, env_):
+        def fake_dispatch(entry, prompt, env_, thinking_effort=None):
             tried.append(entry["id"])
             self.prompts.append(prompt)
             ok, text = outcomes[entry["id"]]
@@ -234,7 +234,7 @@ class SparseSetupTests(Base):
         env = dict(self.env, FA_DISPATCH_PREFS=str(p))
         out, err = io.StringIO(), io.StringIO()
         real = (fat.dispatch_entry, fat.local_on_disk)
-        fat.dispatch_entry = lambda entry, prompt, env_: f"answer from {entry['id']}"
+        fat.dispatch_entry = lambda entry, prompt, env_, thinking_effort=None: f"answer from {entry['id']}"
         fat.local_on_disk = lambda a: a in local
         try:
             with redirect_stdout(out), redirect_stderr(err):
@@ -402,7 +402,7 @@ class Exhaustion(unittest.TestCase):
         os.environ.update(env)
         calls = {"n": 0}
 
-        def fake_dispatch(entry, prompt, e):
+        def fake_dispatch(entry, prompt, e, thinking_effort=None):
             ok, text = fake.get(entry["id"], (False, "boom"))
             if ok:
                 return text
@@ -492,3 +492,138 @@ class Exhaustion(unittest.TestCase):
                 os.environ["CLAUDE_CODE_SESSION_ID"] = old_sid
         self.assertEqual(self.last_json(err)["paid_fallback_allowed"], True)
         self.assertEqual(list(Path(mark_dir).iterdir()), [], "no session id, no mark")
+
+
+class ThinkingPolicyTests(Base):
+    """The dispatch thinking policy (waypoint fa-thinking-toggle): NO manual toggle for a
+    stateless dispatch — a per-entry "thinking": on|off|auto field, role-derived defaults
+    (reasoner/validator on, operator/utility off), model-constraint override applied LAST and
+    reported in the result JSON. The council's cross-family validator is a validator, so the
+    council rule (think ON where the model supports it) is preserved by the role default."""
+
+    GLM = {"id": "g", "kind": "remote", "provider": "nvidia", "model": "z-ai/glm-5.3-flash",
+           "display": "GLM Flash", "smoke_tested": True}
+    NEMO = {"id": "n", "kind": "remote", "provider": "nvidia", "model": "nvidia/nemotron-3-ultra",
+            "display": "Nemotron", "smoke_tested": True}
+
+    def test_role_defaults(self):
+        # Fails if the council rule breaks: validators and reasoners think by default.
+        self.assertEqual(fat.resolve_thinking(dict(self.GLM), "validator"),
+                         ("on", "high", False, None))
+        self.assertEqual(fat.resolve_thinking(dict(self.GLM), "reasoner"),
+                         ("on", "high", False, None))
+        resolved, effort, overridden, _note = fat.resolve_thinking(dict(R1), "operator")
+        self.assertEqual((resolved, overridden), ("off", False))
+        self.assertIsNone(effort, "off on a non-GLM model sends NO reasoning_effort: don't ask")
+        self.assertEqual(fat.resolve_thinking(dict(R1), "utility")[0], "off")
+        # No role at all (general-purpose work) defaults off: dispatches are fire-and-forget.
+        self.assertEqual(fat.resolve_thinking(dict(R1), None)[0], "off")
+
+    def test_entry_field_wins_over_role_default(self):
+        entry = dict(R1, thinking="on")
+        self.assertEqual(fat.resolve_thinking(entry, "operator"), ("on", "high", False, None))
+        entry = dict(R1, thinking="off")
+        self.assertEqual(fat.resolve_thinking(entry, "validator")[0], "off")
+
+    def test_glm_off_maps_to_the_measured_low_dial(self):
+        # Fails if OFF claims honored-ness it does not have: GLM on NIM always runs its
+        # thinking template (chat_template_kwargs inert, measured 2026-10-13) — reasoning_effort
+        # low (≈0 reasoning tokens, verified direct) is the off-equivalent, and the note says so.
+        resolved, effort, overridden, note = fat.resolve_thinking(dict(self.GLM), "operator")
+        self.assertEqual((resolved, effort, overridden), ("off", "low", False))
+        self.assertIn("always", note.lower())
+
+    def test_glm_off_with_explicit_effort_is_the_override_case(self):
+        # Fails if the role default silently beats the maintainer's per-model effort dial (or
+        # vice versa): an explicit reasoning_effort is the more specific fact, it stands, and
+        # the result must say the OFF choice was overridden by the model constraint.
+        entry = dict(self.GLM, reasoning_effort="high")
+        resolved, effort, overridden, note = fat.resolve_thinking(entry, "operator")
+        self.assertEqual((resolved, effort, overridden), ("off", "high", True))
+        self.assertIn("reasoning_effort", note)
+
+    def test_nemotron_off_cannot_be_honored_by_a_dispatch(self):
+        # Fails if OFF is claimed on Nemotron: it gates reasoning with enable_thinking inside
+        # chat_template_kwargs, which remote-agent-dispatch.py cannot send — the constraint
+        # overrides, loudly, in the result JSON.
+        resolved, effort, overridden, note = fat.resolve_thinking(dict(self.NEMO), "operator")
+        self.assertEqual(resolved, "off")
+        self.assertIsNone(effort)
+        self.assertIs(overridden, True)
+        self.assertIn("enable_thinking", note)
+        # ON is native on Nemotron: nothing to send, no override.
+        self.assertEqual(fat.resolve_thinking(dict(self.NEMO), "validator"), ("on", None, False, None))
+
+    def _run_real_dispatch(self, payload, entries, providers=("nvidia",)):
+        """Run fat.run with REAL dispatch_entry and a faked subprocess.run, so the argv the
+        dispatcher receives is captured and the result JSON is inspectable. Returns
+        (code, stdout, stderr, [argv])."""
+        keys = Path(self.tmp.name) / "keys"
+        keys.mkdir(exist_ok=True)
+        for p in providers:
+            (keys / p).write_text("fixture-key")
+        p_file = Path(self.tmp.name) / "prefs.json"
+        p_file.write_text(json.dumps({"order": entries}))
+        env = {"LA_API_KEYS_DIR": str(keys), "FA_DISPATCH_PREFS": str(p_file)}
+        seen = []
+
+        def fake_run(cmd, **_kw):
+            seen.append(list(cmd))
+            out = Path(cmd[cmd.index("--outdir") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "output.txt").write_text("answer")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        real = fat.subprocess.run
+        fat.subprocess.run = fake_run
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                code = fat.run(payload, env)
+        finally:
+            fat.subprocess.run = real
+        return code, out.getvalue(), err.getvalue(), seen
+
+    def test_run_reports_the_resolution_in_the_result_json(self):
+        # Fails if the resolution happens but never reaches the caller: the JSON must carry
+        # the resolved choice, the override flag and the constraint note, and the dispatcher
+        # argv must carry the measured off-equivalent for an operator dispatch to GLM. The
+        # stderr carries the note too — the launcher banner discloses a GLM OFF, so the
+        # dispatch lane must not be quieter about the same fact (review finding 6).
+        code, out, err, cmds = self._run_real_dispatch({"prompt": "hi", "role": "operator"},
+                                                       [dict(self.GLM)])
+        self.assertEqual(code, 0)
+        res = json.loads(out)
+        self.assertEqual(res["thinking"], "off")
+        self.assertIs(res["thinking_overridden"], False)
+        self.assertIn("always", res["thinking_note"].lower())
+        self.assertEqual(cmd_effort(cmds[0]), "low",
+                         "operator dispatch to GLM sends the measured off-equivalent")
+        self.assertIn("always", err.lower(),
+                      "a GLM OFF discloses the constraint on stderr, override or not")
+
+    def test_run_validator_dispatch_thinks_by_default(self):
+        # Fails if the council rule (cross-family validator thinks) is lost in the policy.
+        code, out, _err, cmds = self._run_real_dispatch({"prompt": "hi", "role": "validator"},
+                                                        [dict(R1, thinking="auto")],
+                                                        providers=("gemini",))
+        self.assertEqual(code, 0)
+        res = json.loads(out)
+        self.assertEqual(res["thinking"], "on")
+        self.assertEqual(cmd_effort(cmds[0]), "high")
+
+    def test_run_overridden_case_reports_true(self):
+        # Fails if the model constraint beats the choice silently: overridden=true in the
+        # JSON, the explicit dial stands in the argv, and stderr announces it.
+        code, out, err, cmds = self._run_real_dispatch(
+            {"prompt": "hi", "role": "operator"},
+            [dict(self.GLM, reasoning_effort="high")])
+        self.assertEqual(code, 0)
+        res = json.loads(out)
+        self.assertIs(res["thinking_overridden"], True)
+        self.assertEqual(cmd_effort(cmds[0]), "high", "the entry's explicit dial stands")
+        self.assertIn("thinking", err, "an override is announced on stderr too")
+
+
+def cmd_effort(cmd):
+    return cmd[cmd.index("--reasoning-effort") + 1] if "--reasoning-effort" in cmd else None

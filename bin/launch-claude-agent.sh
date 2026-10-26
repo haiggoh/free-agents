@@ -503,7 +503,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     echo "  Backend       : $LA_CUR_SERVE (declared: ${LA_SERVE_DECLARED[$MODEL_ALIAS]:-$LA_CUR_SERVE})"
     echo "  Backend display: $(la_serve_display "$MODEL_ALIAS")"
     echo "  Effort        : $EFFORT"
-    echo "  Thinking      : $([ "$LA_CUR_THINK" = "true" ] && echo "ON" || echo "OFF")"
+    echo "  Thinking      : $([ "$LA_CUR_THINK" = "true" ] && echo "ON" || echo "OFF")$([ -n "${LA_THINKING_OVERRIDE:-}" ] && echo " (override: LA_THINKING_OVERRIDE=$LA_THINKING_OVERRIDE)")"
     echo "  Auto mode     : $([ "$LA_AUTO_MODE" = "1" ] && echo "ON ($([ "$LA_BLIND_AUTO" = "1" ] && echo "blind-trust" || echo "classifier"))" || echo "OFF")"
     echo "  Telemetry     : $([ "$LA_TELEMETRY" = "0" ] && echo "OFF" || echo "ON")"
     echo "  Stop hook     : $([ "$LA_QUEUE_STOP_HOOK" = "1" ] && echo "ON" || echo "OFF")"

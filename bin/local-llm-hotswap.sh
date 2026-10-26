@@ -191,6 +191,11 @@ if [ "$USE_PROFILE" = "true" ]; then
     TOOLP="${TOOLP:-$LA_CUR_TOOLP}"
     REASONP="${REASONP:-$LA_CUR_REASONP}"
     THINK="${THINK:-$LA_CUR_THINK}"
+    # Session thinking override (waypoint fa-thinking-toggle): the picker's choice beats the
+    # profile's THINK too — it is a session-level decision, not a per-model default.
+    case "${LA_THINKING_OVERRIDE:-}" in
+        true|false) THINK="$LA_THINKING_OVERRIDE" ;;
+    esac
 fi
 
 # State the backend BEFORE anything loads, and say where it came from.
@@ -263,6 +268,28 @@ if [ "$SERVE" = "rapid" ] && [ "$MG_KV" != "auto" ]; then
     fi
 fi
 
+# Weight-format gate (2026-10-25). An MLX backend can only read an MLX serialization: a foreign
+# bundle loads for tens of seconds and then dies inside strict load_weights, which reaches the
+# session as a 409 "unavailable after a previous load failure" naming no cause and no fix —
+# measured on ~/.models/deepseek-v4-flash-0731-coder (weight_format=mxtq plus *.tq_bundle keys:
+# 53 GB loaded, then `ValueError: Received 46 parameters not in model`). Read the artifact's own
+# declaration BEFORE the port scan, exactly like the KV refusal above, so a refusal can never take
+# a running server down with it. The verdict comes from bin/la-detect-backend.py --gate, so this
+# rule has ONE implementation (and one set of tests); LA_GATE_WEIGHT_FORMAT=0 is the escape hatch
+# for an operator whose engine does read the format (a newer runtime than this checkout knows).
+if [ "${LA_GATE_WEIGHT_FORMAT:-1}" != "0" ]; then
+  case "$SERVE" in
+    rapid|vllm|mlx_lm|omlx)
+      if ! _fmt_gate="$(python3 "$HOTSWAP_DIR/la-detect-backend.py" --gate "$MODEL_DIR" 2>/dev/null)"; then
+        echo "🛑 Not launching $MODEL_NAME on $SERVE — its weights are not readable by an MLX engine." >&2
+        [ -n "$_fmt_gate" ] && echo "   $_fmt_gate" >&2
+        echo "   Set the alias's serve to the runtime named above, install it, or re-point the alias at an MLX build." >&2
+        echo "   Override once you know your engine reads it:  LA_GATE_WEIGHT_FORMAT=0" >&2
+        exit 1
+      fi ;;
+  esac
+fi
+
 echo "Scanning ports $LA_PORT_START-$LA_PORT_MAX for a free slot (config: ${LA_CONFIG_SOURCE})..."
 TARGET_PORT=""
 for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
@@ -270,7 +297,7 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
         CURRENT_IDS=$(curl -s --max-time 4 "http://localhost:$port/v1/models" | grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/')
         CURRENT_MODEL=$(printf '%s\n' "$CURRENT_IDS" | head -n 1)
 
-        if [ "$SERVE" = "rapid" ] || [ "$SERVE" = "omlx" ]; then
+        if [ "$SERVE" = "rapid" ] || [ "$SERVE" = "omlx" ] || [ "$SERVE" = "moespresso" ]; then
             _meta="$CONFIG_DIR/server_${port}.meta"
             _listener_pid=$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null | head -1)
             _meta_backend=$(awk -F= '$1=="backend"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
@@ -281,6 +308,20 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             _meta_pid=$(awk -F= '$1=="pid"{print $2}' "$_meta" 2>/dev/null)
             _meta_kv=$(awk -F= '$1=="kv_dtype"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             [ -n "$_meta_kv" ] || _meta_kv="auto"   # a pre-memory-guard meta served the backend default
+            # ★ MoEspresso serves the PACKAGE, not a spoof id: measured 2026-10-25, its
+            # /v1/chat/completions accepts and ECHOES any model name, and GET /v1/models returns
+            # {"error": {"message": "not found"}} — there is no model-list route at all. So the
+            # advertised-id test below can never be satisfied, and a healthy MoEspresso server
+            # would never be reused: every launch would start a fresh 57 GB one. For that
+            # backend the served identity IS the package, which the meta file already pins
+            # (backend + alias + model_dir + a live pid); the id check stays for the others.
+            if [ "$SERVE" = "moespresso" ]; then
+                _served_ok=1
+            elif printf '%s\n' "$CURRENT_IDS" | grep -qxF "$SPOOF_PRIMARY"; then
+                _served_ok=1
+            else
+                _served_ok=0
+            fi
             if [ "${LA_HOTSWAP_FORCE_FRESH:-0}" != "1" ] &&
                [ "$_meta_backend" = "$SERVE" ] &&
                [ "$_meta_alias" = "$MODEL_NAME" ] &&
@@ -290,7 +331,7 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
                [ "$_meta_kv" = "$MG_KV" ] &&
                [ -n "$_listener_pid" ] &&
                [ "$_listener_pid" = "$_meta_pid" ] &&
-               printf '%s\n' "$CURRENT_IDS" | grep -qxF "$SPOOF_PRIMARY"; then
+               [ "$_served_ok" = 1 ]; then
                 echo "✅ $MODEL_NAME already healthy via $SERVE on port $port."
                 # The served id is the spoof for both backends; say so, so the launcher's
                 # DISPATCH_MODEL contract holds on reuse exactly as on a fresh launch.
@@ -333,7 +374,17 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             fi
             echo "SUCCESS_PORT=$port"; exit 0
         fi
-        echo "ℹ️ Port $port busy serving '$CURRENT_MODEL'. Skipping..."
+        # Name the occupant honestly: the advertised id when there is one, else what the meta
+        # file records (MoEspresso advertises no model list, so CURRENT_MODEL is empty there and
+        # this message used to read "busy serving ''"). The meta was already read this iteration
+        # for the reuse check, so the answer is free.
+        _occupant="$CURRENT_MODEL"
+        if [ -z "$_occupant" ] && [ -n "${_meta:-}" ] && [ -f "${_meta:-}" ]; then
+            _occ_alias=$(awk -F= '$1=="alias"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _occ_dir=$(awk -F= '$1=="model_dir"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _occupant="${_occ_alias:-$(basename "${_occ_dir:-unknown}")} (${_meta_backend:-unknown} server)"
+        fi
+        echo "ℹ️ Port $port busy serving '${_occupant:-<unidentifiable>}'. Skipping..."
     else TARGET_PORT=$port; break; fi
 done
 [ -z "$TARGET_PORT" ] && { echo "❌ All ports $LA_PORT_START-$LA_PORT_MAX saturated."; exit 1; }
@@ -533,6 +584,7 @@ if [ "$SERVE" = "omlx" ]; then
         echo "alias=$MODEL_NAME"
         echo "model_dir=$MODEL_DIR"
         echo "served_id=$SPOOF_PRIMARY"
+        echo "kv_dtype=$MG_KV"
         echo "kv_dtype_saved=$MG_KV"
         echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
         [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
@@ -541,6 +593,84 @@ if [ "$SERVE" = "omlx" ]; then
     mv -f "$OMLX_META.tmp.$$" "$OMLX_META"
 
     wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$OMLX_PID" "$SPOOF_PRIMARY"
+    tail -n 12 "$LOG_FILE"
+    _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+    echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
+    echo "SUCCESS_PORT=$TARGET_PORT"
+    exit 0
+fi
+
+# --- MoEspresso branch (serve=moespresso): an artifact only this runtime can read -------------
+# Measured 2026-10-25 against moespresso@3 3.0.0 serving the real deepseek-v4-flash-0731-coder:
+#   * The spoof id is IRRELEVANT — /v1/chat/completions accepts and echoes ANY model name, so
+#     unlike oMLX there is no per-port symlink farm to build; the package dir is served directly.
+#   * GET /v1/models does not exist ({"error": {"message": "not found"}}), so wait_ready is called
+#     with an EMPTY expected_id (it already passes on any HTTP response) and the reuse block above
+#     keys on the meta file for this backend.
+#   * `serve PACKAGE [--host --port --thinking ...]`; there is no served-model-name flag to give.
+if [ "$SERVE" = "moespresso" ]; then
+    if [ -z "${LA_MOESPRESSO_BIN:-}" ] || [ ! -x "$LA_MOESPRESSO_BIN" ]; then
+        echo "❌ MoEspresso executable not found: ${LA_MOESPRESSO_BIN:-<none discovered>}" >&2
+        echo "   $MODEL_NAME is a MoEspresso package — no MLX backend can read its weights." >&2
+        echo "   Install the 3.x line:  brew install steadfastgaze/tap/moespresso@3" >&2
+        echo "   (4.x cannot load it: 'Error: unsupported required package feature')" >&2
+        exit 1
+    fi
+    # thinking: the registry's boolean/free value → oMLX's own vocabulary (on|off|high|max).
+    case "${THINK:-false}" in
+        true|1|on|high|max) MOE_THINKING="${THINK}" ;;
+        *) MOE_THINKING="off" ;;
+    esac
+    MOE_META="$CONFIG_DIR/server_${TARGET_PORT}.meta"
+    MOE_CMD=(
+        "$LA_MOESPRESSO_BIN" serve "$MODEL_DIR"
+        --host 127.0.0.1
+        --port "$TARGET_PORT"
+        --thinking "$MOE_THINKING"
+    )
+    echo "🚀 Launching $MODEL_NAME via MoEspresso on free port $TARGET_PORT (served as $SPOOF_PRIMARY)..."
+    nohup "${MOE_CMD[@]}" > "$LOG_FILE" 2>&1 &
+    MOE_PID=$!
+    {
+        echo "backend=moespresso"
+        echo "alias=$MODEL_NAME"
+        echo "model_dir=$MODEL_DIR"
+        echo "served_id=$SPOOF_PRIMARY"
+        # Written unconditionally, like the oMLX branch: with no spec config this is the sha256 of
+        # the EMPTY string (e3b0c442…), not an empty field — and the reuse chain compares them
+        # literally. Omitting it here made a healthy MoEspresso server unreusable.
+        echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
+        echo "pid=$MOE_PID"
+        echo "kv_dtype=$MG_KV"
+        echo "kv_dtype_saved=$MG_KV"
+        [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
+    } > "$MOE_META.tmp.$$"
+    mv -f "$MOE_META.tmp.$$" "$MOE_META"
+
+    # ★ Readiness is "can it generate", not "does the model list answer". Measured: MoEspresso's
+    # GET /v1/models returns a 404 body that curl cannot treat as success, so the shared
+    # wait_ready (which polls /v1/models) never returns for this backend; and its port binds only
+    # after the weights are resident ("loaded (1328 tensors); serving on ..."), so a completion is
+    # exactly the signal that the model is there. 127.0.0.1, not localhost: it binds one address.
+    _wait_ready_generate() {
+        local port="$1" logf="$2" label="${3:-server}" pid="${4:-}"
+        local timeout="${HOTSWAP_READY_TIMEOUT:-480}"
+        local deadline=$(( SECONDS + timeout )) resp
+        until resp=$(curl -s --max-time 5 -X POST "http://127.0.0.1:$port/v1/chat/completions" \
+                     -H "Content-Type: application/json" \
+                     -d '{"model":"__readiness__","messages":[{"role":"user","content":"hi"}],"max_tokens":1}') \
+              && printf '%s' "$resp" | grep -q '"choices"'; do
+            if (( SECONDS >= deadline )); then
+                { echo "❌ $label startup FAILED — no completion from port $port after ${timeout}s (log $logf)"
+                  if [ -n "$pid" ]; then kill -0 "$pid" 2>/dev/null \
+                      && echo "   pid $pid ALIVE (loading/wedged)" || echo "   pid $pid DEAD (crashed — see log)"; fi
+                  echo "   --- last 40 log lines ---"; tail -n 40 "$logf" 2>/dev/null; } >&2
+                exit 1
+            fi
+            sleep 2
+        done
+    }
+    _wait_ready_generate "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$MOE_PID"
     tail -n 12 "$LOG_FILE"
     _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
     echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
