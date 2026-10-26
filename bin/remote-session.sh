@@ -1194,7 +1194,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     local prov="$1" model="$2" thinking="$3" effort="${4:-}" temperature="${5:-}"
     umask 077
     command -v litellm >/dev/null 2>&1 || {
-        echo "remote-session: litellm not found. Install with: pipx install litellm[proxy]" >&2; return 1; }
+        echo "remote-session: litellm not found. Install with: pipx install --python python3.14 'litellm[proxy]'  (3.14: never a 3.15 venv)" >&2; return 1; }
     # RESOLVE THE INTERPRETER BEHIND THE CONSOLE SCRIPT, and start the proxy through our
     # own wrapper instead of the script itself. The pipx console script's shebang carries
     # `-E`, which makes Python IGNORE PYTHONPATH -- so the Keychain-trust shim this file

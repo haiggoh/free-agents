@@ -39,6 +39,7 @@ class VLLMMLXManager(BackendManager):
     DEFAULT_VERSION = "0.5.0"
     PACKAGE_NAME = "vllm-mlx"
     PYPI_URL = PYPI_URL
+    PYTHON_MAX = (3, 14)  # torch/torchvision wheels stop at cp314 (base.PYTHON_MAX)
 
     def version_key(self, value: str) -> tuple[int, int, int, int, str, int]:
         """Parse version into sortable key compatible with base class."""
@@ -245,22 +246,6 @@ class VLLMMLXManager(BackendManager):
         )
 
     # Helper methods
-    def choose_python(self, explicit: str | None) -> Path:
-        candidates: list[str] = []
-        if explicit:
-            candidates.append(explicit)
-        candidates.extend([sys.executable, "/opt/homebrew/bin/python3.12", "python3.12", "python3"])
-        for candidate in candidates:
-            resolved = shutil.which(candidate) if "/" not in candidate else candidate
-            if not resolved:
-                continue
-            path = Path(resolved).expanduser().resolve()
-            if not os.access(path, os.X_OK):
-                continue
-            if subprocess.run([str(path), "-c", "import venv"], capture_output=True).returncode == 0:
-                return path
-        raise ManagerError("no Python with the stdlib venv module was found; pass --python")
-
     def _package_inventory(self, python: Path) -> dict[str, str]:
         code = """
 import importlib.metadata, json

@@ -20,6 +20,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+def _minor(text: str) -> tuple[int, int]:
+    """'3.15\\n' -> (3, 15); anything unparseable sorts as newest, so a ceiling refuses it."""
+    try:
+        major, minor = text.strip().split(".")[:2]
+        return int(major), int(minor)
+    except ValueError:
+        return (99, 99)
+
+
 from ._common import (
     BackendInfo,
     VersionInfo,
@@ -68,6 +77,11 @@ class BackendManager(
 
     # Schema version for receipts
     SCHEMA: int = 1
+
+    # Newest Python a venv for this backend may be built on, or None for no ceiling. Backends that
+    # pull torch need it: torch lags each CPython release, and Homebrew moving `python3` to a new
+    # minor (3.15, measured 2026-10-23) made every implicit choice a venv pip could not fill.
+    PYTHON_MAX: tuple[int, int] | None = None
 
     def __init__(self, home: Path | None = None) -> None:
         """Initialize the backend manager.
@@ -363,15 +377,14 @@ class BackendManager(
         Raises:
             ManagerError: If no suitable Python is found
         """
-        candidates: list[str] = []
-        if explicit:
-            candidates.append(explicit)
-        if os.environ.get("LA_BASE_PYTHON"):
-            candidates.append(os.environ["LA_BASE_PYTHON"])
-        candidates.extend([sys.executable, "/opt/homebrew/bin/python3.14", "python3.14", "python3"])
+        # An explicit choice (--python, LA_BASE_PYTHON) is the operator's decision and skips the
+        # ceiling; only the implicit default list is filtered by PYTHON_MAX.
+        chosen = [c for c in (explicit, os.environ.get("LA_BASE_PYTHON")) if c]
+        candidates = [(c, False) for c in chosen] + [(c, True) for c in self.python_candidates()]
 
         seen: set[str] = set()
-        for candidate in candidates:
+        too_new: list[str] = []
+        for candidate, capped in candidates:
             resolved = candidate
             if "/" not in candidate:
                 which_result = shutil.which(candidate)
@@ -379,13 +392,39 @@ class BackendManager(
                     resolved = which_result
                 else:
                     continue
-            path = Path(resolved).expanduser().resolve()
-            if str(path) in seen or not os.access(path, os.X_OK):
+            # Dedupe on the real file, but RETURN the path as found: a venv records its base
+            # interpreter, and the resolved target of /opt/homebrew/bin/python3.14 is one patch
+            # keg (Cellar/.../3.14.8_2) that `brew cleanup` deletes after the next patch upgrade.
+            path = Path(resolved).expanduser().absolute()
+            real = path.resolve()
+            if str(real) in seen or not os.access(real, os.X_OK):
                 continue
-            seen.add(str(path))
-            if subprocess.run([str(path), "-c", "import venv"], capture_output=True).returncode == 0:
-                return path
+            seen.add(str(real))
+            probe = subprocess.run(
+                [str(path), "-c", "import venv, sys; print('%d.%d' % sys.version_info[:2])"],
+                capture_output=True, text=True,
+            )
+            if probe.returncode != 0:
+                continue
+            if capped and self.PYTHON_MAX and _minor(probe.stdout) > self.PYTHON_MAX:
+                too_new.append(f"{path} ({probe.stdout.strip()})")
+                continue
+            return path
+        if too_new:
+            ceiling = "%d.%d" % self.PYTHON_MAX
+            raise ManagerError(
+                f"{self.BACKEND_NAME} needs Python <= {ceiling} (torch has no wheels past it); found "
+                f"only {', '.join(too_new)}. Install python@{ceiling} or pass --python / LA_BASE_PYTHON"
+            )
         raise ManagerError("no Python with the stdlib venv module was found; pass --python")
+
+    def python_candidates(self) -> list[str]:
+        """The implicit interpreter list, in preference order. The versioned names come after
+        sys.executable so a ceiling has something older to fall back to."""
+        out = [sys.executable]
+        for minor in ("3.14", "3.13", "3.12"):
+            out += [f"/opt/homebrew/bin/python{minor}", f"python{minor}"]
+        return out + ["python3"]
 
     def sha256_file(self, path: Path) -> str:
         """Compute SHA256 hash of a file."""
