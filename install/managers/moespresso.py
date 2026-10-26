@@ -48,6 +48,7 @@ class MoespressoManager(BackendManager):
     DEFAULT_VERSION = "3.0.0"
     PACKAGE_NAME = "moespresso"
     PYPI_URL = ""  # not on PyPI
+    PYTHON_MAX = (3, 14)  # the bottle's own Python; never a python@3.15 build (user 2026-10-26)
 
     # --- binary resolution (the load-bearing part) ----------------------------------------
     def cellar_roots(self) -> list[Path]:
@@ -223,9 +224,34 @@ class MoespressoManager(BackendManager):
                                path=str(binpath or f"<{FORMULA}>"), status="dry_run",
                                metadata={"method": "homebrew", "formula": FORMULA})
 
+        # The bottle's interpreter is the formula's choice, not ours: refuse a build that moved to
+        # a Python past the ceiling rather than install it (unreadable counts as too new).
+        py, ceiling = self.formula_python(), self.PYTHON_MAX or (3, 14)
+        if py is None or py > ceiling:
+            found = "an unreadable Python dependency" if py is None else "python@%d.%d" % py
+            raise ManagerError(
+                f"{FORMULA} is now built on {found}; this backend stays on Python <= "
+                f"{'%d.%d' % ceiling} (user decision 2026-10-26). Keep the installed 3.x keg.")
         # Always the @3 formula, whatever version string was asked: 4.x is a different engine.
         self.run_command(["brew", "install", FORMULA], capture=False)
+        # PINNED, so a blanket `brew upgrade` (the user's own or the daily job) skips it; the
+        # free-agents upgrade offer unpins, upgrades and re-pins after checking the Python.
+        self.run_command(["brew", "pin", FORMULA], capture=True)
         return self.validate_environment(str(version))
+
+    def formula_python(self) -> tuple[int, int] | None:
+        """The python@X.Y the @3 formula depends on as Homebrew would install it now, or None."""
+        import json
+        import re
+        try:
+            result = subprocess.run(["brew", "info", "--json=v2", FORMULA],
+                                    capture_output=True, text=True, timeout=60)
+            deps = json.loads(result.stdout or "{}")["formulae"][0].get("dependencies", [])
+        except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError):
+            return None
+        found = [(int(m.group(1)), int(m.group(2))) for d in deps
+                 if (m := re.fullmatch(r"python@(\d+)\.(\d+)", d))]
+        return max(found) if found else None
 
     def validate_environment(self, version: str) -> BackendInfo:
         binpath = self.require_binary()

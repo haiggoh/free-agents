@@ -47,6 +47,41 @@ from typing import Callable
 HERE = Path(__file__).resolve().parent
 MANAGE_BACKEND = HERE / "manage-backend.py"
 
+# Homebrew formulae kept PINNED so a blanket `brew upgrade` (the user's own, or the daily job)
+# cannot move them unchecked; their offer is the one route that moves them, and it unpins,
+# upgrades and re-pins. moespresso@3: a 3.x patch rebuilt on python@3.15 must be held back,
+# and 4.x is a different engine that cannot load the DeepSeek V4 package (user 2026-10-26).
+PINNED_FORMULAE = ("steadfastgaze/tap/moespresso@3",)
+# Newest Python litellm and MoEspresso may run on. One value with the venv managers'
+# BackendManager.PYTHON_MAX: torch-era wheels lag each CPython release.
+PYTHON_MAX = (3, 14)
+
+
+def _minor(text: str) -> tuple[int, int] | None:
+    """'Python 3.15.1' / 'python@3.15' / '3.15' -> (3, 15); None when nothing parses."""
+    import re
+    m = re.search(r"(\d+)\.(\d+)", text or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def ceiling_python() -> str:
+    """A <= PYTHON_MAX interpreter, by the venv managers' own chooser (stable symlink path)."""
+    sys.path.insert(0, str(HERE))
+    import importlib
+    importlib.import_module("managers.litellm")
+    return str(importlib.import_module("managers").get_manager_instance("litellm").choose_python(None))
+
+
+def formula_python_too_new(formula: str, run: "Runner") -> bool:
+    """True when the formula, as Homebrew would install it now, depends on python@>PYTHON_MAX."""
+    r = run(["brew", "info", "--json=v2", formula])
+    try:
+        deps = json.loads(r.stdout or "{}")["formulae"][0].get("dependencies", [])
+    except (ValueError, KeyError, IndexError):
+        return True    # unreadable is not "safe": hold the upgrade rather than guess
+    pys = [v for d in deps if d.startswith("python@") and (v := _minor(d))]
+    return any(v > PYTHON_MAX for v in pys)
+
 
 @dataclass
 class Upgrade:
@@ -116,6 +151,8 @@ def brew_upgrades(run: Runner = _run) -> list[Upgrade]:
         if key is None:
             continue
         cur = (f.get("installed_versions") or ["?"])[-1]
+        if key in PINNED_FORMULAE and formula_python_too_new(key, run):
+            continue   # held: this release would put the backend on Python > PYTHON_MAX
         out.append(Upgrade(names[key], cur, f.get("current_version", "?"), ["brew", "upgrade", key], "homebrew"))
     return out
 
@@ -126,14 +163,28 @@ def pipx_upgrades(run: Runner = _run, latest: Callable[[str], str | None] = _pyp
         venvs = json.loads(r.stdout or "{}").get("venvs", {})
     except ValueError:
         return []
-    meta = venvs.get("litellm", {}).get("metadata", {}).get("main_package", {})
-    cur = meta.get("package_version")
+    md = venvs.get("litellm", {}).get("metadata", {})
+    cur = md.get("main_package", {}).get("package_version")
     if not cur:
         return []
+    py = _minor(md.get("python_version", ""))
+    if py and py > PYTHON_MAX:
+        # `pipx upgrade` keeps a venv's interpreter, so it can never repair this; a reinstall on a
+        # <= PYTHON_MAX Python does, keeps injected packages, and lands the newest release.
+        return [Upgrade("litellm", cur, latest("litellm") or cur,
+                        ["pipx", "reinstall", "--python", "<ceiling>", "litellm"], "pipx-python")]
     new = latest("litellm")
     if not new or not _newer(new, cur):
         return []
     return [Upgrade("litellm", cur, new, ["pipx", "upgrade", "litellm"], "pipx")]
+
+
+def _pipx_litellm_python(run: "Runner") -> tuple[int, int] | None:
+    try:
+        meta = json.loads(run(["pipx", "list", "--json"]).stdout or "{}")
+        return _minor(meta["venvs"]["litellm"]["metadata"].get("python_version", ""))
+    except (ValueError, KeyError):
+        return None
 
 
 def venv_upgrades(mgrs: dict | None = None) -> list[Upgrade]:
@@ -168,6 +219,11 @@ def live_command(u: Upgrade) -> list[str]:
     State records WHAT to upgrade; WHERE the code lives is resolved at use time."""
     if u.via == "versioned venv":
         return [sys.executable, str(MANAGE_BACKEND), "--backend", u.backend, "install", u.latest]
+    if u.via == "pipx-python":
+        return ["pipx", "reinstall", "--python", ceiling_python(), "litellm"]
+    if u.via == "homebrew" and u.command[-1] in PINNED_FORMULAE:
+        f = u.command[-1]
+        return ["/bin/sh", "-c", f"brew unpin {f}; brew upgrade {f}; rc=$?; brew pin {f}; exit $rc"]
     return u.command
 
 
@@ -214,9 +270,14 @@ def still_needed(u: Upgrade, run: Runner = _run) -> bool:
     # "Needed" means the installed version is OLDER than the offer -- not merely different. A user
     # who upgraded past the cached offer by hand (litellm 1.106.0 installed, 1.105.1 offered,
     # measured 2026-10-20) must not be asked to "upgrade" to the older release.
+    if u.via == "pipx-python":
+        py = _pipx_litellm_python(run)
+        return bool(py and py > PYTHON_MAX)
     if u.via == "homebrew":
         r = run(["brew", "list", "--versions", u.command[-1].split("/")[-1]])
         parts = r.stdout.split()
+        if u.command[-1] in PINNED_FORMULAE and formula_python_too_new(u.command[-1], run):
+            return False   # the formula moved to a too-new Python since the check: hold it
         return r.returncode == 0 and len(parts) > 1 and _newer(u.latest, parts[-1])
     if u.via == "pipx":
         try:

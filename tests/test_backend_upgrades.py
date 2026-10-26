@@ -26,10 +26,13 @@ def done(stdout="", rc=0):
 class FakeShell:
     """Answers the brew/pipx queries the module makes, from a small in-memory machine."""
 
-    def __init__(self, brew=None, outdated=None, pipx_litellm=None):
+    def __init__(self, brew=None, outdated=None, pipx_litellm=None, litellm_python="3.14.8",
+                 deps=None):
         self.brew = brew or {}            # formula short name -> installed version
         self.outdated = outdated or []    # brew outdated --json formulae entries
         self.pipx_litellm = pipx_litellm  # installed litellm version under pipx, or None
+        self.litellm_python = litellm_python  # the interpreter pipx built litellm's venv on
+        self.deps = deps or {}            # full formula name -> its dependency names (brew info)
         self.calls = []
 
     def __call__(self, cmd):
@@ -39,10 +42,13 @@ class FakeShell:
             return done(f"{cmd[3]} {v}\n", 0) if v else done("", 1)
         if cmd[:2] == ["brew", "outdated"]:
             return done(json.dumps({"formulae": self.outdated, "casks": []}))
+        if cmd[:3] == ["brew", "info", "--json=v2"]:
+            return done(json.dumps({"formulae": [{"name": cmd[3], "dependencies": self.deps.get(cmd[3], [])}]}))
         if cmd[:3] == ["pipx", "list", "--json"]:
             venvs = {}
             if self.pipx_litellm:
-                venvs["litellm"] = {"metadata": {"main_package": {"package_version": self.pipx_litellm}}}
+                venvs["litellm"] = {"metadata": {"main_package": {"package_version": self.pipx_litellm},
+                                                 "python_version": f"Python {self.litellm_python}"}}
             return done(json.dumps({"venvs": venvs}))
         raise AssertionError(f"unexpected command {cmd}")
 
@@ -173,6 +179,49 @@ class Upgrades(unittest.TestCase):
         live = [sys.executable, str(bu.MANAGE_BACKEND), "--backend", "rapid-mlx", "install", "0.16.9"]
         self.assertEqual(ran, [live])
         self.assertNotIn("/gone/", asked[0], "the question must show the command that will run")
+
+    # --- the Python ceiling on the brew/pipx routes (user 2026-10-26) ---------------------
+    # The user runs `brew upgrade && brew upgrade --greedy && pipx upgrade-all` by hand and
+    # from a daily job; nothing may move litellm or MoEspresso onto Python >= 3.15, while
+    # litellm stays on its newest release and MoEspresso takes 3.x patches (never 4.x).
+    MOE = "steadfastgaze/tap/moespresso@3"
+
+    def test_litellm_on_a_too_new_python_is_offered_a_reinstall_on_the_ceiling(self):
+        sh = FakeShell(pipx_litellm="1.106.4", litellm_python="3.15.1")
+        ups = bu.pipx_upgrades(sh, latest=lambda p: "1.106.4")
+        self.assertEqual(len(ups), 1, "same version, wrong interpreter: still an offer")
+        self.assertTrue(bu.still_needed(ups[0], sh), "a repair is needed while the venv is on 3.15")
+        with mock.patch.object(bu, "ceiling_python", lambda: "/stable/python3.14"):
+            cmd = bu.live_command(ups[0])
+        self.assertEqual(cmd,
+                         ["pipx", "reinstall", "--python", "/stable/python3.14", "litellm"])
+        self.assertFalse(bu.still_needed(ups[0], FakeShell(pipx_litellm="1.106.4")),
+                         "once back on 3.14 the repair offer is dropped")
+
+    def test_litellm_on_314_gets_a_plain_upgrade_that_keeps_its_interpreter(self):
+        sh = FakeShell(pipx_litellm="1.106.4", litellm_python="3.14.8")
+        ups = bu.pipx_upgrades(sh, latest=lambda p: "1.107.0")
+        self.assertEqual(bu.live_command(ups[0]), ["pipx", "upgrade", "litellm"])
+        self.assertEqual(bu.pipx_upgrades(sh, latest=lambda p: "1.106.4"), [])
+
+    def test_moespresso_patch_rebuilt_on_a_too_new_python_is_held_not_offered(self):
+        out = [{"name": self.MOE, "installed_versions": ["3.0.0"], "current_version": "3.0.1"}]
+        held = FakeShell(brew={"moespresso@3": "3.0.0"}, outdated=out,
+                         deps={self.MOE: ["python@3.15", "openssl@3"]})
+        self.assertEqual(bu.brew_upgrades(held), [])
+        ok = FakeShell(brew={"moespresso@3": "3.0.0"}, outdated=out, deps={self.MOE: ["python@3.14"]})
+        self.assertEqual([(u.backend, u.latest) for u in bu.brew_upgrades(ok)], [("moespresso", "3.0.1")])
+
+    def test_moespresso_upgrade_unpins_upgrades_and_repins(self):
+        # moespresso@3 is PINNED so a blanket `brew upgrade` cannot move it unchecked; the offer is
+        # the one route that moves it, after the Python check.
+        u = bu.Upgrade("moespresso", "3.0.0", "3.0.1", ["brew", "upgrade", self.MOE], "homebrew")
+        cmd = bu.live_command(u)
+        self.assertEqual(cmd[:2], ["/bin/sh", "-c"])
+        script = cmd[2]
+        for step in (f"brew unpin {self.MOE}", f"brew upgrade {self.MOE}", f"brew pin {self.MOE}"):
+            self.assertIn(step, script)
+        self.assertLess(script.index("upgrade"), script.rindex("brew pin"), "re-pinned AFTER upgrade")
 
     def test_nothing_pending_prints_nothing(self):
         out = io.StringIO()

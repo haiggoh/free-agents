@@ -48,6 +48,7 @@ def test_install_uses_the_at3_formula_not_the_linked_one():
     assert info.version == "3.0.0"
     # The real install path: assert the argv a real invocation would use.
     with patch.object(mgr, "run_command", return_value=_brew([], "🍺")) as run, \
+         patch.object(mgr, "formula_python", return_value=(3, 14)), \
          patch("pathlib.Path.exists", return_value=True):
         mgr.install_version("3.0.0", dry_run=False)
     argv = [c.args[0] for c in run.call_args_list][0]
@@ -182,3 +183,38 @@ def test_a_3x_upgrade_is_still_offered():
          patch.object(mgr, "get_latest_version", return_value="3.4.0"):
         ups = mgr.check_updates()
     assert ups == [("moespresso", "3.0.0", "3.4.0")], ups
+
+
+# --- the Python ceiling + the pin (user 2026-10-26) -----------------------------------------
+# The user runs `brew upgrade && brew upgrade --greedy && pipx upgrade-all` by hand. MoEspresso
+# must stay on 3.x patches AND never land on Python >= 3.15, so the @3 formula is PINNED (a
+# blanket brew upgrade skips it) and moves only through free-agents' checked offer.
+def test_install_pins_the_formula_so_a_blanket_brew_upgrade_cannot_move_it():
+    mgr = MoespressoManager()
+    with patch.object(mgr, "run_command", return_value=_brew([], "🍺")) as run, \
+         patch.object(mgr, "formula_python", return_value=(3, 14)), \
+         patch("pathlib.Path.exists", return_value=True):
+        mgr.install_version("3.0.0", dry_run=False)
+    argvs = [c.args[0] for c in run.call_args_list]
+    install = argvs.index(["brew", "install", "steadfastgaze/tap/moespresso@3"])
+    assert ["brew", "pin", "steadfastgaze/tap/moespresso@3"] in argvs[install + 1:], argvs
+
+
+def test_a_formula_built_on_a_too_new_python_is_refused_before_brew_runs():
+    mgr = MoespressoManager()
+    with patch.object(mgr, "run_command") as run, \
+         patch.object(mgr, "formula_python", return_value=(3, 15)):
+        try:
+            mgr.install_version("3.0.1")
+        except ManagerError as exc:
+            assert "3.14" in str(exc) and "3.15" in str(exc), exc
+            run.assert_not_called()
+        else:
+            raise AssertionError("a python@3.15 build must be refused, not installed")
+
+
+def test_formula_python_reads_the_python_dependency():
+    mgr = MoespressoManager()
+    info = '{"formulae": [{"dependencies": ["openssl@3", "python@3.14"]}]}'
+    with patch("subprocess.run", return_value=_brew([], info)):
+        assert mgr.formula_python() == (3, 14)
