@@ -1,4 +1,4 @@
-## [0.44.3] — 2026-10-26
+## [0.45.2] — 2026-10-26
 
 ### Added — the dispatch-rule memories now live in the skills they govern (rule-migration item D)
 
