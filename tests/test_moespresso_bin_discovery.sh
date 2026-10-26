@@ -70,6 +70,29 @@ else
   bad "the operator pin was ignored (got: ${out:-<empty>})"
 fi
 
+# --- 3b. a set-but-EMPTY pin means "no MoEspresso here", in bash exactly as in the detector -----
+# bin/la-detect-backend.py reads the variable this way; a bash/Python disagreement here gives a
+# gate and a launcher opposite answers about the same model.
+out=$(env -u LA_LIVE_CONFIG_DIR LA_MOESPRESSO_BIN= \
+      LA_MOESPRESSO_CELLAR_ROOT="$KEG3/.." \
+      bash -c '. "$1/config/config-lib.sh"; la_load_config >/dev/null 2>&1
+               if [ -n "${LA_MOESPRESSO_BIN+set}" ]; then echo "set:[${LA_MOESPRESSO_BIN}]"; else echo "unset"; fi' \
+      _ "$REPO" 2>&1)
+# "set:[]" — still set, still empty. `${VAR:-x}` cannot tell those apart (`:` also substitutes for
+# empty), which is why this probes with `${VAR+set}`.
+if [ "$out" = "set:[]" ]; then
+  ok "a set-but-empty LA_MOESPRESSO_BIN stays set-and-empty after la_load_config"
+else
+  bad "la_load_config replaced an empty override with discovery: $out"
+fi
+out=$(env -u LA_LIVE_CONFIG_DIR LA_MOESPRESSO_BIN= \
+      bash -c '. "$1/config/config-lib.sh"; la_discover_moespresso_bin' _ "$REPO" 2>&1)
+if [ -z "$out" ]; then
+  ok "an empty pin means 'no MoEspresso' to bash too (matches the detector)"
+else
+  bad "bash treats an empty pin as 'discover' and found $out — it must mean 'none'"
+fi
+
 # --- 4. `moespresso` is a legal serve value, and NOT a reachable MLX default -----------------
 out=$(env -u LA_LIVE_CONFIG_DIR bash -c '. "$1/config/config-lib.sh"; la_load_config
   case " $LA_SERVE_BACKENDS " in *" moespresso "*) echo "PIN-OK" ;; *) echo "PIN-MISSING" ;; esac

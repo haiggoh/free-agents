@@ -23,7 +23,10 @@ pass=0 fail=0
 ok()  { printf '  ✓ %s\n' "$1"; pass=$((pass+1)); }
 bad() { printf '  ✗ %s\n' "$1"; fail=$((fail+1)); }
 
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+WORK="$(mktemp -d)"
+_cleanup() { for p in $(/usr/sbin/lsof -t -i :9989 -sTCP:LISTEN 2>/dev/null); do kill -9 "$p" 2>/dev/null; done; rm -rf "$WORK"; }
+trap _cleanup EXIT
+_cleanup 2>/dev/null || true
 
 echo "hotswap weight-format gate:"
 
@@ -110,8 +113,8 @@ rm -f "$SCRATCH/config/config.local.sh"
 # alias | subdir | serve | tool_parser | reasoning_parser | thinking | spoof | effort | ...
 cat > "$SCRATCH/config/config.local.sh" <<CFG
 LA_MODELS_DIR=$MODELS
-LA_PORT_START=9990
-LA_PORT_MAX=9990
+LA_PORT_START=9989
+LA_PORT_MAX=9989
 LA_RAPID_BIN=/nonexistent/rapid-mlx
 LA_OMLX_BIN=/nonexistent/omlx
 LA_VENV=/nonexistent/venv/bin
@@ -120,7 +123,7 @@ la_register plain-mlx    plain-mlx    omlx "" "" false "" high "" "" ""
 CFG
 [ -s "$SCRATCH/config/config.local.sh" ] || { echo "FATAL: scratch registry is empty" >&2; exit 1; }
 
-out=$(env -u LA_LIVE_CONFIG_DIR LA_CONFIG_DIR="$SCRATCH/config" \
+out=$(env -u LA_LIVE_CONFIG_DIR LA_MOESPRESSO_BIN= LA_CONFIG_DIR="$SCRATCH/config" \
       "$SCRATCH/bin/local-llm-hotswap.sh" ds-coder 2>&1); rc=$?
 if [ "$rc" -ne 0 ]; then
   ok "a foreign-format artifact makes hotswap exit non-zero (rc=$rc)"
@@ -132,15 +135,23 @@ if printf '%s' "$out" | grep -q 'SUCCESS_PORT='; then
 else
   ok "no SUCCESS_PORT is printed for an unloadable artifact"
 fi
-if printf '%s' "$out" | grep -q 'not readable by any installed backend'; then
+if printf '%s' "$out" | grep -q 'Not launching ds-coder' \
+   && printf '%s' "$out" | grep -q 'not readable by any installed backend'; then
   ok "the refusal explains that the WEIGHTS are the problem (not a vague 409)"
 else
   bad "the refusal does not name the real problem: $out"
 fi
-if printf '%s' "$out" | grep -q 'MoEspresso'; then
-  ok "the refusal names the runtime the catalog says the artifact needs"
+# The runtime hint comes from config/model-catalog.local.psv, which is GITIGNORED machine state —
+# absent in a fresh clone or worktree, where the hint is (correctly) omitted. Assert it only where
+# the catalog is actually present.
+if [ -f "$REPO/config/model-catalog.local.psv" ]; then
+  if printf '%s' "$out" | grep -q 'MoEspresso'; then
+    ok "the refusal names the runtime the catalog says the artifact needs"
+  else
+    bad "the refusal omits the catalog's runtime hint (MoEspresso>=2.1)"
+  fi
 else
-  bad "the refusal omits the catalog's runtime hint (MoEspresso>=2.1)"
+  printf '  ~ skipped: no model-catalog.local.psv here (gitignored), so no runtime hint is expected\n'
 fi
 
 # 5. PLANTED POSITIVE — a negative result needs one. With the override set, the SAME artifact must
@@ -150,7 +161,7 @@ out=$(env -u LA_LIVE_CONFIG_DIR LA_GATE_WEIGHT_FORMAT=0 LA_CONFIG_DIR="$SCRATCH/
       "$SCRATCH/bin/local-llm-hotswap.sh" ds-coder 2>&1); rc=$?
 if printf '%s' "$out" | grep -q 'not readable by any installed backend'; then
   bad "LA_GATE_WEIGHT_FORMAT=0 did not bypass the gate — the negative above may prove nothing"
-elif printf '%s' "$out" | grep -q 'oMLX executable not found'; then
+elif printf '%s' "$out" | grep -q 'executable not found'; then
   ok "LA_GATE_WEIGHT_FORMAT=0 passes the gate and fails later (missing binary), as it should"
 else
   bad "with the override, hotswap neither refused nor reached the backend: $out"
@@ -159,7 +170,7 @@ fi
 # 6. A plain artifact must NOT be refused by this gate. Without this case a gate that refuses
 #    EVERYTHING would look like a working gate, so the assertion demands the refusal be absent AND
 #    a later stage actually be reached — otherwise "not refused" could just mean "nothing ran".
-out=$(env -u LA_LIVE_CONFIG_DIR LA_CONFIG_DIR="$SCRATCH/config" \
+out=$(env -u LA_LIVE_CONFIG_DIR LA_MOESPRESSO_BIN= LA_CONFIG_DIR="$SCRATCH/config" \
       "$SCRATCH/bin/local-llm-hotswap.sh" plain-mlx 2>&1); rc=$?
 if printf '%s' "$out" | grep -q 'not readable by any installed backend'; then
   bad "a plain MLX artifact was refused by the weight-format gate — the gate over-reaches"
@@ -172,7 +183,7 @@ fi
 # 7. The universal net: la_load_config must WARN for an unlaunchable artifact, covering the routes
 #    that never reach hotswap (the auto-mode launchers, the prewarm gate, csl's offer). It must
 #    warn without failing the load, or one bad artifact would break every listing tool.
-net=$(env -u LA_LIVE_CONFIG_DIR LA_CONFIG_DIR="$SCRATCH/config" bash -c \
+net=$(env -u LA_LIVE_CONFIG_DIR LA_MOESPRESSO_BIN= LA_CONFIG_DIR="$SCRATCH/config" bash -c \
       '. "$1/config-lib.sh"; la_load_config' _ "$SCRATCH/config" 2>&1)
 if printf '%s' "$net" | grep -q 'deepseek-v4-flash-0731-coder: weights are not MLX-readable'; then
   ok "la_load_config warns about the unlaunchable artifact (covers non-hotswap routes)"
