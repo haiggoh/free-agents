@@ -374,7 +374,17 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             fi
             echo "SUCCESS_PORT=$port"; exit 0
         fi
-        echo "ℹ️ Port $port busy serving '$CURRENT_MODEL'. Skipping..."
+        # Name the occupant honestly: the advertised id when there is one, else what the meta
+        # file records (MoEspresso advertises no model list, so CURRENT_MODEL is empty there and
+        # this message used to read "busy serving ''"). The meta was already read this iteration
+        # for the reuse check, so the answer is free.
+        _occupant="$CURRENT_MODEL"
+        if [ -z "$_occupant" ] && [ -n "${_meta:-}" ] && [ -f "${_meta:-}" ]; then
+            _occ_alias=$(awk -F= '$1=="alias"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _occ_dir=$(awk -F= '$1=="model_dir"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _occupant="${_occ_alias:-$(basename "${_occ_dir:-unknown}")} (${_meta_backend:-unknown} server)"
+        fi
+        echo "ℹ️ Port $port busy serving '${_occupant:-<unidentifiable>}'. Skipping..."
     else TARGET_PORT=$port; break; fi
 done
 [ -z "$TARGET_PORT" ] && { echo "❌ All ports $LA_PORT_START-$LA_PORT_MAX saturated."; exit 1; }
@@ -574,6 +584,7 @@ if [ "$SERVE" = "omlx" ]; then
         echo "alias=$MODEL_NAME"
         echo "model_dir=$MODEL_DIR"
         echo "served_id=$SPOOF_PRIMARY"
+        echo "kv_dtype=$MG_KV"
         echo "kv_dtype_saved=$MG_KV"
         echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
         [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
@@ -630,6 +641,7 @@ if [ "$SERVE" = "moespresso" ]; then
         # literally. Omitting it here made a healthy MoEspresso server unreusable.
         echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
         echo "pid=$MOE_PID"
+        echo "kv_dtype=$MG_KV"
         echo "kv_dtype_saved=$MG_KV"
         [ -n "${LA_TEMPERATURE:-}" ] && echo "temperature=$LA_TEMPERATURE"
     } > "$MOE_META.tmp.$$"

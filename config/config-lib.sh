@@ -289,9 +289,14 @@ la_moespresso_reports_3x() {
 
 la_discover_moespresso_bin() {
   local root c
-  # 1. An operator pin (LA_MOESPRESSO_BIN) always wins.
-  if [ -n "${LA_MOESPRESSO_BIN:-}" ] && [ -x "$LA_MOESPRESSO_BIN" ]; then
-    echo "$LA_MOESPRESSO_BIN"; return 0
+  # 1. An operator pin (LA_MOESPRESSO_BIN) always wins — INCLUDING a set-but-EMPTY one, which
+  #    means "this machine has no MoEspresso" and resolves to nothing. bin/la-detect-backend.py
+  #    reads the same variable the same way, so the two implementations cannot disagree about
+  #    whether a binary is present; an empty pin that meant "discover" here but "none" there is
+  #    how a gate and a launcher end up with opposite answers about the same model.
+  if [ -n "${LA_MOESPRESSO_BIN+set}" ]; then
+    if [ -x "${LA_MOESPRESSO_BIN:-}" ]; then echo "$LA_MOESPRESSO_BIN"; return 0; fi
+    echo ""; return 1
   fi
   # 2. The @3 kegs, newest first. Same `sort -V` rule as rapid above: version, not mtime.
   root="${LA_MOESPRESSO_CELLAR_ROOT:-/opt/homebrew/Cellar/moespresso@3}"
@@ -668,7 +673,9 @@ la_load_config() {
     else LA_OMLX_BIN="$(command -v omlx 2>/dev/null || true)"; fi
   fi
   # MoEspresso (the 3.x line) — resolves by keg path, see la_discover_moespresso_bin above.
-  if [ -z "${LA_MOESPRESSO_BIN:-}" ]; then
+  # Discover only when UNSET: a set-but-empty override means "no MoEspresso here", and discovery
+  # must not quietly replace it with whatever this machine happens to have installed.
+  if [ -z "${LA_MOESPRESSO_BIN+set}" ]; then
     LA_MOESPRESSO_BIN="$(la_discover_moespresso_bin)"
   fi
   export LA_MOESPRESSO_BIN="${LA_MOESPRESSO_BIN:-}"

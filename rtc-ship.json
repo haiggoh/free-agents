@@ -9,8 +9,8 @@
   "version_file": "VERSION",
   "roadmap": "docs/ROADMAP.md",
 
-  "_comment_assets": "The release tarball and both installer names. Version-free globs are deliberate: scripts/package-release.sh reads VERSION and wipes dist/ each run, so exactly one tarball exists when these resolve. A glob that matches nothing now FAILS the ship (rtc-ship.sh 0.6.6) rather than silently publishing without it.",
-  "assets": "dist/free-agents-*.tar.gz dist/install-free-agents.sh dist/install-free-agents.command",
+  "_comment_assets": "The release tarball and the ONE installer name. The dual .command upload was dropped 2026-10-26: it was the same bytes under a legacy name (superseded since 0.29.3) and the deep links it existed for were judged unused, so a stale install-free-agents.command link now 404s — accepted deliberately. Version-free globs are deliberate: scripts/package-release.sh reads VERSION and wipes dist/ each run, so exactly one tarball exists when these resolve. A glob that matches nothing now FAILS the ship (rtc-ship.sh 0.6.6) rather than silently publishing without it.",
+  "assets": "dist/free-agents-*.tar.gz dist/install-free-agents.sh",
 
   "refresh_plugin": "free-agents",
   "test_workers": 12,

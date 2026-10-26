@@ -513,12 +513,19 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   before any weights are read. Asks three questions cheapest-first (does it fit / are other models
   loaded / are they attached) and stops as soon as the answer is settled.
 - **`bin/la-evict.sh`** — emergency memory-recovery fallback for when the machine is already out of
-  RAM and the terminal is unresponsive. It is **not** ordinary lifecycle management: it evicts **one
-  server at a time** (ranked, least-costly first), escalating one step per repeat invocation, and
-  never touches a server with a live session attached on its first pass. Escalation applies only
-  within the window (default 600 s, `LA_EVICT_WINDOW` to change); once it expires the next invocation
-  is a first run again, and `--reset` clears the saved escalation state and exits without evicting.
-  See [Safety](#safety).
+  RAM and the terminal is unresponsive. It is **not** ordinary lifecycle management. It climbs a
+  three-step ladder and **only an argument-less run advances it**: the **first run (tier 0)** sweeps
+  every *unattached* (orphaned) server in one pass — dead servers are safe to evict, so there is no
+  reason to tier them — and then warns which ports still have a live session attached; the **second
+  run (tier 1)** evicts exactly **one** server (ranked, least-costly first) and *holds back* rather
+  than take one with a live session attached; the **third and later runs (tier 2+)** are the emergency
+  tier, where attached and unrecognised backends become eligible, still one server at a time.
+  Escalation applies only within the window (default 600 s, `LA_EVICT_WINDOW` to change); once it
+  expires the next invocation is a first run again, and `--reset` clears the saved escalation state
+  and exits without evicting. `--port N` (repeatable) evicts one named port and is deliberately
+  **outside** the ladder — it never advances the tier and never writes state — but N must lie inside
+  the configured model-server range, so the proxy band live sessions depend on cannot be named by a
+  typo. See [Safety](#safety).
 - **`bin/la-reboot.sh`** — `la-evict`'s sibling for the opposite problem: a session whose backend
   **already crashed**. It restarts the *same* model on the *same* port with the *same* arguments, so
   a still-open Claude Code session reconnects on its next request — no exit, no `/resume`, no context
@@ -1352,7 +1359,7 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   verdict means no execution, not a silent allow.
 - **No reasoning leakage.** The nudge forbids emitting `<think>` markup / raw chain-of-thought into
   visible output or tool arguments.
-- **`la-evict` is a last resort, and a conservative one.** The escape hatch for when the machine is already out of RAM and the normal lifecycle is unresponsive: it never bulk-kills the roster, never touches a server with a live session on its first pass, and escalates only one step per repeat call inside the window — so a healthy stack is left alone. Deliberately standalone (no `config-lib.sh`, no registry): a fallback that runs while the stack is sick must not depend on the stack.
+- **`la-evict` is a last resort, and a conservative one.** The escape hatch for when the machine is already out of RAM and the normal lifecycle is unresponsive: it never bulk-kills servers with a live session attached, never touches a server with a live session on its first pass, and escalates only one step per repeat call inside the window — so a healthy stack is left alone. (Its first run does sweep every *unattached* server at once: those are dead, so there is nothing to conserve.) Deliberately standalone (no `config-lib.sh`, no registry): a fallback that runs while the stack is sick must not depend on the stack.
 
 ## Testing
 
