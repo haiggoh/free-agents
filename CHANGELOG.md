@@ -1,3 +1,21 @@
+## [0.44.3] — 2026-10-26
+
+### Fixed — a graceful-SIGTERM proxy held the port through the swap's rebind
+
+Live dogfood hit it twice on 2026-10-25: the mid-flight swap SIGTERMed the old
+LiteLLM proxy, waited 30 s for the port to free, and spawned the new proxy onto a
+port the old one still held — uvicorn finishes in-flight work before exiting, so a
+proxy mid-shutdown keeps its port for minutes. The rebind then failed the live
+probe (000) and the automatic revert put the old model back, or worse: the old
+proxy answered both probes and the swap reported a silent wrong-model success.
+
+`swap_model` now gives the graceful exit a tunable grace (`LA_SWAP_TERM_GRACE`,
+default 8 s) and SIGKILLs a proxy that ignored TERM — SIGKILL is the only prompt
+kill — then rebinds only once the port is actually free. The swap stub suite
+gains a lazy ignore-term control and a test that was watched to fail first (the
+old code answered both probes with the OLD model), passes with the fix, and
+fails again with the escalation mutated out.
+
 ## [0.45.1] — 2026-10-26
 
 ### Fixed — the MoEspresso dry run told the user a venv would be created
