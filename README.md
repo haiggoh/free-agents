@@ -411,13 +411,30 @@ auto-discovers brew → `PATH` → newest `~/.venvs/rapid-mlx-*`, so a machine t
 install still works. The weekly `backend-update-check` launchd job (installed via `manage-backend.py --backend rapid-mlx launchd install`) watches PyPI for all backend releases (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) and only *notifies* — it never installs.
 
 **What does install is `install/manage-backend.py`**, the unified runtime lifecycle manager for
-every backend (`--backend rapid-mlx|vllm-mlx|omlx|llama-cpp|litellm`). It closes the notify loop
+every backend (`--backend rapid-mlx|vllm-mlx|omlx|moespresso|llama-cpp|litellm`). It closes the notify loop
 without ever starting a model server. In `csl` it is `v` (Backend manager).
 
 ```bash
 ./install/manage-backend.py --backend rapid-mlx releases
 ./install/manage-backend.py --backend rapid-mlx installed
 ./install/manage-backend.py --backend rapid-mlx install 0.14.0
+```
+
+**MoEspresso** (`serve=moespresso`) is a separate, full runtime for *MoEspresso-packaged* artifacts —
+models shipped as `weight_format: "mxtq"` TurboQuant bundles, which no MLX engine can read (oMLX
+and rapid-mlx both load through `mlx_lm`, and they fail at `load_weights` with
+`Received 46 parameters not in model`). It comes from the `steadfastgaze/tap` Homebrew tap and is
+installed by `install-backend.sh` like every other backend.
+
+Two consequences worth knowing before you use it:
+
+- **It is pinned to the 3.x line.** 4.x is a Qwen-only engine that refuses a DeepSeek V4 package
+  with `unsupported required package feature`, so the backend manager will neither install nor
+  upgrade past 3.x — an upgrade that would break the only model the runtime serves would arrive
+  with every command succeeding.
+- **It needs no spoof id, and advertises no model list.** The server accepts and echoes any model
+  name, so no oMLX-style symlink farm is built; and because `GET /v1/models` 404s, this backend
+  reuses a healthy server from its own metadata instead of an advertised id.
 ./install/manage-backend.py --backend litellm check-updates
 ```
 
