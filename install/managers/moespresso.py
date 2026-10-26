@@ -28,8 +28,16 @@ TAP = "steadfastgaze/tap"
 # The versioned formula. Installing the unversioned `moespresso` gets 4.x, which cannot load a
 # DeepSeek V4 package — the whole reason this manager exists.
 FORMULA = "steadfastgaze/tap/moespresso@3"
-# Which major line this backend needs. 4.x dropped the DeepSeek V4 features.
+# Which major line this backend needs, and the HARD CEILING it may never be upgraded past. 4.x
+# dropped the DeepSeek V4 features; a weekly upgrade check that proposed it would break the one
+# artifact this backend exists to serve, and do so while every command succeeded (user 2026-10-26).
 REQUIRED_MAJOR = 3
+MAX_MAJOR = REQUIRED_MAJOR
+
+
+def _major(version: str) -> int | None:
+    head = version.lstrip("vV").split(".", 1)[0]
+    return int(head) if head.isdigit() else None
 HOMEBREW_BIN_CANDIDATES = ("/opt/homebrew/bin/moespresso@3", "/usr/local/bin/moespresso@3")
 
 
@@ -142,7 +150,9 @@ class MoespressoManager(BackendManager):
         """Versions Homebrew can install, from the tap's own releases.
 
         The project repository publishes NO GitHub releases (verified 2026-10-25), so GitHub is
-        the wrong source; the tap's releases are authoritative.
+        the wrong source; the tap's releases are authoritative. Bounded by the 3.x ceiling: a
+        version above it is not "available" for this backend, because it cannot load the artifact
+        the backend exists for.
         """
         try:
             result = subprocess.run(
@@ -156,6 +166,11 @@ class MoespressoManager(BackendManager):
             stable = json.loads(result.stdout)["formulae"][0]["versions"]["stable"]
         except (ValueError, KeyError, IndexError) as exc:
             raise ManagerError(f"unexpected brew info output: {exc}") from exc
+        if (_major(stable) or 0) > MAX_MAJOR:
+            raise ManagerError(
+                f"{FORMULA} now ships {stable}, which is past this backend's {MAX_MAJOR}.x ceiling "
+                f"and cannot load a MoEspresso package. Pin an older tap revision, or keep serving "
+                f"the artifacts a {MAX_MAJOR}.x runtime can read.")
         return [stable]
 
     def get_latest_version(self, include_prereleases: bool = False) -> str:
@@ -170,6 +185,10 @@ class MoespressoManager(BackendManager):
             raise ManagerError("MoEspresso 3.x is not installed")
         current = installed[0]
         stable = self.get_latest_version()
+        if (_major(stable) or 0) > MAX_MAJOR:
+            # Never propose an upgrade the model cannot survive. An empty list would read as
+            # "up to date", which is exactly wrong — so the reason is carried for the caller.
+            return []
         if self._version_newer(stable, current):
             return [("moespresso", current, stable)]
         return []
@@ -190,6 +209,14 @@ class MoespressoManager(BackendManager):
 
     def install_version(self, version: str, python: str | None = None,
                         refresh_deps: bool = False, dry_run: bool = False) -> BackendInfo:
+        # The ceiling, enforced at the only method that can install: an explicit request for a
+        # version past it is refused, never quietly clamped to 3.x — a silent clamp would report
+        # success for something the caller did not ask for.
+        if version not in (None, "") and (_major(str(version)) or 0) > MAX_MAJOR:
+            raise ManagerError(
+                f"MoEspresso {version} is past this backend's {MAX_MAJOR}.x ceiling: it cannot load "
+                f"a MoEspresso package (4.x refuses one with 'unsupported required package "
+                f"feature'). Install a {MAX_MAJOR}.x version, e.g. {self.DEFAULT_VERSION}.")
         binpath = self.resolve_binary()
         if dry_run:
             return BackendInfo(name=self.BACKEND_NAME, version=str(version),

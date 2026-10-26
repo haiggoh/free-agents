@@ -126,3 +126,48 @@ def test_resolve_binary_fails_loudly_when_no_keg_exists(tmp_path):
                 f"the failure must name the tap so the user can install it: {exc}")
         else:
             raise AssertionError("require_binary() must raise when no 3.x keg exists")
+
+
+# --- the version ceiling: an upgrade must never move off the 3.x line -----------------------
+# User requirement 2026-10-26: MoEspresso can ONLY run the DeepSeek V4 model in 3.x, so an upgrade
+# to 4.x would silently break the one artifact this backend exists for. The weekly check
+# (install/backend_upgrades.py) calls check_updates(), and `manage-backend.py upgrade` calls
+# install_version(), so the ceiling belongs in the manager: one place every route passes through.
+def test_a_4x_release_is_never_proposed_as_an_upgrade():
+    mgr = MoespressoManager()
+    with patch.object(mgr, "get_installed_versions", return_value=["3.0.0"]), \
+         patch.object(mgr, "get_latest_version", return_value="4.0.0"):
+        assert mgr.check_updates() == [], (
+            "4.0.0 cannot load a MoEspresso package — proposing it breaks the model it would "
+            "be upgrading")
+
+
+def test_a_4x_release_never_appears_as_installable():
+    mgr = MoespressoManager()
+    with patch.object(mgr, "run_command", return_value=_brew([], "🍺")):
+        versions = mgr.get_available_versions()
+    assert versions and all(v.startswith("3.") for v in versions), (
+        f"a 4.x version must not be offered: {versions}")
+
+
+def test_installing_a_4x_version_is_refused():
+    """An explicit `install 4.0.0` must fail loudly, not run brew."""
+    mgr = MoespressoManager()
+    with patch.object(mgr, "run_command") as run:
+        try:
+            mgr.install_version("4.0.0")
+        except ManagerError as exc:
+            assert "3.x" in str(exc) and "4.x" in str(exc), (
+                f"the refusal must name the ceiling and the consequence: {exc}")
+            run.assert_not_called()
+        else:
+            raise AssertionError("install_version('4.0.0') must refuse rather than run brew")
+
+
+def test_a_3x_upgrade_is_still_offered():
+    """The ceiling must not freeze a machine that is behind on 3.x patches."""
+    mgr = MoespressoManager()
+    with patch.object(mgr, "get_installed_versions", return_value=["3.0.0"]), \
+         patch.object(mgr, "get_latest_version", return_value="3.4.0"):
+        ups = mgr.check_updates()
+    assert ups == [("moespresso", "3.0.0", "3.4.0")], ups
