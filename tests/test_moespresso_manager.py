@@ -128,6 +128,17 @@ def test_resolve_binary_fails_loudly_when_no_keg_exists(tmp_path):
             raise AssertionError("require_binary() must raise when no 3.x keg exists")
 
 
+def test_dry_run_reports_a_bottle_not_a_venv():
+    """A dry run must not promise a venv path for a backend that installs a Homebrew bottle."""
+    mgr = MoespressoManager()
+    with patch.object(mgr, "run_command", return_value=_brew([], "🍺")), \
+         patch.object(mgr, "resolve_binary", return_value=None):
+        target = str(mgr.target_for("3.0.0"))
+    assert ".venvs/" not in target, (
+        f"the dry run told the user a venv would be created; the install runs brew: {target}")
+    assert "moespresso" in target, target
+
+
 # --- the version ceiling: an upgrade must never move off the 3.x line -----------------------
 # User requirement 2026-10-26: MoEspresso can ONLY run the DeepSeek V4 model in 3.x, so an upgrade
 # to 4.x would silently break the one artifact this backend exists for. The weekly check

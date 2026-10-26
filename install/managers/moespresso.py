@@ -247,5 +247,15 @@ class MoespressoManager(BackendManager):
     def choose_python(self, explicit: str | None) -> Path:
         return Path("/usr/bin/env")
 
+    def target_for(self, version: str, home: Path | None = None) -> Path:
+        """MoEspresso is a Homebrew BOTTLE, so the dry run must not promise a venv path.
+
+        Without this, `install-backend.sh --backend moespresso --dry-run` reports
+        `~/.venvs/moespresso-3.0.0` — a path that will never be created, because the real install
+        runs `brew install steadfastgaze/tap/moespresso@3`. Report the binary that will exist.
+        (oMLX and llama.cpp are bottles too and do not override this; that gap is theirs to fix.)
+        """
+        return Path(self.resolve_binary() or f"<brew formula {FORMULA}>")
+
     def cache_root(self) -> Path:
         return self.home / ".cache" / "local-agents" / "moespresso-manager"
