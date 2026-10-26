@@ -1,3 +1,43 @@
+## [0.45.4] — 2026-10-26
+
+### Added — `la-evict` targets one known port, and the ladder is three steps deep
+
+The eviction fallback could only rank-and-sweep. It now takes an explicit target and walks a
+documented escalation ladder:
+
+- **`--port N` (repeatable, additive).** Evicts exactly the named ports, in the order given. It
+  is orthogonal to the ladder: any number of `--port` invocations leave the bare-run tier
+  exactly where it was, and a `--port` run never writes escalation state — a known target must
+  not consume an escalation step. A port outside the configured range is refused (exit 2)
+  before any state is touched.
+- **The three-step ladder, advanced only by an argument-less run.** Tier 0 sweeps every
+  unattached (orphaned) server in one pass and WARNS which ports are still attached; tier 1
+  evicts one server by the existing ranking and holds back (exit 3) when the sole candidate is
+  attached; tier 2+ is the emergency tier, where attached and unrecognised listeners become
+  eligible — still one server per run, never a sweep.
+- **The LiteLLM proxy band (4141–4151) is hard-excluded**, with no environment override: an
+  operator (or a stale profile) pointing `LA_PORT_START` at 4141 must not be able to kill a
+  proxy that live sessions depend on. Killing one reads as "Connection refused" from every
+  session at once.
+- **Honest exit codes.** 4 for a `--port` request with no listener, 5 when a `--port` run
+  stopped nothing, 3 for the tier-1 hold-back, 2 for usage errors decided before any work. A
+  `--port` request never ends in the generic success line.
+- **PID-reuse re-check and a ports-before snapshot**, so a refusal or a failed kill is never
+  reported as a freed server.
+
+### Fixed — a leftover oMLX server was classified `unknown`
+
+A hyphen is not a space. The classifier knew `omlx serve` (the Homebrew 0.7.1 entry point,
+itself a python3 shim) and `omlx.cli` (the module), but not the standalone `omlx-server` binary
+an older install leaves behind. Measured 2026-10-25 by the Qwen MTP smoke test: two live
+`omlx-server` processes held the local-inference ports, were classified `unknown`, and removing
+either required `--allow-unknown` — the flag that means "I have already decided to risk this".
+An orphan sweep should not need that flag for a backend we ship; the case now also matches
+`omlx-server` and `omlx_server`.
+
+Both changes are pinned by the suite (126 integration tests) and mutation-verified: a forced
+tier that bypasses the tier-1 guard turns the new assertions red, and so does the classifier
+with the `omlx-server` pattern removed.
 ## [0.45.3] — 2026-10-26
 
 ### Added — the dispatch-rule memories now live in the skills they govern (rule-migration item D)
