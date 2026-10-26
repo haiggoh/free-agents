@@ -1325,7 +1325,11 @@ class RemoteScreen(Screen):
             self._catalog_pending.add(agent.provider)
             self._refresh_keep_open()           # show the loading row at once
             return f"rcat:{agent.alias}"
-        for prov in self._catalog_stale:        # cached rosters: one background revision
+        # Snapshot: the loop DISCARDS dead providers from _catalog_stale (below), and mutating a
+        # set while iterating it raises "Set changed size during iteration" — measured as a
+        # picker-wide crash (2026-10-25) whenever a re-render landed mid-load, because every
+        # keystroke in the live search re-runs this path.
+        for prov in list(self._catalog_stale):  # cached rosters: one background revision
             if prov in self._catalog_pending:
                 continue
             anchor = next((a for a in self.agents if a.provider == prov and self._visible(a)), None)
