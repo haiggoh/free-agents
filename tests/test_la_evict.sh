@@ -176,6 +176,9 @@ PY
 cp "$SB/server.py" "$SB/rapid-mlx-server.py"
 cp "$SB/server.py" "$SB/vllm-mlx-server.py"
 cp "$SB/server.py" "$SB/unknown-server.py"
+# The label drives the command line the classifier sees: an omlx listener is
+# `omlx-server` (hyphen) — the shape a leftover oMLX install actually leaves.
+cp "$SB/server.py" "$SB/omlx-server.py"
 
 LAST_PID=""
 
@@ -628,9 +631,11 @@ assert_stopped "$MID_D" "tier 2 still evicts exactly one server"
 # ---------------------------------------------------------------------------
 printf '\n== emergency tier also removes unrecognised listeners ==\n'
 
-# An unrecognised backend (today: omlx) is refused at every non-emergency tier,
-# so a stale one can outlive its model. The emergency tier is the one place it
-# goes, because leaving it resident is exactly the OOM risk eviction exists for.
+# An unrecognised backend is refused at every non-emergency tier, so a stale one
+# can outlive its model. The emergency tier is the one place it goes, because
+# leaving it resident is exactly the OOM risk eviction exists for. (A leftover
+# `omlx-server` used to land here as "unknown" — the section below now pins it as
+# a RECOGNISED backend instead.)
 PORT_START="$BASE"
 PORT_MAX="$BASE"
 STATE_FILE="$SB/unknown-tier.state"
@@ -655,6 +660,35 @@ check "$STATUS" "emergency tier exits successfully"
 assert_contains "EMERGENCY" "$OUT" "the emergency tier labels itself"
 assert_contains "evicting" "$OUT" "the emergency tier removes an unrecognised listener"
 assert_stopped "$UNKNOWN_TIER_PID" "the emergency tier stops the unrecognised listener"
+
+# ---------------------------------------------------------------------------
+printf '\n== a leftover omlx-server is a KNOWN backend ==\n'
+
+# MEASURED 2026-10-25, the Qwen MTP smoke test: two live `omlx-server` processes
+# held the local-inference ports, and la-evict classified them `unknown` — so
+# removing one needed --allow-unknown, the flag that says "I have already decided
+# to risk this". A hyphen is not a space: the classifier knew `omlx serve` (the
+# Homebrew 0.7.1 entry point, itself a python3 shim) and `omlx.cli` (the module),
+# but not the standalone `omlx-server` binary an older install leaves behind.
+PORT_START="$BASE"
+PORT_MAX="$BASE"
+STATE_FILE="$SB/omlx-known.state"
+TEST_PATH="$REAL_PATH"
+
+start_server omlx "$BASE"
+OMLX_KNOWN_PID="$LAST_PID"
+
+sleep 2
+
+OUT="$(run_evict)"
+STATUS=$?
+check "$STATUS" "a tier-0 sweep exits successfully with an omlx-server up"
+assert_contains "evicting omlx on :$BASE" "$OUT" "a leftover omlx-server is recognised by name"
+assert_stopped "$OMLX_KNOWN_PID" "the recognised omlx-server is evicted without --allow-unknown"
+
+# If the sweep did not take it, do not let a stale listener block the next section.
+kill -TERM "$OMLX_KNOWN_PID" 2>/dev/null || true
+wait_for_stopped "$OMLX_KNOWN_PID" || true
 
 # ---------------------------------------------------------------------------
 printf '\n== tier 1 takes exactly ONE server, by ranking ==\n'

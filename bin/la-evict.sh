@@ -29,7 +29,8 @@
 #
 # SUPPORTS MACOS (Apple Silicon MLX) AND LINUX/WSL (CUDA)
 # Uses /proc on Linux for reliable process inspection; uses ps on macOS.
-# Supports Rapid-MLX, vllm-mlx, mlx_lm.server, llama.cpp, and CUDA vLLM/llama-server.
+# Supports Rapid-MLX, vllm-mlx, oMLX (serve, omlx.cli, omlx-server), mlx_lm.server,
+# llama.cpp, and CUDA vLLM/llama-server.
 #
 # Usage: la-evict.sh [--status] [--dry-run] [--tier N] [--port N]... [--all] [--allow-unknown] [--reset]
 #        [--help]   (--reset clears the saved escalation state and exits, evicting nothing)
@@ -256,7 +257,13 @@ for port in $(seq "$PORT_START" "$PORT_MAX") $EXTRA_PORTS; do
 
     case "$cmd" in
         *rapid-mlx*)      backend=rapid-mlx ;;
-        *"omlx serve"*|*omlx.cli*) backend=omlx ;;
+        # oMLX is reached three ways and a hyphen is not a space: `omlx serve`
+        # (the Homebrew 0.7.1 entry point — itself a python3 shim), the `omlx.cli`
+        # module, and the standalone `omlx-server` binary an older install leaves
+        # behind. MEASURED 2026-10-25: two live `omlx-server` processes held the
+        # local-inference ports and were classified unknown here, so removing one
+        # required --allow-unknown. Recognising them costs an orphan sweep.
+        *"omlx serve"*|*omlx-server*|*omlx_server*|*omlx.cli*) backend=omlx ;;
         *mlx_lm.server*)  backend=mlx-lm ;;
         *llama-server*)   backend=llama.cpp ;;
         *vllm-mlx*)       backend=vllm-mlx ;;
