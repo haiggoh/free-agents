@@ -783,7 +783,7 @@ la_load_config() {
   # (the qualified classifier, 2026-10-13 campaign) first, then the campaign-
   # tested latency tier. Cache and fixtures are isolated from generic Rapid
   # sessions and from oMLX.
-  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.16.1/bin/rapid-mlx}"
+  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.16.9/bin/rapid-mlx}"
   : "${LA_RAPID_AUTO_MODEL_DIR:=$("$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bin/local-classifier-default.sh" --dir-only 2>/dev/null || echo "$LA_MODELS_DIR/granite-4.2-30b-q4-mlx")}"
   : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
   : "${LA_RAPID_AUTO_PORT:=8002}"

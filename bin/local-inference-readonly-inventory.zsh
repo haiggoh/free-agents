@@ -346,7 +346,7 @@ for candidate in \
   "$(command_path python3)" \
   "$(command_path python3.12)" \
   "$HOME/.rapid-mlx/bin/python" \
-  "$HOME/.venvs/rapid-mlx-0.16.1/bin/python"; do
+  "$HOME/.venvs/rapid-mlx-0.16.9/bin/python"; do
   [[ -n "$candidate" && -x "$candidate" ]] || continue
   print -r -- "${candidate:A}" >> "$python_paths_file"
 done
