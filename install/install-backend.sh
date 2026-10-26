@@ -147,9 +147,14 @@ esac
 command -v "$PYTHON" >/dev/null || { echo "❌ Python not found: $PYTHON"; exit 1; }
 command -v brew >/dev/null || { echo "⚠ Homebrew not found — oMLX/llama.cpp may not install."; }
 
-# Ensure manage scripts are executable
-chmod +x "$MANAGE_BACKEND"
-[[ -f "$MANAGE_CUDA_BACKEND" ]] && chmod +x "$MANAGE_CUDA_BACKEND"
+# Ensure manage scripts are executable — but NOT during a dry run: `--dry-run` means nothing
+# changes, and this chmod left manage-cuda-backend.py dirty in the working tree (100644 ->
+# 100755) on every invocation of it, which read as a mystery uncommitted change for days.
+if [ "$DRY_RUN" != 1 ]; then
+  # shellcheck disable=SC2174
+  chmod +x "$MANAGE_BACKEND"
+  [[ -f "$MANAGE_CUDA_BACKEND" ]] && chmod +x "$MANAGE_CUDA_BACKEND"
+fi
 
 # Function to install a backend
 install_backend() {

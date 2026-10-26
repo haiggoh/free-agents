@@ -162,6 +162,29 @@ else
   ok "the stub was not invoked again"
 fi
 
+# 3b. When reuse is DECLINED, the "busy" message must name the occupant.
+#
+# It read "Port N busy serving ''" for this backend: CURRENT_MODEL comes from /v1/models, which
+# MoEspresso does not implement, so it was always empty. The meta file already holds the alias, so
+# the answer was free. The decline is forced by perturbing the saved KV precision in the real meta
+# (hotswap's meta dir is $HOME/.claude/logs/... and is not overridable), with a copy taken first
+# and restored unconditionally.
+_meta="$HOME/.claude/logs/local-agents-configs/server_${PORT}.meta"
+if [ -f "$_meta" ] && printf '%s' "$out2" | /usr/bin/grep -q 'already healthy'; then
+  _backup="$_meta.test-backup"
+  /bin/cp -p "$_meta" "$_backup"
+  /usr/bin/sed -i.bak 's/^kv_dtype=.*$/kv_dtype=bf16/' "$_meta"
+  out3=$(run ds-coder)
+  /bin/cp -p "$_backup" "$_meta"; rm -f "$_backup" "${_meta}.bak"
+  if printf '%s' "$out3" | /usr/bin/grep -q "busy serving ''"; then
+    bad "the occupied-port message names nothing: $(printf '%s' "$out3" | /usr/bin/grep 'busy serving' | /usr/bin/head -1)"
+  elif printf '%s' "$out3" | /usr/bin/grep -q "busy serving 'ds-coder"; then
+    ok "an occupied port is named from its metadata, not a blank"
+  else
+    bad "no occupied-port message at all: $(printf '%s' "$out3" | /usr/bin/tail -2 | /usr/bin/tr '\n' ' ')"
+  fi
+fi
+
 # 4. The refusal path refuses without killing anything (the 0.44.2 rule).
 gate_line=$(grep -n 'la-detect-backend.py --gate' "$HOTSWAP" | head -1 | cut -d: -f1)
 branch_line=$(grep -n '"$SERVE" = "moespresso"' "$HOTSWAP" | head -1 | cut -d: -f1)
