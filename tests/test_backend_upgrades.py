@@ -160,6 +160,20 @@ class Upgrades(unittest.TestCase):
                   run=FakeShell(brew={"omlx": "0.7.2"}), out=io.StringIO())
         self.assertEqual(asked, [], "same for homebrew: 0.7.2 installed beats a 0.7.1rc1 offer")
 
+    def test_venv_offer_runs_the_live_manager_not_the_path_stored_at_check_time(self):
+        # Measured 2026-10-26: a --check run from a since-deleted worktree stored
+        # `.../free-agents-moespresso/install/manage-backend.py`; every later csl start replayed
+        # it and failed with Errno 2, and the failure kept the dead offer pending forever.
+        dead = ["/usr/bin/python3", "/gone/free-agents-moespresso/install/manage-backend.py",
+                "--backend", "rapid-mlx", "install", "0.16.9"]
+        self.seed(bu.Upgrade("rapid-mlx", "0.16.1", "0.16.9", dead, "versioned venv"))
+        ran, asked = [], []
+        bu.prompt(False, ask=lambda q: asked.append(q) or "y", run_live=lambda c: ran.append(c) or 0,
+                  run=FakeShell(), out=io.StringIO())
+        live = [sys.executable, str(bu.MANAGE_BACKEND), "--backend", "rapid-mlx", "install", "0.16.9"]
+        self.assertEqual(ran, [live])
+        self.assertNotIn("/gone/", asked[0], "the question must show the command that will run")
+
     def test_nothing_pending_prints_nothing(self):
         out = io.StringIO()
         self.assertEqual(bu.prompt(False, ask=lambda q: "y", run_live=lambda c: 0,

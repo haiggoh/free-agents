@@ -161,6 +161,16 @@ def venv_upgrades(mgrs: dict | None = None) -> list[Upgrade]:
     return out
 
 
+def live_command(u: Upgrade) -> list[str]:
+    """The argv to run NOW. A versioned-venv offer is rebuilt from this checkout's manager: the
+    stored argv names the interpreter and script of whichever tree ran --check, and that tree may
+    be gone (measured 2026-10-26: a deleted worktree's manage-backend.py, replayed on every launch).
+    State records WHAT to upgrade; WHERE the code lives is resolved at use time."""
+    if u.via == "versioned venv":
+        return [sys.executable, str(MANAGE_BACKEND), "--backend", u.backend, "install", u.latest]
+    return u.command
+
+
 def _newer(a: str, b: str, mgr=None) -> bool:
     if mgr is not None and hasattr(mgr, "_version_newer"):
         try:
@@ -233,11 +243,12 @@ def prompt(assume_yes: bool, ask: Callable[[str], str] = input, run_live: Callab
     failed = 0
     print(f"⬆️  {len(todo)} backend upgrade(s) available.", file=out)
     for u in todo:
-        q = f"Upgrade {u.backend} {u.current} -> {u.latest}?  runs: {' '.join(u.command)}  [Y/n] "
+        cmd = live_command(u)
+        q = f"Upgrade {u.backend} {u.current} -> {u.latest}?  runs: {' '.join(cmd)}  [Y/n] "
         answer = "y" if assume_yes else ask(q).strip().lower()
         if answer in ("", "y", "yes"):
-            print(f"→ {' '.join(u.command)}", file=out)
-            rc = run_live(u.command)
+            print(f"→ {' '.join(cmd)}", file=out)
+            rc = run_live(cmd)
             if rc == 0:
                 print(f"✅ {u.backend} upgraded to {u.latest}", file=out)
                 data["pending"] = [p for p in data.get("pending", []) if p.get("backend") != u.backend]
@@ -269,7 +280,7 @@ def main(argv: list[str]) -> int:
             print(json.dumps([asdict(u) for u in items], indent=2))
         else:
             for u in items:
-                print(f"{u.backend}\t{u.current} -> {u.latest}\t{' '.join(u.command)}")
+                print(f"{u.backend}\t{u.current} -> {u.latest}\t{' '.join(live_command(u))}")
             if not items:
                 print("no backend upgrades pending")
         return 0
