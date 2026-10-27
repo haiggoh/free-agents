@@ -103,6 +103,11 @@ one, and the typed text lands in whatever context the session happens to hold (m
 7. Never run `remote-session.sh --stop`, never start another remote session, never kill anything
    listening on 4141–4151: one of them is the proxy you run on.
 8. Record progress in the handoff doc at each milestone, in the same commit.
+9. A dying session's "hand off to a new session" instruction is consumed by the successor it
+   launched — that is YOU. Continue the original handoff directly; never launch yet another
+   session to pass the same work onward. Measured 2026-10-26: a handoff session died with
+   "hand the remaining tasks to a new glm flash session" as its last instruction, and its
+   successor nearly launched a third session instead of continuing the work.
 
 ## A stalled session: swap its model, don't restart it
 

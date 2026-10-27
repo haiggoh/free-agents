@@ -156,6 +156,26 @@ def _extract_result_json(text: str) -> dict:
     return best
 
 
+def _extract_verdict(text: str) -> dict | None:
+    """The last JSON object on stdout that reads as a claude result verdict, or None.
+    Unlike _extract_result_json this does NOT demand a usage block: a failed launch's
+    verdict JSON has none (the child died before any usage was produced), and that verdict
+    is the actionable diagnosis — stderr around a failed launch is teardown noise
+    (measured: a shell job-done notice masked a Vertex 402 quota verdict)."""
+    best = None
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            doc, _end = decoder.raw_decode(text[idx:])
+        except ValueError:
+            continue
+        if isinstance(doc, dict) and (doc.get("type") == "result" or doc.get("is_error")):
+            best = doc
+    return best
+
+
 def _cache_path(env: dict) -> Path:
     return Path(env.get("FA_PREFILL_STATE_DIR") or DEFAULT_STATE_DIR) / CACHE_NAME
 
@@ -220,6 +240,13 @@ def measure(lane: str, levers: dict, env: dict | None = None) -> dict:
                            "(the launcher's process group was killed)") from None
     r = subprocess.CompletedProcess(argv, proc.returncode, stdout=out, stderr=errtxt)
     if r.returncode != 0:
+        verdict = _extract_verdict(r.stdout or "")
+        if verdict:
+            detail = str(verdict.get("result") or verdict.get("error") or "").strip()
+            status = verdict.get("api_error_status")
+            where = f" [api_error_status={status}]" if status else ""
+            raise RuntimeError(f"launch failed (exit {r.returncode}): the launcher's stdout "
+                               f"carries a structured verdict{where}: {detail[:400]}")
         raise RuntimeError(f"launch failed (exit {r.returncode}): "
                            f"{(r.stderr or r.stdout or '').strip()[-400:]}")
     usage = _extract_result_json(r.stdout)["usage"]

@@ -31,6 +31,17 @@ CANNED_RESULT = {
               "cache_read_input_tokens": 255800},
 }
 
+# A failed launch still emits its result JSON on stdout, but a failed run carries no usage
+# block — only the error verdict (measured: a Vertex 402 quota rejection surfaced here while
+# stderr held a German shell job-done notice).
+FAILED_VERDICT = {
+    "type": "result",
+    "subtype": "error_during_execution",
+    "is_error": True,
+    "result": "API Error: 402 quota exceeded (vertex)",
+    "api_error_status": 402,
+}
+
 
 def write_launcher(tmp_path, behavior="ok", extra=None):
     """A stub remote-session.sh: records its argv and env, prints the canned claude JSON."""
@@ -44,6 +55,9 @@ def write_launcher(tmp_path, behavior="ok", extra=None):
         body.append("exit 0")
     elif behavior == "fail":
         body.append('echo "boom" >&2; exit 1')
+    elif behavior == "verdict":
+        body.append(f'cat <<\'JSON\'\n{json.dumps(FAILED_VERDICT)}\nJSON')
+        body.append('echo "Fertig" >&2; exit 1')
     body += extra or []
     stub.write_text("\n".join(body) + "\n")
     stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
@@ -124,6 +138,30 @@ class MeasureTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             fpm.measure("remote", {}, env=dict(self.env, ANTHROPIC_BASE_URL=""))
         self.assertIsNone(fpm.cached("remote", {}, env=dict(self.env, ANTHROPIC_BASE_URL="")))
+
+    def test_failure_reports_the_structured_verdict_first(self):
+        # Fails if a failed launch reports the stderr tail instead of the verdict the
+        # launcher already printed on stdout: stderr carries teardown noise (measured: a
+        # shell job-done notice masked a Vertex 402 quota verdict sitting in the result
+        # JSON), and the structured diagnosis is the actionable one.
+        write_launcher(Path(self.tmp.name), behavior="verdict")
+        with self.assertRaises(RuntimeError) as cm:
+            fpm.measure("remote", {}, env=dict(self.env, ANTHROPIC_BASE_URL=""))
+        msg = str(cm.exception)
+        self.assertIn("402", msg)
+        self.assertIn("quota", msg)
+        self.assertNotIn("Fertig", msg, "teardown noise must not be the diagnosis")
+
+    def test_failure_without_a_verdict_still_names_exit_and_output(self):
+        # Fails if the structured-verdict path breaks the plain failure report: a launch
+        # that printed nothing parseable must still raise with the exit code and the
+        # output tail — that tail is the only diagnosis those runs have.
+        write_launcher(Path(self.tmp.name), behavior="fail")
+        with self.assertRaises(RuntimeError) as cm:
+            fpm.measure("remote", {}, env=dict(self.env, ANTHROPIC_BASE_URL=""))
+        msg = str(cm.exception)
+        self.assertIn("exit 1", msg)
+        self.assertIn("boom", msg)
 
     def test_cli_json_and_guard(self):
         # Fails if the CLI cannot print the measured JSON or skips the cloud guard.

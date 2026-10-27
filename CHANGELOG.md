@@ -1,3 +1,19 @@
+## [0.46.7] — 2026-10-27
+
+### Fixed — a failed launch reports the verdict the launcher printed, not stderr noise
+
+`fa-prefill-measure.py`'s failure path tailed `stderr[-400:]`, preferring stderr over stdout.
+Around a failed headless launch stderr is teardown noise — measured 2026-10-26: a German
+shell job-done notice ("Fertig") masked a Vertex 402 quota verdict that sat in the result
+JSON on stdout, and two sessions burned an hour on the noise (observation 0054). On non-zero
+exit the tool now parses the stdout verdict first — a failed run's JSON carries no usage
+block, so the success-path finder would reject it — and falls back to the exit/tail report
+only when stdout holds nothing structured. Both branches are mutation-checked.
+
+Also in `free-session-handover`: standing rule 9 — a dying session's "hand off to a new
+session" instruction is consumed by the successor it launched; continue the original
+handoff directly, never chain another launch (observation 0056, measured on session 9aba5e79).
+
 ## [0.46.6] — 2026-10-27
 
 ### Removed — leftovers of the first session-theme attempt
