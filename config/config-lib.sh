@@ -92,7 +92,7 @@ LA_CANONICAL_ROLES="operator reasoner validator utility"
 # serve=llama_cpp explicitly. la_finalize_serve warns loudly if a GGUF-looking artifact ends up
 # on an MLX backend, because that combination fails late (at weight load) and confusingly.
 # omlx is a legal PIN (oMLX, Homebrew tap jundot/omlx) for architectures only oMLX's bundled
-# mlx_lm/mlx_vlm can build — measured 2026-10-15: rapid-mlx 0.16.1 rejects `laguna` and lacks
+# mlx_lm/mlx_vlm can build — measured 2026-10-15: 0.16.1 (rapid-mlx) rejected `laguna` and lacked
 # `deepseek_v4`. bin/la-detect-backend.py chooses it per model; it is never the machine default.
 LA_SERVE_BACKENDS="rapid vllm mlx_lm omlx moespresso llama_cpp litellm api"
 LA_SERVE_GENERIC="mlx auto"
