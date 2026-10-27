@@ -16,6 +16,9 @@ read-only commands were denied as idle launches. Measured twice on 2026-10-27: a
 - A quoted alias (`remote-session.sh "nvidia-glm53-thinking"`) is still denied; the first draft
   crashed on it, and a crash in this hook fails OPEN, so it is pinned by a self-test.
 - Guard self-test 36/36, hook pytest 21/21; the new cases fail with the roster check removed.
+- `test_install_backend_dry_run.sh` read modes with `ls -l`, which appends `@` when a file has
+  extended attributes; files written from a Claude Code session carry `com.apple.provenance`,
+  so the exact-match `-rwxr-xr-x` failed on correct behaviour. It reads `stat -f %Sp` now.
 
 ## [0.46.4] — 2026-10-27
 

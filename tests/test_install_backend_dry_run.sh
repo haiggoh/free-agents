@@ -26,9 +26,9 @@ chmod 644 "$WORK/install/manage-cuda-backend.py" "$WORK/install/manage-backend.p
 
 echo "install-backend.sh --dry-run must be side-effect free:"
 
-mode_before=$(/bin/ls -l "$WORK/install/manage-cuda-backend.py" | /usr/bin/awk '{print $1}')
+mode_before=$(/usr/bin/stat -f %Sp "$WORK/install/manage-cuda-backend.py")
 bash "$WORK/install/install-backend.sh" --all --dry-run >"$WORK/out.log" 2>&1
-mode_after=$(/bin/ls -l "$WORK/install/manage-cuda-backend.py" | /usr/bin/awk '{print $1}')
+mode_after=$(/usr/bin/stat -f %Sp "$WORK/install/manage-cuda-backend.py")
 
 if [ "$mode_before" = "$mode_after" ]; then
   ok "a dry run does not chmod install/manage-cuda-backend.sh"
@@ -46,9 +46,9 @@ fi
 # chmods, a dry-run does not.
 chmod 644 "$WORK/install/manage-backend.py"
 bash "$WORK/install/install-backend.sh" --backend rapid-mlx --dry-run >/dev/null 2>&1
-m1=$(/bin/ls -l "$WORK/install/manage-backend.py" | /usr/bin/awk '{print $1}')
+m1=$(/usr/bin/stat -f %Sp "$WORK/install/manage-backend.py")
 bash "$WORK/install/install-backend.sh" --backend rapid-mlx >/dev/null 2>&1 || true
-m2=$(/bin/ls -l "$WORK/install/manage-backend.py" | /usr/bin/awk '{print $1}')
+m2=$(/usr/bin/stat -f %Sp "$WORK/install/manage-backend.py")
 if [ "$m1" = "-rw-r--r--" ] && [ "$m2" = "-rwxr-xr-x" ]; then
   ok "a real install chmods the manager script, while the dry run left it alone"
 else
