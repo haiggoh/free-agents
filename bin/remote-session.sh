@@ -2119,8 +2119,6 @@ if [ -x "$SCRIPT_DIR/la-session-identity.sh" ]; then
         LA_PROVIDER_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"provider_display":"[^"]*"' | cut -d'"' -f4); export LA_PROVIDER_DISPLAY
         LA_ACTUAL_MODEL_DISPLAY=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_display":"[^"]*"' | cut -d'"' -f4); export LA_ACTUAL_MODEL_DISPLAY
         LA_BANNER_MODEL_LABEL=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"actual_model_display":"[^"]*"' | cut -d'"' -f4); export LA_BANNER_MODEL_LABEL
-        LA_THEME_IDENTIFIER=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"theme_identifier":"[^"]*"' | cut -d'"' -f4); export LA_THEME_IDENTIFIER
-        LA_SPINNER_PROFILE=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"spinner_profile_id":"[^"]*"' | cut -d'"' -f4); export LA_SPINNER_PROFILE
         LA_TRANSCRIPT_MARKER_VERSION=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"transcript_marker_version":[0-9]*' | cut -d':' -f2); export LA_TRANSCRIPT_MARKER_VERSION
         LA_SESSION_KIND_EMOJI=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_emoji":"[^"]*"' | cut -d'"' -f4); export LA_SESSION_KIND_EMOJI
         LA_SESSION_ID=$(printf '%s' "$SESSION_IDENTITY" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4); export LA_SESSION_ID

@@ -1,3 +1,26 @@
+## [0.46.6] — 2026-10-27
+
+### Removed — leftovers of the first session-theme attempt
+
+The session theme has been delivered by custom theme FILES since 0.17.7 (selected by
+`theme: custom:<slug>`, prefix fixed in 0.31.0). Code from the withheld 0.17.6 attempt was still
+carried along with nothing reading it. No behaviour change: every generator mode (overlay for
+local/remote/cloud identities × mod attached × spoof id, `--emit-theme-file`, `--emit-model-words`,
+against both the shipped config and the user theme store) renders byte-identical before and after.
+
+- `generate-remote-settings.py`: the overlay computed `accent`/`emoji`/`label` from `theme` and a
+  `fallback` block, then discarded them through `_ = (…)  # retained for the banner/statusline
+  path` — no such path exists. `build_theme_file` read `fallback.accent_color`, a key the
+  `fallback` block never had. Both removed, with the unused identity locals.
+- `generate-local-settings.py`: the same unused `fallback` and identity locals.
+- `config/remote-theme.json`, `config/local-theme.json`: the unread `fallback`,
+  `supported_surfaces`/`unsupported_surfaces` and `_roles_*` blocks (the local list was also
+  stale — it omitted the theme file it now uses). Copies in the user theme store keep the old
+  keys harmlessly.
+- The launchers no longer export `LA_THEME_IDENTIFIER` / `LA_SPINNER_PROFILE`: nothing reads
+  them. If a hook of your own did, read `theme_identifier` / `spinner_profile_id` from
+  `LA_SESSION_IDENTITY` instead — the resolver's JSON schema is unchanged.
+
 ## [0.46.5] — 2026-10-27
 
 ### Fixed — the launch guard no longer blocks commands that only MENTION remote-session.sh

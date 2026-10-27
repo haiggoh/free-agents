@@ -110,8 +110,7 @@ def build_theme_file(config_dir):
     """
     theme_data = load_json_file(theme_config_path(config_dir, 'remote-theme.json'))
     theme = theme_data.get('theme', {})
-    fallback = theme_data.get('fallback', {})
-    accent = theme.get('accent_color') or fallback.get('accent_color') or '#ADFF2F'
+    accent = theme.get('accent_color') or '#ADFF2F'
     # The prompt outline uses a MUTED accent: full strength around the input was too distracting.
     border = theme.get('border_color') or accent
     return {
@@ -202,13 +201,9 @@ def main():
     spinner_data = load_json_file(config_dir / 'remote-spinner-verbs.json')
 
     # Extract identity fields
-    theme_identifier = identity.get('theme_identifier', 'unknown')
     session_kind = identity.get('session_kind', 'unknown')
-    session_emoji = identity.get('session_emoji', '❓')
     provider_display = identity.get('provider_display', 'unknown')
-    actual_model_id = identity.get('actual_model_id', 'unknown')
     actual_model_display = identity.get('actual_model_display', 'unknown')
-    spinner_profile_id = identity.get('spinner_profile_id', 'unknown')
 
     if args.emit_model_words:
         words = []
@@ -226,15 +221,9 @@ def main():
         provider_family = get_provider_family(provider_display)
         spinner_verbs = select_spinner_verbs(provider_family, spinner_data)
 
-        # Build the settings overlay from the theme DATA. Previously `theme` and
-        # `fallback` were read into locals here and then never used, so the lime accent
-        # in remote-theme.json reached nothing — the overlay carried spinner verbs only.
+        # The overlay only SELECTS the theme by name; its colours live in the theme file
+        # (build_theme_file), so remote-theme.json stays their single source.
         theme = theme_data.get('theme', {})
-        fallback = theme_data.get('fallback', {})
-
-        accent = theme.get('accent_color') or fallback.get('accent_color')
-        emoji = session_emoji or theme.get('session_emoji') or fallback.get('session_emoji')
-        label = theme.get('identity_label') or fallback.get('identity_label')
 
         settings = {}
 
@@ -247,18 +236,10 @@ def main():
             mode = "append" if os.environ.get('LA_MOD_ATTACHED') == '1' else "replace"
             settings["spinnerVerbs"] = {"mode": mode, "verbs": spinner_verbs}
 
-        # ★ THE LIME ACCENT IS NOW REALLY EMITTED (2026-09-21).
-        #
-        # 0.17.6 deliberately withheld this, having probed a `themes` SETTINGS MAP and found
-        # it unconfirmable: a bogus key succeeded just as silently, so acceptance was not
-        # evidence of support. That reasoning was correct about the KEY and wrong about the
-        # MECHANISM. Custom themes are FILES, not a settings map: the CLI reads
+        # Custom themes are FILES, not a settings map: the CLI reads
         # ~/.claude/themes/<slug>.json and a session selects one with the ordinary `theme`
-        # setting. Confirmed three ways against CLI 2.1.278 -- the loader path
-        # userConfigDir("themes",[slug]) in the binary, a "[theme] watcher" for hot reload,
-        # and `claude --help`, which lists "custom themes" among the customizations that
-        # --safe-mode disables. So this is a documented feature, not a guess.
-        #
+        # setting (confirmed against CLI 2.1.278: the userConfigDir("themes",[slug]) loader,
+        # a "[theme] watcher" for hot reload, and "custom themes" in `claude --help`).
         # Per-session via --settings, so the user's persistent theme is never touched.
         #
         # ★ The value needs the `custom:` PREFIX (found 2026-10-13, 2.1.296): startup only calls
@@ -270,9 +251,6 @@ def main():
         picker = model_picker_label(os.environ.get('LA_BANNER_MODEL_LABEL') or actual_model_display)
         if picker:
             settings["modelPicker"] = picker
-
-        _ = (accent, emoji, label, theme_identifier, provider_display,
-             actual_model_id, spinner_profile_id)  # retained for the banner/statusline path
 
     # Output
     output_json = json.dumps(settings, separators=(',', ':'))

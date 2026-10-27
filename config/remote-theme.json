@@ -6,42 +6,7 @@
     "accent_color": "#ADFF2F",
     "session_emoji": "📡",
     "identity_label": "Free API session",
-    "supported_surfaces": [
-      "session_title",
-      "startup_announcement",
-      "statusline",
-      "custom_theme_file"
-    ],
-    "unsupported_surfaces": [
-      "native_ascii_artwork",
-      "managed_announcements"
-    ],
-    "_roles_overridden": [
-      "claude",
-      "permission",
-      "planMode",
-      "bashBorder",
-      "suggestion",
-      "thinking",
-      "promptBorder",
-      "promptBorderShimmer",
-      "clawd_body"
-    ],
-    "_roles_deliberately_untouched": [
-      "success",
-      "error",
-      "warning",
-      "text",
-      "inverseText",
-      "diffAdded",
-      "diffRemoved"
-    ],
     "border_color": "#A3D05E",
     "_border_color_note": "Prompt-input outline: the accent at the SAME lightness, saturation 55% (user 2026-10-14: as bright as the accent, less saturated, not dark)."
-  },
-  "fallback": {
-    "theme_identifier": "unknown",
-    "session_emoji": "❓",
-    "identity_label": "Unknown session"
   }
 }

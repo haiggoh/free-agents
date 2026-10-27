@@ -197,12 +197,9 @@ def main():
     spinner_data = load_json_file(config_dir / 'local-spinner-verbs.json')
 
     # Extract identity fields
-    theme_identifier = identity.get('theme_identifier', 'unknown')
     session_kind = identity.get('session_kind', 'unknown')
-    session_emoji = identity.get('session_emoji', '❓')
     actual_model_id = identity.get('actual_model_id', 'unknown')
     actual_model_display = identity.get('actual_model_display', 'unknown')
-    spinner_profile_id = identity.get('spinner_profile_id', 'unknown')
 
     if args.emit_model_words:
         words = []
@@ -220,9 +217,8 @@ def main():
         model_family = get_model_family(actual_model_id)
         spinner_verbs = select_spinner_verbs(model_family, spinner_data)
 
-        # Build theme from data
+        # The overlay only SELECTS the theme by name; its colours live in the theme file.
         theme = theme_data.get('theme', {})
-        fallback = theme_data.get('fallback', {})
 
         # With the session-identity mod attached, the engine must keep sampling Claude Code's
         # OWN words so the mod has a vanilla word to keep on the turns it leaves alone: append.
@@ -236,9 +232,6 @@ def main():
         picker = model_picker_label(os.environ.get('LA_BANNER_MODEL_LABEL') or actual_model_display)
         if picker:
             settings["modelPicker"] = picker
-
-        # Add session name for terminal title (uses -n/--name in Claude Code)
-        # This is handled by the launcher via -n flag, not settings
 
     # Output
     output_json = json.dumps(settings, separators=(',', ':'))
