@@ -1,3 +1,27 @@
+## [0.46.4] — 2026-10-27
+
+### Fixed — the test gates are hermetic; ships no longer need the override
+
+Every ship since 0.45.2 went out past a red gate on an informed override: 15–19 shell suites
+failed from a launcher session and passed from a plain shell, on identical code.
+
+- **Root cause:** a launcher session exports ~37 `LA_*` variables, and config-lib honoured an
+  inherited `LA_LIVE_CONFIG_DIR` ahead of a sandbox's own config, so the suites loaded the real
+  machine roster. Reproduced by planting only that variable and the MoEspresso pin: 15 red.
+- `config-lib.sh` marks a value it resolved with `_LA_LIVE_FOR`; a pre-set value is reused only
+  as an unmarked operator override or when resolved for THIS tree (csl's re-source), never when
+  inherited from another tree. Direct suite runs under a launcher export: 11 red → 0.
+- `tests/conftest.py` scrubs inherited `LA_*` / `_LA_*` (keeps `LA_TEST_*`) before any test or
+  child process runs — the one step every gate route shares — with a planted-env regression test.
+- `test_c0_prompt_launch.sh` leaked a listening stub proxy on every run (its name failed the
+  launcher's own-proxy check, so teardown correctly spared it); eight filled ports 4141–4151 and
+  broke real remote launches with "no free port". The stub is now `stubs/litellm`, the run gets
+  its own `TMPDIR` and port range, and teardown is asserted.
+- MoEspresso manager tests isolate all three machine inputs (pin, kegs, and the Homebrew links,
+  now `symlink_candidates()`); two install tests had passed only because this Mac has the keg.
+- Full gate from a launcher-style environment: 1035 passed, 0 failed. Shipped through
+  run-to-completion 0.8.2's gates (pre-flight concurrent with the main suite).
+
 ## [0.46.3] — 2026-10-27
 
 ### Changed — Rapid-MLX pinned to 0.16.9
