@@ -90,6 +90,10 @@ LAUNCH_RE = re.compile(r"\bremote-session(?:\.sh)?\s+(\S+)", re.IGNORECASE)
 # Subcommands that do NOT start a session: they list, verify, dry-run, or stop.
 LAUNCH_PASS_SUBCOMMANDS = ("--list", "--help", "-h", "--dry-run", "--verify",
                            "--models", "--inventory", "--stop", "--swap-model")
+# A word after the script name that is a FILE, not an alias: the script was named as an
+# argument (git show/diff, cat), not run. Aliases have no path separators and no file
+# extension (gemini-3.8-flash has a dot, so the extension list stays explicit).
+PATH_ARG_RE = re.compile(r"[/:]|\.(?:py|sh|md|json|ya?ml|txt|log|toml|cfg)\b", re.IGNORECASE)
 
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1")
 
@@ -154,6 +158,8 @@ def launch_without_prompt(command):
                     break
             else:
                 continue  # an unknown flag-first invocation: narrow guard, let it pass
+        elif PATH_ARG_RE.search(first):
+            continue  # the script named as a file among other files, not launched
         elif not re.search(r"--prompt(?:-file)?\b", command):
             return True  # an alias position and no prompt flag anywhere: an idle launch
     return False
@@ -239,6 +245,18 @@ SELF_TESTS = [
     ("http://localhost:4141", "remote-session.sh --inventory", True),
     ("http://localhost:4141", "remote-session.sh --stop 4145", True),  # not this session's port
     ("http://localhost:4141", "remote-session.sh --swap-model 4145 other-alias", True),
+    # The script NAMED as a file, not run: the word after it is a path, not an alias
+    # (false positive measured 2026-10-27 on a read-only `git show ... -- <paths>`).
+    ("http://localhost:4141",
+     "git show 7087cf6 -- bin/remote-session.sh tests/test_swap_model.py", True),
+    ("http://localhost:4141",
+     'git show "origin/main:bin/remote-session.sh" "origin/main:tests/x.py"', True),
+    ("http://localhost:4141", "cat bin/remote-session.sh README.md", True),
+    ("http://localhost:4141", "git diff bin/remote-session.sh hooks/guard.py", True),
+    # ...while a real launch by path, or with a dotted alias, is still caught.
+    ("http://localhost:4141",
+     "$HOME/x/bin/remote-session.sh gemini-3.8-flash", False),
+    ("http://localhost:4141", "cd /tmp && bin/remote-session.sh glm-thinking", False),
 ]
 
 

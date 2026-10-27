@@ -131,6 +131,19 @@ class GuardTests(unittest.TestCase):
         self.assertNotEqual(b.returncode, 0)
         self.assertIn("unknown option", b.stderr)
 
+    def test_naming_the_script_as_a_file_is_not_a_launch(self):
+        # The read-only command that was wrongly blocked on 2026-10-27.
+        cmd = ('git show 7087cf6 -- bin/remote-session.sh tests/test_swap_model.py'
+               ' | grep "^+" | while read -r l; do { git show "origin/main:bin/'
+               'remote-session.sh"; } | grep -qF -- "$l" || echo "$l"; done')
+        _, parsed = run(cmd, base_url="http://localhost:4141")
+        self.assertEqual(decision(parsed), "allow")
+
+    def test_a_launch_by_path_is_still_denied(self):
+        _, parsed = run("$HOME/x/bin/remote-session.sh gemini-3.8-flash",
+                        base_url="http://localhost:4141")
+        self.assertEqual(decision(parsed), "deny")
+
     def test_self_test_passes(self):
         s = subprocess.run([sys.executable, str(GUARD), "--self-test"],
                            capture_output=True, text=True)
