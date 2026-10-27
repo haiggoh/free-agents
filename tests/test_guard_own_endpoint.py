@@ -144,6 +144,35 @@ class GuardTests(unittest.TestCase):
                         base_url="http://localhost:4141")
         self.assertEqual(decision(parsed), "deny")
 
+    def _roster(self, aliases):
+        import tempfile
+        d = tempfile.mkdtemp()
+        path = Path(d) / "remote-agents.sh"
+        body = "".join(f'  "{a}|nvidia|m/x|Display|unknown|notes|-"\n' for a in aliases)
+        path.write_text(f"LA_REMOTE_AGENTS=(\n{body})\n")
+        return str(path)
+
+    def test_prose_mentioning_the_script_is_not_a_launch(self):
+        roster = self._roster(["fixture-alias"])
+        _, parsed = run('git commit -m "remote-session.sh as a file"',
+                        base_url="http://localhost:4141",
+                        extra_env={"LA_GUARD_ROSTER": roster})
+        self.assertEqual(decision(parsed), "allow")
+
+    def test_a_roster_alias_without_a_prompt_is_denied(self):
+        roster = self._roster(["fixture-alias"])
+        _, parsed = run("remote-session.sh fixture-alias",
+                        base_url="http://localhost:4141",
+                        extra_env={"LA_GUARD_ROSTER": roster})
+        self.assertEqual(decision(parsed), "deny")
+
+    def test_an_unreadable_roster_falls_back_to_the_strict_shape_check(self):
+        # No roster to consult: every alias-shaped word counts, so the guard stays shut.
+        _, parsed = run('git commit -m "remote-session.sh as a file"',
+                        base_url="http://localhost:4141",
+                        extra_env={"LA_GUARD_ROSTER": "/nonexistent/remote-agents.sh"})
+        self.assertEqual(decision(parsed), "deny")
+
     def test_self_test_passes(self):
         s = subprocess.run([sys.executable, str(GUARD), "--self-test"],
                            capture_output=True, text=True)

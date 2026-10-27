@@ -1,3 +1,22 @@
+## [0.46.5] — 2026-10-27
+
+### Fixed — the launch guard no longer blocks commands that only MENTION remote-session.sh
+
+The C0 launch guard (0.46.0) read whatever word followed `remote-session.sh` as an alias, so
+read-only commands were denied as idle launches. Measured twice on 2026-10-27: a
+`git show <sha> -- bin/remote-session.sh tests/x.py`, then a commit message saying
+"remote-session.sh as a file".
+
+- A word with `/` or `:`, or a file extension, is a path argument: the script was named, not run.
+- Otherwise the word must be a real alias, read from the generated `config/remote-agents.sh`
+  (plus the launcher's `github`, `github-models`, `cerebras-legacy`). An unknown alias makes the
+  launcher exit 2 before starting anything, so prose cannot produce an idle session.
+- An unreadable roster falls back to the old shape check (stricter, never looser);
+  `LA_GUARD_ROSTER` overrides the path for tests.
+- A quoted alias (`remote-session.sh "nvidia-glm53-thinking"`) is still denied; the first draft
+  crashed on it, and a crash in this hook fails OPEN, so it is pinned by a self-test.
+- Guard self-test 36/36, hook pytest 21/21; the new cases fail with the roster check removed.
+
 ## [0.46.4] — 2026-10-27
 
 ### Fixed — the test gates are hermetic; ships no longer need the override

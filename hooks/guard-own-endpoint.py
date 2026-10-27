@@ -41,6 +41,8 @@ bug it prevents.
 Environment:
   ANTHROPIC_BASE_URL        the endpoint to protect (required for a deny)
   LA_GUARD_EXTRA_PORTS      comma-separated extra ports to protect
+  LA_GUARD_ROSTER           remote roster to read aliases from (default: the
+                            plugin's config/remote-agents.sh)
   LA_GUARD_DISABLE=1        turn the guard off entirely
 """
 
@@ -62,6 +64,9 @@ Usage:
 Environment:
   ANTHROPIC_BASE_URL     endpoint to protect; a non-local URL is never guarded
   LA_GUARD_EXTRA_PORTS   comma-separated additional ports to protect
+  LA_GUARD_ROSTER        remote roster whose aliases count as launches (default:
+                         config/remote-agents.sh beside this hook; unreadable =
+                         every alias-shaped word counts)
   LA_GUARD_DISABLE=1     disable the guard (always allow)
 
 Exits 0 and allows the call on any internal error: failing open is safer than
@@ -94,6 +99,24 @@ LAUNCH_PASS_SUBCOMMANDS = ("--list", "--help", "-h", "--dry-run", "--verify",
 # argument (git show/diff, cat), not run. Aliases have no path separators and no file
 # extension (gemini-3.8-flash has a dot, so the extension list stays explicit).
 PATH_ARG_RE = re.compile(r"[/:]|\.(?:py|sh|md|json|ya?ml|txt|log|toml|cfg)\b", re.IGNORECASE)
+# Names remote-session.sh's _entry_for accepts outside the roster. Any other word is an
+# unknown alias: the launcher exits 2 before starting anything, so prose that merely
+# MENTIONS the script ("remote-session.sh as a file") cannot produce an idle session.
+EXTRA_ALIASES = {"github", "github-models", "cerebras-legacy"}
+ROSTER_ENTRY_RE = re.compile(r'^\s*"([^"|\s]+)\|', re.MULTILINE)
+
+
+def roster_aliases():
+    """Aliases from the generated remote roster, or None when it cannot be read (the
+    caller then treats every alias-shaped word as a launch: stricter, never looser)."""
+    path = os.environ.get("LA_GUARD_ROSTER") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "config", "remote-agents.sh")
+    try:
+        with open(path, encoding="utf-8") as f:
+            found = set(ROSTER_ENTRY_RE.findall(f.read()))
+    except OSError:
+        return None
+    return (found | EXTRA_ALIASES) if found else None
 
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1")
 
@@ -145,11 +168,18 @@ def offending_port(command, ports):
     return None
 
 
+def bare_word(word):
+    """The word without shell quoting around it: `"alias"` / `alias\\"'` -> `alias`."""
+    return re.split(r"[\"'\\;|&)]", word.lstrip("\"'\\"))[0]
+
+
 def launch_without_prompt(command):
     """True for an agent Bash command that would start a remote session without carrying
     its first prompt. The alias position is what is detected, so any launch route matches
     (direct, wrapped in sudo-in-terminal.sh --command, osascript, open -a Terminal). The
-    documented non-launching subcommands pass, as does any --prompt/--prompt-file."""
+    documented non-launching subcommands pass, as does any --prompt/--prompt-file, and
+    a word that is not a roster alias (a file path, prose)."""
+    known = None
     for m in LAUNCH_RE.finditer(command):
         first = m.group(1)
         if first.startswith("-"):
@@ -160,6 +190,9 @@ def launch_without_prompt(command):
                 continue  # an unknown flag-first invocation: narrow guard, let it pass
         elif PATH_ARG_RE.search(first):
             continue  # the script named as a file among other files, not launched
+        elif (known := known or roster_aliases()) is not None and \
+                bare_word(first) not in known:
+            continue  # not an alias: the launcher would refuse it before starting
         elif not re.search(r"--prompt(?:-file)?\b", command):
             return True  # an alias position and no prompt flag anywhere: an idle launch
     return False
@@ -229,14 +262,14 @@ SELF_TESTS = [
     # own picker/shell launches never pass through this hook, so they are unaffected.
     ("http://localhost:4141", "remote-session.sh nvidia-glm53-full-thinking", False),
     ("http://localhost:4141",
-     'sudo-in-terminal.sh --command "remote-session.sh glm-thinking --effort high"', False),
-    ("http://localhost:4141", "open -a Terminal remote-session.sh glm-thinking", False),
+     'sudo-in-terminal.sh --command "remote-session.sh nvidia-glm53-thinking --effort high"', False),
+    ("http://localhost:4141", "open -a Terminal remote-session.sh nvidia-glm53-thinking", False),
     ("http://localhost:4141",
-     "osascript -e 'do script \"remote-session.sh glm-thinking\"'", False),
+     "osascript -e 'do script \"remote-session.sh nvidia-glm53-thinking\"'", False),
     ("http://localhost:4141",
-     "remote-session.sh glm-thinking --prompt-file ~/.claude/plans/handoff.md", True),
+     "remote-session.sh nvidia-glm53-thinking --prompt-file ~/.claude/plans/handoff.md", True),
     ("http://localhost:4141",
-     "remote-session.sh glm-thinking --prompt 'read the handoff first'", True),
+     "remote-session.sh nvidia-glm53-thinking --prompt 'read the handoff first'", True),
     ("http://localhost:4141", "remote-session.sh --list", True),
     ("http://localhost:4141", "remote-session.sh --help", True),
     ("http://localhost:4141", "remote-session.sh --dry-run glm-thinking", True),
@@ -256,7 +289,15 @@ SELF_TESTS = [
     # ...while a real launch by path, or with a dotted alias, is still caught.
     ("http://localhost:4141",
      "$HOME/x/bin/remote-session.sh gemini-3.8-flash", False),
-    ("http://localhost:4141", "cd /tmp && bin/remote-session.sh glm-thinking", False),
+    ("http://localhost:4141", "cd /tmp && bin/remote-session.sh nvidia-glm53-thinking", False),
+    # Prose that MENTIONS the script (a commit message, an echo): the next word is not a
+    # roster alias, and an unknown alias exits 2 before anything starts, so it cannot
+    # produce an idle session (false positive measured 2026-10-27 on a commit message).
+    ("http://localhost:4141",
+     'git commit -m "fix: naming remote-session.sh as a file is not a launch"', True),
+    ("http://localhost:4141", "echo 'then remote-session.sh launches it'", True),
+    # A QUOTED alias is still a launch (and must not crash the check into failing open).
+    ("http://localhost:4141", 'remote-session.sh "nvidia-glm53-thinking"', False),
 ]
 
 
