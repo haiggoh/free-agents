@@ -42,14 +42,24 @@ LA_ROOT="$(cd "$LA_CONFIG_DIR/.." && pwd)"
 # relative to it.
 LA_USER_STATE_DIR="${LA_USER_STATE_DIR:-$HOME/.local/share/free-agents}"
 _LA_STATE_CONFIG_DIR="$LA_USER_STATE_DIR/config"
-if [[ -n "${LA_LIVE_CONFIG_DIR:-}" ]]; then
+# A PRE-SET LA_LIVE_CONFIG_DIR is honoured only when it is an operator override (no _LA_LIVE_FOR
+# marker) or was resolved for THIS code tree (a re-source, or a child of the same checkout). This
+# file exports it, so every process a launcher session starts inherits it; honouring a value
+# resolved for ANOTHER tree loaded the real machine roster into test sandboxes and turned 15 suites
+# red whenever a gate ran from a launcher session (test-shell-suites-red-live, 2026-10-27).
+if [[ -n "${LA_LIVE_CONFIG_DIR:-}" && ( -z "${_LA_LIVE_FOR:-}" || "${_LA_LIVE_FOR}" == "$LA_CONFIG_DIR" ) ]]; then
     :
-elif [[ -f "$LA_CONFIG_DIR/config.local.sh" ]]; then
-    LA_LIVE_CONFIG_DIR="$LA_CONFIG_DIR"
-elif [[ "$_LA_CONFIG_DIR_EXPLICIT" == 0 && -f "$_LA_STATE_CONFIG_DIR/config.local.sh" ]]; then
-    LA_LIVE_CONFIG_DIR="$_LA_STATE_CONFIG_DIR"
 else
-    LA_LIVE_CONFIG_DIR="$LA_CONFIG_DIR"
+    if [[ -f "$LA_CONFIG_DIR/config.local.sh" ]]; then
+        LA_LIVE_CONFIG_DIR="$LA_CONFIG_DIR"
+    elif [[ "$_LA_CONFIG_DIR_EXPLICIT" == 0 && -f "$_LA_STATE_CONFIG_DIR/config.local.sh" ]]; then
+        LA_LIVE_CONFIG_DIR="$_LA_STATE_CONFIG_DIR"
+    else
+        LA_LIVE_CONFIG_DIR="$LA_CONFIG_DIR"
+    fi
+    # Resolved HERE, so mark which tree it belongs to (an operator override stays unmarked).
+    _LA_LIVE_FOR="$LA_CONFIG_DIR"
+    export _LA_LIVE_FOR
 fi
 export LA_LIVE_CONFIG_DIR
 

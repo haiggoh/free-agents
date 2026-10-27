@@ -16,6 +16,9 @@
 #   4. the WRITER follows the same resolution: csl --register-model writes into the live
 #      config, never into some other copy's tree.
 set -uo pipefail
+# Run directly from a launcher session, this shell inherits the launcher's resolved config dir and
+# MoEspresso pin; every case below sets the ones it means to test (conftest scrubs them under pytest).
+unset LA_LIVE_CONFIG_DIR _LA_LIVE_FOR LA_MOESPRESSO_BIN
 
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
@@ -166,6 +169,53 @@ EOF
   fi
 else
   printf 'SKIP  5b (writer state-dir resolution) — this checkout has its own config.local.sh\n'
+fi
+
+# --- Test 6: contract 1 holds against an INHERITED LA_LIVE_CONFIG_DIR -------------------------
+# config-lib EXPORTS LA_LIVE_CONFIG_DIR, so every process a launcher session starts inherits it.
+# It used to be honoured ahead of an explicit LA_CONFIG_DIR, which broke contract 1 in exactly
+# the shell where it matters: 15 suites run from a launcher session loaded the real machine
+# roster into their sandboxes (test-shell-suites-red-live, 2026-10-27).
+echo "=== Test 6: explicit LA_CONFIG_DIR beats an inherited LA_LIVE_CONFIG_DIR ==="
+# The inherited pair as a launcher exports it: the live dir AND the tree it was resolved for.
+out="$(resolve "$TREE_NOLOCAL" LA_USER_STATE_DIR="$STATE" LA_CONFIG_DIR="$EXPLICIT" \
+        LA_LIVE_CONFIG_DIR="$STATE/config" _LA_LIVE_FOR="$TMP/some-launcher-checkout/config")"
+live_dir=$(printf '%s' "$out" | cut -f1)
+marker=$(printf '%s' "$out" | cut -f2)
+if [ "$live_dir" = "$EXPLICIT" ]; then
+  check 0 "an inherited LA_LIVE_CONFIG_DIR does not override an explicit LA_CONFIG_DIR"
+else
+  check 1 "an inherited LA_LIVE_CONFIG_DIR does not override an explicit LA_CONFIG_DIR (got: $live_dir)"
+fi
+if [ "$marker" = "from-explicit-dir" ]; then
+  check 0 "and the explicit dir's config is the one loaded"
+else
+  check 1 "and the explicit dir's config is the one loaded (marker: $marker)"
+fi
+# Also with NO explicit LA_CONFIG_DIR: a sandbox tree with its own config.local.sh (contract 2)
+# must not be overridden by a value resolved for another tree.
+out="$(resolve "$TREE_WITHLOCAL" LA_USER_STATE_DIR="$STATE" \
+        LA_LIVE_CONFIG_DIR="$STATE/config" _LA_LIVE_FOR="$TMP/some-launcher-checkout/config")"
+if [ "$(printf '%s' "$out" | cut -f2)" = "from-own-tree" ]; then
+  check 0 "a value inherited from ANOTHER tree does not shadow the own tree's config"
+else
+  check 1 "a value inherited from ANOTHER tree does not shadow the own tree's config (got: $out)"
+fi
+# Resolved for THIS tree (a re-source, or a child of the same checkout): reused, not re-derived —
+# csl re-sources config-lib, and that second pass must keep the first pass's answer.
+out="$(resolve "$TREE_NOLOCAL" LA_USER_STATE_DIR="$TMP/no-state" \
+        LA_LIVE_CONFIG_DIR="$STATE/config" _LA_LIVE_FOR="$TREE_NOLOCAL/config")"
+if [ "$(printf '%s' "$out" | cut -f1)" = "$STATE/config" ]; then
+  check 0 "a value resolved for this same tree is reused"
+else
+  check 1 "a value resolved for this same tree is reused (got: $(printf '%s' "$out" | cut -f1))"
+fi
+# An UNMARKED LA_LIVE_CONFIG_DIR is an operator override and is honoured, as it always was.
+out="$(resolve "$TREE_WITHLOCAL" LA_USER_STATE_DIR="$TMP/no-state" LA_LIVE_CONFIG_DIR="$STATE/config")"
+if [ "$(printf '%s' "$out" | cut -f2)" = "from-stable-dir" ]; then
+  check 0 "an unmarked LA_LIVE_CONFIG_DIR (operator override) is honoured"
+else
+  check 1 "an unmarked LA_LIVE_CONFIG_DIR (operator override) is honoured (got: $out)"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

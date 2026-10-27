@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 
 SCRUBBED_ENV = sorted(k for k in os.environ
-                      if k.startswith("LA_") and not k.startswith("LA_TEST_"))
+                      if k.startswith(("LA_", "_LA_")) and not k.startswith("LA_TEST_"))
 for _k in SCRUBBED_ENV:
     del os.environ[_k]
 

@@ -11,6 +11,9 @@
 # --help prints this header and exits BEFORE anything runs.
 case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 set -uo pipefail
+# Run directly from a launcher session, this shell inherits the launcher's resolved config dir and
+# MoEspresso pin; every case below sets the ones it means to test (conftest scrubs them under pytest).
+unset LA_LIVE_CONFIG_DIR _LA_LIVE_FOR LA_MOESPRESSO_BIN
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 REPO="$PWD"
 
