@@ -754,7 +754,7 @@ class Picker(App):
             self.state_warnings.append(err)
         sm = self.screen_model
         # Fill an already-open list in place; otherwise just refresh counts/labels.
-        if isinstance(sm, m.RemoteScreen) and kind == "remote" and not sm._models_loaded:
+        if isinstance(sm, m.RemoteScreen) and kind == "remote" and (not sm._models_loaded or not sm.agents):
             sm.agents = data
             sm._regroup()
             sm.load_cached_catalogs()          # cached rosters paint at once (T2)
@@ -1160,12 +1160,13 @@ class Picker(App):
                 return True
         # Check RemoteScreen
         if isinstance(sm, m.RemoteScreen) and getattr(sm, '_choose_model_visible', False):
-            if not getattr(sm, '_models_loaded', False):
+            # The agent list, not just the flag: an early _regroup() during the roster load
+            # used to set the flag on an EMPTY roster, and this then never filled (2026-10-27).
+            if not getattr(sm, '_models_loaded', False) or not getattr(sm, 'agents', None):
                 self._maybe_load_inventory("remote")
                 if "remote" in self.cache:
                     sm.agents = self.cache["remote"]
-                    sm._regroup()  # Re-group with loaded agents
-                    sm._models_loaded = True
+                    sm._regroup()  # Re-group with loaded agents (sets _models_loaded)
                     sm.load_cached_catalogs()   # cached rosters paint at once (T2)
                 return True
         return False

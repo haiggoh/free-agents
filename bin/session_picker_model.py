@@ -1195,7 +1195,10 @@ class RemoteScreen(Screen):
         if self.search and not groups and any(self._visible(a) for a in self.agents):
             groups = [Group("__nomatch__", f'No model matches "{self.search}"',
                             [Item("__nomatch__:x", "Edit the live filter above the list (empty shows every provider)")])]
-        if not groups and not any(a.has_key for a in self.agents):
+        # The no-keys instruction needs a REAL roster: an empty one means "still loading",
+        # and reading it as "no keys" poisoned the screen — a search typed during the load
+        # set _models_loaded here and both fill sites then refused to fill (2026-10-27).
+        if not groups and self.agents and not any(a.has_key for a in self.agents):
             # No provider key at all: the list is an instruction, not a roster of unusable models.
             groups = [Group("__nokeys__", f"{ec.EMOJI_KEY_STR} No API key saved yet",
                             [Item("__nokeys__:k", "Press K (API keys) to set one up — every listed provider has a free tier")])]
@@ -1213,7 +1216,9 @@ class RemoteScreen(Screen):
                                          if g.id not in self.accordion.multi_open_folded}
         else:
             self.accordion.multi_open = None
-        self._models_loaded = True
+        # Only a landed roster may flip this: both fill sites gate on it, so a render of
+        # an unlanded (empty) roster must not claim the models are loaded.
+        self._models_loaded = bool(self.agents)
 
     def _matches(self, model_id: str, display: str = "") -> bool:
         q = self.search.casefold()
