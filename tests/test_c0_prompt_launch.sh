@@ -34,7 +34,15 @@ check() {
 }
 
 T="$(mktemp -d "${TMPDIR:-/tmp}/c0-test-XXXXXX")"
-trap 'rm -rf "$T"' EXIT
+# Safety net: a stub proxy that outlives this run holds a port in the launcher's range forever
+# (2026-10-27: eight leaked stubs filled 4141-4151, so this suite AND real launches found no free
+# port). The launcher's own teardown is asserted below; this only guarantees no leak on failure.
+_c0_cleanup() {
+  local pid
+  for pid in $(pgrep -f "$T/stubs/litellm" 2>/dev/null); do kill "$pid" 2>/dev/null; done
+  rm -rf "$T"
+}
+trap _c0_cleanup EXIT
 
 # ---------------------------------------------------------------------------
 echo "== C0c: validation fails before any work, naming the path =="
@@ -93,15 +101,22 @@ echo "== C0: the prompt reaches the claude invocation (stub claude records argv)
 mkdir -p "$T/stubs" "$T/keys"
 printf '#!/bin/sh\nif [ "${1:-}" = "--version" ] || [ "${1:-}" = "-v" ]; then echo "2.1.304 (Claude Code)"; exit 0; fi\nprintf %%s "$*" >> "$C0_ARGV_LOG"\nprintf "\\n" >> "$C0_ARGV_LOG"\nexit 0\n' > "$T/stubs/claude"
 chmod 755 "$T/stubs/claude"
-printf '#!/usr/bin/env python3\nimport sys\nport = 4141\nargs = sys.argv[1:]\nfor i, a in enumerate(args):\n    if a == "--port" and i + 1 < len(args):\n        port = int(args[i + 1])\nimport http.server\nhttp.server.test(HandlerClass=http.server.SimpleHTTPRequestHandler, port=port)\n' > "$T/stub_proxy.py"
+# Named `litellm` on purpose: the launcher tears down only a process it can identify as ITS proxy
+# (_is_our_proxy: "litellm" + proxy-<port>.yaml in argv). A stub_proxy.py name failed that check,
+# so every run of this suite leaked one listening stub.
+printf '#!/usr/bin/env python3\nimport sys\nport = 4141\nargs = sys.argv[1:]\nfor i, a in enumerate(args):\n    if a == "--port" and i + 1 < len(args):\n        port = int(args[i + 1])\nimport http.server\nhttp.server.test(HandlerClass=http.server.SimpleHTTPRequestHandler, port=port)\n' > "$T/stubs/litellm"
+chmod 755 "$T/stubs/litellm"
 mkdir -p "$T/keys"
 printf 'sk-test-fixture-not-a-real-key\n' > "$T/keys/nvidia"
 chmod 600 "$T/keys/nvidia"
 printf 'C0INITIALPROMPTMARKER read the handoff and continue\n' > "$T/launch.md"
 
 export C0_ARGV_LOG="$T/argv.log"; : > "$C0_ARGV_LOG"
-PATH="$T/stubs:$PATH" LA_LITELLM_CMD="python3 $T/stub_proxy.py" \
-    LA_API_KEYS_DIR="$T/keys" \
+# TMPDIR sandboxes the launcher's RUNDIR (live sessions keep their proxy pid/owner files in the
+# real one) and a dedicated port range keeps this run off the ports live sessions use.
+PATH="$T/stubs:$PATH" LA_LITELLM_CMD="$T/stubs/litellm" \
+    LA_API_KEYS_DIR="$T/keys" TMPDIR="$T" \
+    LA_REMOTE_PROXY_PORT_MIN=4180 LA_REMOTE_PROXY_PORT_MAX=4189 \
     timeout 120 bash "$RS" "$ALIAS" --prompt-file "$T/launch.md" >/dev/null 2>&1
 lrc=$?
 unset C0_ARGV_LOG
@@ -114,6 +129,12 @@ if /usr/bin/grep -q -- '--prompt-file' "$T/argv.log" 2>/dev/null; then
     check 1 "the FILE PATH is not passed to claude (its CONTENT is)"
 else
     check 0 "the FILE PATH is not passed to claude (its CONTENT is)"
+fi
+
+if pgrep -f "$T/stubs/litellm" >/dev/null 2>&1; then
+    check 1 "the launch tore down the proxy it started (a stub is still running)"
+else
+    check 0 "the launch tore down the proxy it started"
 fi
 
 # ---------------------------------------------------------------------------
