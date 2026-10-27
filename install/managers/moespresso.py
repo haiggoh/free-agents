@@ -56,6 +56,11 @@ class MoespressoManager(BackendManager):
         return [Path("/opt/homebrew/Cellar/moespresso@3"),
                 Path("/usr/local/Cellar/moespresso@3")]
 
+    def symlink_candidates(self) -> list[Path]:
+        """Homebrew's `moespresso@3` links. A method for the same reason as cellar_roots: a
+        test that redirects only the kegs still reads these real paths otherwise."""
+        return [Path(c) for c in HOMEBREW_BIN_CANDIDATES]
+
     def candidate_kegs(self) -> list[Path]:
         """Versioned kegs, NEWEST first. Versionless numeric sort — no pinned version string."""
         out: list[Path] = []
@@ -82,8 +87,7 @@ class MoespressoManager(BackendManager):
             return pinned
         for binpath in self.candidate_kegs():
             return binpath
-        for cand in HOMEBREW_BIN_CANDIDATES:
-            path = Path(cand)
+        for path in self.symlink_candidates():
             if path.is_file() and self._reports_required_major(path):
                 return path
         return None

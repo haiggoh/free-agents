@@ -16,11 +16,26 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "install"))
 
 from managers import get_manager, get_manager_instance, list_managers  # noqa: E402
 from managers._common import ManagerError  # noqa: E402
 from managers.moespresso import MoespressoManager  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_machine_moespresso(monkeypatch, tmp_path):
+    """resolve_binary() has THREE machine inputs: the LA_MOESPRESSO_BIN pin (config-lib.sh
+    exports it into every launcher-started shell), the @3 kegs, and Homebrew's @3 links.
+    Patching only cellar_roots left the other two live, so the "nothing usable" tests went red
+    from a session that had sourced config-lib (2026-10-27). All three point nowhere unless a
+    test sets one on purpose."""
+    monkeypatch.delenv("LA_MOESPRESSO_BIN", raising=False)
+    nowhere = tmp_path / "no-machine-moespresso"
+    monkeypatch.setattr(MoespressoManager, "cellar_roots", lambda self: [nowhere])
+    monkeypatch.setattr(MoespressoManager, "symlink_candidates", lambda self: [nowhere / "bin"])
 
 
 def _brew(argv, stdout="", rc=0):
@@ -39,9 +54,10 @@ def test_moespresso_manager_is_registered():
 
 
 # --- the 3.x pin: the whole point of this manager -------------------------------------------
-def test_install_uses_the_at3_formula_not_the_linked_one():
+def test_install_uses_the_at3_formula_not_the_linked_one(tmp_path):
     """`brew install moespresso` would install 4.0.0, which cannot load the package."""
     mgr = MoespressoManager()
+    _installed_keg(mgr, tmp_path)  # the keg the stubbed `brew install` would have left
     # dry_run must not touch brew, but must still resolve the right binary path.
     with patch("pathlib.Path.exists", return_value=True):
         info = mgr.install_version("3.0.0", dry_run=True)
@@ -67,6 +83,15 @@ def _fake_keg(root: Path, version: str) -> Path:
     binpath.write_text("#!/bin/sh\n")
     binpath.chmod(0o755)
     return binpath
+
+
+def _installed_keg(mgr, tmp_path, version="3.0.0"):
+    """Point mgr at a temp @3 keg — what a stubbed `brew install` would have produced. Without
+    it the install tests validated against the REAL Cellar and passed only on a machine that
+    already had the keg."""
+    root = tmp_path / "Cellar" / "moespresso@3"
+    _fake_keg(root, version)
+    mgr.cellar_roots = lambda: [root]
 
 
 def test_only_the_3x_keg_counts_as_installed(tmp_path):
@@ -189,8 +214,9 @@ def test_a_3x_upgrade_is_still_offered():
 # The user runs `brew upgrade && brew upgrade --greedy && pipx upgrade-all` by hand. MoEspresso
 # must stay on 3.x patches AND never land on Python >= 3.15, so the @3 formula is PINNED (a
 # blanket brew upgrade skips it) and moves only through free-agents' checked offer.
-def test_install_pins_the_formula_so_a_blanket_brew_upgrade_cannot_move_it():
+def test_install_pins_the_formula_so_a_blanket_brew_upgrade_cannot_move_it(tmp_path):
     mgr = MoespressoManager()
+    _installed_keg(mgr, tmp_path)
     with patch.object(mgr, "run_command", return_value=_brew([], "🍺")) as run, \
          patch.object(mgr, "formula_python", return_value=(3, 14)), \
          patch("pathlib.Path.exists", return_value=True):
