@@ -761,7 +761,25 @@ class Picker(App):
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data, *([MISSING_MODELS] if isinstance(sm, m.LocalScreen) else []))
             sm._models_loaded = True
+        if kind == "remote":
+            # Eager warm-up: fetch every keyed provider's catalog once this session, so the
+            # counts and the model lists are real from the first paint (user decision
+            # 2026-10-27, waypoint csl-remote-provider-catalogs).
+            kinds = self._eager_catalog_kinds()
+            if kinds:
+                self._prefetch(tuple(kinds))
         if kind.startswith("rcat:"):
+            prov = next((a.provider for a in (self.cache.get("remote") or [])
+                         if a.alias == kind.split(":", 1)[1]), None)
+            if prov is not None and not err:
+                # Keep what landed even when no remote screen is showing (the eager fetch
+                # lands on the home screen): counts feed the home row, rows hydrate a
+                # remote screen built later.
+                if not hasattr(self, "catalog_rows"):
+                    self.catalog_rows = {}
+                self.catalog_rows[prov] = list(data or [])
+                if hasattr(self, "catalog_counts"):
+                    self.catalog_counts[prov] = len(data or [])
             if isinstance(sm, m.RemoteScreen):
                 sm.set_catalog(kind.split(":", 1)[1], data, err)
             if err in self.state_warnings:
@@ -1192,6 +1210,25 @@ class Picker(App):
                 sm.catalogs[prov] = rows
                 if from_disk:
                     sm._catalog_stale.add(prov)
+
+    def _eager_catalog_kinds(self):
+        """`rcat:` kinds for every keyed provider not yet fetched this session, with counts
+        seeded from the disk cache so the home row is honest before the fetches land.
+        LA_EAGER_CATALOGS=0 opts out (the test harness sets it: a dozen contract tests
+        assert what a picker start is allowed to call, and the warm-up IS calls)."""
+        if os.environ.get("LA_EAGER_CATALOGS", "1") == "0":
+            return []
+        if not hasattr(self, "catalog_counts"):
+            self.catalog_counts = {}
+        if not hasattr(self, "catalog_rows"):
+            self.catalog_rows = {}
+        kinds = []
+        for a in self.cache.get("remote") or []:
+            if not a.has_key or a.provider in self.catalog_rows:
+                continue
+            self.catalog_counts.setdefault(a.provider, len(m.read_catalog_cache(a.provider) or []))
+            kinds.append(f"rcat:{a.alias}")
+        return kinds
 
     def enter(self):
         h = self._highlighted()

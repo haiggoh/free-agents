@@ -12,6 +12,7 @@ Usage: python3 tests/test_picker_load_race.py -v   (or pytest)
 Environment: none required; stub launchers + temp dirs per picker_harness/conftest.
 """
 from pathlib import Path
+import os
 import sys
 import unittest
 
@@ -77,6 +78,70 @@ class WarmCacheHydration(PilotCase):
             # By IDENTITY, not display text: catalog rows render humanized names.
             self.assertIn(("item", "cat:nvidia:nvidia/test-cat-row"), app.row_ids,
                           "cached catalog row not rendered among the picker's rows")
+
+        self.run_picker(scenario, start="home")
+
+
+def models_stub(rows_by_alias):
+    """inventory_stub plus `--models <alias>` answers (one TSV row set per provider).
+    Catalog calls fall through to the recorder, so launches() sees every fetch."""
+    cases = []
+    for alias, rows in rows_by_alias.items():
+        if rows:
+            args = " ".join("'" + r.replace("'", "'\\''") + "'" for r in rows)
+            cases.append(f"    {alias}) printf '%s\\n' {args} ;;")
+    return ("#!/bin/sh\n"
+            "for a in \"$@\"; do [ \"$a\" = --inventory ] && { cat <<'EOF'\n" + REMOTE_INV +
+            "EOF\nexit 0; }; done\n"
+            "if [ \"$2\" = \"--models\" ]; then\n  case \"$3\" in\n" +
+            "\n".join(cases) + "\n  esac\nfi\n" + RECORDER.split("\n", 1)[1])
+
+
+class EagerStartupFetch(PilotCase):
+    """The startup warm-up fetches every keyed provider's catalog once per session, so the
+    home count and the model lists are real from the first paint (user decision 2026-10-27)."""
+
+    MODELS = {
+        "nvidia-a": ['nvidia/cat-one\t{"tools": true}', "nvidia/cat-two\t{}", "nvidia/cat-three\t{}"],
+        "gemini-flash": ["gemini/gcat-one\t{}"],
+        "cerebras-oss": [],
+    }
+
+    def setUp(self):
+        super().setUp()
+        os.environ["LA_EAGER_CATALOGS"] = "1"   # the harness default opts the suite out
+
+    def _install_stub(self):
+        stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
+        stub.write_text(models_stub(self.MODELS))
+        stub.chmod(0o755)
+
+    def test_every_keyed_provider_catalog_fetches_once_at_startup(self):
+        self._install_stub()
+
+        async def scenario(app, pilot, h):
+            await h.settle()
+            seen = [r for r in self.launches() if "--models" in r["argv"]]
+            aliases = {r["argv"][r["argv"].index("--models") + 1] for r in seen}
+            self.assertEqual(aliases, {"nvidia-a", "gemini-flash", "cerebras-oss"},
+                             f"catalog fetches scheduled for: {aliases or 'nothing'}")
+
+        self.run_picker(scenario, start="home")
+
+    def test_store_seeds_from_disk_and_records_landings(self):
+        self._install_stub()
+        m.write_catalog_cache("nvidia", [m.CatalogModel("nvidia/c1", True),
+                                         m.CatalogModel("nvidia/c2", True)])
+        (Path(self.env["LA_REMOTE_CATALOG_CACHE_DIR"]) / "gemini.json").write_text("{corrupt")
+
+        async def scenario(app, pilot, h):
+            await h.settle()
+            # nvidia: 2 seeded from disk, overwritten by the 3-row landing;
+            # gemini: corrupt file seeds nothing, its landing records 1; cerebras: 0 rows.
+            self.assertEqual(app.catalog_counts, {"nvidia": 3, "gemini": 1, "cerebras": 0})
+            self.assertEqual([c.model_id for c in app.catalog_rows["nvidia"]],
+                             ["nvidia/cat-one", "nvidia/cat-two", "nvidia/cat-three"])
+            self.assertEqual(app.catalog_rows["cerebras"], [])
 
         self.run_picker(scenario, start="home")
 

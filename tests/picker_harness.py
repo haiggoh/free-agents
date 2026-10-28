@@ -94,6 +94,10 @@ class _StubbedEnv(unittest.TestCase):
                     # Catalog rows never reach Hugging Face from a test, nor its real cache.
                     "LA_PICKER_HF_LOOKUP": "0",
                     "LA_HF_PARAMS_CACHE": str(t / "hf-params.json"),
+                    # Nor does the eager per-provider catalog warm-up run: a dozen PTY
+                    # contract tests assert what a picker start may call, and the warm-up
+                    # IS calls. The eager tests re-enable it in their own setUp.
+                    "LA_EAGER_CATALOGS": "0",
                     # The catalog disk cache (T2) reads and writes at picker runtime: tests
                     # must never see nor poison the user's real ~/.local/state catalogs.
                     "LA_REMOTE_CATALOG_CACHE_DIR": str(t / "catalog-cache"),
