@@ -558,6 +558,10 @@ class Picker(App):
         # None = let Textual pick its default driver.
         super().__init__(driver_class=_DRIVER_CLASS, ansi_color=True)
         self.theme = "textual-ansi"
+        # The verdict memo is per picker session: a fresh app must not inherit another
+        # app's fit/age/param verdicts (measured 2026-10-28: the full suite's age-filter
+        # tests share one process, and a cached cutoff from an earlier test leaked).
+        _VERDICT_MEMO.clear()
         state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
         self.state_warnings = list(state.warnings)
         # A security-review override left behind while the plugin is not active is removed, and the
