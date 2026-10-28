@@ -183,6 +183,27 @@ class HomeCatalogCount(_EagerEnv):
         self.run_picker(scenario, start="home")
 
 
+class SubheadlineCounts(unittest.TestCase):
+    """The remote screen's "N model(s) visible (hidden: M)" line counts catalog rows too,
+    and stays consistent with what the list actually renders (2026-10-27 plan)."""
+
+    def test_visible_hidden_counts_catalog_rows(self):
+        s = m.Settings()                     # show_old defaults False
+        s.catalog_model_old = lambda prov, mid: mid.endswith("-old")
+        pinned = m.RemoteAgent("nvidia-a", "nvidia", "NVIDIA A", "unknown",
+                               has_key=True, model_id="nvidia/pinned-one")
+        lane = m.RemoteScreen(s, [pinned], owner=m.DIRECT_ROOT)
+        lane.set_catalog("nvidia-a", [
+            m.CatalogModel("nvidia/pinned-one", True),   # duplicate of the pinned row
+            m.CatalogModel("nvidia/cat-two", True),
+            m.CatalogModel("nvidia/cat-three", True),
+            m.CatalogModel("nvidia/cat-old", True),      # hidden by the age filter
+        ], None)
+        self.assertEqual(lane.policy, "3 model(s) visible  (hidden: 1)")
+        lane.set_search("two")
+        self.assertIn('matching "two"', lane.policy)     # the search line keeps its form
+
+
 class NoKeysSemantics(unittest.TestCase):
     """`__nokeys__` is an instruction for a keyless roster — never for an unlanded one."""
 

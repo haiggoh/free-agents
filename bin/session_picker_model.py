@@ -1141,7 +1141,25 @@ class RemoteScreen(Screen):
             n = sum(len(g.items) for g in self.accordion.groups if not g.id.startswith("__"))
             return f'{n} model(s) matching "{self.search}"  — the filter box above the list is live; empty shows all'
         vis = sum(1 for a in self.agents if self._visible(a) and a.model_id != "SELECT")
-        return f"{vis} model(s) visible  (hidden: {self.hidden_count()})"
+        hidden = self.hidden_count()
+        for prov, cat in self.catalogs.items():
+            if not isinstance(cat, list) or not cat:
+                continue
+            # Same tier/dedupe rules as _catalog_items, so this count can never disagree
+            # with the rendered rows (2026-10-27: the subheadline under the title counted
+            # the agent roster only and read as fiction next to the real lists).
+            have = {a.model_id for a in self.agents if a.provider == prov
+                    and a.model_id != "SELECT" and self._visible(a)}
+            pinned0 = next((a for a in self.agents if a.provider == prov and a.model_id != "SELECT"), None)
+            tier = pinned0.tier if pinned0 else "unknown"
+            for c in cat:
+                if c.model_id in have:
+                    continue
+                if self._visible(self._catalog_probe(prov, c, tier)):
+                    vis += 1
+                else:
+                    hidden += 1
+        return f"{vis} model(s) visible  (hidden: {hidden})"
 
     def __init__(self, settings: Settings, agents: list[RemoteAgent] | None = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
@@ -1253,6 +1271,14 @@ class RemoteScreen(Screen):
         self._refresh_keep_open()
 
     # --- live provider catalogs (pinned aliases first, then everything the provider lists) ---
+    def _catalog_probe(self, prov: str, c, tier: str) -> RemoteAgent:
+        """The probe agent a catalog row is judged and rendered through — ONE construction
+        site, so the subheadline counts can never disagree with the rendered rows."""
+        return RemoteAgent(f"{CATALOG_PREFIX}{prov}:{c.model_id}", prov, c.model_id, tier,
+                           local_capable=self._catalog_local_capable(prov, c.model_id),
+                           old=self._catalog_old(prov, c.model_id),
+                           model_id=c.model_id)
+
     def _catalog_items(self, prov: str, pinned: list) -> list:
         cat = self.catalogs.get(prov)
         if prov in self._catalog_pending and cat is None:
@@ -1272,10 +1298,7 @@ class RemoteScreen(Screen):
             name = model_names.readable(c.model_id)
             if self.search and not self._matches(c.model_id, name):
                 continue
-            probe = RemoteAgent(f"{CATALOG_PREFIX}{prov}:{c.model_id}", prov, c.model_id, tier,
-                                local_capable=self._catalog_local_capable(prov, c.model_id),
-                                old=self._catalog_old(prov, c.model_id),
-                                model_id=c.model_id)
+            probe = self._catalog_probe(prov, c, tier)
             if not self._visible(probe):
                 continue
             # The per-row "tools untested" flag is gone (user 2026-10-20: stale noise on
