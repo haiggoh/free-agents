@@ -1,3 +1,63 @@
+## [0.47.0] — 2026-10-28
+
+The remote picker's model lists: real data, real counts, and no more freezes.
+
+### Fixed — a keystroke during load can no longer poison the model list
+
+Reported on 0.46.6 (plan "csl crash bugfix" update): reaching "choose model" while the
+roster was still loading and typing into the live search left the list permanently empty
+behind a false "No API key saved yet" until csl was restarted. `_regroup()` on the
+not-yet-landed (empty) roster set `_models_loaded = True` and rendered the keyless
+instruction, so when the roster landed both fill sites — which gate on that flag —
+refused to fill. The flag is now set only by a landed roster, the keyless instruction
+needs a non-empty roster, and both fill sites additionally accept an empty-agents screen.
+(Same family as the 0.46.1 crash fix: a mid-load re-render corrupting state; that one
+crashed, this one lay.)
+
+### Fixed — cached catalogs actually paint when navigating to the remote screen
+
+The disk cache worked, but `load_cached_catalogs()` was only reachable when the roster
+landed while a remote screen was already showing. The common path — the startup prefetch
+wins, `goto` builds the screen from cache — never read the cache back, so every group
+opened pinned-only ("nvidia always starts with only 9 models") while the cached full
+list sat unused on disk. A hydrate step now overlays this session's fetch results and
+the disk cache at all three screen-build sites; disk-cached providers still owe one live
+revision per session.
+
+### Added — every keyed provider's catalog fetches once at startup
+
+The startup warm-up now fetches all catalogs for the providers the user has keys for
+(user decision 2026-10-27: eager at startup), so the counts and the model lists are real
+from the first paint and entering "choose model" reads the cache instead of waiting on an
+API call. `LA_EAGER_CATALOGS=0` opts out. The picker keeps each landing even when no
+remote screen is showing: counts feed the home row, rows hydrate a screen built later.
+
+### Changed — the home row and the subheadline count the catalog, not the roster
+
+"Remote free API sessions (N listed)" and the remote screen's "N model(s) visible
+(hidden: M)" counted the agent roster — stale fiction that never matched the lists
+(waypoint csl-remote-provider-catalogs, open since 2026-10-22). Both now count catalog
+models through the same probe construction the rendered rows use, so they cannot
+disagree. A user with no remote keys reads "(0 listed)", never a stale roster count;
+before any roster lands the home shows "?".
+
+### Fixed — the 4000+ model freeze: per-row verdicts computed once, not per regroup
+
+A regroup asked the footprint estimator for every row of every loaded provider, and the
+estimator re-read its cache files from disk on every call — measured: 12,002 file reads
+and 0.3s of UI-thread stall for ONE 4000-row provider per regroup, times a dozen eager
+landings plus every live-filter keystroke. The verdicts (local-capable, param count,
+age) depend only on the id, the cache warmed before the row renders, and the device —
+session-stable — so they are memoized at the settings boundary (per picker session; the
+full suite caught an earlier per-process version leaking across tests). Measured after:
+cold landing 0.117s once, warm landing 8.7ms, keystroke 1.8ms.
+
+### Changed — the empty-list placeholder plays the loading hourglass
+
+While the model list loads, the placeholder runs the same hourglass animation as the
+status line instead of a static "nothing to show here yet" that read as stuck; it yields
+to the real rows when they land.
+
 ## [0.46.7] — 2026-10-27
 
 ### Fixed — a failed launch reports the verdict the launcher printed, not stderr noise
