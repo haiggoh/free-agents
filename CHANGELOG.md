@@ -58,6 +58,24 @@ While the model list loads, the placeholder runs the same hourglass animation as
 status line instead of a static "nothing to show here yet" that read as stuck; it yields
 to the real rows when they land.
 
+### Fixed — findings from the pre-release whole-branch review
+
+A cross-family final review (DeepSeek V4.1 Flash) gated the release DO-NOT-SHIP; each
+finding landed with its own failing test:
+
+- a verdict computed while the HF params cache was still cold (the first paint hydrates
+  disk rows before the fetch lands) no longer outlives the warm-up — `_warm_hf_cache`
+  invalidates the memo for the ids it filled, so the age and fit filters settle correctly
+  within the first seconds instead of the whole session
+- landings record their counts on the `LA_EAGER_CATALOGS=0` opt-out path too, and the home
+  row reads "?" until counts exist (an honest unknown) rather than claiming 0
+- an empty live reply is treated as inconclusive: it no longer records as the provider's
+  catalog, so a rate-limited response cannot pin a provider pinned-only, and hydration
+  falls through to the disk cache
+- the eager warm-up no longer re-queues a provider whose fetch is still in flight
+- hydration regroups the screen it fills, so the rendered list — not just the store —
+  shows the hydrated rows
+
 ## [0.46.7] — 2026-10-27
 
 ### Fixed — a failed launch reports the verdict the launcher printed, not stderr noise
