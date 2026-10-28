@@ -207,7 +207,12 @@ class SubheadlineCounts(unittest.TestCase):
         self.assertIn('matching "two"', lane.policy)     # the search line keeps its form
 
 
-class VerdictMemo(unittest.TestCase):
+class VerdictMemo(PilotCase):
+    """The per-row verdicts (fit/params/old) are computed ONCE per model per session: a
+    regroup asks for every row of every provider, and the estimator reads its cache files
+    from disk on every call — the 2026-10-28 freeze (4000+ rows, multi-second stalls).
+    A PilotCase so the suite's skip path covers it: the ship gate runs pytest on an
+    interpreter without textual (plain import of the picker module would error there)."""
     """The per-row verdicts (fit/params/old) are computed ONCE per model per session: a
     regroup asks for every row of every provider, and the estimator reads its cache files
     from disk on every call — the 2026-10-28 freeze (4000+ rows, multi-second stalls)."""
