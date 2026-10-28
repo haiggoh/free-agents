@@ -14,6 +14,7 @@ Usage:  model_names.py <model-id> [...]     print the readable name of each id
 """
 from __future__ import annotations
 
+import functools
 import re
 import sys
 
@@ -113,6 +114,7 @@ def manufacturer(model_id: str) -> str:
     return FAMILIES.get(first, "")
 
 
+@functools.lru_cache(maxsize=16384)
 def readable(model_id: str, with_maker: bool = True) -> str:
     """`vendor/some-model-1.5-30b-a3b:free` -> `Maker Some Model 1.5 30B-A3B (free)`."""
     mid = (model_id or "").strip()

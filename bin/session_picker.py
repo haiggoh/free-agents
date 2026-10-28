@@ -174,6 +174,24 @@ def _footprint():
     return _FOOTPRINT
 
 
+_VERDICT_MEMO: dict = {}
+
+
+def _memoized_verdict(name, model_id, compute):
+    """One verdict per (kind, model id) per session.
+
+    The estimator reads its cache files from disk on EVERY call, and a regroup asks for
+    every row of every loaded provider — the eager warm-up plus each live-filter keystroke
+    re-read thousands of files on the UI thread (measured 2026-10-28: 0.3s per regroup for
+    one 4000-row provider, multi-second stalls in total). The verdicts depend only on the
+    id, the cache the loader warmed BEFORE the row renders, and the device — session-stable
+    inputs — so one dict is exact enough and a fresh csl re-derives everything."""
+    key = (name, model_id)
+    if key not in _VERDICT_MEMO:
+        _VERDICT_MEMO[key] = compute()
+    return _VERDICT_MEMO[key]
+
+
 def catalog_local_capable(provider, model_id):
     """True when a live-catalog row would fit THIS device at >=4-bit (the filter hides it).
 
@@ -184,10 +202,12 @@ def catalog_local_capable(provider, model_id):
     network: it reads the Hugging Face count only from the cache that load_remote_catalog
     warmed, then falls back to the count in the id. An unknown verdict stays visible
     (fail-open)."""
-    try:
-        return _footprint().estimate(model_id, use_hf=True, hf_offline=True)["suggested"] == "local-capable"
-    except Exception:
-        return False
+    def compute():
+        try:
+            return _footprint().estimate(model_id, use_hf=True, hf_offline=True)["suggested"] == "local-capable"
+        except Exception:
+            return False
+    return _memoized_verdict("cap", model_id, compute)
 
 
 def model_param_count(provider, model_id):
@@ -196,15 +216,17 @@ def model_param_count(provider, model_id):
     The count in the id first (the estimator's parser); when the id states none, the
     Hugging Face count ONLY if already cached — same offline rule as the local-capable
     verdict: a render never waits on the network. None sorts after the sized rows."""
-    try:
-        fp = _footprint()
-        total = fp.parse_params(model_id)["total_b"]
-        if total is None:
-            total, _repo = fp.hf_total_params(model_id, offline=True)
-            total = round(total / 1e9, 1) if total else None   # HF counts raw params
-        return float(total) if total else None
-    except Exception:
-        return None
+    def compute():
+        try:
+            fp = _footprint()
+            total = fp.parse_params(model_id)["total_b"]
+            if total is None:
+                total, _repo = fp.hf_total_params(model_id, offline=True)
+                total = round(total / 1e9, 1) if total else None   # HF counts raw params
+            return float(total) if total else None
+        except Exception:
+            return None
+    return _memoized_verdict("params", model_id, compute)
 
 
 def catalog_model_old(provider, model_id):
@@ -213,11 +235,13 @@ def catalog_model_old(provider, model_id):
     The cutoff is LA_REMOTE_MAX_MODEL_AGE_MONTHS months (default 18) before today; the
     date is the row's Hugging Face createdAt, read from the cache the loader thread
     warmed — never fetched at render time. No cached date means NOT old (fail-open)."""
-    try:
-        created = _footprint().hf_created(model_id)
-    except Exception:
-        return False
-    return m.created_before_cutoff(created, m.max_model_age_months())
+    def compute():
+        try:
+            created = _footprint().hf_created(model_id)
+        except Exception:
+            return False
+        return m.created_before_cutoff(created, m.max_model_age_months())
+    return _memoized_verdict("old", model_id, compute)
 
 
 def _warm_hf_cache(model_ids):

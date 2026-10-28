@@ -204,6 +204,51 @@ class SubheadlineCounts(unittest.TestCase):
         self.assertIn('matching "two"', lane.policy)     # the search line keeps its form
 
 
+class VerdictMemo(unittest.TestCase):
+    """The per-row verdicts (fit/params/old) are computed ONCE per model per session: a
+    regroup asks for every row of every provider, and the estimator reads its cache files
+    from disk on every call — the 2026-10-28 freeze (4000+ rows, multi-second stalls)."""
+
+    def test_verdicts_computed_once_per_model(self):
+        import session_picker as sp
+        calls = []
+        sp._VERDICT_MEMO.clear()
+        sp._footprint()   # warm the module singleton so the memo, not the import, is measured
+
+        def fake_estimate(model_id, use_hf, hf_offline):
+            calls.append(model_id)
+            return {"suggested": "local-capable"}
+        fp = sp._footprint()
+        real_estimate = fp.estimate
+        fp.estimate = fake_estimate
+        try:
+            self.assertTrue(sp.catalog_local_capable("prov", "p/m-one"))
+            self.assertTrue(sp.catalog_local_capable("prov", "p/m-one"))   # memo hit: NO new call
+            self.assertTrue(sp.catalog_local_capable("other", "p/m-one"))  # provider is not part of the verdict
+            self.assertEqual(len(calls), 1, "a repeated verdict call recomputed the estimate")
+        finally:
+            fp.estimate = real_estimate
+            sp._VERDICT_MEMO.clear()
+
+    def test_memo_can_be_bypassed(self):
+        # Mutation guard for the test above: popping the memo entry must recompute.
+        import session_picker as sp
+        calls = []
+        sp._VERDICT_MEMO.clear()
+        fp = sp._footprint()
+        real_estimate = fp.estimate
+        fp.estimate = lambda mid, use_hf, hf_offline: calls.append(mid) or {"suggested": "cloud"}
+        try:
+            sp.catalog_local_capable("prov", "p/m-two")
+            first = len(calls)
+            sp._VERDICT_MEMO.pop(("cap", "p/m-two"), None)
+            sp.catalog_local_capable("prov", "p/m-two")
+            self.assertGreater(len(calls), first, "removing the memo entry did not recompute — nothing was pinned")
+        finally:
+            fp.estimate = real_estimate
+            sp._VERDICT_MEMO.clear()
+
+
 class NoKeysSemantics(unittest.TestCase):
     """`__nokeys__` is an instruction for a keyless roster — never for an unlanded one."""
 
