@@ -836,10 +836,15 @@ class HomeScreen(Screen):
                      "are not present in this installed copy.")
         return line
 
-    def __init__(self, settings: Settings, local_count: int | None = None, remote_count: int | None = None, owner: str = DIRECT_ROOT):
+    def __init__(self, settings: Settings, local_count: int | None = None, remote_count: int | None = None,
+                 catalog_total: "int | None" = None, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner=owner)
         self.local_count = local_count
         self.remote_count = remote_count
+        # The full catalog sum over the providers the user has keys for (2026-10-27). The
+        # roster count this label showed before was stale fiction — it never matched what
+        # the provider groups actually list. None = not known yet ("?").
+        self.catalog_total = catalog_total
 
     def _format_count(self, count: int | None, fallback: str) -> str:
         return str(count) if count is not None else fallback
@@ -848,7 +853,7 @@ class HomeScreen(Screen):
         acts = [
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR} Local sessions ({self._format_count(self.local_count, '?')} on disk)",
                    lambda: Nav("local", HOME_OWNED), section="lanes"),
-            Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote free API sessions ({self._format_count(self.remote_count, '?')} listed)",
+            Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote free API sessions ({self._format_count(self.catalog_total, '?')} listed)",
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
             Action("c", f"{ec.EMOJI_CLOUD_CONFIG_STR}  {ec.EMOJI_TOOLS_STR} Cloud session configuration…", lambda: Nav("cloud_config", HOME_OWNED), section="tools"),
             Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools"),

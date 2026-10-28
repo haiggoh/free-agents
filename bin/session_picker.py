@@ -780,6 +780,8 @@ class Picker(App):
                 self.catalog_rows[prov] = list(data or [])
                 if hasattr(self, "catalog_counts"):
                     self.catalog_counts[prov] = len(data or [])
+            if isinstance(sm, m.HomeScreen):
+                sm.catalog_total = self._home_catalog_total()   # the sum grows as fetches land
             if isinstance(sm, m.RemoteScreen):
                 sm.set_catalog(kind.split(":", 1)[1], data, err)
             if err in self.state_warnings:
@@ -799,6 +801,7 @@ class Picker(App):
                 sm.local_count = len(data)
             else:
                 sm.remote_count = len(data)
+                sm.catalog_total = self._home_catalog_total()
         if not getattr(self, "pending_prompt", None):
             self._rerender_keep_focus()
 
@@ -895,7 +898,8 @@ class Picker(App):
         if nav.target == "home":
             local = self.cache.get("local")
             remote = self.cache.get("remote")
-            self.screen_model = m.HomeScreen(s, len(local) if local else None, len(remote) if remote else None, nav.owner)
+            self.screen_model = m.HomeScreen(s, len(local) if local else None, len(remote) if remote else None,
+                                             self._home_catalog_total(), nav.owner)
         elif nav.target == "local":
             # Pass models only if already cached; otherwise pass None for lazy loading
             local = self.cache.get("local")
@@ -1210,6 +1214,16 @@ class Picker(App):
                 sm.catalogs[prov] = rows
                 if from_disk:
                     sm._catalog_stale.add(prov)
+
+    def _home_catalog_total(self):
+        """The home row's honest number: the catalog-model sum over the providers the user
+        has keys for; None while no roster has landed ("?"), 0 when none has a key."""
+        roster = self.cache.get("remote")
+        if roster is None:
+            return None
+        if not hasattr(self, "catalog_counts"):
+            self.catalog_counts = {}
+        return sum(self.catalog_counts.get(a.provider, 0) for a in roster if a.has_key)
 
     def _eager_catalog_kinds(self):
         """`rcat:` kinds for every keyed provider not yet fetched this session, with counts

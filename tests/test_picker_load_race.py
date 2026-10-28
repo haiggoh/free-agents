@@ -82,24 +82,26 @@ class WarmCacheHydration(PilotCase):
         self.run_picker(scenario, start="home")
 
 
-def models_stub(rows_by_alias):
+def models_stub(rows_by_alias, secs=0):
     """inventory_stub plus `--models <alias>` answers (one TSV row set per provider).
-    Catalog calls fall through to the recorder, so launches() sees every fetch."""
+    Catalog calls fall through to the recorder, so launches() sees every fetch.
+    secs sleeps before answering ANY call, keeping the whole load in one settle window."""
     cases = []
     for alias, rows in rows_by_alias.items():
         if rows:
             args = " ".join("'" + r.replace("'", "'\\''") + "'" for r in rows)
             cases.append(f"    {alias}) printf '%s\\n' {args} ;;")
-    return ("#!/bin/sh\n"
-            "for a in \"$@\"; do [ \"$a\" = --inventory ] && { cat <<'EOF'\n" + REMOTE_INV +
+    return ("#!/bin/sh\n" + (f"sleep {secs}\n" if secs else "")
+            + "for a in \"$@\"; do [ \"$a\" = --inventory ] && { cat <<'EOF'\n" + REMOTE_INV +
             "EOF\nexit 0; }; done\n"
             "if [ \"$2\" = \"--models\" ]; then\n  case \"$3\" in\n" +
             "\n".join(cases) + "\n  esac\nfi\n" + RECORDER.split("\n", 1)[1])
 
 
-class EagerStartupFetch(PilotCase):
-    """The startup warm-up fetches every keyed provider's catalog once per session, so the
-    home count and the model lists are real from the first paint (user decision 2026-10-27)."""
+class _EagerEnv(PilotCase):
+    """Shared env for the eager-warm-up tests: gate ON, and a stub that answers
+    `--models <alias>` from MODELS. A base class so subclasses don't re-run each other's
+    tests (unittest would collect inherited ones too)."""
 
     MODELS = {
         "nvidia-a": ['nvidia/cat-one\t{"tools": true}', "nvidia/cat-two\t{}", "nvidia/cat-three\t{}"],
@@ -111,10 +113,15 @@ class EagerStartupFetch(PilotCase):
         super().setUp()
         os.environ["LA_EAGER_CATALOGS"] = "1"   # the harness default opts the suite out
 
-    def _install_stub(self):
+    def _install_stub(self, secs=0):
         stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
-        stub.write_text(models_stub(self.MODELS))
+        stub.write_text(models_stub(self.MODELS, secs=secs))
         stub.chmod(0o755)
+
+
+class EagerStartupFetch(_EagerEnv):
+    """The startup warm-up fetches every keyed provider's catalog once per session, so the
+    home count and the model lists are real from the first paint (user decision 2026-10-27)."""
 
     def test_every_keyed_provider_catalog_fetches_once_at_startup(self):
         self._install_stub()
@@ -142,6 +149,36 @@ class EagerStartupFetch(PilotCase):
             self.assertEqual([c.model_id for c in app.catalog_rows["nvidia"]],
                              ["nvidia/cat-one", "nvidia/cat-two", "nvidia/cat-three"])
             self.assertEqual(app.catalog_rows["cerebras"], [])
+
+        self.run_picker(scenario, start="home")
+
+
+class HomeCatalogCount(_EagerEnv):
+    """The home row counts the full catalog sum over the providers the user has keys for —
+    never the agent roster ("(51 listed)" was stale fiction), and 0 for a keyless user."""
+
+    def test_home_lists_the_catalog_sum(self):
+        # secs=3 keeps the "?" phase observable: the stub sleeps on every call, so the
+        # roster AND the catalog fetches land inside the same settle window.
+        self._install_stub(secs=3)
+
+        async def scenario(app, pilot, h):
+            self.assertIn("remote", getattr(app, "_loading", set()))
+            self.assertIn("(? listed)", h.text(), "unknown total must read ?, not a stale roster count")
+            await h.settle(secs=8)     # stubs sleep 3s each: the fetches land inside this window
+            self.assertIn("(4 listed)", h.text(), f"home label: {h.labels('actions')}")
+
+        self.run_picker(scenario, start="home")
+
+    def test_keyless_user_reads_zero_listed(self):
+        keyless = REMOTE_INV.replace("\t0\t1\n", "\t0\t0\n")
+        stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
+        stub.write_text(inventory_stub(keyless))
+        stub.chmod(0o755)
+
+        async def scenario(app, pilot, h):
+            await h.settle()
+            self.assertIn("(0 listed)", h.text(), f"home label: {h.labels('actions')}")
 
         self.run_picker(scenario, start="home")
 
