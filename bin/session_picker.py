@@ -256,6 +256,12 @@ def _warm_hf_cache(model_ids):
         return
     for mid in model_ids:
         fp.hf_total_params(mid, timeout=4.0)
+        # A verdict computed while the cache was still cold (fail-open) must not outlive
+        # the warm-up: the first paint often hydrates DISK rows before the fetch lands
+        # (review finding 1, 2026-10-28).
+        _VERDICT_MEMO.pop(("old", mid), None)
+        _VERDICT_MEMO.pop(("cap", mid), None)
+        _VERDICT_MEMO.pop(("params", mid), None)
 
 
 def load_remote_catalog(kind):
@@ -799,15 +805,18 @@ class Picker(App):
         if kind.startswith("rcat:"):
             prov = next((a.provider for a in (self.cache.get("remote") or [])
                          if a.alias == kind.split(":", 1)[1]), None)
-            if prov is not None and not err:
+            if prov is not None and not err and data:
                 # Keep what landed even when no remote screen is showing (the eager fetch
                 # lands on the home screen): counts feed the home row, rows hydrate a
-                # remote screen built later.
+                # remote screen built later. An empty success is INCONCLUSIVE (rate-limited
+                # providers answer empty): recording it would pin the provider pinned-only
+                # and block the disk cache (review finding 5).
                 if not hasattr(self, "catalog_rows"):
                     self.catalog_rows = {}
-                self.catalog_rows[prov] = list(data or [])
-                if hasattr(self, "catalog_counts"):
-                    self.catalog_counts[prov] = len(data or [])
+                self.catalog_rows[prov] = list(data)
+                if not hasattr(self, "catalog_counts"):
+                    self.catalog_counts = {}
+                self.catalog_counts[prov] = len(data)
             if isinstance(sm, m.HomeScreen):
                 sm.catalog_total = self._home_catalog_total()   # the sum grows as fetches land
             if isinstance(sm, m.RemoteScreen):
@@ -1243,17 +1252,24 @@ class Picker(App):
         Disk-cached providers still owe one live revision (_catalog_stale)."""
         if not hasattr(self, "catalog_rows"):
             self.catalog_rows = {}     # this session's fetch results, keyed by provider
+        changed = False
         for prov in dict.fromkeys(a.provider for a in sm.agents):
             if prov in sm.catalogs or prov in sm._catalog_pending:
                 continue
-            rows = self.catalog_rows.get(prov)
+            rows = self.catalog_rows.get(prov) or None   # an empty LIVE reply is inconclusive: fall through to disk
             from_disk = rows is None
             if from_disk:
                 rows = m.read_catalog_cache(prov)
             if rows:
                 sm.catalogs[prov] = rows
                 if from_disk:
-                    sm._catalog_stale.add(prov)
+                    sm._catalog_stale.add(prov)          # disk-cached: still owes one live revision
+                changed = True
+        if changed:
+            # The groups on the screen were built BEFORE hydration: without a regroup the
+            # accordion still carries the pinned-only labels and rows (review finding 13's
+            # coverage test pinned this hole — the store updated but the render never saw it).
+            sm._refresh_keep_open()
 
     def _home_catalog_total(self):
         """The home row's honest number: the catalog-model sum over the providers the user
@@ -1261,9 +1277,12 @@ class Picker(App):
         roster = self.cache.get("remote")
         if roster is None:
             return None
-        if not hasattr(self, "catalog_counts"):
-            self.catalog_counts = {}
-        return sum(self.catalog_counts.get(a.provider, 0) for a in roster if a.has_key)
+        keyed = [a for a in roster if a.has_key]
+        if not keyed:
+            return 0                       # a keyless user: an honest zero, not a stale count
+        if not getattr(self, "catalog_counts", None):
+            return None                    # nothing known yet ("?") — never claim zero
+        return sum(self.catalog_counts.get(a.provider, 0) for a in keyed)
 
     def _eager_catalog_kinds(self):
         """`rcat:` kinds for every keyed provider not yet fetched this session, with counts
@@ -1278,7 +1297,8 @@ class Picker(App):
             self.catalog_rows = {}
         kinds = []
         for a in self.cache.get("remote") or []:
-            if not a.has_key or a.provider in self.catalog_rows:
+            if (not a.has_key or a.provider in self.catalog_rows
+                    or f"rcat:{a.alias}" in getattr(self, "_loading", set())):
                 continue
             self.catalog_counts.setdefault(a.provider, len(m.read_catalog_cache(a.provider) or []))
             kinds.append(f"rcat:{a.alias}")

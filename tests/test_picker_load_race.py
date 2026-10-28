@@ -144,11 +144,14 @@ class EagerStartupFetch(_EagerEnv):
         async def scenario(app, pilot, h):
             await h.settle()
             # nvidia: 2 seeded from disk, overwritten by the 3-row landing;
-            # gemini: corrupt file seeds nothing, its landing records 1; cerebras: 0 rows.
+            # gemini: corrupt file seeds nothing, its landing records 1;
+            # cerebras: an EMPTY success is inconclusive, so it records nothing
+            # (review finding 5: it must not be pinned pinned-only nor block the disk).
             self.assertEqual(app.catalog_counts, {"nvidia": 3, "gemini": 1, "cerebras": 0})
             self.assertEqual([c.model_id for c in app.catalog_rows["nvidia"]],
                              ["nvidia/cat-one", "nvidia/cat-two", "nvidia/cat-three"])
-            self.assertEqual(app.catalog_rows["cerebras"], [])
+            self.assertNotIn("cerebras", app.catalog_rows,
+                             "an empty live reply must not count as the provider's catalog")
 
         self.run_picker(scenario, start="home")
 
@@ -275,6 +278,102 @@ class LoadingPlaceholder(PilotCase):
             self.assertGreater(ol.option_count, 1, "real rows never replaced the placeholder")
 
         self.run_picker(scenario, start="remote")
+
+
+class ReviewFixPass(PilotCase):
+    """Findings from the 0.47.0 whole-branch review (DeepSeek V4.1 Flash, cross-family)."""
+
+    MODELS = {
+        "nvidia-a": ['nvidia/cat-one\t{"tools": true}', "nvidia/cat-two\t{}", "nvidia/cat-three\t{}"],
+        "gemini-flash": ["gemini/gcat-one\t{}"],
+        "cerebras-oss": [],
+    }
+
+    def setUp(self):
+        super().setUp()
+        os.environ["LA_EAGER_CATALOGS"] = "1"
+
+    def _install_stub(self, secs=0):
+        stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
+        stub.write_text(models_stub(self.MODELS, secs=secs))
+        stub.chmod(0o755)
+
+    def test_a_pre_warm_verdict_does_not_outlive_the_warmup(self):
+        # Finding 1: a verdict computed while the HF cache was still cold (fail-open)
+        # must be recomputed after the warm-up fills it.
+        import session_picker as sp
+        sp._VERDICT_MEMO.clear()
+        fp = sp._footprint()
+        real_created, real_total = fp.hf_created, fp.hf_total_params
+        fp.hf_created = lambda mid: None                      # cold cache: fail-open "not old"
+        try:
+            self.assertFalse(sp.catalog_model_old("prov", "p/m-old"))
+            fp.hf_created = lambda mid: "2023-01-01T00:00:00Z"    # the warm-up fills it
+            fp.hf_total_params = lambda mid, timeout=4.0: (7_000_000_000, "org/repo")
+            sp._warm_hf_cache(["p/m-old"])
+            self.assertTrue(sp.catalog_model_old("prov", "p/m-old"),
+                            "the pre-warm verdict survived the warm-up")
+        finally:
+            fp.hf_created, fp.hf_total_params = real_created, real_total
+            sp._VERDICT_MEMO.clear()
+
+    def test_b_counts_record_on_landings_even_with_the_eager_gate_off(self):
+        # Finding 2: with LA_EAGER_CATALOGS=0 nothing seeds catalog_counts, and the
+        # hasattr guard then dropped every landing's count — home read 0 while the
+        # groups listed thousands.
+        self._install_stub()
+        os.environ["LA_EAGER_CATALOGS"] = "0"
+        self.addCleanup(os.environ.__setitem__, "LA_EAGER_CATALOGS", "1")
+
+        async def scenario(app, pilot, h):
+            await h.press("r")
+            sm = app.screen_model
+            sm._toggle_choose_model()
+            app.render_model()
+            sm.set_search("cat")        # a live search loads every keyed roster unprompted
+            await h.settle(secs=8)
+            self.assertEqual(app._home_catalog_total(), 4,
+                             "landings under the eager opt-out must still count — "
+                             f"got {getattr(app, 'catalog_counts', None)}")
+            self.assertEqual(app.catalog_counts.get("nvidia"), 3)
+
+        self.run_picker(scenario, start="remote")
+
+    def test_c_empty_success_does_not_pin_the_provider_pinned_only(self):
+        # Finding 5: a transient empty response was recorded as success, which blocked
+        # re-fetch AND hydrate — the disk cache was never consulted either.
+        self._install_stub()
+        m.write_catalog_cache("cerebras", [m.CatalogModel("cerebras/disk-one", True),
+                                           m.CatalogModel("cerebras/disk-two", True)])
+
+        async def scenario(app, pilot, h):
+            await h.settle()                     # eager landings: cerebras answered EMPTY
+            await h.press("r")
+            sm = app.screen_model
+            sm._toggle_choose_model()
+            app.render_model()
+            rows = app.query_one("#rows")
+            ids = [str(rows.get_option_at_index(i).prompt) for i in range(rows.option_count)]
+            self.assertTrue(sm.catalogs.get("cerebras"),
+                            f"disk cache never consulted after an empty live reply: {ids[:6]}")
+
+        self.run_picker(scenario, start="home")
+
+    def test_d_live_landings_hydrate_a_screen_built_later(self):
+        # Coverage pin (review finding 13): the in-memory overlay path — an eager landing
+        # with NO disk cache must paint when the remote screen is built later.
+        self._install_stub()
+
+        async def scenario(app, pilot, h):
+            await h.settle()                     # eager landings populate catalog_rows
+            await h.press("r")
+            sm = app.screen_model
+            sm._toggle_choose_model()
+            app.render_model()
+            self.assertIn(("item", "cat:nvidia:nvidia/cat-one"), app.row_ids,
+                          "a live landing did not hydrate the screen built later")
+
+        self.run_picker(scenario, start="home")
 
 
 class NoKeysSemantics(unittest.TestCase):
