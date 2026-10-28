@@ -869,6 +869,12 @@ class Picker(App):
         if waiting:
             what = "loading versions" if waiting == "versions" else "loading models"
             self.query_one("#status", Static).update("  " + loading_label(self._loading_frame, what))
+            # The empty-list placeholder plays the same animation while it is the only row
+            # (user 2026-10-28: a static "nothing to show yet" read as stuck).
+            rows = self.query_one("#rows", OptionList)
+            if rows.option_count == 1 and getattr(rows.get_option_at_index(0), "id", None) == "empty":
+                rows.replace_option_prompt_at_index(
+                    0, Text("  " + loading_label(self._loading_frame, what), style="dim"))
         self._startup_tick()                  # independent of the status line: both can be animating
 
     def _rerender_keep_focus(self):
@@ -1051,7 +1057,13 @@ class Picker(App):
 
         if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.MemoryGuardScreen,
                                                     m.RuntimeManagerScreen, m.APIKeysScreen, m.ThemeConfigScreen)):
-            rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
+            waiting = self._waiting_for()
+            if waiting:
+                # The hourglass plays here too, not only in the status line (2026-10-28).
+                what = "loading versions" if waiting == "versions" else "loading models"
+                rows.add_option(Option(f"  {loading_label(self._loading_frame, what)}", id="empty", disabled=True))
+            else:
+                rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
         target = keep or (f"i:{sm.accordion.selected_id}" if sm.accordion and sm.accordion.selected_id else None)
         if target:
             for idx in range(rows.option_count):

@@ -249,6 +249,34 @@ class VerdictMemo(unittest.TestCase):
             sp._VERDICT_MEMO.clear()
 
 
+class LoadingPlaceholder(PilotCase):
+    """While the model list is loading, the empty-list placeholder plays the same hourglass
+    animation as the status line — not a static "nothing to show here yet" (2026-10-28)."""
+
+    def test_placeholder_animates_while_loading_then_yields_to_rows(self):
+        import session_picker as sp
+        stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
+        stub.write_text(slow_inventory_stub(REMOTE_INV, secs=3))
+        stub.chmod(0o755)
+
+        async def scenario(app, pilot, h):
+            sm = app.screen_model
+            sm._toggle_choose_model()
+            app.render_model()
+            ol = app.query_one("#rows")
+            first = str(ol.get_option_at_index(0).prompt)
+            self.assertIn("loading", first, f"placeholder while loading reads: {first!r}")
+            app._tick_loading()
+            app._tick_loading()
+            app._tick_loading()
+            second = str(ol.get_option_at_index(0).prompt)
+            self.assertNotEqual(first, second, "the placeholder does not animate")
+            await h.settle(secs=8)
+            self.assertGreater(ol.option_count, 1, "real rows never replaced the placeholder")
+
+        self.run_picker(scenario, start="remote")
+
+
 class NoKeysSemantics(unittest.TestCase):
     """`__nokeys__` is an instruction for a keyless roster — never for an unlanded one."""
 
