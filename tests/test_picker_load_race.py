@@ -58,6 +58,29 @@ class LoadRaceRegressions(PilotCase):
         self.run_picker(scenario, start="remote")
 
 
+class WarmCacheHydration(PilotCase):
+    """A remote screen built from a WARM roster cache must paint the providers' disk-cached
+    catalogs at once — not only when the roster lands mid-view (the common path never did)."""
+
+    def test_cached_catalogs_paint_when_navigating_to_remote(self):
+        m.write_catalog_cache("nvidia", [m.CatalogModel("nvidia/test-cat-row", True)])
+
+        async def scenario(app, pilot, h):
+            await h.press("r")             # goto remote with the roster already cached
+            sm = app.screen_model
+            self.assertIsInstance(sm, m.RemoteScreen)
+            self.assertTrue(sm.agents, "precondition: the goto path got the cached roster")
+            sm._toggle_choose_model()
+            app.render_model()
+            self.assertTrue(sm.catalogs.get("nvidia"),
+                            "disk-cached catalog never painted on the goto path")
+            # By IDENTITY, not display text: catalog rows render humanized names.
+            self.assertIn(("item", "cat:nvidia:nvidia/test-cat-row"), app.row_ids,
+                          "cached catalog row not rendered among the picker's rows")
+
+        self.run_picker(scenario, start="home")
+
+
 class NoKeysSemantics(unittest.TestCase):
     """`__nokeys__` is an instruction for a keyless roster — never for an unlanded one."""
 

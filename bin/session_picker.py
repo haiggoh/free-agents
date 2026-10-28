@@ -757,7 +757,7 @@ class Picker(App):
         if isinstance(sm, m.RemoteScreen) and kind == "remote" and (not sm._models_loaded or not sm.agents):
             sm.agents = data
             sm._regroup()
-            sm.load_cached_catalogs()          # cached rosters paint at once (T2)
+            self._hydrate_catalogs(sm)         # cached rosters paint at once (T2)
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data, *([MISSING_MODELS] if isinstance(sm, m.LocalScreen) else []))
             sm._models_loaded = True
@@ -887,6 +887,8 @@ class Picker(App):
         elif nav.target == "remote":
             remote = self.cache.get("remote")
             self.screen_model = m.RemoteScreen(s, remote, nav.owner)
+            if remote is not None:
+                self._hydrate_catalogs(self.screen_model)   # cached lists paint at once
         elif nav.target == "lowkey":
             local = self.cache.get("local")
             self.screen_model = m.LowkeyScreen(s, local, nav.owner)
@@ -1167,9 +1169,29 @@ class Picker(App):
                 if "remote" in self.cache:
                     sm.agents = self.cache["remote"]
                     sm._regroup()  # Re-group with loaded agents (sets _models_loaded)
-                    sm.load_cached_catalogs()   # cached rosters paint at once (T2)
+                    self._hydrate_catalogs(sm)   # cached rosters paint at once (T2)
                 return True
         return False
+
+    def _hydrate_catalogs(self, sm):
+        """Paint a remote screen's provider catalogs from this session's fetches and the
+        disk cache — never the network. The goto path built the screen from a warm roster
+        but never read the cache back, so every group opened pinned-only ("nvidia always
+        starts with only 9 models") while the cached full list sat unused (2026-10-27).
+        Disk-cached providers still owe one live revision (_catalog_stale)."""
+        if not hasattr(self, "catalog_rows"):
+            self.catalog_rows = {}     # this session's fetch results, keyed by provider
+        for prov in dict.fromkeys(a.provider for a in sm.agents):
+            if prov in sm.catalogs or prov in sm._catalog_pending:
+                continue
+            rows = self.catalog_rows.get(prov)
+            from_disk = rows is None
+            if from_disk:
+                rows = m.read_catalog_cache(prov)
+            if rows:
+                sm.catalogs[prov] = rows
+                if from_disk:
+                    sm._catalog_stale.add(prov)
 
     def enter(self):
         h = self._highlighted()
