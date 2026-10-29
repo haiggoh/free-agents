@@ -833,9 +833,15 @@ class Picker(App):
         _write_hw_cache(hw)
 
         def apply():
-            old = (self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware)
+            sm = self.screen_model
+            before = getattr(sm, "policy", "") if sm is not None else ""
             self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware = hw
-            if old != tuple(hw):
+            after = getattr(sm, "policy", "") if sm is not None else ""
+            # Re-render only when the visible subheadline actually changes (e.g. generic
+            # "Linux PC" -> "Ubuntu … PC" on first launch); on macOS the platform fallback
+            # already produced the same line, so no mid-interaction redraw (flaky arrow
+            # keys, 2026-10-29).
+            if before != after:
                 self.render_model()
         self.call_from_thread(apply)
 

@@ -178,7 +178,8 @@ class HwDetectCacheTests(unittest.TestCase):
     def setUp(self):
         try:
             import session_picker as sp
-        except ImportError:
+        except (ImportError, SystemExit):
+            # session_picker.py exits(3) instead of raising when textual is missing
             self.skipTest("textual not installed in this interpreter (picker-gate venv only)")
         self.sp = sp
 
