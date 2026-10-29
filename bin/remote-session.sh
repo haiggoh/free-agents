@@ -389,14 +389,11 @@ _filtered_aliases() {
 # "_lc_load_policy: command not found" and silently skip the filter entirely.
 POLICY_FILE="$REPO_ROOT/config/local-capable-remote-models.psv"
 if [[ -r "$POLICY_FILE" ]]; then
+  # The roster projection is ONE cut: the loop it replaces spent five _field subprocesses
+  # per agent (255 spawns, ~9s measured 2026-10-29) on every single invocation — --help
+  # included, which never reads the result.
   _POLICY_JSON="$(bash "$SCRIPT_DIR/local-capable-filter.sh" --parse "$POLICY_FILE" --roster - 2>/dev/null <<< "$(
-    for e in "${LA_REMOTE_AGENTS[@]}"; do
-      printf '%s\n' "$e"
-    done | while IFS= read -r line; do
-      alias="$(_field "$line" 1)"; prov="$(_field "$line" 2)"; model="$(_field "$line" 3)"
-      disp="$(_field "$line" 4)"; tier="$(_field "$line" 5)"
-      printf '%s|%s|%s|%s|%s\n' "$alias" "$prov" "$model" "$disp" "$tier"
-    done
+    printf '%s\n' "${LA_REMOTE_AGENTS[@]}" | cut -d'|' -f1-5
   )")" || _POLICY_JSON='{"visible_count":0,"hidden_count":0,"rows":[]}'
 else
   _POLICY_JSON='{"visible_count":0,"hidden_count":0,"rows":[]}'
@@ -449,14 +446,24 @@ print_inventory() {
     local e alias prov model disp tier lc key br
     # Broken status is reported regardless of SHOW_BROKEN_MODELS (the picker owns the toggle).
     local SHOW_BROKEN_MODELS=0
-    for e in "${LA_REMOTE_AGENTS[@]}"; do
-        alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
-        disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
+    # Fields project in ONE cut, and the key check runs once per PROVIDER in parallel
+    # background jobs: the serial loop paid five _field spawns plus one keys check per
+    # agent — ~30s of subprocess wall time on this roster (measured 2026-10-29). The
+    # parallel form pays max(check) instead of sum(checks).
+    local tmpd; tmpd=$(mktemp -d) || return 1
+    printf '%s\n' "${LA_REMOTE_AGENTS[@]}" | cut -d'|' -f2 | sort -u > "$tmpd/providers"
+    while IFS= read -r prov; do
+        [[ -n "$prov" ]] || continue
+        ( "$KEYS" --check "$prov" >/dev/null 2>&1; echo "$?" > "$tmpd/key.$prov" ) &
+    done < "$tmpd/providers"
+    wait
+    printf '%s\n' "${LA_REMOTE_AGENTS[@]}" | cut -d'|' -f1-5 | while IFS='|' read -r alias prov model disp tier; do
         lc=0; _lc_is_hidden "$prov" "$model" && lc=1
-        key=0; "$KEYS" --check "$prov" >/dev/null 2>&1 && key=1
+        key=0; case "$(cat "$tmpd/key.$prov" 2>/dev/null)" in 0) key=1 ;; esac
         br=0; _is_broken_hidden "$alias" && br=1
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$alias" "$prov" "$disp" "$tier" "$lc" "$key" "$br" "$model"
     done
+    rm -rf "$tmpd"
 }
 
 print_list() {
@@ -464,9 +471,18 @@ print_list() {
     printf '  %-3s %-25s %-37s %-15s %s\n' '#' 'ALIAS' 'DISPLAY' 'TIER' 'KEY'
     local i=0 e alias prov model disp tier keystate
     local hidden_count=0
-    for e in "${LA_REMOTE_AGENTS[@]}"; do
-        alias="$(_field "$e" 1)"; prov="$(_field "$e" 2)"; model="$(_field "$e" 3)"
-        disp="$(_field "$e" 4)"; tier="$(_field "$e" 5)"
+    # Same treatment as print_inventory (2026-10-29): one cut for the field projection and
+    # one parallel keys check per PROVIDER, not per agent.
+    local tmpd; tmpd=$(mktemp -d) || return 1
+    printf '%s\n' "${LA_REMOTE_AGENTS[@]}" | cut -d'|' -f2 | sort -u > "$tmpd/providers"
+    while IFS= read -r prov; do
+        [[ -n "$prov" ]] || continue
+        ( "$KEYS" --check "$prov" >/dev/null 2>&1; echo "$?" > "$tmpd/key.$prov" ) &
+    done < "$tmpd/providers"
+    wait
+    # Process substitution, not a pipe: the while must run in THIS shell or the
+    # hidden_count counter dies in the subshell and the trailer below lies.
+    while IFS='|' read -r alias prov model disp tier; do
         _visible "$tier" || continue
         # This is the same presentation-only filter the interactive menu applies (see
         # session picker) — --list is a display surface too, so it must not show a
@@ -477,9 +493,10 @@ print_list() {
         fi
         _is_broken_hidden "$alias" && continue
         i=$((i+1))
-        if "$KEYS" --check "$prov" >/dev/null 2>&1; then keystate="✓ $prov"; else keystate="✗ $prov (no key)"; fi
+        case "$(cat "$tmpd/key.$prov" 2>/dev/null)" in 0) keystate="✓ $prov";; *) keystate="✗ $prov (no key)";; esac
         printf '  %-3s %-25s %-37s %-15s %s\n' "$i" "$alias" "$disp" "$(_tier_label "$tier" "$prov")" "$keystate"
-    done
+    done < <(printf '%s\n' "${LA_REMOTE_AGENTS[@]}" | cut -d'|' -f1-5)
+    rm -rf "$tmpd"
     [[ $INCLUDE_TRIALS -eq 0 ]] && printf '\n  (trial-tier agents hidden — pass --include-trials to show them)\n'
     if [[ $hidden_count -gt 0 ]]; then
         printf '  (%d local-capable model(s) hidden — pass --local-capable-shown to show them)\n' "$hidden_count"
