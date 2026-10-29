@@ -533,6 +533,17 @@ entries:
       GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick. Reasoning disabled by default.
     autocompact_default: "-"
 
+  - alias: nvidia-mistral-large4
+    provider: nvidia
+    model_id: mistralai/mistral-large-4-1t-a52b
+    display: Mistral Large 4 (Le Chonk)
+    tier: unknown
+    notes: >-
+      TOP PICK for full free sessions (2026-10-29). 1.05T total / 52B active granular MoE,
+      multimodal, 1M context, NVFP4 on NIM since 2026-10-29; fills the gap left by GLM 5.3's
+      retirement from the NVIDIA API.
+    autocompact_default: 1m
+
   - alias: nvidia-laguna
     provider: nvidia
     model_id: poolside/laguna-xs-2.1

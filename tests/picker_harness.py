@@ -247,6 +247,19 @@ class PilotHelper:
     async def wait_screen(self, name, secs=8):
         await self.wait_for(lambda: self.screen() == name, f"screen {name}", secs)
 
+    async def expand_settings(self, secs=8):
+        """Open the lane pickers' collapsed Settings group (0.47.2, waypoint
+        picker-collapsed-settings-group): highlight its header row and press Enter."""
+        await self.wait_text("Settings ▸", secs)
+        from textual.widgets import OptionList
+        ol = self.app.query_one("#actions", OptionList)
+        for i in range(ol.option_count):
+            if "Settings ▸" in str(ol.get_option_at_index(i).prompt):
+                ol.highlighted = i
+                break
+        await self.pilot.press("enter")
+        await self.wait_text("Settings ▾", secs)
+
     async def goto_row(self, kind, row_id, max_steps=60):
         """Move down until the highlighted row is (kind, row_id), opening its group if needed.
         Navigation by IDENTITY, never by counting key presses."""

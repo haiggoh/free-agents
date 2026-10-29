@@ -517,6 +517,30 @@ class HoverOptionList(OptionList):
         self.post_message(self.Hovered(None))
 
 
+def _detect_hw():
+    """One-shot OS/distro/hardware detection through the repo's canonical script
+    (bin/la-hw-detect.sh, which exports LA_OS / LA_DISTRO / LA_HARDWARE). Env wins when
+    the launcher already exported them; any failure returns Nones and the model falls
+    back to platform.system(). Runs once per picker start, never per render."""
+    import os
+    import subprocess
+    from pathlib import Path
+    if os.environ.get("LA_OS") and os.environ.get("LA_HARDWARE"):
+        return os.environ.get("LA_OS"), os.environ.get("LA_DISTRO") or "", os.environ.get("LA_HARDWARE")
+    try:
+        script = Path(__file__).resolve().parent / "la-hw-detect.sh"
+        out = subprocess.run(
+            ["bash", "-c", f'. "{script}"; printf "%s\\n%s\\n%s" "$LA_OS" "$LA_DISTRO" "$LA_HARDWARE"'],
+            capture_output=True, text=True, timeout=8)
+        if out.returncode == 0:
+            parts = out.stdout.splitlines()
+            if len(parts) >= 3:
+                return (parts[0] or None), parts[1], (parts[2] or None)
+    except Exception:
+        pass
+    return None, "", None
+
+
 class Picker(App):
     # R5: no painted background. The `textual-ansi` theme maps background/foreground to the
     # terminal's own defaults (ANSI 39/49) and ansi_color=True keeps them ANSI instead of
@@ -526,6 +550,7 @@ class Picker(App):
     Screen { layout: vertical; background: ansi_default; color: ansi_default; }
     #title { text-style: bold; padding: 0 1; }
     #policy { color: ansi_bright_black; padding: 0 1; }
+    #version { color: ansi_bright_cyan; padding: 0 1; }  /* version footer: own colour, not subheadline formatting (user 2026-10-29) */
     #actions { height: auto; padding: 0 1; }
     #rows { height: 1fr; display: none; margin-top: 1; }   /* a blank line before the model list */
     #rows.visible { display: block; }
@@ -733,6 +758,7 @@ class Picker(App):
         with Vertical():
             yield Static("", id="title")
             yield Static("", id="policy")
+            yield Static("", id="version")
             yield OptionList(id="actions")
             yield SearchInput(id="search")
             yield HoverOptionList(id="rows")
@@ -741,6 +767,12 @@ class Picker(App):
             yield Static("", id="status")
 
     def on_mount(self):
+        # One-shot OS/distro/hardware detection through the repo's canonical script
+        # (bin/la-hw-detect.sh); the model's subheadlines read these from Settings.
+        hw_os, hw_distro, hw_hw = _detect_hw()
+        self.settings.hw_os = hw_os
+        self.settings.hw_distro = hw_distro
+        self.settings.hw_hardware = hw_hw
         self.goto(m.Nav(self.start, m.DIRECT_ROOT))
         # Menu first, then warm the model lists in the background (plan R13/R14): by the time
         # the user presses `c` the slow remote inventory (~1-6 s) is usually already cached.
@@ -785,6 +817,7 @@ class Picker(App):
             self._startup_loading = False     # startup prefetch done: drop the label even if no re-render follows
             if self.screen_model is not None:
                 self.query_one("#policy", Static).update(getattr(self.screen_model, "policy", ""))
+                self.query_one("#version", Static).update(getattr(self.screen_model, "version_line", ""))
         self.cache[kind] = data
         if err and err not in self.state_warnings and not kind.startswith("versions:"):
             self.state_warnings.append(err)
@@ -855,7 +888,7 @@ class Picker(App):
         return loading is None or bool(loading & self.STARTUP_KINDS)   # None: prefetch not started yet
 
     def _startup_policy(self):
-        # The label rides the subtitle's FIRST line; Home's version small print stays below it.
+        # The label rides the subtitle's FIRST line; the version footer is a separate widget.
         head, sep, rest = getattr(self.screen_model, "policy", "").partition("\n")
         return head + "  " + loading_label(self._loading_frame) + sep + rest
 
@@ -864,6 +897,7 @@ class Picker(App):
         if not self._startup_pending():
             return False
         self.query_one("#policy", Static).update(self._startup_policy())
+        self.query_one("#version", Static).update(getattr(self.screen_model, "version_line", ""))
         return True
 
     def _waiting_for(self):
@@ -1013,6 +1047,7 @@ class Picker(App):
         # It used to be drawn on the first render only and never updated, so it looked frozen.
         policy = self._startup_policy() if self._startup_pending() else getattr(sm, "policy", "")
         self.query_one("#policy", Static).update(policy)
+        self.query_one("#version", Static).update(getattr(sm, "version_line", ""))
         rows = self.query_one("#rows", OptionList)
         rows.clear_options()
         self.row_ids = []
@@ -1093,15 +1128,23 @@ class Picker(App):
                     rows.highlighted = idx
                     break
 
-        # Build actions list in the actions OptionList
+        # Build actions list in the actions OptionList. Lane pickers fold their settings
+        # rows under one collapsed group header (user 2026-10-29, waypoint
+        # picker-collapsed-settings-group): launch/choose-model and all non-settings rows
+        # stay top-level; the folded rows remain reachable by their hotkeys.
         actions_list = self.query_one("#actions", OptionList)
         actions_list.clear_options()
         self.action_ids = []  # Track action IDs for keyboard navigation
-        for a in sm.actions():
-            if a.section == "hidden":
-                continue
+        rendered, self._collapsed_actions = m.rendered_actions(sm)
+        collapsed = bool(self._collapsed_actions)
+        for a in rendered:
             # Store action object reference
             self.action_ids.append(a)
+            if a is m.SETTINGS_GROUP:
+                arrow = "▸" if collapsed else "▾"
+                actions_list.add_option(Option(Text(f"  {ec.EMOJI_TOOLS_STR}  Settings {arrow}"),
+                                               id=f"a:{len(self.action_ids)-1}"))
+                continue
             enabled_str = "" if a.enabled else "  —"
             # Display shortcut as uppercase per R8 requirement. Rich labels (the theme
             # rows) must reach the Option as Text: an f-string here calls str() on the
@@ -1197,6 +1240,10 @@ class Picker(App):
             return
         action = self.action_ids[action_index]
         if not action.enabled:
+            return
+        if action is m.SETTINGS_GROUP:
+            self.screen_model.toggle_settings()
+            self._rerender_keep_action(action_index)
             return
         if action.step is not None:
             self._step_action(action_index, +1)
@@ -1450,6 +1497,20 @@ class Picker(App):
         if key == "escape" or (len(key) == 1 and key.isalpha() and key.islower()):
             keep = self._highlighted()
             idx = next((i for i, a in enumerate(getattr(self, "action_ids", [])) if a.key == key), None)
+            if idx is None:
+                # A hotkey of a collapsed settings row still works: folded, not gone.
+                hidden = next((a for a in getattr(self, "_collapsed_actions", []) if a.key == key), None)
+                if hidden is not None:
+                    event.stop()
+                    if hidden.step is not None:
+                        hidden.step(+1)
+                    else:
+                        r = hidden.run()
+                        if r:
+                            self.dispatch(r, keep)
+                            return
+                    self.render_model()
+                    return
             result = sm.handle_key(key)
             event.stop()
             if result is None and idx is not None:

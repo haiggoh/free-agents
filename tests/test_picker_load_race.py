@@ -395,10 +395,15 @@ class VersionSurfaces(PilotCase):
             self.assertLess(title.index("\U0001F4E1"), title.index("\U0001F9BE"), f"title: {title}")
         self.run_picker(scenario, start="home")
 
-    def test_home_small_print_carries_the_version(self):
+    def test_home_version_renders_in_its_own_widget(self):
+        # 0.47.2 (user 2026-10-29): the version is NOT part of the subheadline — it has its
+        # own #version widget in its own colour, so it reads as a footer, not the subtitle.
         import session_picker_model as m
+        from textual.widgets import Static
         async def scenario(app, pilot, h):
-            self.assertIn(f"free-agents v{m.plugin_version()}", self._policy_text(app))
+            self.assertNotIn(f"free-agents v{m.plugin_version()}", self._policy_text(app))
+            vtext = str(app.query_one("#version", Static).render())
+            self.assertIn(f"free-agents v{m.plugin_version()}", vtext)
         self.run_picker(scenario, start="home")
 
     def test_about_screen_shows_version_and_paths(self):

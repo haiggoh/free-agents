@@ -190,6 +190,12 @@ the kind that cost a session to rediscover.
 A short form of each note appears in the remote picker's info box when you hover or
 highlight the model (`config/remote-model-notes.json`).
 
+**Mistral Large 4 (Le Chonk)** — `nvidia-mistral-large4` — **top pick for full free sessions
+(2026-10-29).** `mistralai/mistral-large-4-1t-a52b`: 1.05T total / 52B active granular MoE,
+multimodal, 1M context, served NVFP4 on NVIDIA NIM since 2026-10-29 (released by Mistral on
+2026-10-06). Fills the gap left by GLM 5.3's retirement from the NVIDIA API. Fast and strong
+on tool use — observed in a live full Claude Code session from day one.
+
 **Nemotron 3 Ultra** — `nvidia-nemotron-ultra` / `nvidia-nemotron-ultra-thinking`
 Capable on clearly-instructed work, relatively fast, 1M context. Tends to think for long
 stretches before reporting in. Two habits make it pleasant: the thinking blocks are
@@ -203,7 +209,8 @@ verify its "done" before shipping. Nemotron 3 Super takes these shortcuts even m
 Extremely fast, but takes the path of least resistance and declares goals fulfilled
 prematurely. Good for quick, well-scoped asks; check its "done".
 
-**GLM 5.3** — `nvidia-glm53-full` / `nvidia-glm53-full-thinking`
+**GLM 5.3 — DEPRECATED 2026-10-29** — `nvidia-glm53-full` / `nvidia-glm53-full-thinking`
+(z-ai/glm-5.3 was retired from the NVIDIA API; use **Mistral Large 4** above instead.)
 Very smart reasoning model, excellent at understanding context and finding problems and
 solutions on its own — comparatively slow, ideal for unattended overnight work. 1M
 context. Thinking and output are well balanced; queued-prompt nudging works well here
@@ -218,14 +225,9 @@ Significantly faster (fewer parameters) than GLM 5.3, but still surprisingly sma
 good at investigating and understanding the context it is working in. Thinking and
 output well balanced. The everyday driver among the reasoning models.
 
-**Laguna XS 2.1** — `nvidia-laguna`
-Promising and specialized for coding. Slow on the first prompt, then picks up speed —
-overall slower than Nemotron Ultra. Capable tool use under Claude Code. Known wart: its
-reasoning output may not surface as thinking blocks, and a stray closing think-tag can
-occasionally appear in the text. Likely explanation (2026-10-15): Laguna is a thinking
-model whose reasoning blocks the harness does not recognize, so the stray tag is the tail
-of an unrecognized reasoning block — cosmetic in the output, no observed impact on the
-work itself, and likely patchable.
+**Laguna XS 2.1** (`nvidia-laguna`) is no longer listed here (2026-10-29): it is a small
+model we run **locally** (`laguna-xs2.1-optiq-4bit` in `config/model-catalog.psv`) instead —
+the NVIDIA API is reserved for models we don't have the local hardware for.
 
 ### A full local session: offline and private
 
@@ -275,7 +277,7 @@ and paid subagents in cloud sessions can be swapped for free ones.
 | **Cloud** (gateway / Anthropic login) | Native Sonnet by default. **Opt-in:** replace them with free agents. | `FA_REPLACE_AGENTS` in `~/.claude/settings.json` env |
 
 **Hybrid council routing (free-API).** `LA_SUBAGENT_ROUTING=hybrid` plus
-`LA_SUBAGENT_POOL="nvidia:poolside/laguna-xs-2.1,gemini:gemini-3.8-flash"` spreads subagent calls
+`LA_SUBAGENT_POOL="nvidia:mistralai/mistral-large-4-1t-a52b,gemini:gemini-3.8-flash"` spreads subagent calls
 across the session model and every pool member: different models answering in parallel, the
 original council idea. A member without a key in `~/.api_keys/` is skipped with a note. A member
 that hangs times out after `LA_SUBAGENT_POOL_TIMEOUT` (120 s) and is retried on another.

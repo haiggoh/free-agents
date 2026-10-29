@@ -335,6 +335,7 @@ class ArrowKeysCycleSettings(PilotCase):
 
     def test_right_and_left_cycle_effort(self):
         async def s(app, pilot, h):
+            await h.expand_settings()              # 0.47.2: settings rows live under the folded group
             await h.press("e")                        # select the Effort row (it also cycles once)
             first = self._effort(h)
             await h.press("right")
@@ -346,11 +347,21 @@ class ArrowKeysCycleSettings(PilotCase):
 
     def test_right_left_toggle_boolean_mcps(self):
         async def s(app, pilot, h):
+            await h.expand_settings()              # 0.47.2: settings rows live under the folded group
             await h.wait_text("MCPs: ENABLED")     # default ON (user 2026-10-15)
             await h.press("m")
             await h.wait_text("MCPs: DISABLED")
             await h.press("m")
             await h.wait_text("MCPs: ENABLED")
+        self.run_picker(s, start="local")
+
+    def test_settings_hotkey_works_while_collapsed(self):
+        # 0.47.2: a folded settings row keeps its hotkey — cycling must not require expanding.
+        async def s(app, pilot, h):
+            await h.wait_text("Settings ▸")        # still folded
+            await h.press("m")
+            await h.expand_settings()
+            await h.wait_text("MCPs: DISABLED")
         self.run_picker(s, start="local")
 
 
@@ -403,7 +414,7 @@ class RemoteLiveCatalog(PilotCase):
             await pilot.pause(0.1)
             self.assertLess(time.time() - t0, 0.8)
             self.assertIn("rcat:nvidia-a", app._loading)
-            await h.wait_text("Extra  · catalog", secs=10)
+            await h.wait_text("Extra", secs=10)
             self.assertNotIn("cat:nvidia:vendor/pinned", [r for r in app.row_ids if r])
             await h.goto_row("item", "cat:nvidia:vendor/extra")
             await h.press("enter")
@@ -427,9 +438,9 @@ class RemoteLiveCatalog(PilotCase):
 
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("Cached Old  · catalog")          # from the cache, instantly
-            await h.wait_text("Extra  · catalog", secs=10)      # revision adds the new id
-            self.assertNotIn("Cached Old  · catalog", h.text())  # and removes the vanished one
+            await h.wait_text("Cached Old")          # from the cache, instantly
+            await h.wait_text("Extra", secs=10)      # revision adds the new id
+            self.assertNotIn("Cached Old", h.text())  # and removes the vanished one
         self.run_picker(s, start="remote")
 
 
@@ -455,14 +466,14 @@ class RemoteAgeFilterAndShowOld(PilotCase):
     def test_old_row_hidden_by_default(self):
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("Fresh  · catalog", secs=10)
-            self.assertNotIn("Ancient  · catalog", h.text())
+            await h.wait_text("Fresh", secs=10)
+            self.assertNotIn("Ancient", h.text())
         self.run_picker(s, start="remote")
 
     def test_show_old_flag_shows_the_old_row_from_the_start(self):
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("Ancient  · catalog", secs=10)
+            await h.wait_text("Ancient", secs=10)
         self.run_picker(s, start="remote", show_old=True)
 
     def test_env_cutoff_moves_the_hidden_set(self):
@@ -473,7 +484,7 @@ class RemoteAgeFilterAndShowOld(PilotCase):
 
         async def s(app, pilot, h):
             await h.press("c")
-            await h.wait_text("Ancient  · catalog", secs=10)
+            await h.wait_text("Ancient", secs=10)
         self.run_picker(s, start="remote")
 
 
@@ -565,7 +576,8 @@ class MemoryGuardSettings(PilotCase):
         async def s(app, pilot, h):
             await h.press("l")
             await h.wait_screen("LocalScreen")
-            await h.press("y")                                  # auto-sync OFF -> ON
+            await h.press("y")                                  # auto-sync OFF -> ON (hotkey works folded, 0.47.2)
+            await h.expand_settings()
             await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
             self.assertEqual(self.saved_state()["memguard"], {"registry_auto_sync": True})
         self.run_picker(s, start="home")
@@ -573,6 +585,7 @@ class MemoryGuardSettings(PilotCase):
         async def again(app, pilot, h):
             await h.press("l")
             await h.wait_screen("LocalScreen")
+            await h.expand_settings()
             await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
         self.run_picker(again, start="home")
 

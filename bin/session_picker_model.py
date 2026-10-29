@@ -74,6 +74,12 @@ class Action:
     step: Callable[[int], object] | None = None
 
 
+# The one collapsed group row in the lane pickers (user 2026-10-29): while folded, the
+# settings rows render under this header instead of as top-level rows. Key "0" never
+# matches a letter hotkey, so it cannot collide with a real action.
+SETTINGS_GROUP = Action("0", "Settings", lambda: None)
+
+
 def setting(key: str, label: str, choices, get: Callable[[], object], put: Callable[[object], object],
             enabled: bool = True) -> Action:
     """A row whose value cycles through `choices` in either direction (wraps)."""
@@ -291,10 +297,11 @@ def lane_for(provider: str, model_id: str) -> str:
 
 
 def lane_tag(provider: str, model_id: str) -> str:
-    """Row suffix for a NON-default lane: "" when chat/completions, so the common case
-    stays untagged and the two states worth noticing stand out."""
+    """Row suffix for a NON-default lane: "" for chat/completions AND for catalog rows
+    (user 2026-10-29: "· catalog" on every catalog row is redundant noise — everything in
+    that list is catalog by construction), so only genuinely non-default lanes stand out."""
     lane = lane_for(provider, model_id)
-    return "" if lane == "chat/completions" else f"  · {lane}"
+    return "" if lane in ("chat/completions", "catalog") else f"  · {lane}"
 
 
 # --- model age (T6) ------------------------------------------------------------------------
@@ -348,6 +355,19 @@ def size_sorted(rows, size_of):
         b = size_of(r)
         return (1, 0.0) if b is None else (0, -b)
     return sorted(rows, key=key)
+
+
+def format_param_count(b) -> str:
+    """Human-readable parameter count for row labels: 1.05T / 52B / 8.5B. "" when unknown."""
+    if b is None:
+        return ""
+    try:
+        b = float(b)
+    except (TypeError, ValueError):
+        return ""
+    if b >= 1000:
+        return f"{f'{b / 1000:.2f}'.rstrip('0').rstrip('.')}T"
+    return f"{f'{b:.1f}'.rstrip('0').rstrip('.')}B"
 
 
 # Order matters: identity markers first, so "deepseek-r1-distill-qwen" is DeepSeek (the
@@ -488,6 +508,12 @@ class Settings:
     show_broken: bool = False        # unworking models; in-memory, like the CLI flag
     show_old: bool = False           # models over the age cutoff; in-memory, like the CLI flag
                                      # (--show-old seeds it; the picker filter toggle re-reveals)
+    # One-shot hardware detection (bin/la-hw-detect.sh) wired in by the picker at startup;
+    # the platform-aware subheadlines read these. None/"" = not detected, fall back to
+    # platform.system() + /etc/os-release (user 2026-10-29).
+    hw_os: "str | None" = None
+    hw_distro: str = ""
+    hw_hardware: "str | None" = None
     deny_gh_release: bool = False    # re-add "Bash(gh release create:*)" to the blind-trust deny list (off since 0.32.0)
     remote_temperature: str = sms.DEFAULT_TEMPERATURE["remote_api_session"]
     local_temperature: str = sms.DEFAULT_TEMPERATURE["local_session"]
@@ -732,6 +758,14 @@ class Accordion:
 class Screen:
     title = ""
     lane_key = ""
+    # Lane pickers fold their settings rows under one group header (user 2026-10-29,
+    # waypoint picker-collapsed-settings-group); every other screen renders plain rows.
+    settings_collapsed = True
+    # Rendered in its own colour below the policy line when a screen sets it (Home does).
+    version_line = ""
+
+    def toggle_settings(self):
+        self.settings_collapsed = not self.settings_collapsed
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
         self.settings = settings
@@ -843,10 +877,55 @@ def plugin_version() -> str:
     return _PLUGIN_VERSION
 
 
+def _read_distro(os_release_path: str = "/etc/os-release") -> str:
+    """PRETTY_NAME from os-release, or "" — never raises (missing/unreadable file is not
+    an error, the caller falls back to the generic Linux wording)."""
+    try:
+        with open(os_release_path, encoding="utf-8") as fh:
+            for ln in fh:
+                if ln.startswith("PRETTY_NAME="):
+                    return ln.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def _identity_subheadline(system: "str | None" = None, distro: "str | None" = None,
+                          os_release_path: str = "/etc/os-release") -> str:
+    """Platform-aware home identity line (user 2026-10-29): Linux users get the CUDA line,
+    naming the distro. `system`/`distro` come from the canonical detector (la-hw-detect.sh)
+    via Settings.hw_os/hw_distro when available; otherwise platform.system() + os-release.
+    Never raises; non-Linux platforms keep the Mac wording."""
+    if system is None:
+        try:
+            import platform
+            system = platform.system()
+        except Exception:
+            system = "Darwin" if sys.platform == "darwin" else ""
+    if (system or "").lower() == "linux":
+        if not distro:
+            distro = _read_distro(os_release_path) or "Linux"
+        return (f"Claude Code on free inference — local CUDA models on this {distro} PC, "
+                "or free cloud APIs")
+    return "Claude Code on free inference — local MLX models on this Mac, or free cloud APIs"
+
+
+def _local_backend_word(hw: "str | None" = None, system: "str | None" = None) -> str:
+    """The local lane's backend word: LA_HARDWARE when the canonical detector supplied it
+    (mlx|cuda|rocm|opencl|cpu-only), else MLX on macOS / CUDA elsewhere."""
+    if hw:
+        return "MLX" if hw == "mlx" else hw.upper()
+    if system is None:
+        system = sys.platform
+    return "MLX" if system in ("darwin", "Darwin") else "CUDA"
+
+
 class AboutScreen(Screen):
     """Version and the paths that matter when something misbehaves — read-only facts."""
 
-    title = f"About — {SESSION_LAUNCHER_TITLE}"
+    # The emoji comes from the canonical file (bin/emoji_constants.py), user 2026-10-29.
+    # gap(): ℹ️ is narrow+VS16, drawn two columns — one space would be painted over.
+    title = f"{ec.gap(ec.EMOJI_INFO_STR)}About — {SESSION_LAUNCHER_TITLE}"
 
     @property
     def policy(self):
@@ -869,17 +948,23 @@ class HomeScreen(Screen):
     title = f"{SESSION_LAUNCHER_TITLE}  {ec.SESSION_EMOJI_FREE_API_STR} {ec.SESSION_EMOJI_LOCAL_STR}"
 
     @property
+    def version_line(self):
+        # Its own widget and colour under the subheadline (user 2026-10-29): not the same
+        # formatting directly below it, so it reads as a footer, not part of the subtitle.
+        return f"free-agents v{plugin_version()}"
+
+    @property
     def policy(self):
-        # Identity subheadline, then the 0.21 menu's config line.
+        # Identity subheadline (platform-aware), then the 0.21 menu's config line.
         import os
-        line = "Claude Code on free inference — local MLX models on this Mac, or free cloud APIs"
+        line = _identity_subheadline(getattr(self.settings, "hw_os", None),
+                                     getattr(self.settings, "hw_distro", None))
         src = os.environ.get("LA_CONFIG_SOURCE", "")
         if src:
             line += f"\nConfig: {src}"
         if os.environ.get("LA_FALLBACK_CONFIG") == "1":
             line += (f"\n{ec.EMOJI_WARNING_STR}  Using public fallback defaults. Private models "
                      "are not present in this installed copy.")
-        line += f"\nfree-agents v{plugin_version()}"
         return line
 
     def __init__(self, settings: Settings, local_count: int | None = None, remote_count: int | None = None,
@@ -944,10 +1029,12 @@ class LocalScreen(Screen):
         if self.search and getattr(self, "_models_loaded", False):
             n = sum(len(g.items) for g in self.accordion.groups if not g.id.startswith("__"))
             return f'{n} model(s) matching "{self.search}"  — the filter box above the list is live; empty shows all'
-        # Restored 0.21 subheadline: "N model(s) on disk (session-capable)".
+        # Restored 0.21 subheadline: "N model(s) on disk (session-capable)"; the backend
+        # word is platform-aware (MLX on macOS, CUDA on Linux — user 2026-10-29).
         n = len(self.models) if getattr(self, "_models_loaded", False) and self.models else None
-        return (f"{n} model(s) on disk (session-capable)" if n is not None
-                else "MLX models on this machine")
+        backend = _local_backend_word(getattr(self.settings, "hw_hardware", None))
+        return (f"{n} model(s) on disk (session-capable, {backend})" if n is not None
+                else f"{backend} models on this machine")
     lane_key = "l"
 
     def __init__(self, settings: Settings, models: list[LocalModel] | None = None, owner: str = DIRECT_ROOT):
@@ -1065,7 +1152,7 @@ class LocalScreen(Screen):
             setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.local_temperature or '<provider default>'}",
                     TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v)),
             thinking_row(s),
-            Action("c", self._choose_model_label(), self._toggle_choose_model),
+            Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR}  Remote free API sessions", lambda: Nav("remote", self.owner),
@@ -1255,7 +1342,7 @@ class RemoteScreen(Screen):
                 pinned = size_sorted(pinned, lambda a: self._catalog_size(prov, a.model_id))
             if self.search:
                 pinned = [a for a in pinned if self._matches(a.model_id, a.display)]
-            items = [Item(a.alias, f"{a.display}  · {tier_label(a.tier, a.provider)}{lane_tag(a.provider, a.model_id)}")
+            items = [Item(a.alias, f"{a.display}{self._size_suffix(prov, a.model_id, a.display)}  · {tier_label(a.tier, a.provider)}{lane_tag(a.provider, a.model_id)}")
                      for a in pinned]
             items += self._catalog_items(prov, buckets[prov])
             if self.search and not items:
@@ -1355,13 +1442,22 @@ class RemoteScreen(Screen):
             # the model's own name with its MAKER, not the provider's raw id (user
             # 2026-10-22: the group header already names the provider); the info box keeps
             # the exact id.
-            rows.append(Item(probe.alias, f"{name}  · catalog{lane_tag(prov, c.model_id)}"))
+            rows.append(Item(probe.alias, f"{name}{self._size_suffix(prov, c.model_id, name)}{lane_tag(prov, c.model_id)}"))
         return rows
 
     def _catalog_local_capable(self, prov: str, model_id: str) -> bool:
         """The local-capable verdict for a catalog row (Settings.catalog_local_capable, set by the picker)."""
         fn = getattr(self.settings, "catalog_local_capable", None)
         return bool(fn and fn(prov, model_id))
+
+    def _size_suffix(self, prov: str, model_id: str, display: str) -> str:
+        """'  · 1.05T' appended to a row name when the size is known and the name does not
+        already state it (user 2026-10-29: param size in the name by default, not a separate
+        column, and never duplicated when the name already carries it)."""
+        label = format_param_count(self._catalog_size(prov, model_id))
+        if not label or label.lower() in (display or "").lower():
+            return ""
+        return f"  · {label}"
 
     def _catalog_size(self, prov: str, model_id: str) -> "float | None":
         """The parameter count for the size sort (Settings.model_param_count, set by the
@@ -1526,7 +1622,7 @@ class RemoteScreen(Screen):
             setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
                     TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v)),
             thinking_row(s),
-            Action("c", self._choose_model_label(), self._toggle_choose_model),
+            Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
             # No "find model" action row (user, 2026-10-21): the filter box at the top of
             # the open model list IS the search — typing there filters live from the first
             # character, so a separate menu entry would only duplicate it.
@@ -1629,6 +1725,26 @@ class RemoteScreen(Screen):
         # The thinking toggle always exports (both lanes): None/True = ON, False = OFF.
         env["LA_THINKING_OVERRIDE"] = "false" if s.thinking_session is False else "true"
         return LaunchRequest("remote", argv, env, alias)
+
+
+def rendered_actions(sm: "Screen"):
+    """The actions a lane picker renders, with settings rows folded under one group header
+    while collapsed (user 2026-10-29, waypoint picker-collapsed-settings-group). Returns
+    (rendered, hidden_settings): SETTINGS_GROUP replaces the settings rows when folded;
+    every other section stays a top-level row. Only the two lane screens fold — sub-screens
+    (rate limiter, memguard, filters, …) keep their plain rows, and so does Home."""
+    if sm is None:
+        return [], []
+    acts = [a for a in sm.actions() if a.section != "hidden"]
+    if isinstance(sm, (LocalScreen, RemoteScreen)):
+        settings = [a for a in acts if a.section == "settings"]
+        if settings:
+            top = [a for a in acts if a.section != "settings"]
+            if sm.settings_collapsed:
+                return top + [SETTINGS_GROUP], settings
+            # expanded: the header stays, so Enter on it folds the group again
+            return top + [SETTINGS_GROUP] + settings, []
+    return acts, []
 
 
 class RemoteFiltersScreen(Screen):
