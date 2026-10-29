@@ -1,3 +1,23 @@
+## [0.47.7] — 2026-10-30
+
+Prompt refinements from user review (2026-10-30): the waypoints hand-edit rule stays
+verbatim, the local prompt gets the full insight example, and both prompts note that
+substantive artifacts belong in the visible reply.
+
+### Changed
+
+- Remote prompt: the `~/.claude/waypoints.json` NEVER-hand-edit rule is restored verbatim
+  (user decision: the concrete path is the point — a past hand-edit clobbered the whole
+  store). The general single-JSON-document rule stays alongside it.
+- Both prompts, visibility paragraph: restored the full 3-line `★ Insight ───` example in
+  the LOCAL prompt too, and added: put substantive artifacts (diffs, tables, findings) in
+  the VISIBLE reply — tool output can render collapsed, while Edit/Bash results already
+  show diffs inline. Local prompt now 2469 bytes; the size guard in
+  `test_launcher_profiles.sh` is raised 2048 -> 2560 deliberately (cap origin is
+  template+headroom, b7d078b — not a model constraint).
+- User-level rule added to ~/.claude/CLAUDE.md: report evidence vs assumption, labeled
+  ("verified:" / "assumed:"), never present an assumption as a verified result.
+
 ## [0.47.6] — 2026-10-29
 
 The always-on session prompts no longer carry session-specific history, and the local
