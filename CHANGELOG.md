@@ -1,3 +1,28 @@
+## [0.47.3] — 2026-10-29
+
+Every script answers `--help` now, and hardware detection never blocks the first paint.
+
+### Fixed — the standing "every script gets --help" rule, retrofitted (user 2026-10-29)
+
+- `bin/la-hw-detect.sh`, `bin/la-memguard-run.sh`, `bin/launch-local-auto-mode.sh`,
+  `bin/omlx-auto-prewarm-gate.sh` gain a direct-execution guard: `--help` prints usage and
+  exits 0, an unknown argument exits 2 with usage on stderr, and sourcing is untouched —
+  a `--help` probe can never run detection or start a session.
+- `bin/emoji_constants.py` and `bin/remote_provider_registry.py` no longer run their dump
+  when probed with `--help` (usage + exit 0; unknown arg + exit 2).
+  `bin/read-acquisition-catalog.py` and `install/manage-rapid-mlx.py` already delegate to
+  argparse mains. Covered by `tests/test_script_help.sh` (17 checks).
+
+### Added — LA_DISTRO_PRETTY_NAME + cached, background hardware detection
+
+- `la-hw-detect.sh` exports `LA_DISTRO_PRETTY_NAME` (os-release `PRETTY_NAME`, e.g.
+  "Ubuntu 24.04.3 LTS"; macOS → "macOS <version>"; fallback: the plain distro id).
+- The picker reads it once per launch from a cache (`hw-detect.env` in the catalog cache
+  dir), so launch 2+ needs no subprocess; the very first launch paints the generic
+  platform line and the real distro/backend land in the background, which loads LAST and
+  re-renders only if the values changed (user 2026-10-29). Env (`LA_OS`/`LA_HARDWARE`)
+  still wins when the launcher already exported them.
+
 ## [0.47.2] — 2026-10-29
 
 The picker declutters itself, the subheadline knows the platform, and NVIDIA's roster
