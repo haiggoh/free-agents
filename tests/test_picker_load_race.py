@@ -404,7 +404,7 @@ class VersionSurfaces(PilotCase):
     def test_about_screen_shows_version_and_paths(self):
         import session_picker_model as m
         async def scenario(app, pilot, h):
-            await h.press("a")
+            await h.press("i")
             self.assertEqual(h.screen(), "AboutScreen")
             text = self._policy_text(app) + "\n" + h.text()
             self.assertIn(f"free-agents v{m.plugin_version()}", text)

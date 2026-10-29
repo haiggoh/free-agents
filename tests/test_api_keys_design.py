@@ -278,7 +278,7 @@ class HomeScreenCleanTests(unittest.TestCase):
             sections[a.section] = sections.get(a.section, 0) + 1
 
         self.assertEqual(sections.get("lanes", 0), 2)
-        self.assertEqual(sections.get("tools", 0), 6)   # OOM protection moved to the Local screen (0.42.0)
+        self.assertEqual(sections.get("tools", 0), 7)   # OOM protection moved to Local (0.42.0); About added (0.47.1)
         self.assertEqual(sections.get("nav", 0), 1)
 
     def test_oom_protection_is_local_only(self):

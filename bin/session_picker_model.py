@@ -908,7 +908,8 @@ class HomeScreen(Screen):
         acts.append(Action("h", f"{ec.EMOJI_THEME_STR} Theme colors", lambda: Nav("theme_config", HOME_OWNED), section="tools"))
         acts += _tool_actions(home=True)
         # Which version am I running, and where does it live — user request 2026-10-28.
-        acts.append(Action("a", "About — version and paths", lambda: Nav("about", HOME_OWNED), section="tools"))
+        # Key i, not a: a is the lanes' Auto-mode key, and Home never reuses a lane setting key.
+        acts.append(Action("i", "About — version and paths", lambda: Nav("about", HOME_OWNED), section="tools"))
         # Settings like NVIDIA rate limiter, auto-mode, prompt hook, watcher are in the lanes
         acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
         check_action_table(acts)

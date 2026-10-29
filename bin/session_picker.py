@@ -855,7 +855,9 @@ class Picker(App):
         return loading is None or bool(loading & self.STARTUP_KINDS)   # None: prefetch not started yet
 
     def _startup_policy(self):
-        return getattr(self.screen_model, "policy", "") + "  " + loading_label(self._loading_frame)
+        # The label rides the subtitle's FIRST line; Home's version small print stays below it.
+        head, sep, rest = getattr(self.screen_model, "policy", "").partition("\n")
+        return head + "  " + loading_label(self._loading_frame) + sep + rest
 
     def _startup_tick(self):
         """Animate the subtitle's startup label: hourglass flips and dots step, like the status line."""

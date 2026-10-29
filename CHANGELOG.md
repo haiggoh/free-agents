@@ -24,7 +24,7 @@ load now says `could not load releases: <reason>` instead of passing for an empt
 
 ### Added — csl shows its free-agents version
 
-Home carries a `free-agents vX` small print, a new About screen (key `a`) shows the
+Home carries a `free-agents vX` small print, a new About screen (key `i`) shows the
 version, install path, config path, remote launcher and catalog cache directory, and every
 launch exports `LA_FREE_AGENTS_VERSION` so a running session can tell which picker started
 it. The version is read from the plugin manifest, never parsed from the install path.
