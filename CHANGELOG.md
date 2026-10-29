@@ -1,3 +1,40 @@
+## [0.47.2] — 2026-10-29
+
+The picker declutters itself, the subheadline knows the platform, and NVIDIA's roster
+gets its new top pick: Mistral Large 4 ("Le Chonk").
+
+### Changed — the session pickers are less noisy (user 2026-10-29)
+
+- Both lane pickers fold their settings rows into ONE collapsed `Settings ▸` group
+  (waypoint `picker-collapsed-settings-group`). "Go launch" and "Choose model" stay
+  top-level and prominent; every non-settings row stays top-level too — settings is the
+  only group. Folded rows keep their hotkeys (pressing `e`/`m`/… while collapsed still
+  cycles the value); Enter on the header folds/unfolds.
+- Home's version renders in its own `#version` widget in its own colour — a footer line,
+  no longer the same formatting directly below the subheadline.
+- The subheadline is no longer hardcoded: Linux users see the CUDA line, distro-named.
+  Detection runs ONCE per picker start through the canonical `bin/la-hw-detect.sh`
+  (`LA_OS`/`LA_DISTRO`/`LA_HARDWARE`, env wins when the launcher already exported them);
+  the Local lane names MLX vs CUDA from `LA_HARDWARE`. Failure falls back to
+  `platform.system()` + `/etc/os-release`, never raises.
+- The About screen's emoji comes from the canonical file (`emoji_constants.EMOJI_INFO`),
+  gap-adjusted for narrow VS16 bases.
+- Catalog rows no longer print the redundant `· catalog` tag (every row there is catalog
+  by construction). The parameter size (`1.05T` / `52B`) is appended to the row NAME when
+  known and not already stated in it — no extra column, no duplication. Largest-first
+  sort unchanged; NVIDIA's pinned rows stay hand-curated.
+
+### NVIDIA roster
+
+- NEW top pick `nvidia-mistral-large4` (`mistralai/mistral-large-4-1t-a52b`, 1.05T total /
+  52B active MoE, multimodal, 1M context, NVFP4 on NIM since 2026-10-29) — first entry of
+  the hand-curated nvidia list in `config/remote-agents.sh`, plus registry, info-box notes
+  and README field notes.
+- `nvidia-glm53-full(-thinking)` marked DEPRECATED: z-ai/glm-5.3 was retired from the
+  NVIDIA API on 2026-10-29.
+- Laguna XS 2.1 removed from the README's NVIDIA notes — it is a small model we run
+  locally instead; the NVIDIA API is reserved for models we don't have the hardware for.
+
 ## [0.47.1] — 2026-10-29
 
 The remote launcher stops making you wait, and csl says which version it is.
