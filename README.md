@@ -175,7 +175,7 @@ ModelScope or Streamlake. Usage counts against that provider's quota. See
 >
 > | Status | Providers | What it means |
 > |---|---|---|
-> | **Proven** | NVIDIA, Gemini | Real working sessions, including tool use. NVIDIA leads the roster: generous limits, no known daily quota. |
+> | **Proven** | NVIDIA, Gemini | Real working sessions, including tool use. NVIDIA leads the roster: generous limits, no known daily quota. Gemini is best kept for offload dispatches: its free daily quota is too small to carry full sessions. |
 > | **Untested** | Groq, OpenRouter free tier, Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel, SambaNova, ModelScope, Streamlake | Offline fixture coverage and provider-key isolation tests, but no live quota qualification or real tool-use smoke test yet. |
 >
 > A weak *model* is not a broken *lane*: NVIDIA's Nemotron takes shortcuts and makes mistakes on
@@ -634,7 +634,7 @@ The picker groups providers by what you can expect:
 
 | Group | Providers | Note |
 |---|---|---|
-| **Free tier, session-ready** | Google Gemini, Groq, OpenRouter, Cloudflare Workers AI, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel AI Gateway | Sign up and go. Some ask you to pick a model. |
+| **Free tier, session-ready** | Google Gemini, Groq, OpenRouter, Cloudflare Workers AI, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, Vercel AI Gateway | Sign up and go. Some ask you to pick a model. Google Gemini is the exception for sessions: its free daily quota runs out almost at once, so use it for offload dispatches only. |
 | **Optional / conditional** | SambaNova (promo credits), ModelScope (regional eligibility), Cerebras (trial — opt in with `csl remote --include-trials`), NVIDIA (account credits) | Still free to start, but gated on credits, region, or a trial. |
 
 Quotas and rate limits are the provider's, not this project's — a key that stops working usually

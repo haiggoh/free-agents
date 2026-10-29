@@ -406,6 +406,13 @@ PROVIDER_LABELS = {"nvidia": "NVIDIA", "gemini": "Gemini", "groq": "Groq",
                    "modelscope": "ModelScope", "streamlake": "Streamlake",
                    "huggingface": "Hugging Face"}
 
+# Provider-wide notes for every model's info box (catalog rows included), after the model note.
+# Gemini (user 2026-10-29): the free daily quota cannot carry a full session — loading one eats
+# most of it — so it is worth using only for stateless offload dispatches.
+PROVIDER_ADVISORIES = {
+    "gemini": "Recommended for offload dispatch only: the free daily quota is too small for full sessions.",
+}
+
 
 _MODEL_NOTES_PATH = Path(__file__).resolve().parent.parent / "config" / "remote-model-notes.json"
 
@@ -1454,17 +1461,19 @@ class RemoteScreen(Screen):
                 base = (f"{model_names.readable(parts[2])}\n{parts[2]} · "
                         f"{PROVIDER_LABELS.get(parts[1], parts[1])} catalog · "
                         f"Lane: {lane_for(parts[1], parts[2])}")
-                notice = thinking_constraint(parts[1], parts[2], self.settings.thinking_session)
-                return f"{base}\n{notice}" if notice else base
+                notices = [thinking_constraint(parts[1], parts[2], self.settings.thinking_session),
+                           PROVIDER_ADVISORIES.get(parts[1], "")]
+                return "\n".join([base, *filter(None, notices)])
         agent = next((a for a in self.agents if a.alias == item_id), None)
         if agent is None:
             return "Hover or highlight a model to see notes about it."
         lane_line = f"Lane: {lane_for(agent.provider, agent.model_id)}"
-        notice = thinking_constraint(agent.provider, agent.model_id, self.settings.thinking_session)
+        notices = [thinking_constraint(agent.provider, agent.model_id, self.settings.thinking_session),
+                   PROVIDER_ADVISORIES.get(agent.provider, "")]
         note = model_note(agent.alias)
         base = (f"{agent.display}\n{lane_line}\n{note}" if note
                 else f"{agent.display}\n{lane_line}\nNo notes for this model yet.")
-        return f"{base}\n{notice}" if notice else base
+        return "\n".join([base, *filter(None, notices)])
 
     def _visible(self, agent: RemoteAgent) -> bool:
         s = self.settings

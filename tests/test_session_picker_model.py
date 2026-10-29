@@ -910,6 +910,17 @@ class RemoteInfoBoxTests(unittest.TestCase):
         self.assertIn("Hover or highlight", lane.info_text("nvidia"))      # a group id
         self.assertIn("Hover or highlight", lane.info_text(None))
 
+    def test_gemini_info_box_recommends_dispatch_only(self):
+        # User 2026-10-29: Gemini's free daily quota cannot carry a full session (a session's
+        # first prompt alone eats much of it), so every Gemini row says: dispatch only.
+        agents = [m.RemoteAgent("nvidia-laguna", "nvidia", "NVIDIA Laguna XS 2.1", "unknown"),
+                  m.RemoteAgent("gemini-flash", "gemini", "Gemini Flash", "renewing_free",
+                                model_id="gemini-3.8-flash")]
+        lane = m.RemoteScreen(m.Settings(), agents, owner=m.DIRECT_ROOT)
+        self.assertIn("offload dispatch only", lane.info_text("gemini-flash"))
+        self.assertIn("offload dispatch only", lane.info_text("cat:gemini:gemini-3.8-pro"))
+        self.assertNotIn("offload dispatch only", lane.info_text("nvidia-laguna"))
+
     def test_info_text_shows_the_model_lane(self):
         # T3: every model's info box names its lane; NVIDIA has no native endpoint, so the
         # verdict is plain chat/completions without any route probe.
