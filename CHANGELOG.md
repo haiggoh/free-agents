@@ -1,3 +1,40 @@
+## [0.47.1] — 2026-10-29
+
+The remote launcher stops making you wait, and csl says which version it is.
+
+### Fixed — the remote picker no longer sits on the hourglass for half a minute
+
+Reported on 0.47.0: opening the remote picker showed only the loading hourglass for ~30 s.
+`remote-session.sh` built its local-capable roster with five `cut` subprocesses per agent
+(~255 spawns, ~9 s) before it even parsed arguments, and the inventory then ran a serial
+key check per agent on top. One `cut` now projects the fields and the key check runs once
+per provider, in parallel. Measured on the real roster: `--help` 9.1 s → 0.6 s, one
+`--models` call 16.5 s → 2.5 s, `--inventory` 32.8 s → 2.3 s, output byte-identical.
+
+### Fixed — "Install a release" finds the releases again
+
+Reported on 0.47.0: the Backend Manager's versions list spun for about a minute, then said
+"nothing to choose: no releases found". Not a picker regression: release discovery fetches
+PyPI with urllib, and on networks that black-hole IPv6 to CDNs (measured here: pypi.org has
+8 AAAA records; IPv6-only failed after 32 s, IPv4 answered in 0.3 s) the per-address
+timeouts outlasted the picker's 60 s cap. `manage-backend.py` now loads the repo's existing
+network shim (`install/hf-ipv4`: IPv4 forcing + macOS Keychain trust) for itself and its
+pip/venv children, so the terminal and the launchd update job are fixed too. And a failed
+load now says `could not load releases: <reason>` instead of passing for an empty answer.
+
+### Added — csl shows its free-agents version
+
+Home carries a `free-agents vX` small print, a new About screen (key `a`) shows the
+version, install path, config path, remote launcher and catalog cache directory, and every
+launch exports `LA_FREE_AGENTS_VERSION` so a running session can tell which picker started
+it. The version is read from the plugin manifest, never parsed from the install path.
+
+### Changed
+
+- The title line shows the antenna (remote) before the robot arm (local).
+- Every Gemini model's info box recommends it for offload dispatch only: the free daily
+  quota is too small to carry full sessions. The README says the same.
+
 ## [0.47.0] — 2026-10-28
 
 The remote picker's model lists: real data, real counts, and no more freezes.
