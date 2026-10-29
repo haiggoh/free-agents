@@ -1655,6 +1655,30 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         self.assertEqual(notice, '')
         self.assertIn('LA_THINKING_OVERRIDE', err)
 
+    def test_capability_table_thinking_required_forces_on_with_notice(self):
+        # 0.47.4 (user 2026-10-29): with one picker row per model the alias suffix no longer
+        # selects thinking — a thinking-only model must force ON + say so, even for the
+        # base alias with no override and with an OFF toggle.
+        self.env['THINKING_REQUIRED_MODELS'] = 'nvidia:*deepseek*'
+        self.addCleanup(self.env.pop, 'THINKING_REQUIRED_MODELS', None)
+        t, n, _ = self._resolve_thinking('nvidia-deepseek', 'nvidia', 'deepseek-ai/deepseek-v4.1-flash')
+        self.assertEqual(t, 'true')
+        self.assertIn('thinking-only', n)
+        t, n, _ = self._resolve_thinking('nvidia-deepseek', 'nvidia', 'deepseek-ai/deepseek-v4.1-flash', 'false')
+        self.assertEqual(t, 'true')
+        self.assertIn('thinking-only', n)
+
+    def test_capability_table_no_thinking_forces_off_with_notice(self):
+        self.env['NO_THINKING_MODELS'] = 'nvidia:mistralai/*'
+        self.addCleanup(self.env.pop, 'NO_THINKING_MODELS', None)
+        t, n, _ = self._resolve_thinking('nvidia-mistral-large4', 'nvidia', 'mistralai/mistral-large-4-1t-a52b', 'true')
+        self.assertEqual(t, 'false')
+        self.assertIn('no thinking capability', n)
+
+    def test_capability_table_leaves_unlisted_models_alone(self):
+        t, n, _ = self._resolve_thinking('nvidia-nemotron-ultra', 'nvidia', 'nvidia/nemotron-3-ultra-550b-a55b', 'false')
+        self.assertEqual((t, n), ('false', ''))
+
 
 if __name__ == '__main__':
     if '--help' in sys.argv or '-h' in sys.argv:

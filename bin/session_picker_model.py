@@ -1050,6 +1050,16 @@ class LocalScreen(Screen):
             self.accordion.set_groups([])
 
     def set_models(self, models: list[LocalModel], missing: list[str] | None = None):
+        # One row per model (user 2026-10-29): profiles differing ONLY in the thinking
+        # flag are duplicates — the `j` toggle owns thinking now. Group by folder plus
+        # every profile field except `thinking`; the non-thinking profile represents
+        # the model. First-seen order is preserved.
+        groups: dict = {}
+        for mdl in models:
+            key = (mdl.folder or mdl.alias, mdl.effort, mdl.roles, mdl.backend,
+                   mdl.tool_parser, mdl.reasoning_parser, mdl.family, mdl.auto_scanned)
+            groups.setdefault(key, []).append(mdl)
+        models = [next((x for x in g if not x.thinking), g[0]) for g in groups.values()]
         # Key by profile_id for uniqueness (multiple profiles can share same alias)
         self.models = {mdl.profile_id or mdl.alias: mdl for mdl in models}
         # Registered but weights gone: still LISTED, in red, so a deletion never looks like
@@ -1340,6 +1350,16 @@ class RemoteScreen(Screen):
             pinned = [a for a in buckets[prov] if a.model_id != "SELECT"]
             if prov != "nvidia":
                 pinned = size_sorted(pinned, lambda a: self._catalog_size(prov, a.model_id))
+            # One row per model (user 2026-10-29): the -thinking duplicate aliases were a
+            # workaround from before the `j` thinking toggle existed; the toggle owns the
+            # mode now (the launcher's capability table forces it where a model requires
+            # or lacks thinking). The base (non--thinking) alias represents the model;
+            # first-seen (curated/size) order is preserved.
+            by_model: dict = {}
+            for a in pinned:
+                by_model.setdefault(a.model_id or a.alias, []).append(a)
+            pinned = [next((x for x in g if not x.alias.endswith("-thinking")), g[0])
+                      for g in by_model.values()]
             if self.search:
                 pinned = [a for a in pinned if self._matches(a.model_id, a.display)]
             items = [Item(a.alias, f"{a.display}{self._size_suffix(prov, a.model_id, a.display)}  · {tier_label(a.tier, a.provider)}{lane_tag(a.provider, a.model_id)}")

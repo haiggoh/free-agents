@@ -945,6 +945,31 @@ _resolve_thinking() { # _resolve_thinking <alias> <provider> <model>
             RV_NOTICE="${RV_NOTICE:+$RV_NOTICE — }$constraint"
         fi
     fi
+    # Model thinking-capability table (user 2026-10-29). With the picker listing each model
+    # ONCE (no more -thinking duplicate rows), the alias suffix no longer selects the
+    # mode, so these rules own it. Matched as "$prov:$model" globs; env-extensible without a
+    # release, baked-in defaults below:
+    #   THINKING_REQUIRED_MODELS — the model only works with reasoning enabled; force ON and
+    #     say so (past evidence: several NVIDIA models fail when launched without reasoning).
+    #   NO_THINKING_MODELS — the model has no thinking capability; force OFF and say so.
+    # GLM is deliberately NOT in the force-ON list: NIM runs its template regardless, the
+    # requested mode is reported truthfully (RV_THINKING), and the constraint notice above
+    # says what the session actually gets.
+    local cap
+    for cap in ${THINKING_REQUIRED_MODELS:-}; do
+        # shellcheck disable=SC2053  # $cap is a glob pattern on purpose
+        if [[ "$prov:$model" == $cap && "$thinking" == "false" ]]; then
+            thinking="true"
+            RV_NOTICE="${RV_NOTICE:+$RV_NOTICE — }$model on $prov is thinking-only (fails without reasoning enabled) — launching with thinking ON"
+        fi
+    done
+    for cap in ${NO_THINKING_MODELS:-}; do
+        # shellcheck disable=SC2053  # $cap is a glob pattern on purpose
+        if [[ "$prov:$model" == $cap && "$thinking" == "true" ]]; then
+            thinking="false"
+            RV_NOTICE="${RV_NOTICE:+$RV_NOTICE — }$model on $prov has no thinking capability — launching with thinking OFF"
+        fi
+    done
     RV_THINKING="$thinking"
 }
 
