@@ -351,6 +351,15 @@
   },
   "entries": [
     {
+      "alias": "nvidia-mistral-large4",
+      "provider": "nvidia",
+      "model_id": "mistralai/mistral-large-4-1t-a52b",
+      "display": "Mistral Large 4 (Le Chonk)",
+      "tier": "unknown",
+      "notes": "TOP PICK for full free sessions (2026-10-29). 1.05T total / 52B active granular MoE, multimodal, 1M context, NVFP4 on NIM since 2026-10-29; fills the gap left by GLM 5.3's retirement from the NVIDIA API.",
+      "autocompact_default": "1m"
+    },
+    {
       "alias": "nvidia-glm53-thinking",
       "provider": "nvidia",
       "model_id": "z-ai/glm-5.3-flash",
@@ -365,7 +374,7 @@
       "model_id": "z-ai/glm-5.3",
       "display": "Z.ai GLM 5.3 (thinking)",
       "tier": "unknown",
-      "notes": "SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.",
+      "notes": "DEPRECATED 2026-10-29 — z-ai/glm-5.3 retired from the NVIDIA API; use nvidia-mistral-large4. Was: SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.",
       "autocompact_default": "-"
     },
     {
@@ -410,7 +419,7 @@
       "model_id": "z-ai/glm-5.3",
       "display": "Z.ai GLM 5.3",
       "tier": "unknown",
-      "notes": "SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.",
+      "notes": "DEPRECATED 2026-10-29 — z-ai/glm-5.3 retired from the NVIDIA API; use nvidia-mistral-large4. Was: SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.",
       "autocompact_default": "-"
     },
     {

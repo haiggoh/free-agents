@@ -69,8 +69,9 @@ LA_REMOTE_AGENTS=(
   # then the non-thinking variants mirrored (Lightning after Super); the remaining visible
   # models and the hidden broken rows follow.
   # Re-probe with: bin/remote-probe-log.py probe --all-nvidia ; report
-  # Hand-curated order (user 2026-10-20): the nvidia pins below are sorted manually, largest/most-preferred first.
-  "nvidia-mistral-large4|nvidia|mistralai/mistral-large-4-1t-a52b|Mistral Large 4 (Le Chonk)|unknown|TOP PICK for full free sessions (2026-10-29): 1.05T total / 52B active granular MoE, multimodal, 1M context, served NVFP4 on NIM since 2026-10-29 — fills the gap left by GLM 5.3's retirement. Fast, strong tool use (observed in a live session day one).|1m"
+  # Hand-curated nvidia order (user 2026-10-20; top pick updated 2026-10-29: Mistral Large 4
+  # leads after GLM 5.3's retirement from the NVIDIA API).
+  "nvidia-mistral-large4|nvidia|mistralai/mistral-large-4-1t-a52b|Mistral Large 4 (Le Chonk)|unknown|TOP PICK for full free sessions (2026-10-29). 1.05T total / 52B active granular MoE, multimodal, 1M context, NVFP4 on NIM since 2026-10-29; fills the gap left by GLM 5.3's retirement from the NVIDIA API.|1m"
   "nvidia-glm53-thinking|nvidia|z-ai/glm-5.3-flash|Z.ai GLM 5.3 Flash (thinking)|unknown|PARTIAL: same model as the base alias — thinking is always-on on NIM; this alias just defaults reasoning_effort high. Fast.|-"
   "nvidia-glm53-full-thinking|nvidia|z-ai/glm-5.3|Z.ai GLM 5.3 (thinking)|unknown|DEPRECATED 2026-10-29 — z-ai/glm-5.3 retired from the NVIDIA API; use nvidia-mistral-large4. Was: SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.|-"
   "nvidia-nemotron-ultra-thinking|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.|1m"
