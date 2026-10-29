@@ -1679,6 +1679,15 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         t, n, _ = self._resolve_thinking('nvidia-nemotron-ultra', 'nvidia', 'nvidia/nemotron-3-ultra-550b-a55b', 'false')
         self.assertEqual((t, n), ('false', ''))
 
+    def test_both_lane_system_prompts_tell_the_model_to_surface_insights(self):
+        # 0.47.5 (user 2026-10-29, waypoint nemotron-remote-sessions): the answer and the
+        # decision belong in the VISIBLE reply, and interesting choices come back in a
+        # `★ Insight ───` block — not only in thinking blocks.
+        for name in ('remote-agent-system-prompt.txt', 'local-agent-system-prompt.txt'):
+            text = (ROOT / 'config' / name).read_text()
+            self.assertIn('VISIBLE reply', text, name)
+            self.assertIn('★ Insight ─', text, name)
+
 
 if __name__ == '__main__':
     if '--help' in sys.argv or '-h' in sys.argv:

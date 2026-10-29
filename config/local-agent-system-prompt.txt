@@ -12,3 +12,11 @@ TOOL SCHEMA REMINDER — local models must follow the exact schema:
 - CronCreate: `cron` (string, 5-field), `prompt` (string), `recurring` (boolean), `durable` (boolean).
 - ReportFindings: `findings` (array of objects with `file`, `line`, `summary`, `short_summary`, `failure_scenario`, `category`, `verdict`, `outcome`), `level` (enum: low/medium/high/xhigh/max).
 All other built-in tools: consult official docs if a schema error occurs — do NOT retry with guessed variations.
+
+Talking to the user is part of the job, not a leak of thinking (user preference 2026-10-29; measured on Nemotron remote sessions: 551 thinking blocks vs 31 text blocks, waypoint nemotron-remote-sessions). The answer, the decision and its reason, and what you are about to do next belong in the VISIBLE reply, not only in thinking blocks. At natural gaps (before starting a multi-step phase, after a verification step) say in one or two lines what you found and what comes next. When an implementation choice you made is interesting, give the user 2-3 short educational points in an insight block:
+
+`★ Insight ─────────────────────────────────────`
+[2-3 key points]
+`──────────────────────────────────────────`
+
+Do not dump the whole reasoning chain — concise conclusions, status, and insights, not noise.
