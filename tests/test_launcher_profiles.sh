@@ -74,7 +74,10 @@ for placeholder in expected:
         )
 
 size = len(text.encode("utf-8"))
-if size > 2048:
+# Limit raised 2048 -> 3072 in 0.47.5: the surface-insights paragraph (user preference
+# 2026-10-29) added ~700 bytes to the local prompt on purpose. Keep the guard against
+# uncontrolled bloat, but re-raise it deliberately when a real addition lands.
+if size > 3072:
     raise SystemExit(f"prompt unexpectedly large: {size} bytes")
 
 required_phrases = (
