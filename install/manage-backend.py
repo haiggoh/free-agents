@@ -9,11 +9,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import runpy
 import sys
 from pathlib import Path
 
 # Add install directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Network shim (IPv4 forcing + Keychain truststore) — the same one the downloader and
+# remote-session.sh use. Release discovery fetches PyPI with urllib, and on home wifi IPv6 to
+# the PyPI CDN black-holes: 8 AAAA records x a 15 s timeout outlasted the picker's 60 s cap, so
+# "Install a release" spun, then claimed "no releases found" (2026-10-29). Applied here because
+# every caller passes through this script; exported so its pip/venv children get it too.
+NETWORK_SHIM = Path(__file__).resolve().parent / "hf-ipv4"
+if (NETWORK_SHIM / "sitecustomize.py").is_file():
+    _loaded = getattr(sys.modules.get("sitecustomize"), "__file__", "") or ""
+    if Path(_loaded).resolve().parent != NETWORK_SHIM:
+        runpy.run_path(str(NETWORK_SHIM / "sitecustomize.py"))
+    _pp = [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p and Path(p) != NETWORK_SHIM]
+    os.environ["PYTHONPATH"] = os.pathsep.join([str(NETWORK_SHIM), *_pp])
 
 # Import managers to trigger registration via @register_manager decorator
 try:

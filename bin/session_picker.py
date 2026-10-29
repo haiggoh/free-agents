@@ -774,7 +774,9 @@ class Picker(App):
                         data = load_local_models()         # the registry changed: read it again
                         self.call_from_thread(self._warn_here, note)
         except Exception as exc:              # surfaced as a status warning, never swallowed
-            data, err = [], f"{kind} model list failed to load: {exc}"
+            # A versions screen shows its own failure in place of "nothing to choose" (_loaded).
+            data, err = [], (str(exc) if kind.startswith("versions:")
+                             else f"{kind} model list failed to load: {exc}")
         self.call_from_thread(self._loaded, kind, data, err)
 
     def _loaded(self, kind, data, err):
@@ -784,7 +786,7 @@ class Picker(App):
             if self.screen_model is not None:
                 self.query_one("#policy", Static).update(getattr(self.screen_model, "policy", ""))
         self.cache[kind] = data
-        if err and err not in self.state_warnings:
+        if err and err not in self.state_warnings and not kind.startswith("versions:"):
             self.state_warnings.append(err)
         sm = self.screen_model
         # Fill an already-open list in place; otherwise just refresh counts/labels.
@@ -826,6 +828,7 @@ class Picker(App):
             self.cache.pop(kind, None)             # the screen keeps it; a failed load can be retried
         if isinstance(sm, m.VersionsScreen) and kind == sm.inventory_kind:
             sm.set_entries(data)
+            sm.load_error = err
             if not getattr(self, "pending_prompt", None):
                 self.render_model()
                 self.query_one("#rows", OptionList).focus()   # arrows move through versions at once
@@ -1122,6 +1125,9 @@ class Picker(App):
         waiting = self._waiting_for() if hasattr(self, "_loading") else None
         if waiting:
             status = "  " + loading_label(self._loading_frame, "loading versions" if waiting == "versions" else "loading models")
+        elif isinstance(sm, m.VersionsScreen) and sm.load_error:
+            status = ("  could not load " + ("releases" if sm.OPS[sm.op][1] == "releases"
+                                            else f"installed {sm.backend} versions") + ": " + sm.load_error)
         elif isinstance(sm, m.VersionsScreen) and sm.entries == []:
             status = "  nothing to choose: " + ("no releases found" if sm.OPS[sm.op][1] == "releases"
                                                else f"no installed {sm.backend} versions")

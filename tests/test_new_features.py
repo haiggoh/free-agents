@@ -148,6 +148,28 @@ class BackendManagerScreen(PilotCase):
             self.assertEqual(self.launches()[-1]["argv"], ["--backend", "rapid-mlx", "install", "0.17.0"])
         self.run_picker(s)
 
+    def test_a_failed_release_fetch_says_so_instead_of_no_releases(self):
+        # 2026-10-29: the PyPI fetch timed out (IPv6 black hole) and the screen said "no releases
+        # found" — a failure dressed up as an empty answer, which read as a regression.
+        import session_picker as sp
+        stub = Path(self.tmp.name) / "stubs" / "manage-backend"
+        stub.write_text("#!/bin/sh\ncase \"$3\" in installed) exit 0;;\n"
+                        "releases) echo 'ERROR: could not retrieve Rapid-MLX releases: timed out' >&2; exit 2;; esac\n")
+        stub.chmod(0o755)
+        real = sp._mb
+        sp._mb = lambda backend, *a: [str(stub), "--backend", backend, *a]
+        self.addCleanup(setattr, sp, "_mb", real)
+        async def s(app, pilot, h):
+            await h.press("v")
+            await h.wait_screen("RuntimeManagerScreen")
+            await h.press("i")
+            await h.wait_screen("VersionsScreen")
+            await h.wait_for(lambda: "could not load releases" in h.status(), "the load failure")
+            self.assertIn("could not retrieve Rapid-MLX releases: timed out", h.status())
+            self.assertNotIn("no releases found", h.status())
+            self.assertNotIn("model list failed", h.status())
+        self.run_picker(s)
+
 
 class APIKeysScreen(PilotCase):
     async def _open_add(self, h, slug):

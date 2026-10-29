@@ -2099,6 +2099,7 @@ class VersionsScreen(Screen):
         "promote": ("Promote pins to an installed version", "installed"),
         "remove": ("Remove an installed version", "installed"),
     }
+    load_error: str | None = None   # set by the app when the list failed to load (not empty)
 
     def __init__(self, settings: Settings, op: str, entries: list[VersionEntry] | None = None,
                  owner: str = SUB):
