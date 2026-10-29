@@ -1,3 +1,23 @@
+## [0.47.6] — 2026-10-29
+
+The always-on session prompts no longer carry session-specific history, and the local
+prompt is back under its 2048-byte guard (user 2026-10-29).
+
+### Changed
+
+- `config/remote-agent-system-prompt.txt` and `config/local-agent-system-prompt.txt`:
+  the "keep private reasoning out of visible answers" line and the 0.47.5 insights
+  paragraph are merged into ONE visibility directive (raw reasoning stays out of visible
+  text, but answers, decisions, next steps, and `★ Insight ───` blocks go in the VISIBLE
+  reply). Dated incident numbers, transcript measurements, and waypoint names were removed
+  from the prompts — they now live in the user memory `system-prompt-specifics-moved-out`.
+- Remote prompt: the proxy-kill incident story compressed to one clause (the operational
+  rule is unchanged); the waypoints-store example generalized to "any single-JSON-document
+  state store" without naming the file path and command list.
+- Local prompt trimmed from 3009 to 2047 bytes; `test_launcher_profiles.sh` size guard
+  restored to 2048 (its origin: b7d078b picked 2048 as template-1914 + headroom, not a
+  model constraint — 0.47.5's raise to 3072 was unnecessary).
+
 ## [0.47.5] — 2026-10-29
 
 The session system prompts now tell the model to talk to the user (waypoint
