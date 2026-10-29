@@ -1,3 +1,20 @@
+## [0.47.5] — 2026-10-29
+
+The session system prompts now tell the model to talk to the user (waypoint
+`nemotron-remote-sessions`; user preference 2026-10-29, report in ~/Claude-plans "Nvidia
+nemotron through litellm still has a tendency to respond in…").
+
+### Changed
+
+- Both `config/remote-agent-system-prompt.txt` and `config/local-agent-system-prompt.txt`
+  now say, after the "keep reasoning out of visible answers" rule: that rule means "do not
+  paste raw reasoning", not "stay silent" — the answer, the decision and its reason, and
+  what the model is about to do next belong in the VISIBLE reply; at natural gaps give a
+  one-two line status; and interesting implementation choices come back as 2-3 educational
+  points in a `★ Insight ───…───` block. Measured motivation: a Nemotron remote session ran
+  551 thinking blocks vs 31 text blocks (transcript 72ac993b). Pinned by
+  `test_both_lane_system_prompts_tell_the_model_to_surface_insights`.
+
 ## [0.47.4] — 2026-10-29
 
 One row per model in both session pickers; thinking-capability rules own the toggle edge
