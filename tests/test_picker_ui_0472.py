@@ -171,5 +171,52 @@ class SizeSortAndLabelTests(unittest.TestCase):
             m.lane_for = orig
 
 
+class HwDetectCacheTests(unittest.TestCase):
+    """User 2026-10-29: detection is cached (hw-detect.env) so launch 2+ needs no subprocess;
+    first launch shows the generic placeholder until the background detection lands."""
+
+    def setUp(self):
+        try:
+            import session_picker as sp
+        except ImportError:
+            self.skipTest("textual not installed in this interpreter (picker-gate venv only)")
+        self.sp = sp
+
+    def _with_cache(self, td):
+        sp = self.sp
+        orig = sp._hw_cache_path
+        sp._hw_cache_path = lambda: Path(td) / "hw-detect.env"
+        self.addCleanup(setattr, sp, "_hw_cache_path", orig)
+        return sp
+
+    def test_cache_roundtrip(self):
+        with tempfile.TemporaryDirectory() as td:
+            sp = self._with_cache(td)
+            sp._write_hw_cache(("Linux", "Ubuntu 24.04.3 LTS", "cuda"))
+            self.assertEqual(sp._read_hw_cache(), ("Linux", "Ubuntu 24.04.3 LTS", "cuda"))
+
+    def test_cache_missing_or_broken_returns_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            sp = self._with_cache(td)
+            p = Path(td) / "hw-detect.env"
+            self.assertIsNone(sp._read_hw_cache())               # missing file
+            p.write_text("garbage\n", encoding="utf-8")
+            self.assertIsNone(sp._read_hw_cache())               # no LA_OS/LA_HARDWARE
+            p.write_text('LA_OS="linux"\nLA_HARDWARE="cuda"\n', encoding="utf-8")
+            self.assertEqual(sp._read_hw_cache(), ("linux", "", "cuda"))
+
+    def test_detect_hw_prefers_env(self):
+        sp = self.sp
+        old = os.environ.copy()
+        try:
+            os.environ["LA_OS"] = "linux"
+            os.environ["LA_DISTRO_PRETTY_NAME"] = "Fedora Linux 40"
+            os.environ["LA_HARDWARE"] = "cuda"
+            self.assertEqual(sp._detect_hw(), ("linux", "Fedora Linux 40", "cuda"))
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+
+
 if __name__ == "__main__":
     unittest.main()

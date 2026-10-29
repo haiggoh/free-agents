@@ -12,6 +12,16 @@
 # - exact-fixture fast verification on ordinary launches;
 # - reactive invalidation after a classifier failure.
 
+# --- CLI surface (standing rule: every script answers --help) --------------------------
+# Only when EXECUTED directly; when sourced, $0 is the caller and its args are not ours.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    case "${1:-}" in
+        -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; echo "usage: $0 [--help]"; exit 0 ;;
+        "") ;;   # no args: normal (for this sourced library: function definitions only)
+        *) echo "usage: $0 [--help]  (unknown argument: $1)" >&2; exit 2 ;;
+    esac
+fi
+
 la_prewarm_require_uint() {
     local name="$1"
     local value="$2"

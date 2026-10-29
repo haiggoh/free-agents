@@ -249,6 +249,16 @@ def gap(emoji: str) -> str:
 
 
 if __name__ == "__main__":
+    # CLI surface (standing rule: --help prints usage, unknown args fail loudly — a probe
+    # must never run the dump). user 2026-10-29.
+    import sys as _sys
+    if any(a in ("-h", "--help") for a in _sys.argv[1:]):
+        print("emoji_constants.py — print every loaded emoji constant as NAME=emoji")
+        print("usage: emoji_constants.py [--help]")
+        raise SystemExit(0)
+    if _sys.argv[1:]:
+        print(f"usage: emoji_constants.py [--help]  (unknown argument: {_sys.argv[1]})", file=_sys.stderr)
+        raise SystemExit(2)
     # Print all loaded emojis for debugging
     for k, v in sorted(_load_emojis().items()):
         print(f"{k}={v}")

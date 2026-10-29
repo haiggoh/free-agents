@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # la-hw-detect.sh — hardware & OS detection for free-agents.
 # Exports comprehensive hardware/OS information for cross-platform compatibility.
-# Exports: LA_OS, LA_OS_FAMILY, LA_DISTRO, LA_DISTRO_VERSION, LA_DISTRO_CODENAME,
+# Exports: LA_OS, LA_OS_FAMILY, LA_DISTRO, LA_DISTRO_PRETTY_NAME (os-release PRETTY_NAME,
+#          e.g. "Ubuntu 24.04.3 LTS"), LA_DISTRO_VERSION, LA_DISTRO_CODENAME,
 #          LA_ARCH, LA_HARDWARE (mlx|cuda|cpu-only|rocm|opencl), LA_VRAM_GB,
 #          LA_CPU_ARCH, LA_CPU_MODEL, LA_CPU_CORES, LA_CPU_THREADS,
 #          LA_CPU_FLAGS, LA_SYSTEM_RAM_GB, LA_SWAP_GB,
@@ -10,6 +11,36 @@
 #          LA_CUDA_VERSION, LA_ROCM_VERSION, LA_CUDA_WARNING.
 # Safe to source multiple times; idempotent.
 set -uo pipefail
+
+# --- CLI surface (standing rule: every script answers --help) --------------------------
+# Arg parsing happens ONLY when this file is EXECUTED directly; when sourced, $0 is the
+# caller and its arguments are not ours, so the guard must not fire. A --help probe must
+# never run detection as a side effect.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    case "${1:-}" in
+        -h|--help)
+            cat <<'EOF'
+la-hw-detect.sh — hardware & OS detection for free-agents.
+
+usage:
+  source bin/la-hw-detect.sh     export the LA_* variables below into the current shell
+  bin/la-hw-detect.sh --help      print this text (never runs detection)
+
+exports: LA_OS (mac|linux|windows-wsl|windows-cygwin|windows-msys|windows|unknown),
+  LA_OS_FAMILY, LA_DISTRO (id, e.g. ubuntu), LA_DISTRO_PRETTY_NAME (PRETTY_NAME from
+  /etc/os-release, e.g. "Ubuntu 24.04.3 LTS"), LA_DISTRO_VERSION, LA_DISTRO_CODENAME,
+  LA_ARCH, LA_HARDWARE (mlx|cuda|cpu-only|rocm|opencl), LA_VRAM_GB, LA_CPU_ARCH,
+  LA_CPU_MODEL, LA_CPU_CORES, LA_CPU_THREADS, LA_SYSTEM_RAM_GB, LA_SWAP_GB,
+  LA_GPU_VENDOR, LA_GPU_MODEL, LA_GPU_DRIVER_VERSION, LA_CUDA_VERSION, LA_ROCM_VERSION,
+  LA_CONTAINER, LA_VIRTUALIZATION, LA_KERNEL_VERSION, LA_CUDA_WARNING.
+reads env: WSL_DISTRO_NAME, WSL_DISTRO_VERSION, WSL_DISTRO_CODENAME.
+Idempotent — safe to source repeatedly.
+EOF
+            exit 0 ;;
+        "") ;;
+        *) echo "usage: $0 [--help]  (unknown argument: $1)" >&2; exit 2 ;;
+    esac
+fi
 
 # Resolve this script's directory (portable even when invoked via symlink).
 # Handle both direct execution and sourcing from bash -c 'source ...'
@@ -129,7 +160,17 @@ case "$LA_OS" in
     *) LA_OS_FAMILY="unknown" ;;
 esac
 
-export LA_OS LA_OS_FAMILY LA_DISTRO LA_DISTRO_VERSION LA_DISTRO_CODENAME LA_KERNEL_VERSION
+# Pretty distro name (user 2026-10-29): PRETTY_NAME from /etc/os-release is the
+# human-readable form ("Ubuntu 24.04.3 LTS"); the Linux branch above may already have
+# sourced os-release, so reuse it when present. Every other OS falls back to its plain name.
+if [[ -z "${PRETTY_NAME:-}" && -r /etc/os-release ]]; then
+    PRETTY_NAME="$( . /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-}" )"
+fi
+case "$LA_OS" in
+    mac) LA_DISTRO_PRETTY_NAME="macOS ${LA_DISTRO_VERSION}" ;;
+    *)   LA_DISTRO_PRETTY_NAME="${PRETTY_NAME:-$LA_DISTRO}" ;;
+esac
+export LA_OS LA_OS_FAMILY LA_DISTRO LA_DISTRO_PRETTY_NAME LA_DISTRO_VERSION LA_DISTRO_CODENAME LA_KERNEL_VERSION
 
 # ============================================================================
 # ARCHITECTURE DETECTION

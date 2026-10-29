@@ -55,6 +55,18 @@ set -uo pipefail
 
 # Resolve symlinks (portable across macOS bash 3.2) so this works by own path, ~/.claude symlink, or
 # plugin-repo path.
+# --- CLI surface (standing rule: every script answers --help) --------------------------
+# Only when EXECUTED directly; when sourced, $0 is the caller and its args are not ours.
+# No-arg execution falls through and launches as before — only -h/--help and unknown
+# arguments are intercepted, so a --help probe can never start a session.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    case "${1:-}" in
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; echo "usage: $0 [--help]"; exit 0 ;;
+        "") ;;
+        *) echo "usage: $0 [--help]  (unknown argument: $1)" >&2; exit 2 ;;
+    esac
+fi
+
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 LAUNCH_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # shellcheck source=/dev/null

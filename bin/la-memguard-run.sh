@@ -16,6 +16,16 @@
 # Env: LA_MEMGUARD, LA_MEMGUARD_TMUX, LA_MEMGUARD_SOFT_PCT/HARD_PCT/QUIET_S/AUTO_CONTINUE,
 #      LA_MEMGUARD_STATE_DIR, LA_MEMGUARD_TMUX_BIN (tests).
 
+# --- CLI surface (standing rule: every script answers --help) --------------------------
+# Only when EXECUTED directly; when sourced, $0 is the caller and its args are not ours.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    case "${1:-}" in
+        -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; echo "usage: $0 [--help]"; exit 0 ;;
+        "") ;;   # no args: normal (for this sourced library: function definitions only)
+        *) echo "usage: $0 [--help]  (unknown argument: $1)" >&2; exit 2 ;;
+    esac
+fi
+
 # _la_memguard_settings: export each saved memory-guard setting the caller has not set itself.
 # Values are NAME=value lines from our own store (validated there: digits / 0 / 1), but they are
 # still read with `read`, never eval'd.

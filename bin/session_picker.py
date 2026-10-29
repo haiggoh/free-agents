@@ -526,11 +526,13 @@ def _detect_hw():
     import subprocess
     from pathlib import Path
     if os.environ.get("LA_OS") and os.environ.get("LA_HARDWARE"):
-        return os.environ.get("LA_OS"), os.environ.get("LA_DISTRO") or "", os.environ.get("LA_HARDWARE")
+        return (os.environ.get("LA_OS"),
+                os.environ.get("LA_DISTRO_PRETTY_NAME") or os.environ.get("LA_DISTRO") or "",
+                os.environ.get("LA_HARDWARE"))
     try:
         script = Path(__file__).resolve().parent / "la-hw-detect.sh"
         out = subprocess.run(
-            ["bash", "-c", f'. "{script}"; printf "%s\\n%s\\n%s" "$LA_OS" "$LA_DISTRO" "$LA_HARDWARE"'],
+            ["bash", "-c", f'. "{script}"; printf "%s\\n%s\\n%s" "$LA_OS" "$LA_DISTRO_PRETTY_NAME" "$LA_HARDWARE"'],
             capture_output=True, text=True, timeout=8)
         if out.returncode == 0:
             parts = out.stdout.splitlines()
@@ -539,6 +541,47 @@ def _detect_hw():
     except Exception:
         pass
     return None, "", None
+
+
+def _hw_cache_path():
+    """Where the last detection result lives, so launch 2+ needs no subprocess at all
+    (user 2026-10-29: cache it; only the very first launch shows the generic placeholder)."""
+    try:
+        return m.catalog_cache_dir() / "hw-detect.env"
+    except Exception:
+        return None
+
+
+def _read_hw_cache():
+    import shlex
+    p = _hw_cache_path()
+    if p is None or not p.exists():
+        return None
+    try:
+        vals = {}
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                vals[k] = shlex.split(v)[0] if shlex.split(v) else ""
+        if vals.get("LA_OS") and vals.get("LA_HARDWARE"):
+            return vals["LA_OS"], vals.get("LA_DISTRO_PRETTY_NAME", ""), vals["LA_HARDWARE"]
+    except Exception:
+        pass
+    return None
+
+
+def _write_hw_cache(hw):
+    p = _hw_cache_path()
+    if p is None:
+        return
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(f'LA_OS="{hw[0] or ""}"\nLA_DISTRO_PRETTY_NAME="{hw[1]}"\nLA_HARDWARE="{hw[2] or ""}"\n',
+                       encoding="utf-8")
+        tmp.replace(p)
+    except Exception:
+        pass
 
 
 class Picker(App):
@@ -767,17 +810,34 @@ class Picker(App):
             yield Static("", id="status")
 
     def on_mount(self):
-        # One-shot OS/distro/hardware detection through the repo's canonical script
+        # OS/distro/hardware detection through the repo's canonical script
         # (bin/la-hw-detect.sh); the model's subheadlines read these from Settings.
-        hw_os, hw_distro, hw_hw = _detect_hw()
-        self.settings.hw_os = hw_os
-        self.settings.hw_distro = hw_distro
-        self.settings.hw_hardware = hw_hw
+        # Cache first (instant on every launch after the first), then detect in the
+        # BACKGROUND and load last — the first paint never waits on it; a missing cache
+        # shows the generic platform line until detection lands (user 2026-10-29).
+        cached = _read_hw_cache()
+        if cached:
+            self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware = cached
         self.goto(m.Nav(self.start, m.DIRECT_ROOT))
         # Menu first, then warm the model lists in the background (plan R13/R14): by the time
         # the user presses `c` the slow remote inventory (~1-6 s) is usually already cached.
         self.call_after_refresh(self._prefetch, ("local", "remote"))
         self.set_interval(LOADING_INTERVAL, self._tick_loading)
+        import threading
+        threading.Thread(target=self._detect_hw_async, daemon=True).start()
+
+    def _detect_hw_async(self):
+        """Background hardware detection: runs after the menu is already painted, caches
+        the result, and re-renders only if the values actually changed."""
+        hw = _detect_hw()
+        _write_hw_cache(hw)
+
+        def apply():
+            old = (self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware)
+            self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware = hw
+            if old != tuple(hw):
+                self.render_model()
+        self.call_from_thread(apply)
 
     # --- background inventory ----------------------------------------------------------------
     LOADERS = {"local": "load_local_models", "remote": "load_remote_agents", "catalog": "load_catalog"}
