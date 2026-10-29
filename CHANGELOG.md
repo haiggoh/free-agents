@@ -1,6 +1,37 @@
+## [0.47.4] — 2026-10-29
+
+One row per model in both session pickers; thinking-capability rules own the toggle edge
+cases. (Wording correction for 0.47.3: "every script answers --help" meant the user-facing
+bin/ and install/ scripts, which tests/test_script_help.sh verifies; the remaining
+library/hook/`.rtc` candidates from a full-repo scan are tracked in waypoint
+`free-agents-repo-wide-help-sweep`, and the check-code exception for non-executable files
+in `check-code-nohelp-nonexec-exception`.)
+
+### Changed — no more -thinking duplicate rows (user 2026-10-29)
+
+- Remote picker: pinned rows are deduplicated by model id — the base (non-`-thinking`)
+  alias represents the model; curated/size order preserved. The CLI roster keeps all
+  aliases, so direct `remote-session.sh <alias>-thinking` launches still work.
+- Local picker: profiles differing ONLY in the thinking flag collapse to one row
+  (the non-thinking profile represents the model); profiles differing in anything else
+  (folder, effort, backend, parsers, roles) stay separate.
+- Rationale: the `j` thinking toggle (0.44.0) owns the mode, so the duplicate rows were a
+  pre-toggle workaround.
+
+### Added — launch-time thinking-capability rules (user 2026-10-29)
+
+- `remote-session.sh _resolve_thinking` consults a capability table matched on
+  `"$prov:$model"` globs, env-extensible without a release: `THINKING_REQUIRED_MODELS`
+  (model only works with reasoning enabled → force ON + notice) and `NO_THINKING_MODELS`
+  (no thinking capability → force OFF + notice). The toggle state is ignored in both
+  cases and the launch banner says why, concisely. Seeded empty by default; GLM keeps its
+  existing always-thinking constraint notice (measured 2026-10-13). Evidence-backed
+  additions belong in the defaults once recorded.
+
 ## [0.47.3] — 2026-10-29
 
-Every script answers `--help` now, and hardware detection never blocks the first paint.
+The user-facing scripts answer `--help` now (see the 0.47.4 wording note above), and
+hardware detection never blocks the first paint.
 
 ### Fixed — the standing "every script gets --help" rule, retrofitted (user 2026-10-29)
 
