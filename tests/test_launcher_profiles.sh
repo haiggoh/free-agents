@@ -74,10 +74,10 @@ for placeholder in expected:
         )
 
 size = len(text.encode("utf-8"))
-# Limit raised 2048 -> 3072 in 0.47.5: the surface-insights paragraph (user preference
-# 2026-10-29) added ~700 bytes to the local prompt on purpose. Keep the guard against
-# uncontrolled bloat, but re-raise it deliberately when a real addition lands.
-if size > 3072:
+# 2048 was chosen as template size + headroom (b7d078b raised 1600 -> 2048 for a 1914-byte
+# template), NOT a model constraint. 0.47.5 briefly raised it to 3072 for the insights
+# paragraph; 0.47.6 trims the prompt back under 2048 and keeps this guard as-is.
+if size > 2048:
     raise SystemExit(f"prompt unexpectedly large: {size} bytes")
 
 required_phrases = (
