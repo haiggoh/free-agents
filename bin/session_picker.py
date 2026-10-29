@@ -904,6 +904,8 @@ class Picker(App):
         if nav.target == "home":
             # Pass counts as None initially; they'll be loaded lazily
             return m.HomeScreen(s, local_count=None, remote_count=None, owner=nav.owner)
+        if nav.target == "about":
+            return m.AboutScreen(s, nav.owner)
         if nav.target == "local":
             return m.LocalScreen(s, models=None, owner=nav.owner)
         if nav.target == "remote":
@@ -943,6 +945,8 @@ class Picker(App):
             remote = self.cache.get("remote")
             self.screen_model = m.HomeScreen(s, len(local) if local else None, len(remote) if remote else None,
                                              self._home_catalog_total(), nav.owner)
+        elif nav.target == "about":
+            self.screen_model = m.AboutScreen(s, nav.owner)
         elif nav.target == "local":
             # Pass models only if already cached; otherwise pass None for lazy loading
             local = self.cache.get("local")
@@ -1760,7 +1764,11 @@ class Picker(App):
             self._pending_launch = req
             self._open_prompt("prompt:register")
             return
-        self.run_child(command_for(req), env=req.env, pause_on_error=True)
+        # Every launch carries the picker's own version, so a running session can always
+        # answer which free-agents launched it (user request 2026-10-28).
+        env = dict(req.env or {})
+        env["LA_FREE_AGENTS_VERSION"] = m.plugin_version()
+        self.run_child(command_for(req), env=env, pause_on_error=True)
 
     def _open_cleanup_panel(self, clicked: str | None = None):
         """The missing-models question as a ConfirmPanel. `clicked` = the red row the user

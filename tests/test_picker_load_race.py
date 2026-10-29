@@ -381,6 +381,53 @@ class ReviewFixPass(PilotCase):
         self.run_picker(scenario, start="home")
 
 
+class VersionSurfaces(PilotCase):
+    """Version visibility (user request 2026-10-28): antenna before arm in the title, a
+    small print row on home, an About screen, and LA_FREE_AGENTS_VERSION on every launch."""
+
+    def _policy_text(self, app):
+        from textual.widgets import Static
+        return str(app.query_one("#policy", Static).render())
+
+    def test_title_shows_the_antenna_before_the_arm(self):
+        async def scenario(app, pilot, h):
+            title = h.title()
+            self.assertLess(title.index("\U0001F4E1"), title.index("\U0001F9BE"), f"title: {title}")
+        self.run_picker(scenario, start="home")
+
+    def test_home_small_print_carries_the_version(self):
+        import session_picker_model as m
+        async def scenario(app, pilot, h):
+            self.assertIn(f"free-agents v{m.plugin_version()}", self._policy_text(app))
+        self.run_picker(scenario, start="home")
+
+    def test_about_screen_shows_version_and_paths(self):
+        import session_picker_model as m
+        async def scenario(app, pilot, h):
+            await h.press("a")
+            self.assertEqual(h.screen(), "AboutScreen")
+            text = self._policy_text(app) + "\n" + h.text()
+            self.assertIn(f"free-agents v{m.plugin_version()}", text)
+            self.assertIn(str(Path(h.case.sp.__file__).resolve().parent.parent), text)   # install path
+            await h.press("b")
+            self.assertEqual(h.screen(), "HomeScreen")
+        self.run_picker(scenario, start="home")
+
+    def test_launch_carries_the_version_env(self):
+        import session_picker_model as m
+        async def scenario(app, pilot, h):
+            await h.press("r"); await h.press("c")
+            await h.wait_text("NVIDIA A", secs=10)
+            await h.goto_row("item", "nvidia-a")
+            await h.press("enter")
+            await h.settle()
+            recs = [r for r in self.launches()
+                    if r["prog"] == "remote-session.sh" and "--models" not in r["argv"]]
+            self.assertTrue(recs, f"no launch recorded; got {[r['argv'] for r in self.launches()]}")
+            self.assertEqual(recs[-1]["env"].get("LA_FREE_AGENTS_VERSION"), m.plugin_version())
+        self.run_picker(scenario, start="home")
+
+
 class NoKeysSemantics(unittest.TestCase):
     """`__nokeys__` is an instruction for a keyless roster — never for an unlanded one."""
 

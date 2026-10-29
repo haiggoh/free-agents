@@ -819,9 +819,47 @@ def _tool_actions(backend: bool = True, local_session: bool = False, home: bool 
     return acts if backend else [a for a in acts if a.key != "v"]
 
 
+_PLUGIN_VERSION = None
+
+
+def plugin_version() -> str:
+    """The running plugin's version, read from its manifest (never from the install path).
+    Cached per process; "?" when the manifest is missing or unreadable — a version is
+    never invented (user request 2026-10-28: csl had no way to show which version it ran)."""
+    global _PLUGIN_VERSION
+    if _PLUGIN_VERSION is None:
+        try:
+            data = json.loads((Path(__file__).resolve().parent.parent / ".claude-plugin/plugin.json").read_text())
+            _PLUGIN_VERSION = str(data.get("version") or "?")
+        except Exception:
+            _PLUGIN_VERSION = "?"
+    return _PLUGIN_VERSION
+
+
+class AboutScreen(Screen):
+    """Version and the paths that matter when something misbehaves — read-only facts."""
+
+    title = f"About — {SESSION_LAUNCHER_TITLE}"
+
+    @property
+    def policy(self):
+        import os
+        root = Path(__file__).resolve().parent.parent
+        lines = [f"free-agents v{plugin_version()}",
+                 f"Installed at: {root}",
+                 f"Config: {os.environ.get('LA_CONFIG_SOURCE') or (root / 'config')}",
+                 f"Remote launcher: {os.environ.get('CSL_REMOTE_LAUNCHER') or (root / 'bin/remote-session.sh')}",
+                 f"Catalog cache: {catalog_cache_dir()}"]
+        return "\n".join(lines)
+
+    def actions(self):
+        return [Action("b", f"{ec.EMOJI_HOME_STR} Back to home", lambda: Nav("home", HOME_OWNED), section="nav")]
+
+
 class HomeScreen(Screen):
     # The plugin's identity, not "home": both lanes' icons (user, 2026-10-04).
-    title = f"{SESSION_LAUNCHER_TITLE}  {ec.SESSION_EMOJI_LOCAL_STR} {ec.SESSION_EMOJI_FREE_API_STR}"
+    # Remote (antenna) first, then local (robot arm) — user, 2026-10-28.
+    title = f"{SESSION_LAUNCHER_TITLE}  {ec.SESSION_EMOJI_FREE_API_STR} {ec.SESSION_EMOJI_LOCAL_STR}"
 
     @property
     def policy(self):
@@ -834,6 +872,7 @@ class HomeScreen(Screen):
         if os.environ.get("LA_FALLBACK_CONFIG") == "1":
             line += (f"\n{ec.EMOJI_WARNING_STR}  Using public fallback defaults. Private models "
                      "are not present in this installed copy.")
+        line += f"\nfree-agents v{plugin_version()}"
         return line
 
     def __init__(self, settings: Settings, local_count: int | None = None, remote_count: int | None = None,
@@ -861,6 +900,8 @@ class HomeScreen(Screen):
         ]
         acts.append(Action("h", f"{ec.EMOJI_THEME_STR} Theme colors", lambda: Nav("theme_config", HOME_OWNED), section="tools"))
         acts += _tool_actions(home=True)
+        # Which version am I running, and where does it live — user request 2026-10-28.
+        acts.append(Action("a", "About — version and paths", lambda: Nav("about", HOME_OWNED), section="tools"))
         # Settings like NVIDIA rate limiter, auto-mode, prompt hook, watcher are in the lanes
         acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
         check_action_table(acts)

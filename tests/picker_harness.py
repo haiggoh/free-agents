@@ -36,7 +36,7 @@ import json, os, sys
 rec = {"prog": os.path.basename(sys.argv[1]), "argv": sys.argv[2:], "cwd": os.getcwd(),
        "tty": os.isatty(0),
        "env": {k: os.environ.get(k) for k in ("LA_AUTO_MODE", "LA_BLIND_AUTO", "LA_TELEMETRY",
-               "LA_QUEUE_STOP_HOOK", "LA_ENABLE_MCP", "CSL_WATCH")}}
+               "LA_QUEUE_STOP_HOOK", "LA_ENABLE_MCP", "CSL_WATCH", "LA_FREE_AGENTS_VERSION")}}
 with open(os.environ["PICKER_LOG"], "a") as fh:
     fh.write(json.dumps(rec) + "\n")
 PY
