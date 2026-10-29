@@ -74,10 +74,12 @@ for placeholder in expected:
         )
 
 size = len(text.encode("utf-8"))
-# 2048 was chosen as template size + headroom (b7d078b raised 1600 -> 2048 for a 1914-byte
-# template), NOT a model constraint. 0.47.5 briefly raised it to 3072 for the insights
-# paragraph; 0.47.6 trims the prompt back under 2048 and keeps this guard as-is.
-if size > 2048:
+# Cap origin: b7d078b raised 1600 -> 2048 as template-size (1914) + headroom — a bloat
+# guard, NOT a model constraint. 0.47.7 raises it to 2560 at explicit user request: the
+# local prompt now carries the full 3-line ★ Insight example and the tool-output note
+# (2469 bytes). Re-raise deliberately when a real addition lands; keep the guard against
+# uncontrolled growth.
+if size > 2560:
     raise SystemExit(f"prompt unexpectedly large: {size} bytes")
 
 required_phrases = (

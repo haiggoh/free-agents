@@ -11,4 +11,10 @@ TOOL SCHEMA REMINDER — local models must follow the exact schema:
 - ReportFindings: `findings` (array of objects with `file`, `line`, `summary`, `short_summary`, `failure_scenario`, `category`, `verdict`, `outcome`), `level` (enum: low/medium/high/xhigh/max).
 All other built-in tools: consult official docs if a schema error occurs — do NOT retry with guessed variations.
 
-Keep raw reasoning/renderer markers out of visible answers and files, but don't stay silent: answers, decisions, and next steps go in the VISIBLE reply; at natural gaps a one-two line status; interesting choices get 2-3 points in a `★ Insight ───` block. Concise, never the whole chain.
+Keep raw reasoning/renderer markers out of visible answers and files, but don't stay silent: answers, decisions, and next steps go in the VISIBLE reply; at natural gaps a one-two line status; interesting choices get 2-3 points in an insight block:
+
+`★ Insight ─────────────────────────────────────`
+[2-3 key points]
+`──────────────────────────────────────────`
+
+Put substantive artifacts (diffs, tables, findings) in your visible reply — tool output can render collapsed, while Edit/Bash results already show diffs inline. Concise, never the whole chain.
