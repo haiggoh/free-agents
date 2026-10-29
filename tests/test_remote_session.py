@@ -144,24 +144,27 @@ exit 0
         # thinking variants lead (GLM 5.3 Flash, GLM 5.3, Ultra, Super, Lightning), then the
         # non-thinking variants mirrored (Lightning after Super); Laguna XS follows the
         # non-thinking block — 33B/3B-active puts it below them by size (poolside.ai).
-        self.assertEqual(rows[0][0], 'nvidia-glm53-thinking')
-        self.assertEqual(rows[1][0], 'nvidia-glm53-full-thinking')
-        self.assertEqual(rows[2][0], 'nvidia-nemotron-ultra-thinking')
-        self.assertEqual(rows[3][0], 'nvidia-nemotron3-thinking')
-        self.assertEqual(rows[4][0], 'nvidia-lightning-thinking')
-        self.assertEqual(rows[5][0], 'nvidia-glm53')
-        self.assertEqual(rows[6][0], 'nvidia-glm53-full')
+        # 2026-10-29: Mistral Large 4 (Le Chonk) leads the hand-curated nvidia list by user
+        # decision (GLM 5.3 retired from the NVIDIA API) — supersedes the 2026-10-15 order.
+        self.assertEqual(rows[0][0], 'nvidia-mistral-large4')
+        self.assertEqual(rows[1][0], 'nvidia-glm53-thinking')
+        self.assertEqual(rows[2][0], 'nvidia-glm53-full-thinking')
+        self.assertEqual(rows[3][0], 'nvidia-nemotron-ultra-thinking')
+        self.assertEqual(rows[4][0], 'nvidia-nemotron3-thinking')
+        self.assertEqual(rows[5][0], 'nvidia-lightning-thinking')
+        self.assertEqual(rows[6][0], 'nvidia-glm53')
+        self.assertEqual(rows[7][0], 'nvidia-glm53-full')
         # stepfun + deepseek above Nemotron 3 Ultra (user 2026-10-24)
-        self.assertEqual(rows[7][0], 'nvidia-step5-preview')
-        self.assertEqual(rows[8][0], 'nvidia-deepseek-v4')
-        self.assertEqual(rows[9][0], 'nvidia-nemotron-ultra')
-        self.assertEqual(rows[10][0], 'nvidia-nemotron3')
-        self.assertEqual(rows[11][0], 'nvidia-lightning')
-        self.assertEqual(rows[12][0], 'nvidia-laguna')
+        self.assertEqual(rows[8][0], 'nvidia-step5-preview')
+        self.assertEqual(rows[9][0], 'nvidia-deepseek-v4')
+        self.assertEqual(rows[10][0], 'nvidia-nemotron-ultra')
+        self.assertEqual(rows[11][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[12][0], 'nvidia-lightning')
+        self.assertEqual(rows[13][0], 'nvidia-laguna')
         self.assertEqual(rows[0][1], 'nvidia')
         # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
         leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
-        self.assertGreaterEqual(len(leading), 12, 'the NVIDIA tier-1 block should lead the roster')
+        self.assertGreaterEqual(len(leading), 13, 'the NVIDIA tier-1 block should lead the roster')
         self.assertEqual(rows[len(leading)][1], 'gemini', 'Gemini should immediately follow the NVIDIA block')
         # Kimi K3 was requested by name; assert the id, not merely that some kimi row exists.
         self.assertEqual({r[0]: r[2] for r in rows}['nvidia-kimi-k3'], 'moonshotai/kimi-k3')

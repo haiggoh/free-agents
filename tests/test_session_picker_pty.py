@@ -124,6 +124,7 @@ class PickerLaunch(PilotCase):
 
     def test_remote_provider_default_omits_effort_and_is_persisted(self):
         async def s(app, pilot, h):
+            await h.expand_settings()              # 0.47.2: settings rows live under the folded group
             await h.wait_text("Effort: max")
             await h.press("e")                       # max -> provider default
             await h.wait_text("Effort: Provider default")
