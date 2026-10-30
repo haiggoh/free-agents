@@ -1,3 +1,28 @@
+## [0.49.1] — 2026-10-31
+
+### Fixed — picker consistency patch (scope: `docs/ROADMAP.md` §0.49.1; user-reported live in 0.49.0)
+
+- api-keys submenu: the nav-only actions pane rendered above the rows, so "Back to Home" sat at
+  the very top while every other submenu has it last. A nav-only pane on a screen WITH rows now
+  renders below them; About and other row-less screens keep it on top. Arrow Up/Down and the
+  filter box's hand-off follow the actual DOM order, and the moved pane hands focus to the rows.
+  (Out-of-family review by Gemini 3.8 Flash caught the inverted arrow navigation and the
+  About-screen false positive; both fixed and pinned by `NavPanePosition` pilot tests.)
+- Pinned remote rows no longer end in a dangling `·` when both the tier and lane tags are empty
+  (`_pin_row_label` joins only present tags); `_size_suffix` dedup is word-boundary now (`8B` no
+  longer matches inside `Foo-128B`).
+- NVIDIA param sizes: the HF warm-up cap defaulted to 40 while NVIDIA lists 85 models live, so
+  tail rows never got a size/age verdict and rendered unsized (and the age filter fail-opened).
+  Cap default is now 200. Non-HF ids (nvidia/*, stepfun-ai/*) still need vendor-documented
+  overrides — tracked on waypoint `remote-picker-parameter-sizes`.
+- Hand-curated NVIDIA order (registry.yaml is the SOT; regenerated artifacts): Nemotron 3 Ultra
+  (both variants) now ranks behind StepFun Step 5 Preview and DeepSeek V4.1 Flash.
+- Local session-picker rows and the info box no longer show dispatch `[roles]` brackets — roles
+  are a council/dispatch concept and mean nothing when choosing a session launch model.
+- Remote error classification: a 410 with end-of-life wording is now `model_eol`, not `policy`
+  (glm-5.3's EOL surfaced as a policy error followed by a misleading 429 fallback chain), and it
+  is not retriable — a retired model fails on every fallback too.
+
 ## [0.49.0] — 2026-10-30
 
 Dispatch-briefing guard, from the measured confabulation incident of 2026-10-29
