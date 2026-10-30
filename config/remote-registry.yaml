@@ -455,15 +455,6 @@ entries:
       DEPRECATED 2026-10-29 — z-ai/glm-5.3 retired from the NVIDIA API; use nvidia-mistral-large4. Was: SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.
     autocompact_default: "-"
 
-  - alias: nvidia-nemotron-ultra-thinking
-    provider: nvidia
-    model_id: nvidia/nemotron-3-ultra-550b-a55b
-    display: NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)
-    tier: unknown
-    notes: >-
-      Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.
-    autocompact_default: 1m
-
   - alias: nvidia-nemotron3-thinking
     provider: nvidia
     model_id: nvidia/nemotron-3-super-120b-a12b
@@ -518,6 +509,16 @@ entries:
     notes: >-
       WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.
     autocompact_default: "-"
+
+  - alias: nvidia-nemotron-ultra-thinking
+    provider: nvidia
+    model_id: nvidia/nemotron-3-ultra-550b-a55b
+    display: NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)
+    tier: unknown
+    notes: >-
+      Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.
+      Moved behind stepfun/deepseek (user 2026-10-31).
+    autocompact_default: 1m
 
   - alias: nvidia-nemotron-ultra
     provider: nvidia

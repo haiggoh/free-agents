@@ -298,8 +298,11 @@ def load_remote_catalog(kind):
 
 
 # A catalog can list hundreds of ids; the first lookups cost ~0.3 s each, so cap the cold
-# warm-up per provider. Later opens read the 30-day cache instantly.
-HF_WARM_LIMIT = int(os.environ.get("LA_PICKER_HF_WARM_LIMIT", "40"))
+# warm-up per provider. Later opens read the 30-day cache instantly. The cap must exceed a
+# provider's full catalog (NVIDIA lists 85 models, 2026-10-31) or the tail rows never get a
+# size/age verdict and the picker shows them unsized — user 2026-10-31: every NVIDIA group
+# model should display its parameter size.
+HF_WARM_LIMIT = int(os.environ.get("LA_PICKER_HF_WARM_LIMIT", "200"))
 
 
 def load_catalog():

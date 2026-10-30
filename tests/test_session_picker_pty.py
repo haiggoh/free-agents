@@ -806,6 +806,15 @@ class RemoteLiveFilter(PilotCase):
         self.run_picker(s, start="remote")
 
 
+class HfWarmCap(PilotCase):
+    """User 2026-10-31: the HF warm-up cap must cover a whole provider catalog (NVIDIA lists 85
+    models), or the tail rows render without a parameter size forever."""
+
+    def test_warm_cap_covers_a_full_provider_catalog(self):
+        self.assertGreaterEqual(self.sp.HF_WARM_LIMIT, 100,
+                                f"HF_WARM_LIMIT={self.sp.HF_WARM_LIMIT} would leave tail rows unsized")
+
+
 class NavPanePosition(PilotCase):
     """User 2026-10-31: api-keys setup showed "Back to Home" as the very first row — its actions
     pane is nav-ONLY and the pane renders above #rows, while every other submenu has Back as the

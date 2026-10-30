@@ -204,6 +204,22 @@ class SizeSortAndLabelTests(unittest.TestCase):
         labels = {i.id: i.label for g in lane.groups() for i in g.items}
         self.assertNotIn("· 8B", labels["g-y"])                 # name already states it: deduped
 
+    def test_nemotron_ultra_ranks_behind_stepfun_and_deepseek(self):
+        # User 2026-10-31: in the hand-curated NVIDIA order, Nemotron 3 Ultra (both variants)
+        # comes AFTER StepFun Step 5 and DeepSeek V4.1 Flash — both are superior to it.
+        # The inventory is generated from config/remote-registry.yaml into
+        # config/remote-agents.sh (LA_REMOTE_AGENTS), so assert on the generated file.
+        roster = (ROOT / "config" / "remote-agents.sh").read_text(encoding="utf-8")
+        order = [ln.split("|", 1)[0] for ln in roster.splitlines()
+                 if ln.startswith('  "') and "|nvidia|" in ln]
+        i = {alias: n for n, alias in enumerate(order)}
+        for variant in ("nvidia-nemotron-ultra", "nvidia-nemotron-ultra-thinking"):
+            self.assertIn(variant, i, f"{variant} missing from the nvidia roster")
+            self.assertGreater(i[variant], i["nvidia-step5-preview"],
+                               f"{variant} must rank after nvidia-step5-preview: {order}")
+            self.assertGreater(i[variant], i["nvidia-deepseek-v4"],
+                               f"{variant} must rank after nvidia-deepseek-v4: {order}")
+
     def test_lane_tag_drops_catalog_but_keeps_real_lanes(self):
         orig = m.lane_for
         try:
