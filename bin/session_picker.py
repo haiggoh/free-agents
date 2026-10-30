@@ -1319,6 +1319,15 @@ class Picker(App):
         layout = self.query_one("#layout")
         if show_models and has_groups and rendered and all(a.section == "nav" for a in rendered):
             layout.move_child(actions_list, after=self.query_one("#rows"))
+            # The pane moved below the rows: rows take focus and a valid highlight, so arrow
+            # navigation starts in the content. (Before, the pane on top held focus and the
+            # first Down handed it over — that hand-over assumed actions-on-top.)
+            rows_w = self.query_one("#rows", OptionList)
+            if rows_w.display and rows_w.option_count:
+                if rows_w.highlighted is None:
+                    rows_w.highlighted = 0
+                if self.focused is actions_list:
+                    rows_w.focus()
         else:
             layout.move_child(actions_list, before=self.query_one("#search"))
         prev_section = None
@@ -1649,6 +1658,13 @@ class Picker(App):
                     if rows_count > 0 and rows_list.display:
                         rows_list.focus()
                         rows_list.highlighted = rows_count - 1
+                        event.stop()
+                        return
+                elif key == "down" and actions_below and actions_list.highlighted == actions_count - 1:
+                    # Pane below rows: Down from the last action wraps to the first row
+                    if rows_count > 0 and rows_list.display:
+                        rows_list.focus()
+                        rows_list.highlighted = 0
                         event.stop()
                         return
                 elif key == "up" and actions_list.highlighted == 0:
@@ -1998,7 +2014,11 @@ class Picker(App):
             return
         if delta < 0 and h == 0:
             actions = self.query_one("#actions", OptionList)
-            if actions.option_count:
+            # The hand-off to the actions list only makes sense when the pane is ABOVE the
+            # rows; with the pane below, Up at the first row just stays (DOM order).
+            layout = self.query_one("#layout", Vertical)
+            actions_below = layout.children.index(actions) > layout.children.index(rows)
+            if not actions_below and actions.option_count:
                 actions.highlighted = actions.option_count - 1
                 actions.focus()
             return
