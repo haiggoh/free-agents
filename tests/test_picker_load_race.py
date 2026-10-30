@@ -407,13 +407,17 @@ class VersionSurfaces(PilotCase):
         self.run_picker(scenario, start="home")
 
     def test_about_screen_shows_version_and_paths(self):
+        # 0.48.0: the version is the bottom #version footer on About too (like Home), plus
+        # a sentence at the top of the policy; the install path stays in the policy.
         import session_picker_model as m
+        from textual.widgets import Static
         async def scenario(app, pilot, h):
             await h.press("i")
             self.assertEqual(h.screen(), "AboutScreen")
-            text = self._policy_text(app) + "\n" + h.text()
-            self.assertIn(f"free-agents v{m.plugin_version()}", text)
-            self.assertIn(str(Path(h.case.sp.__file__).resolve().parent.parent), text)   # install path
+            vtext = str(app.query_one("#version", Static).render())
+            self.assertIn(f"free-agents v{m.plugin_version()}", vtext)
+            self.assertIn(f"free-agents v{m.plugin_version()}", self._policy_text(app))  # top sentence
+            self.assertIn(str(Path(h.case.sp.__file__).resolve().parent.parent), self._policy_text(app))  # install path
             await h.press("b")
             self.assertEqual(h.screen(), "HomeScreen")
         self.run_picker(scenario, start="home")

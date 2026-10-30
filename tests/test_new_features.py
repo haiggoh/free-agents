@@ -348,20 +348,20 @@ class ArrowKeysCycleSettings(PilotCase):
     def test_right_left_toggle_boolean_mcps(self):
         async def s(app, pilot, h):
             await h.expand_settings()              # 0.47.2: settings rows live under the folded group
-            await h.wait_text("MCPs: ENABLED")     # default ON (user 2026-10-15)
+            await h.wait_text("Load MCPs in session: ENABLED")     # default ON (user 2026-10-15)
             await h.press("m")
-            await h.wait_text("MCPs: DISABLED")
+            await h.wait_text("Load MCPs in session: DISABLED")
             await h.press("m")
-            await h.wait_text("MCPs: ENABLED")
+            await h.wait_text("Load MCPs in session: ENABLED")
         self.run_picker(s, start="local")
 
     def test_settings_hotkey_works_while_collapsed(self):
         # 0.47.2: a folded settings row keeps its hotkey — cycling must not require expanding.
         async def s(app, pilot, h):
-            await h.wait_text("Settings ▸")        # still folded
+            await h.wait_text("▸ Advanced")        # still folded
             await h.press("m")
             await h.expand_settings()
-            await h.wait_text("MCPs: DISABLED")
+            await h.wait_text("Load MCPs in session: DISABLED")
         self.run_picker(s, start="local")
 
 

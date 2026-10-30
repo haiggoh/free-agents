@@ -60,6 +60,15 @@ def _load_emojis() -> dict[str, str]:
             key, value = match.groups()
             emojis[key] = value
 
+    # Resolve one level of ${VAR} indirection: emoji.sh links e.g.
+    # LK_EMOJI_MODEL="${SESSION_EMOJI_LOCAL}" (single source of truth) — a literal
+    # "${…}" must never reach a rendered label.
+    ref = re.compile(r"^\$\{([A-Z0-9_]+)\}$")
+    for k, v in list(emojis.items()):
+        m2 = ref.match(v)
+        if m2 and m2.group(1) in emojis:
+            emojis[k] = emojis[m2.group(1)]
+
     _EMOJI_CACHE = emojis
     return _EMOJI_CACHE
 
@@ -195,6 +204,9 @@ EMOJI_LOCAL_CAPABLE_STR = _EMOJIS.get("EMOJI_LOCAL_CAPABLE", "🏷️")
 EMOJI_HIDDEN_REPORT_STR = _EMOJIS.get("EMOJI_HIDDEN_REPORT", "📋")
 EMOJI_FILTER_STR = _EMOJIS.get("EMOJI_FILTER", "🔍")
 EMOJI_DOWNLOAD_STR = _EMOJIS.get("EMOJI_DOWNLOAD", "📥")
+EMOJI_BLOCK_STR = _EMOJIS.get("EMOJI_BLOCK", "⛔️")
+EMOJI_BOLT_STR = _EMOJIS.get("EMOJI_BOLT", "🔩")
+EMOJI_TOOLBOX_STR = _EMOJIS.get("EMOJI_TOOLBOX", "🛠️")
 EMOJI_SHIELD_STR = _EMOJIS.get("EMOJI_SHIELD", "🛡️")
 EMOJI_CLOUD_CONFIG_STR = _EMOJIS.get("EMOJI_CLOUD_CONFIG", "☁️")
 EMOJI_THEME_STR = _EMOJIS.get("EMOJI_THEME", "🎨")

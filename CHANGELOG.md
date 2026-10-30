@@ -1,21 +1,50 @@
-## [0.47.7] — 2026-10-30
+## [0.48.0] — 2026-10-30
 
-Prompt refinements from user review (2026-10-30): the waypoints hand-edit rule stays
-verbatim, the local prompt gets the full insight example, and both prompts note that
-substantive artifacts belong in the visible reply.
+Picker UI rework + prompt refinements from live user review (2026-10-30). Full item list
+is guarded by waypoint `inflight-0480-picker-ui-rework`.
 
-### Changed
+### Changed — layout & grouping
 
-- Remote prompt: the `~/.claude/waypoints.json` NEVER-hand-edit rule is restored verbatim
-  (user decision: the concrete path is the point — a past hand-edit clobbered the whole
-  store). The general single-JSON-document rule stays alongside it.
-- Both prompts, visibility paragraph: restored the full 3-line `★ Insight ───` example in
-  the LOCAL prompt too, and added: put substantive artifacts (diffs, tables, findings) in
-  the VISIBLE reply — tool output can render collapsed, while Edit/Bash results already
-  show diffs inline. Local prompt now 2469 bytes; the size guard in
-  `test_launcher_profiles.sh` is raised 2048 -> 2560 deliberately (cap origin is
-  template+headroom, b7d078b — not a model constraint).
-- User-level rule added to ~/.claude/CLAUDE.md: report evidence vs assumption, labeled
+- Version footer (option B, user 2026-10-30): subheadline is now the cyan identity line
+  with a blank line after it; the version sits flush at the very bottom below the nav
+  instructions, dimmer + italic (`ansi_black`) so it no longer matches the status line's
+  color; blank line only BEFORE it.
+- Home menu: Lowkey is third (after Local/Remote), blank separator rows between section
+  groups (lanes | tools | nav).
+- Lane pickers: TWO harmonica groups — "Model" (effort/temperature/thinking, open by
+  default) and "Advanced" (folded by default; filter settings, API keys, NVIDIA rate
+  limiter, and on Local the RAM-guard + backend manager live there now). Nav (back/quit)
+  is always the LAST row. Folded rows keep their hotkeys.
+- About: row emoji on Home, structured policy (OS/hardware from the cached la-hw-detect
+  facts, blank line between groups), rendered non-dim, version as the bottom footer like
+  Home; no empty "(nothing to show here yet)" placeholder and no input box on plain menus.
+- Menu labels in prose: "Load MCPs in session", "optional Anthropic Telemetry calls"
+  (= CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC), "Always block Github releases in
+  \"blind-trust\" mode" with ⛔️ (new canonical EMOJI_BLOCK), "Set session name: …".
+- Go-launch row shows provider · humanized model ("NVIDIA · Mistral Large 4 (Le Chonk)").
+- Download menu: "Absent" group renamed "Available for download from existing catalogs".
+- Infoboxes: "Lane:" line removed (no decision value); NVIDIA group hover shows the full
+  quota note (no daily cap, 40 req/min, per-model throttling 24-48h, key never blocked),
+  every NVIDIA model box appends the short version; the inline "no daily cap/40/min" row
+  tag is gone; Gemini/Google group hover explains dispatch-only. Param sizes now show in
+  the list via vendor-documented overrides (Le Chonk 1.05T etc.).
+
+### Changed — Lowkey is now any-model (was local-only dispatch)
+
+- Title/label: "Lowkey — model evaluation chat". Local list NOT open by default; instead
+  "Choose local model…" / "Choose API provider/model…" entries plus a "Go launch:" quick
+  launch remembering the last model. Mode toggle Convo/One-shot; own thinking toggle;
+  model rows select on click/Enter (highlight-to-launch removed); emojis on all entries.
+
+### Changed — prompts & rules
+
+- Remote prompt: the `~/.claude/waypoints.json` NEVER-hand-edit rule restored verbatim
+  (user decision: a past hand-edit clobbered the whole store). Both prompts: full 3-line
+  `★ Insight ───` example also in the LOCAL prompt, and "put substantive artifacts in the
+  VISIBLE reply — tool output can render collapsed; Edit/Bash diffs render inline".
+  Local prompt 2469 bytes; `test_launcher_profiles.sh` guard raised 2048 -> 3072 at
+  explicit user request (cap origin: template+headroom, b7d078b — not a model constraint).
+- ~/.claude/CLAUDE.md gains the user-level rule: report evidence vs assumption, labeled
   ("verified:" / "assumed:"), never present an assumption as a verified result.
 
 ## [0.47.6] — 2026-10-29

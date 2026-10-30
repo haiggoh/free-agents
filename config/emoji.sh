@@ -44,6 +44,9 @@ EMOJI_HIDDEN_REPORT="📋"   # hidden-model report (picker `x`, bash `R`)
 EMOJI_FILTER="🔍"           # filter submenu (picker remote `y`)
 EMOJI_DOWNLOAD="📥"         # download models (picker `d`, distinct from backend manager)
 EMOJI_SHIELD="🛡️"          # intercept agents toggle (picker `x`)
+EMOJI_BLOCK="⛔️"           # always-block rows (blind-trust GitHub releases)
+EMOJI_BOLT="🔩"            # Model settings group header (not the local/remote lane emojis)
+EMOJI_TOOLBOX="🛠️"         # Advanced settings group header (distinct from EMOJI_TOOLS 🔧 = backend manager)
 
 # Status / progress emojis (picker)
 EMOJI_OK="✅"

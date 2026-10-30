@@ -800,13 +800,17 @@ class LowkeyTests(unittest.TestCase):
         self.assertIn("none", seen)
 
     def test_convo_argv_carries_model_effort_and_session(self):
+        # 0.48.0: row Enter/click only SELECTS (activate_selected -> None); the explicit
+        # `p` action in convo mode launches via _convo().
         s = m.Settings(lowkey_effort="low")
         lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
         lk.session_name = "notes"
         lk.accordion.select("gemma-4-26b")
-        argv = lk.activate_selected().argv
-        self.assertEqual(argv, ["lowkey", "--convo", "--model", "gemma-4-26b",
-                                "--effort", "low", "--session", "notes"])
+        self.assertIsNone(lk.activate_selected())          # click = select only
+        req = lk._convo()
+        self.assertEqual(req.argv, ["lowkey", "--convo", "--model", "gemma-4-26b",
+                                    "--effort", "low", "--session", "notes"])
+        self.assertEqual(req.env.get("LA_THINKING_OVERRIDE"), "true")   # default ON
 
     def test_one_shot_argv(self):
         lk = m.LowkeyScreen(m.Settings(), local_models(), owner=m.DIRECT_ROOT)
@@ -907,7 +911,9 @@ class RemoteInfoBoxTests(unittest.TestCase):
         lane = m.RemoteScreen(m.Settings(), agents, owner=m.DIRECT_ROOT)
         self.assertIn("Laguna XS 2.1 (Poolside)", lane.info_text("nvidia-laguna"))
         self.assertIn("No notes", lane.info_text("gemini-flash"))
-        self.assertIn("Hover or highlight", lane.info_text("nvidia"))      # a group id
+        # group hover now carries provider-level facts (user 2026-10-30): the NVIDIA quota
+        # note on the nvidia group header; a hint only when nothing is pointed at
+        self.assertIn("no daily cap", lane.info_text("nvidia"))            # group id
         self.assertIn("Hover or highlight", lane.info_text(None))
 
     def test_gemini_info_box_recommends_dispatch_only(self):
@@ -921,13 +927,15 @@ class RemoteInfoBoxTests(unittest.TestCase):
         self.assertIn("offload dispatch only", lane.info_text("cat:gemini:gemini-3.8-pro"))
         self.assertNotIn("offload dispatch only", lane.info_text("nvidia-laguna"))
 
-    def test_info_text_shows_the_model_lane(self):
-        # T3: every model's info box names its lane; NVIDIA has no native endpoint, so the
-        # verdict is plain chat/completions without any route probe.
+    def test_info_text_has_no_lane_line_but_nvidia_quota_note(self):
+        # User 2026-10-30: the "Lane:" line held no decision value (the lane is visible in
+        # the row) — removed. NVIDIA model boxes instead carry the short quota note.
         agents = [m.RemoteAgent("nvidia-laguna", "nvidia", "NVIDIA Laguna XS 2.1", "unknown",
                                 model_id="nvidia/llama-3.3-nemotron-super-49b")]
         lane = m.RemoteScreen(m.Settings(), agents, owner=m.DIRECT_ROOT)
-        self.assertIn("Lane: chat/completions", lane.info_text("nvidia-laguna"))
+        text = lane.info_text("nvidia-laguna")
+        self.assertNotIn("Lane:", text)
+        self.assertIn("no daily cap", text)
 
 
 class ThemeStoreLayering(unittest.TestCase):

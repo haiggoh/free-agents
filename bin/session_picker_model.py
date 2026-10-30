@@ -74,14 +74,18 @@ class Action:
     step: Callable[[int], object] | None = None
 
 
-# The one collapsed group row in the lane pickers (user 2026-10-29): while folded, the
-# settings rows render under this header instead of as top-level rows. Key "0" never
-# matches a letter hotkey, so it cannot collide with a real action.
-SETTINGS_GROUP = Action("0", "Settings", lambda: None)
+# The collapsed group rows in the lane pickers (user 2026-10-29/30): while folded, the
+# rows render under these headers instead of as top-level rows. Key "0" never matches a
+# letter hotkey, so it cannot collide with a real action. MODEL_GROUP holds the three
+# model-setting rows (effort/temperature/thinking) — open by default, more users want
+# those; SETTINGS_GROUP ("Advanced") holds the rest — collapsed by default. Nav rows
+# always render last (user 2026-10-30).
+SETTINGS_GROUP = Action("0", "Advanced", lambda: None)
+MODEL_GROUP = Action("0", "Model", lambda: None)
 
 
 def setting(key: str, label: str, choices, get: Callable[[], object], put: Callable[[object], object],
-            enabled: bool = True) -> Action:
+            enabled: bool = True, section: str = "settings") -> Action:
     """A row whose value cycles through `choices` in either direction (wraps)."""
     def step(d: int):
         try:
@@ -89,7 +93,7 @@ def setting(key: str, label: str, choices, get: Callable[[], object], put: Calla
         except ValueError:
             i = -1 if d > 0 else 0
         put(list(choices)[(i + d) % len(choices)])
-    return Action(key, label, lambda: step(1), enabled=enabled, step=step)
+    return Action(key, label, lambda: step(1), enabled=enabled, section=section, step=step)
 
 
 def check_action_table(actions) -> None:
@@ -118,7 +122,7 @@ def thinking_constraint(provider: str, model_id: str, choice: bool | None) -> st
     return None
 
 
-def thinking_row(s: Settings, key: str = "j") -> Action:
+def thinking_row(s: Settings, key: str = "j", section: str = "model") -> Action:
     """The thinking toggle row: ON (default) ↔ OFF. The row stores only the two states that
     differ behaviorally — None and True both launch with thinking ON — so cycling back from
     OFF returns to the launch default rather than to a second, indistinguishable ON."""
@@ -130,8 +134,8 @@ def thinking_row(s: Settings, key: str = "j") -> Action:
         if s.on_thinking_saved:
             s.on_thinking_saved(s.thinking_session)
 
-    return setting(key, f"{ec.EMOJI_THINKING_STR} Thinking: {label()}", (None, False),
-                   lambda: s.thinking_session, put)
+    return setting(key, f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {label()}", (None, False),
+                   lambda: s.thinking_session, put, section=section)
 
 
 # --- data --------------------------------------------------------------------------------
@@ -344,6 +348,12 @@ def created_before_cutoff(created: str, months: int, today=None) -> bool:
     return d < age_cutoff_date(months, today)
 
 
+def status_line(sm: "Screen") -> str:
+    """The nav-instructions line at the very bottom of EVERY screen — single source of
+    truth (user 2026-10-30); pinned by a fixture test so it cannot drift per screen."""
+    return "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies"
+
+
 def size_sorted(rows, size_of):
     """Rows largest-first (user 2026-10-20: parameter size is a rough capability signal).
 
@@ -433,6 +443,26 @@ PROVIDER_ADVISORIES = {
     "gemini": "Recommended for offload dispatch only: the free daily quota is too small for full sessions.",
 }
 
+# Group-hover infobox texts (user 2026-10-30): provider-level facts live on the GROUP row,
+# not inline with every model. Per-model NVIDIA rows get the short version appended.
+NVIDIA_GROUP_NOTE = ("NVIDIA API key currently holds no daily cap — the only limitation is "
+                     "40 requests per minute, but NO known daily maximum quota (yes, you read "
+                     "that right). Note: on some days a specific model can be throttled or "
+                     "blocked for a while when server load is very high; usually resolves after "
+                     "24-48 hours. It never blocks the whole API key — you can always choose "
+                     "another model if one is not reachable.")
+NVIDIA_MODEL_QUOTA_SHORT = ("NVIDIA key: no daily cap, 40 req/min only; a model can be throttled "
+                            "under high load for 24-48h, but the key is never blocked — pick "
+                            "another model.")
+PROVIDER_INFOS = {
+    "nvidia": NVIDIA_GROUP_NOTE,
+    "gemini": ("Gemini's free tier is recommended for offload dispatch only: its free daily "
+               "quota is too small to carry a full session — a session's first prompt alone "
+               "eats much of it. Every Gemini model's info box says the same."),
+    "google": ("Google AI Studio free tier: recommended for offload dispatch only — the free "
+               "daily quota is too small for full sessions."),
+}
+
 
 _MODEL_NOTES_PATH = Path(__file__).resolve().parent.parent / "config" / "remote-model-notes.json"
 
@@ -451,11 +481,10 @@ def model_note(alias: str, path: Path | None = None) -> str:
 
 
 def tier_label(tier: str, provider: str) -> str:
-    if provider == "nvidia" and tier == "unknown":
-        return "no daily cap/40/min"
+    # Quota facts moved to the infobox (user 2026-10-30) — inline row tags are noise.
     if tier == "trial":
         return "trial — possible cost"
-    return tier
+    return "" if tier == "unknown" else tier
 
 
 # --- settings ----------------------------------------------------------------------------
@@ -514,11 +543,15 @@ class Settings:
     hw_os: "str | None" = None
     hw_distro: str = ""
     hw_hardware: "str | None" = None
+    hw_ram_gb: "float | None" = None
+    hw_gpu: str = ""
     deny_gh_release: bool = False    # re-add "Bash(gh release create:*)" to the blind-trust deny list (off since 0.32.0)
     remote_temperature: str = sms.DEFAULT_TEMPERATURE["remote_api_session"]
     local_temperature: str = sms.DEFAULT_TEMPERATURE["local_session"]
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
     lowkey_temperature: str = sms.DEFAULT_TEMPERATURE["lowkey"]
+    lowkey_thinking: "bool | None" = None   # Lowkey's own thinking toggle (user 2026-10-30)
+    stats: dict = field(default_factory=dict)  # About-screen usage stats, gathered at picker start
     # Session thinking toggle (both lanes; waypoint fa-thinking-toggle). None = the launch
     # default, which is thinking ON for session launches; True/False = a remembered choice the
     # launchers apply via LA_THINKING_OVERRIDE (model constraints may override it, and the info
@@ -760,12 +793,16 @@ class Screen:
     lane_key = ""
     # Lane pickers fold their settings rows under one group header (user 2026-10-29,
     # waypoint picker-collapsed-settings-group); every other screen renders plain rows.
-    settings_collapsed = True
+    settings_collapsed = True    # the "Advanced" group starts folded (user 2026-10-29)
+    model_collapsed = False      # the "Model" group (effort/temp/thinking) starts OPEN
     # Rendered in its own colour below the policy line when a screen sets it (Home does).
     version_line = ""
 
     def toggle_settings(self):
         self.settings_collapsed = not self.settings_collapsed
+
+    def toggle_model_group(self):
+        self.model_collapsed = not self.model_collapsed
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
         self.settings = settings
@@ -820,12 +857,14 @@ def _common_toggles(s: Settings, include_watcher: bool):
         acts.append(setting("z", f"Classifier: {CLASSIFIER_SOURCE_LABELS[s.classifier_source]}",
                 (0, 1, 2), lambda: s.classifier_source, lambda v: setattr(s, "classifier_source", v)))
     acts += [
-        setting("t", f"{ec.EMOJI_TELEMETRY_ON_STR} Telemetry: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry")),
-        setting("p", f"{ec.EMOJI_STOP_HOOK_STR} Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
+        # Label says what it actually blocks (user 2026-10-30): LA_TELEMETRY=0 exports
+        # CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 — stock Claude Code reporting off.
+        setting("t", f"{ec.gap(ec.EMOJI_TELEMETRY_ON_STR)}optional Anthropic Telemetry calls: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry")),
+        setting("p", f"{ec.gap(ec.EMOJI_STOP_HOOK_STR)}Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
                 *_toggle(s, "stop_hook")),
         # Key 'd': 'g' is the dynamic Go-launch key and 'h' belongs to the remote filter
         # submenu (FilterSubmenuTests) — keep this row off both.
-        setting("d", f"Deny 'gh release create' in blind-trust: {'ON' if s.deny_gh_release else 'OFF'}",
+        setting("d", f"{ec.gap(ec.EMOJI_BLOCK_STR)}Always block Github releases in \"blind-trust\" mode: {'ON' if s.deny_gh_release else 'OFF'}",
                 *_toggle(s, "deny_gh_release")),
     ]
     if include_watcher:
@@ -839,24 +878,29 @@ def _common_toggles(s: Settings, include_watcher: bool):
 OOM_PROTECTION_NAME = "RAM usage out-of-memory protection"
 
 
-def _tool_actions(backend: bool = True, local_session: bool = False, home: bool = False):
+def _tool_actions(backend: bool = True, local_session: bool = False, home: bool = False,
+                  settings_keys: tuple = ()):
+    # settings_keys (user 2026-10-30): on lane screens these keys are SETTINGS and fold into
+    # the "Advanced" group — k/n on Remote, u/v on Local.
+    def sec(k):
+        return "settings" if k in settings_keys else "tools"
     # The backend manager drives LOCAL runtimes (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM),
     # so the Remote lane does not offer it (user, 2026-10-04).
     # Local session picker (local_session=True) hides API keys and NVIDIA rate limiter.
     # Home screen (home=True) shows only API keys and Backend manager, no NVIDIA rate limiter.
     acts = [
         Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
-               lambda: Nav("runtime_manager"), section="tools"),
+               lambda: Nav("runtime_manager"), section=sec("v")),
     ]
     if local_session:
         # It protects LOCAL sessions only, so only the Local screen offers it — not Remote, and not
         # Home either, where it read as a global setting (user 2026-10-23).
         acts.append(Action("u", f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}{OOM_PROTECTION_NAME}", lambda: Nav("memguard"),
-                           section="tools"))
+                           section=sec("u")))
     if not local_session:
-        acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section="tools"))
+        acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section=sec("k")))
         if not home:
-            acts.append(Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section="tools"))
+            acts.append(Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section=sec("n")))
     return acts if backend else [a for a in acts if a.key != "v"]
 
 
@@ -928,15 +972,54 @@ class AboutScreen(Screen):
     title = f"{ec.gap(ec.EMOJI_INFO_STR)}About — {SESSION_LAUNCHER_TITLE}"
 
     @property
+    def version_line(self):
+        # Bottom footer like Home (user 2026-10-30, option B) — not the first policy line.
+        return f"free-agents v{plugin_version()}"
+
+    @property
     def policy(self):
+        # Structured readout, not a dim list of directories (user 2026-10-30): version
+        # sentence on top, blank lines between groups, hardware + usage stats from
+        # settings.stats (gathered in the background at picker start), paths last.
         import os
+        s = self.settings
         root = Path(__file__).resolve().parent.parent
-        lines = [f"free-agents v{plugin_version()}",
-                 f"Installed at: {root}",
-                 f"Config: {os.environ.get('LA_CONFIG_SOURCE') or (root / 'config')}",
-                 f"Remote launcher: {os.environ.get('CSL_REMOTE_LAUNCHER') or (root / 'bin/remote-session.sh')}",
-                 f"Catalog cache: {catalog_cache_dir()}"]
-        return "\n".join(lines)
+        hw = s.hw_hardware or "unknown"
+        if getattr(s, "hw_distro", ""):
+            hw += f" · {s.hw_distro}"
+        if getattr(s, "hw_ram_gb", None):
+            hw += f" · {s.hw_ram_gb:g} GB RAM"
+        if getattr(s, "hw_gpu", ""):
+            hw += f" · GPU {s.hw_gpu}"
+        st = getattr(s, "stats", None) or {}
+        # Visual hierarchy via a Rich Text (user 2026-10-30): section labels bold, values
+        # plain — NOT all cyan. Each installed backend family gets its own line, pinned
+        # version only, flagged when installed-but-unpinned.
+        from rich.text import Text
+        out = Text()
+        out.append(f"This is free-agents v{plugin_version()}.\n\n", style="bold")
+        out.append("OS / hardware: ", style="bold")
+        out.append(f"{s.hw_os or 'unknown'} — {hw}\n")
+        out.append("Backends installed:\n", style="bold")
+        for b in (st.get("backends") or ["…"]):
+            out.append(f"  {b}\n")
+        out.append("\n")
+        out.append("Local models: ", style="bold")
+        out.append(f"{st.get('local_models', '…')}"
+                   + (f" (~{st['local_gb']:g} GB on disk)" if st.get("local_gb") else "") + "\n")
+        out.append("API providers with a key: ", style="bold")
+        out.append(f"{st.get('providers') or '…'}\n")
+        out.append("Remote models listed: ", style="bold")
+        out.append(f"{st.get('remote_visible', '…')}"
+                   + (f" (hidden by filters: {st['remote_hidden']})" if st.get("remote_hidden") else "") + "\n")
+        out.append("NVIDIA rate limiter: ", style="bold")
+        out.append(f"{st.get('rate_limiter') or '—'}\n\n")
+        out.append("Paths\n", style="bold")
+        out.append(f"Installed at: {root}\n")
+        out.append(f"Config: {os.environ.get('LA_CONFIG_SOURCE') or (root / 'config')}\n")
+        out.append(f"Remote launcher: {os.environ.get('CSL_REMOTE_LAUNCHER') or (root / 'bin/remote-session.sh')}\n")
+        out.append(f"Catalog cache: {catalog_cache_dir()}")
+        return out
 
     def actions(self):
         return [Action("b", f"{ec.EMOJI_HOME_STR} Back to home", lambda: Nav("home", HOME_OWNED), section="nav")]
@@ -981,20 +1064,26 @@ class HomeScreen(Screen):
         return str(count) if count is not None else fallback
 
     def actions(self):
+        # Order (user 2026-10-30): the two session lanes + Lowkey grouped together first
+        # (Lowkey above the blank line, with the session pickers, not with config items);
+        # blank; API keys -> Download -> Backend manager -> Cloud config; blank; Theme +
+        # About; Quit. The renderer drops a blank row on every section change.
         acts = [
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR} Local sessions ({self._format_count(self.local_count, '?')} on disk)",
                    lambda: Nav("local", HOME_OWNED), section="lanes"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote free API sessions ({self._format_count(self.catalog_total, '?')} listed)",
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
-            Action("c", f"{ec.EMOJI_CLOUD_CONFIG_STR}  {ec.EMOJI_TOOLS_STR} Cloud session configuration…", lambda: Nav("cloud_config", HOME_OWNED), section="tools"),
-            Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools"),
-            Action("o", f"{ec.LK_EMOJI_CONVO_STR} Lowkey — local dispatch chat", lambda: Nav("tool:lowkey"), section="tools"),
+            Action("o", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Lowkey — model evaluation chat", lambda: Nav("tool:lowkey"), section="lanes"),
         ]
-        acts.append(Action("h", f"{ec.EMOJI_THEME_STR} Theme colors", lambda: Nav("theme_config", HOME_OWNED), section="tools"))
-        acts += _tool_actions(home=True)
-        # Which version am I running, and where does it live — user request 2026-10-28.
-        # Key i, not a: a is the lanes' Auto-mode key, and Home never reuses a lane setting key.
-        acts.append(Action("i", "About — version and paths", lambda: Nav("about", HOME_OWNED), section="tools"))
+        tools = _tool_actions(home=True)          # [k API keys, v Backend manager]
+        acts.append(tools[0])                     # API keys first …
+        acts.append(Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools"))  # … download directly after
+        acts.append(tools[1])                     # Backend manager (blank line after it)
+        acts.append(Action("c", f"{ec.gap(ec.EMOJI_CLOUD_CONFIG_STR)}Cloud session configuration…", lambda: Nav("cloud_config", HOME_OWNED), section="tools"))  # ☁️ only — 🔧 is the backend manager's, adjacent now (user 2026-10-30)
+        # Theme last before About (user 2026-10-30).
+        # Key i for About, not a: a is the lanes' Auto-mode key, and Home never reuses a lane key.
+        acts.append(Action("h", f"{ec.EMOJI_THEME_STR} Theme colors", lambda: Nav("theme_config", HOME_OWNED), section="appearance"))
+        acts.append(Action("i", f"{ec.gap(ec.EMOJI_INFO_STR)}About — version and paths", lambda: Nav("about", HOME_OWNED), section="appearance"))
         # Settings like NVIDIA rate limiter, auto-mode, prompt hook, watcher are in the lanes
         acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
         check_action_table(acts)
@@ -1157,17 +1246,17 @@ class LocalScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            setting("e", f"{ec.EMOJI_EFFORT_STR} Effort: {s.local_effort}", effort_choices("local_session"),
-                    lambda: s.local_effort, lambda v: self._set_effort(v)),
-            setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.local_temperature or '<provider default>'}",
-                    TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v)),
-            thinking_row(s),
+            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.local_effort}", effort_choices("local_session"),
+                    lambda: s.local_effort, lambda v: self._set_effort(v), section="model"),
+            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.local_temperature or '<provider default>'}",
+                    TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v), section="model"),
+            thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="lanes"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR}  Remote free API sessions", lambda: Nav("remote", self.owner),
                    section="hidden"),
-            setting("m", f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
+            setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp")),
             Action("y", f"Auto-sync local registry with the disk (no prompts): "
                         f"{'ON' if s.memguard.get('registry_auto_sync') else 'OFF'}",
@@ -1179,10 +1268,10 @@ class LocalScreen(Screen):
         # No `in self.models` check: the list is lazy and usually not loaded yet, and launching
         # only needs alias + effort. A since-deleted model fails in the launcher, visibly.
         if last_local:
-            acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {model_names.readable(last_local)} session",
+            acts.insert(0, Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch: {model_names.readable(last_local)} session",
                            lambda: self._launch_last("local_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=True)
-        acts += _tool_actions(backend=True, local_session=True)
+        acts += _tool_actions(backend=True, local_session=True, settings_keys=("u", "v"))  # RAM guard + backend manager are settings (user 2026-10-30)
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
@@ -1575,21 +1664,27 @@ class RemoteScreen(Screen):
         if item_id and item_id.startswith(CATALOG_PREFIX):
             parts = item_id.split(":", 2)
             if len(parts) == 3 and not parts[2].startswith("__"):
+                note = model_note(f"{parts[1]}:{parts[2]}") or ""
+                if parts[1] == "nvidia":
+                    note = (note + " " if note else "") + NVIDIA_MODEL_QUOTA_SHORT
                 base = (f"{model_names.readable(parts[2])}\n{parts[2]} · "
-                        f"{PROVIDER_LABELS.get(parts[1], parts[1])} catalog · "
-                        f"Lane: {lane_for(parts[1], parts[2])}")
+                        f"{PROVIDER_LABELS.get(parts[1], parts[1])} catalog")
                 notices = [thinking_constraint(parts[1], parts[2], self.settings.thinking_session),
-                           PROVIDER_ADVISORIES.get(parts[1], "")]
-                return "\n".join([base, *filter(None, notices)])
+                           PROVIDER_ADVISORIES.get(parts[1], ""), note]
+                return "\n".join(filter(None, [base, *notices]))
+        if item_id in PROVIDER_INFOS:
+            return PROVIDER_INFOS[item_id]          # group-header hover: provider-level facts
         agent = next((a for a in self.agents if a.alias == item_id), None)
         if agent is None:
             return "Hover or highlight a model to see notes about it."
-        lane_line = f"Lane: {lane_for(agent.provider, agent.model_id)}"
+        # No "Lane:" line (user 2026-10-30): it held no decision value — the infobox exists to
+        # help pick a model, and the lane is visible in the row itself.
         notices = [thinking_constraint(agent.provider, agent.model_id, self.settings.thinking_session),
                    PROVIDER_ADVISORIES.get(agent.provider, "")]
         note = model_note(agent.alias)
-        base = (f"{agent.display}\n{lane_line}\n{note}" if note
-                else f"{agent.display}\n{lane_line}\nNo notes for this model yet.")
+        if agent.provider == "nvidia":
+            note = (note + " " if note else "") + NVIDIA_MODEL_QUOTA_SHORT
+        base = f"{agent.display}\n{note}" if note else f"{agent.display}\nNo notes for this model yet."
         return "\n".join([base, *filter(None, notices)])
 
     def _visible(self, agent: RemoteAgent) -> bool:
@@ -1637,19 +1732,19 @@ class RemoteScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            setting("e", f"{ec.EMOJI_EFFORT_STR} Effort: {_effort_label(s.remote_effort)}",
-                    effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v)),
-            setting("o", f"{ec.EMOJI_TEMPERATURE_STR}  Temperature: {s.remote_temperature or '<provider default>'}",
-                    TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v)),
-            thinking_row(s),
-            Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
+            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {_effort_label(s.remote_effort)}",
+                    effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v), section="model"),
+            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.remote_temperature or '<provider default>'}",
+                    TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v), section="model"),
+            thinking_row(s),   # section="model" by default now
+            Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into a group
             # No "find model" action row (user, 2026-10-21): the filter box at the top of
             # the open model list IS the search — typing there filters live from the first
             # character, so a separate menu entry would only duplicate it.
             Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
-            Action("y", f"{ec.EMOJI_FILTER_STR}  Filter settings…", lambda: Nav("remote_filters", self.owner), section="tools"),
-            setting("m", f"{ec.EMOJI_MCP_STR}  MCPs: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
+            Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings"),
+            setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp")),
         ]
         # Add "Launch last model" if we have a saved last model
@@ -1657,10 +1752,12 @@ class RemoteScreen(Screen):
         # No visible-row check: the agent list is lazy. The tier needed for --include-trials is
         # remembered with the alias (user decision 2026-10-03: no 5.7 s inventory call on `g`).
         if last_remote:
-            acts.insert(0, Action("g", f"{ec.EMOJI_GO_LAUNCH_STR} Go launch: {last_remote} session",
+            alias, _, rmodel = last_remote.partition("@")
+            prov = alias.split("-", 1)[0]
+            acts.insert(0, Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch: {PROVIDER_LABELS.get(prov, prov)} · {model_names.readable(rmodel or alias)}",
                            lambda: self._launch_last("remote_api_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=False)
-        acts += _tool_actions(backend=False)
+        acts += _tool_actions(backend=False, settings_keys=("k", "n"))  # API keys + rate limiter are settings (user 2026-10-30)
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
@@ -1748,22 +1845,37 @@ class RemoteScreen(Screen):
 
 
 def rendered_actions(sm: "Screen"):
-    """The actions a lane picker renders, with settings rows folded under one group header
-    while collapsed (user 2026-10-29, waypoint picker-collapsed-settings-group). Returns
-    (rendered, hidden_settings): SETTINGS_GROUP replaces the settings rows when folded;
-    every other section stays a top-level row. Only the two lane screens fold — sub-screens
-    (rate limiter, memguard, filters, …) keep their plain rows, and so does Home."""
+    """The actions a lane picker renders (user 2026-10-29/30, waypoint
+    picker-collapsed-settings-group). Lane screens get TWO harmonica groups: MODEL_GROUP
+    (effort/temperature/thinking, open by default) and SETTINGS_GROUP ("Advanced", folded
+    by default); nav rows always render LAST; every other section stays a top-level row.
+    Returns (rendered, hidden_rows). Only the two lane screens fold — sub-screens and
+    Home keep their plain rows."""
     if sm is None:
         return [], []
     acts = [a for a in sm.actions() if a.section != "hidden"]
     if isinstance(sm, (LocalScreen, RemoteScreen)):
-        settings = [a for a in acts if a.section == "settings"]
-        if settings:
-            top = [a for a in acts if a.section != "settings"]
+        nav = [a for a in acts if a.section == "nav"]
+        model = [a for a in acts if a.section == "model"]
+        adv = [a for a in acts if a.section == "settings"]
+        top = [a for a in acts if a.section not in ("nav", "model", "settings")]
+        out, hidden = list(top), []
+        if model:
+            if sm.model_collapsed:
+                out.append(MODEL_GROUP)
+                hidden += model
+            else:
+                out.append(MODEL_GROUP)
+                out += model
+        if adv:
             if sm.settings_collapsed:
-                return top + [SETTINGS_GROUP], settings
-            # expanded: the header stays, so Enter on it folds the group again
-            return top + [SETTINGS_GROUP] + settings, []
+                out.append(SETTINGS_GROUP)
+                hidden += adv
+            else:
+                out.append(SETTINGS_GROUP)
+                out += adv
+        out += nav                       # nav is always the last option (user 2026-10-30)
+        return out, hidden
     return acts, []
 
 
@@ -2555,13 +2667,21 @@ class LaunchdScreen(Screen):
 
 
 class LowkeyScreen(Screen):
-    """Lowkey chat/one-shot against a local model. `s` here means Session NAME (Lowkey's own
-    menu), never lane switch — Lowkey is a tool screen, not a lane picker."""
-    title = "Lowkey — local dispatch"
+    """Lowkey — a minimalist model-evaluation chat that can run on ANY model, local or a
+    free API provider (user 2026-10-30; was "local dispatch" only). `s` here means Set
+    session name, never lane switch — Lowkey is a tool screen, not a lane picker."""
+    title = f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Lowkey — model evaluation chat"
 
-    def __init__(self, settings: Settings, models: list[LocalModel], owner: str = DIRECT_ROOT):
+    def __init__(self, settings: Settings, models: "list[LocalModel] | None" = None,
+                 owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
         self.session_name = ""
+        self.mode = "convo"                    # convo | oneshot (toggle, user 2026-10-30)
+        self._choose_model_visible = False     # local model list is NOT open by default
+        self._models_loaded = False
+        self.set_models(models or [])
+
+    def set_models(self, models: list[LocalModel]):
         self.models = {mdl.alias: mdl for mdl in models}
         buckets: dict[str, list] = {}
         for mdl in models:
@@ -2570,6 +2690,8 @@ class LowkeyScreen(Screen):
         self.accordion.set_groups([
             Group(f, f"{f} ({len(buckets[f])})", [Item(x.alias, model_names.readable(x.alias)) for x in buckets[f]])
             for f in order])
+        self.accordion.collapse()              # nothing open until "Choose local model…"
+        self._models_loaded = True
 
     def _cycle_effort(self):
         s = self.settings
@@ -2583,14 +2705,47 @@ class LowkeyScreen(Screen):
         if s.on_temperature_saved:
             s.on_temperature_saved("lowkey", s.lowkey_temperature)
 
+    def _set_thinking(self, v):
+        s = self.settings
+        s.lowkey_thinking = v
+        if s.on_thinking_saved:
+            s.on_thinking_saved(v)
+
+    def _toggle_mode(self):
+        self.mode = "oneshot" if self.mode == "convo" else "convo"
+
+    def _toggle_choose_model(self):
+        self._choose_model_visible = not self._choose_model_visible
+
+    def _thinking_label(self):
+        v = self.settings.lowkey_thinking
+        return "ON (default)" if v is None else ("ON" if v else "OFF")
+
     def actions(self):
         s = self.settings
-        acts = [
-            Action("e", f"Effort: {s.lowkey_effort} (sent as reasoning_effort)", self._cycle_effort),
-            Action("t", f"Temperature: {s.lowkey_temperature or '<provider default>'}", self._cycle_temperature),
-            Action("s", f"Session name: {self.session_name or '(ephemeral)'}",
+        acts = []
+        last = s.last_launched_model.get("lowkey") if s.last_launched_model else None
+        if last:
+            acts.append(Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch: {model_names.readable(last)} (lowkey)",
+                               self._launch_last, section="launch"))
+        acts += [
+            Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose local model…", self._toggle_choose_model, section="models"),
+            # Remote/API models in Lowkey are REVERTED for 0.48.0 (user 2026-10-30: local-only
+            # again for a stable release); the remote implementation gets a dedicated
+            # worktree/branch later — waypoint lowkey-any-model-api.
+            # mode and its start action sit directly next to each other (user 2026-10-30)
+            Action("m", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Mode: {'Convo' if self.mode == 'convo' else 'One-shot'}", self._toggle_mode),
+            Action("p", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}{'Start convo' if self.mode == 'convo' else 'Start one-shot'}",
+                   self._start),
+            setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
+                    (None, False), lambda: s.lowkey_thinking, self._set_thinking),
+            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.lowkey_effort} (sent as reasoning_effort)",
+                    effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort()),
+            setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or '<provider default>'}",
+                    TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature()),
+            Action("s", f"{ec.gap(ec.LK_EMOJI_SESSION_STR)}Set session name: {self.session_name or '(ephemeral)'}",
                    lambda: Nav("prompt:session")),
-            Action("o", "One-shot prompt with the highlighted model", lambda: Nav("prompt:oneshot"))]
+        ]
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
@@ -2601,20 +2756,45 @@ class LowkeyScreen(Screen):
             return None
         return ["lowkey", "--model", sel, "--effort", self.settings.lowkey_effort]
 
-    def activate_selected(self):
+    def _env(self):
+        v = self.settings.lowkey_thinking
+        return {"LA_THINKING_OVERRIDE": "false" if v is False else "true"}
+
+    def _launch_last(self):
+        last = self.settings.last_launched_model.get("lowkey")
+        if not last:
+            return None
+        argv = ["lowkey", "--convo", "--model", last, "--effort", self.settings.lowkey_effort]
+        if self.session_name:
+            argv += ["--session", self.session_name]
+        return LaunchRequest("lowkey", argv, self._env(), last)
+
+    def _start(self):
+        # Mode decides what "p" does: convo launches the selected model; one-shot asks
+        # for the prompt first (prompt:oneshot).
+        if self.mode == "convo":
+            return self._convo()
+        return Nav("prompt:oneshot")
+
+    def _convo(self):
         base = self._base()
         if base is None:
             return None
         argv = [base[0], "--convo"] + base[1:]
         if self.session_name:
             argv += ["--session", self.session_name]
-        return LaunchRequest("lowkey", argv, {}, self.accordion.selected_id)
+        return LaunchRequest("lowkey", argv, self._env(), self.accordion.selected_id)
+
+    def activate_selected(self):
+        # Click/Enter on a model row only SELECTS it (user 2026-10-30: highlight-to-choose
+        # is finicky); launching is the explicit `p`/`g` actions.
+        return None
 
     def one_shot(self, prompt: str):
         base = self._base()
         if base is None or not prompt.strip():
             return None
-        return LaunchRequest("lowkey", base + ["--prompt", prompt], {}, self.accordion.selected_id)
+        return LaunchRequest("lowkey", base + ["--prompt", prompt], self._env(), self.accordion.selected_id)
 
 
 @dataclass
@@ -2653,8 +2833,10 @@ class DownloadScreen(Screen):
         for e in entries:
             groups.setdefault(e.state, []).append(e)
         order = [st for st in ("ABSENT", "METADATA", "PRESENT", "COMPLETE") if st in groups]
+        # "Absent" read like a mistake (user 2026-10-30); it means: in a catalog, not on disk.
+        state_labels = {"ABSENT": "Available for download from existing catalogs"}
         self.accordion.set_groups([
-            Group(st, f"{st.title()} ({len(groups[st])})",
+            Group(st, f"{state_labels.get(st, st.title())} ({len(groups[st])})",
                   [Item(e.alias, f"{model_names.readable(e.alias)}  ~{e.size_gb:g} GB  {e.groups}") for e in groups[st]])
             for st in order])
 

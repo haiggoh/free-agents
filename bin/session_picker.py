@@ -210,14 +210,30 @@ def catalog_local_capable(provider, model_id):
     return _memoized_verdict("cap", model_id, compute)
 
 
+# Vendor-documented totals for ids whose numbers the estimator cannot parse (user
+# 2026-10-30): mistral-large-4-1t-a52b = 1.05T total / 52B active ("Le Chonk", Mistral
+# 2026-10-06); Nemotron/Laguna totals from the roster notes.
+PARAM_COUNT_OVERRIDES = {
+    "mistral-large-4-1t-a52b": 1050.0,
+    "nemotron-3-ultra-550b-a55b": 550.0,
+    "nemotron-3-super-120b-a12b": 120.0,
+    "nemotron-3.5-lightning-30b-a3b": 30.0,
+    "laguna-xs-2.1": 33.0,
+}
+
+
 def model_param_count(provider, model_id):
     """Parameter count in billions for the per-provider size sort, or None when unknown.
 
-    The count in the id first (the estimator's parser); when the id states none, the
-    Hugging Face count ONLY if already cached — same offline rule as the local-capable
-    verdict: a render never waits on the network. None sorts after the sized rows."""
+    Overrides first, then the count in the id (the estimator's parser); when the id states
+    none, the Hugging Face count ONLY if already cached — same offline rule as the
+    local-capable verdict: a render never waits on the network. None sorts after the sized
+    rows."""
     def compute():
         try:
+            for pat, b in PARAM_COUNT_OVERRIDES.items():
+                if pat in (model_id or ""):
+                    return float(b)
             fp = _footprint()
             total = fp.parse_params(model_id)["total_b"]
             if total is None:
@@ -526,21 +542,32 @@ def _detect_hw():
     import subprocess
     from pathlib import Path
     if os.environ.get("LA_OS") and os.environ.get("LA_HARDWARE"):
+        ram = None
+        try:
+            ram = float(os.environ.get("LA_SYSTEM_RAM_GB") or "") or None
+        except ValueError:
+            pass
         return (os.environ.get("LA_OS"),
                 os.environ.get("LA_DISTRO_PRETTY_NAME") or os.environ.get("LA_DISTRO") or "",
-                os.environ.get("LA_HARDWARE"))
+                os.environ.get("LA_HARDWARE"), ram, os.environ.get("LA_GPU_MODEL") or "")
     try:
         script = Path(__file__).resolve().parent / "la-hw-detect.sh"
         out = subprocess.run(
-            ["bash", "-c", f'. "{script}"; printf "%s\\n%s\\n%s" "$LA_OS" "$LA_DISTRO_PRETTY_NAME" "$LA_HARDWARE"'],
+            ["bash", "-c", f'. "{script}"; printf "%s\\n%s\\n%s\\n%s\\n%s" "$LA_OS" "$LA_DISTRO_PRETTY_NAME" "$LA_HARDWARE" "$LA_SYSTEM_RAM_GB" "$LA_GPU_MODEL"'],
             capture_output=True, text=True, timeout=8)
         if out.returncode == 0:
             parts = out.stdout.splitlines()
             if len(parts) >= 3:
-                return (parts[0] or None), parts[1], (parts[2] or None)
+                ram = None
+                try:
+                    ram = float(parts[3]) if len(parts) > 3 and parts[3] else None
+                except ValueError:
+                    pass
+                return ((parts[0] or None), parts[1], (parts[2] or None), ram,
+                        (parts[4] if len(parts) > 4 else "") or "")
     except Exception:
         pass
-    return None, "", None
+    return None, "", None, None, ""
 
 
 def _hw_cache_path():
@@ -564,7 +591,13 @@ def _read_hw_cache():
                 k, v = line.split("=", 1)
                 vals[k] = shlex.split(v)[0] if shlex.split(v) else ""
         if vals.get("LA_OS") and vals.get("LA_HARDWARE"):
-            return vals["LA_OS"], vals.get("LA_DISTRO_PRETTY_NAME", ""), vals["LA_HARDWARE"]
+            ram = None
+            try:
+                ram = float(vals.get("LA_SYSTEM_RAM_GB") or "") or None
+            except ValueError:
+                pass
+            return (vals["LA_OS"], vals.get("LA_DISTRO_PRETTY_NAME", ""), vals["LA_HARDWARE"],
+                    ram, vals.get("LA_GPU_MODEL", ""))
     except Exception:
         pass
     return None
@@ -577,7 +610,8 @@ def _write_hw_cache(hw):
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".tmp")
-        tmp.write_text(f'LA_OS="{hw[0] or ""}"\nLA_DISTRO_PRETTY_NAME="{hw[1]}"\nLA_HARDWARE="{hw[2] or ""}"\n',
+        tmp.write_text(f'LA_OS="{hw[0] or ""}"\nLA_DISTRO_PRETTY_NAME="{hw[1]}"\nLA_HARDWARE="{hw[2] or ""}"\n'
+                       f'LA_SYSTEM_RAM_GB="{hw[3] or ""}"\nLA_GPU_MODEL="{hw[4]}"\n',
                        encoding="utf-8")
         tmp.replace(p)
     except Exception:
@@ -592,8 +626,8 @@ class Picker(App):
     CSS = """
     Screen { layout: vertical; background: ansi_default; color: ansi_default; }
     #title { text-style: bold; padding: 0 1; }
-    #policy { color: ansi_bright_black; padding: 0 1; }
-    #version { color: ansi_bright_cyan; padding: 0 1; }  /* version footer: own colour, not subheadline formatting (user 2026-10-29) */
+    #policy { color: ansi_bright_cyan; padding: 0 1 1 1; }  /* subheadline = identity line (cyan since 0.47.7); blank line after it (user 2026-10-30) */
+    #version { color: ansi_black; text-style: italic; padding: 1 0; }  /* version footer: flush at the very bottom (blank line only BEFORE it), dimmer+italic than the status line so neither over-emphasizes (user 2026-10-30) */
     #actions { height: auto; padding: 0 1; }
     #rows { height: 1fr; display: none; margin-top: 1; }   /* a blank line before the model list */
     #rows.visible { display: block; }
@@ -801,13 +835,13 @@ class Picker(App):
         with Vertical():
             yield Static("", id="title")
             yield Static("", id="policy")
-            yield Static("", id="version")
             yield OptionList(id="actions")
             yield SearchInput(id="search")
             yield HoverOptionList(id="rows")
             yield Static("", id="info")
             yield PromptInput(id="prompt")
-            yield Static("", id="status")
+            yield Static("", id="version")
+            yield Static("", id="status")    # status/nav line is ALWAYS the very bottom row (user 2026-10-30)
 
     def on_mount(self):
         # OS/distro/hardware detection through the repo's canonical script
@@ -817,7 +851,8 @@ class Picker(App):
         # shows the generic platform line until detection lands (user 2026-10-29).
         cached = _read_hw_cache()
         if cached:
-            self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware = cached
+            (self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware,
+             self.settings.hw_ram_gb, self.settings.hw_gpu) = cached
         self.goto(m.Nav(self.start, m.DIRECT_ROOT))
         # Menu first, then warm the model lists in the background (plan R13/R14): by the time
         # the user presses `c` the slow remote inventory (~1-6 s) is usually already cached.
@@ -825,6 +860,72 @@ class Picker(App):
         self.set_interval(LOADING_INTERVAL, self._tick_loading)
         import threading
         threading.Thread(target=self._detect_hw_async, daemon=True).start()
+        threading.Thread(target=self._gather_stats_async, daemon=True).start()
+
+    def _gather_stats_async(self):
+        """About-screen usage stats, gathered in the background (never blocks the first
+        paint; re-renders only if About is on screen when they land)."""
+        import subprocess
+        st = {}
+        try:
+            # one line per backend FAMILY, pinned version only (user 2026-10-30); flag
+            # families that have versions installed but no pin.
+            import re as _re
+            venvs = Path.home() / ".venvs"
+            fams = {}
+            for p in sorted(venvs.glob("*")):
+                if not p.is_dir():
+                    continue
+                m2 = _re.match(r"^(.*?)-(\d[0-9A-Za-z.\-]*)?$", p.name)
+                fam, ver = (m2.group(1), m2.group(2)) if m2 and m2.group(2) else (p.name, "")
+                fams.setdefault(fam, []).append(ver or "?")
+            pin_file = Path.home() / ".local" / "share" / "free-agents" / "config" / "backend-pin.txt"
+            pinned = ""
+            try:
+                pinned = pin_file.read_text().strip()
+            except Exception:
+                pass
+            lines = []
+            for fam, vers in sorted(fams.items()):
+                pin = next((v for v in vers if f"{fam}-{v}" in pinned), None)
+                if pin:
+                    lines.append(f"{fam} {pin} (pinned)")
+                else:
+                    lines.append(f"{fam} {', '.join(vers)} — NO VERSION PINNED")
+            st["backends"] = lines or ["none"]
+        except Exception:
+            pass
+        try:
+            models = self.cache.get("local") or []
+            st["local_models"] = len([x for x in models if not getattr(x, "auto_scanned", False)])
+            try:
+                out = subprocess.run(["du", "-sm", str(Path.home() / ".models")],
+                                     capture_output=True, text=True, timeout=8)
+                if out.returncode == 0 and out.stdout.strip():
+                    st["local_gb"] = float(out.stdout.split()[0]) / 1024.0
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            agents = self.cache.get("remote") or []
+            provs = sorted({a.provider for a in agents if a.has_key})
+            st["providers"] = ", ".join(provs) if provs else "none"
+            if agents:
+                lane = m.RemoteScreen(self.settings, agents)
+                st["remote_visible"] = sum(1 for a in agents if lane._visible(a) and a.model_id != "SELECT")
+                st["remote_hidden"] = lane.hidden_count()
+        except Exception:
+            pass
+        rl = getattr(self.settings, "rate_limiter", None) or {}
+        if rl:
+            st["rate_limiter"] = ", ".join(f"{k}={v}" for k, v in sorted(rl.items()))
+
+        def apply():
+            self.settings.stats = st
+            if isinstance(self.screen_model, m.AboutScreen):
+                self.render_model()
+        self.call_from_thread(apply)
 
     def _detect_hw_async(self):
         """Background hardware detection: runs after the menu is already painted, caches
@@ -835,7 +936,8 @@ class Picker(App):
         def apply():
             sm = self.screen_model
             before = getattr(sm, "policy", "") if sm is not None else ""
-            self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware = hw
+            (self.settings.hw_os, self.settings.hw_distro, self.settings.hw_hardware,
+             self.settings.hw_ram_gb, self.settings.hw_gpu) = hw
             after = getattr(sm, "policy", "") if sm is not None else ""
             # Re-render only when the visible subheadline actually changes (e.g. generic
             # "Linux PC" -> "Ubuntu … PC" on first launch); on macOS the platform fallback
@@ -953,9 +1055,19 @@ class Picker(App):
         loading = getattr(self, "_loading", None)
         return loading is None or bool(loading & self.STARTUP_KINDS)   # None: prefetch not started yet
 
+    def _set_policy(self, text):
+        pol = self.query_one("#policy", Static)
+        pol.update(text)
+        # About uses a styled multi-line readout in the default color, not the cyan
+        # subheadline (user 2026-10-30); every other screen keeps the cyan identity line.
+        pol.styles.color = "ansi_default" if isinstance(self.screen_model, m.AboutScreen) else "ansi_bright_cyan"
+
     def _startup_policy(self):
         # The label rides the subtitle's FIRST line; the version footer is a separate widget.
-        head, sep, rest = getattr(self.screen_model, "policy", "").partition("\n")
+        p = getattr(self.screen_model, "policy", "")
+        if not isinstance(p, str):
+            p = p.plain
+        head, sep, rest = p.partition("\n")
         return head + "  " + loading_label(self._loading_frame) + sep + rest
 
     def _startup_tick(self):
@@ -1129,11 +1241,15 @@ class Picker(App):
 
         # Conditionally show model list based on _choose_model_visible
         show_models = True
-        if isinstance(sm, (m.LocalScreen, m.RemoteScreen)):
+        if isinstance(sm, (m.LocalScreen, m.RemoteScreen, m.LowkeyScreen)):
             show_models = getattr(sm, '_choose_model_visible', False)
 
         # Show/hide the rows container
         rows.display = show_models
+        # No input box unless a prompt is actually pending (user 2026-10-30: About and
+        # other plain menus must not show an empty textbox at the bottom).
+        if not getattr(self, "pending_prompt", None):
+            self.query_one("#prompt", Input).display = False
 
         # The live model filter (user, 2026-10-21; the Local list too since 2026-10-22): the
         # box sits at the top of the open model list, seeded with any filter still active,
@@ -1178,8 +1294,10 @@ class Picker(App):
                                            id=f"i:{obj.id}"))
                     self.row_ids.append(("item", obj.id))
 
-        if not self.row_ids and not isinstance(sm, (m.HomeScreen, m.RateLimiterScreen, m.MemoryGuardScreen,
-                                                    m.RuntimeManagerScreen, m.APIKeysScreen, m.ThemeConfigScreen)):
+        # The "(nothing to show here yet)" placeholder only makes sense on model-list
+        # screens (empty while loading). Plain menus (About, settings sub-screens, …)
+        # get no placeholder row at all (user 2026-10-30).
+        if not self.row_ids and isinstance(sm, (m.LocalScreen, m.RemoteScreen, m.LowkeyScreen)):
             waiting = self._waiting_for()
             if waiting:
                 # The hourglass plays here too, not only in the status line (2026-10-28).
@@ -1203,12 +1321,24 @@ class Picker(App):
         self.action_ids = []  # Track action IDs for keyboard navigation
         rendered, self._collapsed_actions = m.rendered_actions(sm)
         collapsed = bool(self._collapsed_actions)
+        prev_section = None
         for a in rendered:
             # Store action object reference
             self.action_ids.append(a)
-            if a is m.SETTINGS_GROUP:
-                arrow = "▸" if collapsed else "▾"
-                actions_list.add_option(Option(Text(f"  {ec.EMOJI_TOOLS_STR}  Settings {arrow}"),
+            # Blank separator row between section groups (user 2026-10-30): a disabled
+            # option with a non-"a:" id, so the action-index mapping in the option ids
+            # stays intact.
+            if prev_section is not None and a.section != prev_section:
+                actions_list.add_option(Option(Text(""), id=f"sep:{len(self.action_ids)}", disabled=True))
+            prev_section = a.section
+            if a in (m.SETTINGS_GROUP, m.MODEL_GROUP):
+                is_model = a is m.MODEL_GROUP
+                is_collapsed = sm.model_collapsed if is_model else collapsed
+                arrow = "▸" if is_collapsed else "▾"
+                emoji = ec.EMOJI_BOLT_STR if is_model else ec.EMOJI_TOOLBOX_STR   # 🔩 model settings, 🛠️ advanced — not 🔧 (backend manager) nor lane emojis (user 2026-10-30)
+                name = "Model settings" if is_model else "Advanced"
+                # convention: the open/close triangle comes BEFORE the menu text (user 2026-10-30)
+                actions_list.add_option(Option(Text(f"  {ec.gap(emoji)} {arrow} {name}"),
                                                id=f"a:{len(self.action_ids)-1}"))
                 continue
             enabled_str = "" if a.enabled else "  —"
@@ -1232,7 +1362,7 @@ class Picker(App):
         if actions_list.option_count and actions_list.highlighted is None:
             actions_list.highlighted = 0
 
-        status = "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies"
+        status = m.status_line(sm)   # single source of truth for the nav line on every screen
         waiting = self._waiting_for() if hasattr(self, "_loading") else None
         if waiting:
             status = "  " + loading_label(self._loading_frame, "loading versions" if waiting == "versions" else "loading models")
@@ -1300,15 +1430,26 @@ class Picker(App):
         elif event.option_list.id == "actions":
             self._activate_action(event.option_index)
 
-    def _activate_action(self, action_index: int):
-        """Activate an action from the actions list."""
-        if not hasattr(self, 'action_ids') or action_index >= len(self.action_ids):
+    def _activate_action(self, option_index: int):
+        """Activate an action from the actions list. option_index is a row in the
+        OptionList; the option's id carries the index into action_ids (separators
+        use a non-"a:" id and are never selectable)."""
+        actions_list = self.query_one("#actions", OptionList)
+        if not hasattr(self, 'action_ids') or option_index >= actions_list.option_count:
             return
+        oid = actions_list.get_option_at_index(option_index).id
+        if not oid.startswith("a:"):
+            return
+        action_index = int(oid[2:])
         action = self.action_ids[action_index]
         if not action.enabled:
             return
         if action is m.SETTINGS_GROUP:
             self.screen_model.toggle_settings()
+            self._rerender_keep_action(action_index)
+            return
+        if action is m.MODEL_GROUP:
+            self.screen_model.toggle_model_group()
             self._rerender_keep_action(action_index)
             return
         if action.step is not None:
@@ -1330,12 +1471,12 @@ class Picker(App):
     def _rerender_keep_action(self, action_index: int):
         """Redraw with the highlight left on the same action row (settings change in place)."""
         actions_list = self.query_one("#actions", OptionList)
-        key = self.action_ids[action_index].key if action_index < len(self.action_ids) else None
         self.render_model()
-        for i, a in enumerate(self.action_ids):
-            if a.key == key:
+        want = f"a:{action_index}"
+        for i in range(actions_list.option_count):
+            if actions_list.get_option_at_index(i).id == want:
                 actions_list.highlighted = i
-                break
+                return
 
     def _maybe_load_inventory(self, screen_type: str) -> None:
         """Never blocks the UI: a cache miss starts (or joins) the background load, and
@@ -1454,6 +1595,10 @@ class Picker(App):
             self.dispatch(req)
         elif req:
             self.launch(req)
+        elif isinstance(self.screen_model, m.LowkeyScreen):
+            # 0.48.0: in Lowkey, Enter/click on a model row only SELECTS it (re-render so
+            # the selection is visible); launching is the explicit `p`/`g` action.
+            self.render_model(keep=f"i:{h[1]}")
 
     def on_key(self, event):
         if isinstance(self.screen, ConfirmPanel):   # the panel owns every key while it is open
@@ -1510,11 +1655,13 @@ class Picker(App):
         if key in ("left", "right"):
             actions_list = self.query_one("#actions", OptionList)
             if self.focused is actions_list and actions_list.highlighted is not None:
-                idx = actions_list.highlighted
-                if idx < len(self.action_ids) and self.action_ids[idx].step is not None:
-                    self._step_action(idx, +1 if key == "right" else -1)
-                    event.stop()
-                    return
+                oid = actions_list.get_option_at_index(actions_list.highlighted).id
+                if oid.startswith("a:"):
+                    ai = int(oid[2:])
+                    if ai < len(self.action_ids) and self.action_ids[ai].step is not None:
+                        self._step_action(ai, +1 if key == "right" else -1)
+                        event.stop()
+                        return
             # Handle group expand/collapse when on a group row (only when rows list is focused)
             rows_list = self.query_one("#rows", OptionList)
             if self.focused is rows_list:
@@ -1679,7 +1826,7 @@ class Picker(App):
         self.run_child(TOOLS[target](), pause=True)
 
     # --- inline prompts (text entry, confirmations) ------------------------------------------
-    PROMPTS = {"prompt:session": "Session name (letters, digits, - _; empty = ephemeral):",
+    PROMPTS = {"prompt:session": "Set session name (letters, digits, - _; empty = ephemeral):",
                "prompt:oneshot": "One-shot prompt:",
                "prompt:keys:add": "Provider slug to add key for (gemini, groq, nvidia, etc.):",
                "prompt:keys:key": "API key/token for {provider} (hidden; paste advances automatically, or type it and press Enter; empty Enter skips):"}
@@ -1903,7 +2050,9 @@ class Picker(App):
         # answer which free-agents launched it (user request 2026-10-28).
         env = dict(req.env or {})
         env["LA_FREE_AGENTS_VERSION"] = m.plugin_version()
-        self.run_child(command_for(req), env=env, pause_on_error=True)
+        # Lowkey launches INLINE and the menu stays put until Enter (user 2026-10-30).
+        self.run_child(command_for(req), env=env,
+                       pause=(req.lane == "lowkey"), pause_on_error=True)
 
     def _open_cleanup_panel(self, clicked: str | None = None):
         """The missing-models question as a ConfirmPanel. `clicked` = the red row the user

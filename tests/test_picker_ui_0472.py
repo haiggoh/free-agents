@@ -84,37 +84,44 @@ class SettingsGroupTests(unittest.TestCase):
     """Waypoint picker-collapsed-settings-group / user 2026-10-29: settings rows fold into
     ONE collapsed group in both lane pickers; launch-last and choose-model stay top-level."""
 
-    def test_remote_lane_folds_settings_under_one_header_by_default(self):
+    def test_lane_layout_two_groups_nav_last(self):
+        # user 2026-10-30: Model group (effort/temp/thinking) open by default, Advanced
+        # group folded, nav ("b"/"q") always the LAST row.
         lane = m.RemoteScreen(m.Settings(), remote_agents())
-        self.assertTrue(lane.settings_collapsed)
         rendered, hidden = m.rendered_actions(lane)
+        self.assertIn(m.MODEL_GROUP, rendered)
         self.assertIn(m.SETTINGS_GROUP, rendered)
-        self.assertTrue(hidden and all(a.section == "settings" for a in hidden))
-        keys = {a.key for a in rendered}
-        self.assertIn("c", keys)          # choose model stays top-level
-        self.assertNotIn("e", keys)       # effort row is folded into the group
+        self.assertFalse(lane.model_collapsed)          # model group open by default
+        self.assertTrue(lane.settings_collapsed)        # advanced folded by default
+        self.assertIn("e", {a.key for a in rendered})   # effort visible (model group open)
+        self.assertTrue(all(a.section == "settings" for a in hidden))
+        self.assertNotIn("e", {a.key for a in hidden})
+        self.assertEqual(rendered[-1].section, "nav")   # back/quit last, always
+        self.assertIn("c", {a.key for a in rendered})   # choose model stays top-level
 
-    def test_local_lane_folds_too(self):
+    def test_local_lane_same_layout(self):
         lane = m.LocalScreen(m.Settings(), [m.LocalModel(alias="x", effort="medium", roles="")])
         rendered, hidden = m.rendered_actions(lane)
+        self.assertIn(m.MODEL_GROUP, rendered)
         self.assertIn(m.SETTINGS_GROUP, rendered)
-        self.assertTrue(hidden)
+        self.assertEqual(rendered[-1].section, "nav")
         self.assertIn("c", {a.key for a in rendered})
 
-    def test_toggle_expands_settings_but_keeps_header(self):
+    def test_toggle_folds_both_groups(self):
         lane = m.RemoteScreen(m.Settings(), remote_agents())
+        lane.toggle_model_group()
         lane.toggle_settings()
         rendered, hidden = m.rendered_actions(lane)
-        self.assertEqual(hidden, [])
-        # the header stays so Enter on it can fold the group again
+        self.assertIn(m.MODEL_GROUP, rendered)          # headers stay, rows fold
         self.assertIn(m.SETTINGS_GROUP, rendered)
-        self.assertLess(rendered.index(m.SETTINGS_GROUP), rendered.index(next(a for a in rendered if a.key == "e")))
-        self.assertIn("e", {a.key for a in rendered})
+        self.assertIn("e", {a.key for a in hidden})
+        self.assertEqual(rendered[-1].section, "nav")
 
     def test_home_does_not_fold(self):
         rendered, hidden = m.rendered_actions(m.HomeScreen(m.Settings()))
         self.assertEqual(hidden, [])
         self.assertNotIn(m.SETTINGS_GROUP, rendered)
+        self.assertNotIn(m.MODEL_GROUP, rendered)
 
 
 class SizeSortAndLabelTests(unittest.TestCase):
@@ -193,8 +200,8 @@ class HwDetectCacheTests(unittest.TestCase):
     def test_cache_roundtrip(self):
         with tempfile.TemporaryDirectory() as td:
             sp = self._with_cache(td)
-            sp._write_hw_cache(("Linux", "Ubuntu 24.04.3 LTS", "cuda"))
-            self.assertEqual(sp._read_hw_cache(), ("Linux", "Ubuntu 24.04.3 LTS", "cuda"))
+            sp._write_hw_cache(("Linux", "Ubuntu 24.04.3 LTS", "cuda", 64.0, "RTX 4090"))
+            self.assertEqual(sp._read_hw_cache(), ("Linux", "Ubuntu 24.04.3 LTS", "cuda", 64.0, "RTX 4090"))
 
     def test_cache_missing_or_broken_returns_none(self):
         with tempfile.TemporaryDirectory() as td:
@@ -204,7 +211,7 @@ class HwDetectCacheTests(unittest.TestCase):
             p.write_text("garbage\n", encoding="utf-8")
             self.assertIsNone(sp._read_hw_cache())               # no LA_OS/LA_HARDWARE
             p.write_text('LA_OS="linux"\nLA_HARDWARE="cuda"\n', encoding="utf-8")
-            self.assertEqual(sp._read_hw_cache(), ("linux", "", "cuda"))
+            self.assertEqual(sp._read_hw_cache(), ("linux", "", "cuda", None, ""))
 
     def test_detect_hw_prefers_env(self):
         sp = self.sp
@@ -213,7 +220,9 @@ class HwDetectCacheTests(unittest.TestCase):
             os.environ["LA_OS"] = "linux"
             os.environ["LA_DISTRO_PRETTY_NAME"] = "Fedora Linux 40"
             os.environ["LA_HARDWARE"] = "cuda"
-            self.assertEqual(sp._detect_hw(), ("linux", "Fedora Linux 40", "cuda"))
+            os.environ["LA_SYSTEM_RAM_GB"] = "64"
+            os.environ["LA_GPU_MODEL"] = "RTX 4090"
+            self.assertEqual(sp._detect_hw(), ("linux", "Fedora Linux 40", "cuda", 64.0, "RTX 4090"))
         finally:
             os.environ.clear()
             os.environ.update(old)

@@ -69,5 +69,21 @@ class LocalDedupeTests(unittest.TestCase):
         self.assertEqual(len(lane._all_models), 2)
 
 
+class LowkeyLabelTests(unittest.TestCase):
+    """0.48.0: Lowkey labels must render real emoji (never a literal "${VAR}" from
+    emoji.sh indirection) and the nav status line has one source of truth."""
+
+    def test_no_unresolved_emoji_vars_in_lowkey_labels(self):
+        lk = m.LowkeyScreen(m.Settings(), [])
+        for a in lk.actions():
+            self.assertNotIn("${", str(a.label), a.label)
+
+    def test_status_line_single_source_pinned(self):
+        self.assertEqual(m.status_line(None),
+                         "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies")
+        src = (ROOT / "bin" / "session_picker.py").read_text()
+        self.assertIn("m.status_line(sm)", src)   # the picker must not inline its own copy
+
+
 if __name__ == "__main__":
     unittest.main()
