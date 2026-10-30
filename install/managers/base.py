@@ -424,11 +424,16 @@ class BackendManager(
         except (OSError, subprocess.SubprocessError) as exc:
             raise ManagerError(f"cannot check running processes (ps failed: {exc}); refusing removal") from exc
         own_pid = os.getpid()
+        # Boundary-aware match: the target path must not be a PREFIX of a longer version dir
+        # (rapid-mlx-0.16.1 must not match a running rapid-mlx-0.16.10 — measured false refusal
+        # 2026-10-30). Never print the full argv: it can carry keys; pid + executable only.
+        pat = re.compile(re.escape(str(target)) + r"(?![\w.\-])")
         matches: list[str] = []
         for line in out.splitlines():
             pid, _, command = line.strip().partition(" ")
-            if pid.isdigit() and int(pid) != own_pid and str(target) in command:
-                matches.append(f"PID {pid}: {command.strip()}")
+            if pid.isdigit() and int(pid) != own_pid and pat.search(command):
+                exe = command.strip().split(" ", 1)[0]
+                matches.append(f"PID {pid}: {exe}")
         return matches
 
     def smoke_environment(self, version: str, home: Path | None = None) -> dict[str, Any]:

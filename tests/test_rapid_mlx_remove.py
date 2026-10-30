@@ -61,6 +61,18 @@ class RemoveGuards(unittest.TestCase):
         found = self.mgr._running_references(target)
         self.assertTrue(any(str(proc.pid) in f for f in found), found)
 
+    def test_running_references_does_not_match_a_longer_version_prefix(self):
+        # rapid-mlx-0.16.10 running must NOT block repairing/removing rapid-mlx-0.16.1
+        # (measured false refusal 2026-10-30: plain `in` matched the prefix)
+        import subprocess
+        target = fake_venv(self.root, "0.16.1")
+        other = fake_venv(self.root, "0.16.10")
+        proc = subprocess.Popen(["/usr/bin/perl", "-e", "sleep 30", str(other / "bin" / "rapid-mlx")])
+        self.addCleanup(proc.kill)
+        self.assertEqual(self.mgr._running_references(target), [])
+        found = self.mgr._running_references(other)
+        self.assertTrue(any(str(proc.pid) in f for f in found), found)
+
     def test_failed_ps_refuses_rather_than_allowing(self):
         target = fake_venv(self.root, "0.15.3")
         with mock.patch("managers.rapid_mlx.subprocess.run", side_effect=OSError("no ps")):
