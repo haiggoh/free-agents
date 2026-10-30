@@ -205,6 +205,14 @@ def launch_rapid(m, port):
     content — the tournament OBSERVES raw reasoning rather than parsing it away. Caveat
     carried from the local stack: --cache-memory-mb does not bound Metal pressure."""
     rbin = os.environ.get("LA_TOURNEY_RAPID_BIN") or _machine_rapid_bin()
+    # 0.49.0: the env override gets the same health gate as every other binary route — a
+    # set-but-dead LA_TOURNEY_RAPID_BIN must abort naming it, never launch and stall at readiness
+    lib = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "config", "config-lib.sh")
+    chk = subprocess.run(["bash", "-c", 'source "$1" >/dev/null 2>&1; la_backend_bin_health "$2"',
+                          "_", lib, rbin], capture_output=True, text=True)
+    if chk.returncode != 0:
+        sys.exit(f"tournament-dispatch: LA_TOURNEY_RAPID_BIN={rbin} cannot run "
+                 f"({(chk.stderr or '').strip()}); unset it or repair the venv")
     mdir = os.path.realpath(f"{MODELS_DIR}/{m['dir']}")
     runtime = f"{CONFIG_DIR}/tourney_{port}_rapid"
     serve_root = f"{runtime}/serve"

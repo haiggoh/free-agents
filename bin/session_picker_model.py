@@ -2544,8 +2544,14 @@ def about_backend_lines(home: Path, repo: Path) -> list[str]:
         live_text = ""
 
     def pins_in_live(path: Path) -> bool:
-        return (re.search(r"(?<![\w.-])" + re.escape(path.name) + r"(?![\w.-])", live_text)
-                or str(path) in live_text)
+        # comment lines are not pins (same rule as _referenced_paths): a commented-out
+        # LA_RAPID_BIN line must not make About report a stale pin
+        for line in live_text.splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            if re.search(r"(?<![\w.-])" + re.escape(path.name) + r"(?![\w.-])", line) or str(path) in line:
+                return True
+        return False
 
     lines = []
     for name in managers.list_managers():

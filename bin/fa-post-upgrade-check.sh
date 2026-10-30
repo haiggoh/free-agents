@@ -23,7 +23,6 @@ set -uo pipefail
 
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MB="${FA_MANAGE_BACKEND:-$HERE/../install/manage-backend.py}"
-NOTIFY="${FA_NOTIFY_CMD:-osascript -e \"display notification \\\"free-agents: a backend venv is broken — run manage-backend.py health --all\\\" with title \\\"free-agents backend check\\\"\"}"
 
 usage() {
     awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"
@@ -41,7 +40,16 @@ for a in "$@"; do
 done
 
 say() { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*"; }
-notify() { $NOTIFY >/dev/null 2>&1 || true; }
+notify() {
+    # FA_NOTIFY_CMD is a single executable path (tests stub it); the default is written out
+    # literally — an unquoted $VAR expansion never re-parses embedded quotes, which would
+    # mangle the osascript argv (found by the 0.49.0 cross-check dispatch)
+    if [ -n "${FA_NOTIFY_CMD:-}" ]; then
+        "$FA_NOTIFY_CMD" >/dev/null 2>&1 || true
+    else
+        osascript -e 'display notification "free-agents: a backend venv is broken — run manage-backend.py health --all" with title "free-agents backend check"' >/dev/null 2>&1 || true
+    fi
+}
 
 TMPF="$(mktemp "${TMPDIR:-/tmp}/fa-puc-health.XXXXXX")"
 trap 'rm -f "$TMPF"' EXIT

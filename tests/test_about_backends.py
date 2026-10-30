@@ -90,6 +90,15 @@ class AboutBackendLinesTest(unittest.TestCase):
         # the pin line still reports the PINNED version's health, not the broken one's
         self.assertIn("pinned 0.2.0 (runs)", rapid)
 
+    def test_commented_out_pin_line_is_not_a_pin(self):
+        # a commented-out LA_RAPID_BIN must not show as the live pin (comment lines are not pins)
+        (self.live / "config.local.sh").write_text(
+            '# LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-0.3.0/bin/rapid-mlx"\n'
+            'LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-0.2.0/bin/rapid-mlx"\n', encoding="utf-8")
+        rapid = next(line for line in self.lines() if line.startswith("rapid-mlx"))
+        self.assertIn("pinned 0.2.0", rapid)
+        self.assertNotIn("pinned 0.3.0", rapid)  # the commented line must not become the pin
+
     def test_no_live_config_means_no_pin_but_still_lists_families(self):
         os.environ.pop("LA_LIVE_CONFIG_DIR", None)
         (self.live / "config.local.sh").unlink()  # override points at a dir without the file

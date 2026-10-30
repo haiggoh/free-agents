@@ -197,7 +197,8 @@ fi
 # --- Check for UVM offload capability -----------------------------------------
 # Check if vLLM supports --swap-space (UVM offload)
 VLLM_BIN="${LA_CUDA_BIN:-$(la_discover_cuda_bin cuda-vllm vllm 2>/dev/null || command -v vllm 2>/dev/null || echo "")}"
-if [ -n "$VLLM_BIN" ] && [ -x "$VLLM_BIN" ]; then
+# 0.49.0: the gate RUNS the binary — a dead PATH entry passes [ -x ] and then fails mid-probe
+if [ -n "$VLLM_BIN" ] && la_backend_bin_health "$VLLM_BIN" 2>/dev/null; then
     if "$VLLM_BIN" serve --help 2>&1 | grep -q -- '--swap-space'; then
         echo "✅ vLLM supports --swap-space (UVM offload available for Tier B)"
     else
