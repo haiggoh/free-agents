@@ -222,6 +222,13 @@ def classify(status, body="", error=""):
     if status == 404:
         # /models 404 is model_unavailable; a chat 404 is usually a bad path/model.
         return "model_unavailable" if "model" in low else "malformed"
+    if status == 410 and any(t in low for t in ("end of life", "no longer available",
+                                                "retired", "decommissioned")):
+        # A retired MODEL (410 Gone with EOL wording), not a policy refusal — measured live
+        # 2026-10-30: glm-5.3's EOL 410 was classified "policy" and the fallback chain then
+        # 429'd, so the user saw a rate-limit story about a dead model. NOT retriable: every
+        # fallback hits the same EOL.
+        return "model_eol"
     if status == 410 or ("safety" in low or "policy" in low or "blocked" in low
                          or "prohibited" in low or "filtered" in low):
         return "policy"

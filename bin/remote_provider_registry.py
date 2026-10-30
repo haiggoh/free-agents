@@ -288,6 +288,11 @@ def classify(status, body="", error=""):
     if status == 404:
         # /models 404 is model_unavailable; a chat 404 is usually a bad path/model.
         return "model_unavailable" if "model" in low else "malformed"
+    if status == 410 and any(t in low for t in ("end of life", "no longer available",
+                                                "retired", "decommissioned")):
+        # Same rule as remote_provider_core.py (deliberately duplicated): model EOL is its own
+        # class, never "policy" — measured live 2026-10-30.
+        return "model_eol"
     if status == 410 or ("safety" in low or "policy" in low or "blocked" in low
                          or "prohibited" in low or "filtered" in low):
         return "policy"

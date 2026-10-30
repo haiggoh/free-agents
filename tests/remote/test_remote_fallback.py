@@ -220,6 +220,12 @@ check(core.classify(400, body="prohibited by safety policy") == "policy",
 check(core.classify(400, body="model not found") == "model_unavailable",
       "400 + model wording -> model_unavailable")
 check(core.classify(200, body="ok") == "", "2xx -> empty (success)")
+check(core.classify(410, body="The model 'z-ai/glm-5.3' has reached its end of life on 2026-10-28T08:00:00Z and is no longer available.") == "model_eol",
+      "410 + end-of-life body -> model_eol, NOT policy (measured live 2026-10-30)")
+check(core.classify(410, body="prohibited by safety policy") == "policy",
+      "410 + policy wording still -> policy")
+check(cls(410, "reached its end of life and is no longer available") is False,
+      "model_eol is NOT retriable — a retired model fails on every fallback too")
 # retriable verdicts
 check(cls(429, "rate limit"), "quota is retriable (fail over)")
 check(cls(500, "rate limit"), "transient is retriable")
