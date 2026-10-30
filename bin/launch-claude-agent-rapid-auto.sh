@@ -170,6 +170,11 @@ EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
     exit 2
 }
 
+if ! _rapid_auto_why="$(la_backend_bin_health "$LA_RAPID_AUTO_BIN" 2>&1)"; then
+    printf 'ERROR: Rapid Auto Mode classifier binary cannot run: %s\n   Repair:  %s\n' \
+        "${_rapid_auto_why#broken: }" "$(la_backend_repair_hint "$LA_RAPID_AUTO_BIN")" >&2
+    exit 2
+fi
 rapid_auto_version="$("$LA_RAPID_AUTO_BIN" --version 2>/dev/null || true)"
 [ "$rapid_auto_version" = "rapid-mlx 1.0.0" ] || {
     printf 'ERROR: Rapid Auto Mode requires rapid-mlx 1.0.0, got %s\n' \

@@ -233,6 +233,18 @@ wait_ready() {
     fi
 }
 
+# _require_backend_bin <label> <binary> -> returns only when the binary can RUN; otherwise prints
+# why and the one repair command, and exits 1 BEFORE any "Launching" line or port is claimed.
+# Every launch branch calls this: a dead binary must fail here in milliseconds, not at wait_ready's
+# deadline (measured 2026-10-30: `[ -x ]` passed a venv whose base Python was gone).
+_require_backend_bin() {
+    local label="$1" bin="$2" why
+    if why="$(la_backend_bin_health "$bin" 2>&1)"; then return 0; fi
+    echo "❌ $label cannot run: ${why#broken: }" >&2
+    echo "   Repair:  $(la_backend_repair_hint "$bin")" >&2
+    exit 1
+}
+
 _preflight_warmup() {
     local port="$1" spoof="$2" timeout="${3:-$(( ${LA_SERVER_TIMEOUT_S:-300} / 4 ))}"
     [ "${LA_HOTSWAP_PREFLIGHT:-1}" = "0" ] && return 0
@@ -425,6 +437,7 @@ if [ "$SERVE" = "rapid" ]; then
         echo "   Or set LA_DEFAULT_MLX_BACKEND=vllm in config.local.sh to fall back to the legacy lane." >&2
         exit 1
     fi
+    _require_backend_bin "Rapid-MLX ($LA_RAPID_BIN)" "$LA_RAPID_BIN"
 
     RAPID_META="$CONFIG_DIR/server_${TARGET_PORT}.meta"
     RAPID_META_TMP="${RAPID_META}.tmp.$$"
@@ -546,6 +559,7 @@ if [ "$SERVE" = "omlx" ]; then
         echo "   Install it:  brew install jundot/omlx/omlx   (or set LA_OMLX_BIN in config.local.sh)" >&2
         exit 1
     fi
+    _require_backend_bin "oMLX ($LA_OMLX_BIN)" "$LA_OMLX_BIN"
     OMLX_ROOT="$HOME/.cache/local-agents/omlx-session/port-$TARGET_PORT"
     OMLX_VIEW="$OMLX_ROOT/models"
     OMLX_CACHE="$HOME/.cache/local-agents/omlx-session/cache/$MODEL_NAME"
@@ -616,6 +630,7 @@ if [ "$SERVE" = "moespresso" ]; then
         echo "   (4.x cannot load it: 'Error: unsupported required package feature')" >&2
         exit 1
     fi
+    _require_backend_bin "MoEspresso ($LA_MOESPRESSO_BIN)" "$LA_MOESPRESSO_BIN"
     # thinking: the registry's boolean/free value → oMLX's own vocabulary (on|off|high|max).
     case "${THINK:-false}" in
         true|1|on|high|max) MOE_THINKING="${THINK}" ;;
@@ -681,6 +696,7 @@ fi
 # --- mlx_lm.server branch (dispatch-only tiers, e.g. Llama-4 which vllm-mlx misroutes) --------
 if [ "$SERVE" = "mlx_lm" ]; then
     [ "$MG_KV" != "auto" ] && echo "⚠️  KV precision $MG_KV is saved for $MODEL_NAME, but the mlx_lm.server lane has no KV flag — not applied." >&2
+    _require_backend_bin "mlx_lm ($LA_VENV/python)" "$LA_VENV/python"
     echo "🚀 Launching $MODEL_NAME via mlx_lm.server on free port $TARGET_PORT..."
     nohup "$LA_VENV/python" -m mlx_lm server --model "$MODEL_DIR" --host 127.0.0.1 --port "$TARGET_PORT" \
         --max-tokens 4096 > "$LOG_FILE" 2>&1 &
@@ -710,6 +726,7 @@ if [ "$CUDA_TIER" = "A" ]; then
         echo "❌ vLLM not found. Install with: manage-cuda-backend.py install vllm" >&2
         exit 1
     fi
+    _require_backend_bin "vLLM ($VLLM_BIN)" "$VLLM_BIN"
 
     # Build vLLM command for Tier A (full VRAM)
     [ "$MG_KV" != "auto" ] && echo "⚠️  KV precision $MG_KV is saved for $MODEL_NAME, but the CUDA vLLM lane is not plumbed — not applied." >&2
@@ -762,6 +779,7 @@ if [ "$CUDA_TIER" = "B" ]; then
             echo "❌ vLLM not found. Install with: manage-cuda-backend.py install vllm" >&2
             exit 1
         fi
+        _require_backend_bin "vLLM ($VLLM_BIN)" "$VLLM_BIN"
 
         # Calculate swap space (GB): system RAM - VRAM - 10GB headroom, minimum 4GB
         if [ -n "${LA_VLLM_SWAP_SPACE:-}" ]; then
@@ -939,6 +957,7 @@ EXTRA_ARGS=(--enable-auto-tool-choice --tool-call-parser "$TOOLP" --timeout "$LA
 export VLLM_MLX_ENABLE_THINKING="${VLLM_MLX_ENABLE_THINKING:-$THINK}"
 
 [ "$MG_KV" != "auto" ] && echo "⚠️  KV precision $MG_KV is saved for $MODEL_NAME, but vllm-mlx has no KV-dtype serve flag (its config carries a fixed quantization level) — not applied." >&2
+_require_backend_bin "vllm-mlx ($LA_VENV/vllm-mlx)" "$LA_VENV/vllm-mlx"
 echo "🚀 Launching $MODEL_NAME on free port $TARGET_PORT  (🧠 thinking: $VLLM_MLX_ENABLE_THINKING)..."
 nohup "$LA_VENV/vllm-mlx" serve --models-config "$TMP_CONFIG" --port "$TARGET_PORT" "${EXTRA_ARGS[@]}" > "$LOG_FILE" 2>&1 &
 wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$SPOOF_PRIMARY"

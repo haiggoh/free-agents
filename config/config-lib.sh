@@ -258,22 +258,67 @@ la_retired_hint() {
   return 0
 }
 
-# la_discover_rapid_bin -> prints the first Rapid-MLX executable that actually exists, or "".
+# la_backend_bin_health <binary> -> exit 0 when the backend binary can actually RUN; else exit 1
+# with one "broken: <reason>" line on stderr. `[ -x ]` is not enough: a Homebrew upgrade deletes
+# the patch keg a venv was built on and leaves bin/<backend> executable (measured 2026-10-30,
+# rapid-mlx-0.16.1 — every Rapid launch then stalled at the readiness deadline). So: the file, its
+# #! interpreter, and — for a venv — RUN bin/python. A missing interpreter fails instantly, so no
+# timeout wrapper is needed (macOS has no GNU `timeout`). Mirrors venv_health() in
+# install/managers/_common.py; tests/test_backend_bin_health.sh pins both behaviours.
+la_backend_bin_health() {
+  local bin="${1:-}" first interp py
+  if [ -z "$bin" ] || [ ! -f "$bin" ] || [ ! -x "$bin" ]; then
+    echo "broken: missing or not executable: ${bin:-<empty>}" >&2; return 1
+  fi
+  IFS= read -r first < "$bin" 2>/dev/null || true
+  case "$first" in
+    '#!'*)
+      interp="${first#\#!}"; interp="${interp#"${interp%%[! ]*}"}"; interp="${interp%% *}"
+      if [ -n "$interp" ] && [ ! -x "$interp" ]; then
+        echo "broken: $bin names a missing interpreter: $interp${interp:+$( [ -L "$interp" ] && printf ' -> %s' "$(readlink "$interp")")}" >&2
+        return 1
+      fi ;;
+  esac
+  py="$(dirname "$bin")/python"
+  if [ -L "$py" ] || [ -e "$py" ]; then
+    if ! "$py" -c 'import encodings' >/dev/null 2>&1; then
+      echo "broken: $py cannot start — its base Python is gone ($(readlink "$py" 2>/dev/null || echo "$py"))" >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
+# la_backend_repair_hint <binary> -> the one command that rebuilds a managed venv binary, or a
+# reinstall hint for anything the backend manager does not own.
+la_backend_repair_hint() {
+  local b="${1:-}" name ver
+  name="$(printf '%s' "$b" | sed -nE 's#.*/\.venvs/(rapid-mlx|vllm-mlx|litellm)-([0-9][^/]*)/bin/.*#\1#p')"
+  ver="$(printf '%s' "$b" | sed -nE 's#.*/\.venvs/(rapid-mlx|vllm-mlx|litellm)-([0-9][^/]*)/bin/.*#\2#p')"
+  if [ -n "$name" ] && [ -n "$ver" ]; then
+    echo "python3 \"${LA_ROOT:-<free-agents>}/install/manage-backend.py\" --backend $name repair $ver"
+  else
+    echo "reinstall the package that provides $b"
+  fi
+}
+
+# la_discover_rapid_bin -> prints the first HEALTHY Rapid-MLX executable, or "".
 # Order is deliberate: the brew install first, because that is the one the user's own upgrade
 # habit keeps current; a PATH install second; the versioned venvs last and newest-first, so a
-# machine that pre-dates the brew formula behaves exactly as it did before.
+# machine that pre-dates the brew formula behaves exactly as it did before. Every candidate must
+# pass la_backend_bin_health: a dead newest venv is skipped, never handed to a launcher.
+# _LA_RAPID_SYSTEM_CANDIDATES overrides the fixed brew paths (tests set it empty).
 la_discover_rapid_bin() {
   local c
-  for c in /opt/homebrew/bin/rapid-mlx /usr/local/bin/rapid-mlx; do
-    [ -x "$c" ] && { echo "$c"; return 0; }
+  for c in ${_LA_RAPID_SYSTEM_CANDIDATES-/opt/homebrew/bin/rapid-mlx /usr/local/bin/rapid-mlx}; do
+    [ -x "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
   done
   c="$(command -v rapid-mlx 2>/dev/null)"
-  [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return 0; }
+  [ -n "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
   # Newest venv by version sort, not by mtime: reinstalling an OLD version would otherwise make
   # it look newest. `sort -V` orders 0.12.18 < 0.13.2 correctly, which a lexical sort does not.
-  # Use find instead of ls to handle edge cases properly.
   while IFS= read -r c; do
-    [ -x "$c" ] && { echo "$c"; return 0; }
+    [ -x "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
   done < <(find "$HOME"/.venvs -maxdepth 2 -name "rapid-mlx-*" -type d 2>/dev/null | sed 's|$|/bin/rapid-mlx|' | sort -V -r)
   echo ""
   return 1
@@ -324,25 +369,6 @@ la_discover_moespresso_bin() {
   return 1
 }
 
-# la_discover_backend_binary <backend> -> prints the binary path for a backend, or "".
-# Uses the unified manage-backend.py CLI to discover the active binary for a backend.
-la_discover_backend_binary() {
-  local backend="$1"
-  local manage_backend="$LA_ROOT/install/manage-backend.py"
-
-  if [[ ! -x "$manage_backend" ]]; then
-    return 1
-  fi
-
-  # Use the Python manager to find the active binary for the backend
-  python3 "$manage_backend" --backend "$backend" info latest 2>/dev/null | head -1
-}
-
-# Backend-specific discovery (fallbacks for when manage-backend.py is not available)
-la_discover_vllm_bin() { la_discover_backend_binary "vllm-mlx" || command -v vllm-mlx || true; }
-la_discover_omlx_bin() { la_discover_backend_binary "omlx" || command -v omlx || true; }
-la_discover_llama_cpp_bin() { la_discover_backend_binary "llama-cpp" || true; }
-la_discover_litellm_bin() { la_discover_backend_binary "litellm" || true; }
 
 # la_resolve_serve <declared> -> prints the concrete backend a declared value means.
 # Generic ("", mlx, auto) -> $LA_DEFAULT_MLX_BACKEND. Anything in LA_SERVE_BACKENDS is a pin and

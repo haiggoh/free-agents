@@ -87,7 +87,8 @@ def venv_health(target: Path, binary_name: str, *, runner=subprocess.run) -> Ven
         words = first[2:].decode("utf-8", "replace").split()
         interpreter = Path(words[0]) if words else None
         if interpreter is not None and not (interpreter.exists() and os.access(interpreter, os.X_OK)):
-            return VenvHealth("broken", f"{binary} names a missing interpreter: {interpreter}")
+            target_note = f" -> {os.readlink(interpreter)}" if interpreter.is_symlink() else ""
+            return VenvHealth("broken", f"{binary} names a missing interpreter: {interpreter}{target_note}")
     python = target / "bin" / "python"
     if not os.path.lexists(python):
         return VenvHealth("complete", "")
