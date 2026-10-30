@@ -407,14 +407,26 @@ choice is not "venv vs no venv" — it is *who pins the venv*. Three reasons it 
 3. **Retention isn't yours.** Brew links one version and `brew cleanup` decides when the old one
    goes, so "retain the previous working runtime for 7 successful days" is not enforceable.
 
-`LA_RAPID_BIN` is therefore normally **pinned** to a qualified version, and upgrades are built
-**side by side** (`~/.venvs/rapid-mlx-<new>`) and promoted after qualification. Left unset, it
-auto-discovers brew → `PATH` → newest `~/.venvs/rapid-mlx-*`, so a machine that prefers the brew
-install still works. The weekly `backend-update-check` launchd job (installed via `manage-backend.py --backend rapid-mlx launchd install`) watches PyPI for all backend releases (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) and only *notifies* — it never installs.
+`LA_RAPID_BIN` is therefore normally **pinned** to a qualified version in the machine's **live
+config** (`~/.local/share/free-agents/config/config.local.sh` — the only file a backend update may
+write; a repo worktree stays clean), and upgrades are built **side by side**
+(`~/.venvs/rapid-mlx-<new>`) on Homebrew's patch-stable `opt/python@X.Y` path and promoted after
+qualification. Left unset, it auto-discovers brew → `PATH` → newest healthy
+`~/.venvs/rapid-mlx-*` — every candidate is **run**, so a dead venv is skipped, never launched.
+The weekly `backend-update-check` launchd job (installed via `manage-backend.py launchd install`)
+runs through a stable launcher in `~/.local/share/free-agents/launchd/` that resolves brew and the
+free-agents root at run time; it watches PyPI for all backend releases and only *notifies*. The
+daily `com.haiggoh.daily-package-upgrade` job (user-level
+`~/.claude/scripts/daily-package-upgrade.sh`) runs brew/pipx upgrades and then
+`bin/fa-post-upgrade-check.sh --repair`, exiting non-zero on any failure.
 
 **What does install is `install/manage-backend.py`**, the unified runtime lifecycle manager for
-every backend (`--backend rapid-mlx|vllm-mlx|omlx|moespresso|llama-cpp|litellm`). It closes the notify loop
-without ever starting a model server. In `csl` it is `v` (Backend manager).
+every backend (`--backend rapid-mlx|vllm-mlx|omlx|moespresso|llama-cpp|litellm` plus the CUDA four
+`cuda-vllm|cuda-llama-cpp|cuda-exllamav2|cuda-sglang` on NVIDIA machines). It closes the notify loop
+without ever starting a model server. In `csl` it is `v` (Backend manager). Health is real:
+`./install/manage-backend.py health --all` runs every installed venv's interpreter, and
+`--backend rapid-mlx repair 0.16.1` rebuilds a broken or keg-fragile venv in place
+(make-before-break) from its receipt.
 
 ```bash
 ./install/manage-backend.py --backend rapid-mlx releases

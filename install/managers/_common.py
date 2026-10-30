@@ -93,7 +93,13 @@ def venv_health(target: Path, binary_name: str, *, runner=subprocess.run) -> Ven
     binary and its #! line alone.
     """
     binary = target / "bin" / binary_name
-    if not binary.is_file() or not os.access(binary, os.X_OK):
+    if not os.path.lexists(binary):
+        return VenvHealth("incomplete", f"missing or not executable: {binary}")
+    if binary.is_symlink() and not binary.exists():
+        # a dead bin/python symlink IS the broken-venv shape (the keg is gone) — not "incomplete":
+        # the venv exists, its interpreter does not (measured damage shape 2026-10-30)
+        return VenvHealth("broken", f"{binary} -> {os.readlink(binary)} (interpreter is gone)")
+    if not os.access(binary, os.X_OK):
         return VenvHealth("incomplete", f"missing or not executable: {binary}")
     try:
         with binary.open("rb") as handle:

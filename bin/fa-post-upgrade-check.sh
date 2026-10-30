@@ -43,7 +43,7 @@ done
 say() { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*"; }
 notify() { $NOTIFY >/dev/null 2>&1 || true; }
 
-TMPF="$(mktemp "${TMPDIR:-/tmp}/fa-puc-health.XXXXXX.json")"
+TMPF="$(mktemp "${TMPDIR:-/tmp}/fa-puc-health.XXXXXX")"
 trap 'rm -f "$TMPF"' EXIT
 
 # health --all exits 1 when something is broken — expected; an EMPTY document means the

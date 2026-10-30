@@ -24,7 +24,13 @@ def make_venv(root: Path, binary: str = "rapid-mlx") -> Path:
     """A real stdlib venv (no pip: fast) plus a console-script-shaped binary like pip writes."""
     target = root / f"{binary}-0.1.0"
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(target)], check=True)
+    if binary.startswith("python"):
+        # bin/python already exists (a symlink to the base interpreter) and IS the probe
+        # binary — writing the console script here would follow the symlink and clobber the
+        # REAL base interpreter (measured damage 2026-10-30: the python@3.12 framework binary).
+        return target
     script = target / "bin" / binary
+    assert not script.is_symlink(), f"refusing to write through symlink {script}"
     script.write_text(f"#!{target}/bin/python\nimport sys\nsys.exit(0)\n", encoding="utf-8")
     script.chmod(0o755)
     return target
@@ -55,6 +61,12 @@ class VenvHealthTest(unittest.TestCase):
         target = make_venv(self.root)
         (target / "bin" / "rapid-mlx").unlink()
         self.assertEqual(venv_health(target, "rapid-mlx").state, "incomplete")
+
+    def test_dead_bin_python_symlink_is_broken_not_incomplete(self):
+        # the venv exists but its bin/python names a deleted keg — "broken", never "incomplete"
+        target = make_venv(self.root)
+        repoint_python(target, self.root / "Cellar" / "gone" / "python3.14")
+        self.assertEqual(venv_health(target, "python").state, "broken")
 
     def test_deleted_base_interpreter_is_broken_and_names_the_path(self):
         target = make_venv(self.root)
@@ -116,17 +128,25 @@ class InstalledVersionsReportBrokenTest(unittest.TestCase):
         self.assertGreaterEqual(len(all_managers()), 6)
 
     def test_every_manager_reports_a_dead_venv_as_broken(self):
+        saved = os.environ.pop("LA_USER_STATE_DIR", None)  # CUDA managers root elsewhere by design
+        self.addCleanup(lambda: saved is not None and os.environ.__setitem__("LA_USER_STATE_DIR", saved))
         for cls in all_managers():
             with self.subTest(manager=cls.BACKEND_NAME), tempfile.TemporaryDirectory() as tmp:
                 home = Path(tmp)
                 version = next(v for v in ("9.9.9", "b9999", "v9.9.9") if cls.VERSION_RE.fullmatch(v))
-                (home / ".venvs").mkdir()
-                target = make_venv(home / ".venvs", cls.BACKEND_NAME)
-                target = target.rename(home / ".venvs" / f"{cls.VENV_PREFIX}-{version}")
-                script = target / "bin" / cls.BACKEND_NAME
-                script.write_text(f"#!{target}/bin/python\n", encoding="utf-8")
+                mgr = cls(home=home)
+                root = mgr.venv_root          # ~/.venvs for the Mac managers, the CUDA state dir for cuda-*
+                root.mkdir(parents=True)
+                target = make_venv(root, cls.BACKEND_NAME)
+                target = target.rename(root / f"{cls.VENV_PREFIX}-{version}")
+                binary = getattr(cls, "BINARY", cls.BACKEND_NAME)   # cuda managers probe bin/vllm etc.
+                script = target / "bin" / binary
+                if not binary.startswith("python"):   # never write through the bin/python symlink
+                    assert not script.is_symlink(), f"refusing to write through symlink {script}"
+                    script.write_text(f"#!{target}/bin/python\n", encoding="utf-8")
+                    script.chmod(0o755)               # venv_health requires X_OK, not just presence
                 repoint_python(target, home / "Cellar" / "gone" / "python3.14")
-                states = {v: st for v, _, st in cls(home=home).installed_versions()}
+                states = {v: st for v, _, st in mgr.installed_versions()}
                 self.assertEqual(states.get(version), "broken", states)
 
 
