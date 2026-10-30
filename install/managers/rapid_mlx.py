@@ -422,6 +422,7 @@ print(json.dumps(out, sort_keys=True))
                 try:
                     with braille_spinner("Creating virtual environment..."):
                         self.run_command([str(base_python), "-m", "venv", str(target)], log=log)
+                    self.after_venv_created(target)
                     child = target / "bin" / "python"
                     lock = None if refresh_deps else self._locked_requirements(version)
                     if lock:

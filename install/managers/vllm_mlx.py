@@ -179,6 +179,7 @@ class VLLMMLXManager(BackendManager):
 
         try:
             self.run_command([str(base_python), "-m", "venv", str(target)], log=log)
+            self.after_venv_created(target)
             child = target / "bin" / "python"
 
             if source == "github" or self.needs_fork_patches(version):

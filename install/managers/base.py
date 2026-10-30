@@ -29,6 +29,7 @@ def _minor(text: str) -> tuple[int, int]:
         return (99, 99)
 
 
+from .durability import durable_python, homebrew_prefixes, normalize_venv_base
 from ._common import (
     BackendInfo,
     VersionInfo,
@@ -500,7 +501,7 @@ class BackendManager(
             if capped and self.PYTHON_MAX and _minor(probe.stdout) > self.PYTHON_MAX:
                 too_new.append(f"{path} ({probe.stdout.strip()})")
                 continue
-            return path
+            return durable_python(path)
         if too_new:
             ceiling = "%d.%d" % self.PYTHON_MAX
             raise ManagerError(
@@ -514,8 +515,20 @@ class BackendManager(
         sys.executable so a ceiling has something older to fall back to."""
         out = [sys.executable]
         for minor in ("3.14", "3.13", "3.12"):
-            out += [f"/opt/homebrew/bin/python{minor}", f"python{minor}"]
+            out += [str(prefix / "opt" / f"python@{minor}" / "bin" / f"python{minor}")
+                    for prefix in homebrew_prefixes()]
+            out.append(f"python{minor}")
         return out + ["python3"]
+
+    def after_venv_created(self, target: Path) -> str:
+        """Run right after `python -m venv`: move a keg-based base onto Homebrew's patch-stable
+        opt/ path and RUN it (durability.normalize_venv_base). A venv that cannot be moved is
+        kept but flagged — it will break at the next Python patch upgrade, and `health` shows it."""
+        result = normalize_venv_base(target)
+        if result == "pinned-keg":
+            print(f"⚠️  {target} is built on a Homebrew patch keg and will break at the next Python patch "
+                  "upgrade; `manage-backend.py … repair` can rebuild it later.", file=sys.stderr)
+        return result
 
     def sha256_file(self, path: Path) -> str:
         """Compute SHA256 hash of a file."""

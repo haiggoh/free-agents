@@ -39,4 +39,8 @@ else
   "${LA_PICKER_PYTHON:-python3}" -m venv "$VENV"
   "$VENV/bin/python" -m pip install -q -r "$REQ"
 fi
+# Keep the picker venv alive across Homebrew Python patch upgrades: move a keg-based base onto the
+# patch-stable opt/ path and run it (install/managers/durability.py; uv records resolved keg paths).
+python3 "$HERE/managers/durability.py" normalize "$VENV" >/dev/null \
+  || echo "⚠️  $VENV is built on a Homebrew patch keg; it will break at the next Python patch upgrade — re-run this script then." >&2
 "$VENV/bin/python" -c 'import textual; print("session picker ready: textual", textual.__version__)'
