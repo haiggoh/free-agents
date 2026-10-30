@@ -210,7 +210,7 @@ class SizeSortAndLabelTests(unittest.TestCase):
         # The inventory is generated from config/remote-registry.yaml into
         # config/remote-agents.sh (LA_REMOTE_AGENTS), so assert on the generated file.
         roster = (ROOT / "config" / "remote-agents.sh").read_text(encoding="utf-8")
-        order = [ln.split("|", 1)[0] for ln in roster.splitlines()
+        order = [ln.split("|", 1)[0].strip().strip('"') for ln in roster.splitlines()
                  if ln.startswith('  "') and "|nvidia|" in ln]
         i = {alias: n for n, alias in enumerate(order)}
         for variant in ("nvidia-nemotron-ultra", "nvidia-nemotron-ultra-thinking"):
