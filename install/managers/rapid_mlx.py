@@ -52,7 +52,7 @@ _DEFAULT_VALIDATOR = object()
 class RapidMLXManager(BackendManager):
     BACKEND_NAME = "rapid-mlx"
     VENV_PREFIX = "rapid-mlx"
-    DEFAULT_VERSION = "0.16.9"
+    DEFAULT_VERSION = "0.16.10"
     PACKAGE_NAME = "rapid-mlx"
     PYPI_URL = PYPI_URL
     PYTHON_MAX = (3, 14)  # torch/torchvision wheels stop at cp314 (base.PYTHON_MAX)
