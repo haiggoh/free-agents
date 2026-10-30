@@ -46,7 +46,26 @@ class BackendManagerScreen(PilotCase):
             self.assertIn("Remove an installed version", h.text())      # rapid-mlx has remove
             await h.press("c")
             await h.wait_for(lambda: "Backend: rapid-mlx" not in h.text(), "backend to cycle")
-            self.assertNotIn("Remove an installed version", h.text())
+            # 0.49.0: snapshot/promote/remove/repair live in the shared venv base, so vllm-mlx
+            # keeps the rows this test used to see hidden (old contract: remove was Rapid-only)
+            self.assertIn("Backend: vllm-mlx", h.text())
+            self.assertIn("Remove an installed version", h.text())
+            self.assertIn("Repair an installed version", h.text())
+            # a backend with NO version ops (omlx) must hide every one of them
+            await h.press("c")
+            await h.wait_for(lambda: "Backend: omlx" in h.text(), "backend to cycle to omlx")
+            for label in ("Snapshot an installed version", "Promote pins to an installed version",
+                          "Remove an installed version", "Repair an installed version"):
+                self.assertNotIn(label, h.text())
+            # litellm is the partial case: remove only (pipx owns the live install), the rest hidden
+            await h.press("c")
+            await h.wait_for(lambda: "Backend: llama-cpp" in h.text(), "backend to cycle")
+            await h.press("c")
+            await h.wait_for(lambda: "Backend: litellm" in h.text(), "backend to cycle to litellm")
+            self.assertIn("Remove an installed version", h.text())
+            self.assertNotIn("Snapshot an installed version", h.text())
+            self.assertNotIn("Promote pins to an installed version", h.text())
+            self.assertNotIn("Repair an installed version", h.text())
         self.run_picker(s)
 
     def _stub_manager(self, installed="0.16.1         complete   /x/rapid-mlx-0.16.1\n"
