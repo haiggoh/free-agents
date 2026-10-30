@@ -113,6 +113,62 @@ are specs.
 
 ---
 
+## `0.49.1` — Picker consistency patch (reserved 2026-10-31)
+
+**Decision (2026-10-31):** the eight fresh picker/remote-session observations from the 2026-10-30
+free-lane session split into a **patch** and a **minor**. This patch holds only bounded
+defect/consistency fixes that are visually verifiable in csl and spend no reserved number, per this
+file's own rule that a reserved number must not be spent casually. New settings and menu-shape
+changes wait for `0.50.0` below.
+
+Scope (waypoint ids in parentheses):
+
+1. api-keys submenu: "back to home" moves from the top to the last option, matching every other
+   submenu (`csl-api-keys-submenu-back-to`).
+2. Dangling `·` separator behind some parameter sizes — leftover from the removed "catalog"
+   wording (`picker-dangling-dot-separator`).
+3. Remote picker: every model in the NVIDIA API group shows its parameter size
+   (`remote-picker-parameter-sizes`).
+4. Handpicked tier order: Nemotron 3 Ultra ranks behind stepfun and deepseek
+   (`handpicked-model-tier`).
+5. Old-model filter: verify it actually filters — Gemini 2.5-class models still listed in every
+   provider group (`verify-the-old-model-filter`).
+6. Local model list: operator/thinking role labels removed from session pickers (they only matter
+   for delegate dispatch, not session launch) (`csl-local-model-list-remove`).
+7. Remote-session error surfacing: a model end-of-life 410 (e.g. glm-5.3 EOL 2026-10-28) must read
+   as EOL, not as a generic APIError followed by a misleading "fallbacks also failed 429" chain
+   (`remote-session-error`).
+
+**Release gates:** every item has a picker test that fails before and passes after (mutation-check
+the label/ordering assertions); full suite green via the repo's own gate; version surfaces agree
+(plugin.json + CHANGELOG + VERSION) at `0.49.1`; shipped through `rtc-ship.sh` from a worktree.
+
+## `0.50.0` — Picker UX minor (reserved 2026-10-31)
+
+New settings and menu-shape changes from the same 2026-10-30 session — behavior users will notice,
+so they earn the minor bump rather than riding the patch:
+
+1. Lowkey menu: drop the "advanced" group entirely; top-level order C) Choose model (local list,
+   api list) → M) Mode → G) Launch → S) Set session name → Model settings group
+   (`lowkey-menu-drop-the-advanced`).
+2. API-keys screen: per-provider hide/show toggle for the choose-model list
+   (`api-keys-provider-hide-toggle`).
+3. Theme screen: shell-mode color swatch per theme + configurable hue shift
+   (`theme-hue-shift-shell-swatch`).
+4. README: concise settings documentation (`readme-settings-docs`).
+5. Backend-manager UI leftovers: remove standalone list-releases, harmonica backend chooser,
+   snapshot inside install (`backend-manager-rework`).
+6. Repo-wide `--help` sweep remainder: `queue_marker.py`, `.rtc/{pre-package,pre-flight,post-release}.sh`,
+   re-audit `hooks/*.py` + `install/managers/*.py` (`free-agents-repo-wide-help-sweep`).
+7. Move backend venvs to a free-agents-owned XDG dir with migration (`free-agents-move-backend`).
+8. Lowkey any-model API providers (`lowkey-any-model-api`).
+9. Pre-existing pyright advisory pile, if addressed (`free-agents-preexisting-pyright-defects`).
+
+**Release gates:** all of the above landed with tests; `0.49.1` shipped and dogfooded first;
+version surfaces agree at `0.50.0`; shipped through `rtc-ship.sh` from a worktree.
+
+---
+
 ## Release sequence — why `0.14.0` was split
 
 **Decided 2026-09-06.** Every roadmap item used to sit behind one large `0.14.0`. That was a
