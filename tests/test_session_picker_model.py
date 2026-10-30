@@ -246,14 +246,38 @@ class BackendManagerContractTests(unittest.TestCase):
         # supported"); a missing row is the 0.34.1 regression (remove vanished from the menu).
         import sys as _s
         _s.path.insert(0, str(ROOT / "install"))
-        from managers.base import BackendManager
         import managers
-        method = {"snapshot": "snapshot_environment", "promote": "promote_pins", "remove": "remove_version"}
+        # 0.49.0: remove/snapshot/repair live in the shared base (gated per backend), so "the
+        # method is overridden" no longer means "supported" — each manager DECLARES VERSION_OPS.
         for backend in m.RUNTIME_BACKENDS:
             cls = managers.get_manager(backend)
-            real = {op for op, name in method.items()
-                    if getattr(cls, name) is not getattr(BackendManager, name)}
-            self.assertEqual(set(m.BACKEND_VERSION_OPS.get(backend, ())), real, backend)
+            self.assertEqual(set(m.BACKEND_VERSION_OPS.get(backend, ())), set(cls.VERSION_OPS), backend)
+
+    def test_repair_row_is_offered_where_the_backend_supports_it(self):
+        s = m.Settings()
+        for backend, expect in (("rapid-mlx", True), ("vllm-mlx", True), ("litellm", False), ("omlx", False)):
+            with self.subTest(backend=backend):
+                s.runtime_backend = backend
+                labels = [a.label for a in m.runtime_actions(m.RuntimeManagerScreen(s))]
+                self.assertEqual(any("Repair" in lb for lb in labels), expect, labels)
+
+    def test_versions_screen_runs_repair_and_flags_broken_versions(self):
+        s = m.Settings()
+        s.runtime_backend = "rapid-mlx"
+        vs = m.VersionsScreen(s, "repair", [m.VersionEntry("0.16.1", "broken"), m.VersionEntry("0.16.9", "complete")])
+        labels = {i.id: i.label for g in vs.accordion.groups for i in g.items}
+        self.assertIn("cannot run", labels["0.16.1"])
+        self.assertNotIn("cannot run", labels["0.16.9"])
+        self.assertEqual(vs.argv_for("0.16.1"), ["repair", "0.16.1"])
+
+    def test_last_complete_version_guard_follows_the_backend(self):
+        s = m.Settings()
+        for backend, guarded in (("rapid-mlx", True), ("vllm-mlx", True), ("litellm", False)):
+            with self.subTest(backend=backend):
+                s.runtime_backend = backend
+                vs = m.VersionsScreen(s, "remove", [m.VersionEntry("1.0.0", "complete")])
+                nav = vs.activate_selected()
+                self.assertEqual(str(nav.target).startswith("warn:"), guarded, nav)
 
     def test_versions_screen_lists_and_routes_remove_through_confirmation(self):
         s = m.Settings()

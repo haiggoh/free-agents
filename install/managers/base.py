@@ -213,6 +213,10 @@ class BackendManager(
     # Venv backends (one ~/.venvs/<prefix>-<version> per version) opt in to the shared remove /
     # snapshot / repair machinery; Homebrew- and binary-managed backends keep "not supported".
     SUPPORTS_VENV_REMOVE: bool = False
+    # Per-version operations beyond install/validate/info that this backend really supports. The
+    # picker's BACKEND_VERSION_OPS must equal this (tests/test_session_picker_model.py), so the menu
+    # never offers a row that can only fail and never hides one that works.
+    VERSION_OPS: tuple[str, ...] = ()
     # Keep at least one COMPLETE version (a core runtime). LiteLLM turns this off: remote sessions
     # run the pipx install, so the manager's venvs are leftovers (user 2026-10-30).
     REMOVE_KEEPS_ONE: bool = True

@@ -2349,7 +2349,13 @@ RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm", "mo
 # Per-version operations beyond install/validate/info, by backend: only the ones that backend's
 # manager actually implements (the base class raises "not supported"), so the menu never offers
 # a row that can only fail. Tests compare this against the managers' real overrides.
-BACKEND_VERSION_OPS = {"rapid-mlx": ("snapshot", "promote", "remove")}
+# Equal to each manager's VERSION_OPS declaration (0.49.0; contract-tested). LiteLLM offers remove
+# only: pipx owns the install the remote sessions run, the manager's venvs are leftovers.
+BACKEND_VERSION_OPS = {"rapid-mlx": ("snapshot", "promote", "remove", "repair"),
+                       "vllm-mlx": ("snapshot", "promote", "remove", "repair"),
+                       "litellm": ("remove",)}
+# Backends whose manager keeps at least one COMPLETE version (REMOVE_KEEPS_ONE).
+KEEP_ONE_BACKENDS = ("rapid-mlx", "vllm-mlx")
 
 
 @dataclass
@@ -2358,8 +2364,9 @@ class VersionEntry:
     status: str = ""          # installed: complete/incomplete; releases: "installed" or ""
 
 
-RAPID_CORE_REFUSAL = ("{version} is the only installed Rapid-MLX version — not removed. Rapid-MLX is a "
-                      "core dependency of free-agents (it runs local models).")
+CORE_REFUSAL = ("{version} is the only installed {backend} version — not removed. {backend} is a "
+                "core dependency of free-agents (it runs local models).")
+RAPID_CORE_REFUSAL = CORE_REFUSAL.replace("{backend}", "Rapid-MLX")   # kept for existing importers
 
 
 class VersionsScreen(Screen):
@@ -2373,6 +2380,7 @@ class VersionsScreen(Screen):
         "snapshot": ("Snapshot an installed version (recreation receipt)", "installed"),
         "promote": ("Promote pins to an installed version", "installed"),
         "remove": ("Remove an installed version", "installed"),
+        "repair": ("Repair an installed version (rebuild in place)", "installed"),
     }
     load_error: str | None = None   # set by the app when the list failed to load (not empty)
 
@@ -2405,7 +2413,10 @@ class VersionsScreen(Screen):
                      for e in entries]
             label = f"Releases incl. prereleases ({len(items)})"
         else:
-            items = [Item(e.version, f"{e.version:14} {e.status}") for e in entries]
+            # A version that cannot run is marked where the user chooses (0.49.0: health is real).
+            items = [Item(e.version, f"{e.version:14} {e.status}"
+                          + (f"  {ec.gap(ec.EMOJI_WARNING_STR)}cannot run — Repair rebuilds it" if e.status in ("broken", "incomplete") else ""))
+                     for e in entries]
             label = f"Installed versions ({len(items)})"
         self.accordion.set_groups([Group(source, label, items)] if items else [])
         # The list IS the screen: start on the first version, never on the group header,
@@ -2420,9 +2431,9 @@ class VersionsScreen(Screen):
         if self.op == "remove":
             # The picker's own guard, before any prompt: the last complete Rapid-MLX version is
             # never offered for removal (the manager refuses it too — this is the friendly half).
-            if self.backend == "rapid-mlx" and not any(
+            if self.backend in KEEP_ONE_BACKENDS and not any(
                     e.version != v and e.status == "complete" for e in (self.entries or [])):
-                return Nav("warn:" + RAPID_CORE_REFUSAL.format(version=v), self.owner)
+                return Nav("warn:" + CORE_REFUSAL.format(version=v, backend=self.backend), self.owner)
             return Nav("prompt:rt-remove", self.owner)       # yes/no, then "are you sure"
         return Nav(f"tool:rt-op:{self.op}:{v}", self.owner)
 
@@ -2455,7 +2466,8 @@ class VersionsScreen(Screen):
 
 VERSION_OP_EMOJI = {"install": ec.EMOJI_INSTALL_STR, "validate": ec.EMOJI_VALIDATE_STR,
                     "info": ec.EMOJI_INFO_STR, "snapshot": ec.EMOJI_SNAPSHOT_STR,
-                    "promote": ec.EMOJI_PROMOTE_STR, "remove": ec.EMOJI_REMOVE_STR}
+                    "promote": ec.EMOJI_PROMOTE_STR, "remove": ec.EMOJI_REMOVE_STR,
+                    "repair": ec.EMOJI_REPAIR_STR}
 
 
 def runtime_actions(screen) -> list:
@@ -2472,7 +2484,8 @@ def runtime_actions(screen) -> list:
     ops = BACKEND_VERSION_OPS.get(b, ())
     for key, op, label in (("s", "snapshot", "Snapshot an installed version"),
                            ("p", "promote", "Promote pins to an installed version"),
-                           ("x", "remove", "Remove an installed version")):
+                           ("x", "remove", "Remove an installed version"),
+                           ("e", "repair", "Repair an installed version (rebuild in place)")):
         if op in ops:
             acts.append(Action(key, f"{ec.gap(VERSION_OP_EMOJI[op])}{label}", pick(op), section="tools"))
     acts.append(Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", screen.owner),

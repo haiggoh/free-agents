@@ -33,6 +33,7 @@ class LitellmManager(BackendManager):
     PYPI_URL = PYPI_URL
     PYTHON_MAX = (3, 14)  # kept with the other venv backends; never a 3.15 venv (user 2026-10-26)
     SUPPORTS_VENV_REMOVE = True
+    VERSION_OPS = ("remove",)   # leftovers only: pipx owns LiteLLM (user 2026-10-30)
     REMOVE_KEEPS_ONE = False  # remote sessions run the pipx litellm; these venvs are leftovers
     VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:([a-zA-Z]+)(\d+))?$")
 

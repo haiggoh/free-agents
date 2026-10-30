@@ -53,6 +53,7 @@ class RapidMLXManager(BackendManager):
     PYPI_URL = PYPI_URL
     PYTHON_MAX = (3, 14)  # torch/torchvision wheels stop at cp314 (base.PYTHON_MAX)
     SUPPORTS_VENV_REMOVE = True
+    VERSION_OPS = ("snapshot", "promote", "remove", "repair")
 
     def __init__(self, home: Path | None = None, repo: Path | None = None) -> None:
         """Initialize the Rapid-MLX manager.
