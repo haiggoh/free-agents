@@ -794,7 +794,7 @@ class Screen:
     # Lane pickers fold their settings rows under one group header (user 2026-10-29,
     # waypoint picker-collapsed-settings-group); every other screen renders plain rows.
     settings_collapsed = True    # the "Advanced" group starts folded (user 2026-10-29)
-    model_collapsed = False      # the "Model" group (effort/temp/thinking) starts OPEN
+    model_collapsed = True       # the "Model settings" group also starts folded (user 2026-10-30)
     # Rendered in its own colour below the policy line when a screen sets it (Home does).
     version_line = ""
 
@@ -1856,24 +1856,24 @@ def rendered_actions(sm: "Screen"):
     acts = [a for a in sm.actions() if a.section != "hidden"]
     if isinstance(sm, (LocalScreen, RemoteScreen)):
         nav = [a for a in acts if a.section == "nav"]
+        lanes = [a for a in acts if a.section == "lanes"]
         model = [a for a in acts if a.section == "model"]
         adv = [a for a in acts if a.section == "settings"]
-        top = [a for a in acts if a.section not in ("nav", "model", "settings")]
+        top = [a for a in acts if a.section not in ("nav", "lanes", "model", "settings")]
         out, hidden = list(top), []
         if model:
+            out.append(MODEL_GROUP)
             if sm.model_collapsed:
-                out.append(MODEL_GROUP)
                 hidden += model
             else:
-                out.append(MODEL_GROUP)
                 out += model
         if adv:
+            out.append(SETTINGS_GROUP)
             if sm.settings_collapsed:
-                out.append(SETTINGS_GROUP)
                 hidden += adv
             else:
-                out.append(SETTINGS_GROUP)
                 out += adv
+        out += lanes                     # pure navigation groups at the end, before back/quit
         out += nav                       # nav is always the last option (user 2026-10-30)
         return out, hidden
     return acts, []

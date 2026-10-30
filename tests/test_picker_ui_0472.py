@@ -91,12 +91,13 @@ class SettingsGroupTests(unittest.TestCase):
         rendered, hidden = m.rendered_actions(lane)
         self.assertIn(m.MODEL_GROUP, rendered)
         self.assertIn(m.SETTINGS_GROUP, rendered)
-        self.assertFalse(lane.model_collapsed)          # model group open by default
+        self.assertTrue(lane.model_collapsed)           # model settings folded by default too (user 2026-10-30)
         self.assertTrue(lane.settings_collapsed)        # advanced folded by default
-        self.assertIn("e", {a.key for a in rendered})   # effort visible (model group open)
-        self.assertTrue(all(a.section == "settings" for a in hidden))
-        self.assertNotIn("e", {a.key for a in hidden})
-        self.assertEqual(rendered[-1].section, "nav")   # back/quit last, always
+        self.assertIn("e", {a.key for a in hidden})     # effort folded into Model settings
+        self.assertTrue(all(a.section in ("settings", "model") for a in hidden))
+        # lane switch sits at the end, right before nav (user 2026-10-30)
+        self.assertEqual(rendered[-1].section, "nav")
+        self.assertEqual(rendered[-2].section, "lanes")
         self.assertIn("c", {a.key for a in rendered})   # choose model stays top-level
 
     def test_local_lane_same_layout(self):
@@ -107,15 +108,17 @@ class SettingsGroupTests(unittest.TestCase):
         self.assertEqual(rendered[-1].section, "nav")
         self.assertIn("c", {a.key for a in rendered})
 
-    def test_toggle_folds_both_groups(self):
+    def test_toggle_expands_both_groups(self):
         lane = m.RemoteScreen(m.Settings(), remote_agents())
         lane.toggle_model_group()
         lane.toggle_settings()
         rendered, hidden = m.rendered_actions(lane)
-        self.assertIn(m.MODEL_GROUP, rendered)          # headers stay, rows fold
+        self.assertIn(m.MODEL_GROUP, rendered)          # headers stay
         self.assertIn(m.SETTINGS_GROUP, rendered)
-        self.assertIn("e", {a.key for a in hidden})
+        self.assertIn("e", {a.key for a in rendered})   # now visible
+        self.assertEqual(hidden, [])
         self.assertEqual(rendered[-1].section, "nav")
+        self.assertEqual(rendered[-2].section, "lanes")
 
     def test_home_does_not_fold(self):
         rendered, hidden = m.rendered_actions(m.HomeScreen(m.Settings()))
