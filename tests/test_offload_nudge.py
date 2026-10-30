@@ -19,6 +19,10 @@ def nudge(base_url):
     if base_url is not None:
         env["ANTHROPIC_BASE_URL"] = base_url
     env["CLAUDE_PLUGIN_ROOT"] = "/plug"
+    # Isolate HOME: route() lets the registered settings.json override the process env by
+    # design, so a saved FA_ROUTE_AGENT on the real machine would leak into the test.
+    import tempfile
+    env["HOME"] = tempfile.mkdtemp(prefix="nudge-home-")
     r = subprocess.run([sys.executable, str(HOOK)], capture_output=True, text=True, env=env,
                        stdin=subprocess.DEVNULL, timeout=10)
     assert r.returncode == 0, r.stderr
@@ -58,8 +62,10 @@ class RouteModeNudges(unittest.TestCase):
     sentence."""
 
     def nudge_with(self, **env):
+        import tempfile
         e = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_BASE_URL"}
-        e.update(ANTHROPIC_BASE_URL="https://gateway.example.com", CLAUDE_PLUGIN_ROOT="/plug", **env)
+        e.update(ANTHROPIC_BASE_URL="https://gateway.example.com", CLAUDE_PLUGIN_ROOT="/plug",
+                 HOME=tempfile.mkdtemp(prefix="nudge-home-"), **env)
         r = subprocess.run([sys.executable, str(HOOK)], capture_output=True, text=True, env=e,
                            stdin=subprocess.DEVNULL, timeout=10)
         assert r.returncode == 0, r.stderr
