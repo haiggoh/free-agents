@@ -1325,10 +1325,13 @@ class Picker(App):
         for a in rendered:
             # Store action object reference
             self.action_ids.append(a)
-            # Blank separator row between section groups (user 2026-10-30): a disabled
-            # option with a non-"a:" id, so the action-index mapping in the option ids
-            # stays intact.
-            if prev_section is not None and a.section != prev_section:
+            # Blank separator row only before MAJOR top-level groups (tools/nav/appearance) —
+            # universal rule (user 2026-10-30): never between launch and choose-model, never
+            # between a harmonica group header and its contents, never between the two
+            # groups. Sentinels carry their group's section so no separator fires around them.
+            if (prev_section is not None and a.section != prev_section
+                    and a.section in ("tools", "nav", "appearance")
+                    and a not in (m.SETTINGS_GROUP, m.MODEL_GROUP)):
                 actions_list.add_option(Option(Text(""), id=f"sep:{len(self.action_ids)}", disabled=True))
             prev_section = a.section
             if a in (m.SETTINGS_GROUP, m.MODEL_GROUP):

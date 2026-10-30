@@ -80,8 +80,8 @@ class Action:
 # model-setting rows (effort/temperature/thinking) — open by default, more users want
 # those; SETTINGS_GROUP ("Advanced") holds the rest — collapsed by default. Nav rows
 # always render last (user 2026-10-30).
-SETTINGS_GROUP = Action("0", "Advanced", lambda: None)
-MODEL_GROUP = Action("0", "Model", lambda: None)
+SETTINGS_GROUP = Action("0", "Advanced", lambda: None, section="settings")
+MODEL_GROUP = Action("0", "Model", lambda: None, section="model")
 
 
 def setting(key: str, label: str, choices, get: Callable[[], object], put: Callable[[object], object],
