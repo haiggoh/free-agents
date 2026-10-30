@@ -21,7 +21,7 @@ from typing import Any
 
 from . import register_manager
 from .base import BackendInfo, BackendManager, ManagerError
-from ._common import braille_spinner
+from ._common import braille_spinner, venv_health
 from .base import repository_root
 
 PACKAGE = "rapid-mlx"
@@ -673,9 +673,7 @@ print(json.dumps(out, sort_keys=True))
             version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
             if not VERSION_RE.fullmatch(version):
                 continue
-            binary = path / "bin" / "rapid-mlx"
-            state = "complete" if binary.is_file() and os.access(binary, os.X_OK) else "incomplete"
-            entries.append((version, path, state))
+            entries.append((version, path, venv_health(path, "rapid-mlx").state))
         return sorted(entries, key=lambda item: self.version_key(item[0]), reverse=True)
 
     @staticmethod

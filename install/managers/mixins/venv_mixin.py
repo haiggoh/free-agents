@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from .._common import venv_health
+
 
 class VenvMixin:
     """Mixin providing virtual environment management utilities.
@@ -179,7 +181,7 @@ class VenvMixin:
             version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
             if not self.VERSION_RE.fullmatch(version):
                 continue
-            state = "complete" if self._is_complete(path) else "incomplete"
+            state = venv_health(path, self.BACKEND_NAME).state if self._is_complete(path) else "incomplete"
             entries.append((version, path, state))
         return sorted(entries, key=lambda item: self.version_key(item[0]), reverse=True)
 
