@@ -570,8 +570,11 @@ else
         fi
     fi
     if [ -z "$ROOT" ]; then
-        hit="$(ls -d "$HOME"/.claude/plugins/cache/*/free-agents/*/ 2>/dev/null | sort -V | tail -1)"
-        if [ -n "$hit" ] && [ -f "${hit%/}/.claude-plugin/plugin.json" ]; then ROOT="${hit%/}"; fi
+        hit=""
+        while IFS= read -r d; do
+            [ -f "$d/.claude-plugin/plugin.json" ] && hit="$d"
+        done < <(find "$HOME/.claude/plugins/cache" -maxdepth 3 -type d -path '*/free-agents/*' -name '[0-9]*' 2>/dev/null | sort -V)
+        [ -n "$hit" ] && ROOT="$hit"
     fi
 fi
 if [ -z "$ROOT" ]; then
