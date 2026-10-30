@@ -668,7 +668,19 @@ la_get_autocompaction() {
 
 # Load the LIVE config.local.sh (see the LA_LIVE_CONFIG_DIR resolution above) if it exists,
 # else config.example.sh (shipped defaults) from the code tree.
+# Backend-binary overrides that an operator may set in the ENVIRONMENT. Sourcing config.local.sh
+# runs its plain `LA_RAPID_BIN=…` line, which used to overwrite the environment — so the one
+# emergency escape hatch did nothing (measured 2026-10-30). la_load_config snapshots these before
+# sourcing and restores them after; a set-but-broken value aborts naming it. LA_MOESPRESSO_BIN is
+# deliberately absent: it is EXPORTED with a resolved value and its set-but-empty form means "no
+# MoEspresso" (la_discover_moespresso_bin), so it keeps its own semantics.
+LA_BIN_ENV_OVERRIDES="LA_RAPID_BIN LA_RAPID_AUTO_BIN LA_OMLX_BIN LA_CUDA_BIN LA_LLAMA_SERVER"
+
 la_load_config() {
+  local _la_n _la_v _la_i=0 _la_snap=()
+  for _la_n in $LA_BIN_ENV_OVERRIDES; do
+    eval "_la_snap[$_la_i]=\"\${$_la_n-}\""; _la_i=$((_la_i + 1))
+  done
   if [ -f "$LA_LIVE_CONFIG_DIR/config.local.sh" ]; then
     # shellcheck source=/dev/null
     . "$LA_LIVE_CONFIG_DIR/config.local.sh"
@@ -685,6 +697,16 @@ la_load_config() {
     echo "❌ local-agents: no config found in $LA_LIVE_CONFIG_DIR (code tree: $LA_CONFIG_DIR)" >&2
     return 1
   fi
+  _la_i=0
+  for _la_n in $LA_BIN_ENV_OVERRIDES; do
+    _la_v="${_la_snap[$_la_i]:-}"; _la_i=$((_la_i + 1))
+    [ -n "$_la_v" ] || continue
+    if ! la_backend_bin_health "$_la_v"; then
+      echo "❌ $_la_n is set in the environment to $_la_v, but it cannot run. Unset it or point it at a working binary." >&2
+      return 1
+    fi
+    eval "$_la_n=\"\$_la_v\""
+  done
   # Machine defaults (only set if the config file didn't).
   : "${LA_MODELS_DIR:=$HOME/.models}"
   : "${LA_VENV:=$HOME/.local-llm/bin}"
