@@ -33,6 +33,7 @@ from ._common import (
     BackendInfo,
     VersionInfo,
     ManagerError,
+    receipt_freeze,
 )
 from .mixins import (
     VersionParsingMixin,
@@ -451,8 +452,20 @@ class BackendManager(
         finally:
             temporary.unlink(missing_ok=True)
 
+    def save_receipt(self, version: str, data: dict[str, Any]) -> Path:
+        """Write the recreation receipt for `version` (mode 600) — THE writer every backend uses.
+
+        Always records `version` and `backend`, the keys locked_requirements matches on; until
+        0.49.0 the writer omitted `version` while every reader required it."""
+        payload = dict(data)
+        payload["version"] = version
+        payload["backend"] = self.BACKEND_NAME
+        path = self.receipt_path(version)
+        self.atomic_json(path, payload)
+        return path
+
     def locked_requirements(self, version: str) -> list[str] | None:
-        """Get locked requirements from receipt if available."""
+        """The pip freeze the receipt can rebuild `version` from, or None (see receipt_freeze)."""
         path = self.receipt_path(version)
         if not path.is_file():
             return None
@@ -460,13 +473,7 @@ class BackendManager(
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
-        lines = payload.get("pip_freeze") if isinstance(payload, dict) else None
-        if payload.get("version") != version or not isinstance(lines, list):
-            return None
-        clean = [line for line in lines if isinstance(line, str) and line.strip()]
-        normalized = {line.casefold().replace("_", "-") for line in clean}
-        pkg_normalized = self.PACKAGE_NAME.replace("_", "-")
-        return clean if f"{pkg_normalized}=={version}" in normalized else None
+        return receipt_freeze(payload, version, self.PACKAGE_NAME)
 
     def _is_complete(self, path: Path) -> bool:
         """Check if environment is complete (override for backend-specific checks)."""

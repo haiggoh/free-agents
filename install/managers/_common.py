@@ -59,6 +59,23 @@ class ManagerError(RuntimeError):
     pass
 
 
+def receipt_freeze(payload: Any, version: str, package: str) -> list[str] | None:
+    """The pip freeze a receipt can rebuild `version` from, or None.
+
+    Accepts a receipt WITHOUT a `version` key when its freeze pins `<package>==<version>`: every
+    receipt written before 0.49.0 lacked the key, and requiring it made `remove` refuse forever
+    (it demanded a snapshot; snapshot wrote the same keyless file). A receipt that names a
+    DIFFERENT version is still rejected."""
+    if not isinstance(payload, dict):
+        return None
+    lines = payload.get("pip_freeze")
+    if not isinstance(lines, list) or payload.get("version", version) != version:
+        return None
+    clean = [line for line in lines if isinstance(line, str) and line.strip()]
+    normalized = {line.casefold().replace("_", "-") for line in clean}
+    return clean if f"{package.casefold().replace('_', '-')}=={version}" in normalized else None
+
+
 @dataclass(frozen=True)
 class VenvHealth:
     """Whether a backend environment can actually RUN. state: complete | incomplete | broken."""

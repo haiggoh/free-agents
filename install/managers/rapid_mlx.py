@@ -207,35 +207,12 @@ print(json.dumps(out, sort_keys=True))
         ]
 
     def _locked_requirements(self, version: str) -> list[str] | None:
-        path = self.receipt_path(version)
-        if not path.is_file():
-            return None
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        lines = payload.get("pip_freeze") if isinstance(payload, dict) else None
-        if payload.get("version") != version or not isinstance(lines, list):
-            return None
-        clean = [line for line in lines if isinstance(line, str) and line.strip()]
-        normalized = {line.casefold().replace("_", "-") for line in clean}
-        return clean if f"rapid-mlx=={version}" in normalized else None
+        """Kept for callers of the old name; the one rule lives in base.locked_requirements."""
+        return self.locked_requirements(version)
 
     def _save_receipt(self, version: str, data: dict[str, Any]) -> None:
-        path = self.receipt_path(version)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, name = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
-        temporary = Path(name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2, sort_keys=True)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        """Kept for callers of the old name; base.save_receipt is THE writer (adds version/backend)."""
+        self.save_receipt(version, data)
 
     def _plan_pin_update(self, version: str):
         """Plan the ONE write a promotion makes: the live config's LA_RAPID_BIN line.

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from .._common import venv_health
+from .._common import receipt_freeze, venv_health
 
 
 class VenvMixin:
@@ -148,7 +148,7 @@ class VenvMixin:
             temporary.unlink(missing_ok=True)
 
     def locked_requirements(self, version: str) -> Optional[list[str]]:
-        """Get locked requirements from receipt if available."""
+        """The pip freeze the receipt can rebuild `version` from, or None (one rule: receipt_freeze)."""
         import json
         path = self.receipt_path(version)
         if not path.is_file():
@@ -157,13 +157,7 @@ class VenvMixin:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
-        lines = payload.get("pip_freeze") if isinstance(payload, dict) else None
-        if payload.get("version") != version or not isinstance(lines, list):
-            return None
-        clean = [line for line in lines if isinstance(line, str) and line.strip()]
-        normalized = {line.casefold().replace("_", "-") for line in clean}
-        pkg_normalized = self.PACKAGE_NAME.replace("_", "-")
-        return clean if f"{pkg_normalized}=={version}" in normalized else None
+        return receipt_freeze(payload, version, self.PACKAGE_NAME)
 
     def installed_versions(self) -> list[tuple[str, Path, str]]:
         """List installed versioned environments.
