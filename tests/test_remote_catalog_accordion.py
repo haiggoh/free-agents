@@ -241,7 +241,10 @@ class CatalogAccordionTests(unittest.TestCase):
         agents = [m.RemoteAgent("zai", "zai", "ZAI", "unknown", model_id="SELECT")]
         lane = self.lane_screen(agents)
         text = lane.info_text("cat:zai:glm-native")
-        self.assertIn("Lane: native Anthropic", text)
+        # 0.48.0: the "Lane:" line is gone from infoboxes (user 2026-10-30 — no decision value);
+        # the alias + provider name still lead the box.
+        self.assertNotIn("Lane:", text)
+        self.assertIn("Z.ai catalog", text)
         self.assertNotIn("untested", text)
         self.assertNotIn("Listed by", text)
         self.assertNotIn("not pinned", text)
