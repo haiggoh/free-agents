@@ -28,8 +28,8 @@ SAFETY (safe to run unattended, watchable via CC Live):
 USAGE:
   tournament-dispatch.py                     # safe subset (<=LARGE_GB), reuse operator on 8000
   tournament-dispatch.py --only kat-coder    # one model
-BACKENDS (per-candidate "serve" field): vllm (vllm-mlx), mlx_lm, rapid (Rapid-MLX 0.16.1 —
-  the primary session backend), omlx (oMLX, Homebrew). The same weights may be entered twice
+BACKENDS (per-candidate "serve" field): vllm (vllm-mlx), mlx_lm, rapid (Rapid-MLX —
+  the primary session backend, version resolved live via _machine_rapid_bin), omlx (oMLX, Homebrew). The same weights may be entered twice
   under different aliases to A/B backends (qwen-3.6-operator vs qwen-3.6-operator-rapid).
   The engines do NOT share a serve contract: rapid takes a positional model ID resolved
   under an env-isolated HOME (no --model-dir), oMLX takes --model-dir + paged/hot cache
@@ -196,7 +196,7 @@ def launch_mlx_lm(m, port):
     return p, logf
 
 def launch_rapid(m, port):
-    """Rapid-MLX 0.16.1 (the primary session backend). OWN serve CLI — positional model ID
+    """Rapid-MLX (the primary session backend). OWN serve CLI — positional model ID
     resolved under an env-isolated HOME with a symlinked view, NOT --model-dir (the oMLX
     flags do not exist here). Mirrors launch-claude-agent-rapid-auto.sh's invocation with
     the launcher's cache defaults: 16384 MB prefix cache / 8 hybrid entries / 32 GB resident

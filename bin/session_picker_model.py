@@ -2495,6 +2495,76 @@ def runtime_actions(screen) -> list:
     return acts
 
 
+def about_backend_lines(home: Path, repo: Path) -> list[str]:
+    """About-screen backend lines: one per REGISTERED backend family with >=1 venv under
+    <home>/.venvs — never a bare glob of ~/.venvs, which also listed the user's own unrelated
+    venvs (hf-py312). Health comes from the managers' real installed_versions() (runs the
+    interpreter), and the pin is read from the LIVE config (config-lib's own resolution) — the
+    old code read backend-pin.txt, a file no code ever writes, so About could never show a pin.
+    Format: "<fam>  pinned <ver> (<health>)" or "<fam>  <n> installed, not pinned
+    (auto-discovery: <ver>)"; broken / pinned-keg versions are flagged with the warning emoji.
+    """
+    warn = ec.EMOJI_WARNING_STR
+    try:
+        install = str(repo / "install")
+        if install not in sys.path:
+            sys.path.insert(0, install)
+        import managers  # noqa: E402
+        import managers.llama_cpp  # noqa: F401,E402  (fills the registry, as manage-backend.py does)
+        import managers.litellm  # noqa: F401,E402
+        import managers.moespresso  # noqa: F401,E402
+        import managers.omlx  # noqa: F401,E402
+        import managers.rapid_mlx  # noqa: F401,E402
+        import managers.vllm_mlx  # noqa: F401,E402
+        from managers.base import live_config_file  # noqa: E402
+        from managers.durability import venv_durability  # noqa: E402
+    except Exception:
+        return []
+    try:
+        live = live_config_file(repo)
+        live_text = live.read_text(encoding="utf-8", errors="replace") if live.is_file() else ""
+    except Exception:
+        live_text = ""
+
+    def pins_in_live(path: Path) -> bool:
+        return (re.search(r"(?<![\w.-])" + re.escape(path.name) + r"(?![\w.-])", live_text)
+                or str(path) in live_text)
+
+    lines = []
+    for name in managers.list_managers():
+        cls = managers.get_manager(name)
+        if not getattr(cls, "VENV_PREFIX", ""):
+            continue
+        mgr = managers.get_manager_instance(name, home)
+        if mgr is None:
+            continue
+        try:
+            rows = mgr.installed_versions()
+        except Exception:
+            rows = []
+        if not rows:
+            continue
+        broken = [v for v, _p, s in rows if s == "broken"]
+        fragile = [v for v, p, s in rows
+                   if s == "complete" and (p / "pyvenv.cfg").is_file()
+                   and venv_durability(p) == "pinned-keg"]
+        flags = []
+        if broken:
+            flags.append(f"{warn} broken: {', '.join(broken)}")
+        if fragile:
+            flags.append(f"{warn} pinned-keg: {', '.join(fragile)}")
+        pinned = next(((v, s) for v, p, s in rows if pins_in_live(p)), None)
+        if pinned:
+            ver, state = pinned
+            health = "runs" if state == "complete" else state
+            lines.append(f"{name}  pinned {ver} ({health})" + (f" {' '.join(flags)}" if flags else ""))
+        else:
+            best = next((v for v, _p, s in rows if s != "broken"), rows[0][0])
+            lines.append(f"{name}  {len(rows)} installed, not pinned (auto-discovery: {best})"
+                         + (f" {' '.join(flags)}" if flags else ""))
+    return lines
+
+
 class RuntimeManagerScreen(Screen):
     """Backend Manager - manages versioned runtime environments.
 

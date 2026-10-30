@@ -874,31 +874,10 @@ class Picker(App):
         import subprocess
         st = {}
         try:
-            # one line per backend FAMILY, pinned version only (user 2026-10-30); flag
-            # families that have versions installed but no pin.
-            import re as _re
-            venvs = Path.home() / ".venvs"
-            fams = {}
-            for p in sorted(venvs.glob("*")):
-                if not p.is_dir():
-                    continue
-                m2 = _re.match(r"^(.*?)-(\d[0-9A-Za-z.\-]*)?$", p.name)
-                fam, ver = (m2.group(1), m2.group(2)) if m2 and m2.group(2) else (p.name, "")
-                fams.setdefault(fam, []).append(ver or "?")
-            pin_file = Path.home() / ".local" / "share" / "free-agents" / "config" / "backend-pin.txt"
-            pinned = ""
-            try:
-                pinned = pin_file.read_text().strip()
-            except Exception:
-                pass
-            lines = []
-            for fam, vers in sorted(fams.items()):
-                pin = next((v for v in vers if f"{fam}-{v}" in pinned), None)
-                if pin:
-                    lines.append(f"{fam} {pin} (pinned)")
-                else:
-                    lines.append(f"{fam} {', '.join(vers)} — NO VERSION PINNED")
-            st["backends"] = lines or ["none"]
+            # one line per REGISTERED backend family (Task 9b): real health from the managers,
+            # the pin from the LIVE config — never a bare ~/.venvs glob (that listed the user's
+            # own hf-py312), never backend-pin.txt (a file no code writes, so no pin ever showed).
+            st["backends"] = m.about_backend_lines(Path.home(), REPO) or ["none"]
         except Exception:
             pass
         try:
