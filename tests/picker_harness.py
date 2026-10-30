@@ -248,18 +248,18 @@ class PilotHelper:
         await self.wait_for(lambda: self.screen() == name, f"screen {name}", secs)
 
     async def expand_settings(self, secs=8):
-        """Open the lane pickers' collapsed "Advanced" group (0.47.2 waypoint
-        picker-collapsed-settings-group; renamed 0.48.0): highlight its header row and
-        press Enter. The "Model settings" group is open by default since 0.48.0."""
-        await self.wait_text("▸ Advanced", secs)
+        """Open BOTH collapsed harmonica groups (0.47.2 waypoint picker-collapsed-settings-
+        group; 0.48.0: "Model settings" and "Advanced" are both folded by default)."""
         from textual.widgets import OptionList
-        ol = self.app.query_one("#actions", OptionList)
-        for i in range(ol.option_count):
-            if "▸ Advanced" in str(ol.get_option_at_index(i).prompt):
-                ol.highlighted = i
-                break
-        await self.pilot.press("enter")
-        await self.wait_text("▾ Advanced", secs)
+        for header in ("▸ Model settings", "▸ Advanced"):
+            await self.wait_text(header, secs)
+            ol = self.app.query_one("#actions", OptionList)
+            for i in range(ol.option_count):
+                if header in str(ol.get_option_at_index(i).prompt):
+                    ol.highlighted = i
+                    break
+            await self.pilot.press("enter")
+            await self.wait_text(header.replace("▸", "▾"), secs)
 
     async def goto_row(self, kind, row_id, max_steps=60):
         """Move down until the highlighted row is (kind, row_id), opening its group if needed.

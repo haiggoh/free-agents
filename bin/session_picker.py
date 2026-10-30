@@ -1344,7 +1344,7 @@ class Picker(App):
             prev_section = a.section
             if a in (m.SETTINGS_GROUP, m.MODEL_GROUP):
                 is_model = a is m.MODEL_GROUP
-                is_collapsed = sm.model_collapsed if is_model else collapsed
+                is_collapsed = sm.model_collapsed if is_model else sm.settings_collapsed
                 arrow = "▸" if is_collapsed else "▾"
                 emoji = ec.EMOJI_BOLT_STR if is_model else ec.EMOJI_TOOLBOX_STR   # 🔩 model settings, 🛠️ advanced — not 🔧 (backend manager) nor lane emojis (user 2026-10-30)
                 name = "Model settings" if is_model else "Advanced"

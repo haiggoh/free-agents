@@ -348,6 +348,13 @@ def created_before_cutoff(created: str, months: int, today=None) -> bool:
     return d < age_cutoff_date(months, today)
 
 
+def _model_identity(alias: str) -> str:
+    """Alias with role/thinking suffixes stripped: qwen-3.8-operator / qwen-3.8-thinking /
+    qwen-3.8 all map to qwen-3.8 (user 2026-10-30 — one row per model, toggle owns thinking)."""
+    import re
+    return re.sub(r"-(thinking|operator|reasoner|validator|utility)$", "", alias or "")
+
+
 def status_line(sm: "Screen") -> str:
     """The nav-instructions line at the very bottom of EVERY screen — single source of
     truth (user 2026-10-30); pinned by a fixture test so it cannot drift per screen."""
@@ -1146,13 +1153,19 @@ class LocalScreen(Screen):
         # non-thinking profile represents the model. First-seen order is preserved.
         groups: dict = {}
         for mdl in models:
-            # registered aliases may carry no folder — then the alias minus a
-            # "-thinking" suffix is the model identity (qwen-3.8-operator ==
-            # qwen-3.8-thinking, gemma-4-26b == gemma-4-26b-thinking; user 2026-10-30)
-            ident = mdl.folder or mdl.alias.removesuffix("-thinking")
-            key = (ident, mdl.backend, mdl.tool_parser, mdl.reasoning_parser)
+            # One row per MODEL, period (user 2026-10-30): same weights = same model, even
+            # across backends/parsers/roles/effort — those are launch choices, and the `j`
+            # thinking toggle decides thinking. Registered aliases may carry no folder —
+            # then the alias with role/thinking suffixes stripped is the identity.
+            ident = mdl.folder or _model_identity(mdl.alias)
+            key = (ident, mdl.auto_scanned)
             groups.setdefault(key, []).append(mdl)
-        models = [next((x for x in g if not x.thinking), g[0]) for g in groups.values()]
+        # deterministic representative, stable under reordering: the bare identity alias
+        # wins, then non-thinking, then lexicographic
+        deduped = []
+        for (ident, _auto), grp in groups.items():
+            deduped.append(min(grp, key=lambda x: (x.alias != ident, x.thinking, x.alias)))
+        models = deduped
         # Key by profile_id for uniqueness (multiple profiles can share same alias)
         self.models = {mdl.profile_id or mdl.alias: mdl for mdl in models}
         # Registered but weights gone: still LISTED, in red, so a deletion never looks like
@@ -1858,7 +1871,7 @@ def rendered_actions(sm: "Screen"):
     if sm is None:
         return [], []
     acts = [a for a in sm.actions() if a.section != "hidden"]
-    if isinstance(sm, (LocalScreen, RemoteScreen)):
+    if isinstance(sm, (LocalScreen, RemoteScreen, LowkeyScreen)):
         nav = [a for a in acts if a.section == "nav"]
         lanes = [a for a in acts if a.section == "lanes"]
         model = [a for a in acts if a.section == "model"]
@@ -2727,26 +2740,26 @@ class LowkeyScreen(Screen):
 
     def actions(self):
         s = self.settings
-        acts = []
+        # Order (user 2026-10-30): launch the chosen model FIRST, the remembered last
+        # model second, choose-model THIRD, then a collapsed-by-default Model settings
+        # group (like the lane pickers), mode, session name, nav.
+        acts = [
+            Action("p", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}{'Start convo' if self.mode == 'convo' else 'Start one-shot'}",
+                   self._start, section="launch"),
+        ]
         last = s.last_launched_model.get("lowkey") if s.last_launched_model else None
         if last:
-            acts.append(Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch: {model_names.readable(last)} (lowkey)",
+            acts.append(Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch last: {model_names.readable(last)} (lowkey)",
                                self._launch_last, section="launch"))
+        acts.append(Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose local model…", self._toggle_choose_model, section="models"))
         acts += [
-            Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose local model…", self._toggle_choose_model, section="models"),
-            # Remote/API models in Lowkey are REVERTED for 0.48.0 (user 2026-10-30: local-only
-            # again for a stable release); the remote implementation gets a dedicated
-            # worktree/branch later — waypoint lowkey-any-model-api.
-            # mode and its start action sit directly next to each other (user 2026-10-30)
-            Action("m", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Mode: {'Convo' if self.mode == 'convo' else 'One-shot'}", self._toggle_mode),
-            Action("p", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}{'Start convo' if self.mode == 'convo' else 'Start one-shot'}",
-                   self._start),
             setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
-                    (None, False), lambda: s.lowkey_thinking, self._set_thinking),
+                    (None, False), lambda: s.lowkey_thinking, self._set_thinking, section="model"),
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.lowkey_effort} (sent as reasoning_effort)",
-                    effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort()),
+                    effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(), section="model"),
             setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or '<provider default>'}",
-                    TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature()),
+                    TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(), section="model"),
+            Action("m", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Mode: {'Convo' if self.mode == 'convo' else 'One-shot'}", self._toggle_mode),
             Action("s", f"{ec.gap(ec.LK_EMOJI_SESSION_STR)}Set session name: {self.session_name or '(ephemeral)'}",
                    lambda: Nav("prompt:session")),
         ]

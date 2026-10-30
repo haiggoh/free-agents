@@ -55,14 +55,16 @@ class LocalDedupeTests(unittest.TestCase):
         self.assertEqual(len(lane._all_models), 1)
 
     def test_thinking_suffix_alias_dedupes_without_folder(self):
-        # registered profiles often have no folder: qwen-3.8-operator and
+        # registered profiles often have no folder: qwen-3.8 / qwen-3.8-operator /
         # qwen-3.8-thinking are the same model (user 2026-10-30) — one row, base alias.
-        base = dict(alias="qwen-3.8-operator", effort="medium", roles="", backend="rapid-mlx")
-        think = dict(base, alias="qwen-3.8-thinking")
-        lane = m.LocalScreen(m.Settings(), [m.LocalModel(**base, profile_id="qwen-3.8-operator", thinking=False),
-                                             m.LocalModel(**think, profile_id="qwen-3.8-thinking", thinking=True)])
+        base = dict(alias="qwen-3.8", effort="medium", roles="", backend="rapid-mlx")
+        op = dict(base, alias="qwen-3.8-operator", roles="operator")
+        think = dict(base, alias="qwen-3.8-thinking", thinking=True)
+        lane = m.LocalScreen(m.Settings(), [m.LocalModel(**base, profile_id="qwen-3.8", thinking=False),
+                                             m.LocalModel(**op, profile_id="qwen-3.8-operator"),
+                                             m.LocalModel(**think, profile_id="qwen-3.8-thinking")])
         self.assertEqual(len(lane._all_models), 1)
-        self.assertEqual(list(lane.models), ["qwen-3.8-operator"])
+        self.assertEqual(list(lane.models), ["qwen-3.8"])
 
     def test_different_folders_stay_separate(self):
         a = dict(alias="m1", effort="medium", roles="", folder="F1")
@@ -81,13 +83,14 @@ class LocalDedupeTests(unittest.TestCase):
         self.assertEqual(len(lane._all_models), 1)
         self.assertEqual(list(lane.models), ["p1"])
 
-    def test_different_backend_config_stays_separate(self):
+    def test_same_weights_different_backend_still_one_model(self):
+        # same folder on a different backend is the same model — serving choice, not identity
         base = dict(alias="m1", effort="medium", roles="", folder="F", backend="rapid-mlx")
         other = dict(base, backend="omlx")
         models = [m.LocalModel(**base, profile_id="p1", thinking=False),
                   m.LocalModel(**other, profile_id="p2", thinking=True)]
         lane = m.LocalScreen(m.Settings(), models)
-        self.assertEqual(len(lane._all_models), 2)
+        self.assertEqual(len(lane._all_models), 1)
 
 
 class LowkeyLabelTests(unittest.TestCase):

@@ -615,10 +615,12 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(acc.open_group, "Mistral")
         acc.expand("Qwen")
         self.assertEqual(acc.open_group, "Qwen", "opening a group must close the previous one")
-        acc.select("qwen-3.8-thinking")
+        # 0.48.0 dedupe: qwen-3.8-thinking folds into the base profile (same identity),
+        # so the surviving selectable id is the non-thinking one.
+        acc.select("qwen-3.8-operator")
         # Reorder the underlying models; the selection follows the id, not the row number.
         lane.set_models(list(reversed(local_models(14))))
-        self.assertEqual(lane.accordion.selected_id, "qwen-3.8-thinking")
+        self.assertEqual(lane.accordion.selected_id, "qwen-3.8-operator")
 
     def test_zero_models_is_a_valid_screen(self):
         lane = m.LocalScreen(m.Settings(), [], owner=m.HOME_OWNED)
