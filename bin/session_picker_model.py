@@ -1194,8 +1194,9 @@ class LocalScreen(Screen):
             else:
                 item = Item(mdl.profile_id or mdl.alias,
                             f"{name}"
-                            + (f" ({mdl.backend}" + (", thinking" if mdl.thinking else "") + ")" if mdl.backend else "")
-                            + (f"  [{mdl.roles}]" if mdl.roles else ""))
+                            # No [roles] bracket here (user 2026-10-31): roles are a dispatch/council
+                            # concept and mean nothing when choosing a session launch model.
+                            + (f" ({mdl.backend}" + (", thinking" if mdl.thinking else "") + ")" if mdl.backend else ""))
             if q and q not in item.label.casefold() and q not in mdl.alias.casefold():
                 continue
             buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(item)
@@ -1257,8 +1258,9 @@ class LocalScreen(Screen):
             return "Highlight a model to see its alias and backend."
         serve = (f"Backend: {mdl.backend}" + (", thinking" if mdl.thinking else "")
                  if mdl.backend else "Backend: not registered yet")
-        roles = f" · Roles: {mdl.roles}" if mdl.roles else ""
-        return f"{model_names.readable(mdl.alias)}\nAlias: {mdl.alias}\n{serve}{roles}"
+        # Roles omitted from the session picker's info box too (user 2026-10-31) — they only
+        # matter for delegate dispatch, not for choosing a session launch model.
+        return f"{model_names.readable(mdl.alias)}\nAlias: {mdl.alias}\n{serve}"
 
     def actions(self):
         s = self.settings

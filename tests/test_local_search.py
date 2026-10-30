@@ -26,6 +26,20 @@ def models():
             m.LocalModel("kat-v2.5-new", auto_scanned=True, folder="kat-v2.5-new")]
 
 
+class RoleLabelTests(unittest.TestCase):
+    def test_row_label_has_no_roles_bracket(self):
+        # User 2026-10-31: roles (operator/thinking/…) belong to delegate dispatch (the council
+        # rule) and play no role when choosing a SESSION launch model — the session pickers
+        # must not list them.
+        lane = m.LocalScreen(m.Settings())
+        lane.set_models([m.LocalModel("qwen-3.8-operator", backend="rapid",
+                                      roles="operator,reasoner")], missing=[])
+        labels = [obj.label for kind, obj in lane.accordion.rows() if kind == "item"]
+        self.assertEqual(len(labels), 1)
+        self.assertNotIn("[", labels[0])
+        self.assertNotIn("operator", labels[0])
+
+
 def item_ids(lane):
     return [obj.id for kind, obj in lane.accordion.rows() if kind == "item"]
 
