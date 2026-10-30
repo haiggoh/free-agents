@@ -217,6 +217,13 @@ wait_ready() {
     local timeout="${HOTSWAP_READY_TIMEOUT:-480}"
     local deadline=$(( SECONDS + timeout ))
     until curl -s --max-time 2 "http://localhost:$port/v1/models" > /dev/null 2>&1; do
+        # A server that has EXITED will never answer: say so now, not at the deadline (a dead
+        # interpreter once looked like 480 s of "loading", 2026-10-30).
+        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+            { echo "❌ $label startup FAILED — pid $pid DEAD (exited before serving; port $port, log $logf)"
+              echo "   --- last 80 log lines ---"; tail -n 80 "$logf" 2>/dev/null; } >&2
+            exit 1
+        fi
         if (( SECONDS >= deadline )); then
             { echo "❌ $label startup FAILED — /v1/models silent after ${timeout}s (port $port, log $logf)"
               if [ -n "$pid" ]; then kill -0 "$pid" 2>/dev/null \
