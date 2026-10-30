@@ -36,6 +36,32 @@ class LitellmManager(BackendManager):
     REMOVE_KEEPS_ONE = False  # remote sessions run the pipx litellm; these venvs are leftovers
     VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:([a-zA-Z]+)(\d+))?$")
 
+    def pipx_install(self) -> Path | None:
+        """The LiteLLM the remote sessions actually run: `command -v litellm` (remote-session.sh
+        resolves exactly this), followed to its venv. None when there is none."""
+        found = shutil.which("litellm")
+        if not found:
+            return None
+        venv = Path(os.path.realpath(found)).parent.parent
+        return venv if (venv / "pyvenv.cfg").is_file() else None
+
+    def health_report(self) -> list[dict[str, Any]]:
+        """The manager's ~/.venvs/litellm-* are pipx-era LEFTOVERS (user 2026-10-30): reported for
+        removal, never repair. The pipx install is reported read-only with its owner."""
+        from ._common import venv_health
+        rows = super().health_report()
+        for row in rows:
+            row["leftover"] = True
+        venv = self.pipx_install()
+        if venv is not None:
+            dist = sorted(venv.glob("lib/python*/site-packages/litellm-*.dist-info"))
+            version = dist[-1].name[len("litellm-"):-len(".dist-info")] if dist else "unknown"
+            health = venv_health(venv, "litellm")
+            rows.insert(0, {"backend": "litellm", "version": version, "path": str(venv),
+                            "state": health.state, "reason": health.reason, "durability": "n/a",
+                            "pinned": None, "owner": "pipx"})
+        return rows
+
     def is_proxy(self) -> bool:
         return True
 

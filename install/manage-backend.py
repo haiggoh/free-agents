@@ -460,6 +460,16 @@ def cmd_health(args: argparse.Namespace) -> int:
         here = Path(__file__).resolve()
         for r in rows:
             pin = "  (pinned)" if r.get("pinned") else ""
+            if r.get("owner") == "pipx":
+                mark = "✅" if r["state"] == "complete" else "❌"
+                print(f"{mark} {r['backend']} {r['version']}: {r['state']} — maintained by pipx "
+                      f"(remote sessions run this one; the nightly upgrade job updates it)")
+                continue
+            if r.get("leftover"):
+                print(f"🧹 {r['backend']} {r['version']}: leftover manager venv ({r['state']}), unused — "
+                      f"remote sessions run the pipx install")
+                print(f"   remove:  python3 \"{here}\" --backend {r['backend']} remove {r['version']} --yes")
+                continue
             if r["state"] == "complete" and r["durability"] != "pinned-keg":
                 print(f"✅ {r['backend']} {r['version']}: runs{pin}")
             elif r["state"] == "complete":
@@ -469,7 +479,7 @@ def cmd_health(args: argparse.Namespace) -> int:
             else:
                 print(f"❌ {r['backend']} {r['version']}: {r['state']} — {r['reason']}{pin}")
                 print(f"   repair:  python3 \"{here}\" --backend {r['backend']} repair {r['version']}")
-    return 1 if any(r["state"] == "broken" for r in rows) else 0
+    return 1 if any(r["state"] == "broken" and not r.get("leftover") for r in rows) else 0
 
 
 def cmd_repair(args: argparse.Namespace) -> int:
