@@ -52,6 +52,7 @@ class RapidMLXManager(BackendManager):
     PACKAGE_NAME = "rapid-mlx"
     PYPI_URL = PYPI_URL
     PYTHON_MAX = (3, 14)  # torch/torchvision wheels stop at cp314 (base.PYTHON_MAX)
+    SUPPORTS_VENV_REMOVE = True
 
     def __init__(self, home: Path | None = None, repo: Path | None = None) -> None:
         """Initialize the Rapid-MLX manager.
@@ -341,103 +342,6 @@ print(json.dumps(out, sort_keys=True))
                 raise ManagerError(f"pin promotion failed ({exc}); rollback also failed:\n"
                                    + "\n".join(rollback_errors)) from exc
             raise ManagerError(f"pin promotion failed and was rolled back: {exc}") from exc
-
-    def remove_version(
-        self,
-        version: str,
-        *,
-        yes: bool = False,
-        repo: Path | None = None,
-        home: Path | None = None,
-        dry_run: bool = False,
-    ) -> None:
-        """Remove an inactive, unpinned, reproducible venv."""
-        target = self.target_for(version, home or self.home)
-        if target.is_symlink() or not target.is_dir():
-            raise ManagerError(f"refusing removal: not a real managed directory: {target}")
-        # Another COMPLETE version must remain: an incomplete venv cannot run local models either.
-        others = [v for v, _, st in self.installed_versions(home or self.home)
-                  if v != version and st == "complete"]
-        if not others:
-            raise ManagerError(
-                f"refusing removal: {version} is the only installed Rapid-MLX version. Rapid-MLX is a "
-                "core dependency of free-agents (it runs local models); install another version first.")
-        self.validate_environment(version)
-        if not self._locked_requirements(version):
-            raise ManagerError(f"refusing removal without a valid recreation receipt; run snapshot {version}")
-        try:
-            Path(sys.executable).resolve().relative_to(target.resolve())
-        except ValueError:
-            pass
-        else:
-            raise ManagerError("refusing to remove the environment running this manager")
-
-        running = self._running_references(target)
-        if running:
-            raise ManagerError("environment is referenced by running process(es):\n" + "\n".join(running))
-        references = self._referenced_paths(repo or self._repo, target)
-        if references:
-            raise ManagerError("environment is still pinned:\n" + "\n".join(references))
-        if dry_run:
-            print(f"would remove {target}")
-            return
-        if not yes:
-            if not sys.stdin.isatty():
-                raise ManagerError("removal requires a TTY or --yes")
-            if input(f"Permanently remove {target}? Type 'delete {version}': ") != f"delete {version}":
-                raise ManagerError("removal cancelled")
-        shutil.rmtree(target)
-        if target.exists() or target.is_symlink():
-            raise ManagerError(f"removal verification failed: {target}")
-
-    def _referenced_paths(self, repo: Path | None, target: Path) -> list[str]:
-        """Lines of the LIVE config that pin the target (the file the launcher reads).
-
-        Fails CLOSED: a live config that cannot be resolved raises, so `remove` refuses rather
-        than deleting a version the machine may be running on. Until 0.49.0 this scanned
-        <repo>/config/config.local.sh, which no real checkout has — so it would have allowed
-        removing the live-pinned version."""
-        live = live_config_file((repo or Path(__file__).resolve().parents[2]).resolve())
-        if not live.is_file() or live.is_symlink():
-            return []
-        matches: list[str] = []
-        for number, line in enumerate(live.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            if line.lstrip().startswith("#"):
-                continue
-            if re.search(r"(?<![\w.-])" + re.escape(target.name) + r"(?![\w.-])", line) or str(target) in line:
-                matches.append(f"{live}:{number}:{line.strip()}")
-        return matches
-
-    def _running_references(self, target: Path) -> list[str]:
-        """Find running processes referencing the target.
-
-        Uses `ps`, not psutil: the manager runs under whatever python3 is on PATH, and a missing
-        psutil crashed `remove` with a raw traceback (2026-10-14). A guard that cannot run must
-        refuse, never wave the removal through, so a failed `ps` is an error, not "no matches"."""
-        try:
-            out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True,
-                                 text=True, timeout=10, check=True).stdout
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise ManagerError(f"cannot check running processes (ps failed: {exc}); refusing removal") from exc
-        own_pid = os.getpid()
-        matches: list[str] = []
-        for line in out.splitlines():
-            pid, _, command = line.strip().partition(" ")
-            if pid.isdigit() and int(pid) != own_pid and str(target) in command:
-                matches.append(f"PID {pid}: {command.strip()}")
-        return matches
-
-    def snapshot_environment(self, version: str, home: Path | None = None, *, dry_run: bool = False) -> Path:
-        """Save an exact recreation receipt."""
-        target = self.target_for(version, home or self.home)
-        path = self.receipt_path(version, home or self.home)
-        if dry_run:
-            print(f"would write recreation receipt: {path}")
-            return path
-        receipt = self.validate_environment(version)
-        receipt.metadata["result"] = "snapshot"
-        self._save_receipt(version, receipt.metadata)
-        return path
 
     def smoke_environment(self, version: str, home: Path | None = None) -> dict[str, Any]:
         """Validate package and CLI surfaces without starting a server."""

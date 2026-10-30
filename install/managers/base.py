@@ -34,6 +34,7 @@ from ._common import (
     VersionInfo,
     ManagerError,
     receipt_freeze,
+    venv_health,
 )
 from .mixins import (
     VersionParsingMixin,
@@ -206,6 +207,13 @@ class BackendManager(
         """
         raise ManagerError(f"promote not supported for {self.BACKEND_NAME}")
 
+    # Venv backends (one ~/.venvs/<prefix>-<version> per version) opt in to the shared remove /
+    # snapshot / repair machinery; Homebrew- and binary-managed backends keep "not supported".
+    SUPPORTS_VENV_REMOVE: bool = False
+    # Keep at least one COMPLETE version (a core runtime). LiteLLM turns this off: remote sessions
+    # run the pipx install, so the manager's venvs are leftovers (user 2026-10-30).
+    REMOVE_KEEPS_ONE: bool = True
+
     def remove_version(
         self,
         version: str,
@@ -215,19 +223,90 @@ class BackendManager(
         home: Path | None = None,
         dry_run: bool = False,
     ) -> None:
-        """Remove an installed version.
+        """Remove one installed venv version — the one implementation for every venv backend.
 
-        Args:
-            version: Version to remove
-            yes: Skip confirmation
-            repo: Repository path (for pin checking)
-            home: Home directory override
-            dry_run: Print plan without executing
-
-        Raises:
-            ManagerError: If removal is not supported or fails
+        Refuses only for a stated reason: the last complete version (REMOVE_KEEPS_ONE), a healthy
+        version with no recreation receipt, a version a running process uses, or the version the
+        LIVE config pins. A BROKEN venv (its base Python is gone) is removable without validation
+        or a receipt — it is exactly what needs removing, and it cannot be recreated from itself.
         """
-        raise ManagerError(f"remove not supported for {self.BACKEND_NAME}")
+        if not self.SUPPORTS_VENV_REMOVE:
+            raise ManagerError(f"remove not supported for {self.BACKEND_NAME}")
+        self.require_version(version)
+        target = (home or self.home) / ".venvs" / f"{self.VENV_PREFIX}-{version}"
+        if target.is_symlink() or not target.is_dir():
+            raise ManagerError(f"refusing removal: not a real managed directory: {target}")
+        health = venv_health(target, self.BACKEND_NAME)
+        if self.REMOVE_KEEPS_ONE:
+            others = [v for v, _, st in self.installed_versions() if v != version and st == "complete"]
+            if not others:
+                raise ManagerError(
+                    f"refusing removal: {version} is the only installed {self.BACKEND_NAME} version. "
+                    f"{self.BACKEND_NAME} is a core dependency of free-agents; install another version first.")
+        if health.state == "complete":
+            self.validate_environment(version)
+            if not self.locked_requirements(version):
+                raise ManagerError(f"refusing removal without a valid recreation receipt; run snapshot {version}")
+        else:
+            print(f"{self.BACKEND_NAME} {version} is {health.state} ({health.reason}); "
+                  "removing without a receipt — it is not recreatable from itself")
+        try:
+            Path(sys.executable).resolve().relative_to(target.resolve())
+        except ValueError:
+            pass
+        else:
+            raise ManagerError("refusing to remove the environment running this manager")
+        running = self._running_references(target)
+        if running:
+            raise ManagerError("environment is referenced by running process(es):\n" + "\n".join(running))
+        references = self._referenced_paths(repo, target)
+        if references:
+            raise ManagerError("environment is still pinned:\n" + "\n".join(references))
+        if dry_run:
+            return  # the CLI prints the outcome line (manage-backend.py cmd_remove)
+        if not yes:
+            if not sys.stdin.isatty():
+                raise ManagerError("removal requires a TTY or --yes")
+            if input(f"Permanently remove {target}? Type 'delete {version}': ") != f"delete {version}":
+                raise ManagerError("removal cancelled")
+        shutil.rmtree(target)
+        if target.exists() or target.is_symlink():
+            raise ManagerError(f"removal verification failed: {target}")
+
+    def _referenced_paths(self, repo: Path | None, target: Path) -> list[str]:
+        """Lines of the LIVE config that pin the target (the file the launchers read).
+
+        Fails CLOSED: a live config that cannot be resolved raises, so `remove` refuses rather
+        than deleting a version the machine may be running on. Until 0.49.0 this scanned
+        <repo>/config/config.local.sh, which no real checkout has — so it would have allowed
+        removing the live-pinned version. Comment lines are not pins."""
+        live = live_config_file((repo or Path(__file__).resolve().parents[2]).resolve())
+        if not live.is_file() or live.is_symlink():
+            return []
+        matches: list[str] = []
+        for number, line in enumerate(live.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if re.search(r"(?<![\w.-])" + re.escape(target.name) + r"(?![\w.-])", line) or str(target) in line:
+                matches.append(f"{live}:{number}:{line.strip()}")
+        return matches
+
+    def _running_references(self, target: Path) -> list[str]:
+        """Running processes referencing the target, via `ps` (no psutil dependency: the manager
+        runs under whatever python3 is on PATH). A guard that cannot run must refuse, never wave
+        the removal through, so a failed `ps` is an error, not "no matches"."""
+        try:
+            out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True,
+                                 text=True, timeout=10, check=True).stdout
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ManagerError(f"cannot check running processes (ps failed: {exc}); refusing removal") from exc
+        own_pid = os.getpid()
+        matches: list[str] = []
+        for line in out.splitlines():
+            pid, _, command = line.strip().partition(" ")
+            if pid.isdigit() and int(pid) != own_pid and str(target) in command:
+                matches.append(f"PID {pid}: {command.strip()}")
+        return matches
 
     def smoke_environment(self, version: str, home: Path | None = None) -> dict[str, Any]:
         """Smoke test an environment (package import + CLI --help, no server).
@@ -258,7 +337,18 @@ class BackendManager(
         Raises:
             ManagerError: If snapshot is not supported or fails
         """
-        raise ManagerError(f"snapshot not supported for {self.BACKEND_NAME}")
+        if not self.SUPPORTS_VENV_REMOVE:
+            raise ManagerError(f"snapshot not supported for {self.BACKEND_NAME}")
+        path = self.receipt_path(version)
+        if dry_run:
+            print(f"would write recreation receipt: {path}")
+            return path
+        receipt = self.validate_environment(version)
+        metadata = dict(getattr(receipt, "metadata", None) or {})
+        if not metadata.get("pip_freeze"):
+            raise ManagerError(f"{self.BACKEND_NAME} {version}: validation recorded no pip freeze — nothing to snapshot")
+        metadata["result"] = "snapshot"
+        return self.save_receipt(version, metadata)
 
     def inspect_environment(
         self,

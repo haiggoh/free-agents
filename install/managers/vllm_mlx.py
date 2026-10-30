@@ -40,6 +40,7 @@ class VLLMMLXManager(BackendManager):
     PACKAGE_NAME = "vllm-mlx"
     PYPI_URL = PYPI_URL
     PYTHON_MAX = (3, 14)  # torch/torchvision wheels stop at cp314 (base.PYTHON_MAX)
+    SUPPORTS_VENV_REMOVE = True
 
     def version_key(self, value: str) -> tuple[int, int, int, int, str, int]:
         """Parse version into sortable key compatible with base class."""
