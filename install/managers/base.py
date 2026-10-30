@@ -276,6 +276,58 @@ class BackendManager(
         if target.exists() or target.is_symlink():
             raise ManagerError(f"removal verification failed: {target}")
 
+    def set_live_config_var(self, name: str, value: str, *, purpose: str, validate=None,
+                            dry_run: bool = False) -> dict[str, Any]:
+        """Set ONE `NAME="value"` line in the machine's live config.local.sh — the only file a
+        backend update may write (never the repo). Replaces the first non-comment NAME= line or
+        appends one; keeps the file's mode; backs it up into <live>/backups/ first; then runs
+        validate() (the launcher-visible outcome) and restores the file byte-for-byte on failure."""
+        live = live_config_file(Path(getattr(self, "_repo", None) or Path(__file__).resolve().parents[2]))
+        if live.is_symlink() or (live.exists() and not live.is_file()):
+            raise ManagerError(f"unsafe live config (symlink or not a file): {live}")
+        before = live.read_bytes() if live.exists() else b""
+        text = before.decode("utf-8")
+        new_line = f'{name}="{value}"   # set by manage-backend.py ({purpose})'
+        lines, replaced = text.splitlines(), False
+        for i, line in enumerate(lines):
+            if not replaced and line.lstrip().startswith(f"{name}=") and not line.lstrip().startswith("#"):
+                lines[i], replaced = new_line, True
+        if not replaced:
+            lines.append(new_line)
+        after = ("\n".join(lines) + "\n").encode("utf-8")
+        if after == before:
+            return {"result": "already_promoted", "changed": []}
+        if dry_run:
+            return {"result": "dry_run", "changed": [str(live)]}
+        mode = live.stat().st_mode & 0o777 if live.exists() else 0o600
+        backups = live.parent / "backups"
+        backups.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        backup = backups / f"config.local.sh.pre-{purpose.replace(' ', '-')}-{stamp}"
+        backup.write_bytes(before)
+        os.chmod(backup, 0o600)
+
+        def write(data: bytes) -> None:
+            fd, name_ = tempfile.mkstemp(prefix=live.name + ".", dir=live.parent)
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(data)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(name_, mode)
+                os.replace(name_, live)
+            finally:
+                Path(name_).unlink(missing_ok=True)
+
+        write(after)
+        try:
+            if validate:
+                validate()
+        except Exception as exc:
+            write(before)
+            raise ManagerError(f"promotion failed and was rolled back: {exc}") from exc
+        return {"result": "promoted", "changed": [str(live)], "backup": str(backup)}
+
     def health_report(self) -> list[dict[str, Any]]:
         """One row per installed version: state (complete|incomplete|broken), reason, base
         durability (durable|pinned-keg), and whether the LIVE config pins it."""

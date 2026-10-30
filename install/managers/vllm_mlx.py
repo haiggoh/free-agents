@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from .base import BackendInfo, BackendManager, ManagerError
 from . import register_manager
@@ -41,6 +42,31 @@ class VLLMMLXManager(BackendManager):
     PYPI_URL = PYPI_URL
     PYTHON_MAX = (3, 14)  # torch/torchvision wheels stop at cp314 (base.PYTHON_MAX)
     SUPPORTS_VENV_REMOVE = True
+
+    def promote_pins(self, version: str, *, dry_run: bool = False) -> dict[str, Any]:
+        """Point the vllm-mlx lane (and mlx_lm, which runs from the same venv) at this version:
+        LA_VENV="$HOME/.venvs/vllm-mlx-X/bin" in the LIVE config only. Until 0.49.0 the lane ran
+        the legacy ~/.local-llm venv and manager installs never took effect (user 2026-10-30)."""
+        self.require_version(version)
+        if not dry_run:
+            self.validate_environment(version)
+        repo = Path(getattr(self, "_repo", None) or Path(__file__).resolve().parents[2])
+        expected = f"{self.home}/.venvs/{self.VENV_PREFIX}-{version}/bin"
+
+        def validate() -> None:
+            probe = subprocess.run(
+                ["bash", "-c", 'source "$1" >/dev/null 2>&1; la_load_config >/dev/null 2>&1; '
+                 'printf "%s\\n" "$LA_VENV"; la_backend_bin_health "$LA_VENV/vllm-mlx"',
+                 "_", str(repo / "config" / "config-lib.sh")],
+                capture_output=True, text=True, cwd=repo, timeout=60)
+            got = (probe.stdout.splitlines() or [""])[0]
+            if got != expected:
+                raise ManagerError(f"after promotion the launcher resolves LA_VENV={got or '<empty>'}, not {expected}")
+            if probe.returncode != 0:
+                raise ManagerError(f"promoted vllm-mlx cannot run: {probe.stderr.strip()}")
+
+        return self.set_live_config_var("LA_VENV", f"$HOME/.venvs/{self.VENV_PREFIX}-{version}/bin",
+                                        purpose=f"promote-vllm-mlx-{version}", validate=validate, dry_run=dry_run)
 
     def version_key(self, value: str) -> tuple[int, int, int, int, str, int]:
         """Parse version into sortable key compatible with base class."""
