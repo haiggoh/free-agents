@@ -309,6 +309,30 @@ asserted `records.count == 1` BEFORE unwrapping. If a test passes without the gu
 it's meant to test, the test is not verifying what you think — mutation-test it by
 temporarily breaking the code and confirming the test fails.
 
+## Dispatch reviews: ask only what the payload can answer
+
+A stateless dispatch has **no tools, no disk, no test runner, no diff** — it reasons only over the
+payload. Asked a question its inputs cannot answer, it does not decline and does not signal the
+gap: **it confabulates, in the same register as a real finding** (measured 2026-10-29: 25 findings,
+2 real, 23 fabricated-but-plausible, several labelled "critical" — taxonomy in
+`docs/dispatch-briefing-confabulation-2026-10-29.md`). Returning nothing is the honest failure;
+fabrication is the dangerous one. Classify before briefing:
+
+- **Answerable from attached files** → safe. **Closed enumerations** ("list every X; for each,
+  state whether it handles Y"), and require **file:line + the triggering input** per claim.
+- **Needs execution, unseen files, or a diff against another version** → **not a dispatch.**
+  Attach everything the reasoning needs — **never trim the test file from the payload** (the
+  trimmed instrument is what the largest fabrication cluster reasoned about instead of reading) —
+  or escalate to a free session, which can drive tools.
+- **Needs a design verdict** → don't ask. It will relitigate intentional design as noise.
+
+**Triage every finding against the real code before acting on any.** At a 2-in-25 hit rate,
+triage is where the value is; the real findings repay it (one was a regression the author's own
+suite could not see by construction).
+
+`avoid_family` must be a **roster family name** (`free-agent-tool.py --list`), not a branding
+guess — GLM's roster family is `zhipu`; unknown names are refused loudly by the tool.
+
 ## Keep on the PAID model (quality-critical)
 Architecture / design decisions, tricky debugging, security-sensitive logic, the FINAL
 review / verification, and the orchestration & judgment itself. Offload the legwork; keep the

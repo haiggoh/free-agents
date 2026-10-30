@@ -1,3 +1,23 @@
+## [0.49.0] — 2026-10-30
+
+Dispatch-briefing guard, from the measured confabulation incident of 2026-10-29
+(`docs/dispatch-briefing-confabulation-2026-10-29.md`): an `avoid_family` that names no roster
+family ("zai" for "zhipu") silently matched nothing, so the same-family slow lane ran and burned
+the whole wall-clock window.
+
+### Added
+- `bin/free-agent-tool.py`: `avoid_family` is validated against the live roster before dispatch;
+  an unknown name exits non-zero, naming the known families and `--list`. A family that exists
+  but leaves nothing available on this machine still degrades with the existing same-family
+  warning (that contract is unchanged and test-pinned).
+- Tests: `UnknownAvoidFamilyTests` — refusal names the families, case-mismatch refused, known
+  family still dispatches, empty roster left to the no-model error. Mutation-checked: disabling
+  the guard fails exactly the two refusal tests.
+- `skills/offload-to-local/SKILL.md`: "Dispatch reviews: ask only what the payload can answer" —
+  the fabrication variant of the stateless-dispatch failure (the skill previously documented only
+  the silence variant), the question-bucket rule, never trimming the instrument from the payload,
+  and triage-every-finding.
+
 ## [0.48.0] — 2026-10-30
 
 Picker UI rework + prompt refinements from live user review (2026-10-30). Full item list

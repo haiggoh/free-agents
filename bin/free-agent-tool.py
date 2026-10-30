@@ -497,6 +497,18 @@ def run(input_data, env) -> int:
                                input_data.get("files"))
     prefs = load_preferences(env)
     role, avoid = request_role(input_data), input_data.get("avoid_family")
+    families = {e["family"] for e in prefs.get("order", []) if e.get("family")}
+    if avoid and prefs.get("order") and avoid not in families:
+        # An unknown name is a caller typo (measured 2026-10-29: "zai" for "zhipu"): it matches
+        # no entry, so the filter would silently skip nothing and the family being avoided is
+        # exactly what runs. Refuse instead of dispatching wrong; a KNOWN family that leaves
+        # nothing available still degrades, in degraded_candidates() below.
+        print(json.dumps({"error": f"avoid_family {avoid!r} matches no family in the dispatch roster "
+                                   f"(known families: {', '.join(sorted(families)) or 'none'}) — run "
+                                   "free-agent-tool.py --list; a name that matches nothing skips "
+                                   "nothing, so the family you meant to avoid is what runs"}),
+              file=sys.stderr)
+        return 1
     order, role_matched, family_avoided = degraded_candidates(prefs, env, role=role, avoid_family=avoid)
     if not order:
         print(json.dumps({"error": "no dispatch model is available (no keys, no local weights) — "

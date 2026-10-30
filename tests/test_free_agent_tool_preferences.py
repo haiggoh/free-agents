@@ -272,11 +272,70 @@ class SparseSetupTests(Base):
         self.assertIs(res["family_avoided"], True)
         self.assertNotIn("same family", err)
 
-    def test_nothing_set_up_is_the_only_hard_failure_and_says_so(self):
+    def test_nothing_set_up_is_a_hard_failure_and_says_so(self):
         code, res, err = self.run_sparse({"prompt": "hi", "avoid_family": "google"})
         self.assertNotEqual(code, 0)
         self.assertIsNone(res)
         self.assertIn("no keys", err)
+
+
+class UnknownAvoidFamilyTests(Base):
+    """avoid_family must name a roster family. Measured 2026-10-29 (check-code 0.4.0 build):
+    avoid_family "zai" — a branding guess; the roster family for GLM is "zhipu" — matched no
+    entry, so the filter silently skipped nothing and the same-family slow lane burned the
+    whole wall-clock window. An unknown name is a caller typo, not a preference: refuse it
+    loudly (explicit overrides fail loudly). A family that EXISTS but leaves nothing available
+    on this machine still degrades — that contract stays with SparseSetupTests."""
+
+    G = dict(R1, family="google", roles=["operator", "validator"])
+    N = dict(R2, family="zhipu", roles=["reasoner", "validator"])
+
+    def run_guard(self, payload, order=(G, N), keys=("gemini", "nvidia")):
+        for k in keys:
+            self.key(k)
+        p = Path(self.tmp.name) / "p.json"
+        p.write_text(json.dumps(prefs(*order)))
+        env = dict(self.env, FA_DISPATCH_PREFS=str(p))
+        out, err = io.StringIO(), io.StringIO()
+        real = (fat.dispatch_entry, fat.local_on_disk)
+        fat.dispatch_entry = lambda entry, prompt, env_, thinking_effort=None: f"answer from {entry['id']}"
+        fat.local_on_disk = lambda a: False
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                code = fat.run(payload, env)
+        finally:
+            fat.dispatch_entry, fat.local_on_disk = real
+        return code, (json.loads(out.getvalue()) if out.getvalue() else None), err.getvalue()
+
+    def test_unknown_family_is_refused_naming_the_roster_families(self):
+        code, res, err = self.run_guard({"prompt": "review", "avoid_family": "zai"})
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(res)                       # nothing dispatched, no result JSON
+        self.assertIn("zai", err)
+        self.assertIn("zhipu", err)                  # the error names the valid families
+        self.assertIn("--list", err)
+
+    def test_case_mismatch_is_refused_too(self):
+        code, res, err = self.run_guard({"prompt": "review", "avoid_family": "Google"})
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(res)
+        self.assertIn("google", err)
+
+    def test_known_family_still_dispatches(self):
+        # Existing behaviour the guard must not break: a family present in the roster is a
+        # preference, honoured when another family is available.
+        code, res, err = self.run_guard({"prompt": "review", "avoid_family": "zhipu"})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(res["model_used"], "r1")    # zhipu (r2) avoided, google (r1) runs
+        self.assertIs(res["family_avoided"], True)
+
+    def test_empty_roster_skips_the_family_check(self):
+        # No roster to validate against: the downstream "no dispatch model" error owns this case.
+        code, res, err = self.run_guard({"prompt": "hi", "avoid_family": "zai"}, order=(), keys=())
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(res)
+        self.assertIn("no dispatch model", err)
+        self.assertNotIn("avoid_family", err)
 
 
 class RemoteDispatchTests(Base):
