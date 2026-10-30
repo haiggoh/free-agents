@@ -1308,6 +1308,15 @@ class Picker(App):
         self.action_ids = []  # Track action IDs for keyboard navigation
         rendered, self._collapsed_actions = m.rendered_actions(sm)
         collapsed = bool(self._collapsed_actions)
+        # A nav-ONLY actions pane (API keys setup) renders BELOW the rows, so Back is the last
+        # row on screen like every other submenu (user 2026-10-31: it used to sit at the very
+        # top because the pane is mounted above #rows). Screens with real actions keep the pane
+        # on top, nav last inside it.
+        layout = self.query_one("#layout")
+        if rendered and all(a.section == "nav" for a in rendered):
+            layout.move_child(actions_list, after=self.query_one("#rows"))
+        else:
+            layout.move_child(actions_list, before=self.query_one("#search"))
         prev_section = None
         for a in rendered:
             # Store action object reference

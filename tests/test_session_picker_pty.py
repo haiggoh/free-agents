@@ -806,5 +806,35 @@ class RemoteLiveFilter(PilotCase):
         self.run_picker(s, start="remote")
 
 
+class NavPanePosition(PilotCase):
+    """User 2026-10-31: api-keys setup showed "Back to Home" as the very first row — its actions
+    pane is nav-ONLY and the pane renders above #rows, while every other submenu has Back as the
+    last option. A nav-only pane must render BELOW the rows; screens with real actions keep the
+    pane on top (nav last inside it)."""
+
+    def test_nav_only_actions_pane_renders_below_rows_on_api_keys(self):
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            ids = [w.id for w in app.query_one("#layout").children]
+            self.assertIn("actions", ids)
+            self.assertIn("rows", ids)
+            self.assertLess(ids.index("rows"), ids.index("actions"),
+                            f"nav-only actions pane must sit below the rows, got {ids}")
+            acts = h.labels("actions")
+            self.assertTrue(acts and all("Back" in a for a in acts),
+                            f"the api-keys actions pane is nav-only: {acts}")
+        self.run_picker(s)
+
+    def test_lane_screens_keep_actions_pane_on_top(self):
+        async def s(app, pilot, h):
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
+            ids = [w.id for w in app.query_one("#layout").children]
+            self.assertLess(ids.index("actions"), ids.index("rows"),
+                            f"lane screens keep the actions pane on top, got {ids}")
+        self.run_picker(s)
+
+
 if __name__ == "__main__":
     unittest.main()
