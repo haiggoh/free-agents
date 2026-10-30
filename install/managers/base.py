@@ -7,6 +7,7 @@ managers (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, litellm) inherit from.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
@@ -15,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,7 +31,7 @@ def _minor(text: str) -> tuple[int, int]:
         return (99, 99)
 
 
-from .durability import durable_python, homebrew_prefixes, normalize_venv_base
+from .durability import durable_python, homebrew_prefixes, normalize_venv_base, venv_durability
 from ._common import (
     BackendInfo,
     VersionInfo,
@@ -273,6 +275,70 @@ class BackendManager(
         shutil.rmtree(target)
         if target.exists() or target.is_symlink():
             raise ManagerError(f"removal verification failed: {target}")
+
+    def health_report(self) -> list[dict[str, Any]]:
+        """One row per installed version: state (complete|incomplete|broken), reason, base
+        durability (durable|pinned-keg), and whether the LIVE config pins it."""
+        rows: list[dict[str, Any]] = []
+        for version, path, state in self.installed_versions():
+            health = venv_health(path, self.BACKEND_NAME)
+            try:
+                pinned = bool(self._referenced_paths(None, path))
+            except ManagerError:
+                pinned = None
+            rows.append({
+                "backend": self.BACKEND_NAME, "version": version, "path": str(path),
+                "state": health.state if state != "incomplete" else "incomplete",
+                "reason": health.reason,
+                "durability": venv_durability(path) if (path / "pyvenv.cfg").is_file() else "n/a",
+                "pinned": pinned,
+            })
+        return rows
+
+    def repair_version(self, version: str, *, dry_run: bool = False) -> dict[str, Any]:
+        """Rebuild `version` in place — for a BROKEN venv, or a healthy one still built on a
+        Homebrew patch keg — and never leave the user with less than they had.
+
+        Order (make-before-break, adapted: pip writes ABSOLUTE shebangs, so a venv built elsewhere
+        and renamed would point at the wrong path): move the old venv aside, rebuild at the real
+        path through install_version (an exact recreation when a receipt exists), RUN the result,
+        then delete the set-aside original. Any failure deletes the half-built one and puts the
+        original back."""
+        if not self.SUPPORTS_VENV_REMOVE:
+            raise ManagerError(f"repair not supported for {self.BACKEND_NAME}")
+        self.require_version(version)
+        target = self.home / ".venvs" / f"{self.VENV_PREFIX}-{version}"
+        if target.is_symlink() or not target.is_dir():
+            raise ManagerError(f"nothing to repair: {target} is not an installed version")
+        running = self._running_references(target)
+        if running:
+            raise ManagerError("environment is referenced by running process(es):\n" + "\n".join(running))
+        mode = "locked_recreation" if self.locked_requirements(version) else "fresh_resolution"
+        if dry_run:
+            return {"result": "dry_run", "target": str(target), "mode": mode}
+        aside = target.with_name(f"{target.name}.repair-{os.getpid()}-{int(time.time())}")
+        os.rename(target, aside)
+        try:
+            kwargs: dict[str, Any] = {"python": None, "refresh_deps": False, "dry_run": False}
+            try:
+                # The CLASS method is the contract (an instance attribute may be a wrapper/stub).
+                if "skip_pin_update" in inspect.signature(type(self).install_version).parameters:
+                    kwargs["skip_pin_update"] = True        # a repair never promotes
+            except (TypeError, ValueError):
+                pass
+            self.install_version(version, **kwargs)
+            health = venv_health(target, self.BACKEND_NAME)
+            if health.state != "complete":
+                raise ManagerError(f"the rebuilt venv is {health.state}: {health.reason}")
+            self.validate_environment(version)
+        except Exception as exc:
+            if target.exists() or target.is_symlink():
+                shutil.rmtree(target, ignore_errors=True)
+            os.rename(aside, target)
+            raise ManagerError(f"repair of {self.BACKEND_NAME} {version} failed and the original was restored: {exc}") from exc
+        shutil.rmtree(aside, ignore_errors=True)
+        return {"result": "repaired", "target": str(target), "mode": mode,
+                "durability": venv_durability(target)}
 
     def _referenced_paths(self, repo: Path | None, target: Path) -> list[str]:
         """Lines of the LIVE config that pin the target (the file the launchers read).

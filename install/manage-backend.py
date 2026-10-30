@@ -160,6 +160,12 @@ Examples:
     snap_p = sub.add_parser("snapshot", help="save an exact recreation receipt")
     snap_p.add_argument("version")
 
+    # health / repair (0.49.0): judge each installed version by RUNNING it; rebuild in place
+    health_p = sub.add_parser("health", help="report whether each installed version can run (exit 1 if any is broken)")
+    health_p.add_argument("--all", action="store_true", help="every venv backend, not only --backend")
+    repair_p = sub.add_parser("repair", help="rebuild a broken or keg-fragile version in place (the original is kept until the rebuild runs)")
+    repair_p.add_argument("version")
+
     # inspect command (capture CLI/package evidence)
     inspect_p = sub.add_parser("inspect", help="capture CLI/package evidence")
     inspect_p.add_argument("version")
@@ -432,6 +438,52 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _venv_managers() -> list:
+    return [get_manager_instance(name) for name in list_managers()
+            if getattr(get_manager(name), "SUPPORTS_VENV_REMOVE", False)]
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    """Report every installed version's real health; exit 1 when any is broken."""
+    mgrs = _venv_managers() if args.all else [_require_backend(args)]
+    rows = []
+    for mgr in mgrs:
+        if not getattr(mgr, "SUPPORTS_VENV_REMOVE", False):
+            print(f"ERROR: health not supported for {mgr.BACKEND_NAME} (not a managed venv backend)", file=sys.stderr)
+            return 2
+        rows += mgr.health_report()
+    if args.json:
+        print(json.dumps(rows, indent=2, sort_keys=True))
+    else:
+        if not rows:
+            print("no managed venvs installed")
+        here = Path(__file__).resolve()
+        for r in rows:
+            pin = "  (pinned)" if r.get("pinned") else ""
+            if r["state"] == "complete" and r["durability"] != "pinned-keg":
+                print(f"✅ {r['backend']} {r['version']}: runs{pin}")
+            elif r["state"] == "complete":
+                print(f"⚠️  {r['backend']} {r['version']}: runs, but is built on a Homebrew patch keg and "
+                      f"will break at the next Python patch upgrade{pin}")
+                print(f"   re-base it:  python3 \"{here}\" --backend {r['backend']} repair {r['version']}")
+            else:
+                print(f"❌ {r['backend']} {r['version']}: {r['state']} — {r['reason']}{pin}")
+                print(f"   repair:  python3 \"{here}\" --backend {r['backend']} repair {r['version']}")
+    return 1 if any(r["state"] == "broken" for r in rows) else 0
+
+
+def cmd_repair(args: argparse.Namespace) -> int:
+    """Rebuild one version in place."""
+    mgr = _require_backend(args)
+    try:
+        result = mgr.repair_version(args.version, dry_run=args.dry_run)
+    except ManagerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_inspect(args: argparse.Namespace) -> int:
     """Capture CLI/package evidence."""
     mgr = _require_backend(args)
@@ -538,6 +590,8 @@ def main(argv: list[str] | None = None) -> int:
         return bu.prompt(args.yes)
     if args.command == "list":
         return cmd_list(args)
+    if args.command == "health" and args.all:
+        return cmd_health(args)
     if not args.backend:
         parser.error("the following arguments are required: --backend")
 
@@ -566,6 +620,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_snapshot(args)
     elif args.command == "inspect":
         return cmd_inspect(args)
+    elif args.command == "health":
+        return cmd_health(args)
+    elif args.command == "repair":
+        return cmd_repair(args)
     elif args.command == "info":
         return cmd_info(args)
     elif args.command == "launchd":
