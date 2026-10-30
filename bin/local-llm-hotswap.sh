@@ -777,13 +777,35 @@ if [ "$CUDA_TIER" = "B" ]; then
     echo "🎮 CUDA Tier B detected (VRAM <= 8GB) — using offload strategy."
 
     # Check model type from subdir/runtime
-    if [[ "$MODEL_DIR" == *"awq"* ]] || [[ "$MODEL_DIR" == *"exl2"* ]] || [[ "$MODEL_DIR" == *"AWQ"* ]] || [[ "$MODEL_DIR" == *"EXL2"* ]]; then
-        # AWQ/EXL2 → vLLM with UVM/KV cache offload
-        echo "📦 AWQ/EXL2 model detected — using vLLM with UVM/KV cache offload (--swap-space)."
+    if [[ "$MODEL_DIR" == *"exl2"* ]] || [[ "$MODEL_DIR" == *"EXL2"* ]]; then
+        # EXL2 → TabbyAPI (cuda-exllamav2), NOT vLLM — vLLM cannot load exl2 (docs/CUDA.md);
+        # the old routing sent it to vLLM and failed at load. Flags verified against
+        # tabbyAPI's common/args.py (generated from config fields: --model_dir/--host/--port).
+        EXL2_BIN="${LA_EXL2_BIN:-$(la_discover_cuda_bin cuda-exllamav2 python)}"
+        if [ -z "$EXL2_BIN" ] || ! la_backend_bin_health "$EXL2_BIN" 2>/dev/null; then
+            echo "❌ TabbyAPI (cuda-exllamav2) not found or not runnable. Install with:" >&2
+            echo "   manage-backend.py --backend cuda-exllamav2 install <version>" >&2
+            exit 1
+        fi
+        EXL2_DIR="$(cd "$(dirname "$EXL2_BIN")/.." && pwd)"
+        echo "📦 EXL2 model detected — using TabbyAPI (cuda-exllamav2) on port $TARGET_PORT..."
+        nohup "$EXL2_BIN" "$EXL2_DIR/main.py" --model_dir "$MODEL_DIR" --host 127.0.0.1 --port "$TARGET_PORT" > "$LOG_FILE" 2>&1 &
+        EXL2_PID=$!
+        wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$EXL2_PID" "$SPOOF_PRIMARY"
+        tail -n 8 "$LOG_FILE"
+        _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+        echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
+        echo "SUCCESS_PORT=$TARGET_PORT"
+        [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
+        exit 0
+    elif [[ "$MODEL_DIR" == *"awq"* ]] || [[ "$MODEL_DIR" == *"AWQ"* ]]; then
+        # AWQ → vLLM with UVM/KV cache offload
+        echo "📦 AWQ model detected — using vLLM with UVM/KV cache offload (--swap-space)."
 
-        VLLM_BIN="${LA_CUDA_BIN:-$(command -v vllm 2>/dev/null || echo "")}"
-        if [ -z "$VLLM_BIN" ] || [ ! -x "$VLLM_BIN" ]; then
-            echo "❌ vLLM not found. Install with: manage-cuda-backend.py install vllm" >&2
+        VLLM_BIN="${LA_CUDA_BIN:-$(la_discover_cuda_bin cuda-vllm vllm 2>/dev/null || command -v vllm 2>/dev/null || echo "")}"
+        if [ -z "$VLLM_BIN" ] || ! la_backend_bin_health "$VLLM_BIN" 2>/dev/null; then
+            echo "❌ vLLM (cuda-vllm) not found or not runnable. Install/repair with:" >&2
+            echo "   manage-backend.py --backend cuda-vllm install <version>   (or: ... repair <version>)" >&2
             exit 1
         fi
         _require_backend_bin "vLLM ($VLLM_BIN)" "$VLLM_BIN"
@@ -840,8 +862,11 @@ if [ "$CUDA_TIER" = "B" ]; then
         echo "📦 GGUF/other model detected — using llama-server with -ngl offload."
 
         LLAMA_SERVER="${LA_LLAMA_SERVER:-$(command -v llama-server 2>/dev/null || echo "")}"
-        if [ -z "$LLAMA_SERVER" ] || [ ! -x "$LLAMA_SERVER" ]; then
-            echo "❌ llama-server not found. Install with: brew install llama.cpp or manage-cuda-backend.py install llama-cpp" >&2
+        # 0.49.0: the gate RUNS the binary (a dead venv passes `[ -x ]` and then stalls the
+        # readiness wait — the exact 0.16.1 failure shape). Refuse fast, naming the repair.
+        if [ -z "$LLAMA_SERVER" ] || ! la_backend_bin_health "$LLAMA_SERVER" 2>/dev/null; then
+            echo "❌ llama-server not found or not runnable (${LLAMA_SERVER:-unset}). Install/repair with:" >&2
+            echo "   manage-backend.py --backend cuda-llama-cpp install <version>   (or: ... repair <version>)" >&2
             exit 1
         fi
 
@@ -939,6 +964,54 @@ if [ "$CUDA_TIER" = "C" ] || [ "$LA_HARDWARE" = "cpu-only" ]; then
     tail -n 8 "$LOG_FILE"
     _preflight_warmup "$TARGET_PORT" "$MODEL_DIR"
     echo "DISPATCH_MODEL=$MODEL_DIR"
+    echo "SUCCESS_PORT=$TARGET_PORT"
+    [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
+    exit 0
+fi
+
+# --- SGLang branch (serve=sglang, CUDA-only): refuses with the backend's name on non-CUDA hw,
+#     like serve=omlx refuses on non-Apple — never a silent fallback to another engine.
+if [ "$SERVE" = "sglang" ]; then
+    if [ -z "${LA_SGLANG_BIN:-}" ] || ! la_backend_bin_health "$LA_SGLANG_BIN" 2>/dev/null; then
+        echo "❌ SGLang (cuda-sglang) not found or not runnable: ${LA_SGLANG_BIN:-<none discovered>}" >&2
+        echo "   $MODEL_NAME is pinned to serve=sglang — a CUDA-only backend (no GPU here, or the venv is dead)." >&2
+        echo "   Install:  manage-backend.py --backend cuda-sglang install <version>" >&2
+        exit 1
+    fi
+    _require_backend_bin "SGLang ($LA_SGLANG_BIN)" "$LA_SGLANG_BIN"
+    SGL_CMD=("$LA_SGLANG_BIN" -m sglang.launch_server --model-path "$MODEL_DIR"
+             --host 127.0.0.1 --port "$TARGET_PORT" --served-model-name "$SPOOF_PRIMARY")
+    [ -n "$TOOLP" ] && SGL_CMD+=(--tool-call-parser "$TOOLP")
+    echo "🚀 Launching $MODEL_NAME via SGLang (cuda-sglang) on port $TARGET_PORT..."
+    nohup "${SGL_CMD[@]}" > "$LOG_FILE" 2>&1 &
+    SGL_PID=$!
+    wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$SGL_PID" "$SPOOF_PRIMARY"
+    tail -n 8 "$LOG_FILE"
+    _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+    echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
+    echo "SUCCESS_PORT=$TARGET_PORT"
+    [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
+    exit 0
+fi
+
+# --- TabbyAPI/ExLlamaV2 branch (serve=exl2, CUDA-only) ----------------------------------------
+if [ "$SERVE" = "exl2" ]; then
+    if [ -z "${LA_EXL2_BIN:-}" ] || ! la_backend_bin_health "$LA_EXL2_BIN" 2>/dev/null; then
+        echo "❌ TabbyAPI (cuda-exllamav2) not found or not runnable: ${LA_EXL2_BIN:-<none discovered>}" >&2
+        echo "   $MODEL_NAME is pinned to serve=exl2 — a CUDA-only backend (no GPU here, or the venv is dead)." >&2
+        echo "   Install:  manage-backend.py --backend cuda-exllamav2 install <version>" >&2
+        exit 1
+    fi
+    _require_backend_bin "TabbyAPI ($LA_EXL2_BIN)" "$LA_EXL2_BIN"
+    EXL2_DIR="$(cd "$(dirname "$LA_EXL2_BIN")/.." && pwd)"
+    EXL2_CMD=("$LA_EXL2_BIN" "$EXL2_DIR/main.py" --model_dir "$MODEL_DIR" --host 127.0.0.1 --port "$TARGET_PORT")
+    echo "🚀 Launching $MODEL_NAME via TabbyAPI (cuda-exllamav2) on port $TARGET_PORT..."
+    nohup "${EXL2_CMD[@]}" > "$LOG_FILE" 2>&1 &
+    EXL2_PID=$!
+    wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$EXL2_PID" "$SPOOF_PRIMARY"
+    tail -n 8 "$LOG_FILE"
+    _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
+    echo "DISPATCH_MODEL=$SPOOF_PRIMARY"
     echo "SUCCESS_PORT=$TARGET_PORT"
     [ "$USE_PROFILE" = "true" ] && echo "PROFILE_ID=$PROFILE_ID"
     exit 0

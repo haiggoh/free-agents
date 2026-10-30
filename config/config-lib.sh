@@ -302,6 +302,19 @@ la_backend_repair_hint() {
   fi
 }
 
+# la_discover_cuda_bin <venv-prefix> <binary> -> prints the first HEALTHY CUDA-backend binary
+# from the versioned venvs under <LA_USER_STATE_DIR>/cuda-backends (0.49.0 Task 14), newest by
+# sort -V, every candidate through la_backend_bin_health. Defaults: cuda-vllm / vllm.
+la_discover_cuda_bin() {
+  local prefix="${1:-cuda-vllm}" bin="${2:-vllm}" root c
+  root="${LA_USER_STATE_DIR:-$HOME/.local/share/free-agents}/cuda-backends"
+  while IFS= read -r c; do
+    [ -x "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
+  done < <(find "$root" -maxdepth 2 -name "$prefix-*" -type d 2>/dev/null | sed "s|$|/bin/$bin|" | sort -V -r)
+  echo ""
+  return 1
+}
+
 # la_discover_rapid_bin -> prints the first HEALTHY Rapid-MLX executable, or "".
 # Order is deliberate: the brew install first, because that is the one the user's own upgrade
 # habit keeps current; a PATH install second; the versioned venvs last and newest-first, so a
@@ -674,7 +687,7 @@ la_get_autocompaction() {
 # sourcing and restores them after; a set-but-broken value aborts naming it. LA_MOESPRESSO_BIN is
 # deliberately absent: it is EXPORTED with a resolved value and its set-but-empty form means "no
 # MoEspresso" (la_discover_moespresso_bin), so it keeps its own semantics.
-LA_BIN_ENV_OVERRIDES="LA_RAPID_BIN LA_RAPID_AUTO_BIN LA_OMLX_BIN LA_CUDA_BIN LA_LLAMA_SERVER"
+LA_BIN_ENV_OVERRIDES="LA_RAPID_BIN LA_RAPID_AUTO_BIN LA_OMLX_BIN LA_CUDA_BIN LA_LLAMA_SERVER LA_EXL2_BIN LA_SGLANG_BIN"
 
 la_load_config() {
   local _la_n _la_v _la_i=0 _la_snap=()
@@ -724,6 +737,19 @@ la_load_config() {
   # rather than reported as the answer, and hotswap refuses to launch if none resolved.
   if [ -z "${LA_RAPID_BIN:-}" ]; then
     LA_RAPID_BIN="$(la_discover_rapid_bin)"
+  fi
+  # CUDA backends (0.49.0 Task 14): an explicit pin in the live config / env always wins
+  # (LA_CUDA_BIN, LA_LLAMA_SERVER, LA_EXL2_BIN, LA_SGLANG_BIN); otherwise the newest HEALTHY
+  # versioned venv is discovered. exl2/sglang pin the venv's bin/python; the launchers add the
+  # `-m tabbyapi` / `-m sglang.launch_server` module part themselves.
+  if [ -z "${LA_CUDA_BIN:-}" ]; then
+    LA_CUDA_BIN="$(la_discover_cuda_bin cuda-vllm vllm)"
+  fi
+  if [ -z "${LA_EXL2_BIN:-}" ]; then
+    LA_EXL2_BIN="$(la_discover_cuda_bin cuda-exllamav2 python)"
+  fi
+  if [ -z "${LA_SGLANG_BIN:-}" ]; then
+    LA_SGLANG_BIN="$(la_discover_cuda_bin cuda-sglang python)"
   fi
   # oMLX executable for serve=omlx (one install: the Homebrew tap). LA_OMLX_BIN wins when set.
   if [ -z "${LA_OMLX_BIN:-}" ]; then

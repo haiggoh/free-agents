@@ -55,6 +55,12 @@ try:
     import managers.litellm  # noqa: F401
 except ImportError:
     pass
+# CUDA backends (0.49.0 Task 14): registered managers like the Mac ones, venvs under
+# <LA_USER_STATE_DIR>/cuda-backends/<name>-<version>; no CUDA hardware needed to register.
+try:
+    import managers._cuda  # noqa: F401
+except ImportError:
+    pass
 
 from managers import (
     BackendManager,

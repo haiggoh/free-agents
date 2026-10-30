@@ -2345,7 +2345,12 @@ class MemoryGuardScreen(Screen):
 # ★ Keep in step with install/manage-backend.py's manager imports: adding a backend manager
 # without adding it here leaves the picker unable to name it, and the contract test below is the
 # only guard (it caught `moespresso` missing here for three releases — 0.45.0/0.45.1/0.45.5).
-RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm", "moespresso")
+RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm", "moespresso",
+                    "cuda-vllm", "cuda-llama-cpp", "cuda-exllamav2", "cuda-sglang")
+# The CUDA four (0.49.0 Task 14) cycle only on NVIDIA hardware; elsewhere the Backend manager
+# shows them as ONE dim "not applicable on this hardware" row, never silently absent.
+CUDA_BACKENDS = ("cuda-vllm", "cuda-llama-cpp", "cuda-exllamav2", "cuda-sglang")
+MAC_ONLY_BACKENDS = tuple(b for b in RUNTIME_BACKENDS if b not in CUDA_BACKENDS)
 # Per-version operations beyond install/validate/info, by backend: only the ones that backend's
 # manager actually implements (the base class raises "not supported"), so the menu never offers
 # a row that can only fail. Tests compare this against the managers' real overrides.
@@ -2353,7 +2358,8 @@ RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm", "mo
 # only: pipx owns the install the remote sessions run, the manager's venvs are leftovers.
 BACKEND_VERSION_OPS = {"rapid-mlx": ("snapshot", "promote", "remove", "repair"),
                        "vllm-mlx": ("snapshot", "promote", "remove", "repair"),
-                       "litellm": ("remove",)}
+                       "litellm": ("remove",),
+                       **{b: ("snapshot", "promote", "remove", "repair") for b in CUDA_BACKENDS}}
 # Backends whose manager keeps at least one COMPLETE version (REMOVE_KEEPS_ONE).
 KEEP_ONE_BACKENDS = ("rapid-mlx", "vllm-mlx")
 
@@ -2473,6 +2479,10 @@ VERSION_OP_EMOJI = {"install": ec.EMOJI_INSTALL_STR, "validate": ec.EMOJI_VALIDA
 def runtime_actions(screen) -> list:
     """The Backend manager rows, shared by both entry screens (Home `v` and Launchd's Back)."""
     b = screen.settings.runtime_backend
+    cuda_ok = getattr(screen.settings, "hw_hardware", "") == "cuda"
+    if not cuda_ok and b in CUDA_BACKENDS:
+        b = MAC_ONLY_BACKENDS[0]
+        screen.settings.runtime_backend = b
     pick = lambda op: (lambda: Nav(f"runtime_versions:{op}", screen.owner))   # noqa: E731
     acts = [
         Action("c", f"{ec.EMOJI_BACKEND_STR} Backend: {b}", screen._cycle_backend),
@@ -2491,6 +2501,13 @@ def runtime_actions(screen) -> list:
     acts.append(Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", screen.owner),
                        section="tools"))
     acts += screen.nav_actions()
+    if not cuda_ok:
+        # one dim row, never silently absent: the CUDA backends exist but need an NVIDIA GPU.
+        # Key is the first free lowercase letter — check_action_table demands unique keys.
+        used = {a.key for a in acts}
+        key = next(c for c in "abcdefghijklmnopqrstuvwxyz" if c not in used)
+        acts.append(Action(key, f"{ec.EMOJI_BACKEND_STR} CUDA backends — not applicable on this hardware",
+                           lambda: None, enabled=False, section="tools"))
     check_action_table(acts)
     return acts
 
@@ -2576,7 +2593,9 @@ class RuntimeManagerScreen(Screen):
     _has_accordion = False
 
     def _cycle_backend(self):
-        self.settings.runtime_backend = _next(RUNTIME_BACKENDS, self.settings.runtime_backend)
+        cuda_ok = getattr(self.settings, "hw_hardware", "") == "cuda"
+        choices = RUNTIME_BACKENDS if cuda_ok else MAC_ONLY_BACKENDS
+        self.settings.runtime_backend = _next(choices, self.settings.runtime_backend)
 
     def actions(self):
         return runtime_actions(self)
@@ -2734,7 +2753,9 @@ class RuntimeScreen(Screen):
     title = f"{ec.EMOJI_TOOLS_STR} Backend manager"
 
     def _cycle_backend(self):
-        self.settings.runtime_backend = _next(RUNTIME_BACKENDS, self.settings.runtime_backend)
+        cuda_ok = getattr(self.settings, "hw_hardware", "") == "cuda"
+        choices = RUNTIME_BACKENDS if cuda_ok else MAC_ONLY_BACKENDS
+        self.settings.runtime_backend = _next(choices, self.settings.runtime_backend)
 
     def actions(self):
         return runtime_actions(self)
