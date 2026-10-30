@@ -631,6 +631,11 @@ class Picker(App):
     #actions { height: auto; padding: 0 1; }
     #rows { height: 1fr; display: none; margin-top: 1; }   /* a blank line before the model list */
     #rows.visible { display: block; }
+    #spacer { height: 0; }
+    /* Status + version are pinned to the very bottom on EVERY screen: when the model
+       list is hidden, the spacer takes the flex space, so the nav line never jumps up
+       when switching home <-> lane <-> lowkey (user 2026-10-30). */
+    #layout.no-rows #spacer { height: 1fr; }
     /* Secondary text is grey (ANSI bright-black): readable on light AND dark terminals.
        Only background and main text are the terminal's own defaults. */
     /* Remote info box: model notes for the hovered/highlighted row, framed like a tooltip. */
@@ -832,12 +837,13 @@ class Picker(App):
 
     # --- layout ----------------------------------------------------------------------------
     def compose(self) -> ComposeResult:
-        with Vertical():
+        with Vertical(id="layout"):
             yield Static("", id="title")
             yield Static("", id="policy")
             yield OptionList(id="actions")
             yield SearchInput(id="search")
             yield HoverOptionList(id="rows")
+            yield Static("", id="spacer")
             yield Static("", id="info")
             yield PromptInput(id="prompt")
             yield Static("", id="version")
@@ -984,7 +990,7 @@ class Picker(App):
         if not self._loading & self.STARTUP_KINDS:
             self._startup_loading = False     # startup prefetch done: drop the label even if no re-render follows
             if self.screen_model is not None:
-                self.query_one("#policy", Static).update(getattr(self.screen_model, "policy", ""))
+                self._set_policy(getattr(self.screen_model, "policy", ""))
                 self.query_one("#version", Static).update(getattr(self.screen_model, "version_line", ""))
         self.cache[kind] = data
         if err and err not in self.state_warnings and not kind.startswith("versions:"):
@@ -1074,7 +1080,7 @@ class Picker(App):
         """Animate the subtitle's startup label: hourglass flips and dots step, like the status line."""
         if not self._startup_pending():
             return False
-        self.query_one("#policy", Static).update(self._startup_policy())
+        self._set_policy(self._startup_policy())
         self.query_one("#version", Static).update(getattr(self.screen_model, "version_line", ""))
         return True
 
@@ -1224,7 +1230,7 @@ class Picker(App):
         # Startup: the label shows at once and animates (_startup_tick) until the prefetch lands.
         # It used to be drawn on the first render only and never updated, so it looked frozen.
         policy = self._startup_policy() if self._startup_pending() else getattr(sm, "policy", "")
-        self.query_one("#policy", Static).update(policy)
+        self._set_policy(policy)
         self.query_one("#version", Static).update(getattr(sm, "version_line", ""))
         rows = self.query_one("#rows", OptionList)
         rows.clear_options()
@@ -1246,6 +1252,8 @@ class Picker(App):
 
         # Show/hide the rows container
         rows.display = show_models
+        # flex spacer keeps status+version at the bottom when no model list is shown
+        self.query_one("#layout", Vertical).set_class(not show_models, "no-rows")
         # No input box unless a prompt is actually pending (user 2026-10-30: About and
         # other plain menus must not show an empty textbox at the bottom).
         if not getattr(self, "pending_prompt", None):

@@ -1139,14 +1139,14 @@ class LocalScreen(Screen):
             self.accordion.set_groups([])
 
     def set_models(self, models: list[LocalModel], missing: list[str] | None = None):
-        # One row per model (user 2026-10-29): profiles differing ONLY in the thinking
-        # flag are duplicates — the `j` toggle owns thinking now. Group by folder plus
-        # every profile field except `thinking`; the non-thinking profile represents
-        # the model. First-seen order is preserved.
+        # One row per model (user 2026-10-29/30): profiles on the SAME weights are one
+        # model — "operator" vs "-thinking" variants differ only in the thinking flag,
+        # which the `j` toggle owns now. Key by folder + serving config (backend/parsers),
+        # NOT by effort/roles (those are profile choices, not model identity); the
+        # non-thinking profile represents the model. First-seen order is preserved.
         groups: dict = {}
         for mdl in models:
-            key = (mdl.folder or mdl.alias, mdl.effort, mdl.roles, mdl.backend,
-                   mdl.tool_parser, mdl.reasoning_parser, mdl.family, mdl.auto_scanned)
+            key = (mdl.folder or mdl.alias, mdl.backend, mdl.tool_parser, mdl.reasoning_parser)
             groups.setdefault(key, []).append(mdl)
         models = [next((x for x in g if not x.thinking), g[0]) for g in groups.values()]
         # Key by profile_id for uniqueness (multiple profiles can share same alias)
@@ -1253,7 +1253,7 @@ class LocalScreen(Screen):
             thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
-                   lambda: Nav("remote", self.owner), section="lanes"),
+                   lambda: Nav("remote", self.owner), section="nav"),   # grouped with Back/Quit at the end (user 2026-10-30)
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR}  Remote free API sessions", lambda: Nav("remote", self.owner),
                    section="hidden"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
@@ -1741,7 +1741,7 @@ class RemoteScreen(Screen):
             # No "find model" action row (user, 2026-10-21): the filter box at the top of
             # the open model list IS the search — typing there filters live from the first
             # character, so a separate menu entry would only duplicate it.
-            Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="lanes"),
+            Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="nav"),   # grouped with Back/Quit at the end (user 2026-10-30)
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
             Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",

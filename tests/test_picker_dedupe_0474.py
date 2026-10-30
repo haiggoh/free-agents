@@ -60,9 +60,20 @@ class LocalDedupeTests(unittest.TestCase):
         lane = m.LocalScreen(m.Settings(), [m.LocalModel(**a), m.LocalModel(**b)])
         self.assertEqual(len(lane._all_models), 2)
 
-    def test_profiles_differing_in_more_than_thinking_stay_separate(self):
-        base = dict(alias="qwen38", effort="medium", roles="", folder="F")
-        other = dict(base, effort="max")
+    def test_same_folder_different_effort_or_roles_still_one_model(self):
+        # qwen "operator" vs "-thinking" profiles share weights; effort/roles are profile
+        # choices, not model identity (user 2026-10-30) — one row, non-thinking wins.
+        base = dict(alias="qwen38", effort="medium", roles="operator", folder="F", backend="rapid-mlx")
+        other = dict(base, effort="max", roles="reasoner", thinking=True, alias="qwen38-thinking")
+        models = [m.LocalModel(**base, profile_id="p1", thinking=False),
+                  m.LocalModel(**other, profile_id="p2")]
+        lane = m.LocalScreen(m.Settings(), models)
+        self.assertEqual(len(lane._all_models), 1)
+        self.assertEqual(list(lane.models), ["p1"])
+
+    def test_different_backend_config_stays_separate(self):
+        base = dict(alias="m1", effort="medium", roles="", folder="F", backend="rapid-mlx")
+        other = dict(base, backend="omlx")
         models = [m.LocalModel(**base, profile_id="p1", thinking=False),
                   m.LocalModel(**other, profile_id="p2", thinking=True)]
         lane = m.LocalScreen(m.Settings(), models)

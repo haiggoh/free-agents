@@ -95,9 +95,9 @@ class SettingsGroupTests(unittest.TestCase):
         self.assertTrue(lane.settings_collapsed)        # advanced folded by default
         self.assertIn("e", {a.key for a in hidden})     # effort folded into Model settings
         self.assertTrue(all(a.section in ("settings", "model") for a in hidden))
-        # lane switch sits at the end, right before nav (user 2026-10-30)
+        # lane switch grouped WITH nav at the end (user 2026-10-30): separator before it
         self.assertEqual(rendered[-1].section, "nav")
-        self.assertEqual(rendered[-2].section, "lanes")
+        self.assertEqual(rendered[-2].section, "nav")
         self.assertIn("c", {a.key for a in rendered})   # choose model stays top-level
 
     def test_local_lane_same_layout(self):
@@ -118,7 +118,7 @@ class SettingsGroupTests(unittest.TestCase):
         self.assertIn("e", {a.key for a in rendered})   # now visible
         self.assertEqual(hidden, [])
         self.assertEqual(rendered[-1].section, "nav")
-        self.assertEqual(rendered[-2].section, "lanes")
+        self.assertEqual(rendered[-2].section, "nav")
 
     def test_home_does_not_fold(self):
         rendered, hidden = m.rendered_actions(m.HomeScreen(m.Settings()))
