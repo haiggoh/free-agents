@@ -6,7 +6,7 @@
       "backend": "rapid",
       "version": "0.12.18",
       "tag": "v0.12.18",
-      "executable": "~/.venvs/rapid-mlx-0.12.18/bin/rapid-mlx",
+      "executable": "auto",
       "expected_dependencies": {
         "mlx": ">=0.31.2,<0.32",
         "mlx-lm": ">=0.31.3,<0.32",

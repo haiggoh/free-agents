@@ -93,6 +93,17 @@ MODELS = [
 def now(): return time.monotonic()
 def utcstamp(): return datetime.now(timezone.utc).strftime("%Y%m%d")
 
+def _machine_rapid_bin():
+    """The machine's Rapid binary exactly as the launchers resolve it (live-config pin, else the
+    newest HEALTHY install) — asked of config-lib.sh, never a version hardcoded here (this file
+    defaulted to a dead rapid-mlx-0.16.1 until 0.49.0)."""
+    lib = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "config", "config-lib.sh")
+    out = subprocess.run(["bash", "-c", 'source "$1" >/dev/null 2>&1; la_load_config >/dev/null 2>&1; '
+                          'printf %s "$LA_RAPID_BIN"', "_", lib], capture_output=True, text=True)
+    if not out.stdout.strip():
+        sys.exit("tournament-dispatch: no healthy Rapid-MLX found (set LA_TOURNEY_RAPID_BIN or install one)")
+    return out.stdout.strip()
+
 def free_ram_gb():
     """Approx free (free + inactive + speculative) RAM in GB via vm_stat."""
     try:
@@ -193,7 +204,7 @@ def launch_rapid(m, port):
     classifier). --no-reasoning-parser is passed ALWAYS so reasoning stays in the visible
     content — the tournament OBSERVES raw reasoning rather than parsing it away. Caveat
     carried from the local stack: --cache-memory-mb does not bound Metal pressure."""
-    rbin = os.environ.get("LA_TOURNEY_RAPID_BIN", f"{HOME}/.venvs/rapid-mlx-0.16.1/bin/rapid-mlx")
+    rbin = os.environ.get("LA_TOURNEY_RAPID_BIN") or _machine_rapid_bin()
     mdir = os.path.realpath(f"{MODELS_DIR}/{m['dir']}")
     runtime = f"{CONFIG_DIR}/tourney_{port}_rapid"
     serve_root = f"{runtime}/serve"

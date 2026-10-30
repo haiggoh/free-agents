@@ -92,8 +92,10 @@ check $? "launcher uses a self-match-safe model-process gate"
 grep -qF 'LA_RAPID_AUTO_MODEL_DIR' "$CONFIG_LIB"
 check $? "config library exposes the pinned Rapid Auto Mode model"
 
-grep -qF 'rapid-mlx 1.0.0' "$LAUNCHER"
-check $? "launcher pins the tested Rapid version"
+grep -qF 'serve --help' "$LAUNCHER"
+check $? "launcher checks the binary's serve-flag capability (no shipped version pin)"
+! grep -qE 'rapid-mlx-[0-9]+\.[0-9]+\.[0-9]+/bin|"rapid-mlx [0-9]+\.[0-9]+\.[0-9]+"' "$LAUNCHER"
+check $? "launcher ships no Rapid version"
 
 grep -qF 'requires a non-thinking session alias' "$LAUNCHER"
 check $? "launcher rejects thinking aliases"
@@ -158,7 +160,20 @@ printf '{}\n' >"$SB/home/.models/Qwen3.6-35B-A3B-4bit/config.json"
 cat >"$SB/bin/rapid-mlx" <<'RAPID_STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = "--version" ]; then
-    printf '%s\n' "rapid-mlx 1.0.0"
+    printf '%s\n' "rapid-mlx 9.9.9"
+    exit 0
+fi
+if [ "${1:-}" = "serve" ] && [ "${2:-}" = "--help" ]; then
+    # Every flag the launcher passes, as a real `rapid-mlx serve --help` lists them.
+    # STUB_DROP_FLAG removes one, to prove the capability gate refuses a binary that lacks it.
+    for f in --served-model-name --host --port --max-num-seqs --max-concurrent-requests \
+             --cache-memory-mb --hybrid-cache-entries --pflash --no-mllm --no-spec-decode \
+             --pin-system-prompt --relocate-mid-conversation-system --enable-prefix-cache \
+             --prefix-cache-index --idle-cache-clear-seconds --response-cache-entries \
+             --resident-memory-limit-gb --timeout --tool-call-parser --enable-auto-tool-choice \
+             --no-thinking --no-reasoning-parser; do
+        [ "$f" = "${STUB_DROP_FLAG:-}" ] || printf '  %s VALUE\n' "$f"
+    done
     exit 0
 fi
 exit 97
@@ -182,6 +197,17 @@ dry_status=$?
 
 [ "$dry_status" -eq 0 ]
 check $? "sandboxed Rapid Auto Mode dry run completes"
+
+lacking="$(
+    HOME="$SB/home" STUB_DROP_FLAG=--pin-system-prompt \
+    LA_RAPID_AUTO_BIN="$SB/bin/rapid-mlx" \
+    LA_RAPID_AUTO_MODEL_DIR="$SB/home/.models/Qwen3.6-35B-A3B-4bit" \
+    LA_RAPID_AUTO_DRY_RUN=1 \
+        bash "$SB/bin/launch-claude-agent-rapid-auto.sh" alpha high 2>&1
+)"
+lacking_status=$?
+[ "$lacking_status" -eq 2 ] && printf '%s' "$lacking" | grep -qF -- '--pin-system-prompt'
+check $? "a rapid-mlx lacking a needed serve flag is refused (exit 2) naming the flag"
 
 printf '%s' "$dry_run" | grep -qF 'RAPID_AUTO_DRY_RUN_OK'
 check $? "dry run reports explicit success marker"

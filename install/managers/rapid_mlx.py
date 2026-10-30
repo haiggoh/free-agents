@@ -22,22 +22,18 @@ from typing import Any
 from . import register_manager
 from .base import BackendInfo, BackendManager, ManagerError
 from ._common import braille_spinner, venv_health
-from .base import repository_root
+from .base import live_config_file, repository_root
 
 PACKAGE = "rapid-mlx"
 PYPI_URL = "https://pypi.org/pypi/rapid-mlx/json"
 VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:([a-zA-Z]+)(\d+))?$")
 SCHEMA = 2
 
-# Files that get pinned during promotion
-PIN_FILES = (
-    "bin/launch-claude-agent-rapid-auto.sh",
-    "config/config-lib.sh",
-    "config/config.example.sh",
-    "tests/test_rapid_auto_mode.sh",
-)
-PRIVATE_PIN_FILE = "config/config.local.sh"
-OPTIONAL_PIN_FILES = ("bin/local-inference-readonly-inventory.zsh",)
+# Promotion writes ONE file: the machine's live config.local.sh (base.live_config_file). Until
+# 0.49.0 it also stamped four tracked repo files, so every backend update dirtied the checkout
+# and shipped one machine's version choice in the release (user 2026-10-30: an update is a user
+# action, not release work). tests/test_live_config_promotion.py guards that no shipped file
+# carries a backend venv path again.
 PATH_PIN_RE = re.compile(
     r"(?P<prefix>rapid-mlx-)(?P<version>\d+\.\d+\.\d+)(?P<suffix>/bin/(?:rapid-mlx|python))"
 )
@@ -242,94 +238,46 @@ print(json.dumps(out, sort_keys=True))
             temporary.unlink(missing_ok=True)
 
     def _plan_pin_update(self, version: str):
+        """Plan the ONE write a promotion makes: the live config's LA_RAPID_BIN line.
+
+        Returns (version, changes, scanned, note). note = "no_live_config" (nothing to write:
+        the machine runs on auto-discovery), "no_explicit_pin" (the live file has no Rapid pin
+        line — also auto-discovery; the file is left byte-identical, never gains a line), or ""."""
         self.require_version(version)
         if not self._repo:
             raise ManagerError("Repository required for pin promotion")
-        repo = self._repo.resolve()
-        changes = []
-        scanned = []
-        all_files = PIN_FILES + OPTIONAL_PIN_FILES + (PRIVATE_PIN_FILE,)
-
-        for relative in all_files:
-            path = repo / relative
-            private = relative == PRIVATE_PIN_FILE
-            if not path.exists():
-                if private or relative in OPTIONAL_PIN_FILES:
-                    continue
-                raise ManagerError(f"required pin surface is absent: {path}")
-            if path.is_symlink() or not path.is_file():
-                raise ManagerError(f"unsafe pin surface: {path}")
-            before = path.read_bytes()
-            try:
-                text = before.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise ManagerError(f"pin surface is not UTF-8: {path}") from exc
-            output = PATH_PIN_RE.sub(lambda m: m.group("prefix") + version + m.group("suffix"), text)
-            if relative in ("bin/launch-claude-agent-rapid-auto.sh", "tests/test_rapid_auto_mode.sh"):
-                output = RAPID_AUTO_VERSION_RE.sub(f"rapid-mlx {version}", output)
-            after = output.encode("utf-8")
-            scanned.append(path)
-            if after != before:
-                changes.append((path, before, after, private, path.stat().st_mode & 0o777))
-
-        required_invariants = {
-            "bin/launch-claude-agent-rapid-auto.sh": (f"rapid-mlx-{version}/bin/rapid-mlx", f"rapid-mlx {version}"),
-            "config/config-lib.sh": (f"rapid-mlx-{version}/bin/rapid-mlx",),
-            "config/config.example.sh": (f"rapid-mlx-{version}/bin/rapid-mlx",),
-            "tests/test_rapid_auto_mode.sh": (f"rapid-mlx {version}",),
-        }
-        final_by_path = {str(p.relative_to(repo)): p.read_text(encoding="utf-8") for p in scanned}
-        for path, _, after, _, _ in changes:
-            final_by_path[str(path.relative_to(repo))] = after.decode("utf-8")
-        missing = []
-        for relative, markers in required_invariants.items():
-            final = final_by_path.get(relative, "")
-            for marker in markers:
-                if marker not in final:
-                    missing.append(f"{relative}: {marker}")
-        if missing:
-            raise ManagerError("pin surfaces are partially migrated: " + "; ".join(missing))
-        return (version, tuple(changes), tuple(scanned))
-
-    def tracked_repo_clean(self, repo: Path) -> None:
-        """Refuse to promote over uncommitted tracked work (tests may replace this)."""
+        live = live_config_file(self._repo.resolve())
+        if not os.path.lexists(live):
+            return (version, (), (), "no_live_config")
+        if live.is_symlink() or not live.is_file():
+            raise ManagerError(f"unsafe live config (symlink or not a file): {live}")
+        before = live.read_bytes()
         try:
-            inside = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo,
-                                    capture_output=True, text=True, check=False)
-        except OSError:
-            inside = None
-        if inside is None or inside.returncode != 0 or inside.stdout.strip() != "true":
-            # A derived copy (installed plugin cache, extracted archive) is not a checkout:
-            # pin edits there are silently lost on the next update, so say so and name the
-            # remedy instead of the generic clean-worktree error git would produce.
-            raise ManagerError(
-                f"{repo} is not a git checkout — pin promotion edits tracked repo files, and "
-                "a derived copy would lose them on the next update. Run manage-backend.py "
-                "from a real free-agents checkout, or pass --repo <path-to-checkout>.")
-        unstaged = subprocess.run(["git", "diff", "--quiet"], cwd=repo, check=False).returncode
-        staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo, check=False).returncode
-        if unstaged or staged:
-            raise ManagerError("pin promotion requires a clean tracked worktree and index")
+            text = before.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ManagerError(f"live config is not UTF-8: {live}") from exc
+        if not any(PATH_PIN_RE.search(line) for line in text.splitlines()
+                   if line.lstrip().startswith("LA_RAPID_BIN=")):
+            return (version, (), (live,), "no_explicit_pin")
+        after = PATH_PIN_RE.sub(lambda m: m.group("prefix") + version + m.group("suffix"), text).encode("utf-8")
+        changes = ((live, before, after, True, live.stat().st_mode & 0o777),) if after != before else ()
+        return (version, changes, (live,), "")
 
     def default_pin_validator(self, repo: Path, version: str) -> None:
-        """Post-write checks: every surface carries the new pin, and the repo still passes."""
-        launcher = repo / "bin" / "launch-claude-agent-rapid-auto.sh"
-        config = repo / "config" / "config-lib.sh"
-        tests = repo / "tests" / "test_rapid_auto_mode.sh"
-        for p in (launcher, config, tests):
-            text = p.read_text(encoding="utf-8")
-            if p.name != "test_rapid_auto_mode.sh" and f"rapid-mlx-{version}/bin/rapid-mlx" not in text:
-                raise ManagerError(f"post-promotion versioned path missing from {p}")
-            if p in (launcher, tests) and f"rapid-mlx {version}" not in text:
-                raise ManagerError(f"post-promotion exact version assertion missing from {p}")
-        compile_code = (
-            "from pathlib import Path; "
-            "[compile(Path(p).read_text(encoding='utf-8'), p, 'exec') "
-            "for p in ('install/manage-rapid-mlx.py', 'tests/test_manage_rapid_mlx.py')]"
-        )
-        self.run_command([sys.executable, "-B", "-c", compile_code], cwd=repo)
-        self.run_command(["bash", "tests/test_rapid_auto_mode.sh"], cwd=repo)
-        self.run_command(["git", "diff", "--check"], cwd=repo)
+        """Validate the OUTCOME the launcher will see: source config-lib like a launcher does and
+        require LA_RAPID_BIN to resolve to the promoted version AND pass the health check."""
+        expected = f"rapid-mlx-{version}/bin/rapid-mlx"
+        probe = subprocess.run(
+            ["bash", "-c", 'source "$1" >/dev/null 2>&1; la_load_config >/dev/null 2>&1; '
+             'printf "%s\\n" "$LA_RAPID_BIN"; la_backend_bin_health "$LA_RAPID_BIN"',
+             "_", str(repo / "config" / "config-lib.sh")],
+            capture_output=True, text=True, cwd=repo, timeout=60)
+        resolved = probe.stdout.strip().splitlines()[:1]
+        if not resolved or not resolved[0].endswith(expected):
+            raise ManagerError(f"after promotion the launcher resolves LA_RAPID_BIN={resolved[0] if resolved else '<empty>'}, "
+                               f"not …/{expected}")
+        if probe.returncode != 0:
+            raise ManagerError(f"promoted binary cannot run: {probe.stderr.strip() or 'health check failed'}")
 
     def _apply_pin_plan(self, plan, *, dry_run: bool = False, validator=_DEFAULT_VALIDATOR,
                         backup_root: Path | None = None):
@@ -340,15 +288,14 @@ print(json.dumps(out, sort_keys=True))
         repo half-promoted, and post-write verification compares each file with ITS OWN planned
         bytes (it compared every file with the last file's content, so any multi-file promotion
         failed verification)."""
-        version, changes, _scanned = plan
+        version, changes, _scanned, note = plan if len(plan) == 4 else (*plan, "")
         repo = self._repo.resolve() if self._repo else None
         if dry_run or not changes:
-            return {"result": "dry_run" if dry_run else "already_promoted", "changed": []}
+            return {"result": "dry_run" if dry_run else (note or "already_promoted"), "changed": []}
         if repo is None:
             raise ManagerError("Repository required for pin promotion")
         if validator is _DEFAULT_VALIDATOR:
             validator = self.default_pin_validator
-        self.tracked_repo_clean(repo)
 
         transaction = backup_root or (
             self._cache_root() / "pin-transactions" /
@@ -359,7 +306,7 @@ print(json.dumps(out, sort_keys=True))
         written = []
         try:
             for path, before, after, private, _mode in changes:
-                relative = path.relative_to(repo)
+                relative = Path(path.name)
                 backup = transaction / relative
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 backup.write_bytes(before)
@@ -367,7 +314,7 @@ print(json.dumps(out, sort_keys=True))
                 if backup.read_bytes() != before:
                     raise ManagerError(f"backup verification failed: {backup}")
                 manifest.append({
-                    "path": str(relative),
+                    "path": str(path),
                     "before_sha256": hashlib.sha256(before).hexdigest(),
                     "after_sha256": hashlib.sha256(after).hexdigest(),
                     "private": private,
@@ -393,7 +340,7 @@ print(json.dumps(out, sort_keys=True))
                     raise ManagerError(f"post-write verification failed: {path}")
             return {
                 "result": "promoted",
-                "changed": [str(c[0].relative_to(repo)) for c in changes],
+                "changed": [str(c[0]) for c in changes],
                 "transaction": str(transaction),
             }
         except Exception as exc:
@@ -467,18 +414,21 @@ print(json.dumps(out, sort_keys=True))
             raise ManagerError(f"removal verification failed: {target}")
 
     def _referenced_paths(self, repo: Path | None, target: Path) -> list[str]:
-        """Find pinned references to the target in the repository."""
-        if not repo:
+        """Lines of the LIVE config that pin the target (the file the launcher reads).
+
+        Fails CLOSED: a live config that cannot be resolved raises, so `remove` refuses rather
+        than deleting a version the machine may be running on. Until 0.49.0 this scanned
+        <repo>/config/config.local.sh, which no real checkout has — so it would have allowed
+        removing the live-pinned version."""
+        live = live_config_file((repo or Path(__file__).resolve().parents[2]).resolve())
+        if not live.is_file() or live.is_symlink():
             return []
         matches: list[str] = []
-        all_files = PIN_FILES + OPTIONAL_PIN_FILES + (PRIVATE_PIN_FILE,)
-        for relative in all_files:
-            path = repo / relative
-            if not path.is_file() or path.is_symlink():
+        for number, line in enumerate(live.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if line.lstrip().startswith("#"):
                 continue
-            for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-                if re.search(r"(?<![\w.-])" + re.escape(target.name) + r"(?![\w.-])", line) or str(target) in line:
-                    matches.append(f"{path}:{number}:{line.strip()}")
+            if re.search(r"(?<![\w.-])" + re.escape(target.name) + r"(?![\w.-])", line) or str(target) in line:
+                matches.append(f"{live}:{number}:{line.strip()}")
         return matches
 
     def _running_references(self, target: Path) -> list[str]:

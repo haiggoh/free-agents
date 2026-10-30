@@ -30,7 +30,7 @@ LA_DEFAULT_MLX_BACKEND=rapid
 # config edit. Set it explicitly only to PIN a known version — for an A/B against recorded
 # measurements, or as a rollback target.
 #   brew install rapid-mlx
-# LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-1.0.0/bin/rapid-mlx"
+# LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-<version>/bin/rapid-mlx"   (the backend manager's promote writes this line)
 LA_RAPID_CACHE_MEMORY_MB=2048          # conservative shipped ceiling; tune to workload/RAM
 LA_RAPID_HYBRID_CACHE_ENTRIES=2        # retained recurrent/sliding-window snapshots
 

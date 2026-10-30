@@ -15,9 +15,6 @@ import pytest
 from managers import get_manager, get_manager_instance, list_managers
 from managers._common import ManagerError
 from managers.rapid_mlx import (
-    PIN_FILES,
-    PATH_PIN_RE,
-    RAPID_AUTO_VERSION_RE,
     VERSION_RE,
     RapidMLXManager,
 )
@@ -101,17 +98,9 @@ def test_rapid_mlx_class_attributes():
     assert mgr.PYPI_URL == "https://pypi.org/pypi/rapid-mlx/json"
 
 
-def test_pin_surfaces_match_default_version():
-    """Single source of truth: every pin surface's rapid-mlx version references must
-    equal the manager's DEFAULT_VERSION (pin promotion keeps them in step). No literal
-    version lives here — the assertion is consistency with the source, by user rule."""
-    repo = Path(__file__).parent.parent
-    for rel in PIN_FILES:
-        text = (repo / rel).read_text()
-        found = {m.group("version") for m in PATH_PIN_RE.finditer(text)}
-        found |= {m.group("version") for m in RAPID_AUTO_VERSION_RE.finditer(text)}
-        assert found == {RapidMLXManager.DEFAULT_VERSION}, (
-            f"{rel} pins {found} but DEFAULT_VERSION is {RapidMLXManager.DEFAULT_VERSION}")
+# test_pin_surfaces_match_default_version was retired in 0.49.0: no shipped file carries a
+# Rapid version any more (promotion writes only the live config). Its successor is
+# tests/test_live_config_promotion.py::NoShippedBackendPinTest.
 
 
 def test_rapid_mlx_version_key_invalid():

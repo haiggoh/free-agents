@@ -153,7 +153,7 @@ selected_model_dir="$(
 SESSION_MODEL_ID="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 
-: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-1.0.0/bin/rapid-mlx}"
+: "${LA_RAPID_AUTO_BIN:=${LA_RAPID_BIN:-$(la_discover_rapid_bin)}}"
 : "${LA_RAPID_AUTO_MODEL_DIR:=$("$(dirname "${BASH_SOURCE[0]}")/local-classifier-default.sh" --dir-only 2>/dev/null || echo "$HOME/.models/granite-4.2-30b-q4-mlx")}"
 : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
 : "${LA_RAPID_AUTO_PORT:=8002}"
@@ -175,10 +175,22 @@ if ! _rapid_auto_why="$(la_backend_bin_health "$LA_RAPID_AUTO_BIN" 2>&1)"; then
         "${_rapid_auto_why#broken: }" "$(la_backend_repair_hint "$LA_RAPID_AUTO_BIN")" >&2
     exit 2
 fi
-rapid_auto_version="$("$LA_RAPID_AUTO_BIN" --version 2>/dev/null || true)"
-[ "$rapid_auto_version" = "rapid-mlx 1.0.0" ] || {
-    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 1.0.0, got %s\n' \
-        "${rapid_auto_version:-<unavailable>}" >&2
+# Capability, not an exact version: the flags this launcher passes must exist in THIS binary's
+# `serve --help`. The old `= "rapid-mlx X.Y.Z"` equality was re-stamped by every promotion
+# (0.15.0 .. 1.0.0) — it never encoded a qualification, only the last machine's choice.
+rapid_auto_serve_help="$("$LA_RAPID_AUTO_BIN" serve --help 2>&1 || true)"
+rapid_auto_missing=""
+for _flag in --served-model-name --host --port --max-num-seqs --max-concurrent-requests \
+             --cache-memory-mb --hybrid-cache-entries --pflash --no-mllm --no-spec-decode \
+             --pin-system-prompt --relocate-mid-conversation-system --enable-prefix-cache \
+             --prefix-cache-index --idle-cache-clear-seconds --response-cache-entries \
+             --resident-memory-limit-gb --timeout --tool-call-parser --enable-auto-tool-choice \
+             --no-thinking --no-reasoning-parser; do
+    case "$rapid_auto_serve_help" in *"$_flag"*) ;; *) rapid_auto_missing="$rapid_auto_missing $_flag" ;; esac
+done
+[ -z "$rapid_auto_missing" ] || {
+    printf 'ERROR: Rapid Auto Mode needs serve flags this rapid-mlx lacks (%s):%s\n' \
+        "$("$LA_RAPID_AUTO_BIN" --version 2>/dev/null || echo '?')" "$rapid_auto_missing" >&2
     exit 2
 }
 

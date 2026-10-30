@@ -84,27 +84,9 @@ def test_cli_promote_defaults_repo_to_script_repository():
     assert exit_code == 0, f"promote --dry-run failed: {stderr or stdout}"
 
 
-def test_tracked_repo_clean_refuses_non_git_dir_with_remedy(tmp_path):
-    """Promoting pins into a directory that is not a git checkout must say so and name the
-    remedy — an installed plugin copy resolves "script repository" to its own derived cache,
-    where the old code's generic "requires a clean tracked worktree" (git diff failing inside
-    a non-repo) told the user nothing actionable. Tested on the method directly: a full promote
-    would first validate an installed venv, which would make this test depend on machine
-    state; the promote path reaches this check by composition."""
-    sys.path.insert(0, str(Path(__file__).parent.parent / "install"))
-    from managers.rapid_mlx import RapidMLXManager
-
-    mgr = RapidMLXManager()
-    missing = tmp_path / "not-a-checkout"
-    missing.mkdir()                       # exists, but is not a git repo
-    with _pytest.raises(Exception) as excinfo:
-        mgr.tracked_repo_clean(missing)
-    message = str(excinfo.value)
-    assert "not a git checkout" in message
-    assert "--repo" in message           # the remedy names the flag
-    with _pytest.raises(Exception) as excinfo:
-        mgr.tracked_repo_clean(tmp_path / "does-not-exist")   # typo'd --repo: same remedy
-    assert "not a git checkout" in str(excinfo.value)
+# test_tracked_repo_clean_refuses_non_git_dir_with_remedy was retired in 0.49.0: promotion no
+# longer writes the repo, so a non-checkout (the installed plugin copy) is SUPPORTED, not refused.
+# Successor: tests/test_live_config_promotion.py::test_promote_works_on_a_copy_without_git.
 
 
 if __name__ == "__main__":

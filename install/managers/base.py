@@ -495,6 +495,33 @@ class BackendManager(
         return infos
 
 
+def live_config_file(repo: Path) -> Path:
+    """The machine's LIVE config.local.sh — the one file a backend update may write.
+
+    Resolved by config/config-lib.sh itself (one implementation of the precedence: operator
+    override, the tree's own file, the machine state dir), so the manager can never again write
+    a file the launcher does not read (until 2026-10-30 it wrote <repo>/config/config.local.sh,
+    which no real checkout has had since v0.41.1). An explicit LA_LIVE_CONFIG_DIR that is set
+    but not a directory aborts naming it — never a silent fallthrough.
+    """
+    override = os.environ.get("LA_LIVE_CONFIG_DIR", "")
+    if override and not os.environ.get("_LA_LIVE_FOR"):
+        if not Path(override).is_dir():
+            raise ManagerError(f"LA_LIVE_CONFIG_DIR is set but is not a directory: {override}")
+        return Path(override) / "config.local.sh"
+    lib = repo / "config" / "config-lib.sh"
+    if not lib.is_file():
+        raise ManagerError(f"cannot resolve the live config: {lib} is missing")
+    env = {k: v for k, v in os.environ.items() if k not in ("LA_LIVE_CONFIG_DIR", "_LA_LIVE_FOR")}
+    probe = subprocess.run(
+        ["bash", "-c", 'source "$1" >/dev/null 2>&1; printf %s "$LA_LIVE_CONFIG_DIR"', "_", str(lib)],
+        capture_output=True, text=True, cwd=repo, env=env, timeout=30)
+    resolved = probe.stdout.strip()
+    if probe.returncode != 0 or not resolved:
+        raise ManagerError(f"config-lib.sh did not report a live config dir (exit {probe.returncode})")
+    return Path(resolved) / "config.local.sh"
+
+
 def repository_root(explicit: Path | None = None) -> Path:
     """The free-agents checkout this manager runs from (two levels above install/managers/).
 

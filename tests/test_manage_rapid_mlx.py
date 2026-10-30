@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -62,31 +63,25 @@ def raises(callable_, label: str) -> None:
         check(False, label)
 
 
-def create_repo(root: Path, version: str = "0.13.4", private: str = "0.12.18") -> Path:
+# create_repo points LA_LIVE_CONFIG_DIR at a per-sandbox dir. This file runs at pytest IMPORT time,
+# so the original values are restored as the script's LAST act (below) — a mid-file cleanup was
+# undone by a later create_repo call and leaked a deleted dir into the next test module.
+_ORIGINAL_LIVE_ENV = {k: os.environ.get(k) for k in ("LA_LIVE_CONFIG_DIR", "_LA_LIVE_FOR")}
+
+
+def create_repo(root: Path, private: str = "0.12.18") -> Path:
+    """A free-agents-shaped tree plus a LIVE config pinning `private`. Since 0.49.0 a promotion
+    writes ONLY the live config (LA_LIVE_CONFIG_DIR here, the machine state dir for real), so the
+    repo needs no pin surfaces at all — just config-lib.sh to resolve the live file."""
     repo = root / "repo"
-    repo.mkdir(parents=True, exist_ok=True)
-    # Initialize git properly
-    subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=repo, capture_output=True, check=True)
-    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, capture_output=True, check=True)
-    for relative in rapid_mlx_module.PIN_FILES:
-        path = repo / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if relative == "bin/launch-claude-agent-rapid-auto.sh":
-            text = (
-                f': "${{LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-{version}/bin/rapid-mlx}}"\n'
-                f'rapid_auto_version="rapid-mlx {version}"\n'
-            )
-        elif relative == "config/config-lib.sh":
-            text = f': "${{LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-{version}/bin/rapid-mlx}}"\n'
-        elif relative == "config/config.example.sh":
-            text = '# LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-0.13.2/bin/rapid-mlx"\n'
-        else:
-            text = f"grep -qF 'rapid-mlx {version}' launcher\nprintf 'rapid-mlx {version}'\n"
-        path.write_text(text, encoding="utf-8")
-    local = repo / rapid_mlx_module.PRIVATE_PIN_FILE
-    local.parent.mkdir(parents=True, exist_ok=True)
-    local.write_text(f'LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-{private}/bin/rapid-mlx"\n', encoding="utf-8")
+    (repo / "config").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(Path(__file__).resolve().parents[1] / "config" / "config-lib.sh", repo / "config" / "config-lib.sh")
+    live = root / "live"
+    live.mkdir(exist_ok=True)
+    (live / "config.local.sh").write_text(f'LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-{private}/bin/rapid-mlx"\n', encoding="utf-8")
+    (live / "config.local.sh").chmod(0o600)
+    os.environ["LA_LIVE_CONFIG_DIR"] = str(live)
+    os.environ.pop("_LA_LIVE_FOR", None)
     return repo.resolve()
 
 
@@ -123,18 +118,14 @@ with tempfile.TemporaryDirectory() as temporary:
     test_mgr.atomic_json(lock_path, {"version": "0.14.0", "pip_freeze": ["mlx==0.32.2"]})
     check(test_mgr.locked_requirements("0.14.0") is None, "receipt without Rapid pin rejected")
 
-print("== pin planning ==")
+print("== pin planning targets ONLY the live config ==")
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     repo = create_repo(root)
     plan = module.plan_pin_update(repo, "0.14.0")
-    # plan is a tuple (version, tuple(changes), tuple(scanned))
-    # changes is a list of tuples: (path, before, after, private, mode)
     changes = plan[1]
-    changed = {str(item[0].relative_to(repo)) for item in changes}
-    check(changed == set(rapid_mlx_module.PIN_FILES + (rapid_mlx_module.PRIVATE_PIN_FILE,)), "all and only active pin surfaces planned")
-    check(all(b"0.14.0" in item[2] for item in changes), "all planned outputs contain target version")
-    check(all(b"0.13.4" not in item[2] and b"0.12.18" not in item[2] and b"0.13.2" not in item[2] for item in changes), "supported old active pins removed from outputs")
+    check([item[0] for item in changes] == [root / "live" / "config.local.sh"], "the live config is the only planned file")
+    check(all(b"0.14.0" in item[2] and b"0.12.18" not in item[2] for item in changes), "planned output moves the pin")
     before = {item[0]: item[0].read_bytes() for item in changes}
     result = module.apply_pin_plan(plan, dry_run=True)
     check(result["result"] == "dry_run" and all(path.read_bytes() == data for path, data in before.items()), "pin dry-run writes nothing")
@@ -143,31 +134,27 @@ print("== transactional promotion and private mode ==")
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     repo = create_repo(root)
-    # Create manager with repo set
     test_mgr = RapidMLXManager(repo=repo)
     plan = test_mgr.plan_pin_update(repo, "0.14.0")
     transaction = root / "transaction"
-    test_mgr.tracked_repo_clean = lambda _repo: None
-    # A REAL promotion (the fixture repo has no launcher tests to run, so no validator).
     result = test_mgr.apply_pin_plan(plan, validator=None, backup_root=transaction)
+    live = root / "live" / "config.local.sh"
     check(result["result"] == "promoted", "pin transaction reports promotion")
-    check(all(b"0.14.0" in item[0].read_bytes() for item in plan[1]), "pin transaction writes every target")
-    private = repo / rapid_mlx_module.PRIVATE_PIN_FILE
-    check(stat.S_IMODE(private.stat().st_mode) == 0o600, "private overlay remains mode 600")
+    check(b"0.14.0" in live.read_bytes(), "pin transaction writes the live config")
+    check(stat.S_IMODE(live.stat().st_mode) == 0o600, "live config remains mode 600")
     check((transaction / "manifest.json").is_file(), "transaction manifest retained")
     check(not test_mgr.plan_pin_update(repo, "0.14.0")[1], "second promotion is an idempotent no-op")
 
-print("== a failing validator rolls every file back ==")
+print("== a failing validator rolls the live config back ==")
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     repo = create_repo(root)
     test_mgr = RapidMLXManager(repo=repo)
-    test_mgr.tracked_repo_clean = lambda _repo: None
     plan = test_mgr.plan_pin_update(repo, "0.14.0")
     originals = {item[0]: item[1] for item in plan[1]}
 
     def failing_validator(_repo, _version):
-        raise subprocess.CalledProcessError(1, ["bash", "tests/test_rapid_auto_mode.sh"])
+        raise subprocess.CalledProcessError(1, ["bash", "-c", "la_backend_bin_health"])
     try:
         test_mgr.apply_pin_plan(plan, validator=failing_validator, backup_root=root / "tx")
         raised = False
@@ -175,41 +162,25 @@ with tempfile.TemporaryDirectory() as temporary:
         raised = "rolled back" in str(exc)
     check(raised, "a validator failure surfaces as a rolled-back ManagerError")
     check(all(path.read_bytes() == data for path, data in originals.items()),
-          "every pin surface is restored byte-for-byte after a failed validation")
+          "the live config is restored byte-for-byte after a failed validation")
 
-print("== bytecode-free post-promotion validation ==")
+print("== unsafe or pin-less live configs fail closed / stay untouched ==")
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     repo = create_repo(root)
-    # Skip this test as the validator is internal
-    check(True, "skipped - validator is internal")
-
-print("== full rollback on validator failure ==")
+    live = root / "live" / "config.local.sh"
+    live.write_text("# no Rapid pin: auto-discovery\n", encoding="utf-8")
+    plan = module.plan_pin_update(repo, "0.14.0")
+    check(not plan[1] and plan[3] == "no_explicit_pin", "a live config without a pin line is never given one")
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     repo = create_repo(root)
-    # Skip this test as it requires internal methods
-    check(True, "skipped - requires internal methods")
-
-print("== partial migration and unsafe files fail closed ==")
-with tempfile.TemporaryDirectory() as temporary:
-    root = Path(temporary)
-    repo = create_repo(root)
-    path = repo / "config" / "config-lib.sh"
-    path.write_text("no supported Rapid pin here\n", encoding="utf-8")
-    raises(lambda: module.plan_pin_update(repo, "0.14.0"), "missing supported anchor refuses partial migration")
-with tempfile.TemporaryDirectory() as temporary:
-    root = Path(temporary)
-    repo = create_repo(root, version="0.14.0", private="0.14.0")
-    (repo / "config" / "config-lib.sh").write_text("no Rapid pin here\n", encoding="utf-8")
-    raises(lambda: module.plan_pin_update(repo, "0.14.0"), "unsupported no-diff surface is not misreported as promoted")
-with tempfile.TemporaryDirectory() as temporary:
-    root = Path(temporary)
-    repo = create_repo(root)
-    path = repo / "config" / "config-lib.sh"
-    path.unlink()
-    path.symlink_to(repo / "config" / "config.example.sh")
-    raises(lambda: module.plan_pin_update(repo, "0.14.0"), "symlinked pin surface rejected")
+    live = root / "live" / "config.local.sh"
+    real = root / "elsewhere.sh"
+    real.write_text(live.read_text(encoding="utf-8"), encoding="utf-8")
+    live.unlink()
+    live.symlink_to(real)
+    raises(lambda: module.plan_pin_update(repo, "0.14.0"), "symlinked live config rejected")
 
 print("== install dry-run and skip-pin semantics ==")
 with tempfile.TemporaryDirectory() as temporary:
@@ -234,6 +205,12 @@ listed = subprocess.run([sys.executable, str(MODULE_PATH), "installed"], text=Tr
                         env={**os.environ, "HOME": tempfile.mkdtemp()})
 check(listed.returncode == 0 and "No versioned rapid-mlx environments found" in listed.stdout,
       "wrapper translates backend argument (installed runs as --backend rapid-mlx)")
+
+for _key, _value in _ORIGINAL_LIVE_ENV.items():
+    if _value is None:
+        os.environ.pop(_key, None)
+    else:
+        os.environ[_key] = _value
 
 print(f"\n{passed} passed, {len(failed)} failed")
 for label in failed:
