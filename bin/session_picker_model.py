@@ -1146,7 +1146,11 @@ class LocalScreen(Screen):
         # non-thinking profile represents the model. First-seen order is preserved.
         groups: dict = {}
         for mdl in models:
-            key = (mdl.folder or mdl.alias, mdl.backend, mdl.tool_parser, mdl.reasoning_parser)
+            # registered aliases may carry no folder — then the alias minus a
+            # "-thinking" suffix is the model identity (qwen-3.8-operator ==
+            # qwen-3.8-thinking, gemma-4-26b == gemma-4-26b-thinking; user 2026-10-30)
+            ident = mdl.folder or mdl.alias.removesuffix("-thinking")
+            key = (ident, mdl.backend, mdl.tool_parser, mdl.reasoning_parser)
             groups.setdefault(key, []).append(mdl)
         models = [next((x for x in g if not x.thinking), g[0]) for g in groups.values()]
         # Key by profile_id for uniqueness (multiple profiles can share same alias)

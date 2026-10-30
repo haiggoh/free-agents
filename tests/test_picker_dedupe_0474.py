@@ -54,6 +54,16 @@ class LocalDedupeTests(unittest.TestCase):
         self.assertEqual(list(lane.models), ["qwen38"])   # non-thinking profile represents
         self.assertEqual(len(lane._all_models), 1)
 
+    def test_thinking_suffix_alias_dedupes_without_folder(self):
+        # registered profiles often have no folder: qwen-3.8-operator and
+        # qwen-3.8-thinking are the same model (user 2026-10-30) — one row, base alias.
+        base = dict(alias="qwen-3.8-operator", effort="medium", roles="", backend="rapid-mlx")
+        think = dict(base, alias="qwen-3.8-thinking")
+        lane = m.LocalScreen(m.Settings(), [m.LocalModel(**base, profile_id="qwen-3.8-operator", thinking=False),
+                                             m.LocalModel(**think, profile_id="qwen-3.8-thinking", thinking=True)])
+        self.assertEqual(len(lane._all_models), 1)
+        self.assertEqual(list(lane.models), ["qwen-3.8-operator"])
+
     def test_different_folders_stay_separate(self):
         a = dict(alias="m1", effort="medium", roles="", folder="F1")
         b = dict(alias="m1", effort="medium", roles="", folder="F2")   # same alias, other weights
