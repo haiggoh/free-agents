@@ -1468,7 +1468,7 @@ class RemoteScreen(Screen):
                       for g in by_model.values()]
             if self.search:
                 pinned = [a for a in pinned if self._matches(a.model_id, a.display)]
-            items = [Item(a.alias, f"{a.display}{self._size_suffix(prov, a.model_id, a.display)}  · {tier_label(a.tier, a.provider)}{lane_tag(a.provider, a.model_id)}")
+            items = [Item(a.alias, self._pin_row_label(prov, a))
                      for a in pinned]
             items += self._catalog_items(prov, buckets[prov])
             if self.search and not items:
@@ -1575,6 +1575,15 @@ class RemoteScreen(Screen):
         """The local-capable verdict for a catalog row (Settings.catalog_local_capable, set by the picker)."""
         fn = getattr(self.settings, "catalog_local_capable", None)
         return bool(fn and fn(prov, model_id))
+
+    def _pin_row_label(self, prov: str, a) -> str:
+        # Tier and lane tags each carry their own "  · " separator, and BOTH can be empty
+        # (unknown tier, default/catalog lane) — a glued-on separator then dangles behind the
+        # parameter size (user 2026-10-31). Join only the tags that exist.
+        tags = [t for t in (tier_label(a.tier, a.provider),
+                            lane_tag(a.provider, a.model_id).lstrip(" ·")) if t]
+        tail = f"  · {'  · '.join(tags)}" if tags else ""
+        return f"{a.display}{self._size_suffix(prov, a.model_id, a.display)}{tail}"
 
     def _size_suffix(self, prov: str, model_id: str, display: str) -> str:
         """'  · 1.05T' appended to a row name when the size is known and the name does not

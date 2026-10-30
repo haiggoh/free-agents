@@ -170,6 +170,28 @@ class SizeSortAndLabelTests(unittest.TestCase):
         self.assertNotIn("550B  · 550B", labels["g-named"])   # name already states the size
         self.assertNotIn("catalog", labels["g-big"].lower())   # redundant tag removed
 
+    def test_no_dangling_separator_when_tier_and_lane_tags_are_empty(self):
+        # User 2026-10-31: a pinned row with a known size but unknown tier and the default
+        # lane ended in a bare "  · " — the separator was glued on unconditionally, left
+        # dangling behind the parameter size.
+        agents = [m.RemoteAgent("n-1", "nvidia", "NVIDIA A", "unknown", model_id="a")]
+        lane = self._lane(agents, {"a": 70.0})
+        labels = {i.id: i.label for g in lane.groups() for i in g.items}
+        self.assertTrue(labels["n-1"].endswith("70B"), labels["n-1"])
+        self.assertFalse(labels["n-1"].rstrip().endswith("·"), labels["n-1"])
+
+    def test_tier_and_lane_tags_still_join_when_present(self):
+        # lane_for must be patched BEFORE the screen is built: groups are composed in __init__.
+        orig = m.lane_for
+        try:
+            m.lane_for = lambda p, mid: "responses"
+            agents = [m.RemoteAgent("n-1", "nvidia", "NVIDIA A", "trial", model_id="a")]
+            lane = self._lane(agents, {"a": 70.0})
+            labels = {i.id: i.label for g in lane.groups() for i in g.items}
+        finally:
+            m.lane_for = orig
+        self.assertIn("70B  · trial — possible cost  · responses", labels["n-1"])
+
     def test_lane_tag_drops_catalog_but_keeps_real_lanes(self):
         orig = m.lane_for
         try:
