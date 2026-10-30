@@ -178,7 +178,8 @@ Examples:
     # launchd command
     launchd_p = sub.add_parser("launchd", help="manage launchd for automatic update checks")
     launchd_sub = launchd_p.add_subparsers(dest="launchd_action", required=True)
-    launchd_sub.add_parser("install", help="install launchd plist for weekly update checks")
+    launchd_sub.add_parser("install", help="install the stable launcher + launchd plist for weekly "
+                                          "update checks (FA_LAUNCHD_NO_LOAD=1 skips launchctl, for tests)")
     launchd_sub.add_parser("uninstall", help="uninstall launchd plist")
     launchd_sub.add_parser("status", help="show launchd status")
     launchd_sub.add_parser("run-once", help="run update check once manually")
@@ -510,26 +511,115 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+# Stable weekly-check launcher, written by `launchd install` into the machine's live-config
+# tree (<live-config>/../launchd/backend-check.sh) — NEVER into the installing copy: the plist
+# used to hardcode this script's own path (manage-backend.py:457 area), which for an installed
+# plugin is a versioned cache dir that dies at the next plugin update. The launcher resolves
+# everything (brew, free-agents root) at RUN time. bash-3.2 compatible.
+LAUNCHER_TEMPLATE = """#!/usr/bin/env bash
+# backend-check.sh — STABLE weekly backend-update check (free-agents, Task 11).
+# Written by `manage-backend.py launchd install`; the plist points HERE, not at any plugin copy.
+# Run time: (1) Homebrew on PATH via `brew shellenv` (launchd's PATH lacks the prefix — the old
+# job failed nightly with `brew: command not found`); (2) resolve the free-agents root:
+# $FA_ROOT if set (must be a root, else exit 1 naming it) -> the checkout the `csl` launcher
+# symlink points into -> newest ~/.claude/plugins/cache/*/free-agents/<ver> by `sort -V`;
+# (3) run scripts/check-backend-updates.sh, then bin/fa-post-upgrade-check.sh (report only).
+# `--print-root` runs only (1)-(2) and prints the root (used by `launchd status`).
+# Env: FA_BREW overrides brew discovery (must be executable, else exit 1 naming it).
+set -u
+log() { printf '%s backend-check: %s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+BREW="${FA_BREW:-}"
+if [ -n "$BREW" ]; then
+    if [ ! -x "$BREW" ]; then
+        log "FAIL: FA_BREW=$BREW is set but not executable"
+        exit 1
+    fi
+else
+    for c in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        if [ -x "$c" ]; then BREW="$c"; break; fi
+    done
+fi
+if [ -z "$BREW" ]; then
+    log "FAIL: no brew found at /opt/homebrew/bin/brew or /usr/local/bin/brew (set FA_BREW)"
+    exit 1
+fi
+eval "$("$BREW" shellenv)"
+
+ROOT=""
+if [ -n "${FA_ROOT:-}" ]; then
+    if [ -f "$FA_ROOT/.claude-plugin/plugin.json" ]; then
+        ROOT="$FA_ROOT"
+    else
+        log "FAIL: FA_ROOT=$FA_ROOT is set but is not a free-agents root (no .claude-plugin/plugin.json)"
+        exit 1
+    fi
+else
+    csl="$(command -v csl 2>/dev/null || true)"
+    if [ -n "$csl" ]; then
+        real="$(readlink -f "$csl" 2>/dev/null || true)"
+        if [ -n "$real" ]; then
+            cand="$(dirname "$(dirname "$real")")"
+            if [ -f "$cand/.claude-plugin/plugin.json" ]; then ROOT="$cand"; fi
+        fi
+    fi
+    if [ -z "$ROOT" ]; then
+        hit="$(ls -d "$HOME"/.claude/plugins/cache/*/free-agents/*/ 2>/dev/null | sort -V | tail -1)"
+        if [ -n "$hit" ] && [ -f "${hit%/}/.claude-plugin/plugin.json" ]; then ROOT="${hit%/}"; fi
+    fi
+fi
+if [ -z "$ROOT" ]; then
+    log "FAIL: could not resolve a free-agents root (set FA_ROOT)"
+    exit 1
+fi
+log "root: $ROOT"
+
+if [ "${1:-}" = "--print-root" ]; then
+    printf '%s\\n' "$ROOT"
+    exit 0
+fi
+
+rc=0
+bash "$ROOT/scripts/check-backend-updates.sh" || rc=1
+bash "$ROOT/bin/fa-post-upgrade-check.sh" --quiet || rc=1
+if [ "$rc" -ne 0 ]; then log "FAIL: backend check exited $rc"; fi
+exit "$rc"
+"""
+
+LAUNCHD_LABEL = "com.haiggoh.backend-update-check"
+
+
+def _launchd_paths(repo: Path) -> tuple[Path, Path]:
+    """(launcher, plist) — the launcher lives in the machine's live-config tree, stable across
+    plugin updates; the plist is the per-user LaunchAgent."""
+    from managers.base import live_config_file
+    live = live_config_file(repo)
+    launcher = live.parent.parent / "launchd" / "backend-check.sh"
+    plist = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
+    return launcher, plist
+
+
 def cmd_launchd(args: argparse.Namespace) -> int:
     """Manage launchd for automatic update checks."""
+    import re
     import subprocess
-    from pathlib import Path
-
-    # Script is in the scripts directory, not install directory
-    SCRIPT_PATH = Path(__file__).parent.parent / "scripts" / "check-backend-updates.sh"
+    repo = Path(__file__).resolve().parents[1]
+    launcher, plist_path = _launchd_paths(repo)
 
     if args.launchd_action == "install":
-        # Install launchd plist
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text(LAUNCHER_TEMPLATE)
+        launcher.chmod(0o755)
         plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.haiggoh.backend-update-check</string>
+  <string>{LAUNCHD_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>{SCRIPT_PATH}</string>
+    <string>{launcher}</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>
@@ -548,18 +638,18 @@ def cmd_launchd(args: argparse.Namespace) -> int:
   <false/>
 </dict>
 </plist>'''
-
-        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.haiggoh.backend-update-check.plist"
         plist_path.parent.mkdir(parents=True, exist_ok=True)
         plist_path.write_text(plist_content)
-        subprocess.run(["launchctl", "load", str(plist_path)], check=False)
-        print(f"Installed launchd plist at {plist_path}")
+        if not os.environ.get("FA_LAUNCHD_NO_LOAD"):
+            subprocess.run(["launchctl", "load", str(plist_path)], check=False)
+        print(f"Installed stable launcher at {launcher}")
+        print(f"Installed launchd plist at {plist_path} (points at the launcher, not this copy)")
         return 0
 
     elif args.launchd_action == "uninstall":
-        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.haiggoh.backend-update-check.plist"
         if plist_path.exists():
-            subprocess.run(["launchctl", "unload", str(plist_path)], check=False)
+            if not os.environ.get("FA_LAUNCHD_NO_LOAD"):
+                subprocess.run(["launchctl", "unload", str(plist_path)], check=False)
             plist_path.unlink()
             print("Uninstalled launchd plist")
         else:
@@ -567,17 +657,27 @@ def cmd_launchd(args: argparse.Namespace) -> int:
         return 0
 
     elif args.launchd_action == "status":
-        result = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
-        if "com.haiggoh.backend-update-check" in result.stdout:
-            print("Launchd service: INSTALLED and RUNNING")
+        print(f"launcher: {launcher} ({'present' if launcher.is_file() else 'MISSING — run: launchd install'})")
+        root = subprocess.run(["bash", str(launcher), "--print-root"], capture_output=True, text=True)
+        if root.returncode == 0:
+            print(f"resolved root: {root.stdout.strip()}")
         else:
-            print("Launchd service: NOT INSTALLED or NOT RUNNING")
+            print(f"root resolution failed: {(root.stderr or root.stdout).strip()}")
+        listed = subprocess.run(["launchctl", "list"], capture_output=True, text=True).stdout
+        print(f"Launchd service: {'INSTALLED' if LAUNCHD_LABEL in listed else 'NOT INSTALLED'}")
+        pr = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{LAUNCHD_LABEL}"],
+                            capture_output=True, text=True)
+        m = re.search(r"last exit code = (-?\d+)", pr.stdout)
+        if m:
+            print(f"last exit code: {m.group(1)}")
         return 0
 
     elif args.launchd_action == "run-once":
-        # Run the update check script directly
-        import subprocess
-        result = subprocess.run(["/bin/bash", str(Path(__file__).parent.parent / "scripts" / "check-backend-updates.sh")])
+        if not launcher.is_file():
+            print(f"ERROR: stable launcher {launcher} is missing — run `launchd install` first",
+                  file=sys.stderr)
+            return 2
+        result = subprocess.run(["/bin/bash", str(launcher)])
         return result.returncode
 
     return 0
@@ -602,6 +702,9 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_list(args)
     if args.command == "health" and args.all:
         return cmd_health(args)
+    if args.command == "launchd":
+        # Backend-independent (manages the machine's job, not one backend's venvs).
+        return cmd_launchd(args)
     if not args.backend:
         parser.error("the following arguments are required: --backend")
 
@@ -636,8 +739,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_repair(args)
     elif args.command == "info":
         return cmd_info(args)
-    elif args.command == "launchd":
-        return cmd_launchd(args)
     else:
         parser.print_help()
         return 2
