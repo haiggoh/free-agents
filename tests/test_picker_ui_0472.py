@@ -192,6 +192,18 @@ class SizeSortAndLabelTests(unittest.TestCase):
             m.lane_for = orig
         self.assertIn("70B  · trial — possible cost  · responses", labels["n-1"])
 
+    def test_size_suffix_dedup_uses_word_boundaries(self):
+        # Out-of-family review finding 4 (2026-10-31): "8B" substring-matched inside "128B",
+        # so a model named "Foo-128B" with a true 8B estimate lost its param suffix.
+        agents = [m.RemoteAgent("g-x", "groq", "Foo-128B", "renewing_free", model_id="x")]
+        lane = self._lane(agents, {"x": 8.0})
+        labels = {i.id: i.label for g in lane.groups() for i in g.items}
+        self.assertIn("8B", labels["g-x"])                      # 8B must still show (not in 128B)
+        agents = [m.RemoteAgent("g-y", "groq", "Foo-8B", "renewing_free", model_id="y")]
+        lane = self._lane(agents, {"y": 8.0})
+        labels = {i.id: i.label for g in lane.groups() for i in g.items}
+        self.assertNotIn("· 8B", labels["g-y"])                 # name already states it: deduped
+
     def test_lane_tag_drops_catalog_but_keeps_real_lanes(self):
         orig = m.lane_for
         try:

@@ -1590,7 +1590,9 @@ class RemoteScreen(Screen):
         already state it (user 2026-10-29: param size in the name by default, not a separate
         column, and never duplicated when the name already carries it)."""
         label = format_param_count(self._catalog_size(prov, model_id))
-        if not label or label.lower() in (display or "").lower():
+        # Word-boundary match, not substring: "8B" must NOT dedup against a name that only
+        # CONTAINS it ("Foo-128B") — out-of-family review finding 4, 2026-10-31.
+        if not label or re.search(r"\b" + re.escape(label) + r"\b", display or "", re.IGNORECASE):
             return ""
         return f"  · {label}"
 

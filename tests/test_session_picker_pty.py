@@ -835,6 +835,40 @@ class NavPanePosition(PilotCase):
                             f"lane screens keep the actions pane on top, got {ids}")
         self.run_picker(s)
 
+    def test_about_screen_keeps_actions_pane_on_top(self):
+        # Out-of-family review finding 2 (2026-10-31): AboutScreen is nav-only but has NO
+        # accordion groups — moving its pane below an empty 1fr #rows shoved Back under a
+        # blank gap. Only screens with real rows may move the pane.
+        async def s(app, pilot, h):
+            await h.press("i")
+            await h.wait_screen("AboutScreen")
+            ids = [w.id for w in app.query_one("#layout").children]
+            self.assertLess(ids.index("actions"), ids.index("rows"),
+                            f"nav-only screen WITHOUT rows keeps the pane on top, got {ids}")
+        self.run_picker(s)
+
+    def test_arrow_nav_follows_dom_order_when_pane_is_below_rows(self):
+        # Out-of-family review finding 1 (2026-10-31): the Up/Down handler assumed the
+        # actions pane is above #rows; with the pane below, Down from the last row must reach
+        # the first action and Up from the top action must reach the last row.
+        async def s(app, pilot, h):
+            from textual.widgets import OptionList
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            rows = app.query_one("#rows", OptionList)
+            acts = app.query_one("#actions", OptionList)
+            self.assertGreater(rows.option_count, 0)
+            self.assertGreater(acts.option_count, 0)
+            rows.focus()
+            rows.highlighted = rows.option_count - 1
+            await h.press("down")
+            self.assertIs(app.focused, acts, "Down from the last row must focus the actions pane")
+            self.assertEqual(acts.highlighted, 0)
+            await h.press("up")
+            self.assertIs(app.focused, rows, "Up from the top action must return to the rows")
+            self.assertEqual(rows.highlighted, rows.option_count - 1)
+        self.run_picker(s)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1308,12 +1308,13 @@ class Picker(App):
         self.action_ids = []  # Track action IDs for keyboard navigation
         rendered, self._collapsed_actions = m.rendered_actions(sm)
         collapsed = bool(self._collapsed_actions)
-        # A nav-ONLY actions pane (API keys setup) renders BELOW the rows, so Back is the last
-        # row on screen like every other submenu (user 2026-10-31: it used to sit at the very
-        # top because the pane is mounted above #rows). Screens with real actions keep the pane
-        # on top, nav last inside it.
+        # A nav-ONLY actions pane on a screen WITH rows (API keys setup) renders BELOW the rows,
+        # so Back is the last row on screen like every other submenu (user 2026-10-31: it used
+        # to sit at the very top because the pane is mounted above #rows). Nav-only screens
+        # WITHOUT rows (About) must NOT move — an empty 1fr #rows would push Back under a blank
+        # gap (out-of-family review finding 2). Screens with real actions keep the pane on top.
         layout = self.query_one("#layout")
-        if rendered and all(a.section == "nav" for a in rendered):
+        if show_models and has_groups and rendered and all(a.section == "nav" for a in rendered):
             layout.move_child(actions_list, after=self.query_one("#rows"))
         else:
             layout.move_child(actions_list, before=self.query_one("#search"))
@@ -1626,13 +1627,25 @@ class Picker(App):
             actions_count = actions_list.option_count
             rows_count = rows_list.option_count
 
+            # The actions pane can render BELOW the rows (nav-only sub-screens, user 2026-10-31),
+            # so arrow transitions follow the actual DOM order, not an assumed actions-on-top
+            # (out-of-family review finding 1: hardcoding it inverted Up/Down there).
+            layout = self.query_one("#layout", Vertical)
+            actions_below = layout.children.index(actions_list) > layout.children.index(rows_list)
             # Check if actions list is focused
             if self.focused is actions_list:
-                if key == "down" and actions_list.highlighted == actions_count - 1:
+                if key == "down" and not actions_below and actions_list.highlighted == actions_count - 1:
                     # Move from last action to first row (if rows visible)
                     if rows_count > 0 and rows_list.display:
                         rows_list.focus()
                         rows_list.highlighted = 0
+                        event.stop()
+                        return
+                elif key == "up" and actions_below and actions_list.highlighted == 0:
+                    # Pane below rows: Up from the top action wraps to the last row
+                    if rows_count > 0 and rows_list.display:
+                        rows_list.focus()
+                        rows_list.highlighted = rows_count - 1
                         event.stop()
                         return
                 elif key == "up" and actions_list.highlighted == 0:
@@ -1640,11 +1653,18 @@ class Picker(App):
                     pass
             # Check if rows list is focused
             elif self.focused is rows_list:
-                if key == "up" and rows_list.highlighted == 0:
+                if key == "up" and not actions_below and rows_list.highlighted == 0:
                     # Move from first row to last action
                     if actions_count > 0:
                         actions_list.focus()
                         actions_list.highlighted = actions_count - 1
+                        event.stop()
+                        return
+                elif key == "down" and actions_below and rows_list.highlighted == rows_count - 1:
+                    # Pane below rows: Down from the last row wraps to the first action
+                    if actions_count > 0:
+                        actions_list.focus()
+                        actions_list.highlighted = 0
                         event.stop()
                         return
                 elif key == "down" and rows_list.highlighted == rows_count - 1:
