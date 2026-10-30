@@ -153,7 +153,7 @@ selected_model_dir="$(
 SESSION_MODEL_ID="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 
-: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.16.10/bin/rapid-mlx}"
+: "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-1.0.0/bin/rapid-mlx}"
 : "${LA_RAPID_AUTO_MODEL_DIR:=$("$(dirname "${BASH_SOURCE[0]}")/local-classifier-default.sh" --dir-only 2>/dev/null || echo "$HOME/.models/granite-4.2-30b-q4-mlx")}"
 : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
 : "${LA_RAPID_AUTO_PORT:=8002}"
@@ -171,8 +171,8 @@ EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 }
 
 rapid_auto_version="$("$LA_RAPID_AUTO_BIN" --version 2>/dev/null || true)"
-[ "$rapid_auto_version" = "rapid-mlx 0.16.10" ] || {
-    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 0.16.10, got %s\n' \
+[ "$rapid_auto_version" = "rapid-mlx 1.0.0" ] || {
+    printf 'ERROR: Rapid Auto Mode requires rapid-mlx 1.0.0, got %s\n' \
         "${rapid_auto_version:-<unavailable>}" >&2
     exit 2
 }
