@@ -1,3 +1,12 @@
+## [0.49.4] — 2026-10-31
+
+### Changed — description rewritten to current capabilities (rtc-1.0.0 plan, Part B2)
+
+- plugin.json description set to the user-approved text
+  (2026-10-31-approved-plugin-descriptions.json); identical text lands in the
+  get-haiggoh catalog in the same rollout. D5's 0.50.0 collision is gone (no such
+  branch on origin anymore), so this lands as its own patch. 0.49.3 → 0.49.4.
+
 ## [0.49.3] — 2026-10-31
 
 ### Changed — lane-conditional credit-moment marks (emoji branding rollout, Task 12)
