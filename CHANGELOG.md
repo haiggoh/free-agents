@@ -1,3 +1,23 @@
+## [0.49.8] — 2026-11-01
+
+### Fixed — gate de-flake + orphan cleanup (waypoints recorded 2026-10-31)
+
+- `tests/test_la_evict.sh`: the port-base scan bound-then-closed its probe sockets, so a
+  parallel suite run or an external listener could steal a port before the controlled servers
+  bound ("Port N belongs to unexpected pid" — blocked two gates on 2026-10-31). A machine-wide
+  flock now serializes runs, and a wrapper retries with a raised scan start
+  (`LA_EVICT_BASE_FROM`) when a port is still stolen. Regression test
+  `tests/test_la_evict_ports.py` runs two concurrent copies; the retry path was
+  planted-positive verified (fake stolen port -> retry -> 126/126 pass).
+- `tests/test_litellm_contract.py`: the limiter state-file read could land on an empty/partial
+  write under gate load (JSONDecodeError at char 0 — blocked a 0.49.7 ship attempt on
+  2026-10-31). `read_json_with_retry()` polls until the file is valid JSON; the call site uses
+  it; mutation-checked (no-retry -> red).
+- Removed the orphaned `skills/offload-to-local/` dir (left by the 0.49.7 rename rebase; its
+  in-depth content is merged verbatim, name-normalized, into
+  `skills/offload/references/offload-in-depth.md`); a layout test in
+  `tests/test_skill_budget.py` pins its absence.
+
 ## [0.49.7] — 2026-10-31
 
 (Renumbered 0.49.3 → 0.49.7 on 2026-10-31: releases 0.49.3–0.49.6 were spent on main by
