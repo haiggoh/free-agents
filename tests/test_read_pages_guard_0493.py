@@ -56,6 +56,35 @@ class ReadPagesGuardTests(unittest.TestCase):
         r = run_hook("{not json")
         self.assertEqual(r.returncode, 0, "a broken guard must allow, not wedge the session")
 
+    def test_null_or_empty_pages_on_text_is_allowed(self):
+        # pages=null/"" means "no paging requested" — that is a valid Read, never deny it
+        for pages in (None, ""):
+            r = run_hook(read_call(file_path="/tmp/x.md", pages=pages))
+            self.assertEqual(r.returncode, 0, f"pages={pages!r} must allow: " + r.stdout + r.stderr)
+
+    def test_crash_inside_decide_fails_open(self):
+        # fail-open must be the hook's OWN contract, not the harness's crash handling:
+        # an exception anywhere in hook mode still allows the Read (exit 0)
+        import importlib.util
+        import io
+        spec = importlib.util.spec_from_file_location("read_pages_guard", HOOK)
+        assert spec is not None and spec.loader is not None   # our own file always loads
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        main, decide = getattr(mod, "main"), getattr(mod, "decide")
+        orig_argv, orig_stdin = sys.argv, sys.stdin
+        def _boom(_payload):
+            raise RuntimeError(f"boom {_payload}")
+        setattr(mod, "decide", _boom)
+        sys.argv = ["read-pages-guard.py"]
+        sys.stdin = io.StringIO(read_call(file_path="/tmp/x.md", pages="2-4"))
+        try:
+            rc = main()
+        finally:
+            setattr(mod, "decide", decide)
+            sys.argv, sys.stdin = orig_argv, orig_stdin
+        self.assertEqual(rc, 0, "a crashed guard must allow, not wedge the session")
+
     def test_help_and_self_test(self):
         r = subprocess.run([sys.executable, str(HOOK), "--help"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0)

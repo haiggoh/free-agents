@@ -11,9 +11,12 @@ non-PDF path can never do what the caller meant — so per-model gating has zero
 spoofed-model-id gate would be fragile. Never denies a valid Read:
   * PDF + pages            -> allow
   * text + offset/limit     -> allow
+  * pages null / empty      -> allow (no paging requested)
   * other tools / no pages  -> allow
   * unparseable stdin       -> allow (fail-open: a guard that blocks everything when it
                                breaks is worse than the bug it prevents)
+  * ANY internal crash      -> allow (fail-open is this hook's own contract, not the
+                               harness's crash handling)
 
 The deny message gives the offset/limit equivalent to re-issue with (the caller's own
 offset/limit if present, else defaults), because `pages` was overriding them.
@@ -33,8 +36,11 @@ def decide(payload) -> tuple:
     if not isinstance(payload, dict) or payload.get("tool_name") != "Read":
         return False, ""
     ti = payload.get("tool_input")
-    if not isinstance(ti, dict) or "pages" not in ti:
+    if not isinstance(ti, dict):
         return False, ""
+    pages = ti.get("pages")
+    if pages is None or pages == "":
+        return False, ""  # null/empty pages = no paging requested
     path = ti.get("file_path")
     if not isinstance(path, str) or not path:
         return False, ""
@@ -63,6 +69,7 @@ def main() -> int:
             ({"tool_name": "Read", "tool_input": {"file_path": "/x/a.md", "pages": "2", "offset": 50}}, True),
             ({"tool_name": "Bash", "tool_input": {"command": "ls"}}, False),
             ({"tool_name": "Read", "tool_input": {"file_path": "/x/a.md"}}, False),
+            ({"tool_name": "Read", "tool_input": {"file_path": "/x/a.md", "pages": None}}, False),
             ("{not json", False),  # fail-open on unparseable input
         ]
         ok = True
@@ -78,20 +85,20 @@ def main() -> int:
         return 0 if ok else 1
     try:
         payload = json.load(sys.stdin)
+        deny, reason = decide(payload)
+        if not deny:
+            return 0
+        print(json.dumps({
+            "decision": "block",
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            },
+        }))
+        return 2
     except Exception:
-        return 0  # fail-open
-    deny, reason = decide(payload)
-    if not deny:
-        return 0
-    print(json.dumps({
-        "decision": "block",
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        },
-    }))
-    return 2
+        return 0  # fail-open: any internal crash still allows the Read
 
 
 if __name__ == "__main__":
