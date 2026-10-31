@@ -299,7 +299,7 @@ def parse_cloudflare(headers: dict, usage: dict) -> QuotaRecord:
 
     # Daily reset at 00:00 UTC
     now = datetime.now(timezone.utc)
-    next_midnight = datetime(now.year, now.month, now.day + 1, tzinfo=timezone.utc)
+    next_midnight = _next_midnight_utc(now)
     record.reset_at = next_midnight.isoformat()
 
     record._recompute_binding()
@@ -530,6 +530,16 @@ def _next_hour_boundary(now: datetime) -> datetime:
     raises ValueError the moment the clock reads 23 (a 23:00-23:59 UTC crash).
     """
     return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
+
+def _next_midnight_utc(now: datetime) -> datetime:
+    """00:00 UTC of the NEXT day after `now`.
+
+    Day 31 must roll to the 1st of the next month — `datetime(now.year, now.month,
+    now.day + 1, ...)` raises ValueError on every month's last day (measured live
+    2026-10-31, it broke the Cloudflare quota parse).
+    """
+    return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
 
 
 def parse_vercel(headers: dict, usage: dict) -> QuotaRecord:

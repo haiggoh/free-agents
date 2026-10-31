@@ -206,6 +206,16 @@ class TestProviderParsers:
         assert record.provenance == PROVENANCE_AUTHORITATIVE
         assert record.window == "month"
 
+    def test_next_midnight_rolls_over_month_and_year_end(self):
+        """The reset-at computation must not do `day + 1` arithmetic: on the 31st that is
+        day 32 -> ValueError (measured live 2026-10-31, broke test_parse_cloudflare)."""
+        from datetime import datetime, timezone
+        from bin.quota.providers import _next_midnight_utc
+        assert _next_midnight_utc(datetime(2026, 10, 31, 23, 59, tzinfo=timezone.utc)) == \
+            datetime(2026, 11, 1, 0, 0, tzinfo=timezone.utc)
+        assert _next_midnight_utc(datetime(2026, 12, 31, 12, 0, tzinfo=timezone.utc)) == \
+            datetime(2027, 1, 1, 0, 0, tzinfo=timezone.utc)
+
     def test_parse_cloudflare(self):
         """Test Cloudflare parser (Neurons)."""
         headers = {
