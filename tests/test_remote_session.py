@@ -53,6 +53,7 @@ class RemoteSessionTests(unittest.TestCase):
                     # SESSION_EMOJI_* vars are read under `set -u`; without it in the
                     # fixture every launch path aborts before doing anything.
                     'config/emoji.sh', 'config/dispatch-preferences.json',
+                    'config/broken-nvidia-models.json',
                     'bin/session-fallbacks.py'):
             shutil.copy2(ROOT / rel, self.root / rel)
         source = (self.root / 'bin/remote-session.sh').read_text()
@@ -146,22 +147,23 @@ exit 0
         # non-thinking block — 33B/3B-active puts it below them by size (poolside.ai).
         # 2026-10-29: Mistral Large 4 (Le Chonk) leads the hand-curated nvidia list by user
         # decision (GLM 5.3 retired from the NVIDIA API) — supersedes the 2026-10-15 order.
+        # 2026-10-31: the GLM 5.3 full rows left the curated order — 410 Gone, EOL
+        # 2026-10-28T08:00:00Z (live catalog no longer lists z-ai/glm-5.3); hidden via
+        # broken-nvidia-models.json, so they no longer occupy curated positions.
         self.assertEqual(rows[0][0], 'nvidia-mistral-large4')
         self.assertEqual(rows[1][0], 'nvidia-glm53-thinking')
-        self.assertEqual(rows[2][0], 'nvidia-glm53-full-thinking')
-        self.assertEqual(rows[3][0], 'nvidia-nemotron3-thinking')
-        self.assertEqual(rows[4][0], 'nvidia-lightning-thinking')
-        self.assertEqual(rows[5][0], 'nvidia-glm53')
-        self.assertEqual(rows[6][0], 'nvidia-glm53-full')
+        self.assertEqual(rows[2][0], 'nvidia-nemotron3-thinking')
+        self.assertEqual(rows[3][0], 'nvidia-lightning-thinking')
+        self.assertEqual(rows[4][0], 'nvidia-glm53')
         # stepfun + deepseek above BOTH Nemotron 3 Ultra variants (user 2026-10-24 for the base
         # alias, 2026-10-31 extended to the thinking variant — both are superior to it)
-        self.assertEqual(rows[7][0], 'nvidia-step5-preview')
-        self.assertEqual(rows[8][0], 'nvidia-deepseek-v4')
-        self.assertEqual(rows[9][0], 'nvidia-nemotron-ultra-thinking')
-        self.assertEqual(rows[10][0], 'nvidia-nemotron-ultra')
-        self.assertEqual(rows[11][0], 'nvidia-nemotron3')
-        self.assertEqual(rows[12][0], 'nvidia-lightning')
-        self.assertEqual(rows[13][0], 'nvidia-laguna')
+        self.assertEqual(rows[5][0], 'nvidia-step5-preview')
+        self.assertEqual(rows[6][0], 'nvidia-deepseek-v4')
+        self.assertEqual(rows[7][0], 'nvidia-nemotron-ultra-thinking')
+        self.assertEqual(rows[8][0], 'nvidia-nemotron-ultra')
+        self.assertEqual(rows[9][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[10][0], 'nvidia-lightning')
+        self.assertEqual(rows[11][0], 'nvidia-laguna')
         self.assertEqual(rows[0][1], 'nvidia')
         # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
         leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
@@ -351,7 +353,10 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         the same port. Same provider only, own model skipped, order from dispatch-preferences."""
         text, _ = self._write_cfg(model='z-ai/glm-5.3-flash')
         models, block = self._fallbacks(text)
-        self.assertEqual(models, ['nvidia_nim/z-ai/glm-5.3', 'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
+        # 2026-10-31: Mistral Large 4 leads the chain; z-ai/glm-5.3 is gone (retired 410 EOL
+        # 2026-10-28) and retired ids are filtered even if listed (0.49.3 H5).
+        self.assertEqual(models, ['nvidia_nim/mistralai/mistral-large-4-1t-a52b',
+                                  'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
                                   'nvidia_nim/stepfun-ai/step-5-preview',
                                   'nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b'])
         # Every spoofed id AND the generic "*" key (measured: a "claude-*" key does not match a
@@ -368,23 +373,29 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         text, _ = self._write_cfg(model='z-ai/glm-5.3-flash')
         ultra = text.split('  - model_name: "la-fallback-4"\n', 1)[1].split('  - model_name:', 1)[0]
         self.assertIn('enable_thinking: false', ultra.split('litellm_settings:')[0])
-        glm = text.split('  - model_name: "la-fallback-1"\n', 1)[1].split('  - model_name:', 1)[0]
-        self.assertIn('      reasoning_effort: low\n', glm)
-        self.assertIn('      api_key: os.environ/NVIDIA_API_KEY\n', glm)
+        mistral = text.split('  - model_name: "la-fallback-1"\n', 1)[1].split('  - model_name:', 1)[0]
+        self.assertIn('mistralai/mistral-large-4-1t-a52b', mistral)   # 2026-10-31: Le Chonk leads
+        self.assertIn('      api_key: os.environ/NVIDIA_API_KEY\n', mistral)
 
     def test_session_on_ultra_falls_back_to_the_others_in_order(self):
         text, _ = self._write_cfg()
         models, _ = self._fallbacks(text)
-        self.assertEqual(models, ['nvidia_nim/z-ai/glm-5.3-flash', 'nvidia_nim/z-ai/glm-5.3',
+        self.assertEqual(models, ['nvidia_nim/mistralai/mistral-large-4-1t-a52b',
+                                  'nvidia_nim/z-ai/glm-5.3-flash',
                                   'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
                                   'nvidia_nim/stepfun-ai/step-5-preview'])
 
     def test_fallbacks_off_and_override_and_other_providers(self):
         text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'off'}, model='z-ai/glm-5.3-flash')
         self.assertEqual(self._fallbacks(text), ([], ''))
+        # 0.49.3 (H5): an end-of-life id (listed in broken-nvidia-models.json) is dropped even
+        # from an explicit override — it can only answer 410.
         text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'nvidia:z-ai/glm-5.3, bogus'},
                                   model='z-ai/glm-5.3-flash')
-        self.assertEqual(self._fallbacks(text)[0], ['nvidia_nim/z-ai/glm-5.3'])
+        self.assertEqual(self._fallbacks(text)[0], [])
+        text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'nvidia:z-ai/glm-5.3,nvidia:deepseek-ai/deepseek-v4.1-flash'},
+                                  model='z-ai/glm-5.3-flash')
+        self.assertEqual(self._fallbacks(text)[0], ['nvidia_nim/deepseek-ai/deepseek-v4.1-flash'])
         # A provider with no session chain in the roster gets none (no cross-provider quota drain).
         text, _ = self._write_cfg(prov='gemini', model='gemini-3.8-flash')
         self.assertEqual(self._fallbacks(text), ([], ''))

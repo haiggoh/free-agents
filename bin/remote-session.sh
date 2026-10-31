@@ -23,7 +23,7 @@
 #   remote-session.sh --include-trials     # also offer trial-tier (non-free) agents
 #   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
 #   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
-#   remote-session.sh <alias> --effort LEVEL  # request low|medium|high|xhigh|max (omit = provider default)
+#   remote-session.sh <alias> --effort LEVEL  # request low|medium|high|xhigh|max (omit = this alias's stored last-launch effort (0.49.3+), else provider default)
 #   remote-session.sh <alias> --prompt-file <path>  # the launch's first prompt, from a file
 #   remote-session.sh <alias> --prompt <text>       # the launch's first prompt, inline
 #                             # (C0: a launch without its first prompt yields an idle session)
@@ -1468,7 +1468,7 @@ while [[ $# -gt 0 ]]; do
         --show-paid-only) SHOW_PAID_ONLY_MODELS=1; shift ;;
         --effort)         [[ $# -ge 2 ]] || { echo 'remote-session: --effort needs a level' >&2; exit 2; }
                           case "$2" in low|medium|high|xhigh|max) EFFORT_CHOICE="$2" ;;
-                              *) echo "remote-session: --effort must be low|medium|high|xhigh|max (omit it for the provider default)" >&2; exit 2 ;;
+                              *) echo "remote-session: --effort must be low|medium|high|xhigh|max (omit it: stored last-launch effort for the alias, else provider default)" >&2; exit 2 ;;
                           esac; shift 2 ;;
         --inventory)      MODE="inventory"; shift ;;
         --csl-owner)
@@ -1931,6 +1931,16 @@ elif [[ "$MODEL" == SELECT ]]; then
 fi
 _valid_model "$MODEL" || exit 2
 
+# 0.49.3: when --effort is omitted, default to the effort stored from this alias's LAST launch
+# (user 2026-10-31: a handover launched without --effort must not drop to medium when the user's
+# stored setting is max). An explicit --effort / -c choice always wins. The store fails open.
+if [[ -z "$EFFORT_CHOICE" && -n "$ALIAS" ]]; then
+    _stored_effort="$(python3 "$SCRIPT_DIR/last-effort.py" get "$ALIAS" 2>/dev/null || true)"
+    case "$_stored_effort" in
+        low|medium|high|xhigh|max) EFFORT_CHOICE="$_stored_effort" ;;
+    esac
+fi
+
 # Cerebras: its free tier caps output at 40960 and reserves tokens from the per-minute budget
 # based on the requested max_tokens. To avoid burning 30k/min on a single 128000 request that
 # gets silently capped, lower the ceiling for Cerebras unless the user explicitly overrode it.
@@ -2063,6 +2073,12 @@ if [[ $DRY_RUN -eq 1 ]]; then
     [[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]] && echo "     autocompact    : --autocompact $LA_AUTO_COMPACT_WINDOW"
     echo
     exit 0
+fi
+
+# 0.49.3: record the effective effort for this alias on every REAL launch (never on --dry-run),
+# so the next launch without --effort resumes at the same level (see above).
+if [[ $DRY_RUN -eq 0 && -n "$ALIAS" && -n "$EFFORT_CHOICE" ]]; then
+    python3 "$SCRIPT_DIR/last-effort.py" set "$ALIAS" "$EFFORT_CHOICE" 2>/dev/null || true
 fi
 
 _prepare_runtime_dir || exit 1

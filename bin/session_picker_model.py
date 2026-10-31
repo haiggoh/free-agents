@@ -487,6 +487,14 @@ def model_note(alias: str, path: Path | None = None) -> str:
     return note if isinstance(note, str) else ""
 
 
+def strip_leading_name(display: str, note: str) -> str:
+    """0.49.3 (H4): when the note repeats the display name at its start, drop the repetition —
+    the infobox already prints the name on line 1 (Le Chonk's note did; user 2026-10-31)."""
+    if display and note.lower().startswith(display.lower()):
+        return note[len(display):].lstrip(" \t-—:,")
+    return note
+
+
 def tier_label(tier: str, provider: str) -> str:
     # Quota facts moved to the infobox (user 2026-10-30) — inline row tags are noise.
     if tier == "trial":
@@ -1695,6 +1703,8 @@ class RemoteScreen(Screen):
             parts = item_id.split(":", 2)
             if len(parts) == 3 and not parts[2].startswith("__"):
                 note = model_note(f"{parts[1]}:{parts[2]}") or ""
+                if note:
+                    note = strip_leading_name(model_names.readable(parts[2]), note)  # 0.49.3 (H4)
                 if parts[1] == "nvidia":
                     note = (note + " " if note else "") + NVIDIA_MODEL_QUOTA_SHORT
                 base = (f"{model_names.readable(parts[2])}\n{parts[2]} · "
@@ -1712,6 +1722,8 @@ class RemoteScreen(Screen):
         notices = [thinking_constraint(agent.provider, agent.model_id, self.settings.thinking_session),
                    PROVIDER_ADVISORIES.get(agent.provider, "")]
         note = model_note(agent.alias)
+        if note:
+            note = strip_leading_name(agent.display, note)   # 0.49.3 (H4): no name echo on line 2
         if agent.provider == "nvidia":
             note = (note + " " if note else "") + NVIDIA_MODEL_QUOTA_SHORT
         base = f"{agent.display}\n{note}" if note else f"{agent.display}\nNo notes for this model yet."

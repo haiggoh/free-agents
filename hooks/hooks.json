@@ -68,6 +68,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/read-pages-guard.py\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
