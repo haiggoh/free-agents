@@ -159,6 +159,26 @@ class GuardTests(unittest.TestCase):
                         extra_env={"LA_GUARD_ROSTER": roster})
         self.assertEqual(decision(parsed), "allow")
 
+    def test_rule_text_in_a_quoted_argument_is_not_a_kill(self):
+        # False positive measured 2026-10-31: a waypoints.py --point string quoting the
+        # standing rule ("never touch ports 4141-4151 ... remote-session.sh --stop") was
+        # DENIED because the verb regexes scanned inside the quoted argument.
+        _, parsed = run(
+            'waypoints.py add --id x "t" --point "never touch ports 4141-4151 or '
+            'remote-session.sh --stop"',
+            base_url="http://localhost:4141")
+        self.assertEqual(decision(parsed), "allow")
+
+    def test_kill_verb_inside_quotes_is_not_a_kill(self):
+        _, parsed = run('echo "pkill -f 4141"', base_url="http://localhost:4141")
+        self.assertEqual(decision(parsed), "allow")
+        _, parsed = run("echo 'remote-session.sh --stop 4141'", base_url="http://localhost:4141")
+        self.assertEqual(decision(parsed), "allow")
+
+    def test_unquoted_stop_of_own_port_is_still_denied(self):
+        _, parsed = run("remote-session.sh --stop 4141", base_url="http://localhost:4141")
+        self.assertEqual(decision(parsed), "deny")
+
     def test_a_roster_alias_without_a_prompt_is_denied(self):
         roster = self._roster(["fixture-alias"])
         _, parsed = run("remote-session.sh fixture-alias",

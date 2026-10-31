@@ -148,17 +148,51 @@ def protected_ports():
     return ports
 
 
+def mask_quoted(command):
+    """Mask the CONTENTS of quoted regions, keeping the quote chars themselves.
+
+    Verb regexes run on the result, so a kill/stop word inside a quoted argument of an
+    UNRELATED command (prose like "never ... remote-session.sh --stop", an echo) does
+    not count — false positive measured 2026-10-31 on a waypoints.py --point string.
+    The port search still runs on the RAW command: `pkill -f "litellm.*4141"` carries
+    the port inside quotes and must keep denying. Launch detection likewise stays on
+    the raw command (a launch wrapped in sudo-in-terminal.sh --command "..." is real).
+    """
+    out = []
+    quote = None
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if quote:
+            if c == "\\" and i + 1 < len(command):
+                out.append("\x00\x00")
+                i += 2
+                continue
+            out.append(c if c == quote else "\x00")
+            if c == quote:
+                quote = None
+            i += 1
+        else:
+            if c in "\"'":
+                quote = c
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def offending_port(command, ports):
     """Return the protected port this command would kill, or None.
 
-    A command qualifies only if it BOTH uses a process-ending verb AND names a
-    protected port (or the proxy config file carrying that port). Naming the
-    port alone -- tailing its log, curling it -- is not enough.
+    A command qualifies only if it BOTH uses a process-ending verb at command
+    position (quoted contents masked) AND names a protected port anywhere in the
+    raw command (the port may legitimately sit inside a quoted pkill pattern).
+    Naming the port alone -- tailing its log, curling it -- is not enough.
     """
     if not command or not ports:
         return None
-    kills = bool(KILL_RE.search(command)) or bool(SERVICE_STOP_RE.search(command))
-    if not kills and not REMOTE_STOP_RE.search(command):
+    code = mask_quoted(command)
+    kills = bool(KILL_RE.search(code)) or bool(SERVICE_STOP_RE.search(code))
+    if not kills and not REMOTE_STOP_RE.search(code):
         return None
     for port in sorted(ports):
         # The port as a standalone number, or embedded in the runtime artifact
@@ -298,6 +332,15 @@ SELF_TESTS = [
     ("http://localhost:4141", "echo 'then remote-session.sh launches it'", True),
     # A QUOTED alias is still a launch (and must not crash the check into failing open).
     ("http://localhost:4141", 'remote-session.sh "nvidia-glm53-thinking"', False),
+    # FP measured 2026-10-31: the rule TEXT inside a quoted argument of an UNRELATED
+    # command is not a kill/stop. Verb regexes must see only command-position words,
+    # so quoted contents are masked before matching (the port search stays on the raw
+    # command: pkill -f "litellm.*4141" carries the port inside quotes and must still deny).
+    ("http://localhost:4141",
+     'waypoints.py add --point "never touch ports 4141-4151 or remote-session.sh --stop"', True),
+    ("http://localhost:4141", 'echo "pkill -f 4141"', True),
+    ("http://localhost:4141", "echo 'remote-session.sh --stop 4141'", True),
+    ("http://localhost:4141", "remote-session.sh --stop 4141", False),  # unquoted: still denied
 ]
 
 
