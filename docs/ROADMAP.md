@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.49.6`. See `CHANGELOG.md`.
+`0.49.7`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -143,6 +143,21 @@ Scope (waypoint ids in parentheses):
 the label/ordering assertions); full suite green via the repo's own gate; version surfaces agree
 (plugin.json + CHANGELOG + VERSION) at `0.49.1`; shipped through `rtc-ship.sh` from a worktree.
 
+## `0.49.7` — Roster hotfix + handover skills (reserved 2026-10-31, ships before `0.50.0`)
+
+**Decision (2026-10-31):** GLM 5.3 full left NVIDIA (410 EOL 2026-10-28T08:00:00Z, verified against the
+live catalog), so a dead id in the pins, fallback chains and preference lists harms every live
+session NOW — the roster hotfix and the free-session-handover skills rework ship as a patch ahead
+of `0.50.0` rather than inside it. Scope: retire `z-ai/glm-5.3` everywhere (pinned rows, preference
+lists, README), Le Chonk first in session preference lists, EOL-free fallback chains plus an EOL
+refusal in `--swap-model`, remote-list infobox name dedupe, the always-on `Read` `pages` guard,
+stored last-launch effort at handover, interactive-window handover launch, and the
+`offload-to-local` → `offload` rename. Full detail: `CHANGELOG.md` `[0.49.7]`.
+
+**Release gates:** every item landed with tests (mutation-checked guards); full suite green via
+`rtc-ship.sh --test-only` from a worktree; version surfaces agree (plugin.json + CHANGELOG + VERSION
++ ROADMAP) at `0.49.7`; shipped through `rtc-ship.sh` from a worktree.
+
 ## `0.50.0` — Picker UX minor (reserved 2026-10-31)
 
 New settings and menu-shape changes from the same 2026-10-30 session — behavior users will notice,
@@ -164,7 +179,13 @@ so they earn the minor bump rather than riding the patch:
 8. Lowkey any-model API providers (`lowkey-any-model-api`).
 9. Pre-existing pyright advisory pile, if addressed (`free-agents-preexisting-pyright-defects`).
 
-**Release gates:** all of the above landed with tests; `0.49.1` shipped and dogfooded first;
+**Release gates:** all of the above landed with tests; `0.49.7` shipped and dogfooded first;
+10. The `0.49.7`-hotfix follow-ups F1-F6: a real pin icon on the promoted version in backend manager,
+    hardware-gated backend rows (CUDA backends never shown on Mac, MLX never on Linux/Windows),
+    csl copy of selected text (Cmd+C) plus long-click-drag selection where clicks must pass through,
+    About-section real values (and what the warning emoji actually flags), session/proxy identity
+    keyed on (pid, process start time) against PID recycling, and the pyright waypoint pile
+    (spec: the 2026-10-31 0.49.7/0.50.0 handoff plan, §4).
 version surfaces agree at `0.50.0`; shipped through `rtc-ship.sh` from a worktree.
 
 ---

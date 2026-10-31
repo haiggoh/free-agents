@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/test_fallback_eol_0493.py — 0.49.3 (H5): end-of-life ids never enter a session's
+"""tests/test_fallback_eol_0493.py — 0.49.7 (H5): end-of-life ids never enter a session's
 fallback chain, even via an explicit LA_REMOTE_FALLBACKS override (z-ai/glm-5.3 retired by
 NVIDIA, 410 Gone, EOL 2026-10-28T08:00:00Z). The 410+429 LiteLLM blob misled the user because
 the chain still contained the EOL id; dropping it is the launch-side fix."""

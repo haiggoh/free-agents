@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/test_read_pages_guard_0493.py — 0.49.3 (H6): the always-on PreToolUse guard on Read.
+"""tests/test_read_pages_guard_0493.py — 0.49.7 (H6): the always-on PreToolUse guard on Read.
 
 `pages` on a non-PDF path is silently ignored by Read AND overrides offset/limit — Step 5
 Preview sessions loop on it. The guard denies ONLY that misuse; a valid Read is never denied

@@ -354,7 +354,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         text, _ = self._write_cfg(model='z-ai/glm-5.3-flash')
         models, block = self._fallbacks(text)
         # 2026-10-31: Mistral Large 4 leads the chain; z-ai/glm-5.3 is gone (retired 410 EOL
-        # 2026-10-28) and retired ids are filtered even if listed (0.49.3 H5).
+        # 2026-10-28) and retired ids are filtered even if listed (0.49.7 H5).
         self.assertEqual(models, ['nvidia_nim/mistralai/mistral-large-4-1t-a52b',
                                   'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
                                   'nvidia_nim/stepfun-ai/step-5-preview',
@@ -388,7 +388,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
     def test_fallbacks_off_and_override_and_other_providers(self):
         text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'off'}, model='z-ai/glm-5.3-flash')
         self.assertEqual(self._fallbacks(text), ([], ''))
-        # 0.49.3 (H5): an end-of-life id (listed in broken-nvidia-models.json) is dropped even
+        # 0.49.7 (H5): an end-of-life id (listed in broken-nvidia-models.json) is dropped even
         # from an explicit override — it can only answer 410.
         text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'nvidia:z-ai/glm-5.3, bogus'},
                                   model='z-ai/glm-5.3-flash')

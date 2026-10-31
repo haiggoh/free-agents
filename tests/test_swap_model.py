@@ -110,7 +110,7 @@ def master_key(cfg_text):
 
 
 class SwapModelTests(unittest.TestCase):
-    ALIAS_TO = "nvidia-glm53"                  # the rescue model (z-ai/glm-5.3-flash since 0.49.3 retired GLM full)
+    ALIAS_TO = "nvidia-glm53"                  # the rescue model (z-ai/glm-5.3-flash since 0.49.7 retired GLM full)
     ALIAS_EOL = "nvidia-glm53-full"            # maps to z-ai/glm-5.3 — 410 EOL 2026-10-28, listed in broken-nvidia-models.json
 
     @classmethod
@@ -234,7 +234,7 @@ class SwapModelTests(unittest.TestCase):
         self.assertIn(f"swapped :{port} to z-ai/glm-5.3-flash", r.stdout)
 
     def test_an_eol_alias_is_refused_before_anything_is_touched(self):
-        """0.49.3 (H5-adjacent): a retired id (410 Gone, EOL) can never serve, so --swap-model
+        """0.49.7 (H5-adjacent): a retired id (410 Gone, EOL) can never serve, so --swap-model
         must refuse it up front with the reason — not run a pre-flight that can only 410."""
         port, old_pid = self.start_old_session()
         self.age_log(port)

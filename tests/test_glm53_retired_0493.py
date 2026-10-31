@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/test_glm53_retired_0493.py — 0.49.3: GLM 5.3 full (z-ai/glm-5.3) retired from NVIDIA.
+"""tests/test_glm53_retired_0493.py — 0.49.7: GLM 5.3 full (z-ai/glm-5.3) retired from NVIDIA.
 
 EOL 2026-10-28T08:00:00Z (410 detail from a user session, 2026-10-31); live catalog check
 2026-10-31 (remote-session.sh --models nvidia-mistral-large4, GET only) no longer lists

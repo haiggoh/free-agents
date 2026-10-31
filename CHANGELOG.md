@@ -1,3 +1,40 @@
+## [0.49.7] — 2026-10-31
+
+(Renumbered 0.49.3 → 0.49.7 on 2026-10-31: releases 0.49.3–0.49.6 were spent on main by
+concurrent work while this branch was in review; content unchanged — renumber-upward per the
+ROADMAP rules.)
+
+### Fixed — GLM 5.3 full retired by NVIDIA (410 Gone, EOL 2026-10-28T08:00:00Z; live catalog no longer lists it, verified GET-only 2026-10-31)
+
+- Pinned rows in `config/remote-registry.yaml` drop `z-ai/glm-5.3` (`config/remote-registry.json` regenerated); the id stays hidden via `config/broken-nvidia-models.json` with its EOL evidence, and `nvidia-glm53` / `nvidia-glm53-thinking` now map to `z-ai/glm-5.3-flash` (H1).
+- Le Chonk (`mistral-large-4`) is first in every session preference list — pinned rows, `config/dispatch-preferences.json`, the offload hierarchy, the free-session-handover text, README; GLM full removed from all of them (H3). GLM Flash's infobox/README take over GLM full's deep-work reputation with the corrected speed caveat: the 1-4s figure is a stateless ping only (H2).
+- Remote session list: the infobox no longer repeats the model name on its first two lines (`strip_leading_name`; a test pins the name appearing once) (H4).
+- Fallback chains drop EOL ids even from an explicit `LA_REMOTE_FALLBACKS` override (`bin/session-fallbacks.py` reads `broken-nvidia-models.json`, fail-open), and `--swap-model` refuses a retired target id up front, naming the EOL date (`_eol_reason`, `LA_BROKEN_MODELS_FILE` override, fail-open) — a retired id can only 410, so the old path turned every upstream failure into the misleading "primary 410 + fallbacks 429" blob (H5).
+- `tests/test_swap_model.py` no longer uses the retired id as its swap example; the flash assertions are exact now, plus an EOL-refusal test and a fail-open planted positive (mutation-checked: guard neutralized -> red).
+
+### Added — always-on `Read` `pages` guard (H6)
+
+- `hooks/read-pages-guard.py` + `hooks/hooks.json`: PreToolUse on `Read` denies only `pages` on a non-PDF path, with the exact `offset`/`limit` equivalent in the deny message; PDF+`pages` allowed, `offset`/`limit` always allowed, unparseable hook input fails open (fail-open is an ALLOW, so the success branch is test-pinned). `--self-test`; tests in `tests/test_read_pages_guard_0493.py`.
+
+### Changed — free-session-handover + offload skills (H7, user decision 2026-10-31)
+
+- An omitted `--effort` at launch defaults to the alias's stored last-launch effort (`bin/last-effort.py`; state in the gitignored `config/remote-last-effort.local.json`, `LA_LAST_EFFORT_FILE` override; recorded on real launches only) — a handover no longer silently runs at medium.
+- A handover always launches interactive in its own Terminal window — `sudo-in-terminal.sh --command '<command -v-resolved launcher> <alias> --prompt-file <handoff>'` with a LISTEN check on the 4141-4151 band as `--verify` — never headless from the Bash tool. Invoking the skill IS the launch authorization; deferring to doc-only happens only when explicitly asked.
+- `handover-verify.sh --expect` now matches a text LINE of the handoff doc (`--prompt-file` sends contents; the path never lands in the transcript — previously NOT_VERIFIED on a correct handover, verified 2026-10-31).
+- `offload-to-local` renamed to `offload` (it routes to local OR remote free lanes) with the decision rules encoded: stateless dispatch = one request (review/extraction/draft/cross-check); headless background session = multi-step tool work while the user stays put; interactive window = handover. All references updated (repo, `hooks/offload-nudge.py`, README, skills).
+
+## [0.49.2] — 2026-10-31
+
+### Fixed — own-endpoint guard false positive on quoted prose
+
+- `hooks/guard-own-endpoint.py`: verb regexes (kill-family, service-stop,
+  `remote-session.sh --stop`) scanned the RAW command, so a quoted argument of an
+  unrelated command that merely quoted the standing rule (a waypoints `--point`
+  string, a commit message) was DENIED — measured live 2026-10-31 while writing
+  the resume waypoint and committing this fix. `mask_quoted()` now masks quoted
+  contents before the verb regexes run; the port search and the launch detection
+  stay on the raw command, so a quoted pattern naming the endpoint port inside a
+
 ## [0.49.6] — 2026-10-31
 
 ### Changed — offload-to-local SKILL.md within the 1500-word SKILL-BUDGET

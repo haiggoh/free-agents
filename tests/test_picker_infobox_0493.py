@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/test_picker_infobox_0493.py — 0.49.3 (H4): the remote infobox must not repeat the
+"""tests/test_picker_infobox_0493.py — 0.49.7 (H4): the remote infobox must not repeat the
 model's name on lines 1 and 2 (Le Chonk's note started with the display name; user 2026-10-31).
 The test asserts the name appears EXACTLY ONCE. Mutation: strip_leading_name returning the
 note unchanged makes test_le_chonk_name_appears_once fail (count 2)."""

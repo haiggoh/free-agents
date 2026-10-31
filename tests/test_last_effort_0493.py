@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/test_last_effort_0493.py — 0.49.3: an omitted --effort defaults to the alias's stored
+"""tests/test_last_effort_0493.py — 0.49.7: an omitted --effort defaults to the alias's stored
 last-launch effort (never silently to medium when the user's stored level is higher).
 
 Incident 2026-10-31: a handover launched without --effort ran at medium instead of the user's

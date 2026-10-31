@@ -98,3 +98,7 @@ Long-form material — the remote-vs-local lane axes and size filtering, concret
 briefing checklist, the mutation-testing rule, the supervised offload loop, streaming dispatch
 mechanics, and advanced parallel local sessions — lives in
 [`references/offload-in-depth.md`](references/offload-in-depth.md).
+
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.
