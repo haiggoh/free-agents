@@ -1,10 +1,3 @@
-# offload — in-depth reference (moved out of SKILL.md for the 1500-word SKILL-BUDGET)
-
-The imperative rules live in `../SKILL.md`. This file holds the measured incidents, dated
-rosters, worked examples and advanced material that used to sit inline.
-
-## From the maintainer's earlier in-depth file (2026-10-31 trim)
-
 # offload — in-depth reference (moved out of SKILL.md for the 1500-word budget)
 
 The imperative rules live in `../SKILL.md`. This file holds the measured incidents, dated
