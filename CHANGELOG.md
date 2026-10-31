@@ -1,3 +1,17 @@
+## [0.49.2] — 2026-10-31
+
+### Fixed — own-endpoint guard false positive on quoted prose
+
+- `hooks/guard-own-endpoint.py`: verb regexes (kill-family, service-stop,
+  `remote-session.sh --stop`) scanned the RAW command, so a quoted argument of an
+  unrelated command that merely quoted the standing rule (a waypoints `--point`
+  string, a commit message) was DENIED — measured live 2026-10-31 while writing
+  the resume waypoint and committing this fix. `mask_quoted()` now masks quoted
+  contents before the verb regexes run; the port search and the launch detection
+  stay on the raw command, so a quoted pattern naming the endpoint port inside a
+  real process-ending command still denies. Self-test 40/40, subprocess tests
+  24/24, mutation-checked (mask removed -> FP cases deny again).
+
 ## [0.49.1] — 2026-10-31
 
 ### Fixed — picker consistency patch (scope: `docs/ROADMAP.md` §0.49.1; user-reported live in 0.49.0)
