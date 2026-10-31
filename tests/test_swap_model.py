@@ -110,7 +110,8 @@ def master_key(cfg_text):
 
 
 class SwapModelTests(unittest.TestCase):
-    ALIAS_TO = "nvidia-glm53"                  # the rescue model (z-ai/glm-5.3)
+    ALIAS_TO = "nvidia-glm53"                  # the rescue model (z-ai/glm-5.3-flash since 0.49.3 retired GLM full)
+    ALIAS_EOL = "nvidia-glm53-full"            # maps to z-ai/glm-5.3 — 410 EOL 2026-10-28, listed in broken-nvidia-models.json
 
     @classmethod
     def setUpClass(cls):
@@ -136,7 +137,8 @@ class SwapModelTests(unittest.TestCase):
                     'bin/remote-keys.sh', 'bin/blind-trust-settings.py',
                     'config/remote-agents.sh', 'config/remote-agent-system-prompt.txt',
                     'config/shared-agent-shipping-rules.txt', 'config/emoji.sh',
-                    'config/dispatch-preferences.json', 'bin/session-fallbacks.py'):
+                    'config/dispatch-preferences.json', 'bin/session-fallbacks.py',
+                    'config/broken-nvidia-models.json'):
             shutil.copy2(ROOT / rel, self.root / rel)
         source = (self.root / 'bin/remote-session.sh').read_text()
         (self.root / 'bin/library.sh').write_text(source.split('# ---- argument parsing')[0])
@@ -229,7 +231,35 @@ class SwapModelTests(unittest.TestCase):
         (self.rundir / f'proxy-{port}.log').touch()
         r = self.swap(port, self.ALIAS_TO, force=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(f"swapped :{port} to z-ai/glm-5.3", r.stdout)
+        self.assertIn(f"swapped :{port} to z-ai/glm-5.3-flash", r.stdout)
+
+    def test_an_eol_alias_is_refused_before_anything_is_touched(self):
+        """0.49.3 (H5-adjacent): a retired id (410 Gone, EOL) can never serve, so --swap-model
+        must refuse it up front with the reason — not run a pre-flight that can only 410."""
+        port, old_pid = self.start_old_session()
+        self.age_log(port)
+        r = self.swap(port, self.ALIAS_EOL)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("retired", r.stderr)
+        self.assertIn("410", r.stderr)
+        self.assertIn("2026-10-28", r.stderr)
+        cfg = (self.rundir / f'proxy-{port}.yaml').read_text()
+        self.assertIn('nemotron-3-ultra', cfg)                 # the session's model is unchanged
+        self.assertEqual(int((self.rundir / f'proxy-{port}.pid').read_text()), old_pid)
+        os.kill(old_pid, 0)                                    # the old proxy is untouched
+        self.assertFalse(list(self.rundir.glob(f'proxy-{port}.yaml.bak-*')))
+        self.assertFalse(list(self.rundir.glob('swap-scratch-*')))
+
+    def test_a_missing_broken_list_fails_open(self):
+        """Planted positive for the refusal above: with LA_BROKEN_MODELS_FILE pointing at a
+        missing file the EOL alias is NOT refused — the swap proceeds (fail-open, the same
+        contract as session-fallbacks.py). Proves the refusal reads the list, not a hardcode."""
+        port, _ = self.start_old_session()
+        self.age_log(port)
+        env = dict(self.env, LA_BROKEN_MODELS_FILE=str(self.root / 'config' / 'no-such-file.json'))
+        r = sh(self.root, f'swap_model {port} {self.ALIAS_EOL}', env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"swapped :{port} to z-ai/glm-5.3 (", r.stdout)
 
     # ---- the swap ------------------------------------------------------------------------
 
@@ -239,11 +269,11 @@ class SwapModelTests(unittest.TestCase):
         owner = (self.rundir / f'proxy-{port}.owner').read_bytes()
         r = self.swap(port, self.ALIAS_TO)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(f"swapped :{port} to z-ai/glm-5.3", r.stdout)
+        self.assertIn(f"swapped :{port} to z-ai/glm-5.3-flash", r.stdout)
         self.assertIn("press Enter", r.stdout)
         cfg = (self.rundir / f'proxy-{port}.yaml').read_text()
         primary = cfg.split('la-fallback-1', 1)[0]            # the primary deployments
-        self.assertIn('z-ai/glm-5.3', primary)                # the rescue model is the primary
+        self.assertIn('z-ai/glm-5.3-flash', primary)          # the rescue model is the primary
         new_pid = int((self.rundir / f'proxy-{port}.pid').read_text())
         self.assertNotEqual(new_pid, old_pid)
         with self.assertRaises(ProcessLookupError):

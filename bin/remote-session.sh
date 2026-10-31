@@ -19,7 +19,8 @@
 #                                         # rescue a STALLED session: relaunch its proxy on
 #                                         # another model, same port (pre-flight on a scratch
 #                                         # port; backs up and reverts on any failure; refuses
-#                                         # a session that answered recently unless --force)
+#                                         # a session that answered recently unless --force;
+#                                         # also refuses a retired (410 EOL) target id (0.49.3)
 #   remote-session.sh --include-trials     # also offer trial-tier (non-free) agents
 #   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
 #   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
@@ -1322,6 +1323,24 @@ _swap_revert() { # _swap_revert <port> <bak-cfg> <cfg> <log> <pidf> <newpid> <pr
     return 0
 }
 
+_eol_reason() { # _eol_reason <model-id> -> "retired by the provider on <date> (HTTP 410 Gone)"; empty when not listed. Fail-open: a missing/corrupt list prints nothing (same contract as session-fallbacks.py, 0.49.3 H5).
+    python3 - "$1" "${LA_BROKEN_MODELS_FILE:-$SCRIPT_DIR/../config/broken-nvidia-models.json}" <<'PY'
+import json, re, sys
+model, path = sys.argv[1], sys.argv[2]
+try:
+    models = json.load(open(path)).get("models", [])
+except (OSError, ValueError):
+    sys.exit(0)                       # fail-open: never refuse because the list is unreadable
+for m in models:
+    if m.get("model_id") == model and m.get("failure_mode") == "end_of_life":
+        date = re.search(r"end of life(?: on)?\s+([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+Z?)",
+                         m.get("reason", ""))
+        print("retired by the provider%s (HTTP 410 Gone)"
+              % (" on " + date.group(1) if date else ""))
+        break
+PY
+}
+
 swap_model() { # swap_model <port> <alias> [force]
     local port="${1:-}" alias="${2:-}" force="${3:-}"
     local cfg pidf log ownerf pid entry prov model thinking effort temperature
@@ -1347,6 +1366,13 @@ swap_model() { # swap_model <port> <alias> [force]
     entry="$(_entry_for "$alias")"
     [[ -n "$entry" ]] || { echo "remote-session: --swap-model: unknown remote alias: $alias" >&2; return 2; }
     prov="$(_field "$entry" 2)"; model="$(_field "$entry" 3)"
+    # 0.49.3: refuse retired (410 EOL) ids up front — a pre-flight against them can only 410,
+    # and swapping a live session onto one would strand it. Fail-open on an unreadable list.
+    local eol
+    eol="$(_eol_reason "$model")"
+    [[ -z "$eol" ]] || {
+        echo "remote-session: --swap-model: '$alias' ($model) is $eol — a retired id only ever 410s; pick a live alias (--list)." >&2
+        return 2; }
     _available "$prov" || { echo "remote-session: --swap-model: no key saved for provider $prov" >&2; return 2; }
     [[ "$model" != "SELECT" ]] || {
         echo "remote-session: --swap-model: '$alias' has no fixed model (catalog-only); pick a concrete alias." >&2
