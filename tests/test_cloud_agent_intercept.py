@@ -84,6 +84,14 @@ class Hook(unittest.TestCase):
         self.assertEqual(sent["prompt"], self.AGENT["tool_input"]["prompt"], "prompt passed verbatim")
         self.assertEqual(sent["subagent_type"], "code-reviewer")
 
+    def test_deny_reason_leads_with_the_remote_lane_mark(self):
+        # exact pin (branding/credit-moments): a cloud session carries 📡 — the remote
+        # free lane the redirect steers to; the heredoc line below must stay intact
+        out = self.run_hook(self.AGENT, ANTHROPIC_BASE_URL="https://gw.example",
+                            LA_SESSION_KIND_EMOJI="")
+        reason = out["permissionDecisionReason"]
+        self.assertTrue(reason.startswith("📡 free-agents: replacement:"), reason[:60])
+
     def test_free_only_denies_and_says_it_never_falls_back(self):
         self.write_settings({cse_key() : "free-only"})
         out = self.run_hook(self.AGENT, ANTHROPIC_BASE_URL="https://gw.example")

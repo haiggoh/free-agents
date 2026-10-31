@@ -56,3 +56,7 @@ A single-slot server (like vllm-mlx) can become **wedged**: the health endpoint 
 - **Stall watchdog:** Use the plugin's streaming dispatch helper for long generations. Be precise about what it does: it **flags** a stall after a configurable window with no new data (default 30s) and keeps printing liveness ticks during a long prefill. It does **not** abort the request for you — the decision to kill and relaunch stays yours.
 - **Avoid concurrent heavy loads:** Do not dispatch multiple large prompts to a single-slot server simultaneously.
 
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.
+

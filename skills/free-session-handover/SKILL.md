@@ -135,3 +135,7 @@ Silence from a briefed implementer is normal. Check once (its transcript tail an
 `git status --porcelain`), then do useful interim work: prepare the next phase, reconcile records
 the finished phases made stale, or finish leftover docs in files the running agent will not
 touch. Never run mutation tests or full suites against the same tree concurrently.
+
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.

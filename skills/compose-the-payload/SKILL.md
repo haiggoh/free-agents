@@ -57,3 +57,7 @@ MODEL="$(la-roles.sh operator | head -1)"   # role -> an on-disk alias, via the 
 PORT="$SUCCESS_PORT"                        # from the warm-up script's SUCCESS_PORT= line; never assumed
 ```
 
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.
+

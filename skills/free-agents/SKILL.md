@@ -148,3 +148,7 @@ For long generations use `./bin/librarian-dispatch.py` (SSE + stall watchdog).
 - NEVER kill/pkill processes on the local server ports — that terminates a running local session.
 - Use `--permission-mode acceptEdits` (the launcher sets this); Auto Mode's safety classifier
   can't be served by the local spoofed model.
+
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.

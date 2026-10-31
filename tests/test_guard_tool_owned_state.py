@@ -46,6 +46,20 @@ class GuardToolOwnedState(unittest.TestCase):
         self.assertIn("VERSION BUMP", reason)
         self.assertIn("get-haiggoh apply", reason)
 
+    def test_deny_reason_leads_with_the_lane_mark(self):
+        # exact pin (branding/credit-moments): the mark sits before "free-agents:"
+        target = os.path.expanduser("~/.claude/plugins/installed_plugins.json")
+        _, out = run("Write", {"file_path": target, "content": "{}"},
+                     extra_env={"ANTHROPIC_BASE_URL": "http://localhost:4143",
+                                "LA_SESSION_KIND_EMOJI": ""})
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertTrue(reason.startswith("📡 free-agents: BLOCKED"), reason[:60])
+        _, out = run("Write", {"file_path": target, "content": "{}"},
+                     extra_env={"ANTHROPIC_BASE_URL": "http://localhost:8000",
+                                "LA_SESSION_KIND_EMOJI": ""})
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertTrue(reason.startswith("🦾 free-agents: BLOCKED"), reason[:60])
+
     def test_incident_bash_cp_is_denied(self):
         _, out = run("Bash", {"command": "! cp /tmp/installed_plugins.json ~/.claude/plugins/installed_plugins.json"})
         self.assertTrue(denied(out))

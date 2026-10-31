@@ -99,6 +99,27 @@ def session_emoji_unknown() -> str:
     return _get("SESSION_EMOJI_UNKNOWN", "❓")
 
 
+def lane_mark(env: dict | None = None) -> str:
+    """The session's lane mark for hook emit lines: 🦾 local inference, 📡 otherwise
+    (remote free-API proxy or cloud — the mark names the free lane an emit steers to).
+
+    LA_SESSION_KIND_EMOJI (exported by bin/la-session-identity.sh at launch) wins;
+    otherwise the same port bands as that resolver: localhost:8000-8010 = local."""
+    import os as _os
+    from urllib.parse import urlparse as _urlparse
+    e = env if env is not None else _os.environ
+    if e.get("LA_SESSION_KIND_EMOJI", "") == SESSION_EMOJI_LOCAL_STR:
+        return SESSION_EMOJI_LOCAL_STR
+    try:
+        p = _urlparse(e.get("ANTHROPIC_BASE_URL", ""))
+        if p.hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0") and p.port is not None \
+                and 8000 <= p.port <= 8010:
+            return SESSION_EMOJI_LOCAL_STR
+    except ValueError:
+        pass
+    return SESSION_EMOJI_FREE_API_STR
+
+
 # Feature emojis
 def emoji_telemetry_on() -> str:
     return _get("EMOJI_TELEMETRY_ON", "🛰️")

@@ -1,3 +1,22 @@
+## [0.49.3] — 2026-10-31
+
+### Changed — lane-conditional credit-moment marks (emoji branding rollout, Task 12)
+
+- Hook emit lines now lead with the session's lane mark + `free-agents:`: 🦾 on local
+  inference, 📡 otherwise (remote free-API proxy or cloud). Affected: `hooks/offload-nudge.py`
+  (free-session nudge only — the paid nudge stays unbranded; its lane ☁️ is outside the About
+  pair 📡🦾), `hooks/guard-own-endpoint.py` (both BLOCKED reasons), `hooks/guard-tool-owned-state.py`
+  (deny reason), `hooks/cloud-agent-intercept.py` (replacement redirect). The single classifier
+  is `bin/emoji_constants.py: lane_mark()`, using LA_SESSION_KIND_EMOJI first and otherwise the
+  same port bands as `bin/la-session-identity.sh` (8000-8010 local, 4141-4151 free-API proxy).
+- All 9 skills' SKILL.md carry a ≤3-line `## Branding (📡🦾)` section for invocation-moment
+  attribution. Static surfaces use the pair: plugin.json description prefix, README h1.
+- Tests: exact-prefix pins per lane in test_offload_nudge / test_guard_own_endpoint /
+  test_guard_tool_owned_state / test_cloud_agent_intercept, plus new tests/test_emoji_lane_mark.py.
+  Mutation-checked: stripping the mark turns 10 pins red; restored (cmp-identical) all 68 green.
+- Session picker (Textual) untouched — its lane emojis already shipped; no emoji inside
+  markup-processed strings.
+
 ## [0.49.2] — 2026-10-31
 
 ### Fixed — own-endpoint guard false positive on quoted prose

@@ -53,3 +53,7 @@ For a *lasting* decision or a plan — not a mechanical edit — convene two del
 
 ## Fold in standing rules (if available)
 If a standing-rules index for delegated work exists (e.g., from a separate plugin), fold the relevant lines into the prompt. This skill does not maintain the index; it only uses it.
+
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.

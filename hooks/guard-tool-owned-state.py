@@ -49,6 +49,18 @@ import re
 import shlex
 import sys
 
+
+def lane_mark() -> str:
+    """🦾 local / 📡 remote lane mark for the credit-moment prefix (fail-safe)."""
+    try:
+        bin_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        from emoji_constants import lane_mark as _lm
+        return _lm(os.environ)
+    except Exception:
+        return "📡"
+
 USAGE = """guard-tool-owned-state.py - PreToolUse guard against hand-editing plugin state
 
 Reads a PreToolUse hook payload as JSON on stdin and denies Write/Edit/Bash calls that
@@ -86,7 +98,7 @@ CHAINING = re.compile(r"[;&|`\n]|\$\(")
 HARMLESS_REDIRECT = re.compile(r"\d*>>?\s*(&\d+|/dev/null)")
 
 REASON = (
-    "Blocked by free-agents guard-tool-owned-state: {what} is Claude Code's tool-owned plugin "
+    "{mark} free-agents: BLOCKED — {what} is Claude Code's tool-owned plugin "
     "state and is written only by `claude plugin ...` (or get-haiggoh). Never hand-edit it: a "
     "rewrite from a partial view silently drops entries (incident 2026-09-25). If an update did "
     "not land, the usual cause is a MISSING VERSION BUMP - bump it in the source repo, commit, "
@@ -282,12 +294,12 @@ def decide(payload):
     if tool in FILE_TOOLS:
         path = ti.get("file_path") or ti.get("notebook_path") or ""
         if protected_file(path):
-            return False, REASON.format(what=path)
+            return False, REASON.format(what=path, mark=lane_mark())
         return True, ""
     if tool == "Bash":
         cmd = ti.get("command") or ""
         if bash_writes_state(cmd):
-            return False, REASON.format(what="this command's target")
+            return False, REASON.format(what="this command's target", mark=lane_mark())
         return True, ""
     return True, ""
 

@@ -415,3 +415,7 @@ Offloading pays off only when you **supervise** it. The repeatable loop:
 
 Grab cheap ground truth **before** dispatching (e.g. `ls` the real files) so step 5 is a comparison,
 not a fresh guess. The supervision is real cloud attention — that's the cost; the legwork compute is $0.
+
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.

@@ -51,6 +51,18 @@ import os
 import re
 import sys
 
+
+def lane_mark() -> str:
+    """🦾 local / 📡 remote lane mark for the credit-moment prefix (fail-safe)."""
+    try:
+        bin_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        from emoji_constants import lane_mark as _lm
+        return _lm(os.environ)
+    except Exception:
+        return "📡"
+
 USAGE = """guard-own-endpoint.py - PreToolUse guard against killing your own API endpoint
 
 Reads a PreToolUse hook payload as JSON on stdin and, for Bash commands, denies
@@ -257,7 +269,7 @@ def decide(payload):
     port = offending_port(command, ports)
     if port:
         return False, (
-            f"BLOCKED: this command would kill the endpoint serving THIS session.\n\n"
+            f"{lane_mark()} free-agents: BLOCKED: this command would kill the endpoint serving THIS session.\n\n"
             f"ANTHROPIC_BASE_URL points at port {port}, so stopping that process ends "
             f"the current turn with a misleading "
             f'"API Error: Connection refused - a firewall or proxy may be blocking it". '
@@ -273,7 +285,7 @@ def decide(payload):
             f"are certain the port is NOT your own endpoint."
         )
     if launch_without_prompt(command):
-        return False, LAUNCH_BLOCK_MESSAGE
+        return False, f"{lane_mark()} free-agents: {LAUNCH_BLOCK_MESSAGE}"
     return True, ""
 
 

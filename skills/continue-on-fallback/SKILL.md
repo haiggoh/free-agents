@@ -78,3 +78,7 @@ bin/agent-fallback.py --mode local-first-free --prompt "$TASK" --dry-run
 
 The final answer comes back on **stdout** (so `> answer.txt` works); the routing
 ledger, the REMOTE banner, and pass/fail go to stderr.
+
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.

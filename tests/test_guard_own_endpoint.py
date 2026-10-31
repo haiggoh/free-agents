@@ -54,6 +54,25 @@ class GuardTests(unittest.TestCase):
         self.assertIn("4141", reason, "the reason must name the port")
         self.assertIn("THIS session", reason)
 
+    def test_kill_deny_reason_leads_with_the_lane_mark(self):
+        # exact pin (branding/credit-moments): remote free-API proxy band -> 📡
+        _, parsed = run(INCIDENT_CMD, "http://localhost:4141",
+                        extra_env={"LA_SESSION_KIND_EMOJI": ""})
+        reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertTrue(reason.startswith("📡 free-agents: BLOCKED:"), reason[:60])
+        # local inference band 8000-8010 -> 🦾
+        _, parsed = run("pkill -f 'rapid-mlx.*8000'", "http://localhost:8000",
+                        extra_env={"LA_SESSION_KIND_EMOJI": ""})
+        reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertTrue(reason.startswith("🦾 free-agents: BLOCKED:"), reason[:60])
+
+    def test_launch_deny_reason_leads_with_the_lane_mark(self):
+        _, parsed = run("$HOME/x/bin/remote-session.sh gemini-3.8-flash",
+                        base_url="http://localhost:4141",
+                        extra_env={"LA_SESSION_KIND_EMOJI": ""})
+        reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertTrue(reason.startswith("📡 free-agents: BLOCKED:"), reason[:60])
+
     def test_emits_the_contract_shape(self):
         _, parsed = run(INCIDENT_CMD, "http://localhost:4141")
         hso = parsed["hookSpecificOutput"]

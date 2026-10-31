@@ -14,10 +14,11 @@ from pathlib import Path
 HOOK = Path(__file__).resolve().parent.parent / "hooks" / "offload-nudge.py"
 
 
-def nudge(base_url):
+def nudge(base_url, **extra):
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_BASE_URL"}
     if base_url is not None:
         env["ANTHROPIC_BASE_URL"] = base_url
+    env.update(extra)
     env["CLAUDE_PLUGIN_ROOT"] = "/plug"
     # Isolate HOME: route() lets the registered settings.json override the process env by
     # design, so a saved FA_ROUTE_AGENT on the real machine would leak into the test.
@@ -86,3 +87,30 @@ class RouteModeNudges(unittest.TestCase):
         self.assertIn("FREE OFFLOADING IS THE DEFAULT", text)
         self.assertIn("paid_fallback_allowed", text)
         self.assertIn("one native agent call", text.lower())
+
+
+class LaneBrandingTests(unittest.TestCase):
+    """branding/credit-moments: the FREE nudge leads with the session's lane mark —
+    exact prefix pins, never loosened to substrings. The paid nudge stays unbranded
+    (a paid session's lane is ☁️, outside the About pair 📡🦾)."""
+
+    PREFIX_TAIL = "free-agents: this session already runs on FREE inference"
+
+    def test_remote_free_api_proxy_band_leads_with_satellite(self):
+        # 4141-4151 = remote free-API proxy (same band as la-session-identity.sh)
+        text = nudge("http://127.0.0.1:4143", LA_SESSION_KIND_EMOJI="")
+        self.assertTrue(text.startswith(f"📡 {self.PREFIX_TAIL}"), text[:60])
+
+    def test_local_inference_band_leads_with_robot(self):
+        # 8000-8010 = local MLX inference
+        text = nudge("http://localhost:8000", LA_SESSION_KIND_EMOJI="")
+        self.assertTrue(text.startswith(f"🦾 {self.PREFIX_TAIL}"), text[:60])
+
+    def test_launcher_env_beats_the_port_heuristic(self):
+        text = nudge("http://localhost:4143", LA_SESSION_KIND_EMOJI="🦾")
+        self.assertTrue(text.startswith(f"🦾 {self.PREFIX_TAIL}"), text[:60])
+
+    def test_paid_nudge_stays_unbranded(self):
+        text = nudge("https://gateway.example.com", LA_SESSION_KIND_EMOJI="☁️")
+        self.assertFalse(text.startswith(("📡", "🦾", "☁️")), text[:60])
+        self.assertTrue(text.startswith("free-agents is installed"), text[:60])

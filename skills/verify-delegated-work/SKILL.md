@@ -74,3 +74,7 @@ warm-up, not death).
 ## Universal application
 This skill applies to **any** handoff: local models, cloud subagents, or external scripts. The principle is identical: capture truth, delegate, compare, and enforce a ceiling.
 
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.
+

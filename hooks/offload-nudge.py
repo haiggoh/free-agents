@@ -27,6 +27,19 @@ def is_free_session(base_url: str) -> bool:
         return False
 
 
+def lane_mark() -> str:
+    """🦾 local / 📡 remote lane mark for the credit-moment prefix (fail-safe: never
+    break session start over a branding mark)."""
+    try:
+        bin_dir = str(Path(__file__).resolve().parent.parent / "bin")
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        from emoji_constants import lane_mark as _lm
+        return _lm(os.environ)
+    except Exception:
+        return "📡"
+
+
 def paid_nudge(root: str, modes: dict | None = None) -> str:
     """A PAID session, per the Agent path's routing mode (cloud_session_env.route).
 
@@ -87,7 +100,7 @@ def free_nudge(root: str) -> str:
     """A FREE session: offloading saves no money here, but a second model family still buys quality."""
     tool = f"{root}/bin/free-agent-tool.py" if root else "the plugin's bin/free-agent-tool.py"
     return (
-        "free-agents: this session already runs on FREE inference, so offloading saves no money "
+        f"{lane_mark()} free-agents: this session already runs on FREE inference, so offloading saves no money "
         "here; do not delegate to cut cost. A dispatch still pays off for QUALITY: an adversarial "
         "review or an independent cross-check from a DIFFERENT model family often finds what this "
         "session's own model misses. For that, run a stateless dispatch: "

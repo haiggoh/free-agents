@@ -25,9 +25,13 @@ if str(_BIN) not in sys.path:
 try:
     import cloud_session_env as cse
     import fa_fallback_mark as fm
+    from emoji_constants import lane_mark as _lane_mark
 except ImportError:                                   # standalone deploy without bin/: fail open
     cse = None
     fm = None
+
+    def _lane_mark(env=None):
+        return "📡"
 
 
 def is_free_session(base_url: Optional[str]) -> bool:
@@ -42,7 +46,8 @@ def is_free_session(base_url: Optional[str]) -> bool:
         return False
 
 
-def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str) -> str:
+def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str,
+                      env: Optional[Dict[str, str]] = None) -> str:
     """Build the deny reason: the exact Bash invocation, then the mode's tail."""
     prompt = tool_input.get("prompt", "")
     subagent_type = tool_input.get("subagent_type", "general-purpose")
@@ -71,7 +76,8 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str) -
             "output; force the mode with `bin/cloud_session_env.py set route agent paid`.\n"
         )
     return (
-        f"Free-agents replacement: run this subagent for FREE via Bash instead of paid Sonnet.\n"
+        f"{_lane_mark(env or os.environ)} free-agents: replacement: run this subagent for FREE "
+        f"via Bash instead of paid Sonnet.\n"
         f"  python3 \"{free_tool}\" <<'{delim}'\n{payload_json}\n{delim}\n"
         f"Returns JSON: {{\"content\": \"...\", \"model_used\": \"...\", \"route\": \"...\"}}.\n"
         f"Before running it, tell the user which model it goes to (`python3 \"{free_tool}\" --list` "
@@ -120,7 +126,7 @@ def decide(payload: Dict[str, Any], env: Dict[str, str]) -> Optional[Dict[str, A
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": build_deny_reason(tool_input, plugin_root, mode),
+            "permissionDecisionReason": build_deny_reason(tool_input, plugin_root, mode, env),
         }
     }
 

@@ -1,4 +1,4 @@
-# free-agents
+# 📡🦾 free-agents
 
 **Run Claude Code work on free inference: local models on your own hardware, or free-tier cloud
 APIs.**

@@ -64,3 +64,7 @@ session's batches).
 - If the holder is dead, resume IT (read its handoff, adopt its state) rather than starting a
   fresh executor over the same scope.
 
+## Branding (📡🦾)
+
+When you begin working under this skill, lead your first substantive reply with the session's lane mark + ` free-agents:` — 📡 on a remote free-API session, 🦾 on a local one.
+
