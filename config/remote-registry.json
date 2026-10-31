@@ -365,16 +365,7 @@
       "model_id": "z-ai/glm-5.3-flash",
       "display": "Z.ai GLM 5.3 Flash (thinking)",
       "tier": "unknown",
-      "notes": "PARTIAL: same model as the base alias — thinking is always-on on NIM; this alias just defaults reasoning_effort high. Fast.",
-      "autocompact_default": "-"
-    },
-    {
-      "alias": "nvidia-glm53-full-thinking",
-      "provider": "nvidia",
-      "model_id": "z-ai/glm-5.3",
-      "display": "Z.ai GLM 5.3 (thinking)",
-      "tier": "unknown",
-      "notes": "DEPRECATED 2026-10-29 — z-ai/glm-5.3 retired from the NVIDIA API; use nvidia-mistral-large4. Was: SLOW LANE: deliberate deep-work mode — ~1min door charge + reasoning at reasoning_effort high. Excellent quality, minutes per turn. Streaming required.",
+      "notes": "Same model as nvidia-glm53 — thinking is always-on on NIM; this alias defaults reasoning_effort high. Fast (1-4s) AND sharp: takes over GLM 5.3 full's deep-work reputation (finds problems and solutions on its own; 1M context).",
       "autocompact_default": "-"
     },
     {
@@ -401,16 +392,7 @@
       "model_id": "z-ai/glm-5.3-flash",
       "display": "Z.ai GLM 5.3 Flash",
       "tier": "unknown",
-      "notes": "PARTIAL: fast (1-4s), always-thinking — thinking CANNOT be disabled on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.",
-      "autocompact_default": "-"
-    },
-    {
-      "alias": "nvidia-glm53-full",
-      "provider": "nvidia",
-      "model_id": "z-ai/glm-5.3",
-      "display": "Z.ai GLM 5.3",
-      "tier": "unknown",
-      "notes": "DEPRECATED 2026-10-29 — z-ai/glm-5.3 retired from the NVIDIA API; use nvidia-mistral-large4. Was: SLOW LANE: ~1min NVIDIA-side door charge before first token (payload-independent, measured 2026-10-13) + reasoning volume. Thinking always-on; reasoning_effort is the only dial (base alias defaults low). Streaming required in practice.",
+      "notes": "FAST (1-4s) and quality work: inherits GLM 5.3's sharpness at investigating context — finds problems and solutions on its own; the fast sibling of the retired GLM 5.3 full (410 EOL 2026-10-28). Always-thinking on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.",
       "autocompact_default": "-"
     },
     {
@@ -501,6 +483,24 @@
       "display": "Moonshot Kimi K3",
       "tier": "unknown",
       "notes": "⚠️ RETIRED: NVIDIA returns 410 Gone since 2026-10-15 (end of life). Earlier probes timed out (2026-10-10/13). Hidden via broken-nvidia-models.json.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-glm53-full-thinking",
+      "provider": "nvidia",
+      "model_id": "z-ai/glm-5.3",
+      "display": "Z.ai GLM 5.3 (thinking)",
+      "tier": "unknown",
+      "notes": "⚠️ RETIRED: NVIDIA returns 410 Gone — \"reached its end of life on 2026-10-28T08:00:00Z\" (session error, 2026-10-31). Live catalog check 2026-10-31 (remote-session.sh --models, GET only): z-ai/glm-5.3 no longer listed, only z-ai/glm-5.3-flash. Hidden via broken-nvidia-models.json. Was: SLOW LANE deep-work model — ~1min door charge, excellent quality. Use nvidia-mistral-large4 (Le Chonk) or nvidia-glm53.",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-glm53-full",
+      "provider": "nvidia",
+      "model_id": "z-ai/glm-5.3",
+      "display": "Z.ai GLM 5.3",
+      "tier": "unknown",
+      "notes": "⚠️ RETIRED: NVIDIA returns 410 Gone — \"reached its end of life on 2026-10-28T08:00:00Z\" (session error, 2026-10-31). Live catalog check 2026-10-31 (remote-session.sh --models, GET only): z-ai/glm-5.3 no longer listed, only z-ai/glm-5.3-flash. Hidden via broken-nvidia-models.json. Was: SLOW LANE — ~1min NVIDIA-side door charge before first token + reasoning volume; excellent quality. Use nvidia-mistral-large4 (Le Chonk) or nvidia-glm53.",
       "autocompact_default": "-"
     },
     {
