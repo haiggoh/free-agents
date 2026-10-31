@@ -50,6 +50,40 @@ def free_port():
         return s.getsockname()[1]
 
 
+def read_json_with_retry(path, timeout=10.0):
+    """0.49.8: read the limiter state file tolerantly. The limiter writes it while the
+    proxy serves; under gate load a read can land on an empty/partial file (JSONDecodeError
+    at char 0 seen 2026-10-31, blocking a release). The value settles within a second."""
+    deadline = time.time() + timeout
+    last_err = ""
+    while time.time() < deadline:
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            last_err = str(e)
+            time.sleep(0.1)
+    raise AssertionError(f"state file {path} never became valid JSON within {timeout}s: {last_err}")
+
+
+class StateFileReadTests(unittest.TestCase):
+    def test_retries_until_the_state_file_becomes_valid_json(self):
+        """0.49.8: the limiter writes its state file while the proxy serves; under gate
+        load the read can land on an empty/partial file (JSONDecodeError at char 0, seen
+        2026-10-31 blocking a release). The value settles within a second — poll for it."""
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        p = Path(d.name) / "state.json"
+        p.write_text("")                      # empty now, as during a torn write
+
+        def fill():
+            time.sleep(0.3)
+            p.write_text('{"tokens": 5}')
+        t = threading.Thread(target=fill)
+        t.start()
+        self.addCleanup(t.join)
+        self.assertEqual(read_json_with_retry(p), {"tokens": 5})
+
+
 class Upstream:
     """Fake provider: records every request; answers (status, body) planted per test."""
 
@@ -414,7 +448,7 @@ class LiteLLMContract(unittest.TestCase):
             status, body = self.post_at(port, self.msg("claude-opus-5-5"))
             self.assertEqual(status, 200, body)
             self.assertEqual(body["content"][0]["text"], "PONG")
-        st = json.loads(state.read_text())
+        st = read_json_with_retry(state)
         booked = (int(st["tokens"]) if mode == "smooth_bucket" else len(st["stamps"]))
         log_tail = "proxy log:\n" + (dd / "proxy.log").read_text()[-2000:]
         if primary_429:

@@ -25,6 +25,13 @@ class SkillBudgetTests(unittest.TestCase):
         over = {str(p.relative_to(ROOT)): body_words(p) for p in skills if body_words(p) > BUDGET}
         self.assertEqual(over, {}, f"SKILL-BUDGET exceeded (budget {BUDGET}); move detail to references/")
 
+    def test_no_orphan_offload_to_local_dir(self):
+        # 0.49.8: the offload-to-local -> offload rename (0.49.7) must not leave the old
+        # dir behind; its in-depth content is merged into skills/offload/references/.
+        self.assertFalse((ROOT / "skills" / "offload-to-local").exists(),
+                         "orphaned skills/offload-to-local/ — its content belongs in "
+                         "skills/offload/references/offload-in-depth.md")
+
 
 if __name__ == "__main__":
     unittest.main()

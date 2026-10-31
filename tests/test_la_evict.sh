@@ -91,6 +91,34 @@ done
     exit 2
 }
 
+# --- 0.49.8: race-proof the dynamic port pick --------------------------------------
+# The base scan binds BASE..BASE+2 to test they are free, then CLOSES the sockets;
+# an external process can grab one in the window before our controlled servers
+# bind ("Port N belongs to unexpected pid M" — seen blocking gates 2026-10-31).
+# Two defenses, both deterministic:
+#   1. a machine-wide lock serializes concurrent runs of this suite (the gate runs
+#      suites on parallel workers), so two runs can never pick the same base;
+#   2. if a port is still stolen by an external squatter, the wrapper below re-runs
+#      the whole test with a higher scan start (LA_EVICT_BASE_FROM), up to 3 times.
+if [[ "${LA_EVICT_RETRY:-}" != "1" ]]; then
+    exec 9>"${TMPDIR:-/tmp}/free-agents-la-evict.lock"
+    flock 9                       # blocking: serialize concurrent runs machine-wide
+    from="${LA_EVICT_BASE_FROM:-20000}"
+    attempt=0
+    while :; do
+        attempt=$((attempt + 1))
+        out="$(LA_EVICT_RETRY=1 LA_EVICT_BASE_FROM="$from" bash "$0" "$@" 2>&1)"
+        rc=$?
+        printf '%s\n' "$out"
+        [[ $rc -eq 0 ]] && exit 0
+        if [[ $attempt -ge 3 ]] || ! printf '%s' "$out" | grep -q 'unexpected pid'; then
+            exit "$rc"
+        fi
+        from=$((from + 2000))
+        printf '  (test port stolen by an external listener; retrying, scan start now %s)\n' "$from" >&2
+    done
+fi
+
 SB="$(mktemp -d "${TMPDIR:-/tmp}/la-evict-test.XXXXXX")"
 TEST_HOME="$SB/home"
 LOG_DIR="$TEST_HOME/.claude/logs"
@@ -123,9 +151,11 @@ trap cleanup EXIT
 # probe to avoid selecting a partially occupied range.
 BASE="$(
 "$PYTHON" - <<'PY'
+import os
 import socket
 
-for base in range(20000, 45000):
+start = int(os.environ.get("LA_EVICT_BASE_FROM", "20000"))
+for base in range(start, 45000):
     sockets = []
     try:
         for port in range(base, base + 3):
