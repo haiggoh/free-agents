@@ -156,6 +156,13 @@ def print_usage() -> None:
 
 def run_self_test() -> int:
     """Run built-in test cases. Return 0 if all pass, 1 otherwise."""
+    # Hermetic settings layer: route() lets the registered settings.json env override the
+    # case env by design, so the self-test must not read the real machine's config — on a
+    # machine whose settings set FA_ROUTE_AGENT the cases failed (2026-10-31: 3 FAILs).
+    import tempfile
+    _tmp = tempfile.TemporaryDirectory()
+    _old_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = _tmp.name
     all_pass = True
 
     def run_case(name: str, payload: Dict[str, Any], env: Dict[str, str], expected: Optional[Dict[str, Any]]) -> bool:
@@ -216,7 +223,7 @@ def run_self_test() -> int:
     result_f = decide({"tool_name": "Agent", "tool_input": {"prompt": "hi", "description": "task 1"},
                        "session_id": "s1"}, {**CLOUD, "FA_ROUTE_AGENT": "free-only"})
     if result_f and result_f["hookSpecificOutput"]["permissionDecision"] == "deny" \
-            and "never falls back" in result_f["hookSpecificOutput"]["permissionDecisionReason"]:
+            and "never falls back" in result_f["hookSpecificOutput"]["permissionDecisionReason"].lower():
         print("PASS: free-only -> deny, never falls back")
     else:
         print(f"FAIL: free-only -> expected deny with the never-fallback tail, got {result_f}")
@@ -252,6 +259,11 @@ def run_self_test() -> int:
             else:
                 os.environ["FA_FALLBACK_MARK_DIR"] = old
 
+    if _old_cfg is None:
+        os.environ.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        os.environ["CLAUDE_CONFIG_DIR"] = _old_cfg
+    _tmp.cleanup()
     return 0 if all_pass else 1
 
 

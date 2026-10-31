@@ -172,5 +172,21 @@ def cse_key():
     return ROUTE_ENV["agent"]
 
 
+class SelfTestHermeticTests(unittest.TestCase):
+    def test_self_test_ignores_a_poisoned_real_settings_layer(self):
+        # The in-file --self-test resolves the mode via cloud_session_env.route, whose
+        # settings.json env is authoritative over the case env. Without isolation the
+        # real machine's config decides the verdict (failed here 2026-10-31: 3 FAILs).
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "settings.json").write_text(json.dumps(
+                {"env": {"FA_ROUTE_AGENT": "free-first", "FA_REPLACE_AGENTS": "1"}}),
+                encoding="utf-8")
+            env = {**os.environ, "CLAUDE_CONFIG_DIR": d}
+            r = subprocess.run([sys.executable, str(HOOK), "--self-test"],
+                               capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertNotIn("FAIL", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

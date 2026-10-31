@@ -1,3 +1,14 @@
+## [0.49.5] — 2026-10-31
+
+### Fixed — cloud-agent-intercept --self-test was machine-dependent
+
+- `run_self_test()` now isolates CLAUDE_CONFIG_DIR to a temp dir: route() lets the
+  registered settings.json env override the case env by design, so on any machine whose
+  settings set FA_ROUTE_AGENT the paid/legacy cases failed. Also fixed a case-sensitivity
+  bug in the free-only assertion ("NEVER falls back" vs the asserted lowercase substring).
+  New pin: SelfTestHermeticTests runs --self-test under a poisoned config dir (RED→GREEN,
+  mutation-checked). Self-test exit 0 plain and poisoned; pytest 16/16. 0.49.4 → 0.49.5.
+
 ## [0.49.4] — 2026-10-31
 
 ### Changed — description rewritten to current capabilities (rtc-1.0.0 plan, Part B2)
