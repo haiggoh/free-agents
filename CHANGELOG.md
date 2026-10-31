@@ -1,3 +1,14 @@
+## [0.49.6] — 2026-10-31
+
+### Changed — offload-to-local SKILL.md within the 1500-word SKILL-BUDGET
+
+- skills/offload-to-local/SKILL.md body trimmed 4695 → 1159 words; measured incidents,
+  dated rosters, worked examples and the advanced parallel-session pattern moved to
+  skills/offload-to-local/references/offload-in-depth.md (linked from the skill). New
+  tests/test_skill_budget.py pins every skills/*/SKILL.md at ≤1500 words
+  (mutation-checked: old file -> red, restored cmp-identical -> green). check-code hook on
+  the trimmed file: clean. 0.49.5 → 0.49.6.
+
 ## [0.49.5] — 2026-10-31
 
 ### Fixed — cloud-agent-intercept --self-test was machine-dependent

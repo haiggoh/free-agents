@@ -5,416 +5,141 @@ description: 'Use when PLANNING or decomposing ANY multi-step task, and whenever
 
 # offload-to-local — send the legwork to a free local model
 
-The biggest cost saving in Claude Code is not a cheaper cloud model — it's **$0 local compute**.
-When your main session runs a capable cloud model (Opus/Sonnet), keep that model for judgment and
-**delegate the bulk/mechanical legwork to a local model** via dispatch. This applies to anyone who
-wants to save cost, with or without a spending cap.
+The biggest cost saving in Claude Code is **$0 local compute**: keep your capable cloud model
+for judgment and delegate the bulk/mechanical legwork to a free model via dispatch.
 
-**Already on a FREE session?** (`ANTHROPIC_BASE_URL` is `localhost` — a local model or a free-API
-proxy; check the endpoint, never a label or a document.) Then offloading saves no money, so never
-delegate to cut cost. The reason that still holds is QUALITY: an adversarial review or an
-independent cross-check from a different model family (see *Council routing* below,
-`"avoid_family"`) often finds what the session's own model misses.
+**Already on a FREE session?** (`ANTHROPIC_BASE_URL` is `localhost` — check the endpoint, never
+a label.) Then offloading saves no money; the reason that still holds is QUALITY — an adversarial
+review or cross-check from a different model family (`"avoid_family"`) often finds what this
+session's own model misses. In-depth material: `references/offload-in-depth.md`.
 
 ## ⛔ READ THIS FIRST — the built-in `Agent` tool CANNOT reach a free model
 
-This is the single most common way this skill gets "used" without saving a cent, so it is
-stated before anything else.
-
-**In a CLOUD (paid) session, Claude Code's `Agent` (Task) tool cannot dispatch to a free agent.**
-Its `model` parameter accepts only first-party paid tiers — `sonnet`, `opus`, `haiku`, `fable` —
-and the org allowlist blocks adding one. (Two exceptions, since 0.27.0: inside a FREE session, local
-or free-API, `Agent` and `Workflow` subagents already run on that session's free endpoint. And if the
-user opted into `FA_REPLACE_AGENTS=1`, a hook redirects a cloud session's `Agent` call to
-`bin/free-agent-tool.py`; follow its instructions — and check the task shape yourself first:
-the hook's substitution does not verify that a stateless dispatch can actually do the work
-(measured: a review that needed file reads was re-routed to a stateless dispatch, which
-returned narration and no findings).) So, in a cloud session:
-
-| What you do | What actually runs | Cost |
-|---|---|---|
-| `Agent(...)` with **no** `model` | the **default subagent model** (usually the same tier as you) | **full price** |
-| `Agent(..., model="haiku")` | Haiku, on the paid gateway | **cheaper, still paid** |
-| `Agent(..., model="qwen…"/"local"/"free")` | rejected — not a valid enum value | n/a |
-| **`curl` / the dispatch scripts below** | a free local or free-API model | **$0** |
-
-**Omitting `model` is the trap.** It reads like "let the harness pick something cheap"; it
-actually means "run a full-price subagent." A dispatch that went through the `Agent` tool has
-saved **nothing** — it is the *illusion* of delegation. If you have been asked to use free
-agents and you reached for the `Agent` tool, you have not complied yet.
-
-**The only free routes are HTTP dispatch or a free session:**
+In a CLOUD (paid) session, `Agent`/`Task` only accepts first-party paid tiers; omitting `model`
+means the full-price default subagent, not "something cheap". A dispatch that went through `Agent`
+saved nothing. The only free routes are HTTP dispatch or a free session:
 
 ```bash
-bin/lowkey-cli.py             # (alias lk) or plain curl to localhost → free LOCAL model
-bin/librarian-dispatch.py     # long/streaming generations: --port (local) or --provider nvidia|gemini (remote)
-bin/remote-agent-dispatch.py  # → free REMOTE API model (bigger + smarter, see the map below)
-bin/free-agent-tool.py        # stdin {"prompt","files"} → the maintainer's model order, fails over; --list
-bin/agent-fallback.py         # picks a lane for you, with a privacy/cost posture
+bin/lowkey-cli.py             # local model (localhost) — alias lk
+bin/librarian-dispatch.py     # long/streaming generations (SSE), local or remote provider
+bin/remote-agent-dispatch.py  # free REMOTE API model (bigger; needs --model, --max-tokens)
+bin/free-agent-tool.py        # stdin {"prompt","files"} → preference order, fails over; --list
+bin/agent-fallback.py         # picks a lane (privacy/cost posture)
 bin/csl                       # a full interactive session on either free lane
 ```
 
-Self-check before you claim you offloaded anything: **name the process that ran the tokens.**
-If the answer is not "a localhost port" or "a free provider's API", it was not free.
+Self-check before claiming an offload: **name the process that ran the tokens** — if not a
+localhost port or a free provider's API, it was not free.
 
 ## Default routing on a PAID session — offload first, announce always
 
-With free-agents installed, **delegated work on a paid session goes to a free model by default.**
-That covers every native fan-out path, not just a lone `Agent` call: `Agent`/Task, `Workflow`,
-parallel subagents, review agents, `/ultracode`-style runs. Each of those starts a PAID model. So
-decide the route BEFORE the call, not after a hook stops it:
+Decide the route BEFORE the call (Agent/Task, Workflow, fan-out, review agents all start a PAID
+model):
 
-1. **Self-contained text work** (review, analysis, extraction, drafting, a cross-check) → a
-   stateless dispatch through `bin/free-agent-tool.py`. Attach the inputs as `"files"`: the model
-   cannot read the disk. It walks the maintainer's preference order in
-   `config/dispatch-preferences.json` and fails over on its own (`--list` shows the order and
-   what is available now). Several independent pieces = several parallel Bash calls.
-2. **Work that must read files or run commands** → a free SESSION (`remote-session.sh <alias>`, or
-   `csl` locally). A stateless dispatch would narrate the reads it cannot do and return nothing.
-   Session models are NOT the dispatch order: see the `free-session-handover` skill.
-3. **A paid subagent** only with a stated reason: security-critical work, the final verification of
-   a free result, or a free lane that is measured as failing right now.
+1. **Self-contained text work** (review, analysis, extraction, drafting, cross-check) → stateless
+   dispatch via `bin/free-agent-tool.py`; attach inputs as `"files"` (it cannot read the disk).
+   Parallel independent pieces = parallel Bash calls.
+2. **Work that must read files or run commands** → a free SESSION (`remote-session.sh <alias>`,
+   or `csl` locally) — see the `free-session-handover` skill.
+3. **A paid subagent** only with a stated reason: security-critical, final verification of a free
+   result, or a free lane measured as failing right now.
 
-**Announce the model and route BEFORE every offload** ("offloading to Gemini 3.8 Flash, stateless
-dispatch"). Free models differ a lot in quality and speed, and the user needs to know which one ran.
-The tool also prints the model it tried on stderr and returns `model_used` and `route`. Repeat
-those in your reply.
+**Announce the model and route BEFORE every offload**; repeat the tool's `model_used`/`route` in
+your reply. Council routing: ask by `"role"` and add `"avoid_family"` for adversarial review —
+family diversity beats raw capability for review. `--list` prints the live table.
 
-The default order (maintainer, 2026-10-21): Gemini 3.8 Flash → DeepSeek V4.1 Flash (NVIDIA) → GLM
-5.3 → GLM 5.3 Flash → Nemotron 3 Ultra (fallback) → local DeepSeek V4 Flash → local Laguna S → local
-KAT Coder (fast, smaller: weaker on hard tasks). Kimi K3 is not on it: NVIDIA retired it on
-2026-10-15 (410 Gone) and every other provider that lists it wants paid credits (402).
-Override it with `config/dispatch-preferences.local.json` or `FA_DISPATCH_PREFS`.
+## Which lane? — remote is SMARTER, local is PRIVATE
 
-**Council routing — pick by strength, review across families.** Each entry also lists the roles it
-is strong at (operator, reasoner, validator, utility) and its model family. Ask for a role with
-`"role": "validator"` (a `subagent_type` such as `code-reviewer` maps to one), and for an
-adversarial review add `"avoid_family": "<family that did the work>"`. A different family often
-finds what a stronger model of the same family misses, so for review, family diversity beats raw
-capability. Example: work drafted by Gemini (`google`) gets its review from DeepSeek or GLM.
-On a machine with only one family (or no model for the role), the dispatch still runs on what is
-there and returns `"family_avoided": false` / `"role_matched": false` plus a recommendation to add a
-model; pass that on to the user rather than treating the review as cross-family.
-
-| Role | Who fills it (preference order) |
-|---|---|
-| operator | Gemini 3.8 Flash → GLM 5.3 Flash → local Laguna S → local KAT Coder |
-| reasoner | Gemini 3.8 Flash → DeepSeek V4.1 Flash → GLM 5.3 → GLM 5.3 Flash → Nemotron 3 Ultra → local DeepSeek V4 Flash |
-| validator | Gemini 3.8 Flash → DeepSeek V4.1 Flash → GLM 5.3 → GLM 5.3 Flash → Nemotron 3 Ultra → local Laguna S |
-| utility | Gemini 3.8 Flash → local KAT Coder |
-
-`free-agent-tool.py --list` prints the live table (families, roles, what is available now). When
-the roster changes, edit `config/dispatch-preferences.json` and give each new entry its `family`
-and `roles`; the tests refuse an entry without them.
-
-## Which free agent? — remote is SMARTER, local is PRIVATE
-
-The two free lanes are **not** a quality ladder with local at the bottom and paid at the top.
-The free *remote* lane reaches models far larger than anything that fits on this machine, so for
-hard thinking the free remote lane often beats the free local one outright — and costs the same
-($0). Choose on the axes that actually differ:
-
-| | **REMOTE free API** (`remote-agent-dispatch.py`) | **LOCAL MLX** (`lowkey-cli.py`) |
+| | **REMOTE free API** | **LOCAL MLX** |
 |---|---|---|
-| **Size / smarts** | up to **hundreds of B** params — genuinely frontier-adjacent | ~27–35B, 4-bit — capable but visibly smaller |
-| **Reach for it when** | the work needs *reasoning*: analysis, review, planning, tricky code, long synthesis | the work needs *volume*: extraction, classification, reformatting, mechanical edits, first drafts |
-| **Latency** | fast (provider GPUs); no model load | fast once warm; first call pays a model load |
-| **Limits** | a **daily quota per provider** — and quotas are **independent**, so exhausting one leaves the others untouched | none — unlimited, offline, runs all night |
-| **Privacy** | ⚠️ the prompt **leaves the machine**; `--files` needs explicit `--allow-remote-files` | never leaves the box; the privacy default |
-| **Reliability** | a provider can 404/timeout/return empty; ids rot | fully under your control |
+| Size | up to hundreds of B params | ~27–35B, 4-bit |
+| Reach for | hard reasoning: analysis, review, planning | volume: extraction, classification, mechanical edits |
+| Limits | daily quota per provider (independent per provider) | none — unlimited, offline |
+| Privacy | prompt leaves the machine (`--files` needs `--allow-remote-files`) | never leaves the box |
 
-**Default heuristic:** *hard thinking → remote; bulk grind → local; anything sensitive → local,
-regardless of difficulty.* When a remote quota is spent, fall back to local rather than to paid
-(`agent-fallback.py --mode local-first-free` encodes exactly this).
-
-**⚠️ Remote does NOT mean big.** A remote roster lists small models too — several NVIDIA entries
-are 20–35B, i.e. the *same class as (or smaller than) what you already have locally*. Dispatching
-one of those remotely buys you **nothing**: no extra capability, but it spends a finite daily quota
-and sends your prompt off the machine. **"It is remote" is not evidence that it is smarter — check
-the parameter count.**
-
-So filter by SIZE, not by lane:
-- **Remote is only the right call when the model is genuinely bigger than local** — the
-  hundreds-of-billions tier (e.g. Nemotron Ultra 550B, DeepSeek V4, GLM 5.3, Gemini Flash).
-- **If a remote entry has a local-capable equivalent, prefer the LOCAL one.** Same capability,
-  unlimited, private, no quota burned. The repo tracks this classification for the picker
-  (a local-capable filter over the remote roster, hidden by default); apply the *same* judgement
-  when choosing a dispatch target, not just when browsing a menu. If that data is available, treat
-  a remote entry marked local-capable as "run it locally instead."
-- **Never spend a big-model quota on utility work.** Bulk classification goes local even when a
-  550B is sitting there idle — save the quota for work that actually needs the brains.
-
-Concrete current picks — **verify with `bin/remote-session.sh --list` and `bin/la-roles.sh`
-before using a name; rosters and model ids rot:**
-
-- **Remote, big/smart:** Gemini 3.8 Flash and Gemini 3.6 Flash (note: **separate** daily
-  quotas — treat them as two budgets, not one), NVIDIA Nemotron 3 Ultra 550B-A55B, GLM 5.3,
-  DeepSeek V4.1 Flash. (Kimi K3: NVIDIA retired it on 2026-10-15; other providers want paid credits.) For utility-tier remote work, Nemotron 3.5 Lightning 30B or Groq
-  gpt-oss-120b (very fast).
-- **Local, simpler work:** the KAT-Coder 2.5 and Qwen 3.8 class aliases — resolve the live names
-  with `bin/la-roles.sh`.
-
-A concrete remote dispatch:
-
-```bash
-bin/remote-agent-dispatch.py --provider gemini --prompt '<role + task + inputs + output spec>' \
-  --max-tokens 2048 --outdir /tmp/fa-out
-# ⚠️ --help lists gemini|nvidia|groq|openrouter|cerebras|cloudflare|github, but only some are
-#    IMPLEMENTED — the rest fail fast with "declared but not implemented". Verified 2026-09-17:
-#    gemini works; nvidia does NOT (yet). Check before planning a lane around a provider.
-# ⚠️ ALWAYS pass --model. The built-in default can be a RETIRED id (measured: it defaulted to
-#    gemini-2.0-flash and got HTTP 404 "no longer available"). Model ids rot; pin one explicitly.
-# ⚠️ Give it enough --max-tokens. A big model may spend tokens thinking and return a TRUNCATED
-#    answer that looks like a terse one (measured: a 700-token cap cut the reply off mid-word).
-# --dry-run shows the REMOTE banner and sends nothing; --files needs --allow-remote-files.
-```
-
-Both lanes are **stateless per dispatch** — resend the full briefing every call — and both need
-their output verified against ground truth before you trust it.
+**Heuristic: hard thinking → remote; bulk grind → local; sensitive → local.** Remote is NOT
+automatically bigger — check the parameter count, not the lane (details in references/).
 
 ## Decide UPFRONT, at decomposition — not mid-work
-The habit is not "notice you're already grinding through files and stop." It's: **when you first
-break a task into steps, decide per step where it runs before you execute anything.** Waiting until
-you're mid-bulk-work means the cloud tokens are already being spent.
 
-**Decide before you READ the inputs.** This is the sharpest version of the rule, and the easiest to
-get wrong. If you open the files to judge whether the task is worth delegating, you have already done
-the expensive part — and delegating afterwards is theatre, because the work is spent either way. So
-"I've already read the material, it'd be quicker to just do it now" is **evidence the decision came
-too late**, not a reason to keep it on cloud. Decide from the *shape* of the step, which you know at
-decomposition, not from its contents.
+Decide per step where it runs BEFORE executing anything, and before READING the inputs — "I've
+already read it" means the decision came too late. Annotate every step of a multi-step plan:
 
-If you catch yourself there anyway, a dispatch still buys something real: run it as an **independent
-cross-check** of the work you just did. Diffing your output against a local model's is a genuine
-second use, and it costs nothing.
+- `local:<role>` — free LOCAL model (default `operator`)
+- `remote:<provider>` — free REMOTE API model ($0 too)
+- `cloud:<reason>` — kept on PAID, reason named
 
-**Make it a required column in the plan — don't leave it implicit** (an implicit "I'll offload
-later" reliably becomes "I did it all on cloud"). For any multi-step task that touches files or has
-bulk/mechanical steps — and *always* under a budget constraint — annotate **every** step:
+Two of three cost nothing, so `cloud:` should be the minority. Valid `cloud:` reasons: quality/
+capability (frontier reasoning, security, final review), coupled tool-work needing this session's
+live state, or cost-benefit on a one-liner. **A `cloud:` reason must be checkable and name its
+expiry** ("the local endpoint is serving a session right now" is good; "too hard to delegate" is a
+SPEC gap — split it into `cloud:spec` + `local:` slices). **Watch the distribution:** a plan with
+zero local steps owes one explicit sentence why. "Local is slow" is never a reason — check the
+current runtime first. Offload is the default, not a mandate: offload real chunks, do one-liners.
 
-- `local:<role>` — delegated to a free LOCAL model (default `operator`; see below),
-- `remote:<provider>` — delegated to a free REMOTE API model (also $0; reach for it when the
-  step needs more brains than local has, and nothing sensitive leaves the machine), or
-- `cloud:<reason>` — kept on the PAID model, with the reason named.
+**What QUALIFIES for local:** a self-contained transformation over many similar inputs whose
+output is checkable against the source (extraction, classification, test-matrix expansion,
+first-pass drafts, reformatting). Verify local output against ground truth — never trust it blind.
 
-Two of these three cost nothing, so `cloud:` should be the minority annotation in any plan.
+## Route by role — operator by default
 
-**Default to `operator`.** Under a budget constraint the burden flips: a step is `local:operator`
-unless you can name why it's `cloud:`. Valid `cloud:` reasons:
-- **quality/capability** — frontier reasoning, security-critical, or final review/verification;
-- **coupled tool-work** — it needs this session's live context and tool state;
-- **cost-benefit** — the work is small or one-off and the spin-up/briefing overhead would exceed the
-  saving (`cloud:not worth offloading`). Legitimate, but see the trap below before reaching for it.
+| Role | Reach for it when |
+|---|---|
+| **operator** (DEFAULT) | anything delegatable; if not clearly below, it's operator |
+| **reasoner** | real multi-step reasoning, trade-offs, plans, comparisons |
+| **validator** | independent/adversarial validation of a plan or diff |
+| **utility** | trivial high-volume classification/extraction/tagging |
 
-### What QUALIFIES for local — the positive test
+Roles are filled by a (model × effort) pairing, not one model each — resolve the live mapping, never
+hardcode a name:
 
-Listing only what's *excluded* makes the rule unfalsifiable, so here is the shape that qualifies:
-
-> **A self-contained transformation over many similar inputs, whose output is checkable against the
-> source.** Cheap to verify, tedious to do by hand.
-
-Extraction, classification, mechanical test-matrix expansion against a harness that already exists, a
-first-pass draft that will be reviewed anyway, reformatting a corpus. The *checkable* part is what
-makes trusting a smaller model safe: you are not taking its word, you are diffing it against ground
-truth.
-
-Worked example, measured: pulling `(target, milestone)` dependency pairs out of 15 free-text notes.
-One dispatch, ~1.2k prompt / ~1k completion tokens, about a minute, **$0**. It returned 19 pairs and
-all 19 verified — every target present verbatim in the source *and* a real id in the store, every
-milestone verbatim. It also correctly **excluded** three near-misses that needed judgement: a "see
-also" cross-reference, a sibling the note mentioned as also-blocked rather than as a dependency, and a
-parenthetical aside. **If a step fits this shape and you keep it on cloud, that is the miss.**
-
-### The trap: two escape hatches that cover everything
-
-`quality-critical` and `not worth offloading` are **jointly exhaustive** — between them they can
-justify keeping *any* step on cloud. Each individual call looks defensible; the pattern only shows up
-in the aggregate. A measured instance: four delegatable steps in one plan, four `cloud:` annotations,
-two citing each reason, **zero local dispatches** — and every one was individually arguable.
-
-Three rules that make the pair falsifiable again:
-
-1. **A `cloud:` reason must be checkable, and should name its expiry.** "The local endpoint is
-   currently serving an interactive session" is good: you can verify it before asserting it, and it
-   stops being true later. A reason you cannot check is a preference wearing a reason's clothes.
-2. **"Too hard to delegate" is a SPEC gap, not a model limit.** If the work is too tangled to hand
-   over, that says the task isn't specified yet. Split it: `cloud:spec` to write the design, then
-   `local:` for the slices the spec produces. That converts an unfalsifiable verdict into two
-   actionable steps.
-3. **Watch the distribution, not the step.** If a plan comes out with **zero** local steps, that is
-   the thing to justify — one explicit sentence at plan level about why nothing in it qualified. A
-   per-step shrug does not discharge it.
-
-Also not a reason: **"local is slow."** Check what the current runtime actually is before assuming;
-timings from a superseded backend are not evidence about the one you'd dispatch to now.
-
-**Offload is the default, not a mandate.** The point is to stop *reflexively* doing bulk/mechanical
-work on the paid model — not to force a local hop onto trivia where it costs more than it saves. When
-in doubt on a real chunk of work, offload; on a one-liner, just do it. Absent budget pressure the
-whole annotation is optional — but the upfront pass costs nothing.
-
-## Route by role — operator by default, escalate when needed
-`operator` is the **broad default / catch-all**: any delegatable chunk goes here unless it clearly
-needs a specialist. The others are *escalations*, not separate silos — a role is a point on a
-spectrum of depth, not a narrow bucket. **When in doubt, `operator`.**
-
-| Role | Reach for it when… | How to brief it |
-|---|---|---|
-| **operator** (DEFAULT) | anything delegatable: read/search/summarize many files, log/diff/output analysis, mechanical transforms, format conversion, repetitive spec-driven edits, boilerplate/scaffold, draft prose, straightforward extraction. If it's not clearly one of the below, it's operator. | Exact task, inputs inline, exact output shape. Favor it. |
-| **reasoner** (escalate) | the chunk needs real multi-step reasoning: analyze *why*, enumerate trade-offs, draft a plan, structured comparison. | Question + full context; ask for its reasoning. |
-| **validator** (escalate) | independent validation / second-opinion / adversarial critique of a plan or diff. | Artifact + criteria; ask it to find flaws. Usually a curl dispatch (review needs no tool-driving). |
-| **utility** (down-shift) | trivial classification / extraction / tagging at high volume, where even operator is overkill. | Tight instruction + the items; keep it mechanical. |
-
-**Roles are filled by a (model × effort/thinking) pairing — not one model each.** The SAME weights
-serve different roles at different depths: fast/thinking-off = operator/utility; higher-effort or
-thinking-on = reasoner/validator. So a small roster covers a wide role spectrum by varying effort —
-and adding a role rarely means adding a model. Resolve which of *your* on-disk models (and at what
-effort) fills each role — **never hardcode a model name**, the roster changes:
 ```bash
-<repo>/bin/la-roles.sh          # per-role table — ● on disk / usable now, ○ not downloaded; shows each model's effort
-<repo>/bin/la-roles.sh <role>   # just the on-disk alias(es) for one role (empty = unfilled)
-# or `csl roles`
+<repo>/bin/la-roles.sh          # per-role table (● on disk / usable now)
+<repo>/bin/la-roles.sh <role>   # on-disk alias(es) for one role
 ```
 
-**Roles are extensible.** These four are the current canonical set; add more as the roster grows
-(e.g. `coder`, `vision`/OCR, `long-context`) — the registry `roles` field takes any tag and the
-resolver lists canonical + extras, so a new role is a tag plus a row here. If the existing roles feel
-too narrow for the work you keep doing, widen a role's "reach for it when" or add one — the goal is
-that most delegatable work maps to *some* role, so offload gets reached for often.
+A partial roster is fine: an unfilled role's work stays on cloud or waits for a download.
 
-**A partial roster is fine.** If `la-roles.sh` shows a role with no ● (nothing downloaded), keep that
-work on cloud or download a model (`install/download-models.sh`, interactive). Several ● under one
-role = your A/B choice — pick one or try both.
+## Briefing checklist (a dispatch is stateless — resend everything)
 
-## Briefing checklist — gaps a delegated local model will fill with plausible guesses
+Cover the silent failure points: ordering of returned collections; tie-breaking precedence;
+inclusive vs exclusive boundaries; empty/absent/malformed input behavior; timezone/locale values
+(assert structurally, e.g. ISO 8601). **ALWAYS mutation-test offloaded tests** — a passing test
+can hide a blind spot.
 
-A generative model cannot leave a gap blank — every unstated detail becomes a plausible
-GUESS asserted as fact. Before dispatching to a local model, verify your brief covers these
-common silent failure points:
+**Dispatch reviews: ask only what the payload can answer.** A stateless dispatch has no tools, no
+disk, no diff — asked beyond its inputs it confabulates in the same register as a real finding.
+Answerable-from-attached-files → safe (require file:line per claim); needs execution/unseen files
+→ not a dispatch, escalate to a free session; design verdicts → don't ask. Triage every finding
+against the real code before acting. `avoid_family` must be a roster family name (`--list`).
 
-- **Ordering of returned collections** — first vs last write wins? newest-first or
-  oldest-first? state it explicitly.
-- **Tie-breaking / precedence** — when two rules conflict, which wins? document it.
-- **Inclusive vs exclusive boundaries** — is the interval `[start, end]` or `[start, end)`?
-- **Empty / absent / malformed input** — what should the output be when the input is
-  missing, empty, or doesn't match the expected shape?
-- **Timezone- and locale-dependent values** — assert structurally (e.g. "ISO 8601"),
-  not with an exact string that breaks in a different locale.
+## Keep on the PAID model
 
-**Rule: ALWAYS mutation-test offloaded tests.** A passing test can hide a blind spot.
-Example: deleting a `where !known.contains` guard did NOT fail
-`testBaselineDoesNotOverwriteArchived` because `record(for:)` returns `.first` and the
-duplicate record hid behind the still-correct first entry; the test only bit once it
-asserted `records.count == 1` BEFORE unwrapping. If a test passes without the guard
-it's meant to test, the test is not verifying what you think — mutation-test it by
-temporarily breaking the code and confirming the test fails.
-
-## Dispatch reviews: ask only what the payload can answer
-
-A stateless dispatch has **no tools, no disk, no test runner, no diff** — it reasons only over the
-payload. Asked a question its inputs cannot answer, it does not decline and does not signal the
-gap: **it confabulates, in the same register as a real finding** (measured 2026-10-29: 25 findings,
-2 real, 23 fabricated-but-plausible, several labelled "critical" — taxonomy in
-`docs/dispatch-briefing-confabulation-2026-10-29.md`). Returning nothing is the honest failure;
-fabrication is the dangerous one. Classify before briefing:
-
-- **Answerable from attached files** → safe. **Closed enumerations** ("list every X; for each,
-  state whether it handles Y"), and require **file:line + the triggering input** per claim.
-- **Needs execution, unseen files, or a diff against another version** → **not a dispatch.**
-  Attach everything the reasoning needs — **never trim the test file from the payload** (the
-  trimmed instrument is what the largest fabrication cluster reasoned about instead of reading) —
-  or escalate to a free session, which can drive tools.
-- **Needs a design verdict** → don't ask. It will relitigate intentional design as noise.
-
-**Triage every finding against the real code before acting on any.** At a 2-in-25 hit rate,
-triage is where the value is; the real findings repay it (one was a regression the author's own
-suite could not see by construction).
-
-`avoid_family` must be a **roster family name** (`free-agent-tool.py --list`), not a branding
-guess — GLM's roster family is `zhipu`; unknown names are refused loudly by the tool.
-
-## Keep on the PAID model (quality-critical)
-Architecture / design decisions, tricky debugging, security-sensitive logic, the FINAL
-review / verification, and the orchestration & judgment itself. Offload the legwork; keep the
-judgment.
-
-**But check the free REMOTE lane before you conclude "this needs the paid model."** "Too hard for
-a 27B local model" is an argument for a 550B *free* one, not for spending. A step is only truly
-`cloud:` when it needs frontier judgment, this session's live tool state, or must not leave the
-machine — so prefer the annotation `remote:<provider>` over `cloud:` whenever the blocker was
-size rather than trust or coupling. **Verify local output before trusting it** — it's a smaller model, so a plausible-but-wrong
-answer is the risk; the point is that the legwork cost nothing.
-
-**Tool use is NOT a reason to avoid local.** A local *session* (the operator via
-`launch-claude-agent.sh`) drives Claude Code's tools fine — qwen-class models handle tool-calling
-normally; only a stateless curl *dispatch* can't run a tool loop. So "it involves tools" never
-disqualifies local. But be honest about the default: for tool-driving work **coupled to what this
-session is already doing**, cloud is usually right — it holds the live context and tool state. The
-local-*session* route is a deliberate move for one specific shape of work (below), not the default.
-
-### Advanced: delegate a tool-driving chunk to a parallel local session
-Worth it for a **big, isolated, verifiable** chunk (e.g. a mechanical refactor across many files then
-run the tests) — not for small or tightly-coupled tool-work. Launch a local session as a side worker
-(`bin/new-local-window.sh <alias>` opens an independent window) and let it grind while this cloud
-session continues. To make it pay off and stay safe:
-- **Isolate** — give it its own git worktree/branch or a disjoint file set, so the two agents can't clobber each other.
-- **Watch + verify** — local models hallucinate paths and botch tool schemas; supervise the session (tail its log / a monitor) and review its diff before trusting it. Never merge unsupervised local edits blind.
-- **Mind the infra** — check the live concurrency setting rather than assuming; a local session can be slower per turn than a dispatch, so this suits a long *background* chunk over latency-sensitive work. A free *remote* session is the faster option when the work may leave the machine.
-- **Amortize** — launching a session costs more than a curl dispatch; reach for it only when the chunk is substantial. Smaller → dispatch it, or keep it on cloud.
-
-The supervision + review is real cloud-attention cost, so the win is cheap *compute*, not zero effort.
-Use it when the chunk is big enough that $0 tool-driving compute clearly beats the coordination overhead.
-
-## Briefing (local dispatch is stateless)
-A dispatch is a stateless HTTP call — nothing carries between requests — so each one must be
-self-contained: the role you want the model to play, the inputs, and the exact output format,
-resent every call. For a bounded mechanical stage that's usually all it needs (task + inputs), not
-your full rule set. If the delegated work is architecture/code-shaped **and you maintain a standing-rules
-index for delegated work**, also fold its relevant lines into the prompt — handing a delegate your
-durable *rules* belongs to whatever keeps that index; this skill only covers the local-dispatch
-mechanics. (No dependency: with no such index, skip that step.)
+Architecture/design, tricky debugging, security-sensitive logic, FINAL review/verification, and
+the orchestration itself. Check the free REMOTE lane before concluding "needs paid" — size is an
+argument for a big FREE model, not for spending. Tool use is NOT a reason to avoid a local
+*session* (it drives tools fine; only stateless dispatch can't). Advanced pattern — a parallel
+local session for a big isolated chunk — in references/offload-in-depth.md.
 
 ## How to dispatch
+
 ```bash
-# ensure the right model is up (hotswap once for a batch), then curl it:
 PORT=$(<repo>/bin/local-llm-hotswap.sh <alias> | grep -o 'SUCCESS_PORT=[0-9]*' | cut -d= -f2)
 curl -s http://localhost:$PORT/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"<alias-or-spoof>","messages":[{"role":"user","content":"<role + task + inputs + output spec>"}],"max_tokens":1024}'
+  -d '{"model":"<alias>","messages":[{"role":"user","content":"<role + task + inputs + output spec>"}],"max_tokens":1024}'
+# long/open-ended generations: librarian-dispatch.py --port $PORT --payload body.json --outdir /tmp/la-out
 ```
-**Stream long or open-ended generations** with `librarian-dispatch.py` (SSE). Why stream: a **stall
-watchdog** aborts a hung local server (no tokens for N s) instead of blocking forever on a dead
-request; no timeout death on multi-minute runs (the connection keeps receiving); and live progress.
-It takes a **JSON body file** and an output dir (NOT `--prompt`/`--model` flags):
-```bash
-# write a standard chat-completions body, then dispatch it:
-echo '{"model":"<alias-or-spoof>","max_tokens":800,"messages":[{"role":"user","content":"<role + task + inputs + output spec>"}]}' > /tmp/body.json
-<repo>/bin/librarian-dispatch.py --port "$PORT" --payload /tmp/body.json --outdir /tmp/la-out
-# assistant text streams to /tmp/la-out/output.txt; live heartbeats print on stdout;
-# exit 0 = done, 2 = HTTP/engine error, 3 = transport. (The script sets stream=true for you.)
-```
-Don't wrap dispatches in `timeout` — it's GNU-only (absent on stock macOS) and the built-in stall
-watchdog already handles a hung server. Plain curl (above) is fine for short, bounded calls. For a
-single trivial item where spin-up costs more than it saves, just do it; when unsure, offload.
 
-## The supervised offload loop (put it together)
-Offloading pays off only when you **supervise** it. The repeatable loop:
-1. **Warm** the model once up front (`local-llm-hotswap.sh <alias>`, backgroundable) so the first
-   dispatch isn't paying cold-start latency; capture the `SUCCESS_PORT` it prints.
-2. **Route** — resolve role→model with `la-roles.sh` (never hardcode a name).
-3. **Decide** per step: `local:<role>` or `cloud:<reason>` (above).
-4. **Dispatch** the local step self-contained (stateless — resend the full briefing).
-5. **VERIFY against ground truth** — never trust local output blind. Compare it to something known
-   (the real file list, a functional test, a diff) and judge by an *observable outcome change*, not
-   "it replied / no error." A smaller model's failure mode is plausible-but-wrong.
-6. **Correct** — if it's off (hallucinated path, stale interface, wrong shape), fix the briefing and
-   re-dispatch, or finish on cloud. Retrying is cheap; the compute was free.
-7. **Hand off to your shipping discipline** (when the work is a repo/package change). Getting a change
-   *landed and live* is finish-discipline, not local-model discipline — it applies identically to work
-   you did yourself — so it is deliberately **not** specified here. Follow whatever shipping discipline
-   you already use for landing a change.
+## The supervised offload loop
 
-Grab cheap ground truth **before** dispatching (e.g. `ls` the real files) so step 5 is a comparison,
-not a fresh guess. The supervision is real cloud attention — that's the cost; the legwork compute is $0.
+1. **Warm** the model once (`local-llm-hotswap.sh <alias>`), capture `SUCCESS_PORT`.
+2. **Route** role→model with `la-roles.sh`.
+3. **Decide** per step: `local:`/`remote:`/`cloud:<reason>`.
+4. **Dispatch** self-contained.
+5. **VERIFY** against ground truth (real file list, functional test, diff) — judge by an
+   observable outcome change, not "it replied".
+6. **Correct** — fix the briefing and re-dispatch, or finish on cloud. Retrying is free.
+7. **Hand off** to your own shipping discipline when the work lands a change.
 
 ## Branding (📡🦾)
 
