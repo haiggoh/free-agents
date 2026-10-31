@@ -356,7 +356,7 @@
       "model_id": "mistralai/mistral-large-4-1t-a52b",
       "display": "Mistral Large 4 (Le Chonk)",
       "tier": "unknown",
-      "notes": "TOP PICK for full free sessions (2026-10-29). 1.05T total / 52B active granular MoE, multimodal, 1M context, NVFP4 on NIM since 2026-10-29; fills the gap left by GLM 5.3's retirement from the NVIDIA API.",
+      "notes": "TOP PICK for full free sessions (2026-10-29). 1.05T total / 52B active granular MoE, multimodal, 1M context, NVFP4 on NIM since 2026-10-29; fills the gap left by GLM 5.3's retirement from the NVIDIA API. Faster and more responsive than GLM 5.3 Flash in full sessions (user 2026-10-31).",
       "autocompact_default": "1m"
     },
     {
@@ -365,7 +365,7 @@
       "model_id": "z-ai/glm-5.3-flash",
       "display": "Z.ai GLM 5.3 Flash (thinking)",
       "tier": "unknown",
-      "notes": "Same model as nvidia-glm53 — thinking is always-on on NIM; this alias defaults reasoning_effort high. Fast (1-4s) AND sharp: takes over GLM 5.3 full's deep-work reputation (finds problems and solutions on its own; 1M context).",
+      "notes": "Same model as nvidia-glm53 — thinking is always-on on NIM; this alias defaults reasoning_effort high. Sharp: takes over GLM 5.3 full's deep-work reputation (finds problems and solutions on its own; 1M context). Speed caveat: the 1-4s figure is a stateless ping — in a full session Le Chonk is faster and more responsive (user 2026-10-31).",
       "autocompact_default": "-"
     },
     {
@@ -392,7 +392,7 @@
       "model_id": "z-ai/glm-5.3-flash",
       "display": "Z.ai GLM 5.3 Flash",
       "tier": "unknown",
-      "notes": "FAST (1-4s) and quality work: inherits GLM 5.3's sharpness at investigating context — finds problems and solutions on its own; the fast sibling of the retired GLM 5.3 full (410 EOL 2026-10-28). Always-thinking on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.",
+      "notes": "Quality work: inherits GLM 5.3's sharpness at investigating context — finds problems and solutions on its own; the quality successor of the retired GLM 5.3 full (410 EOL 2026-10-28). Speed caveat: the 1-4s figure is a stateless single-prompt ping — in a full session no model is that fast and Le Chonk is faster and more responsive (user 2026-10-31). Always-thinking on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.",
       "autocompact_default": "-"
     },
     {
@@ -401,7 +401,7 @@
       "model_id": "stepfun-ai/step-5-preview",
       "display": "StepFun Step 5 Preview",
       "tier": "unknown",
-      "notes": "SESSION-PROVEN (user 2026-10-24): an 18-hour session, 589 turns, ZERO API errors — shipped cost-tracker 0.16.0-0.18.0 across three worktrees. Median turn 23 s. Now ranks above Nemotron 3 Ultra; also in the dispatch order and session fallbacks.",
+      "notes": "SESSION-PROVEN (user 2026-10-24): an 18-hour session, 589 turns, ZERO API errors — shipped cost-tracker 0.16.0-0.18.0 across three worktrees. Median turn 23 s. Now ranks above Nemotron 3 Ultra; also in the dispatch order and session fallbacks. Blazingly fast, but quality varies: it tends to loop back and forth on misapplied tool uses it struggles with (user 2026-10-31).",
       "autocompact_default": "1m"
     },
     {

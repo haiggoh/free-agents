@@ -158,7 +158,7 @@ If you use [rtk](https://github.com/rtk-ai/rtk) (an output-condensing Bash hook)
 
 Keep driving with your cloud model. Send bounded sub-tasks to a free model, either local (`curl`,
 `librarian-dispatch.py --port`, `lowkey`) or remote (`librarian-dispatch.py --provider`). Your main
-session does not change. The `offload-to-local` skill teaches the model when and how to do this, and
+session does not change. The `offload` skill teaches the model when and how to do this, and
 the [Usage](#usage) section has the commands.
 
 ### A full remote session: the fastest free lane
@@ -194,7 +194,8 @@ highlight the model (`config/remote-model-notes.json`).
 (2026-10-29).** `mistralai/mistral-large-4-1t-a52b`: 1.05T total / 52B active granular MoE,
 multimodal, 1M context, served NVFP4 on NVIDIA NIM since 2026-10-29 (released by Mistral on
 2026-10-06). Fills the gap left by GLM 5.3's retirement from the NVIDIA API. Fast and strong
-on tool use — observed in a live full Claude Code session from day one.
+on tool use — observed in a live full Claude Code session from day one; faster and more
+responsive than GLM 5.3 Flash in full sessions (user 2026-10-31).
 
 **Nemotron 3 Ultra** — `nvidia-nemotron-ultra` / `nvidia-nemotron-ultra-thinking`
 Capable on clearly-instructed work, relatively fast, 1M context. Tends to think for long
@@ -209,21 +210,22 @@ verify its "done" before shipping. Nemotron 3 Super takes these shortcuts even m
 Extremely fast, but takes the path of least resistance and declares goals fulfilled
 prematurely. Good for quick, well-scoped asks; check its "done".
 
-**GLM 5.3 — DEPRECATED 2026-10-29** — `nvidia-glm53-full` / `nvidia-glm53-full-thinking`
-(z-ai/glm-5.3 was retired from the NVIDIA API; use **Mistral Large 4** above instead.)
-Very smart reasoning model, excellent at understanding context and finding problems and
-solutions on its own — comparatively slow, ideal for unattended overnight work. 1M
-context. Thinking and output are well balanced; queued-prompt nudging works well here
-too. One caution: **don't `/resume` a long GLM session cold** — start the session with a
-throwaway prompt (e.g. "hello"), wait for the first response, and only then use
-`/resume-interrupted`. The first prompt of a GLM 5.3 session takes unusually long; once
-the session is going it speeds up and produces significant work. (The `-full` aliases
-carry a ~1-minute NVIDIA-side door charge before the first token — payload-independent.)
+**GLM 5.3 — RETIRED 2026-10-31** — `nvidia-glm53-full` / `nvidia-glm53-full-thinking`
+(z-ai/glm-5.3): NVIDIA answers **410 Gone** — "reached its end of life on
+2026-10-28T08:00:00Z" — and the live catalog no longer lists the id (checked 2026-10-31,
+GET only). Both aliases are hidden from the picker via `config/broken-nvidia-models.json`.
+Use **Mistral Large 4** above instead. Was: very smart reasoning model, excellent at
+understanding context and finding problems and solutions on its own — comparatively slow
+(~1-minute door charge before the first token), ideal for unattended overnight work.
+1M context.
 
 **GLM 5.3 Flash** — `nvidia-glm53` / `nvidia-glm53-thinking`
-Significantly faster (fewer parameters) than GLM 5.3, but still surprisingly smart —
-good at investigating and understanding the context it is working in. Thinking and
-output well balanced. The everyday driver among the reasoning models.
+Sharp: it takes over GLM 5.3 full's reputation for investigating the
+context and finding problems and solutions on its own — the quality successor of the
+retired full model, not a downgrade. Thinking and output well balanced; 1M context.
+Speed caveat (user 2026-10-31): the often-quoted 1-4s is a stateless single-prompt ping —
+in a full Claude Code session no model is that fast, and **Le Chonk is faster and more
+responsive than Flash there**.
 
 **Laguna XS 2.1** (`nvidia-laguna`) is no longer listed here (2026-10-29): it is a small
 model we run **locally** (`laguna-xs2.1-optiq-4bit` in `config/model-catalog.psv`) instead —
@@ -593,7 +595,7 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
 - **skills (8)** — two entry points, five that each own one phase of a delegation, and a fallback:
   - `free-agents` — drive local and remote free sessions & dispatch.
-  - `offload-to-local` — the habit-forming trigger to delegate bulk/mechanical work to a local model to
+  - `offload` — the habit-forming trigger to delegate bulk/mechanical work to a local model to
     save cost. The plugin's main idea.
   - `compose-the-payload` — build the dispatch **material** from files on disk, so the corpus never
     enters your own context (this is the actual cost lever).
@@ -855,7 +857,7 @@ fallback router / `free-agent-tool.py` built on it) shares that bucket too.
 
 **Supervise it.** Offloading pays off only when you verify the result: warm → route (`la-roles.sh`) →
 decide `local:`/`cloud:` per step → dispatch → **verify against ground truth** (never trust local
-output blind) → correct/re-dispatch. The `offload-to-local` skill documents this loop in full. (Landing
+output blind) → correct/re-dispatch. The `offload` skill documents this loop in full. (Landing
 the change afterwards is ordinary shipping discipline, so this plugin deliberately doesn't specify it.)
 
 **Full local session** (a local model as the session engine):

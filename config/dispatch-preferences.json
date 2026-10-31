@@ -1,6 +1,6 @@
 {
  "description": "Default model order for free dispatch offloading (bin/free-agent-tool.py). The first AVAILABLE entry is used; a failed dispatch falls over to the next. Remote entries need ~/.api_keys/<provider>; local entries need their weights on disk. Override the whole list with config/dispatch-preferences.local.json (gitignored) or FA_DISPATCH_PREFS=<path>. Every entry needs family and roles (tests enforce it). An entry with smoke_tested=false is skipped until a smoke test passes, unless FA_DISPATCH_INCLUDE_UNTESTED=1. A request may name a \"role\" (operator, reasoner, validator, utility): only entries listing that role run, in this order. \"avoid_family\" skips a model family, so an adversarial review comes from a different family than the work it reviews: a different family often finds what a stronger same-family model misses. An optional \"thinking\": \"on\"|\"off\"|\"auto\" per entry (absent = auto) resolves the reasoning dial by role first (reasoner/validator dispatches think, operator/utility do not) and by model constraint last — GLM on NIM always thinks (OFF travels as reasoning_effort low), Nemotron's enable_thinking is not sendable statelessly (an OFF there is reported overridden). The resolution is reported in the result JSON as thinking / thinking_overridden / thinking_note.",
- "maintainer_note": "A-tier roster set by the free-agents maintainer, 2026-10-21, in order: Gemini 3.8 Flash, DeepSeek V4.1 Flash (NVIDIA), GLM 5.3, GLM 5.3 Flash, StepFun Step 5 Preview (user 2026-10-24: session-proven, 18 h zero errors), Nemotron 3 Ultra (fallback), then local DeepSeek V4 Flash, Laguna S, KAT Coder (fast, smaller: less sophisticated on hard tasks). Roles (maintainer-approved draft, 2026-10-21) say what each model is strong at; cross-family review is preferred over raw capability for adversarial checks. Kimi K3 was on the list but is NOT included: smoke-tested 2026-10-21, NVIDIA returns 410 Gone (end of life 2026-10-15) and Hugging Face, SiliconFlow, LLM7 and Kilo all answer 402 (paid credits required). NVIDIA was heavily restricted on 2026-10-21; re-evaluate this roster in a future update. The roster will change: add or remove entries here, keeping family and roles set. GLM 5.3 (full) will be deprecated by NVIDIA soon; GLM 5.3 Flash is expected to stay. Other NVIDIA models may deserve a place here: investigate in a future update.",
+ "maintainer_note": "A-tier roster set by the free-agents maintainer, 2026-10-21; re-ordered 2026-10-31: Gemini 3.8 Flash stays FIRST for stateless DISPATCHES while its daily quota lasts (user 2026-10-31: superior and faster for that shape); Mistral Large 4 (Le Chonk, NVIDIA) is SECOND for dispatches but FIRST for full sessions (pins + fallback chains; user top pick 2026-10-29). Then DeepSeek V4.1 Flash (NVIDIA), GLM 5.3 Flash, StepFun Step 5 Preview (user 2026-10-24: session-proven, 18 h zero errors), Nemotron 3 Ultra (fallback), then local DeepSeek V4 Flash, Laguna S, KAT Coder (fast, smaller: less sophisticated on hard tasks). Roles (maintainer-approved draft, 2026-10-21) say what each model is strong at; cross-family review is preferred over raw capability for adversarial checks. Kimi K3 was on the list but is NOT included: smoke-tested 2026-10-21, NVIDIA returns 410 Gone (end of life 2026-10-15) and Hugging Face, SiliconFlow, LLM7 and Kilo all answer 402 (paid credits required). GLM 5.3 full (z-ai/glm-5.3) was REMOVED 2026-10-31: NVIDIA retired it (410 Gone, end of life 2026-10-28T08:00:00Z; live catalog no longer lists it) — retired ids must never stay in this file or in fallback chains. The roster will change: add or remove entries here, keeping family and roles set.",
  "order": [
   {
    "id": "gemini-3.8-flash",
@@ -18,7 +18,25 @@
     "validator",
     "utility"
    ],
-   "note": "Strong all-rounder; fast. Free quota runs out fast in a full session, so use it for dispatch."
+   "note": "Strong all-rounder; fast. Leads stateless dispatches while its daily quota lasts (user 2026-10-31: superior and faster for that shape); free quota runs out fast in a full session, so use it for dispatch."
+  },
+  {
+   "id": "nvidia-mistral-large4",
+   "kind": "remote",
+   "provider": "nvidia",
+   "model": "mistralai/mistral-large-4-1t-a52b",
+   "display": "Mistral Large 4 (Le Chonk, NVIDIA)",
+   "reasoning_effort": "high",
+   "max_tokens": 128000,
+   "smoke_tested": true,
+   "family": "mistral",
+   "roles": [
+    "operator",
+    "reasoner",
+    "validator",
+    "utility"
+   ],
+   "note": "TOP PICK for full SESSIONS (user 2026-10-29): 1.05T total / 52B active granular MoE, multimodal, 1M context, NVFP4 on NIM; faster and more responsive than GLM Flash in full sessions (user 2026-10-31). Second for dispatches (after Gemini). Fills the gap left by GLM 5.3 full (NVIDIA 410 EOL 2026-10-28T08:00:00Z; removed from this file 2026-10-31)."
   },
   {
    "id": "nvidia-deepseek-v4.1-flash",
@@ -35,22 +53,6 @@
     "validator"
    ],
    "note": "Thorough analysis and review; slow per request (minutes), too slow for a full session."
-  },
-  {
-   "id": "nvidia-glm-5.3",
-   "kind": "remote",
-   "provider": "nvidia",
-   "model": "z-ai/glm-5.3",
-   "display": "GLM 5.3 (NVIDIA, slow lane)",
-   "reasoning_effort": "high",
-   "max_tokens": 128000,
-   "smoke_tested": true,
-   "family": "zhipu",
-   "roles": [
-    "reasoner",
-    "validator"
-   ],
-   "note": "Deep-work lane: about a minute before the first token, excellent quality. NVIDIA is deprecating it soon; usable for now. GLM 5.3 Flash stays."
   },
   {
    "id": "nvidia-glm-5.3-flash",
@@ -146,15 +148,15 @@
  ],
  "session_fallbacks": {
   "description": "Fallback chain for a FREE SESSION's proxy (bin/remote-session.sh), used when the session's own model is throttled upstream: the proxy answers from the next model here, same port, no restart. Same provider only (a session would drain another provider's free quota). The session's own model is skipped. LA_REMOTE_FALLBACKS=off disables; LA_REMOTE_FALLBACKS=provider:model,... overrides.",
-  "maintainer_note": "Order set 2026-10-21: GLM 5.3 Flash, GLM 5.3, DeepSeek V4.1 Flash (slow but superior quality, so above Nemotron), Nemotron 3 Ultra last (least capable, least likely to be throttled).",
+  "maintainer_note": "Order set 2026-10-31: Mistral Large 4 (Le Chonk) first, then GLM 5.3 Flash, DeepSeek V4.1 Flash (slow but superior quality, so above Nemotron), Step 5 Preview, Nemotron 3 Ultra last (least capable, least likely to be throttled). z-ai/glm-5.3 removed — retired by NVIDIA (410 EOL 2026-10-28T08:00:00Z); a retired id must never be in a fallback chain.",
   "order": [
    {
     "provider": "nvidia",
-    "model": "z-ai/glm-5.3-flash"
+    "model": "mistralai/mistral-large-4-1t-a52b"
    },
    {
     "provider": "nvidia",
-    "model": "z-ai/glm-5.3"
+    "model": "z-ai/glm-5.3-flash"
    },
    {
     "provider": "nvidia",

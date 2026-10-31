@@ -54,9 +54,10 @@ class Base(unittest.TestCase):
 class LoadingTests(Base):
     def test_shipped_file_parses_in_the_maintainers_order(self):
         order = [e["id"] for e in fat.load_preferences({})["order"]]
-        self.assertEqual(order[:6], ["gemini-3.8-flash", "nvidia-deepseek-v4.1-flash",
-                                     "nvidia-glm-5.3", "nvidia-glm-5.3-flash", "nvidia-step5-preview",
-                                     "nvidia-nemotron-3-ultra"])   # stepfun above nemotron (user 2026-10-24)
+        self.assertEqual(order[:6], ["gemini-3.8-flash", "nvidia-mistral-large4",
+                                     "nvidia-deepseek-v4.1-flash", "nvidia-glm-5.3-flash",
+                                     "nvidia-step5-preview",
+                                     "nvidia-nemotron-3-ultra"])   # Gemini first for dispatches while quota lasts, Le Chonk second (user 2026-10-31); GLM 5.3 full removed 2026-10-31 (410 EOL 2026-10-28); stepfun above nemotron (user 2026-10-24)
         self.assertEqual(order[6:], ["local-deepseek-v4-flash", "local-laguna-s", "local-kat-coder"])
 
     def test_every_shipped_entry_has_a_family_and_known_roles(self):

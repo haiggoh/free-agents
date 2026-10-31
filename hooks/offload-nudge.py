@@ -92,7 +92,7 @@ def paid_nudge(root: str, modes: dict | None = None) -> str:
         "judgment, integration and the final check on this session. After this session's free "
         "attempts are honestly exhausted (a dispatch result says \"paid_fallback_allowed\": true), "
         "ONE native Agent call is let through automatically — the honest-exhaustion escape; a "
-        "corrupt settings layer never blocks the call. Full guidance: the offload-to-local skill."
+        "corrupt settings layer never blocks the call. Full guidance: the offload skill."
     )
 
 
@@ -106,7 +106,7 @@ def free_nudge(root: str) -> str:
         "session's own model misses. For that, run a stateless dispatch: "
         f"`python3 {tool}` with {{\"prompt\": ..., \"files\": [paths], \"role\": \"validator\", "
         "\"avoid_family\": \"<this session's model family>\"} (attach the files; a dispatch cannot "
-        "read the disk). Announce the model and route before offloading. Guidance: the offload-to-local "
+        "read the disk). Announce the model and route before offloading. Guidance: the offload "
         "skill (council routing)."
     )
 
