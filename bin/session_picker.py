@@ -128,16 +128,18 @@ def auto_sync_registry(models) -> str:
     gone = list(MISSING_MODELS)
     if not new and not gone:
         return ""
+    # 0.50.1: ONE batched call — the per-model loop spawned a full bash+config+python per
+    # model (the same class as the 2026-10-29 roster fix: ~255 spawns, ~9 s).
     registered, failed = 0, []
-    for x in new:
-        r = _run([csl, "--register-model", x.folder or x.alias])
+    if new:
+        r = _run([csl, "--register-models", *[x.folder or x.alias for x in new]])
         if r.returncode == 0:
-            registered += 1
+            registered = len(new)
         else:
-            failed.append(x.alias)
+            failed = [x.alias for x in new]
     moved = 0
     if gone:
-        r = _run([csl, "--unregister-model", *gone])
+        r = _run([csl, "--unregister-models", *gone])
         if r.returncode == 0:
             moved = len(gone)
         else:
@@ -940,6 +942,8 @@ class Picker(App):
             pass
         try:
             agents = self.cache.get("remote") or []
+            hidden_prov = set(getattr(self.settings, "hidden_providers", None) or [])   # 0.50.1
+            agents = [a for a in agents if a.provider not in hidden_prov]
             provs = sorted({a.provider for a in agents if a.has_key})
             st["providers"] = ", ".join(provs) if provs else "none"
             if agents:
@@ -1632,6 +1636,12 @@ class Picker(App):
         for a in self.cache.get("remote") or []:
             if (not a.has_key or a.provider in self.catalog_rows
                     or f"rcat:{a.alias}" in getattr(self, "_loading", set())):
+                continue
+            # 0.50.1: a fresh disk cache means NO live GET this session — seed from it.
+            fresh = m.catalog_cache_fresh(a.provider, float(os.environ.get("LA_CATALOG_CACHE_MAX_AGE_H", "6")))
+            if fresh:
+                self.catalog_rows[a.provider] = list(fresh)
+                self.catalog_counts[a.provider] = len(fresh)
                 continue
             self.catalog_counts.setdefault(a.provider, len(m.read_catalog_cache(a.provider) or []))
             kinds.append(f"rcat:{a.alias}")

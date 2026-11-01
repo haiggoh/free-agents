@@ -131,6 +131,10 @@ class _EagerEnv(PilotCase):
     def setUp(self):
         super().setUp()
         os.environ["LA_EAGER_CATALOGS"] = "1"   # the harness default opts the suite out
+        # 0.50.1: fresh-cache skip would bypass the live fetches these tests assert —
+        # pin max age to 0 so the eager path always goes live under test.
+        os.environ["LA_CATALOG_CACHE_MAX_AGE_H"] = "0"
+        self.addCleanup(os.environ.pop, "LA_CATALOG_CACHE_MAX_AGE_H", None)
 
     def _install_stub(self, secs=0):
         stub = Path(self.env["CSL_REMOTE_LAUNCHER"])

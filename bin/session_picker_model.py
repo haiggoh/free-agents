@@ -225,6 +225,20 @@ def write_catalog_cache(provider: str, rows: list) -> None:
         pass
 
 
+def catalog_cache_fresh(provider: str, max_age_hours: float = 6.0) -> "list[CatalogModel] | None":
+    """0.50.1: disk-cached rows when the cache file is fresh (LA_CATALOG_CACHE_MAX_AGE_H,
+    default 6 h), else None. Lets the eager warm-up skip live catalog GETs when the cache
+    is fresh — the per-session live refetch was the startup slowdown (69 s cold NVIDIA)."""
+    rows = read_catalog_cache(provider)
+    if not rows:
+        return None
+    try:
+        age_h = (time.time() - (catalog_cache_dir() / f"{provider}.json").stat().st_mtime) / 3600.0
+    except OSError:
+        return None
+    return rows if age_h <= max_age_hours else None
+
+
 def read_catalog_cache(provider: str) -> "list[CatalogModel] | None":
     """Cached rows for a provider, or None when missing/corrupt — never raises. Rows whose
     id is not a string are dropped (a corrupt entry must not poison the whole file)."""
@@ -1425,10 +1439,12 @@ class RemoteScreen(Screen):
         if self.search:
             n = sum(len(g.items) for g in self.accordion.groups if not g.id.startswith("__"))
             return f'{n} model(s) matching "{self.search}"  — the filter box above the list is live; empty shows all'
-        vis = sum(1 for a in self.agents if self._visible(a) and a.model_id != "SELECT")
+        hidden_prov = set(getattr(self.settings, "hidden_providers", None) or [])   # 0.50.1
+        vis = sum(1 for a in self.agents
+                  if self._visible(a) and a.model_id != "SELECT" and a.provider not in hidden_prov)
         hidden = self.hidden_count()
         for prov, cat in self.catalogs.items():
-            if not isinstance(cat, list) or not cat:
+            if not isinstance(cat, list) or not cat or prov in hidden_prov:
                 continue
             # Same tier/dedupe rules as _catalog_items, so this count can never disagree
             # with the rendered rows (2026-10-27: the subheadline under the title counted
@@ -2603,9 +2619,9 @@ def about_backend_lines(home: Path, repo: Path) -> list[str]:
     venvs (hf-py312). Health comes from the managers' real installed_versions() (runs the
     interpreter), and the pin is read from the LIVE config (config-lib's own resolution) — the
     old code read backend-pin.txt, a file no code ever writes, so About could never show a pin.
-    Format: "<fam>  📌 pinned <ver> (<health>)" (0.50.1: the promoted version carries the pin
-    emoji, not the warning triangle) or "<fam>  <n> installed, not pinned
-    (auto-discovery: <ver>)"; broken / pinned-keg versions are flagged with ⚠️.
+    Format: "<fam>  <pin-emoji> pinned <ver> (<health>)" (0.50.1: the promoted version
+    carries the pin emoji, not the warning triangle) or "<fam>  <n> installed, not pinned
+    (auto-discovery: <ver>)"; broken / pinned-keg versions are flagged with the warning emoji.
     Emoji spacing goes through ec.gap() (narrow+VS16 emoji are drawn 2 cols wide).
     """
     warn = ec.EMOJI_WARNING_STR

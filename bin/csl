@@ -104,7 +104,7 @@ HELP
     --picker-launch)
       break   # internal: picker -> local session; handled after config load
       ;;
-    --register-model|--unregister-model)
+    --register-model|--unregister-model|--register-models|--unregister-models)
       break   # internal: picker registry hygiene; handled after config load
       ;;
     -?*)
@@ -296,6 +296,24 @@ if [ "${1:-}" = "--unregister-model" ]; then
   shift
   _unregister_model_cmd "$@"
   exit $?
+fi
+# 0.50.1: plural forms batch in ONE process — the picker's auto-sync used to spawn one
+# csl invocation per model (same class as the 2026-10-29 roster fix: ~255 spawns, ~9 s).
+if [ "${1:-}" = "--register-models" ]; then
+  shift
+  rc=0
+  for folder in "$@"; do
+    _register_model_cmd "$folder" || rc=1
+  done
+  exit $rc
+fi
+if [ "${1:-}" = "--unregister-models" ]; then
+  shift
+  rc=0
+  for alias in "$@"; do
+    _unregister_model_cmd "$alias" || rc=1
+  done
+  exit $rc
 fi
 
 EFFORTS=(low medium high xhigh max)     # claude --effort <level>
