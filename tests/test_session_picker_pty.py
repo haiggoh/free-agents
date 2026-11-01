@@ -17,6 +17,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from picker_harness import RECORDER, ROOT, PilotCase, PTYCase, inventory_stub  # noqa: E402
+import pytest  # noqa: E402
+
+pytestmark = pytest.mark.load_sensitive  # drives the real picker in PTY processes
 
 
 class PickerNavigation(PilotCase):

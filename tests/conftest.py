@@ -56,6 +56,14 @@ def pytest_report_header(config):
 
 
 def pytest_configure(config):
+    # Load-sensitive marker (2026-11-01 pty-litellm-venv flake): tests that spawn real
+    # processes or drive the picker PTY harness depend on shared-machine load and the
+    # shared nvidia rate limiter, so they can flake one-per-run at load > 10 even with
+    # load-scaled timeouts. Deselect them on a loaded box with: pytest -m "not load_sensitive"
+    config.addinivalue_line(
+        "markers",
+        "load_sensitive: test spawns real processes / PTY harness and flakes under extreme "
+        "shared load (incl. rate-limiter pressure); deselect with -m 'not load_sensitive'")
     # Catalog-cache tripwire (2026-11-01): a test that writes the REAL catalog cache
     # (~/.local/state/local-agents/remote-catalogs) pollutes every later picker start —
     # fixture rows show up as live models ("nvidia/cat-two"…). Tests must sandbox

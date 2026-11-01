@@ -22,6 +22,10 @@ import subprocess
 import sys
 import unittest
 
+import pytest
+
+pytestmark = pytest.mark.load_sensitive  # spawns real python subprocesses
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SHIM_DIR = REPO / "install" / "hf-ipv4"
 SHIM_FILE = SHIM_DIR / "sitecustomize.py"

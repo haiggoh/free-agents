@@ -20,6 +20,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from picker_harness import RECORDER, ROOT, PilotCase, PTYCase  # noqa: E402
+import pytest  # noqa: E402
+
+pytestmark = pytest.mark.load_sensitive  # UI flows drive the real picker (pilot/PTY)
 
 sys.path.insert(0, str(ROOT / "bin"))
 

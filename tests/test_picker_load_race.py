@@ -22,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import session_picker_model as m  # noqa: E402
 from picker_harness import RECORDER, REMOTE_INV, PilotCase, inventory_stub  # noqa: E402
 
+pytestmark = pytest.mark.load_sensitive  # drives the real picker in pilot processes
+
 
 @pytest.fixture(autouse=True)
 def _sandbox_catalog_cache():

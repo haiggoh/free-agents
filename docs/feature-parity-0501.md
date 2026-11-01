@@ -88,11 +88,18 @@ regression reports (nvidia catalog pollution, lowkey API list, About pin/count, 
   weight rule for all dirs, pure-expansion escapes/sanitize. Measured 2026-11-01: 22 s → 4.6 s wall,
   byte-identical TSV output (44 lines, diff-verified against the pre-change tree). Waypoint
   `csl-inventory-takes-23s-wall` to be closed with this commit as evidence.
-- PTY/litellm tests still flake one-per-run at extreme external load (load > 10) — waypoint
-  `pty-litellm-venv-tests-flake`; timeouts are now load-scaled, which narrows but cannot
-  eliminate it on a shared box.
-- Local pyright binary broken (brew simdjson) — waypoint `local-pyright-binary-broken`;
-  CI/editor diagnostics unaffected.
+- ~~PTY/litellm/venv tests flaking at extreme load~~ PARTLY RESOLVED on `fix/0502-known-gaps`:
+  timeouts are load-scaled (0.50.1) AND the load-sensitive modules (PTY harness drivers,
+  litellm/venv subprocess spawn tests) now carry the registered `load_sensitive` pytest
+  marker, so a loaded gate runs `pytest -m "not load_sensitive"` instead of flaking
+  (marker tests in test_loadscale.py, mutation-checked). Residual: at load > 10 even
+  load-scaled waits can still exceed, so the marker is the operational answer, not a fix
+  of the environment — waypoint `pty-litellm-venv-tests-flake` stays open for that reason.
+- ~~Local pyright binary broken (brew simdjson)~~ RESOLVED 2026-11-01: `~/.local/bin/pyright`
+  runs again (1.1.414; single-file 0 errors, full project completes with diagnostics);
+  brew now ships libsimdjson.36. The 252 full-project errors are the known pre-existing
+  pile (waypoint `free-agents-preexisting-pyright-defects`), not the binary gap.
+  Waypoint `local-pyright-binary-broken` closed.
 - `rtc-ship.sh --versions-only` is check-only; a separate bump action is wanted — waypoint
   `rtc-ship-sh-split-the-version` (run-to-completion repo).
 

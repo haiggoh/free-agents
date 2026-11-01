@@ -23,6 +23,9 @@ import managers.llama_cpp  # noqa: F401,E402
 import managers.rapid_mlx  # noqa: F401,E402
 import managers.vllm_mlx  # noqa: F401,E402
 from managers import list_managers  # noqa: E402
+import pytest  # noqa: E402
+
+pytestmark = pytest.mark.load_sensitive  # spawns real backend/python subprocesses
 
 
 def _brew(argv, stdout="", rc=0):

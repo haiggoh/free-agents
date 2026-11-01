@@ -23,6 +23,9 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "install"))
 
 from managers import durability  # noqa: E402
+import pytest  # noqa: E402
+
+pytestmark = pytest.mark.load_sensitive  # builds REAL venvs in temp dirs (slow under load)
 
 MM = "%d.%d" % sys.version_info[:2]
 EXE = f"python{MM}"

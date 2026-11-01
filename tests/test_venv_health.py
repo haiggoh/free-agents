@@ -18,6 +18,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "install"))
 
 from managers._common import VenvHealth, venv_health  # noqa: E402
+import pytest  # noqa: E402
+
+pytestmark = pytest.mark.load_sensitive  # builds REAL venvs in temp dirs (slow under load)
+
 
 
 def make_venv(root: Path, binary: str = "rapid-mlx") -> Path:

@@ -14,6 +14,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.load_sensitive  # spawns real pipx/python subprocesses
+
 REPO = Path(__file__).resolve().parents[1]
 CLI = REPO / "install" / "manage-backend.py"
 

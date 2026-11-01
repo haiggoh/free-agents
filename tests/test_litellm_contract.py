@@ -41,6 +41,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))          # for loadscale
 import loadscale   # noqa: E402 — load-scaled timeouts (waypoint pty-litellm-venv-tests-flake)
+import pytest      # noqa: E402
+
+pytestmark = pytest.mark.load_sensitive  # spawns real litellm proxy processes
 LITELLM_PY = Path(os.environ.get("LA_LITELLM_PY") or
                   Path.home() / ".local/pipx/venvs/litellm/bin/python")
 MASTER = "sk-local-agents-remote"
