@@ -61,6 +61,21 @@ class StateTests(unittest.TestCase):
         doc = json.loads(self.file.read_text())
         self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)
 
+    def test_hidden_providers_round_trip_and_clear(self):
+        # 0.50.0 (waypoint api-keys-provider-hide-toggle): the hidden-provider list
+        # persists, clears, and a pre-0.50.0 (schema 7) file without the section loads empty.
+        self.assertIsNone(sms.save_hidden_providers(self.cfg, ["groq", "vercel"]))
+        self.assertEqual(sorted(sms.load(self.cfg).hidden_providers), ["groq", "vercel"])
+        doc = json.loads(self.file.read_text())
+        self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)
+        self.assertIsNone(sms.save_hidden_providers(self.cfg, []))
+        self.assertEqual(sms.load(self.cfg).hidden_providers, [])
+        doc7 = json.loads(self.file.read_text())
+        doc7["schema_version"] = 7
+        doc7.pop("hidden_providers", None)
+        self.file.write_text(json.dumps(doc7))
+        self.assertEqual(sms.load(self.cfg).hidden_providers, [])
+
     def test_provider_default_is_a_sentinel_that_means_omit(self):
         # Fails if provider_default is turned into a real effort string.
         sms.save_effort(self.cfg, "remote_api_session", "provider_default")
@@ -475,10 +490,10 @@ class StateTests(unittest.TestCase):
         # would reject a file its schema claim says it understands (workflow finding #7 pattern).
         sms.save_thinking_session(self.cfg, False)
         doc = json.loads(self.file.read_text())
-        self.assertEqual(doc["schema_version"], 7)
-        self.assertIn(6, sms.READABLE_SCHEMAS)          # schema-6 files still load
-        # Simulate the OLD reader: schemas 1..6 only. It must refuse LOUDLY, not load.
-        with mock.patch.object(sms, "READABLE_SCHEMAS", (1, 2, 3, 4, 5, 6)):
+        self.assertEqual(doc["schema_version"], 8)
+        self.assertIn(7, sms.READABLE_SCHEMAS)          # schema-7 files still load
+        # Simulate the OLD reader: schemas 1..7 only. It must refuse LOUDLY, not load.
+        with mock.patch.object(sms, "READABLE_SCHEMAS", (1, 2, 3, 4, 5, 6, 7)):
             state = sms.load(self.cfg)
             self.assertTrue(any("schema_version" in w for w in state.warnings))
             self.assertIsNone(state.thinking_session)   # defaults, not a silent half-read

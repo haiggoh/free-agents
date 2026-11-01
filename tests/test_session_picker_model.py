@@ -859,6 +859,36 @@ class LowkeyTests(unittest.TestCase):
                          "the advanced group is dropped entirely in 0.50.0")
 
 
+class APIKeysHideToggleTests(unittest.TestCase):
+    def test_hide_toggle_persists_and_remote_list_drops_the_provider(self):
+        # 0.50.0 (waypoint api-keys-provider-hide-toggle): the API-keys screen offers a
+        # per-provider Hide/Show item; toggling persists via the save callback, marks the
+        # label, and the remote choose-model list drops the provider's group entirely.
+        s = m.Settings()
+        saved = []
+        s.on_hidden_providers_saved = lambda v: saved.append(list(v))
+        remote_prov = {a.provider for a in remote_agents()}
+        keys_screen = m.APIKeysScreen(s)
+        slugs = [g.id for g in keys_screen.accordion.groups
+                 if g.id not in ("__sep__", "more") and g.id in remote_prov]
+        self.assertTrue(slugs, "no provider common to the keys screen and the remote list")
+        target = slugs[0]
+        keys_screen.accordion.select(f"hide:{target}")
+        keys_screen.activate_selected()
+        self.assertIn(target, s.hidden_providers)
+        self.assertEqual(saved, [[target]])
+        grp = next(g for g in keys_screen.accordion.groups if g.id == target)
+        self.assertIn("hidden", grp.label.lower())
+        remote = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
+        self.assertNotIn(target, [g.id for g in remote.accordion.groups])
+        # Show again restores the provider in the remote list
+        keys_screen.accordion.select(f"show:{target}")
+        keys_screen.activate_selected()
+        self.assertNotIn(target, s.hidden_providers)
+        remote2 = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
+        self.assertIn(target, [g.id for g in remote2.accordion.groups])
+
+
 def catalog():
     return [m.CatalogEntry("ornith-1.5-35b", "COMPLETE", 19.5, "existing", "o/r"),
             m.CatalogEntry("qwen-3.8-operator", "ABSENT", 16.0, "session,operator", "q/q"),

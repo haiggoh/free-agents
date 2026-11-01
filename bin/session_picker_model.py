@@ -573,6 +573,9 @@ class Settings:
     # box says so). Persisted by the Picker through on_thinking_saved -> sms.save_thinking_session.
     thinking_session: bool | None = None
     rate_limiter: dict = field(default_factory=dict)
+    # 0.50.0 (api-keys-provider-hide-toggle): provider slugs hidden from the remote
+    # choose-model list; persisted via on_hidden_providers_saved. Keys stay on disk.
+    hidden_providers: list = field(default_factory=list)
     memguard: dict = field(default_factory=lambda: dict(sms.DEFAULT_MEMGUARD))
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
     # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=local default classifier always, 2=Auto)
@@ -601,6 +604,7 @@ class Settings:
     on_memguard_saved: Callable[[dict], object] | None = None
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
+    on_hidden_providers_saved: Callable[[list], object] | None = None
     # Called with (lane, value) when the user CONFIRMS a temperature change; persists it.
     on_temperature_saved: Callable[[str, str], object] | None = None
     # Called with (bool | None) when the user changes the session thinking toggle; persists it.
@@ -1449,8 +1453,11 @@ class RemoteScreen(Screen):
     def _regroup(self):
         buckets: dict[str, list] = {}
         order = []
+        hidden_prov = set(self.settings.hidden_providers or [])   # 0.50.0 hide toggle
         for agent in self.agents:
             if not self._visible(agent):
+                continue
+            if agent.provider in hidden_prov:
                 continue
             if agent.provider not in buckets:
                 order.append(agent.provider)
@@ -2663,13 +2670,15 @@ class APIKeysScreen(Screen):
             # and an empty label renders as a blank row. Placed at index 1 (after NVIDIA).
             if i == 1:
                 groups.append(Group("__sep__", "", []))
-            # Each provider group has two items: Open page and Add key
+            # Each provider group has three items: Open page, Add key, Hide/Show in the
+            # choose-model list (0.50.0 api-keys-provider-hide-toggle).
             groups.append(Group(
                 slug,
                 label,
                 [
                     Item(f"open:{slug}", f"Open {name} signup page"),
                     Item(f"add:{slug}", f"Add {name} key"),
+                    Item(*self._hide_item(slug)),
                 ]
             ))
         self.accordion.set_groups(groups)
@@ -2685,13 +2694,30 @@ class APIKeysScreen(Screen):
         """Get status of a provider by checking actual key files in ~/.api_keys"""
         status = f"{ec.EMOJI_OK_STR} Saved" if provider_has_key(slug) else f"{ec.EMOJI_MISSING_STR} Missing"
         warning = self.ACCOUNT_WARNINGS.get(slug)
-        return f"{status}  {warning}" if warning else status
+        if warning:
+            status = f"{status}  {warning}"
+        if slug in (self.settings.hidden_providers or []):
+            status += "  · hidden from model list"
+        return status
+
+    def _hide_item(self, slug: str) -> tuple:
+        """(item_id, label) for the hide/show toggle — the id flips with the state so
+        activating it again reverses the toggle."""
+        hidden = slug in (self.settings.hidden_providers or [])
+        verb = "Show" if hidden else "Hide"
+        return f"{'show' if hidden else 'hide'}:{slug}", f"{verb} {slug} in the choose-model list"
 
     def info_text(self, item_id: str | None) -> str:
         """The info box under the list: what the highlighted provider needs BEFORE a key works
         (its setup steps, incl. account requirements such as Vercel's credit card) plus the
         registry's measured notes. Shown for a provider row and for its Open/Add items."""
         slug = item_id.split(":", 1)[-1] if item_id else None
+        if item_id and (item_id.startswith("hide:") or item_id.startswith("show:")):
+            hidden = slug in (self.settings.hidden_providers or [])
+            return (f"{'Show' if hidden else 'Hide'} this provider in the choose-model list. "
+                    "The key stays on disk — only the remote model list hides the provider's group. "
+                    "Unlike 'Open signup page' (browser) and 'Add key' (credential wizard), this "
+                    "changes no account state; toggle it any time to reverse.")
         prov = next((p for p in KEY_PROVIDERS if p.slug == slug), None)
         if prov is None:
             return "Highlight a provider to see what its account needs before a key works."
@@ -2725,13 +2751,15 @@ class APIKeysScreen(Screen):
             # and an empty label renders as a blank row. Placed at index 1 (after NVIDIA).
             if i == 1:
                 groups.append(Group("__sep__", "", []))
-            # Each provider group has two items: Open page and Add key
+            # Each provider group has three items: Open page, Add key, Hide/Show
+            # (0.50.0 api-keys-provider-hide-toggle).
             groups.append(Group(
                 slug,
                 label,
                 [
                     Item(f"open:{slug}", f"Open {name} signup page"),
                     Item(f"add:{slug}", f"Add {name} key"),
+                    Item(*self._hide_item(slug)),
                 ]
             ))
         # Add "More providers" item if not showing all
@@ -2769,6 +2797,20 @@ class APIKeysScreen(Screen):
         elif sel.startswith("more:"):
             # Toggle more providers visibility
             self._show_all_providers = not getattr(self, '_show_all_providers', False)
+            self._rebuild_groups()
+            return None
+        elif sel.startswith("hide:") or sel.startswith("show:"):
+            # 0.50.0: hide/show this provider in the remote choose-model list. Reversible;
+            # the key on disk is untouched. Persisted via the save callback.
+            slug = sel.split(":", 1)[1]
+            hidden = list(self.settings.hidden_providers or [])
+            if sel.startswith("hide:") and slug not in hidden:
+                hidden.append(slug)
+            elif sel.startswith("show:") and slug in hidden:
+                hidden.remove(slug)
+            self.settings.hidden_providers = hidden
+            if self.settings.on_hidden_providers_saved:
+                self.settings.on_hidden_providers_saved(hidden)
             self._rebuild_groups()
             return None
         return None

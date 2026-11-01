@@ -713,6 +713,8 @@ class Picker(App):
             on_effort_saved=self._save_effort,
             on_temperature_saved=self._save_temperature,
             on_thinking_saved=self._save_thinking,
+            hidden_providers=list(state.hidden_providers),
+            on_hidden_providers_saved=self._save_hidden_providers,
             security_review=cloud["security_review"],
             security_review_custom=cloud["custom_model"],
             security_review_offered=cloud["plugin_active"],
@@ -744,6 +746,11 @@ class Picker(App):
 
     def _save_effort(self, lane, value):
         warning = sms.save_effort(self._config_dir(), lane, value)
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
+
+    def _save_hidden_providers(self, providers):
+        warning = sms.save_hidden_providers(self._config_dir(), providers)
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
 

@@ -41,10 +41,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 7
-READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7)
+SCHEMA_VERSION = 8
+READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8)
 SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature",
-            "intercept_agents", "memguard", "thinking")
+            "intercept_agents", "memguard", "thinking", "hidden_providers")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown",
@@ -151,6 +151,9 @@ class State:
                                                     "kv_dtype": dict(DEFAULT_MEMGUARD["kv_dtype"])})
     # None = the launch default (thinking ON for session launches); True/False = remembered choice.
     thinking_session: bool | None = None
+    # 0.50.0 (api-keys-provider-hide-toggle): providers hidden from the choose-model
+    # list. The key stays on disk; only the listing is hidden, reversible any time.
+    hidden_providers: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
 
 
@@ -232,7 +235,7 @@ def _unsafe_dir(config_dir: Path) -> str | None:
     return None
 
 
-def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict]:
+def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list]:
     """Return (effort, rate_limiter, last_launched, temperature, intercept_agents, memguard,
     thinking) or raise ValueError with a short reason."""
     if len(raw) > MAX_BYTES:
@@ -254,12 +257,17 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict]:
         raise ValueError("memguard needs schema_version 5")
     if doc["schema_version"] < 7 and "thinking" in doc:
         raise ValueError("thinking needs schema_version 7")
+    if doc["schema_version"] < 8 and "hidden_providers" in doc:
+        raise ValueError("hidden_providers needs schema_version 8")
     memguard = doc.get("memguard", {})
     if not isinstance(memguard, dict):
         raise ValueError("preference sections must be JSON objects")
     _validate_memguard(memguard)
     thinking = doc.get("thinking", {})
     _validate_thinking(thinking)
+    hidden = doc.get("hidden_providers", [])
+    if not isinstance(hidden, list) or not all(isinstance(x, str) for x in hidden):
+        raise ValueError("hidden_providers must be a list of provider slugs")
     effort = doc.get("effort", {})
     limiter = doc.get("rate_limiter", {})
     last = doc.get("last_launched", {})
@@ -285,10 +293,10 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict]:
     # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
     for lane, tier in tiers.items():
         last[f"{lane}:tier"] = tier
-    return effort, limiter, last, temperature, intercept_agents, memguard, thinking
+    return effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden
 
 
-def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict, dict] | None:
+def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict, dict, list] | None:
     """None when absent; raises ValueError when present but unusable."""
     try:
         st = os.lstat(path)
@@ -317,7 +325,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.warnings.append(f"{exc}; using built-in defaults and leaving the file untouched")
         return state
     if found:
-        effort, limiter, last, temperature, intercept_agents, memguard, thinking = found
+        effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
@@ -326,6 +334,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.intercept_agents = intercept_agents
         state.memguard.update(memguard)
         state.thinking_session = thinking.get("session")
+        state.hidden_providers = list(hidden)
     return state
 
 
@@ -428,7 +437,8 @@ def _write(config_dir: Path, doc: dict) -> None:
         pass
 
 
-def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking=None) -> dict:
+def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking=None,
+         hidden_providers=None) -> dict:
     doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
            "last_launched": {k: v for k, v in last.items() if ":" not in k},
            "temperature": temperature,
@@ -440,14 +450,17 @@ def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinkin
         doc["memguard"] = memguard
     if thinking:
         doc["thinking"] = thinking
+    if hidden_providers:
+        doc["hidden_providers"] = list(hidden_providers)
     return doc
 
 
-def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinking=None) -> str | None:
+def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinking=None,
+            mutate_hidden=None) -> str | None:
     """Apply `mutate(effort, limiter, last_launched, temperature)` (or one of the section hooks)
     under the lock. Returns a warning or None.
 
-    Always writes the current schema, so a schema-1..6 file is migrated here (and only here),
+    Always writes the current schema, so a schema-1..7 file is migrated here (and only here),
     carrying every section it already had."""
     config_dir = Path(config_dir)
     reason = _unsafe_dir(config_dir)
@@ -457,17 +470,19 @@ def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinkin
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking = found
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden = found
             else:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking = \
-                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}
-            if mutate_thinking is not None:
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden = \
+                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, []
+            if mutate_hidden is not None:
+                mutate_hidden(hidden)
+            elif mutate_thinking is not None:
                 mutate_thinking(thinking)
             elif mutate_memguard is not None:
                 mutate_memguard(memguard)
             else:
                 mutate(effort, limiter, last, temperature)
-            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking)
+            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden)
             _write(config_dir, doc)
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
@@ -566,6 +581,19 @@ def save_thinking_session(config_dir: Path | str, value: bool | None) -> str | N
     return _update(config_dir, None, mutate_thinking=mutate_thinking)
 
 
+def save_hidden_providers(config_dir: Path | str, providers: list) -> str | None:
+    """Persist which providers are hidden from the choose-model list (0.50.0 api-keys
+    hide toggle). The keys stay on disk; only the listing is hidden. Empty clears the
+    section entirely so the file carries no hidden_providers key at all."""
+    if not isinstance(providers, list) or not all(isinstance(p, str) for p in providers):
+        raise ValueError("hidden_providers must be a list of provider slugs")
+
+    def mutate_hidden(hidden):
+        hidden.clear()
+        hidden.extend(sorted(set(providers)))
+    return _update(config_dir, None, mutate_hidden=mutate_hidden)
+
+
 def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
     if value not in INTERCEPT_AGENTS_CHOICES:
         raise ValueError(f"intercept_agents must be one of {', '.join(INTERCEPT_AGENTS_CHOICES)}")
@@ -582,7 +610,7 @@ def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, _, memguard, thinking = found
+                effort, limiter, last, temperature, _, memguard, thinking, _hidden = found
             else:
                 effort, limiter, last, temperature, memguard, thinking = {}, {}, {}, {}, {}, {}
             _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking))
