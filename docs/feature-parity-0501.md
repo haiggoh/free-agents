@@ -80,7 +80,14 @@ regression reports (nvidia catalog pollution, lowkey API list, About pin/count, 
 
 ## Known gaps (open, not shipped)
 
-- `csl --inventory` ~22 s wall (2.5 s CPU) — waypoint `csl-inventory-takes-23s-wall`.
+- ~~`csl --inventory` ~22 s wall (2.5 s CPU)~~ RESOLVED on `fix/0502-known-gaps`: the wall time was
+  subprocess spawn latency, not CPU — `--gate` ran the engine probes despite its own help saying it
+  skips them (each probe spawns an engine venv python, ~1 s), `la_auto_scan_models` was called TWICE
+  per inventory and spawned a find/grep/basename/sed per model dir, and the alias sanitize spawned a
+  sed per folder. Now: gate skips probes (mutation-tested), one auto-scan call, one find answers the
+  weight rule for all dirs, pure-expansion escapes/sanitize. Measured 2026-11-01: 22 s → 4.6 s wall,
+  byte-identical TSV output (44 lines, diff-verified against the pre-change tree). Waypoint
+  `csl-inventory-takes-23s-wall` to be closed with this commit as evidence.
 - PTY/litellm tests still flake one-per-run at extreme external load (load > 10) — waypoint
   `pty-litellm-venv-tests-flake`; timeouts are now load-scaled, which narrows but cannot
   eliminate it on a shared box.

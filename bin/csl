@@ -553,18 +553,24 @@ if [ "${INVENTORY:-0}" = "1" ]; then
   # registration whether a model would run on rapid or needs oMLX.
   declare -A _auto_backend=()
   _auto_folders=()
+  _auto_names=()
+  # ONE scan for both loops below (was: la_auto_scan_models twice — it spawns finds over the
+  # whole models dir, so the second call doubled the inventory's wall time; 2026-11-01).
   while IFS= read -r folder; do
-    [ -n "$folder" ] && _auto_folders+=("$LA_MODELS_DIR/$folder")
+    [ -n "$folder" ] || continue
+    _auto_names+=("$folder")
+    _auto_folders+=("$LA_MODELS_DIR/$folder")
   done < <(la_auto_scan_models)
   if [ "${#_auto_folders[@]}" -gt 0 ]; then
     while IFS=$'\t' read -r _path _backend _rest; do
       _auto_backend[$(basename "$_path")]="$_backend"
     done < <(python3 "$CSL_DIR/la-detect-backend.py" "${_auto_folders[@]}" 2>/dev/null)
   fi
-  while IFS= read -r folder; do
+  for folder in "${_auto_names[@]}"; do
     [ -n "$folder" ] || continue
-    # Generate a sanitized alias from folder name
-    alias=$(printf '%s' "$folder" | sed 's/[^a-zA-Z0-9_-]/-/g')
+    # Generate a sanitized alias from folder name (pure expansion — a sed spawn per folder
+    # was measurable in the inventory's wall time, 2026-11-01)
+    alias=${folder//[^a-zA-Z0-9_-]/-}
     # Skip if this folder is already registered under any alias
     registered=0
     for a in "${LA_ALIASES[@]}"; do

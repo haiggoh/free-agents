@@ -378,21 +378,17 @@ def main(argv: list[str]) -> int:
         ap.print_usage(sys.stderr)
         print("la-detect-backend.py: at least one model folder is required", file=sys.stderr)
         return 2
-    rapid = _engine_registry(_rapid_interpreter())
-    omlx = _engine_registry(_omlx_interpreter())
-    results = []
-    for f in args.folders:
-        backend, reason = detect(Path(f), rapid, omlx)
-        results.append({"folder": f, "backend": backend, "reason": reason})
     if args.gate:
         # The launch guard: name what cannot be loaded and exit non-zero, so a caller refuses
         # BEFORE it starts a server that would burn a full weight load to fail late and cryptic.
-        # Engine probes are deliberately skipped — the format verdict does not need them. Every
-        # caller asks on behalf of an MLX engine (serve in rapid|vllm|mlx_lm|omlx), so a foreign
-        # bundle is ALWAYS blocked here, MoEspresso installed or not: 0.45.0 let it through on
-        # the assumption it would be "launched by that backend", the alias was pinned omlx, and
-        # the original causeless 409 came back (2026-10-26). An installed MoEspresso changes the
-        # remedy, not the verdict — the message then names the one-word fix.
+        # Engine probes are deliberately skipped — the format verdict does not need them (each
+        # probe spawns an engine's venv python, ~1 s; launchers call this before every MLX
+        # start, and csl --inventory pays for it once at config load). Every caller asks on
+        # behalf of an MLX engine (serve in rapid|vllm|mlx_lm|omlx), so a foreign bundle is
+        # ALWAYS blocked here, MoEspresso installed or not: 0.45.0 let it through on the
+        # assumption it would be "launched by that backend", the alias was pinned omlx, and
+        # the original causeless 409 came back (2026-10-26). An installed MoEspresso changes
+        # the remedy, not the verdict — the message then names the one-word fix.
         blocked = 0
         moespresso = _capable_moespresso() if any(_foreign_weight_format(Path(f)) for f in args.folders) else None
         for f in args.folders:
@@ -408,6 +404,12 @@ def main(argv: list[str]) -> int:
                 fix = f" (catalog says: {runtime})" if runtime else ""
             print(f"{Path(f).name}: weights are not MLX-readable — {foreign}{fix}")
         return 3 if blocked else 0
+    rapid = _engine_registry(_rapid_interpreter())
+    omlx = _engine_registry(_omlx_interpreter())
+    results = []
+    for f in args.folders:
+        backend, reason = detect(Path(f), rapid, omlx)
+        results.append({"folder": f, "backend": backend, "reason": reason})
     if args.json:
         print(json.dumps(results, indent=2))
     else:

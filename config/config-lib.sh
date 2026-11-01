@@ -550,35 +550,52 @@ la_auto_scan_models() {
     "ds_store"
   )
 
-  # Build grep pattern for exclusions - escape special chars
+  # Build grep pattern for exclusions - escape special chars. Escaping is pure parameter
+  # expansion: one sed spawn per pattern cost ~18 spawns per scan (measured 2026-11-01,
+  # csl --inventory ~22s wall of which most was per-dir/per-pattern subprocess latency).
   local exclude_regex
-  local escaped_patterns=()
+  local escaped_patterns=() p esc bs="\\"
   for p in "${exclude_patterns[@]}"; do
-    # Escape regex metacharacters: . * + ? ^ $ { } [ ] ( ) | \
-    escaped=$(printf '%s' "$p" | sed 's/[][\\.*+?^${}()|]/\\&/g')
-    escaped_patterns+=("$escaped")
+    esc=$p
+    esc=${esc//"$bs"/"$bs$bs"}; esc=${esc//'['/'\['}; esc=${esc//']'/'\]'}
+    esc=${esc//'.'/'\.'}; esc=${esc//'*'/'\*'}; esc=${esc//'+'/'\+'}; esc=${esc//'?'/'\?'}
+    esc=${esc//'^'/'\^'}; esc=${esc//'$'/'\$'}; esc=${esc//'{'/'\{'}; esc=${esc//'}'/'\}'}
+    esc=${esc//'('/'\('}; esc=${esc//')'/'\)'}; esc=${esc//'|'/'\|'}
+    escaped_patterns+=("$esc")
   done
   exclude_regex=$(IFS='|'; echo "${escaped_patterns[*]}") || true
 
-  # Find directories with weight files (safetensors, gguf, or config.json)
-  # Exclude hidden directories and known non-model directories
-  find -L "$models_dir" -mindepth 1 -maxdepth 1 -type d \
-    \( -name "*.DS_Store" -o -name ".*" \) -prune -o \
-    \( \
-      -exec test -e "{}/config.json" \; -o \
-      -exec test -e "{}/model.safetensors" \; -o \
-      -exec find "{}" -maxdepth 1 -name "*.gguf" -print -quit \; \
-    \) -print 2>/dev/null | while read -r dir; do
-    local name
-    name=$(basename "$dir")
-    # Filter out excluded patterns (case-insensitive)
-    if echo "$name" | grep -qiE "$exclude_regex"; then
-      continue
-    fi
-    # Same weight rule as la_on_disk: a config.json-only shell (an aborted download) is NOT a model.
-    [ -n "$(find -L "$dir" -maxdepth 2 -type f -size +1M -print -quit 2>/dev/null)" ] || continue
-    echo "$name"
-  done
+  # Candidates in ONE pass: top-level dirs (hidden pruned) holding a config.json, a
+  # model.safetensors, or a *.gguf — checked with builtins and a glob, not per-dir spawns
+  # (the old -exec find per dir was one subprocess per candidate).
+  local candidates dir name
+  candidates=$(find -L "$models_dir" -mindepth 1 -maxdepth 1 -type d \
+      \( -name "*.DS_Store" -o -name ".*" \) -prune -o -print 2>/dev/null |
+    while read -r dir; do
+      name=${dir##*/}
+      if [ -e "$dir/config.json" ] || [ -e "$dir/model.safetensors" ]; then
+        printf '%s\n' "$name"
+        continue
+      fi
+      set -- "$dir"/*.gguf
+      [ -e "$1" ] && printf '%s\n' "$name"
+    done | grep -viE "$exclude_regex")
+  [ -n "$candidates" ] || return 0
+
+  # Same weight rule as la_on_disk, answered for EVERY dir in ONE find (was: one find per
+  # candidate): a model dir has some file at most two levels below it larger than 1M — a
+  # config.json-only shell (an aborted download) is NOT a model. The top-level dir name is
+  # recovered from the path in awk; -L stays REQUIRED (symlink farms are legitimate models).
+  local weighted wlist
+  weighted=$(find -L "$models_dir" -mindepth 2 -maxdepth 3 -type f -size +1M -print 2>/dev/null |
+    awk -v md="$models_dir/" '{ if (index($0, md) == 1) { p = substr($0, length(md) + 1); sub(/\/.*/, "", p); print p } }' |
+    sort -u)
+  wlist="|$(printf '%s\n' "$weighted" | tr '\n' '|')|"
+
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    case "$wlist" in *"|$name|"*) printf '%s\n' "$name" ;; esac
+  done <<< "$candidates"
 }
 
 # Get effective context for an alias using the precedence hierarchy:

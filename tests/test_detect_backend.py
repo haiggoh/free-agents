@@ -212,6 +212,26 @@ class DetectBackend(unittest.TestCase):
         self.assertEqual(r2.returncode, 3)
         self.assertIn("mxtq", r2.stdout)
 
+    def test_gate_mode_skips_engine_probes(self):
+        """--gate's own --help says it "skips the engine probes entirely": the format verdict
+        needs only the weights' own evidence. csl --inventory pays for one gate call at config
+        load plus one full detect call, and each probe spawns an engine's venv python (~1 s),
+        so running the probes in gate mode doubles the inventory's fixed cost for nothing
+        (measured 2026-11-01: csl --inventory ~22 s wall, 2.3 s CPU — wait-bound on spawns)."""
+        marker = self.t / "probed"
+        spy = _exe(self.t / "spy-python", f"#!/bin/sh\ntouch {marker}\necho '{{}}'\n")
+        env = {"LA_DETECT_RAPID_PY": str(spy), "LA_DETECT_OMLX_PY": str(spy)}
+        d = self.folder("qwen-gate", "qwen3")
+        r = self.run_tool("--gate", str(d), env_extra=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(marker.exists(),
+                         "--gate ran an engine probe despite skipping them by contract")
+        # Planted positive: the batch mode DOES probe, so the spy is proven able to fire —
+        # otherwise the negative assertion above would be vacuous.
+        r2 = self.run_tool(str(d), env_extra=env)
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertTrue(marker.exists(), "spy never fired in batch mode — instrument broken")
+
     def test_gguf_still_wins_before_the_format_check(self):
         # Order matters: a GGUF artifact gets llama_cpp regardless of any weight_format key.
         d = self.folder("dsv4-gguf", "deepseek_v4")

@@ -45,6 +45,27 @@ cat > "$MODELS_DIR/flux-model/config.json" <<'EOF'
 {"text_config": {"max_position_embeddings": 1024}}
 EOF
 
+# A model whose only weight sits in a SUBDIR (absolute depth 3) must still be found: the
+# weight rule is "any file <= 2 levels below the model dir > 1M", not "at the top".
+mkdir -p "$MODELS_DIR/nested-weight-model/sub"
+echo '{"architectures": ["LlamaForCausalLM"]}' > "$MODELS_DIR/nested-weight-model/config.json"
+dd if=/dev/zero of="$MODELS_DIR/nested-weight-model/sub/model.safetensors" bs=1 count=0 seek=2097152 2>/dev/null
+
+# A symlink-farm model (weights are symlinks into a shared snapshot) must be found: -L is
+# REQUIRED, plain -type f would miss the links.
+mkdir -p "$TMP/snapshot"
+dd if=/dev/zero of="$TMP/snapshot/real-weights.safetensors" bs=1 count=0 seek=2097152 2>/dev/null
+mkdir -p "$MODELS_DIR/symlink-farm-model"
+echo '{"architectures": ["LlamaForCausalLM"]}' > "$MODELS_DIR/symlink-farm-model/config.json"
+ln -s "$TMP/snapshot/real-weights.safetensors" "$MODELS_DIR/symlink-farm-model/model.safetensors"
+
+# A GGUF-only dir (no config.json) is a model when the gguf itself is > 1M...
+mkdir -p "$MODELS_DIR/gguf-only-model"
+dd if=/dev/zero of="$MODELS_DIR/gguf-only-model/model-Q4_K_M.gguf" bs=1 count=0 seek=2097152 2>/dev/null
+# ...but a tiny gguf with no other weight is not (candidacy via gguf, weight rule fails).
+mkdir -p "$MODELS_DIR/tiny-gguf-only"
+dd if=/dev/zero of="$MODELS_DIR/tiny-gguf-only/tiny.gguf" bs=1 count=0 seek=1024 2>/dev/null
+
 # Create config.local.sh with registered model
 cat > "$TMP/config.local.sh" <<EOF
 LA_MODELS_DIR="$MODELS_DIR"
@@ -58,6 +79,10 @@ echo "$out" | grep -q "^registered-model\t" && check 0 "registered model appears
 echo "$out" | grep -q "^auto-scanned-model\t" && check 0 "auto-scanned model appears in csl inventory" || check 1 "auto-scanned model appears in csl inventory"
 echo "$out" | grep "^auto-scanned-model\t" | grep -q "auto-scanned" && check 0 "auto-scanned model marked with auto-scanned role" || check 1 "auto-scanned model marked with auto-scanned role"
 echo "$out" | grep -q "^flux-model\t" && check 1 "excluded model (flux) does not appear" || check 0 "excluded model (flux) does not appear"
+echo "$out" | grep -q "^nested-weight-model\t" && check 0 "weight in a subdir (depth 3) still counts" || check 1 "weight in a subdir (depth 3) still counts"
+echo "$out" | grep -q "^symlink-farm-model\t" && check 0 "symlinked weights (-L farm) still count" || check 1 "symlinked weights (-L farm) still count"
+echo "$out" | grep -q "^gguf-only-model\t" && check 0 "gguf-only dir with >1M gguf appears" || check 1 "gguf-only dir with >1M gguf appears"
+echo "$out" | grep -q "^tiny-gguf-only" && check 1 "tiny gguf with no other weight is not listed" || check 0 "tiny gguf with no other weight is not listed"
 
 # Test 2: local-session.sh --inventory includes auto-scanned model
 echo "$out" | grep -q "^metadata-only-shell" && check 1 "metadata-only shell is not listed" || check 0 "metadata-only shell is not listed"
