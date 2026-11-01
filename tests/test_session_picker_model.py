@@ -1035,6 +1035,66 @@ class ThemeStoreLayering(unittest.TestCase):
                              shipped)                   # shipped config untouched
 
 
+class ThemeHueShiftTests(unittest.TestCase):
+    """0.50.0 (waypoint theme-hue-shift-shell-swatch): per-lane hue rotation on the theme
+    screen — arrows step 5°, Enter/click steps 20° — persisted with the theme file, and
+    the lane swatch shows the shell-mode colour slice derived from the accent."""
+
+    def _screen(self, tmp):
+        import json
+        from pathlib import Path
+        from unittest import mock
+        root = Path(__file__).resolve().parents[1]
+        shipped_local = json.loads((root / "config" / "local-theme.json").read_text())
+        shipped_remote = json.loads((root / "config" / "remote-theme.json").read_text())
+        env = Path(tmp) / "themes"
+        env.mkdir(parents=True)
+        (env / "local-theme.json").write_text(json.dumps(shipped_local))
+        (env / "remote-theme.json").write_text(json.dumps(shipped_remote))
+        patcher = mock.patch.dict(os.environ, {"LA_THEME_CONFIG_DIR": str(env)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return m.ThemeConfigScreen(m.Settings()), env
+
+    def test_hue_rows_step_5_on_arrows_20_on_enter_and_persist(self):
+        import colorsys
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            scr, env = self._screen(tmp)
+            acts = {a.key: a for a in scr.actions()}
+            self.assertIn("y", acts, "local hue row missing")
+            base = scr.local_theme["theme"]["accent_color"]
+
+            def hue(c):
+                c = c.lstrip("#")
+                r, g, b = [int(c[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+                return colorsys.rgb_to_hls(r, g, b)[0] * 360
+
+            acts["y"].step(1)                                   # right arrow: +5°
+            after_arrow = scr.local_theme["theme"]["accent_color"]
+            self.assertAlmostEqual((hue(after_arrow) - hue(base)) % 360, 5, delta=1.5)
+            acts["y"].run()                                     # Enter/click: +20°
+            after_enter = scr.local_theme["theme"]["accent_color"]
+            self.assertAlmostEqual((hue(after_enter) - hue(base)) % 360, 25, delta=2)
+            saved = json.loads((env / "local-theme.json").read_text())
+            self.assertEqual(saved["theme"]["accent_color"], after_enter,
+                             "the rotated accent must persist with the theme file")
+
+    def test_lane_swatch_shows_the_shell_mode_slice(self):
+        import theme_colors as tc
+        with tempfile.TemporaryDirectory() as tmp:
+            scr, _ = self._screen(tmp)
+            accent = scr.local_theme["theme"]["accent_color"]
+            shell = tc.shell_mode_color(accent)
+            label = scr._lane_label("local")
+            if hasattr(label, "spans"):                       # rich path: style spans
+                styles = [str(s.style) for s in label.spans]
+                self.assertTrue(any(shell in st for st in styles),
+                                f"no swatch span in shell-mode colour {shell}: {styles}")
+            else:                                               # plain fallback: hex in text
+                self.assertIn(shell, label)
+
+
 if __name__ == "__main__":
     unittest.main()
 

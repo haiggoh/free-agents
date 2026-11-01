@@ -41,6 +41,7 @@ import session_menu_state as sms
 import emoji_constants as ec
 import cloud_session_env as cse
 import model_names
+import theme_colors as tc
 
 # Session Launcher title - single source of truth
 SESSION_LAUNCHER_TITLE = "Claude Code Free-Agents: Session Launcher"
@@ -2181,8 +2182,10 @@ class ThemeConfigScreen(Screen):
                 "  ",
                 Text("    ", style=f"on {accent}"),
                 Text(" ", style=f"on {border}"),
+                Text(" ", style=f"on {tc.shell_mode_color(accent)}"),   # 0.50.0: shell-mode slice
             )
-        return f"{emoji} {which.capitalize()}:{lane_pad} {name:<{width}} {accent} + border {border}"
+        return (f"{emoji} {which.capitalize()}:{lane_pad} {name:<{width}} {accent} + border {border}"
+                f" + shell {tc.shell_mode_color(accent)}")
 
     def _set_accent(self, which: str, color: str):
         """setting() put: store the accent, re-derive the border, persist."""
@@ -2217,6 +2220,27 @@ class ThemeConfigScreen(Screen):
             self.local_theme if which == "local" else self.remote_theme,
             indent=2, ensure_ascii=False) + "\n")
 
+    def _hue_deg(self, which: str) -> int:
+        import colorsys
+        accent = (self.local_theme if which == "local" else self.remote_theme)["theme"]["accent_color"]
+        r, g, b = [int(accent.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        return round(colorsys.rgb_to_hls(r, g, b)[0] * 360)  # noqa: E741 -- hls tuple unpack below
+
+    def _shift_hue(self, which: str, deg: int):
+        """0.50.0 (theme-hue-shift-shell-swatch): rotate the lane accent's hue by deg —
+        arrows step ±5°, Enter/click +20° — re-derive the border, persist. The shell-mode
+        colour follows automatically (it is derived from the accent at +20° hue)."""
+        import colorsys
+        theme = self.local_theme if which == "local" else self.remote_theme
+        accent = theme["theme"]["accent_color"].lstrip("#")
+        r, g, b = [int(accent[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        hue, light, sat = colorsys.rgb_to_hls(r, g, b)
+        hue = (hue + deg / 360.0) % 1.0
+        r2, g2, b2 = colorsys.hls_to_rgb(hue, light, sat)
+        theme["theme"]["accent_color"] = "#%02X%02X%02X" % tuple(round(c * 255) for c in (r2, g2, b2))
+        self._recompute_border(theme)
+        self._save_theme(which)
+
     def _restore_defaults(self):
         self.local_theme["theme"]["accent_color"] = "#FFD700"
         self.remote_theme["theme"]["accent_color"] = "#ADFF2F"
@@ -2232,6 +2256,12 @@ class ThemeConfigScreen(Screen):
             setting("r", self._lane_label("remote"), presets,
                     lambda: self.remote_theme["theme"]["accent_color"],
                     lambda v: self._set_accent("remote", v)),
+            Action("y", f"Hue local: {self._hue_deg('local')}°  (←/→ 5°, Enter/click 20°)",
+                   lambda: self._shift_hue("local", 20),
+                   step=lambda d: self._shift_hue("local", 5 * d)),
+            Action("u", f"Hue remote: {self._hue_deg('remote')}°  (←/→ 5°, Enter/click 20°)",
+                   lambda: self._shift_hue("remote", 20),
+                   step=lambda d: self._shift_hue("remote", 5 * d)),
             Action("d", "Restore defaults", lambda: self._restore_defaults()),
         ]
         acts += self.nav_actions()
