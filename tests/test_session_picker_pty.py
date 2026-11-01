@@ -383,7 +383,7 @@ class RegistryAutoSync(PilotCase):
         after = "qwen-3.8-operator\trapid\thigh\t\t\nauto-dream-7b\trapid\tmedium\t\t\n"
         Path(self.env["CSL_SELF"]).write_text(
             "#!/bin/sh\n"
-            f'case "$1" in --register-model|--unregister-model) touch "{done}";; esac\n'
+            f'case "$1" in --register-model*|--unregister-model*) touch "{done}";; esac\n'
             f'for a in "$@"; do [ "$a" = --inventory ] && {{ if [ -e "{done}" ]; then printf \'{after}\'; '
             f"else cat <<'EOF'\n{HYGIENE_INV}EOF\nfi; exit 0; }}; done\n"
             + RECORDER.split("\n", 1)[1])
@@ -400,8 +400,9 @@ class RegistryAutoSync(PilotCase):
         async def s(app, pilot, h):
             await h.wait_for(lambda: len(self.launches()) >= 2, "register + unregister calls")
             argvs = [r["argv"] for r in self.launches()]
-            self.assertIn(["--register-model", "auto-dream-7b"], argvs)
-            self.assertIn(["--unregister-model", "gone-model"], argvs)
+            # 0.50.1: batched — one call per direction, not per model
+            self.assertIn(["--register-models", "auto-dream-7b"], argvs)
+            self.assertIn(["--unregister-models", "gone-model"], argvs)
             self.assertFalse(any(a and a[0] == "--picker-launch" for a in argvs), "nothing launched")
             self.assertIsNone(h.panel(), "no question asked")
             await h.wait_text("auto-synced the registry: registered 1, moved 1 missing")
