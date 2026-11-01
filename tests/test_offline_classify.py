@@ -29,16 +29,23 @@ class OfflineClassifyTests(unittest.TestCase):
         # The two modules carry a copy each (core re-exports); both must classify alike.
         cases = [
             (0, "", "offline"),                                   # no HTTP response at all
-            (500, "APIConnectionError: Failed to connect", "offline"),
-            (500, "Error code: 500 - Connection refused", "offline"),
-            (500, "Network is unreachable", "offline"),
-            (500, "[Errno -3] Name or service not known", "offline"),
-            (500, "[Errno 101] Network is unreachable", "offline"),
+            (500, "litellm.APIConnectionError: Failed to connect", "offline"),   # local proxy wrap
+            (500, "APIConnectionError - Connection refused", "offline"),
+            (500, "APIConnectionError: [Errno 101] Network is unreachable", "offline"),
+        ]
+        # a provider's OWN 500 mentioning connect errors upstream is NOT our wifi:
+        not_offline = [
+            (500, "upstream connection refused while proxying"),   # no APIConnectionError wrap
+            (500, "connection reset by peer"),                      # mid-stream, stays transient
         ]
         for status, body, want in cases:
             with self.subTest(status=status, body=body[:40]):
                 self.assertEqual(core.classify(status, body=body), want)
                 self.assertEqual(registry.classify(status, body=body), want)
+        for status, body in not_offline:
+            with self.subTest(status=status, body=body[:40]):
+                self.assertNotEqual(core.classify(status, body=body), "offline")
+                self.assertNotEqual(registry.classify(status, body=body), "offline")
 
     def test_existing_classes_unchanged(self):
         self.assertEqual(core.classify(410, body="end of life on 2026-10-28"), "model_eol")
