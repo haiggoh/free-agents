@@ -179,13 +179,14 @@ so they earn the minor bump rather than riding the patch:
 8. Lowkey any-model API providers (`lowkey-any-model-api`).
 9. Pre-existing pyright advisory pile, if addressed (`free-agents-preexisting-pyright-defects`).
 
-**Release gates:** all of the above landed with tests; `0.49.7` shipped and dogfooded first;
 10. The `0.49.7`-hotfix follow-ups F1-F6: a real pin icon on the promoted version in backend manager,
     hardware-gated backend rows (CUDA backends never shown on Mac, MLX never on Linux/Windows),
     csl copy of selected text (Cmd+C) plus long-click-drag selection where clicks must pass through,
     About-section real values (and what the warning emoji actually flags), session/proxy identity
     keyed on (pid, process start time) against PID recycling, and the pyright waypoint pile
     (spec: the 2026-10-31 0.49.7/0.50.0 handoff plan, §4).
+
+**Release gates:** all of the above landed with tests; `0.49.8` shipped and dogfooded first;
 version surfaces agree at `0.50.0`; shipped through `rtc-ship.sh` from a worktree.
 
 ---

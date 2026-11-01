@@ -260,6 +260,7 @@ def _route_module():
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "anthropic_route", Path(__file__).resolve().parent / "anthropic-route.py")
+        assert spec is not None and spec.loader is not None   # our own file always loads
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)     # stdlib-only module; defines cache_path/load_cache
         _ROUTE_MOD = mod
@@ -651,6 +652,7 @@ def _load_key_providers():
     from pathlib import Path
     path = Path(__file__).resolve().parent.parent / "install" / "setup-api-keys.py"
     spec = importlib.util.spec_from_file_location("setup_api_keys", path)
+    assert spec is not None and spec.loader is not None   # our own file always loads
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.PROVIDERS
@@ -2215,8 +2217,8 @@ class ThemeConfigScreen(Screen):
         import colorsys
         accent = theme_dict["theme"]["accent_color"].lstrip("#")
         r, g, b = [int(accent[i:i+2], 16) / 255 for i in (0, 2, 4)]
-        h, l, s = colorsys.rgb_to_hls(r, g, b)
-        r2, g2, b2 = colorsys.hls_to_rgb(h, l, 0.55)
+        h, light, sat = colorsys.rgb_to_hls(r, g, b)
+        r2, g2, b2 = colorsys.hls_to_rgb(h, light, 0.55)
         border = "#%02X%02X%02X" % tuple(round(c * 255) for c in (r2, g2, b2))
         theme_dict["theme"]["border_color"] = border
 

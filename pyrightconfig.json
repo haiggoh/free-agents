@@ -1,0 +1,11 @@
+{
+  // 0.50.0 item 9 (pyright policy): the tests run via pytest with sys.path-then-import,
+  // so import noise there is EXPECTED — excluded rather than "fixed". bin/ resolves its
+  // sibling imports (extraPaths) and rich/textual from the picker venv; install/ resolves
+  // its managers package. Everything else stays a real finding.
+  "exclude": ["tests", "**/__pycache__", "**/node_modules", "scripts"],
+  "extraPaths": ["bin", "install"],
+  "reportMissingImports": "warning",
+  "reportAttributeAccessIssue": "warning",
+  "typeCheckingMode": "basic"
+}
