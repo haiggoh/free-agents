@@ -53,3 +53,25 @@ def pytest_report_header(config):
     if SCRUBBED_ENV:
         return f"conftest: scrubbed {len(SCRUBBED_ENV)} inherited LA_* var(s) from the environment"
     return None
+
+
+def pytest_configure(config):
+    # Catalog-cache tripwire (2026-11-01): a test that writes the REAL catalog cache
+    # (~/.local/state/local-agents/remote-catalogs) pollutes every later picker start —
+    # fixture rows show up as live models ("nvidia/cat-two"…). Tests must sandbox
+    # LA_REMOTE_CATALOG_CACHE_DIR; an in-process write to the default dir fails the test.
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
+    import session_picker_model as _m
+
+    _default_cache = Path.home() / ".local" / "state" / "local-agents" / "remote-catalogs"
+    _orig_write = _m.write_catalog_cache
+
+    def _guarded_write(provider, rows):
+        if _m.catalog_cache_dir() == _default_cache and os.environ.get("LA_REMOTE_CATALOG_CACHE_DIR") is None:
+            raise AssertionError(
+                f"test wrote the REAL catalog cache for {provider!r}; set "
+                "LA_REMOTE_CATALOG_CACHE_DIR to a sandbox dir (picker_harness does)")
+        return _orig_write(provider, rows)
+
+    _m.write_catalog_cache = _guarded_write

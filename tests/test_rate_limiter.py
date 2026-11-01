@@ -7,6 +7,7 @@ the expected total is exact, and widens the read->write window so a missing lock
 reliably rather than by luck. The mutation check proves the test can fail.
 """
 import importlib.util
+import json
 import multiprocessing as mp
 import os
 import sys
@@ -356,6 +357,87 @@ class PerModelCooldownBucketTests(PerModelCooldownTests):
             b = self.limiter(os.path.join(d, "s"), now)
             b.note_429(model="nvidia_nim/z-ai/glm-5.3")
             self.assertEqual(list(b.status()["cooling_models"]), ["nvidia_nim/z-ai/glm-5.3"])
+
+
+class OwnerAttributionPriorityTests(unittest.TestCase):
+    """0.50.1: stamps carry their owner; a reserved priority fraction; per-owner live
+    throttle/prioritize via set-owner; the probe that separates 'concurrent sessions ate
+    my bucket' from a real defect."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, "state")
+        self.env = unittest.mock.patch.dict(os.environ, {
+            "LA_LIMITER_OWNER": "sess-A", "LA_LIMITER_RESERVE": "0.2"})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        os.environ.pop("LA_LIMITER_PRIORITY", None)
+
+    def _state(self):
+        with open(self.path) as f:
+            return json.load(f)
+
+    def test_stamps_carry_owner_and_legacy_floats_still_load(self):
+        b = rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN)
+        self.assertEqual(b.try_acquire(), 0.0)
+        stamps = self._state()["stamps"]
+        self.assertEqual(stamps[0]["o"], "sess-A", "new stamps are attributed")
+        # a pre-0.50.1 file (bare float stamps, no owners key) still loads and counts
+        with open(self.path, "w") as f:
+            json.dump({"stamps": [FROZEN - 1], "limit": 40}, f)
+        b2 = rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN)
+        self.assertEqual(b2.status()["in_window"], 1)
+        self.assertEqual(b2.try_acquire(), 0.0)
+        self.assertEqual(self._state()["stamps"][-1]["o"], "sess-A",
+                         "a fresh stamp is attributed even when legacy ones were floats")
+
+    def test_bucket_reserve_blocks_normal_but_priority_passes(self):
+        # capacity 6, reserve 0.2 -> reserve 1.2 tokens: normal stops at tokens>=2.2
+        b = rl.SmoothTokenBucket(self.path, rpm=1, capacity=6, clock=lambda: FROZEN)
+        ok = sum(1 for _ in range(10) if b.try_acquire() == 0.0)
+        self.assertEqual(ok, 4, f"normal should stop at the reserve: got {ok}")
+        os.environ["LA_LIMITER_PRIORITY"] = "1"
+        self.assertEqual(b.try_acquire(), 0.0, "priority draws from the reserve")
+        self.assertEqual(b.try_acquire(), 0.0, "priority drains the rest of the bucket")
+        self.assertGreater(b.try_acquire(), 0.0, "bucket empty even for priority")
+        os.environ.pop("LA_LIMITER_PRIORITY", None)
+
+    def test_sliding_reserve_and_per_owner_scale(self):
+        b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: FROZEN)   # limit 4
+        ok = sum(1 for _ in range(6) if b.try_acquire() == 0.0)
+        self.assertEqual(ok, 3, "normal stops at limit*(1-reserve)=3")        # 0.2 reserve
+        os.environ["LA_LIMITER_PRIORITY"] = "1"
+        self.assertEqual(b.try_acquire(), 0.0, "priority takes the 4th slot")
+        os.environ.pop("LA_LIMITER_PRIORITY", None)
+        # per-owner throttle live: scale 0.5 -> own limit 2 even though the window has room
+        rl.set_owner(b, "sess-A", priority=None, rpm_scale=0.5)
+        with tempfile.TemporaryDirectory() as d2:
+            p2 = os.path.join(d2, "s")
+            rl.SlidingWindowLimiter(p2, rpm=4, clock=lambda: FROZEN).status()
+            b2 = rl.SlidingWindowLimiter(p2, rpm=4, clock=lambda: FROZEN)
+            rl.set_owner(b2, "sess-A", priority=None, rpm_scale=0.5)
+            self.assertEqual(b2.try_acquire(), 0.0)
+            self.assertEqual(b2.try_acquire(), 0.0)
+            self.assertGreater(b2.try_acquire(), 0.0, "own scale 0.5 caps at 2 of 4")
+
+    def test_probe_counts_only_other_owners(self):
+        b = rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN)
+        b.try_acquire()                                    # sess-A
+        with unittest.mock.patch.dict(os.environ, {"LA_LIMITER_OWNER": "sess-B"}):
+            b2 = rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN)
+            b2.try_acquire()                               # sess-B
+            self.assertEqual(rl.external_occupancy(b2, "sess-B"), 1, "sess-A's slot is external")
+            self.assertEqual(rl.external_occupancy(b2, "sess-A"), 1, "sess-B's slot is external to A")
+            self.assertEqual(rl.external_occupancy(b2, "nobody"), 2)
+
+    def test_cli_set_owner_and_owners(self):
+        with unittest.mock.patch.dict(os.environ, {"LA_NVIDIA_THROTTLE_STATE": self.path}):
+            rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN).status()
+            rc = rl.main(["set-owner", "sess-B", "--priority", "--rpm-scale", "0.5"])
+            self.assertEqual(rc, 0)
+            owners = self._state().get("owners", {})
+            self.assertEqual(owners["sess-B"], {"priority": True, "rpm_scale": 0.5})
 
 
 if __name__ == "__main__":

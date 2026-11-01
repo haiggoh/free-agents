@@ -15,11 +15,30 @@ from pathlib import Path
 import os
 import sys
 import unittest
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import session_picker_model as m  # noqa: E402
 from picker_harness import RECORDER, REMOTE_INV, PilotCase, inventory_stub  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_catalog_cache():
+    """0.50.1: this module calls write_catalog_cache in-process from plain TestCases
+    (no PilotCase env sandbox) — that wrote fixture rows into the REAL catalog cache and
+    they showed up as live models. Sandbox the cache dir for every test in this file."""
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="fa-cat-cache-")
+    old = os.environ.get(m.CATALOG_CACHE_DIR_ENV)
+    os.environ[m.CATALOG_CACHE_DIR_ENV] = tmp
+    yield
+    if old is None:
+        os.environ.pop(m.CATALOG_CACHE_DIR_ENV, None)
+    else:
+        os.environ[m.CATALOG_CACHE_DIR_ENV] = old
+    shutil.rmtree(tmp, ignore_errors=True)
 
 
 def slow_inventory_stub(text, secs=3):

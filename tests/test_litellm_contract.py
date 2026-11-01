@@ -39,6 +39,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))          # for loadscale
+import loadscale   # noqa: E402 — load-scaled timeouts (waypoint pty-litellm-venv-tests-flake)
 LITELLM_PY = Path(os.environ.get("LA_LITELLM_PY") or
                   Path.home() / ".local/pipx/venvs/litellm/bin/python")
 MASTER = "sk-local-agents-remote"
@@ -192,12 +194,12 @@ class LiteLLMContract(unittest.TestCase):
         cls.proc = subprocess.Popen([str(LITELLM_PY), str(ROOT / "bin/litellm-with-trust.py"),
                                      "--config", str(cfg), "--port", str(cls.port)],
                                     stdout=cls.log, stderr=subprocess.STDOUT, env=env, cwd=d)
-        deadline = time.time() + 120
+        deadline = time.time() + 120 * loadscale.current_scale()
         while time.time() < deadline:
             if cls.proc.poll() is not None:
                 raise RuntimeError("proxy died at startup:\n" + (d / "proxy.log").read_text()[-3000:])
             try:
-                urllib.request.urlopen(f"http://127.0.0.1:{cls.port}/health/liveliness", timeout=2)
+                urllib.request.urlopen(f"http://127.0.0.1:{cls.port}/health/liveliness", timeout=2 * loadscale.current_scale())
                 return
             except Exception:
                 time.sleep(1)
@@ -227,7 +229,7 @@ class LiteLLMContract(unittest.TestCase):
             headers={"x-api-key": MASTER, "content-type": "application/json",
                      "anthropic-version": "2023-06-01"})
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=60 * loadscale.current_scale()) as r:
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"{}")
@@ -239,7 +241,7 @@ class LiteLLMContract(unittest.TestCase):
             headers={"x-api-key": MASTER, "content-type": "application/json",
                      "anthropic-version": "2023-06-01"})
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=60 * loadscale.current_scale()) as r:
                 return r.status, r.read().decode()
         except urllib.error.HTTPError as e:
             return e.code, (e.read() or b"").decode()
@@ -423,7 +425,7 @@ class LiteLLMContract(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 proc.kill()
         self.addCleanup(_stop)
-        deadline = time.time() + 120
+        deadline = time.time() + 120 * loadscale.current_scale()
         while time.time() < deadline:
             if proc.poll() is not None:
                 self.fail("proxy died at startup:\n" + (dd / "proxy.log").read_text()[-3000:])
@@ -485,7 +487,7 @@ class LiteLLMContract(unittest.TestCase):
             headers={"x-api-key": MASTER, "content-type": "application/json",
                      "anthropic-version": "2023-06-01"})
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=60 * loadscale.current_scale()) as r:
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"{}")
@@ -497,7 +499,7 @@ class LiteLLMContract(unittest.TestCase):
             headers={"x-api-key": MASTER, "content-type": "application/json",
                      "anthropic-version": "2023-06-01"})
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=60 * loadscale.current_scale()) as r:
                 return r.status, r.read().decode()
         except urllib.error.HTTPError as e:
             return e.code, (e.read() or b"").decode()

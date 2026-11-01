@@ -1029,6 +1029,12 @@ class Picker(App):
         elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
             sm.set_models(data, *([MISSING_MODELS] if isinstance(sm, m.LocalScreen) else []))
             sm._models_loaded = True
+        elif isinstance(sm, m.LowkeyScreen) and kind == "remote":
+            # 0.50.1: the API-model chooser is fed from the remote inventory — fill it when
+            # the inventory lands (the screen may have been built before it was cached).
+            sm.api_agents = [a for a in (data or []) if a.model_id and a.model_id != "SELECT"]
+            sm.set_models(list(sm.models.values()))
+            self._rerender_keep_focus()
         if kind == "remote":
             # Eager warm-up: fetch every keyed provider's catalog once this session, so the
             # counts and the model lists are real from the first paint (user decision
@@ -1159,7 +1165,8 @@ class Picker(App):
         if nav.target == "remote":
             return m.RemoteScreen(s, agents=None, owner=nav.owner)
         if nav.target == "lowkey":
-            return m.LowkeyScreen(s, models=None, owner=nav.owner)
+            return m.LowkeyScreen(s, models=None, owner=nav.owner,
+                                  api_agents=self.cache.get("remote") or [])   # 0.50.1: API chooser
         if nav.target == "download":
             return m.DownloadScreen(s, entries=None, free_gb=None, headroom_gb=None, owner=nav.owner)
         if nav.target == "rate_limiter":

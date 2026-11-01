@@ -20,6 +20,9 @@ import select
 import signal
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import loadscale   # load-scaled waits: idle-machine 8 s flakes under shared load
 import time
 import unittest
 from pathlib import Path
@@ -234,6 +237,7 @@ class PilotHelper:
         return type(self.app.screen_model).__name__
 
     async def wait_for(self, pred, what, secs=8):
+        secs *= loadscale.current_scale()                     # waypoint pty-litellm-venv-tests-flake: load-scaled
         end = time.time() + secs
         while time.time() < end:
             if pred():
@@ -321,6 +325,7 @@ class PTYCase(_StubbedEnv):
         return ANSI.sub("", self.buf)
 
     def wait_for(self, text, secs=15):
+        secs *= loadscale.current_scale()                     # load-scaled PTY wait
         end = time.time() + secs
         while time.time() < end:
             self.pump(0.2)
@@ -329,11 +334,13 @@ class PTYCase(_StubbedEnv):
         self.fail(f"never saw {text!r}; tail:\n{self.screen()[-1500:]}")
 
     def send(self, *keys, gap=0.25):
+        gap *= loadscale.current_scale()                      # key-processing gap scales with load too
         for k in keys:
             os.write(self.fd, str(KEYS.get(k, k)).encode())
             self.pump(gap)
 
     def exit_code(self, secs=10):
+        secs *= loadscale.current_scale()
         end = time.time() + secs
         while time.time() < end:
             self.pump(0.1)

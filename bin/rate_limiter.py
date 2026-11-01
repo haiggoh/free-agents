@@ -121,6 +121,60 @@ def _setting(key: str, default):
     return default if saved is None else saved
 
 
+def _owner() -> str:
+    """0.50.1: who books a slot — LA_LIMITER_OWNER, else the session id, else the pid.
+    Stamps are attributed to this owner, so the shared bucket is no longer anonymous."""
+    o = os.environ.get("LA_LIMITER_OWNER")
+    if o:
+        return o
+    sid = os.environ.get("LA_SESSION_IDENTITY") or ""
+    if sid:
+        try:
+            return json.loads(sid).get("sessionId") or sid
+        except Exception:
+            return sid
+    return f"pid-{os.getpid()}"
+
+
+def _reserve_frac() -> float:
+    """Fraction of capacity reserved for priority requests (0.50.1 priority lane).
+    LA_LIMITER_RESERVE — DEFAULT 0.0 (off): the lane only exists when explicitly enabled
+    (tests / a live priority session), so normal traffic keeps the full 40."""
+    try:
+        return min(0.9, max(0.0, float(os.environ.get("LA_LIMITER_RESERVE", "0.0"))))
+    except ValueError:
+        return 0.0
+
+
+def _owner_opts(owners: dict, owner: str) -> dict:
+    """Per-owner options from the state map, with the process env as fallback."""
+    o = owners.get(owner) if isinstance(owners, dict) else None
+    o = o if isinstance(o, dict) else {}
+    try:
+        scale = float(o.get("rpm_scale", 1.0))
+    except (TypeError, ValueError):
+        scale = 1.0
+    return {"priority": bool(o.get("priority", False)) or os.environ.get("LA_LIMITER_PRIORITY") == "1",
+            "rpm_scale": min(8.0, max(0.05, scale))}
+
+
+def _stamp(t: float, owner: str) -> dict:
+    return {"t": float(t), "o": owner}
+
+
+def _stamp_parts(s) -> tuple:
+    """A stamp is {"t": ts, "o": owner}; a bare float is a pre-0.50.1 legacy stamp (owner "legacy")."""
+    if isinstance(s, dict):
+        try:
+            return float(s.get("t", 0.0)), str(s.get("o", "legacy"))
+        except (TypeError, ValueError):
+            return 0.0, "legacy"
+    try:
+        return float(s), "legacy"
+    except (TypeError, ValueError):
+        return 0.0, "legacy"
+
+
 class RateLimitTimeout(Exception):
     """No slot became available within max_wait."""
 
@@ -178,6 +232,7 @@ class SmoothTokenBucket:
         self._consecutive_429s = 0
         self._last_429_time = 0.0
         self._models: dict = {}           # per-model cooldowns, same shape as the window's
+        self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}, live-editable
         self._load()
 
     def _load(self):
@@ -198,12 +253,15 @@ class SmoothTokenBucket:
                     self._cooldown_until = float(data.get('cooldown_until', 0.0))
                     self._consecutive_429s = int(data.get('consecutive_429s', 0))
                     self._last_429_time = float(data.get('last_429_time', 0.0))
+                    owners = data.get('owners', {})
+                    self._owners = owners if isinstance(owners, dict) else {}
             except Exception:
                 self._tokens = float(self.capacity)
                 self._last_refill = self._clock()
                 self._cooldown_until = 0.0
                 self._consecutive_429s = 0
                 self._last_429_time = 0.0
+                self._owners = {}
 
     def _save(self):
         data = {
@@ -213,7 +271,8 @@ class SmoothTokenBucket:
             'rate': self.rate,
             'cooldown_until': self._cooldown_until,
             'consecutive_429s': self._consecutive_429s,
-            'last_429_time': self._last_429_time
+            'last_429_time': self._last_429_time,
+            'owners': self._owners
         }
         # Atomic write
         tmp = self.path.with_suffix('.tmp')
@@ -228,14 +287,25 @@ class SmoothTokenBucket:
             self._tokens = min(self.capacity, self._tokens + elapsed * self.rate)
             self._last_refill = now
 
-    def try_acquire(self) -> float:
+    def try_acquire(self, priority: bool | None = None) -> float:
         """Take a token if available. Returns 0.0 on success, else seconds to wait.
 
         Reads state from file on EVERY call (like SlidingWindowLimiter) so concurrent
         processes see each other's token consumption immediately.
         Resets exponential backoff on successful acquisition only -- an EXPIRED pause no
         longer resets it (0.40.0, same fix as the sliding window).
-        """
+
+        0.50.1 priority lane: with LA_LIMITER_RESERVE>0, that fraction of the capacity is
+        reserved for priority acquisitions (per-owner "priority" in the state map, or
+        LA_LIMITER_PRIORITY=1 for this process); normal traffic stops at the reserve.
+        Default 0.0 = off (full 40 for everyone, exactly as before).
+        Per-owner rpm_scale s makes this owner's acquisitions cost 1/s tokens (s<1 =
+        throttle: half rate costs 2 tokens)."""
+        owner = _owner()
+        opts = _owner_opts(self._owners, owner)
+        prio = opts["priority"] if priority is None else bool(priority)
+        cost = 1.0 / opts["rpm_scale"]
+        reserve = 0.0 if prio else self.capacity * _reserve_frac()
         fd = self._locked()
         try:
             now = self._clock()
@@ -247,15 +317,16 @@ class SmoothTokenBucket:
                 return self._cooldown_until - now
 
             self._refill(now)
-            if self._tokens >= 1.0:
-                self._tokens -= 1.0
+            if self._tokens >= cost and self._tokens - cost >= reserve:
+                self._tokens -= cost
                 # SUCCESS: Reset exponential backoff counter
                 self._consecutive_429s = 0
                 self._last_429_time = 0.0
                 self._save_state(fd)
                 return 0.0
-            # Time until next token
-            wait = (1.0 - self._tokens) / self.rate
+            # Time until the next affordable token
+            need = cost + reserve - self._tokens
+            wait = need / self.rate if need > 0 else 1e-3
             self._save_state(fd)
             return max(1e-3, wait)
         finally:
@@ -275,6 +346,8 @@ class SmoothTokenBucket:
             self._last_429_time = float(state.get('last_429_time', 0.0))
             models = state.get('models', {})
             self._models = models if isinstance(models, dict) else {}
+            owners = state.get('owners', {})
+            self._owners = owners if isinstance(owners, dict) else {}
         except Exception:
             self._tokens = float(self.capacity)
             self._last_refill = now
@@ -282,6 +355,7 @@ class SmoothTokenBucket:
             self._consecutive_429s = 0
             self._last_429_time = 0.0
             self._models = {}
+            self._owners = {}
         # Refill based on elapsed since last_refill
         elapsed = now - self._last_refill
         if elapsed > 0:
@@ -297,7 +371,8 @@ class SmoothTokenBucket:
             'cooldown_until': self._cooldown_until,
             'consecutive_429s': self._consecutive_429s,
             'last_429_time': self._last_429_time,
-            'models': self._models
+            'models': self._models,
+            'owners': self._owners
         }).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
@@ -390,11 +465,11 @@ class SmoothTokenBucket:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def acquire(self, max_wait: float | None = None) -> float:
+    def acquire(self, max_wait: float | None = None, priority: bool | None = None) -> float:
         limit = _max_wait(max_wait)
         waited = 0.0
         while True:
-            need = self.try_acquire()
+            need = self.try_acquire(priority=priority)
             if need == 0.0:
                 return waited
             if waited + need > limit:
@@ -402,11 +477,11 @@ class SmoothTokenBucket:
             time.sleep(need)
             waited += need
 
-    async def aacquire(self, max_wait: float | None = None) -> float:
+    async def aacquire(self, max_wait: float | None = None, priority: bool | None = None) -> float:
         limit = _max_wait(max_wait)
         waited = 0.0
         while True:
-            need = self.try_acquire()
+            need = self.try_acquire(priority=priority)
             if need == 0.0:
                 return waited
             if waited + need > limit:
@@ -453,6 +528,7 @@ class SlidingWindowLimiter:
         # Exponential backoff state
         self._consecutive_429s = 0
         self._last_429_time = 0.0
+        self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}
 
     def _locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -465,34 +541,41 @@ class SlidingWindowLimiter:
         raw = os.read(fd, 65536)
         try:
             state = json.loads(raw) if raw else {}
-            stamps = [float(s) for s in state.get("stamps", [])]
+            raw_stamps = state.get("stamps", [])
+            # 0.50.1: stamps keep their owner — dicts stay dicts, bare floats are legacy.
+            stamps = list(raw_stamps)
             cooldown_until = float(state.get("cooldown_until", 0.0))
             consecutive_429s = int(state.get("consecutive_429s", 0))
             last_429_time = float(state.get("last_429_time", 0.0))
             models = state.get("models", {}) if isinstance(state.get("models", {}), dict) else {}
+            owners = state.get("owners", {})
+            self._owners = owners if isinstance(owners, dict) else {}
         except Exception:
             # A missing, corrupt or old-format (token bucket) file starts EMPTY: the safe
             # failure is one extra window, never a permanently full one that wedges every session.
             return [], 0.0, 0, 0.0, {}
         # A stamp in the future (clock step) is treated as now, so a skewed clock can hold a
         # slot for at most one window, never forever.
-        stamps = [min(s, now) for s in stamps if s > now - WINDOW_SECONDS]
-        stamps.sort()
+        stamps = [s for s in stamps if _stamp_parts(s)[0] > now - WINDOW_SECONDS]
+        stamps.sort(key=lambda s: _stamp_parts(s)[0])
         return stamps, cooldown_until, consecutive_429s, last_429_time, models
 
     def _write(self, fd: int, stamps: list[float], cooldown_until: float,
                consecutive_429s: int = 0, last_429_time: float = 0.0,
-               models: dict | None = None) -> None:
-        data = json.dumps({"stamps": stamps, "cooldown_until": cooldown_until,
+               models: dict | None = None, owners: dict | None = None) -> None:
+        owner = _owner()
+        data = json.dumps({"stamps": [s if isinstance(s, dict) else _stamp(s, owner) for s in stamps],
+                           "cooldown_until": cooldown_until,
                            "limit": self.limit,
                            "consecutive_429s": consecutive_429s,
                            "last_429_time": last_429_time,
-                           "models": models or {}}).encode()
+                           "models": models or {},
+                           "owners": owners if owners is not None else self._owners}).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
         os.write(fd, data)
 
-    def try_acquire(self) -> float:
+    def try_acquire(self, priority: bool | None = None) -> float:
         """Take a slot if one is free. Returns 0.0 on success, else the seconds to wait.
 
         The whole read-prune-append-write runs under one exclusive lock, so two processes can
@@ -502,7 +585,18 @@ class SlidingWindowLimiter:
         lapsed, before the next request had even failed, so four 429s in a row each read
         "pause 30s, consecutive=1" and a model throttled for hours was retried ~2x/min forever.
         Only a success (an acquisition, or note_success from a completed request) resets it.
+
+        0.50.1 priority lane + per-owner throttle: stamps are attributed to the caller's
+        owner id. With LA_LIMITER_RESERVE>0 (default 0.0 = off), that fraction of the window limit is
+        reserved for priority acquisitions (owner "priority" flag or LA_LIMITER_PRIORITY=1);
+        normal traffic stops at limit*(1-reserve). An owner's rpm_scale s caps ITS OWN
+        window count at limit*s (s<1 throttles that session live, at any time).
         """
+        owner = _owner()
+        opts = _owner_opts(self._owners, owner)
+        prio = opts["priority"] if priority is None else bool(priority)
+        own_limit = max(1, int(self.limit * opts["rpm_scale"]))
+        normal_limit = self.limit if prio else max(1, int(self.limit * (1.0 - _reserve_frac())))
         fd = self._locked()
         try:
             now = self._clock()
@@ -513,7 +607,8 @@ class SlidingWindowLimiter:
             if now < cooldown_until:
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return cooldown_until - now
-            if len(stamps) < self.limit:
+            own_count = sum(1 for s in stamps if _stamp_parts(s)[1] == owner)
+            if len(stamps) < normal_limit and own_count < own_limit:
                 stamps.append(now)
                 # SUCCESS: Reset exponential backoff counter
                 self._consecutive_429s = 0
@@ -521,8 +616,12 @@ class SlidingWindowLimiter:
                 self._write(fd, stamps, cooldown_until, 0, 0.0, models)
                 return 0.0
             self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
-            # The oldest request leaves the window first; wait for exactly that.
-            return max(1e-3, stamps[-self.limit] + WINDOW_SECONDS - now)
+            # The oldest request leaves the window first; wait for exactly that. When the
+            # block came from the owner's OWN scale (fewer stamps than limit), wait on those.
+            if not stamps:
+                return 1e-3
+            idx = min(self.limit, len(stamps))
+            return max(1e-3, _stamp_parts(stamps[-idx])[0] + WINDOW_SECONDS - now)
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -614,12 +713,12 @@ class SlidingWindowLimiter:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def acquire(self, max_wait: float | None = None) -> float:
+    def acquire(self, max_wait: float | None = None, priority: bool | None = None) -> float:
         """Block until a slot is taken; returns the total seconds waited."""
         limit = _max_wait(max_wait)
         waited = 0.0
         while True:
-            need = self.try_acquire()
+            need = self.try_acquire(priority=priority)
             if need == 0.0:
                 return waited
             if waited + need > limit:
@@ -627,12 +726,12 @@ class SlidingWindowLimiter:
             time.sleep(need)
             waited += need
 
-    async def aacquire(self, max_wait: float | None = None) -> float:
+    async def aacquire(self, max_wait: float | None = None, priority: bool | None = None) -> float:
         """Async twin of acquire() -- sleeps without blocking the proxy's event loop."""
         limit = _max_wait(max_wait)
         waited = 0.0
         while True:
-            need = self.try_acquire()
+            need = self.try_acquire(priority=priority)
             if need == 0.0:
                 return waited
             if waited + need > limit:
@@ -660,6 +759,79 @@ class SlidingWindowLimiter:
 
 def _max_wait(value: float | None) -> float:
     return float(value if value is not None else _setting("max_wait", DEFAULT_MAX_WAIT))
+
+
+
+
+def owners_info(limiter) -> dict:
+    """0.50.1: per-owner options + in-window counts (the de-anonymized bucket)."""
+    fd = limiter._locked()
+    try:
+        now = limiter._clock()
+        if isinstance(limiter, SlidingWindowLimiter):
+            stamps, *_ = limiter._read(fd, now)
+            counts = {}
+            for s in stamps:
+                _t, o = _stamp_parts(s)
+                counts[o] = counts.get(o, 0) + 1
+            owners = dict(getattr(limiter, "_owners", {}))
+            return {"limit": limiter.limit, "in_window": len(stamps),
+                    "owners": {o: {**opts, "in_window": counts.get(o, 0)}
+                               for o, opts in owners.items()},
+                    "unowned_in_window": counts.get("legacy", 0)}
+        limiter._load_state(fd, now)
+        return {"capacity": limiter.capacity, "tokens": round(limiter._tokens, 2),
+                "owners": dict(getattr(limiter, "_owners", {}))}
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def set_owner(limiter, owner: str, priority: bool | None, rpm_scale: float | None) -> None:
+    """0.50.1: live per-owner options, written under the lock — throttle or prioritize one
+    session at any time (rate_limiter.py set-owner <owner> --rpm-scale 0.5 --priority)."""
+    fd = limiter._locked()
+    try:
+        now = limiter._clock()
+        if isinstance(limiter, SlidingWindowLimiter):
+            limiter._read(fd, now)
+        else:
+            limiter._load_state(fd, now)
+        owners = dict(getattr(limiter, "_owners", {}))
+        o = dict(owners.get(owner, {}))
+        if priority is not None:
+            o["priority"] = bool(priority)
+        if rpm_scale is not None:
+            o["rpm_scale"] = min(8.0, max(0.05, float(rpm_scale)))
+        if o:
+            owners[owner] = o
+        else:
+            owners.pop(owner, None)
+        limiter._owners = owners
+        if isinstance(limiter, SlidingWindowLimiter):
+            stamps, cd, c429, l429, models = limiter._read(fd, now)
+            limiter._write(fd, stamps, cd, c429, l429, models, owners=owners)
+        else:
+            limiter._save_state(fd)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def external_occupancy(limiter, owner: str) -> int:
+    """0.50.1 probe: how many in-window slots belong to OTHER owners — the classifier that
+    tells 'concurrent sessions ate my bucket' apart from a genuine defect."""
+    fd = limiter._locked()
+    try:
+        now = limiter._clock()
+        if isinstance(limiter, SlidingWindowLimiter):
+            stamps, *_ = limiter._read(fd, now)
+            return sum(1 for s in stamps if _stamp_parts(s)[1] not in (owner, "legacy"))
+        limiter._load_state(fd, now)
+        return 0
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def get_limiter(path: Path | str | None = None, rpm: float | None = None,
@@ -691,7 +863,17 @@ def main(argv: list[str]) -> int:
     sub = parser.add_subparsers(dest="cmd", required=False)
     acq = sub.add_parser("acquire", help="take one slot, waiting if needed")
     acq.add_argument("--max-wait", type=float, default=None)
+    acq.add_argument("--priority", action="store_true",
+                     help="draw from the reserved priority fraction (0.50.1 lane)")
     sub.add_parser("status", help="print window state without taking a slot")
+    sub.add_parser("owners", help="list known owners with their window counts and options")
+    so = sub.add_parser("set-owner", help="set one owner's options live (throttle/prioritize)")
+    so.add_argument("owner", help="owner id (session id, or pid-N)")
+    so.add_argument("--priority", action="store_true", help="allow this owner into the reserve")
+    so.add_argument("--no-priority", dest="priority", action="store_false")
+    so.add_argument("--rpm-scale", type=float, default=None,
+                    help="this owner's allowed fraction of the window (0.5 = half rate)")
+    sub.add_parser("probe", help="print this owner's external occupancy (other owners' slots in window)")
     sub.add_parser("menu", help="open the session picker's rate limiter screen")
     args = parser.parse_args(argv)
 
@@ -706,8 +888,20 @@ def main(argv: list[str]) -> int:
     if args.cmd == "status":
         print(json.dumps(limiter.status()))
         return 0
+    if args.cmd == "owners":
+        info = owners_info(limiter)
+        print(json.dumps(info, indent=2))
+        return 0
+    if args.cmd == "set-owner":
+        set_owner(limiter, args.owner, priority=args.priority, rpm_scale=args.rpm_scale)
+        print(json.dumps(owners_info(limiter)))
+        return 0
+    if args.cmd == "probe":
+        occ = external_occupancy(limiter, _owner())
+        print(json.dumps({"owner": _owner(), "external_in_window": occ}))
+        return 0
     try:
-        waited = limiter.acquire(args.max_wait)
+        waited = limiter.acquire(args.max_wait, priority=args.priority)
     except RateLimitTimeout as exc:
         print(f"rate_limiter: {exc}", file=sys.stderr)
         return 3
