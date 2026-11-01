@@ -67,7 +67,10 @@ class RepairTest(unittest.TestCase):
             mgr.save_receipt(version, {"pip_freeze": [f"{cls.PACKAGE_NAME}=={version}"]})
         return cls, mgr, target
 
-    def test_repairs_a_broken_venv_in_place_for_every_venv_backend(self):
+    def test_repairs_a_broken_venv_for_every_venv_backend(self):
+        # 0.50.0 (free-agents-move-backend): a LEGACY (~/.venvs) venv is repaired INTO the
+        # XDG root make-before-break — the rebuild lands at target_for (new root), the
+        # set-aside original is deleted only on success.
         for name in ("rapid-mlx", "vllm-mlx", "litellm"):
             with self.subTest(backend=name):
                 cls, mgr, target = self.broken(name)
@@ -75,13 +78,15 @@ class RepairTest(unittest.TestCase):
 
                 def install(version, **kw):
                     calls.append(kw)
-                    build_venv(target, cls.BACKEND_NAME)
+                    build_venv(mgr.target_for(version), cls.BACKEND_NAME)   # XDG root
                 mgr.install_version = install
                 result = mgr.repair_version("1.0.0")
+                new_target = mgr.target_for("1.0.0")
                 self.assertEqual(result["result"], "repaired")
+                self.assertEqual(result["target"], str(new_target))
                 self.assertEqual(mgr.installed_versions()[0][2], "complete")
-                self.assertFalse((target / "MARKER").exists(), "the old venv was replaced")
-                self.assertEqual([p.name for p in target.parent.iterdir() if ".repair-" in p.name], [],
+                self.assertFalse(target.exists(), "the legacy venv was relocated after success")
+                self.assertEqual([p.name for p in new_target.parent.iterdir() if ".repair-" in p.name], [],
                                  "the set-aside original is deleted after success")
                 if name == "rapid-mlx":
                     self.assertTrue(calls[0].get("skip_pin_update"), "repair never promotes")
@@ -90,7 +95,6 @@ class RepairTest(unittest.TestCase):
         cls, mgr, target = self.broken()
 
         def install(version, **kw):
-            target.mkdir(parents=True, exist_ok=True)
             raise ManagerError("pip exploded")
         mgr.install_version = install
         with self.assertRaisesRegex(ManagerError, "original was restored"):
@@ -101,12 +105,14 @@ class RepairTest(unittest.TestCase):
         cls, mgr, target = self.broken()
 
         def install(version, **kw):
-            build_venv(target, cls.BACKEND_NAME)
-            kill_base(target)                       # still dead: must not be accepted
+            new_target = mgr.target_for(version)              # 0.50.0: rebuild goes to the XDG root
+            build_venv(new_target, cls.BACKEND_NAME)
+            kill_base(new_target)                   # still dead: must not be accepted
         mgr.install_version = install
         with self.assertRaisesRegex(ManagerError, "original was restored"):
             mgr.repair_version("1.0.0")
         self.assertEqual((target / "MARKER").read_text(encoding="utf-8"), "original")
+        self.assertFalse(mgr.target_for("1.0.0").exists(), "the half-built XDG venv is deleted")
 
     def test_a_version_used_by_a_running_process_is_refused(self):
         cls, mgr, target = self.broken()

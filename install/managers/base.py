@@ -48,6 +48,36 @@ from .mixins import (
 )
 
 
+def backends_root(home: Path | None = None) -> Path:
+    """0.50.0 (free-agents-move-backend): the free-agents-owned venv root —
+    $XDG_DATA_HOME/free-agents/backends, default ~/.local/share/free-agents/backends.
+    All NEW installs land here; the old shared ~/.venvs is legacy (read-only discovery)."""
+    home = home or Path.home()
+    xdg = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg) if xdg else home / ".local" / "share"
+    return base / "free-agents" / "backends"
+
+
+def legacy_venvs_root(home: Path | None = None) -> Path:
+    """The pre-0.50.0 shared root ~/.venvs — still SCANNED by discovery so nothing
+    installed breaks; nothing new is written here."""
+    return (home or Path.home()) / ".venvs"
+
+
+def discovery_roots(home: Path | None = None) -> tuple:
+    """Roots scanned for installed venvs, new root first: (backends_root, legacy ~/.venvs)."""
+    return backends_root(home), legacy_venvs_root(home)
+
+
+def resolve_venv_dir(prefix: str, version: str, home: Path | None = None) -> Path | None:
+    """Find an installed venv dir: new XDG root first, then the legacy ~/.venvs."""
+    for root in discovery_roots(home):
+        p = root / f"{prefix}-{version}"
+        if p.is_dir() and not p.is_symlink():
+            return p
+    return None
+
+
 class BackendManager(
     VersionParsingMixin,
     VenvMixin,
@@ -240,9 +270,10 @@ class BackendManager(
         if not self.SUPPORTS_VENV_REMOVE:
             raise ManagerError(f"remove not supported for {self.BACKEND_NAME}")
         self.require_version(version)
-        target = (home or self.home) / ".venvs" / f"{self.VENV_PREFIX}-{version}"
-        if target.is_symlink() or not target.is_dir():
-            raise ManagerError(f"refusing removal: not a real managed directory: {target}")
+        target = resolve_venv_dir(self.VENV_PREFIX, version, home or self.home)
+        if target is None:
+            raise ManagerError(f"refusing removal: not a real managed directory: "
+                               f"{self.VENV_PREFIX}-{version} (searched the XDG root and ~/.venvs)")
         health = venv_health(target, self.BACKEND_NAME)
         if self.REMOVE_KEEPS_ONE:
             others = [v for v, _, st in self.installed_versions() if v != version and st == "complete"]
@@ -363,15 +394,21 @@ class BackendManager(
         if not self.SUPPORTS_VENV_REMOVE:
             raise ManagerError(f"repair not supported for {self.BACKEND_NAME}")
         self.require_version(version)
-        target = self.home / ".venvs" / f"{self.VENV_PREFIX}-{version}"
-        if target.is_symlink() or not target.is_dir():
-            raise ManagerError(f"nothing to repair: {target} is not an installed version")
+        target = resolve_venv_dir(self.VENV_PREFIX, version, self.home)
+        if target is None:
+            raise ManagerError(f"nothing to repair: {self.VENV_PREFIX}-{version} is not an "
+                               f"installed version (searched the XDG root and ~/.venvs)")
+        # 0.50.0: a legacy (~/.venvs) venv is repaired INTO the XDG root — make-before-break:
+        # the rebuild lands at build_target, the original is set aside and deleted only on success.
+        build_target = backends_root(self.home) / target.name
+        relocating = target != build_target
         running = self._running_references(target)
         if running:
             raise ManagerError("environment is referenced by running process(es):\n" + "\n".join(running))
         mode = "locked_recreation" if self.locked_requirements(version) else "fresh_resolution"
         if dry_run:
-            return {"result": "dry_run", "target": str(target), "mode": mode}
+            return {"result": "dry_run", "target": str(target), "build_target": str(build_target),
+                    "mode": mode}
         aside = target.with_name(f"{target.name}.repair-{os.getpid()}-{int(time.time())}")
         os.rename(target, aside)
         try:
@@ -382,19 +419,20 @@ class BackendManager(
                     kwargs["skip_pin_update"] = True        # a repair never promotes
             except (TypeError, ValueError):
                 pass
-            self.install_version(version, **kwargs)
-            health = venv_health(target, self.BACKEND_NAME)
+            self.install_version(version, **kwargs)          # writes to target_for = the XDG root
+            health = venv_health(build_target, self.BACKEND_NAME)
             if health.state != "complete":
                 raise ManagerError(f"the rebuilt venv is {health.state}: {health.reason}")
             self.validate_environment(version)
         except Exception as exc:
-            if target.exists() or target.is_symlink():
-                shutil.rmtree(target, ignore_errors=True)
+            if build_target.exists() or build_target.is_symlink():
+                shutil.rmtree(build_target, ignore_errors=True)
             os.rename(aside, target)
             raise ManagerError(f"repair of {self.BACKEND_NAME} {version} failed and the original was restored: {exc}") from exc
-        shutil.rmtree(aside, ignore_errors=True)
-        return {"result": "repaired", "target": str(target), "mode": mode,
-                "durability": venv_durability(target)}
+        shutil.rmtree(aside, ignore_errors=True)             # success: the set-aside original goes
+        return {"result": "repaired", "target": str(build_target), "mode": mode,
+                "relocated_from": str(target) if relocating else None,
+                "durability": venv_durability(build_target)}
 
     def _referenced_paths(self, repo: Path | None, target: Path) -> list[str]:
         """Lines of the LIVE config that pin the target (the file the launchers read).

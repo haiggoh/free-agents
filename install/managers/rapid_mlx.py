@@ -22,7 +22,7 @@ from typing import Any
 from . import register_manager
 from .base import BackendInfo, BackendManager, ManagerError
 from ._common import braille_spinner, venv_health
-from .base import live_config_file, repository_root
+from .base import backends_root, discovery_roots, live_config_file, repository_root
 
 PACKAGE = "rapid-mlx"
 PYPI_URL = "https://pypi.org/pypi/rapid-mlx/json"
@@ -468,18 +468,19 @@ print(json.dumps(out, sort_keys=True))
         return receipt
 
     def target_for(self, version: str, home: Path | None = None) -> Path:
-        """Get target path for a version."""
+        """Get target path for a version. 0.50.0: NEW installs go to the XDG root."""
         self.require_version(version)
-        return (home or self.home) / ".venvs" / f"{self.VENV_PREFIX}-{version}"
+        return backends_root(home or self.home) / f"{self.VENV_PREFIX}-{version}"
 
     @property
     def venv_root(self) -> Path:
-        """Get venv root directory (property for backward compatibility)."""
-        return self.home / ".venvs"
+        """The NEW venv root (XDG) — write path. Discovery scans both roots (see
+        installed_versions); the legacy ~/.venvs stays readable."""
+        return backends_root(self.home)
 
     def _venv_root(self, home: Path | None = None) -> Path:
-        """Get venv root directory with optional home override."""
-        return (home or self.home) / ".venvs"
+        """Get the new venv root with optional home override."""
+        return backends_root(home or self.home)
 
     @property
     def cache_root(self) -> Path:
@@ -495,19 +496,20 @@ print(json.dumps(out, sort_keys=True))
         return self._cache_root(home) / "receipts" / f"{self.VENV_PREFIX}-{version}.json"
 
     def installed_versions(self, home: Path | None = None) -> list[tuple[str, Path, str]]:
-        """List installed versions."""
-        root = self._venv_root(home)
-        entries: list[tuple[str, Path, str]] = []
-        if not root.is_dir():
-            return entries
-        for path in root.glob(f"{self.VENV_PREFIX}-*"):
-            if path.is_symlink() or not path.is_dir():
+        """List installed versions. 0.50.0: scans the XDG root AND the legacy ~/.venvs
+        (nothing installed breaks); a version present in both reports the NEW root."""
+        entries: dict[str, tuple[str, Path, str]] = {}
+        for root in discovery_roots(home or self.home):        # new root first
+            if not root.is_dir():
                 continue
-            version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
-            if not VERSION_RE.fullmatch(version):
-                continue
-            entries.append((version, path, venv_health(path, "rapid-mlx").state))
-        return sorted(entries, key=lambda item: self.version_key(item[0]), reverse=True)
+            for path in root.glob(f"{self.VENV_PREFIX}-*"):
+                if path.is_symlink() or not path.is_dir():
+                    continue
+                version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
+                if not VERSION_RE.fullmatch(version):
+                    continue
+                entries.setdefault(version, (version, path, venv_health(path, "rapid-mlx").state))
+        return sorted(entries.values(), key=lambda item: self.version_key(item[0]), reverse=True)
 
     @staticmethod
     def _menu_emoji() -> dict[str, str]:

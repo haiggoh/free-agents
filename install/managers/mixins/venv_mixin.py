@@ -34,11 +34,13 @@ class VenvMixin:
 
     @property
     def venv_root(self) -> Path:
-        """Root directory for versioned virtual environments."""
-        return self.home / ".venvs"
+        """Root for NEW versioned venvs: the free-agents XDG root (0.50.0,
+        free-agents-move-backend). Discovery scans this AND the legacy ~/.venvs."""
+        from ..base import backends_root
+        return backends_root(self.home)
 
     def target_for(self, version: str) -> Path:
-        """Get the target path for a specific version."""
+        """Get the target path for a specific version (the XDG root, 0.50.0)."""
         self.require_version(version)
         return self.venv_root / f"{self.VENV_PREFIX}-{version}"
 
@@ -160,24 +162,26 @@ class VenvMixin:
         return receipt_freeze(payload, version, self.PACKAGE_NAME)
 
     def installed_versions(self) -> list[tuple[str, Path, str]]:
-        """List installed versioned environments.
+        """List installed versioned environments. 0.50.0: scans the XDG root AND the
+        legacy ~/.venvs (nothing installed breaks); a version in both reports the NEW root.
 
         Returns:
             List of (version, path, status) tuples
         """
-        root = self.venv_root
-        entries: list[tuple[str, Path, str]] = []
-        if not root.is_dir():
-            return entries
-        for path in root.glob(f"{self.VENV_PREFIX}-*"):
-            if path.is_symlink() or not path.is_dir():
+        from ..base import discovery_roots
+        entries: dict[str, tuple[str, Path, str]] = {}
+        for root in discovery_roots(self.home):               # new root first
+            if not root.is_dir():
                 continue
-            version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
-            if not self.VERSION_RE.fullmatch(version):
-                continue
-            state = venv_health(path, self.BACKEND_NAME).state if self._is_complete(path) else "incomplete"
-            entries.append((version, path, state))
-        return sorted(entries, key=lambda item: self.version_key(item[0]), reverse=True)
+            for path in root.glob(f"{self.VENV_PREFIX}-*"):
+                if path.is_symlink() or not path.is_dir():
+                    continue
+                version = path.name.removeprefix(f"{self.VENV_PREFIX}-")
+                if not self.VERSION_RE.fullmatch(version):
+                    continue
+                state = venv_health(path, self.BACKEND_NAME).state if self._is_complete(path) else "incomplete"
+                entries.setdefault(version, (version, path, state))   # new root wins
+        return sorted(entries.values(), key=lambda item: self.version_key(item[0]), reverse=True)
 
     def _is_complete(self, path: Path) -> bool:
         """Check if environment is complete (override for backend-specific checks)."""
