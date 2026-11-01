@@ -1,3 +1,49 @@
+## [0.50.0] — 2026-11-01
+
+Picker UX minor (ROADMAP §0.50.0 items 1-10, incl. the 0.49.7-hotfix follow-ups F1-F6):
+
+### Added
+- API-keys screen: per-provider Hide/Show toggle for the choose-model list — persisted as
+  a new `hidden_providers` section (schema 8; old schemas still load), reversible, key
+  stays on disk; the infobox explains it vs open-website/add-key (item 2).
+- Theme screen: per-lane hue rotation (arrows ±5°, Enter/click +20°), persisted with the
+  theme file, border re-derived; the lane swatch shows a shell-mode colour slice (item 3).
+- Lowkey any-model API: `lowkey --provider <id> --api-model <id>` routes through a free
+  remote provider (remote_provider_core + remote_http, same path as
+  remote-agent-dispatch.py); the Lowkey picker screen has a real "Choose API model…"
+  chooser fed from the remote inventory (item 8 + the item-1 API list).
+- Backend manager: the promoted version row carries a pin icon (manage-backend `installed`
+  lists a pinned column, parsed via VersionEntry.pinned) (F1).
+
+### Changed
+- Lowkey menu: C) Choose model → M) Mode → G) Launch → S) Set session name → Model settings
+  group last; the Advanced group is gone (Mode/Set-name were folded into it because
+  Action's default section is "settings") (item 1).
+- Backend manager: harmonica backend chooser (accordion) instead of a cycling first row;
+  no standalone list-releases row; backend list is hardware-gated — CUDA first on CUDA
+  hardware, Mac-only elsewhere, and the "not applicable on this hardware" row is never
+  shown (item 5 + F2).
+- Backend venvs move to a free-agents-owned XDG root
+  ($XDG_DATA_HOME/free-agents/backends, default ~/.local/share/free-agents/backends);
+  discovery still reads the legacy ~/.venvs (new root wins on duplicates); remove/repair
+  resolve either root; repair of a legacy venv relocates it into the XDG root
+  make-before-break (item 7).
+- About screen shows real values: background stats now wait for the model caches (no more
+  false 0), placeholders read "loading…"; the status line's ⚠️ is reserved for problems —
+  informational notices (settings cleanup, paste whitespace) render with the info emoji,
+  and padding uses ec.gap() (F4).
+- csl: long-click+drag (>= 2 chars) over a menu entry copies its text; a plain click still
+  activates; Cmd+C copies the selection (F3).
+- Pid identity is keyed on (pid, process start time): proxy pidfiles store "pid start" and
+  _is_our_proxy verifies it; handover-verify --pid compares the registry procStart with the
+  live process and refuses recycled pids; local-watch --attach warns on a recycled pid (F5).
+- README: concise picker-settings reference table (item 4).
+- --help sweep remainder: .rtc/*.sh, queue_marker.py and two hooks now answer --help
+  without running their real work and reject unknown flags (item 6).
+- pyright policy settled: pyrightconfig.json (extraPaths bin+install, tests excluded as
+  expected pytest noise, missing third-party imports downgraded to warnings) + mechanical
+  fixes (assert spec/loader, E741, urllib.error import) (item 9).
+
 ## [0.49.8] — 2026-11-01
 
 ### Fixed — gate de-flake + orphan cleanup (waypoints recorded 2026-10-31)

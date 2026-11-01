@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.49.8`. See `CHANGELOG.md`.
+`0.50.0`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -159,6 +159,8 @@ stored last-launch effort at handover, interactive-window handover launch, and t
 + ROADMAP) at `0.49.7`; shipped through `rtc-ship.sh` from a worktree.
 
 ## `0.50.0` — Picker UX minor (reserved 2026-10-31)
+
+**SHIPPED 2026-11-01 as v0.50.0** — all items landed with tests; see `CHANGELOG.md` `[0.50.0]`.
 
 New settings and menu-shape changes from the same 2026-10-30 session — behavior users will notice,
 so they earn the minor bump rather than riding the patch:
