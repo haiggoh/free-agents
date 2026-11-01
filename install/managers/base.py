@@ -251,6 +251,14 @@ class BackendManager(
     # run the pipx install, so the manager's venvs are leftovers (user 2026-10-30).
     REMOVE_KEEPS_ONE: bool = True
 
+    def resolve_target(self, version: str, home: Path | None = None) -> Path:
+        """0.50.0: where an INSTALLED version lives — the XDG root first, then the legacy
+        ~/.venvs (resolve_venv_dir); falls back to the write path (target_for) for
+        not-yet-installed versions. Read operations must use this, never a bare
+        target_for, or a legacy-installed version looks missing after the XDG move."""
+        found = resolve_venv_dir(self.VENV_PREFIX, version, home or self.home)
+        return found if found is not None else self.target_for(version)
+
     def remove_version(
         self,
         version: str,
@@ -574,7 +582,7 @@ class BackendManager(
         versions = self.get_installed_versions()
         if not versions:
             raise ManagerError(f"No installed versions of {self.BACKEND_NAME}")
-        target = self.target_for(versions[0])
+        target = self.resolve_target(versions[0])   # 0.50.0: find it in the XDG root OR legacy ~/.venvs
         python = target / "bin" / "python"
         if not python.exists():
             raise ManagerError(f"Python not found in {target}")

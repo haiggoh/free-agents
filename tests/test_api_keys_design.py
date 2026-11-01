@@ -50,16 +50,17 @@ class APIKeysDesignTests(unittest.TestCase):
         api_keys = m.APIKeysScreen(self.settings)
         self.assertEqual(api_keys.accordion.open_group, "nvidia")
 
-    def test_group_items_are_open_and_add_actions(self):
-        """Each group has exactly 2 items: 'open:<slug>' and 'add:<slug>'."""
+    def test_group_items_are_open_add_and_hide_toggle(self):
+        """Each group has 3 items since 0.50.0: 'open:<slug>', 'add:<slug>', hide/show toggle."""
         api_keys = m.APIKeysScreen(self.settings)
         for group in api_keys.groups():
             # Skip separator group
             if group.id == "__sep__":
                 continue
-            self.assertEqual(len(group.items), 2)
+            self.assertEqual(len(group.items), 3)
             self.assertTrue(group.items[0].id.startswith("open:"))
             self.assertTrue(group.items[1].id.startswith("add:"))
+            self.assertTrue(group.items[2].id.startswith(("hide:", "show:")))
             # Items should reference the same slug
             open_slug = group.items[0].id[5:]
             add_slug = group.items[1].id[4:]

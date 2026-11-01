@@ -70,12 +70,13 @@ def test_moespresso_names_the_real_bottle_path():
 
 
 def test_venv_backends_keep_their_venv_targets():
-    """The complement: rapid-mlx and vllm-mlx really do install venvs; they must not change."""
+    """The complement: rapid-mlx and vllm-mlx really do install venvs. 0.50.0: the target
+    root moved to the free-agents XDG dir (discovery still reads the legacy ~/.venvs)."""
     for name in ("rapid-mlx", "vllm-mlx"):
         assert name in list_managers(), name
     from managers.rapid_mlx import RapidMLXManager
     mgr = RapidMLXManager()
     with patch("pathlib.Path.home", return_value=Path("/tmp/fakehome")):
         t = str(mgr.target_for("0.16.1"))
-    assert "/.venvs/rapid-mlx-0.16.1" in t, (
-        f"rapid-mlx installs a venv — its target must still say so: {t}")
+    assert ".local/share/free-agents/backends/rapid-mlx-0.16.1" in t, (
+        f"rapid-mlx installs a venv — its target must point at the XDG root: {t}")

@@ -247,14 +247,16 @@ def validate_accordion_structure(api_keys_screen) -> List[str]:
     if provider_groups and provider_groups[0].id != "nvidia":
         errors.append(f"First group should be nvidia, got {provider_groups[0].id}")
 
-    # Check each provider group has 2 items
+    # Check each provider group has 3 items (0.50.0: open, add, hide/show toggle)
     for g in provider_groups:
-        if len(g.items) != 2:
-            errors.append(f"Group {g.id} should have 2 items, got {len(g.items)}")
+        if len(g.items) != 3:
+            errors.append(f"Group {g.id} should have 3 items, got {len(g.items)}")
         if not g.items[0].id.startswith("open:"):
             errors.append(f"Group {g.id} first item should be 'open:', got {g.items[0].id}")
         if not g.items[1].id.startswith("add:"):
             errors.append(f"Group {g.id} second item should be 'add:', got {g.items[1].id}")
+        if not (g.items[2].id.startswith("hide:") or g.items[2].id.startswith("show:")):
+            errors.append(f"Group {g.id} third item should be the hide/show toggle, got {g.items[2].id}")
 
     # Verify separator exists
     sep_groups = [g for g in groups if g.id == "__sep__"]

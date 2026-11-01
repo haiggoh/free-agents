@@ -31,37 +31,42 @@ class BackendManagerScreen(PilotCase):
             await h.wait_screen("RuntimeManagerScreen")
             self.assertIn("Backend Manager", h.title())
             text = h.text()
-            for label in ("Backend: rapid-mlx", "List installable releases", "Install a release",
+            for label in ("Choose backend", "Install a release",
                           "Validate an installed version", "Show info for an installed version",
                           "Launchd update checks", "Back to Home"):
                 self.assertIn(label, text)
+            # 0.50.0: the standalone list-releases row is gone (install shows the list)
+            self.assertNotIn("List installable releases", text)
+            self.assertNotIn("Backend: rapid-mlx", text)
             await h.press("b")
             await h.wait_screen("HomeScreen")
         self.run_picker(s)
 
     def test_backend_cycles_and_hides_ops_its_manager_lacks(self):
+        # 0.50.0 item 5: backends are CHOSEN via the chooser accordion (no cycling "c" row);
+        # the op rows still hide for backends whose manager lacks them.
         async def s(app, pilot, h):
             await h.press("v")
             await h.wait_screen("RuntimeManagerScreen")
             self.assertIn("Remove an installed version", h.text())      # rapid-mlx has remove
-            await h.press("c")
-            await h.wait_for(lambda: "Backend: rapid-mlx" not in h.text(), "backend to cycle")
+
+            async def choose(backend):
+                await h.goto_row("item", backend)
+                await h.press("enter")                                   # chooser sets it
+                await h.wait_for(lambda: backend in h.text(), f"{backend} chosen")
+
             # 0.49.0: snapshot/promote/remove/repair live in the shared venv base, so vllm-mlx
             # keeps the rows this test used to see hidden (old contract: remove was Rapid-only)
-            self.assertIn("Backend: vllm-mlx", h.text())
+            await choose("vllm-mlx")
             self.assertIn("Remove an installed version", h.text())
             self.assertIn("Repair an installed version", h.text())
             # a backend with NO version ops (omlx) must hide every one of them
-            await h.press("c")
-            await h.wait_for(lambda: "Backend: omlx" in h.text(), "backend to cycle to omlx")
+            await choose("omlx")
             for label in ("Snapshot an installed version", "Promote pins to an installed version",
                           "Remove an installed version", "Repair an installed version"):
                 self.assertNotIn(label, h.text())
             # litellm is the partial case: remove only (pipx owns the live install), the rest hidden
-            await h.press("c")
-            await h.wait_for(lambda: "Backend: llama-cpp" in h.text(), "backend to cycle")
-            await h.press("c")
-            await h.wait_for(lambda: "Backend: litellm" in h.text(), "backend to cycle to litellm")
+            await choose("litellm")
             self.assertIn("Remove an installed version", h.text())
             self.assertNotIn("Snapshot an installed version", h.text())
             self.assertNotIn("Promote pins to an installed version", h.text())
@@ -580,8 +585,9 @@ class StaleSecurityReviewOverride(PilotCase):
             {"env": {"SECURITY_REVIEW_MODEL": "claude-sonnet-4-6", "KEEP": "1"}}))
 
         async def s(app, pilot, h):
-            self.assertTrue(any("SECURITY_REVIEW_MODEL" in w for w in app.state_warnings),
-                            app.state_warnings)
+            # 0.50.0 F4: the removal is informational — it renders as a notice, not a ⚠️ warning
+            notices = getattr(app, "state_notices", [])
+            self.assertTrue(any("SECURITY_REVIEW_MODEL" in n for n in notices), notices)
             self.assertNotIn("s", {a.key for a in self.m.CloudConfigScreen(app.settings).actions()})
         self.run_picker(s, start="home")
         self.assertEqual(json.loads((cfg / "settings.json").read_text()), {"env": {"KEEP": "1"}})

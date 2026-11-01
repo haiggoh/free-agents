@@ -127,7 +127,7 @@ class RapidMLXManager(BackendManager):
         return payload.get("info", {}).get("version", "")
 
     def validate_environment(self, version: str) -> BackendInfo:
-        target = self.target_for(version)
+        target = self.resolve_target(version)
         if target.is_symlink() or not target.is_dir():
             raise ManagerError(f"environment is missing or unsafe: {target}")
         binary = target / "bin" / "rapid-mlx"
@@ -347,7 +347,7 @@ print(json.dumps(out, sort_keys=True))
 
     def smoke_environment(self, version: str, home: Path | None = None) -> dict[str, Any]:
         """Validate package and CLI surfaces without starting a server."""
-        target = self.target_for(version, home or self.home)
+        target = self.resolve_target(version, home or self.home)
         receipt = self.validate_environment(version)
         binary = target / "bin" / "rapid-mlx"
         top_help = self.run_command([str(binary), "--help"], capture=True).stdout
@@ -365,7 +365,7 @@ print(json.dumps(out, sort_keys=True))
         dry_run: bool = False,
     ) -> Path:
         """Capture CLI/package evidence."""
-        target = self.target_for(version, home or self.home)
+        target = self.resolve_target(version, home or self.home)
         destination = (output or self._cache_root() / "inspections" / f"rapid-mlx-{version}.txt").expanduser()
         if dry_run:
             print(f"would inspect {target} and write {destination}")
@@ -401,7 +401,7 @@ print(json.dumps(out, sort_keys=True))
                 "pass --skip-pin-update"
             )
 
-        target = self.target_for(version, home)
+        target = self.resolve_target(version, home)
         if dry_run:
             lock = None if refresh_deps else self._locked_requirements(version)
             receipt = BackendInfo(

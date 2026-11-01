@@ -99,7 +99,7 @@ with tempfile.TemporaryDirectory() as temporary:
     # Create manager with custom home
     test_mgr = RapidMLXManager(home=home)
     root = test_mgr.venv_root
-    root.mkdir()
+    root.mkdir(parents=True)          # 0.50.0: the XDG root is nested — create parents too
     complete = root / "rapid-mlx-0.14.0"
     (complete / "bin").mkdir(parents=True)
     binary = complete / "bin" / "rapid-mlx"
