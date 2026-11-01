@@ -340,6 +340,32 @@ logged 8 × `400` and 17 × `500` before recovering.
   warning.
 - The `csl` dry run names the real MCP toggle key (`m`).
 
+### Picker settings reference (0.50.0)
+
+What each `csl` picker setting does and where it lands. Persisted choices live in
+`~/.claude/free-agents/session-menu/session-menu.local.json` (schema 8); theme colours in
+`~/.claude/free-agents/themes/`; in-memory flags reset every start.
+
+| Setting (key, screen) | Effect | Lands as |
+|---|---|---|
+| Effort (`e`, both lanes / Lowkey) | `reasoning_effort` for the launch | `LA_*_EFFORT` / `--effort`, remembered per lane |
+| Temperature (`o`, Local; remote row) | Sampling temperature | `LA_TEMPERATURE`; part of server-reuse identity |
+| Thinking (`j`, lanes) | On/off per session launch | `LA_THINKING_OVERRIDE` |
+| Auto-mode (`a`) | blind-trust / classifier / off | `CSL_AUTO_MODE_STATE` at launch |
+| Classifier source (`z`) | which classifier grades | settings overlay |
+| Telemetry (`t`) | optional Anthropic traffic OFF by default | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in `remote-session.sh` |
+| Queued-prompt hook (`p`) | Stop hook fires on queued prompts | settings overlay |
+| Watcher (`w`) | transcript watcher window | `CSL_WATCH` |
+| MCP (`m`) | enable MCP servers | `LA_ENABLE_MCP` |
+| NVIDIA rate limiter (`n`) | RPM + mode (sliding window / smooth bucket) | limiter state file |
+| OOM protection (`u`, Local) | memguard kv_dtype etc. | `memguard` section |
+| API keys (`k`) | provider credentials in `~/.api_keys` | key files |
+| Hide provider in model list (API-keys screen, 0.50.0) | drops the provider's group from the remote choose-model list; reversible, key stays on disk | `hidden_providers` section |
+| Theme accent + hue (`l`/`r` presets, `y`/`u` hue 5°/20°, `d` defaults) | session accent, border, shell-mode colour | theme json per lane |
+| Lowkey effort/temp/thinking | model-eval chat defaults | `lowkey` effort section |
+| Show broken / old / local-capable / trials (filters) | list visibility only | in-memory flags |
+| `LA_REMOTE_CLAUDE_SETTINGS=<file>` | extra settings overlay for every free-API session | merged at launch (deny rules added, never substituted) |
+
 ## How it works
 
 Claude Code talks to an Anthropic-compatible endpoint. A local MLX backend exposes one
