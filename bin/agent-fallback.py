@@ -114,10 +114,13 @@ def _remote_providers_for_mode(mode, requested=None, doctor_ids=None):
 
 def _run_local(prompt, files, model, max_tokens, outdir, dry_run, timeout,
                progress, profile=""):
-    """Drive lowkey-cli.py (the local dispatcher, formerly local-agent-dispatch.py) as a subprocess. Returns (ok, answer_text).
+    """Drive lowkey-cli.py (the local dispatcher, formerly local-agent-dispatch.py) as a subprocess. Returns (ok, answer_text, partial).
 
     The local lane is lane-agnostic; we read its answer from stdout (its one
-    output channel) and treat empty-or-nonzero-exit as "local failed". It never
+    output channel) and treat empty-or-nonzero-exit as "local failed". A failed
+    run that already wrote answer text is PARTIAL: the text is returned so the
+    caller can preserve it, and the caller must not re-send the prompt to a
+    remote lane (the failover contract in the module docstring). It never
     leaves the machine, so no remote banner is needed.
     """
     cmd = [sys.executable, LOCAL_DISPATCH,
@@ -134,25 +137,31 @@ def _run_local(prompt, files, model, max_tokens, outdir, dry_run, timeout,
         print("[local] dry-run — would dispatch to model=%s profile=%s "
               "(%d file(s)); no request sent." % (model, profile or "none", len(files)),
               file=sys.stderr)
-        return False, ""
+        return False, "", False
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        print("[local] TIMEOUT after %.0fs (no output) — local lane failed." % timeout,
-              file=sys.stderr)
-        return False, ""
+    except subprocess.TimeoutExpired as exc:
+        got = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        got = got.strip()
+        print("[local] TIMEOUT after %.0fs (%s) — local lane failed." % (
+            timeout, "%d chars of partial output kept" % len(got) if got else "no output"),
+            file=sys.stderr)
+        return False, got, bool(got)
+    answer = (proc.stdout or "").strip()
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()[-3:]
-        print("[local] model=%s exited %d:" % (model, proc.returncode), file=sys.stderr)
+        print("[local] model=%s exited %d%s:" % (
+            model, proc.returncode,
+            " after %d chars of output (partial, kept)" % len(answer) if answer else ""),
+            file=sys.stderr)
         for ln in tail:
             print("    " + ln, file=sys.stderr)
-        return False, ""
-    answer = (proc.stdout or "").strip()
+        return False, answer, bool(answer)
     if not answer:
         print("[local] model=%s produced no output — local lane failed." % model,
               file=sys.stderr)
-        return False, ""
-    return True, answer
+        return False, "", False
+    return True, answer, False
 
 
 def _run_remote(provider_id, prompt, files, model, max_tokens, outdir, dry_run,
@@ -282,14 +291,19 @@ def main(argv=None):
     # --- local lane (every mode starts local EXCEPT remote-free-only) ----------
     try_local = a.mode != "remote-free-only"
     if try_local:
-        ok, answer = _run_local(a.prompt, a.files, a.local_model, a.max_tokens,
-                                outdir, a.dry_run, a.timeout, a.progress, a.profile)
+        ok, answer, partial = _run_local(a.prompt, a.files, a.local_model, a.max_tokens,
+                                         outdir, a.dry_run, a.timeout, a.progress, a.profile)
         record["lanes"].append({"lane": "local", "model": a.local_model, "profile": a.profile, "ok": ok,
-                                "output_chars": len(answer)})
+                                "partial": partial, "output_chars": len(answer)})
         if ok:
             final_answer = answer
             record.update(succeeded=True, output_chars=len(answer),
                           succeeded_on="local")
+        elif partial:
+            # A partial output is preserved, never re-sent to a remote lane.
+            record.update(stopped_on="local", output_chars=len(answer))
+            _report(record, a, answer, outdir, code=2)
+            return 2
     if not record.get("succeeded") and not remote_plan:
         # No remote lane permitted (local-only) or none configured → hard stop.
         _report(record, a, final_answer, outdir, code=2)
@@ -316,9 +330,13 @@ def main(argv=None):
                 return 0
             last_retriable = retriable
             # Only retry the SAME provider on a retriable reason, and only within
-            # the ceiling; a hard reason breaks out to the next provider.
+            # the ceiling. A hard reason (auth / malformed / policy / partial /
+            # transport / offline) STOPS the whole walk: the contract above forbids
+            # falling over on it, and any partial text is preserved, not retried.
             if not retriable:
-                break
+                record.update(stopped_on="remote:" + pid, output_chars=len(answer))
+                _report(record, a, answer, outdir, code=2)
+                return 2
         # A provider that still failed for a retriable reason means "try later";
         # remember it so the final code can signal 3 (retry later) vs 2 (stop).
         any_retriable_left = any_retriable_left or last_retriable
