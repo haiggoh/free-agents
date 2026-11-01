@@ -61,8 +61,8 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$expect" ]] || { echo 'handover-verify: --expect is required' >&2; exit 2; }
 [[ -n "$sid" || -n "$pid" ]] || { echo 'handover-verify: one of --session-id / --pid is required' >&2; exit 2; }
-sdir="${sdir:-$HOME/.claude/sessions}"
-pdir="${pdir:-$HOME/.claude/projects}"
+sdir="${sdir:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions}"
+pdir="${pdir:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects}"
 if [[ -z "$sid" ]]; then
     regf="$sdir/$pid.json"
     if [[ ! -r "$regf" ]]; then

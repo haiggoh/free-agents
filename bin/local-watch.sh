@@ -190,7 +190,7 @@ if [ "$MODE" = "--attach" ]; then
   case "$_apid" in ''|*[!0-9]*) echo "Usage: local-watch.sh --attach <launcher-pid>"; exit 1;; esac
   # 0.50.0 F5: a recycled pid must not attach to another session's transcript — if the
   # sessions registry has this pid with a different start time, warn loudly.
-  _regf="$HOME/.claude/sessions/$_apid.json"
+  _regf="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$_apid.json"
   if [ -r "$_regf" ]; then
     _pstart="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("procStart",""))' "$_regf" 2>/dev/null || true)"
     if [ -n "$_pstart" ]; then
