@@ -25,7 +25,7 @@ class LaEvictPortSafetyTests(unittest.TestCase):
         # machine-wide flock on the suite. This test runs ONE suite and asserts the lock is
         # HELD for its whole run — a second run would wait, never collide on the same base.
         import time
-        lock = Path(tempfile.gettempdir()) / "free-agents-la-evict.lock"
+        lockdir = Path(tempfile.gettempdir()) / "free-agents-la-evict.lock.d"
         p = subprocess.Popen(["bash", str(SUITE)], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
         try:
@@ -33,7 +33,8 @@ class LaEvictPortSafetyTests(unittest.TestCase):
             for _ in range(1200):                     # up to 10 min of probing
                 if p.poll() is not None:
                     break
-                r = subprocess.run(["flock", "-n", str(lock), "true"], capture_output=True)
+                # mkdir is atomic: it fails while the suite holds the lock dir
+                r = subprocess.run(["mkdir", str(lockdir)], capture_output=True)
                 if r.returncode != 0:
                     held = True                       # lock held by the running suite
                     break

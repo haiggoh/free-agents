@@ -101,22 +101,38 @@ done
 #   2. if a port is still stolen by an external squatter, the wrapper below re-runs
 #      the whole test with a higher scan start (LA_EVICT_BASE_FROM), up to 3 times.
 if [[ "${LA_EVICT_RETRY:-}" != "1" ]]; then
-    exec 9>"${TMPDIR:-/tmp}/free-agents-la-evict.lock"
-    flock 9                       # blocking: serialize concurrent runs machine-wide
+    # 0.49.8: serialize concurrent runs machine-wide. macOS has no flock(1) binary, so
+    # the lock is an atomic mkdir of a lock dir (with stale-lock reclaim: a killed run's
+    # lock is taken over when its owner pid is gone).
+    LOCKDIR="${TMPDIR:-/tmp}/free-agents-la-evict.lock.d"
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+        owner="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
+        if [[ -n "$owner" ]] && kill -0 "$owner" 2>/dev/null; then
+            printf 'another la-evict run is active (pid %s); waiting for it\n' "$owner" >&2
+            while [[ -d "$LOCKDIR" ]]; do sleep 2; done
+        else
+            rm -rf "$LOCKDIR" 2>/dev/null      # stale lock: owner is gone
+            mkdir "$LOCKDIR" 2>/dev/null || true
+        fi
+    fi
+    echo $$ > "$LOCKDIR/pid" 2>/dev/null || true
     from="${LA_EVICT_BASE_FROM:-20000}"
     attempt=0
+    rc=1
     while :; do
         attempt=$((attempt + 1))
         out="$(LA_EVICT_RETRY=1 LA_EVICT_BASE_FROM="$from" bash "$0" "$@" 2>&1)"
         rc=$?
         printf '%s\n' "$out"
-        [[ $rc -eq 0 ]] && exit 0
+        [[ $rc -eq 0 ]] && break
         if [[ $attempt -ge 3 ]] || ! printf '%s' "$out" | grep -q 'unexpected pid'; then
-            exit "$rc"
+            break
         fi
         from=$((from + 2000))
         printf '  (test port stolen by an external listener; retrying, scan start now %s)\n' "$from" >&2
     done
+    rm -rf "$LOCKDIR" 2>/dev/null
+    exit "$rc"
 fi
 
 SB="$(mktemp -d "${TMPDIR:-/tmp}/la-evict-test.XXXXXX")"
