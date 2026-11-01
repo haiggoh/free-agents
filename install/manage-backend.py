@@ -240,7 +240,10 @@ def cmd_installed(args: argparse.Namespace) -> int:
         entries = mgr.installed_versions()
         if entries:
             for version, path, status in entries:
-                print(f"{version:14} {status:10} {path}")
+                # 0.50.0 F1: mark the promoted version (referenced by the live config) so
+                # the picker can pin-icon it; the column is always present ('-' otherwise).
+                pinned = bool(mgr._referenced_paths(None, path))
+                print(f"{version:14} {status:10} {'pinned' if pinned else '-':6} {path}")
         else:
             print(f"No versioned {mgr.BACKEND_NAME} environments found.")
     except ManagerError as exc:

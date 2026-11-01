@@ -92,7 +92,7 @@ cat > "$SB/manage-backend" <<EOF
 #!/bin/sh
 case "\$*" in
   *--help*) echo "sandbox backend manager: fake version lists"; echo "see picker-sandbox.sh"; exit 0;;
-  *" installed"*) printf '0.16.1         complete   /sandbox/rapid-mlx-0.16.1\n0.15.3         complete   /sandbox/rapid-mlx-0.15.3\n'; exit 0;;
+  *" installed"*) printf '0.16.1         complete   pinned  /sandbox/rapid-mlx-0.16.1\n0.15.3         complete   -       /sandbox/rapid-mlx-0.15.3\n'; exit 0;;
   *" releases"*) printf '0.17.0\n0.16.1\n0.15.3\n'; exit 0;;
 esac
 . "$SB/record"

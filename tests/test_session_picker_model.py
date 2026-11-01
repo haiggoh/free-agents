@@ -309,9 +309,9 @@ class BackendManagerContractTests(unittest.TestCase):
             self.assertEqual(ld.handle_key("b"), m.Nav("runtime", owner))
         s = m.Settings()
         m.RuntimeScreen(s).handle_key("c")
-        # len(), not a literal: the tuple gained moespresso and this assertion kept % 5.
-        self.assertEqual(s.runtime_backend,
-                         m.RUNTIME_BACKENDS[(m.RUNTIME_BACKENDS.index("rapid-mlx") + 1) % len(m.RUNTIME_BACKENDS)])
+        # 0.50.0 item 5: the cycling backend row is gone (harmonica chooser instead), so
+        # pressing "c" no longer cycles — the default backend is untouched.
+        self.assertEqual(s.runtime_backend, "rapid-mlx")
 
 
 class ActionTableTests(unittest.TestCase):
@@ -1004,6 +1004,56 @@ class RemoteInfoBoxTests(unittest.TestCase):
         text = lane.info_text("nvidia-laguna")
         self.assertNotIn("Lane:", text)
         self.assertIn("no daily cap", text)
+
+
+class BackendManagerUX0500Tests(unittest.TestCase):
+    """0.50.0 items 5 + F1 + F2: no standalone list-releases row; a harmonica backend
+    chooser instead of a cycling first row; hardware-gated backend list (no
+    'not applicable' row, CUDA first on CUDA hardware); a pin icon on the promoted
+    version row."""
+
+    def test_no_list_releases_row_and_chooser_not_cycling(self):
+        s = m.Settings()
+        scr = m.RuntimeManagerScreen(s)
+        labels = [a.label for a in scr.actions()]
+        self.assertFalse(any("List installable releases" in lb for lb in labels), labels)
+        self.assertFalse(any("Backend:" in lb for lb in labels),
+                         "the cycling first row is replaced by a chooser")
+        groups = scr.groups()
+        self.assertTrue(groups, "backend chooser must be an accordion group")
+        items = [i.id for g in groups for i in g.items]
+        self.assertIn(s.runtime_backend, items)
+        # selecting a different backend sets it (no cycling)
+        other = next(b for b in items if b != s.runtime_backend)
+        scr.accordion.select(other)
+        scr.activate_selected()
+        self.assertEqual(s.runtime_backend, other)
+
+    def test_hardware_gates_the_chooser_never_a_na_row(self):
+        s = m.Settings()
+        s.hw_hardware = "apple-silicon"                      # Mac
+        scr = m.RuntimeManagerScreen(s)
+        items = [i.id for g in scr.groups() for i in g.items]
+        self.assertTrue(items and all(b not in m.CUDA_BACKENDS for b in items), items)
+        labels = [a.label for a in scr.actions()] + [i.label for g in scr.groups() for i in g.items]
+        self.assertFalse(any("not applicable" in lb for lb in labels), labels)
+        s2 = m.Settings()
+        s2.hw_hardware = "cuda"
+        scr2 = m.RuntimeManagerScreen(s2)
+        items2 = [i.id for g in scr2.groups() for i in g.items]
+        self.assertEqual(tuple(items2[:len(m.CUDA_BACKENDS)]), m.CUDA_BACKENDS,
+                         "on CUDA hardware the CUDA backends list FIRST (as MLX does on Mac)")
+        labels2 = [a.label for a in scr2.actions()] + [i.label for g in scr2.groups() for i in g.items]
+        self.assertFalse(any("not applicable" in lb for lb in labels2), labels2)
+
+    def test_promoted_version_row_carries_the_pin_icon(self):
+        s = m.Settings()
+        s.runtime_backend = "rapid-mlx"
+        vs = m.VersionsScreen(s, "info", [m.VersionEntry("0.16.1", "complete", pinned=True),
+                                          m.VersionEntry("0.15.3", "complete")])
+        labels = {i.id: i.label for g in vs.accordion.groups for i in g.items}
+        self.assertIn(m.ec.EMOJI_PROMOTE_STR, labels["0.16.1"])
+        self.assertNotIn(m.ec.EMOJI_PROMOTE_STR, labels["0.15.3"])
 
 
 class ThemeStoreLayering(unittest.TestCase):

@@ -363,7 +363,8 @@ def load_versions(kind: str) -> list[m.VersionEntry]:
     read from manage-backend.py's own text output (never a second source of truth)."""
     _, backend, source = kind.split(":", 2)
     inst = _run(_mb(backend, "installed"))
-    installed = [m.VersionEntry(p[0], p[1]) for p in (ln.split() for ln in inst.stdout.splitlines())
+    installed = [m.VersionEntry(p[0], p[1], pinned=(len(p) >= 3 and p[2] == "pinned"))
+                 for p in (ln.split() for ln in inst.stdout.splitlines())
                  if len(p) >= 2 and p[0][:1].isdigit()]
     if source == "installed":
         if inst.returncode != 0:

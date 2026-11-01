@@ -2413,6 +2413,14 @@ RUNTIME_BACKENDS = ("rapid-mlx", "vllm-mlx", "omlx", "llama-cpp", "litellm", "mo
 # shows them as ONE dim "not applicable on this hardware" row, never silently absent.
 CUDA_BACKENDS = ("cuda-vllm", "cuda-llama-cpp", "cuda-exllamav2", "cuda-sglang")
 MAC_ONLY_BACKENDS = tuple(b for b in RUNTIME_BACKENDS if b not in CUDA_BACKENDS)
+
+
+def _backend_choices(hw: str) -> tuple:
+    """0.50.0 F2: the backend list is hardware-gated — on CUDA hardware the CUDA backends
+    list FIRST (as MLX does on Mac); elsewhere only the Mac backends. A 'not applicable
+    on this hardware' row is never shown (that was the 0.49.x dim row)."""
+    cuda_ok = (hw or "") == "cuda"
+    return CUDA_BACKENDS + MAC_ONLY_BACKENDS if cuda_ok else MAC_ONLY_BACKENDS
 # Per-version operations beyond install/validate/info, by backend: only the ones that backend's
 # manager actually implements (the base class raises "not supported"), so the menu never offers
 # a row that can only fail. Tests compare this against the managers' real overrides.
@@ -2430,6 +2438,7 @@ KEEP_ONE_BACKENDS = ("rapid-mlx", "vllm-mlx")
 class VersionEntry:
     version: str
     status: str = ""          # installed: complete/incomplete; releases: "installed" or ""
+    pinned: bool = False      # 0.50.0 F1: the promoted version (live-config pin) gets a pin icon
 
 
 CORE_REFUSAL = ("{version} is the only installed {backend} version — not removed. {backend} is a "
@@ -2482,7 +2491,9 @@ class VersionsScreen(Screen):
             label = f"Releases incl. prereleases ({len(items)})"
         else:
             # A version that cannot run is marked where the user chooses (0.49.0: health is real).
-            items = [Item(e.version, f"{e.version:14} {e.status}"
+            # F1 (0.50.0): the promoted version carries a real pin icon.
+            items = [Item(e.version, (f"{ec.EMOJI_PROMOTE_STR} " if e.pinned else "")
+                          + f"{e.version:14} {e.status}"
                           + (f"  {ec.gap(ec.EMOJI_WARNING_STR)}cannot run — Repair rebuilds it" if e.status in ("broken", "incomplete") else ""))
                      for e in entries]
             label = f"Installed versions ({len(items)})"
@@ -2539,16 +2550,17 @@ VERSION_OP_EMOJI = {"install": ec.EMOJI_INSTALL_STR, "validate": ec.EMOJI_VALIDA
 
 
 def runtime_actions(screen) -> list:
-    """The Backend manager rows, shared by both entry screens (Home `v` and Launchd's Back)."""
+    """The Backend manager rows, shared by both entry screens (Home `v` and Launchd's Back).
+    0.50.0 item 5: no standalone list-releases row (the install flow lists the same
+    releases) and no cycling backend row — the backend is the chooser accordion on
+    RuntimeManagerScreen. F2: no 'not applicable on this hardware' row either."""
     b = screen.settings.runtime_backend
-    cuda_ok = getattr(screen.settings, "hw_hardware", "") == "cuda"
-    if not cuda_ok and b in CUDA_BACKENDS:
-        b = MAC_ONLY_BACKENDS[0]
+    choices = _backend_choices(getattr(screen.settings, "hw_hardware", ""))
+    if b not in choices:
+        b = choices[0]
         screen.settings.runtime_backend = b
     pick = lambda op: (lambda: Nav(f"runtime_versions:{op}", screen.owner))   # noqa: E731
     acts = [
-        Action("c", f"{ec.EMOJI_BACKEND_STR} Backend: {b}", screen._cycle_backend),
-        Action("r", f"{ec.EMOJI_RELEASES_STR} List installable releases (incl. prereleases)", lambda: Nav("tool:rt-releases"), section="tools"),
         Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", pick("install"), section="tools"),
         Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", pick("validate"), section="tools"),
         Action("f", f"{ec.EMOJI_INFO_STR}  Show info for an installed version", pick("info"), section="tools"),
@@ -2563,13 +2575,6 @@ def runtime_actions(screen) -> list:
     acts.append(Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", screen.owner),
                        section="tools"))
     acts += screen.nav_actions()
-    if not cuda_ok:
-        # one dim row, never silently absent: the CUDA backends exist but need an NVIDIA GPU.
-        # Key is the first free lowercase letter — check_action_table demands unique keys.
-        used = {a.key for a in acts}
-        key = next(c for c in "abcdefghijklmnopqrstuvwxyz" if c not in used)
-        acts.append(Action(key, f"{ec.EMOJI_BACKEND_STR} CUDA backends — not applicable on this hardware",
-                           lambda: None, enabled=False, section="tools"))
     check_action_table(acts)
     return acts
 
@@ -2657,20 +2662,35 @@ class RuntimeManagerScreen(Screen):
     Drives install/manage-backend.py with backend selection.
     """
     title = f"{ec.EMOJI_TOOLS_STR} Backend Manager"
-    # This screen has no accordion (action-only screen)
-    _has_accordion = False
 
-    def _cycle_backend(self):
-        cuda_ok = getattr(self.settings, "hw_hardware", "") == "cuda"
-        choices = RUNTIME_BACKENDS if cuda_ok else MAC_ONLY_BACKENDS
-        self.settings.runtime_backend = _next(choices, self.settings.runtime_backend)
+    def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
+        super().__init__(settings, owner)
+        self._rebuild_backend_chooser()
+
+    def _rebuild_backend_chooser(self):
+        """0.50.0 item 5: the backend picker is a chooser (accordion group), not a cycling
+        first row. F2: the list is hardware-gated (CUDA first on CUDA hardware)."""
+        choices = _backend_choices(getattr(self.settings, "hw_hardware", ""))
+        cur = self.settings.runtime_backend
+        if cur not in choices:
+            cur = choices[0]
+            self.settings.runtime_backend = cur
+        self.accordion.set_groups([Group(
+            "backends", "Choose backend",
+            [Item(b, f"{b}" + ("  ← current" if b == cur else "")) for b in choices])])
+
+    def groups(self):
+        return self.accordion.groups
+
+    def activate_selected(self):
+        sel = self.accordion.selected_id
+        if sel and sel in _backend_choices(getattr(self.settings, "hw_hardware", "")):
+            self.settings.runtime_backend = sel
+            self._rebuild_backend_chooser()
+        return None
 
     def actions(self):
         return runtime_actions(self)
-
-    def groups(self):
-        """No accordion for this screen."""
-        return []
 
 
 class APIKeysScreen(Screen):
