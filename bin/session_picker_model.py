@@ -2603,10 +2603,13 @@ def about_backend_lines(home: Path, repo: Path) -> list[str]:
     venvs (hf-py312). Health comes from the managers' real installed_versions() (runs the
     interpreter), and the pin is read from the LIVE config (config-lib's own resolution) — the
     old code read backend-pin.txt, a file no code ever writes, so About could never show a pin.
-    Format: "<fam>  pinned <ver> (<health>)" or "<fam>  <n> installed, not pinned
-    (auto-discovery: <ver>)"; broken / pinned-keg versions are flagged with the warning emoji.
+    Format: "<fam>  📌 pinned <ver> (<health>)" (0.50.1: the promoted version carries the pin
+    emoji, not the warning triangle) or "<fam>  <n> installed, not pinned
+    (auto-discovery: <ver>)"; broken / pinned-keg versions are flagged with ⚠️.
+    Emoji spacing goes through ec.gap() (narrow+VS16 emoji are drawn 2 cols wide).
     """
     warn = ec.EMOJI_WARNING_STR
+    pin = ec.EMOJI_PROMOTE_STR
     try:
         install = str(repo / "install")
         if install not in sys.path:
@@ -2658,14 +2661,14 @@ def about_backend_lines(home: Path, repo: Path) -> list[str]:
                    and venv_durability(p) == "pinned-keg"]
         flags = []
         if broken:
-            flags.append(f"{warn} broken: {', '.join(broken)}")
+            flags.append(f"{ec.gap(warn)}broken: {', '.join(broken)}")
         if fragile:
-            flags.append(f"{warn} pinned-keg: {', '.join(fragile)}")
+            flags.append(f"{ec.gap(warn)}pinned-keg: {', '.join(fragile)}")
         pinned = next(((v, s) for v, p, s in rows if pins_in_live(p)), None)
         if pinned:
             ver, state = pinned
             health = "runs" if state == "complete" else state
-            lines.append(f"{name}  pinned {ver} ({health})" + (f" {' '.join(flags)}" if flags else ""))
+            lines.append(f"{name}  {ec.gap(pin)}pinned {ver} ({health})" + (f" {' '.join(flags)}" if flags else ""))
         else:
             best = next((v for v, _p, s in rows if s != "broken"), rows[0][0])
             lines.append(f"{name}  {len(rows)} installed, not pinned (auto-discovery: {best})"

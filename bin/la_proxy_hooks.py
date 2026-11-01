@@ -299,6 +299,20 @@ _DAILY_QUOTA = re.compile(r"daily\s+(?:token\s+)?(?:quota|limit)|quota\s+exceede
 _TOO_LARGE = re.compile(r"request\s+too\s+large|tokens\s+per\s+minute.{0,40}limit\s+\d+.{0,20}requested\s+\d+", re.I)
 
 
+def _is_offline(text: str) -> bool:
+    """0.50.1: a connect-level failure = the network is down (wifi cut), not a model error."""
+    low = text.lower()
+    return any(t in low for t in ("failed to connect", "connection refused",
+                                  "network is unreachable", "no route to host",
+                                  "name or service not known", "enotfound", "econnrefused",
+                                  "ehostunreach", "enetunreach", "api connection error"))
+
+
+OFFLINE_DETAIL = ("network unreachable from here (wifi off?) — the provider cannot be "
+                  "reached at all right now, so the model is fine; this session will retry "
+                  "when you are back online")
+
+
 def is_account_error(status, text: str) -> bool:
     """True for refusals a retry cannot fix soon: account/billing, a daily quota, a too-large request."""
     text = text or ""
@@ -463,6 +477,16 @@ class LAProxyHooks(CustomLogger):
         # fix 6: what the CLIENT sees. An account refusal becomes a 402 that names the provider;
         # Claude Code shows a 402 at once instead of retrying a 429 behind a countdown.
         text = str(original_exception)
+        # 0.50.1 (wifi-cutoff plan): a connect-level failure means the network is down —
+        # say THAT plainly instead of surfacing a provider/model error (and its 429 chain).
+        if _is_offline(text):
+            print(f"la_proxy_hooks: offline: {OFFLINE_DETAIL}", file=sys.stderr)
+            for attr, value in (("message", OFFLINE_DETAIL), ("type", "api_connection_error")):
+                try:
+                    setattr(original_exception, attr, value)
+                except Exception:
+                    pass
+            return None
         if not is_account_error(getattr(original_exception, "status_code", None), text):
             return None
         from fastapi import HTTPException

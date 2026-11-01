@@ -188,6 +188,13 @@ def classify(status, body="", error=""):
     """
     text = (body or "") + " " + (error or "")
     low = text.lower()
+    if status == 0 or any(t in low for t in (
+            "failed to connect", "connection refused", "network is unreachable",
+            "no route to host", "name or service not known", "enotfound",
+            "econnrefused", "ehostunreach", "enetunreach")):
+        # 0.50.1: wifi/network down — the provider is unreachable FROM HERE, the model is
+        # fine. Not retriable until connectivity returns; must not read as a model error.
+        return "offline"
     if status in (408, 409, 429, 500, 502, 503, 504):
         # 429/5xx are the transient family. But a 500 that is really a bad request
         # or a 4xx-ish refusal is NOT retriable — look at the body to split them.

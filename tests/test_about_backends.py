@@ -78,6 +78,9 @@ class AboutBackendLinesTest(unittest.TestCase):
         rapid = next(line for line in lines if line.startswith("rapid-mlx"))
         self.assertIn("pinned 0.2.0", rapid)                    # from config.local.sh, not backend-pin.txt
         self.assertIn("runs", rapid)                            # real health, not file presence
+        # 0.50.1: the promoted version carries the PIN emoji with gap spacing (a real
+        # broken/keg flag may still add ⚠️ — but never instead of the pin)
+        self.assertIn(f"{m.ec.EMOJI_PROMOTE_STR} pinned 0.2.0", rapid)
         vllm = next(line for line in lines if line.startswith("vllm-mlx"))
         self.assertIn("1 installed, not pinned (auto-discovery: 0.6.0)", vllm)
 
@@ -87,6 +90,10 @@ class AboutBackendLinesTest(unittest.TestCase):
         self.assertIn(m.ec.EMOJI_WARNING_STR, rapid)
         self.assertIn("0.3.0", rapid)
         self.assertIn("broken", rapid)
+        # 0.50.1: the warning emoji is padded via gap() (drawn 2 cols wide), the pin row
+        # still shows the pin emoji, not the warning triangle
+        self.assertIn(f"{m.ec.gap(m.ec.EMOJI_WARNING_STR)}broken", rapid)
+        self.assertIn(f"{m.ec.EMOJI_PROMOTE_STR} pinned 0.2.0", rapid)
         # the pin line still reports the PINNED version's health, not the broken one's
         self.assertIn("pinned 0.2.0 (runs)", rapid)
 

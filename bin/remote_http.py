@@ -198,9 +198,14 @@ def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
         # Network / timeout / connection-level failure. A pre-output timeout is
         # retriable; classify by whether we saw any data.
         import socket as _socket
-        is_timeout = isinstance(exc, _socket.timeout) or \
-            "timed out" in str(exc).lower() or "timeout" in str(exc).lower()
-        eclass = "timeout" if is_timeout else "transient"
+        msg = str(exc).lower()
+        is_timeout = isinstance(exc, _socket.timeout) or "timed out" in msg or "timeout" in msg
+        # 0.50.1: wifi/network down = offline (not a model error): the connect itself failed.
+        is_offline = isinstance(exc, (_socket.gaierror, ConnectionRefusedError)) or any(
+            t in msg for t in ("failed to connect", "connection refused",
+                               "network is unreachable", "no route to host",
+                               "name or service not known", "enotfound"))
+        eclass = "offline" if is_offline else ("timeout" if is_timeout else "transient")
         # If content already flushed before the socket broke, this is a cut
         # stream (`partial`), NOT retriable — the partial output must be kept.
         if out_proxy.chars:

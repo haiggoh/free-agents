@@ -1,3 +1,28 @@
+## [0.50.1] — 2026-11-01
+
+### Fixed — wifi-cutoff error handling (plan wifi-cutoff_error_handling_free-agents.md)
+
+- Connect-level failures (wifi down: "Failed to connect", "Connection refused", DNS
+  ENOTFOUND, no-route) now classify as a new `offline` error_class — non-retriable, so the
+  fallback chain is not burned — in both classifier copies, the `remote_http` OSError
+  branch, and the proxy's failure hook, which rewrites the client-visible message to
+  "network unreachable from here (wifi off?) — the model is fine; retry when back online"
+  instead of surfacing a provider/model error. Tests: tests/test_offline_classify.py.
+- About screen: the promoted backend row now carries the pin emoji 📌 with correct
+  ec.gap() spacing (was plain text / warning triangle); warning flags keep ⚠️, also gap-padded.
+
+### Added — de-anonymized rate limiter + opt-in priority lane + load-scaled test timeouts
+
+- Limiter stamps carry their owner (session id/pid); state gains a live-editable per-owner
+  map (priority, rpm_scale) via `rate_limiter.py set-owner` / `owners` / `probe` —
+  `probe` reports external occupancy, the classifier that tells "concurrent sessions ate
+  my bucket" apart from a real defect. Priority reserve (LA_LIMITER_RESERVE) is OFF by
+  default (full 40 for everyone); enable only for the marked critical tests.
+- PTY/litellm test timeouts now scale with the live load average (tests/loadscale.py,
+  per-call sampling); conftest tripwire fails any test writing the REAL catalog cache
+  (fixture rows had leaked into live model lists); lowkey API chooser fills when the
+  remote inventory lands.
+
 ## [0.50.0] — 2026-11-01
 
 Picker UX minor (ROADMAP §0.50.0 items 1-10, incl. the 0.49.7-hotfix follow-ups F1-F6):
