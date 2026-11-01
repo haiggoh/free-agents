@@ -1074,6 +1074,19 @@ class BackendManagerUX0500Tests(unittest.TestCase):
         self.assertNotIn(m.ec.EMOJI_PROMOTE_STR, labels["0.15.3"])
 
 
+class DragSelectTests(unittest.TestCase):
+    """0.50.0 F3: long-click+drag of >= 2 characters selects the entry; a plain click
+    (no drag) activates it."""
+
+    def test_drag_threshold(self):
+        self.assertFalse(m._drag_selects(None, (5, 5)))
+        self.assertFalse(m._drag_selects((5, 5), (5, 5)), "plain click must activate")
+        self.assertFalse(m._drag_selects((5, 5), (6, 5)), "1 column is not a selection")
+        self.assertTrue(m._drag_selects((5, 5), (7, 5)), "2 columns selects")
+        self.assertTrue(m._drag_selects((5, 5), (5, 7)))
+        self.assertTrue(m._drag_selects((5, 5), (6, 6)))
+
+
 class AboutScreen0500Tests(unittest.TestCase):
     """0.50.0 F4: About shows REAL values — the background stats may still be loading, so
     the placeholder says 'loading…' instead of the fake-looking '…'/0, and a loaded count

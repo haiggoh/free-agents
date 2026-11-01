@@ -536,6 +536,31 @@ class HoverOptionList(OptionList):
         super()._on_leave(event)
         self.post_message(self.Hovered(None))
 
+    def _on_mouse_down(self, event):
+        self._drag_start = (event.x, event.y)
+        super()._on_mouse_down(event)
+
+    def _on_mouse_up(self, event):
+        # 0.50.0 F3: long-click+drag (>= 2 chars) over a menu entry copies that entry's
+        # text (the selection path — Cmd+C copies any selection); a plain click passes
+        # through and activates the entry as before.
+        start = getattr(self, "_drag_start", None)
+        self._drag_start = None
+        if m._drag_selects(start, (event.x, event.y)):
+            idx = self._mouse_hovering_over
+            if idx is not None:
+                try:
+                    opt = self.get_option_at_index(idx)
+                    label = str(getattr(opt, "prompt", opt))
+                except Exception:
+                    label = ""
+                if label:
+                    self.app.copy_to_clipboard(label)
+                    self.app.notify(f"Copied: {label[:40]}", timeout=1.5)
+                    event.stop()
+                    return
+        super()._on_mouse_up(event)
+
 
 def _detect_hw():
     """One-shot OS/distro/hardware detection through the repo's canonical script

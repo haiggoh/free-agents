@@ -63,6 +63,14 @@ SUB = "sub"
 BACK = Nav("back")
 
 
+def _drag_selects(start, end) -> bool:
+    """0.50.0 F3: a long-click+drag of at least 2 characters (columns) selects the entry's
+    text; a plain click (no drag) still activates the entry."""
+    if start is None or end is None:
+        return False
+    return abs(end[0] - start[0]) + abs(end[1] - start[1]) >= 2
+
+
 @dataclass
 class Action:
     key: str
