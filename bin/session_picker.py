@@ -1659,6 +1659,10 @@ class Picker(App):
             # 0.48.0: in Lowkey, Enter/click on a model row only SELECTS it (re-render so
             # the selection is visible); launching is the explicit `p`/`g` action.
             self.render_model(keep=f"i:{h[1]}")
+        elif isinstance(self.screen_model, m.RuntimeManagerScreen):
+            # 0.50.0 item 5: choosing a backend in the harmonica chooser re-renders, so the
+            # "← current" marker and the per-backend op rows update.
+            self.render_model(keep=f"i:{h[1]}")
 
     def on_key(self, event):
         if isinstance(self.screen, ConfirmPanel):   # the panel owns every key while it is open

@@ -51,9 +51,12 @@ class BackendManagerScreen(PilotCase):
             self.assertIn("Remove an installed version", h.text())      # rapid-mlx has remove
 
             async def choose(backend):
+                await h.goto_row("group", "backends")
+                await h.press("right")                                   # expand the chooser
                 await h.goto_row("item", backend)
                 await h.press("enter")                                   # chooser sets it
-                await h.wait_for(lambda: backend in h.text(), f"{backend} chosen")
+                # wait for the SELECTION marker, not the item name (items are always listed)
+                await h.wait_for(lambda: f"{backend}  ← current" in h.text(), f"{backend} chosen")
 
             # 0.49.0: snapshot/promote/remove/repair live in the shared venv base, so vllm-mlx
             # keeps the rows this test used to see hidden (old contract: remove was Rapid-only)
@@ -214,13 +217,14 @@ class APIKeysScreen(PilotCase):
             self.assertIn("NVIDIA: ❌ Missing", rows[0])   # NVIDIA first, expanded
             self.assertIn("Open NVIDIA signup page", rows[1])
             self.assertIn("Add NVIDIA key", rows[2])
+            self.assertIn("Hide nvidia in the choose-model list", rows[3])   # 0.50.0 third item (slug)
             for name in ("Google Gemini", "Groq", "OpenRouter"):
                 self.assertIn(name, h.text())
-            # The separator blank line sits AFTER "Add NVIDIA key", never between NVIDIA's
-            # header and its items. It's a disabled empty row (index 3 = blank separator).
+            # The separator blank line sits AFTER NVIDIA's items (open/add/hide), never
+            # between NVIDIA's header and its items. It's a disabled empty row.
             self.assertFalse(rows[0].endswith("\n"), rows[0])
-            self.assertEqual(rows[3], "")  # separator row (disabled, no arrow)
-            self.assertTrue(rows[4].lstrip("▸▾ ").startswith("Google Gemini"), rows[4])
+            self.assertEqual(rows[4], "")  # separator row (disabled, no arrow)
+            self.assertTrue(rows[5].lstrip("▸▾ ").startswith("Google Gemini"), rows[5])
         self.run_picker(s)
 
     def test_info_box_shows_the_highlighted_providers_requirements(self):
@@ -290,8 +294,9 @@ class APIKeysScreen(PilotCase):
             prompt.post_message(events.Paste("  gsk-AB CD\nEF\t12\r\n"))
             await h.wait_text("Groq: ✅ Saved")
             self.assertFalse(prompt.display, "a paste submits without Enter")
-            self.assertTrue(any("removed" in w and "whitespace" in w for w in app.state_warnings),
-                            app.state_warnings)
+            # 0.50.0 F4: whitespace-removal is an informational NOTICE, not a ⚠️ warning
+            notices = getattr(app, "state_notices", [])
+            self.assertTrue(any("removed" in n and "whitespace" in n for n in notices), notices)
         self.run_picker(s)
         self.assertEqual(self._key("groq"), "gsk-ABCDEF12\n")
 

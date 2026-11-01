@@ -2696,6 +2696,7 @@ class RuntimeManagerScreen(Screen):
         self.accordion.set_groups([Group(
             "backends", "Choose backend",
             [Item(b, f"{b}" + ("  ← current" if b == cur else "")) for b in choices])])
+        self.accordion.open_group = "backends"     # the chooser stays open while picking
 
     def groups(self):
         return self.accordion.groups
