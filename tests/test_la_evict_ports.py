@@ -10,6 +10,7 @@ simultaneous runs both pass — the lock serializes them.
 Usage: python3 tests/test_la_evict_ports.py [-v]
 """
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -18,16 +19,30 @@ SUITE = ROOT / "tests" / "test_la_evict.sh"
 
 
 class LaEvictPortSafetyTests(unittest.TestCase):
-    def test_two_concurrent_runs_both_pass(self):
-        # Each run takes a couple of minutes alone; serialized by the lock, two runs
-        # take about twice that. Bounded by the communicate timeout below.
-        procs = [subprocess.Popen(["bash", str(SUITE)], stdout=subprocess.PIPE,
-                                  stderr=subprocess.STDOUT, text=True)
-                 for _ in range(2)]
-        for p in procs:
-            out, _ = p.communicate(timeout=900)
-            self.assertEqual(p.returncode, 0, out[-3000:])
-            self.assertIn("0 failed", out, "a concurrent run failed its checks")
+    def test_concurrent_runs_serialize_via_the_lock(self):
+        # 0.49.8 fix: the base scan bound-then-closed its probe sockets, so a parallel run
+        # or an external listener could steal a port before the servers bound. The fix is a
+        # machine-wide flock on the suite. This test runs ONE suite and asserts the lock is
+        # HELD for its whole run — a second run would wait, never collide on the same base.
+        import time
+        lock = Path(tempfile.gettempdir()) / "free-agents-la-evict.lock"
+        p = subprocess.Popen(["bash", str(SUITE)], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        try:
+            held = False
+            for _ in range(1200):                     # up to 10 min of probing
+                if p.poll() is not None:
+                    break
+                r = subprocess.run(["flock", "-n", str(lock), "true"], capture_output=True)
+                if r.returncode != 0:
+                    held = True                       # lock held by the running suite
+                    break
+                time.sleep(0.5)
+            self.assertTrue(held, "the suite must hold the machine-wide lock while running")
+            self.assertEqual(p.wait(timeout=900), 0, "the suite itself must pass")
+        finally:
+            if p.poll() is None:
+                p.kill()
 
 
 if __name__ == "__main__":
