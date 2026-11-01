@@ -10,6 +10,7 @@ This module is import-only; running it directly prints usage info.
 """
 
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, field, asdict
@@ -226,6 +227,24 @@ class QuotaRecord:
 # ─── Ledger I/O ───────────────────────────────────────────────────────────────
 
 
+LEDGER_DIR_ENV = "FA_QUOTA_LEDGER_DIR"
+
+
+def ledger_dir() -> Path:
+    """The ledger directory: $FA_QUOTA_LEDGER_DIR when set, else DEFAULT_LEDGER_DIR.
+
+    A set-but-unusable override (its parent does not exist) raises ValueError naming the
+    variable — it never falls through to the real default, which would write the user's
+    ledger while a test or a misconfigured caller believed it was sandboxed."""
+    raw = os.environ.get(LEDGER_DIR_ENV, "")
+    if not raw:
+        return DEFAULT_LEDGER_DIR
+    path = Path(raw).expanduser()
+    if not path.is_dir() and not path.parent.is_dir():
+        raise ValueError("%s=%s: neither it nor its parent directory exists" % (LEDGER_DIR_ENV, raw))
+    return path
+
+
 def _ensure_ledger_dir(path: Path = DEFAULT_LEDGER_DIR) -> Path:
     """Create ledger directory if needed."""
     path.mkdir(parents=True, exist_ok=True)
@@ -233,10 +252,17 @@ def _ensure_ledger_dir(path: Path = DEFAULT_LEDGER_DIR) -> Path:
 
 
 def write_ledger(record: QuotaRecord, ledger_path: Path = DEFAULT_LEDGER_PATH) -> None:
-    """Append a QuotaRecord to the JSONL ledger (addendum §9)."""
+    """Append a QuotaRecord to the JSONL ledger (addendum §9).
+
+    One os.write() on an O_APPEND fd per record, so concurrent dispatches cannot interleave
+    a line; the file is created 0600 (it names providers, models and usage)."""
     _ensure_ledger_dir(ledger_path.parent)
-    with ledger_path.open("a") as f:
-        f.write(json.dumps(record.to_dict()) + "\n")
+    line = (json.dumps(record.to_dict()) + "\n").encode("utf-8")
+    fd = os.open(str(ledger_path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        os.write(fd, line)
+    finally:
+        os.close(fd)
 
 
 def write_usage_event(
@@ -479,8 +505,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="provider ids to include in statusline (default: all with state)")
     ap.add_argument("--rebuild", action="store_true",
                     help="rebuild derived state from ledger")
-    ap.add_argument("--ledger-dir", type=Path, default=DEFAULT_LEDGER_DIR,
-                    help=f"ledger directory (default: {DEFAULT_LEDGER_DIR})")
+    ap.add_argument("--ledger-dir", type=Path, default=None,
+                    help=f"ledger directory (default: ${LEDGER_DIR_ENV}, else {DEFAULT_LEDGER_DIR})")
     ap.add_argument("--max-age-days", type=int, default=30,
                     help="max age for state rebuild (default: 30)")
     ap.add_argument("--show-ledger", action="store_true",
@@ -489,8 +515,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="number of ledger lines to show (default: 20)")
     a = ap.parse_args(argv)
 
-    ledger_path = a.ledger_dir / "remote-usage.jsonl"
-    state_path = a.ledger_dir / "remote-quota-state.json"
+    try:
+        base = a.ledger_dir or ledger_dir()
+    except ValueError as exc:
+        print("quota: %s" % exc, file=sys.stderr)
+        return 2
+    ledger_path = base / "remote-usage.jsonl"
+    state_path = base / "remote-quota-state.json"
 
     if a.rebuild:
         latest = rebuild_state(ledger_path, state_path, a.max_age_days)

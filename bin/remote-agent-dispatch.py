@@ -113,6 +113,21 @@ def banner(provider, body, attached, dry_run, allow_files):
     print(file=sys.stderr)
 
 
+def _record_quota(provider_id, result):
+    """Append this response's quota observation to the bin/quota ledger. FAIL-OPEN: telemetry
+    never changes a dispatch's exit code or output — any failure is one stderr line."""
+    try:
+        from quota import providers as qproviders, telemetry
+        usage = dict(result.usage or {})
+        usage["model"] = result.model_effective or result.model_requested
+        record = qproviders.parse_provider(provider_id, dict(result.quota_headers or {}), usage)
+        telemetry.write_parsed_record(record, telemetry.ledger_dir() / "remote-usage.jsonl")
+    except Exception as exc:  # noqa: BLE001 — fail-open is the contract
+        print("quota: not recorded (%s: %s)" % (type(exc).__name__, str(exc)[:160]),
+              file=sys.stderr)
+    return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Dispatch a prompt to a remote provider (OpenAI-compatible). "
@@ -199,6 +214,11 @@ def main(argv=None):
         if a.json_out:
             json.dump(result.to_dict(), open(a.json_out, "w"), indent=2)
         return 0
+
+    # A completed call (or a quota refusal, which carries the denominators) is a quota
+    # observation. Dry runs never reach here.
+    if result.ok or result.error_class == "quota":
+        _record_quota(provider.id, result)
 
     if a.json_out:
         json.dump(result.to_dict(), open(a.json_out, "w"), indent=2)

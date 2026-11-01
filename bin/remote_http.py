@@ -77,6 +77,23 @@ def _is_loopback(url):
         or host.startswith("127.")
 
 
+_QUOTA_HEADER_PREFIXES = ("x-ratelimit", "ratelimit", "x-quota")
+
+
+def quota_header_subset(headers):
+    """The rate-limit/quota response headers, lower-cased; EVERYTHING else is dropped.
+
+    An allowlist on purpose: a denylist of credential headers cannot know every provider's
+    spelling (x-goog-api-key, set-cookie, an echoed Authorization), and these values land in
+    a persistent ledger."""
+    out = {}
+    for name, value in headers or ():
+        low = str(name).lower()
+        if low == "retry-after" or low.startswith(_QUOTA_HEADER_PREFIXES):
+            out[low] = str(value)
+    return out
+
+
 def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
                 dry_run=False):
     """POST `body` to `provider`'s chat endpoint, streaming.
@@ -129,6 +146,7 @@ def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
     model_effective = body.get("model", "")
     status = 0
     retry_after = 0.0
+    quota_headers = {}
     # Content is written through counting proxies so output_chars is known even
     # on a cut stream; the proxies are the fds the stream consumer receives.
     out_proxy = _CountingFD(out_fd)
@@ -140,6 +158,7 @@ def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
         conn.request(method, path, body=data, headers=headers)
         resp = conn.getresponse()
         status = resp.status
+        quota_headers = quota_header_subset(resp.getheaders())
 
         # Capture Retry-After if the provider sent one (quota/429 path).
         ra = resp.getheader("Retry-After")
@@ -175,6 +194,7 @@ def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
                 usage=ok_result["usage"], stream_complete=ok_result["complete"],
                 partial=is_partial, output_chars=out_proxy.chars,
                 elapsed=time.time() - started, retry_after=retry_after,
+                quota_headers=quota_headers,
             )
 
         # Non-2xx: read the (usually short) error body for classification.
@@ -193,6 +213,7 @@ def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
             model_requested=body.get("model", ""), model_effective=model_effective,
             status=status, error_class=eclass, error_reason=error_text.strip(),
             elapsed=time.time() - started, retry_after=retry_after,
+            quota_headers=quota_headers,
         )
     except (http.client.HTTPException, OSError) as exc:
         # Network / timeout / connection-level failure. A pre-output timeout is
