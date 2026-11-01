@@ -70,6 +70,7 @@ class Provider:
     default_models: tuple = ()     # known-good model ids, in preference order
     supports_responses: bool = False
     notes: str = ""
+    retired_message: str = ""      # set = retired; the same field the session launcher refuses on
 
     @property
     def key_name(self):
@@ -137,9 +138,11 @@ IMPLEMENTED = {"gemini", "nvidia", "groq", "openrouter", "cloudflare",
 RATE_LIMITED = {"nvidia"}
 
 
-def _load_registry():
-    """Read the generated config/remote-registry.json; return (PROVIDERS, ENTRIES, CATALOG_SCANABLE)."""
-    with open(_JSON_PATH, encoding="utf-8") as fh:
+def _load_registry(path=None):
+    """Read the generated config/remote-registry.json; return (PROVIDERS, ENTRIES, CATALOG_SCANABLE).
+
+    A provider with `retired_message` is never catalog-scannable: its endpoint is gone."""
+    with open(path or _JSON_PATH, encoding="utf-8") as fh:
         data = json.load(fh)
 
     providers_raw = data.get("providers", {})
@@ -164,11 +167,12 @@ def _load_registry():
             default_models=tuple(defaults) if defaults else (),
             supports_responses=bool(pd.get("supports_responses", False)),
             notes=pd.get("notes", ""),
+            retired_message=pd.get("retired_message", "") or "",
         )
 
     catalog_scanable = {
         pid for pid, p in providers.items()
-        if p.models_path or p.catalog_url
+        if (p.models_path or p.catalog_url) and not p.retired_message
     }
 
     entries = []
@@ -187,6 +191,10 @@ def _load_registry():
 
 
 PROVIDERS, ENTRIES, CATALOG_SCANABLE = _load_registry()
+
+# Retired providers (registry `retired_message`) are never runnable, whatever IMPLEMENTED lists.
+RETIRED = {pid for pid, p in PROVIDERS.items() if p.retired_message}
+IMPLEMENTED = IMPLEMENTED - RETIRED
 
 
 def get(provider_id):

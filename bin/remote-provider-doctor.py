@@ -32,8 +32,23 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from remote_provider_core import (PROVIDERS, IMPLEMENTED, get, TIER_CHOICES)  # noqa: E402
 
 
+def state_for(usable, detail):
+    """The doctor's one-word state for a check_models() result."""
+    if usable:
+        return "usable"
+    if detail.startswith("retired"):
+        return "retired"
+    if "key not configured" in detail:
+        return "no-key"
+    if "not implemented" in detail:
+        return "unimplemented"
+    return "broken"
+
+
 def check_models(provider, timeout=15.0):
     """GET the provider's models endpoint. Returns (usable: bool, detail, models: list)."""
+    if getattr(provider, "retired_message", ""):
+        return False, "retired — " + provider.retired_message, []
     if not provider.config_present():
         return False, "key not configured (env %s unset)" % ", ".join(
             provider.required_env()), []
@@ -84,10 +99,8 @@ def doctor(provider_ids, all_providers=False, json_out=False, timeout=15.0):
             broken += 1
             continue
         usable, detail, models = check_models(prov, timeout=timeout)
-        state = "usable" if usable else ("no-key" if "key not configured" in detail
-                                         else ("unimplemented" if "not implemented" in detail
-                                              else "broken"))
-        if usable or state in ("no-key", "unimplemented"):
+        state = state_for(usable, detail)
+        if usable or state in ("no-key", "unimplemented", "retired"):
             pass
         else:
             broken += 1
