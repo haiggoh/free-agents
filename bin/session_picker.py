@@ -417,7 +417,7 @@ class PromptInput(Input):
                 return                      # whitespace-only paste: keep waiting
             removed = len(event.text) - len(key)
             if removed and len(event.text.strip()) != len(key):
-                self.app.state_warnings.append(
+                self.app.state_notices.append(
                     f"removed {removed} whitespace character(s) from the pasted key")
             self.value = key
             self.post_message(self.Submitted(self, self.value))
@@ -681,6 +681,9 @@ class Picker(App):
         _VERDICT_MEMO.clear()
         state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
         self.state_warnings = list(state.warnings)
+        # 0.50.0 F4: informational notes (cleanups, paste fixes) are NOT warnings — they get
+        # the info emoji, not ⚠️ (which is reserved for problems).
+        self.state_notices = []
         # A security-review override left behind while the plugin is not active is removed, and the
         # removal is SHOWN (0.42.0): the row is hidden then, so a kept override would be stale state.
         try:
@@ -689,7 +692,7 @@ class Picker(App):
             removed = []
             self.state_warnings.append(f"could not clear a leftover security-review setting: {exc}")
         if removed:
-            self.state_warnings.append(
+            self.state_notices.append(
                 f"removed {', '.join(removed)} from ~/.claude/settings.json: the security-guidance "
                 "plugin is not active, so the setting did nothing")
         cloud = cse.load()      # read-only; reflects ~/.claude/settings.json + installed plugins
@@ -891,6 +894,13 @@ class Picker(App):
             st["backends"] = m.about_backend_lines(Path.home(), REPO) or ["none"]
         except Exception:
             pass
+        # 0.50.0 F4: the prefetch runs concurrently with this gather — wait for the caches
+        # so the About counts are real, never a false 0 from an empty-not-yet-loaded cache.
+        import time as _time
+        for _ in range(40):
+            if self.cache.get("local") is not None and self.cache.get("remote") is not None:
+                break
+            _time.sleep(0.5)
         try:
             models = self.cache.get("local") or []
             st["local_models"] = len([x for x in models if not getattr(x, "auto_scanned", False)])
@@ -1397,7 +1407,11 @@ class Picker(App):
         if isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and sm._models_loaded and not waiting:
             status = "  type to filter · ↑↓ move · Enter launch · ←→ fold · Esc close list"
         if self.state_warnings:
-            status += f"\n  {ec.EMOJI_WARNING_STR}  " + self.state_warnings[-1]   # 2 spaces: VS16 emoji
+            # 0.50.0 F4: ⚠️ is reserved for problems; padding via ec.gap() (emoji = 2 cols,
+            # U+FE0F adds zero — no extra space).
+            status += f"\n  {ec.gap(ec.EMOJI_WARNING_STR)}" + self.state_warnings[-1]
+        if getattr(self, "state_notices", None):
+            status += f"\n  {ec.gap(ec.EMOJI_INFO_STR)}" + self.state_notices[-1]
         self.query_one("#status", Static).update(status)
         self._update_info()
 

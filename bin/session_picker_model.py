@@ -1015,22 +1015,30 @@ class AboutScreen(Screen):
         # Visual hierarchy via a Rich Text (user 2026-10-30): section labels bold, values
         # plain — NOT all cyan. Each installed backend family gets its own line, pinned
         # version only, flagged when installed-but-unpinned.
-        from rich.text import Text
+        try:
+            from rich.text import Text
+        except ImportError:
+            class Text:  # minimal stand-in so About renders without rich (tests, bare envs)
+                def __init__(self): self.parts = []
+                def append(self, t, style=None): self.parts.append(str(t))
+                @property
+                def plain(self): return "".join(self.parts)
+                def __str__(self): return self.plain
         out = Text()
         out.append(f"This is free-agents v{plugin_version()}.\n\n", style="bold")
         out.append("OS / hardware: ", style="bold")
         out.append(f"{s.hw_os or 'unknown'} — {hw}\n")
         out.append("Backends installed:\n", style="bold")
-        for b in (st.get("backends") or ["…"]):
+        for b in (st.get("backends") or ["loading…"]):
             out.append(f"  {b}\n")
         out.append("\n")
         out.append("Local models: ", style="bold")
-        out.append(f"{st.get('local_models', '…')}"
+        out.append(f"{st.get('local_models', 'loading…')}"
                    + (f" (~{st['local_gb']:g} GB on disk)" if st.get("local_gb") else "") + "\n")
         out.append("API providers with a key: ", style="bold")
-        out.append(f"{st.get('providers') or '…'}\n")
+        out.append(f"{st.get('providers') or 'loading…'}\n")
         out.append("Remote models listed: ", style="bold")
-        out.append(f"{st.get('remote_visible', '…')}"
+        out.append(f"{st.get('remote_visible', 'loading…')}"
                    + (f" (hidden by filters: {st['remote_hidden']})" if st.get("remote_hidden") else "") + "\n")
         out.append("NVIDIA rate limiter: ", style="bold")
         out.append(f"{st.get('rate_limiter') or '—'}\n\n")

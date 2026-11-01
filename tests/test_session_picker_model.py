@@ -1056,6 +1056,35 @@ class BackendManagerUX0500Tests(unittest.TestCase):
         self.assertNotIn(m.ec.EMOJI_PROMOTE_STR, labels["0.15.3"])
 
 
+class AboutScreen0500Tests(unittest.TestCase):
+    """0.50.0 F4: About shows REAL values — the background stats may still be loading, so
+    the placeholder says 'loading…' instead of the fake-looking '…'/0, and a loaded count
+    is shown as-is."""
+
+    @staticmethod
+    def _plain(policy):
+        return policy.plain if hasattr(policy, "plain") else str(policy)
+
+    def test_placeholder_reads_loading_and_real_counts_show(self):
+        s = m.Settings()
+        text = self._plain(m.AboutScreen(s).policy)
+        self.assertIn("loading…", text)
+        self.assertNotIn("Local models: …", text)
+        s.stats = {"local_models": 3, "local_gb": 12.5, "providers": "groq",
+                   "remote_visible": 40, "backends": ["rapid-mlx  pinned 1.0.0 (runs)"]}
+        text = self._plain(m.AboutScreen(s).policy)
+        self.assertIn("Local models: 3 (~12.5 GB on disk)", text)
+        self.assertIn("API providers with a key: groq", text)
+        self.assertNotIn("loading…", text)
+
+    def test_zero_local_models_is_shown_as_zero_not_loading(self):
+        # A gathered-but-truly-empty inventory IS real data: 0 models.
+        s = m.Settings()
+        s.stats = {"local_models": 0}
+        text = self._plain(m.AboutScreen(s).policy)
+        self.assertIn("Local models: 0", text)
+
+
 class ThemeStoreLayering(unittest.TestCase):
     """0.35.3: theme colours persist in the stable user store (survive version installs,
     shared by every copy), layered over shipped defaults; LA_THEME_CONFIG_DIR (tests)
