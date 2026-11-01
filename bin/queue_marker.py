@@ -38,3 +38,17 @@ def extract_hashes(texts) -> set:
         if t:
             found.update(MARKER_RE.findall(t))
     return found
+
+
+if __name__ == "__main__":
+    # Library module (imported by the queue hooks); running it directly is a no-op,
+    # but --help must still answer (0.50.0 help sweep) and unknown flags must fail loudly.
+    import sys
+    if any(a in ("-h", "--help") for a in sys.argv[1:]):
+        print(__doc__)
+        sys.exit(0)
+    if len(sys.argv) > 1:
+        print(f"Usage: python3 {sys.argv[0]} [--help]   (this file is a library; import it)",
+              file=sys.stderr)
+        sys.exit(2)
+    sys.exit(0)

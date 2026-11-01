@@ -111,6 +111,11 @@ def free_nudge(root: str) -> str:
     )
 
 def main():
+    # 0.50.0 help sweep: --help prints usage and never emits hook output.
+    if any(a in ("-h", "--help") for a in sys.argv[1:]):
+        print("offload-nudge.py — SessionStart hook: prints the offload/council nudge as "
+              "hook JSON on stdout. Usage: python3 offload-nudge.py [--help]")
+        return 0
     try:
         root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
         # A FREE session saves nothing by offloading, so it gets the council nudge instead of the

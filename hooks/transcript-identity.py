@@ -177,6 +177,11 @@ def append_to_transcript(transcript_path, marker_json, marker_version):
 
 
 def main():
+    # 0.50.0 help sweep: --help prints usage and never reads stdin or emits hook output.
+    if any(a in ("-h", "--help") for a in sys.argv[1:]):
+        print("transcript-identity.py — SessionStart hook: stamps session identity into the "
+              "transcript. Usage: python3 transcript-identity.py [--help]")
+        return 0
     # Read hook input
     input_data = read_input()
     transcript_path = input_data.get('transcript_path')

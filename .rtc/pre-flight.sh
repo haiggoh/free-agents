@@ -20,6 +20,16 @@
 # Env: FA_LITELLM_PY / FA_PICKER_PY   interpreters for the two gates (defaults below)
 #      FA_ALLOW_MISSING_VENVS=1        degrade to the old warning instead of failing
 # Usage: ./.rtc/pre-flight.sh   (run by rtc-ship.sh from the repo root)
+# --help must never run the real work (0.50.0 help sweep): parse args before anything else.
+case "${1:-}" in
+  -h|--help)
+    printf 'Usage: bash %s [--help]\n\n%s\n' "$0" \
+      ".rtc/pre-flight.sh — extra test gates rtc-ship.sh runs before packaging (litellm + picker venvs). Env: FA_LITELLM_PY, FA_PICKER_PY override the venv interpreters."
+    exit 0 ;;
+  "") ;;
+  *) printf 'Usage: bash %s [--help]  (unknown argument: %s)\n' "$0" "$1" >&2; exit 2 ;;
+esac
+
 set -uo pipefail
 
 LITELLM_PY=${FA_LITELLM_PY:-$HOME/.local/pipx/venvs/litellm/bin/python}

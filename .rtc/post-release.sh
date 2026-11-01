@@ -19,6 +19,16 @@
 # Env: FA_SKIP_BREW=1    do not trigger bump-formulas.yml
 #      FA_BREW_WAIT      seconds to wait for the tap formula (default 120; it lands in ~15 s)
 # Usage: ./.rtc/post-release.sh   (run by rtc-ship.sh from the repo root, stdout discarded)
+# --help must never run the real work (0.50.0 help sweep): parse args before anything else.
+case "${1:-}" in
+  -h|--help)
+    printf 'Usage: bash %s [--help]\n\n%s\n' "$0" \
+      ".rtc/post-release.sh — after the GitHub release (e.g. the Homebrew tap trigger); called by rtc-ship.sh."
+    exit 0 ;;
+  "") ;;
+  *) printf 'Usage: bash %s [--help]  (unknown argument: %s)\n' "$0" "$1" >&2; exit 2 ;;
+esac
+
 set -uo pipefail
 
 say() { printf '%s\n' "$*" >&2; }
