@@ -2875,10 +2875,14 @@ class LowkeyScreen(Screen):
 
     def actions(self):
         s = self.settings
-        # Order (user 2026-10-30): launch the chosen model FIRST, the remembered last
-        # model second, choose-model THIRD, then a collapsed-by-default Model settings
-        # group (like the lane pickers), mode, session name, nav.
+        # Order (user 2026-10-30, 0.50.0 waypoint lowkey-menu-drop-the-advanced):
+        # C) Choose model FIRST, M) Mode, G) Launch (chosen model, then remembered
+        # last), S) Set session name, and the Model settings group LAST. The old
+        # "advanced" group is dropped entirely — no action sits in a "settings" section.
         acts = [
+            Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose local model…", self._toggle_choose_model, section="models"),
+            Action("m", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Mode: {'Convo' if self.mode == 'convo' else 'One-shot'}",
+                   self._toggle_mode, section="main"),
             Action("p", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}{'Start convo' if self.mode == 'convo' else 'Start one-shot'}",
                    self._start, section="launch"),
         ]
@@ -2886,7 +2890,8 @@ class LowkeyScreen(Screen):
         if last:
             acts.append(Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch last: {model_names.readable(last)} (lowkey)",
                                self._launch_last, section="launch"))
-        acts.append(Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose local model…", self._toggle_choose_model, section="models"))
+        acts.append(Action("s", f"{ec.gap(ec.LK_EMOJI_SESSION_STR)}Set session name: {self.session_name or '(ephemeral)'}",
+                           lambda: Nav("prompt:session"), section="main"))
         acts += [
             setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
                     (None, False), lambda: s.lowkey_thinking, self._set_thinking, section="model"),
@@ -2894,9 +2899,6 @@ class LowkeyScreen(Screen):
                     effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(), section="model"),
             setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or '<provider default>'}",
                     TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(), section="model"),
-            Action("m", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Mode: {'Convo' if self.mode == 'convo' else 'One-shot'}", self._toggle_mode),
-            Action("s", f"{ec.gap(ec.LK_EMOJI_SESSION_STR)}Set session name: {self.session_name or '(ephemeral)'}",
-                   lambda: Nav("prompt:session")),
         ]
         acts += self.nav_actions()
         check_action_table(acts)

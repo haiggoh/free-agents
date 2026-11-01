@@ -846,6 +846,18 @@ class LowkeyTests(unittest.TestCase):
                                 "--prompt", "summarise X"])
         self.assertIsNone(lk.one_shot(""))
 
+    def test_menu_order_choose_mode_launch_name_settings_last(self):
+        # 0.50.0 (waypoint lowkey-menu-drop-the-advanced): C) Choose model first,
+        # M) Mode, G) Launch, S) Set session name, Model settings group LAST — and no
+        # "advanced" group at all (no action in the "settings" section).
+        s = m.Settings()
+        s.last_launched_model = {"lowkey": "gemma-4-26b"}     # so the "g" launch action exists
+        lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        acts = [a for a in lk.actions() if a.section != "nav"]
+        self.assertEqual([a.key for a in acts], ["c", "m", "p", "g", "s", "j", "e", "t"])
+        self.assertNotIn("settings", {a.section for a in lk.actions()},
+                         "the advanced group is dropped entirely in 0.50.0")
+
 
 def catalog():
     return [m.CatalogEntry("ornith-1.5-35b", "COMPLETE", 19.5, "existing", "o/r"),
