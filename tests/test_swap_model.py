@@ -192,7 +192,7 @@ class SwapModelTests(unittest.TestCase):
     def start_old_session(self):
         """A running session: start_proxy's artifacts (cfg/pid/log/owner) on a real port."""
         r = sh(self.root, 'port="$(start_proxy nvidia nvidia/nemotron-3-ultra-550b-a55b false)" && '
-                          'echo "PORT=$port" && echo "PID=$(cat "$RUNDIR/proxy-$port.pid")"', self.env)
+                          'echo "PORT=$port" && echo "PID=$(awk \'{print $1}\' "$RUNDIR/proxy-$port.pid")"', self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
         port = int(next(line for line in r.stdout.splitlines() if line.startswith("PORT=")).split("=")[1])
         pid = int(next(line for line in r.stdout.splitlines() if line.startswith("PID=")).split("=")[1])
@@ -226,6 +226,20 @@ class SwapModelTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("not one of our proxies", r.stderr)
 
+    def test_a_pidfile_with_a_wrong_start_time_is_not_trusted(self):
+        """0.50.0 F5: pidfiles store 'pid start'; a recycled pid (right number, wrong
+        start time) must be refused exactly like a foreign pid."""
+        port, old_pid = self.start_old_session()
+        self.age_log(port)
+        pf = self.rundir / f'proxy-{port}.pid'
+        content = pf.read_text().split()
+        self.assertEqual(len(content), 2, "pidfile must store 'pid start'")
+        self.assertEqual(int(content[0]), old_pid)
+        pf.write_text(f"{old_pid} bogus-start-12345")              # recycled pid
+        r = self.swap(port, self.ALIAS_TO)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("not one of our proxies", r.stderr)
+
     def test_force_swaps_a_recently_active_session(self):
         port, _ = self.start_old_session()
         (self.rundir / f'proxy-{port}.log').touch()
@@ -245,7 +259,7 @@ class SwapModelTests(unittest.TestCase):
         self.assertIn("2026-10-28", r.stderr)
         cfg = (self.rundir / f'proxy-{port}.yaml').read_text()
         self.assertIn('nemotron-3-ultra', cfg)                 # the session's model is unchanged
-        self.assertEqual(int((self.rundir / f'proxy-{port}.pid').read_text()), old_pid)
+        self.assertEqual(int((self.rundir / f'proxy-{port}.pid').read_text().split()[0]), old_pid)
         os.kill(old_pid, 0)                                    # the old proxy is untouched
         self.assertFalse(list(self.rundir.glob(f'proxy-{port}.yaml.bak-*')))
         self.assertFalse(list(self.rundir.glob('swap-scratch-*')))
@@ -274,7 +288,7 @@ class SwapModelTests(unittest.TestCase):
         cfg = (self.rundir / f'proxy-{port}.yaml').read_text()
         primary = cfg.split('la-fallback-1', 1)[0]            # the primary deployments
         self.assertIn('z-ai/glm-5.3-flash', primary)          # the rescue model is the primary
-        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text())
+        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text().split()[0])
         self.assertNotEqual(new_pid, old_pid)
         with self.assertRaises(ProcessLookupError):
             os.kill(old_pid, 0)                                # the old proxy is gone
@@ -299,7 +313,7 @@ class SwapModelTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         with self.assertRaises(ProcessLookupError):
             os.kill(old_pid, 0)          # the stubborn proxy did NOT survive the swap
-        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text())
+        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text().split()[0])
         os.kill(new_pid, 0)              # the new proxy owns the port now
         self.assertEqual(probe(port, master_key(
             (self.rundir / f'proxy-{port}.yaml').read_text())), 200)
@@ -314,7 +328,7 @@ class SwapModelTests(unittest.TestCase):
         self.assertIn("reverting", r.stderr)
         self.assertEqual((self.rundir / f'proxy-{port}.yaml').read_bytes(), old_cfg,
                          "the original config is restored byte-for-byte")
-        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text())
+        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text().split()[0])
         os.kill(new_pid, 0)                                    # the reverted proxy is live
         (self.root / 'ctrl' / f'{port}.fail').unlink()          # the throttle was transient
         self.assertEqual(probe(port, master_key(old_cfg.decode())), 200,
@@ -335,7 +349,7 @@ class SwapModelTests(unittest.TestCase):
                                  "the revert must not return before the relaunched proxy is ready")
         (self.root / 'ctrl' / f'{port}.fail').unlink()
         (self.root / 'ctrl' / f'{port}.slow').unlink()
-        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text())
+        new_pid = int((self.rundir / f'proxy-{port}.pid').read_text().split()[0])
         os.kill(new_pid, 0)
         self.assertEqual(probe(port, master_key(
             (self.rundir / f'proxy-{port}.yaml').read_text())), 200,

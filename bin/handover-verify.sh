@@ -74,6 +74,20 @@ if [[ -z "$sid" ]]; then
         echo "NOT_VERIFIED: the registry entry for pid $pid carries no sessionId"
         exit 1
     fi
+    # 0.50.0 F5: the registry is keyed by pid — a RECYCLED pid must not verify another
+    # session's transcript. Compare the recorded procStart with the live process.
+    pstart="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("procStart",""))' "$regf" 2>/dev/null || true)"
+    if [[ -n "$pstart" ]]; then
+        live="$(LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//' | tr -s ' ')"
+        if [[ -z "$live" ]]; then
+            echo "NOT_VERIFIED: pid $pid is not running (registry procStart '$pstart')"
+            exit 1
+        fi
+        if [[ "$live" != "$pstart" ]]; then
+            echo "NOT_VERIFIED: pid $pid was recycled (registry start '$pstart' != live '$live')"
+            exit 1
+        fi
+    fi
 fi
 deadline=$(( $(date +%s) + tmo ))
 while :; do

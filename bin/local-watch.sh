@@ -188,6 +188,18 @@ _model_on() {    # $1=port → the non-spoof model id served (best-effort)
 if [ "$MODE" = "--attach" ]; then
   _apid="${2:-}"
   case "$_apid" in ''|*[!0-9]*) echo "Usage: local-watch.sh --attach <launcher-pid>"; exit 1;; esac
+  # 0.50.0 F5: a recycled pid must not attach to another session's transcript — if the
+  # sessions registry has this pid with a different start time, warn loudly.
+  _regf="$HOME/.claude/sessions/$_apid.json"
+  if [ -r "$_regf" ]; then
+    _pstart="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("procStart",""))' "$_regf" 2>/dev/null || true)"
+    if [ -n "$_pstart" ]; then
+      _live="$(LC_ALL=C ps -o lstart= -p "$_apid" 2>/dev/null | sed 's/^ *//' | tr -s ' ')"
+      if [ -n "$_live" ] && [ "$_live" != "$_pstart" ]; then
+        echo "WARNING: pid $_apid was recycled (registry start '$_pstart' != live '$_live') — watching a different process than the registry entry." >&2
+      fi
+    fi
+  fi
   _pfile="$LOGDIR/local-agents-session-$_apid.port"
   _tfile="$LOGDIR/local-agents-session-$_apid.transcript"
   printf '=== local-watch --attach: following session pid %s ===\n' "$_apid"

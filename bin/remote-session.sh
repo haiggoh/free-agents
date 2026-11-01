@@ -637,10 +637,15 @@ free_port() {
 # A pid can be REUSED by an unrelated process after ours dies, so never kill on the
 # strength of a stale pid file alone: confirm the process really is the litellm proxy
 # started from OUR config path before signalling it.
-_is_our_proxy() { # _is_our_proxy <pid> <port>
-    local pid="${1:-}" port="${2:-}" cmd
+_is_our_proxy() { # _is_our_proxy <"pid [start]"> <port> — 0.50.0 F5: a stored start time
+    # must match the live process; a recycled pid (same number, different start) is refused.
+    local content="${1:-}" port="${2:-}" pid start cmd
+    pid="${content%% *}"; start="${content#* }"
     [[ -n "$pid" && -n "$port" ]] || return 1
     kill -0 "$pid" 2>/dev/null || return 1
+    if [[ "$start" != "$content" && -n "$start" ]] && [[ "$(_proc_start "$pid")" != "$start" ]]; then
+        return 1
+    fi
     cmd="$(ps -o command= -p "$pid" 2>/dev/null)" || return 1
     # Match either the wrapper or a bare litellm (older running proxies predate the
     # wrapper). The config path is what actually identifies OUR proxy on THIS port.
@@ -651,8 +656,8 @@ stop_one_proxy() { # stop_one_proxy <port>
     local port="${1:-}" pf pid
     [[ -n "$port" ]] || return 0
     pf="$RUNDIR/proxy-$port.pid"
-    pid="$(cat "$pf" 2>/dev/null)"
-    if _is_our_proxy "$pid" "$port"; then
+    pid="$(awk '{print $1}' "$pf" 2>/dev/null)"
+    if _is_our_proxy "$(cat "$pf" 2>/dev/null)" "$port"; then
         kill "$pid" 2>/dev/null && echo "   proxy    : stopped (pid $pid, port $port)"
     fi
     rm -f "$pf" "$RUNDIR/proxy-$port.owner"
@@ -661,6 +666,11 @@ stop_one_proxy() { # stop_one_proxy <port>
 
 _proc_start() { # _proc_start <pid> -> the process's start time, compact; empty if it is gone
     ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' '_'
+}
+
+_write_pidf() { # _write_pidf <pidfile> <pid> — 0.50.0 F5: store "pid start" so a recycled
+    # pid (same number, different process) is detectable on every later read.
+    printf '%s %s\n' "$2" "$(_proc_start "$2")" > "$1"
 }
 
 _owner_alive() { # _owner_alive "<pid> <start>" -> 0 only if THAT process (not a recycled pid) runs
@@ -691,9 +701,9 @@ stop_proxy() { # stop_proxy [<port>] [--force]
     for pf in "$RUNDIR"/proxy-*.pid; do
         port="$(basename "$pf")"; port="${port#proxy-}"; port="${port%.pid}"
         [[ -n "$want" && "$port" != "$want" ]] && continue
-        pid="$(cat "$pf" 2>/dev/null)"
+        pid="$(awk '{print $1}' "$pf" 2>/dev/null)"
         owner="$(cat "$RUNDIR/proxy-$port.owner" 2>/dev/null)"
-        if ! _is_our_proxy "$pid" "$port"; then
+        if ! _is_our_proxy "$(cat "$pf" 2>/dev/null)" "$port"; then
             rm -f "$pf" "$RUNDIR/proxy-$port.owner"; continue
         fi
         if [[ $force -eq 0 ]]; then
@@ -1265,7 +1275,7 @@ start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperatur
     # on a large model can take minutes before the health endpoint answers.
     local bgpid
     bgpid="$(_spawn_proxy_on "$port" "$cfg" "$log" "$prov")" || return 1
-    echo "$bgpid" > "$pidf"; echo "$$ $(_proc_start $$)" > "$RUNDIR/proxy-$port.owner"
+    _write_pidf "$pidf" "$bgpid"; echo "$$ $(_proc_start $$)" > "$RUNDIR/proxy-$port.owner"
     if _wait_proxy_ready "$port" "$bgpid" "$([[ -n "${LA_LITELLM_CMD:-}" ]] && echo 60 || echo 300)"; then
         echo "$port"; return 0
     fi
@@ -1315,10 +1325,10 @@ _swap_revert() { # _swap_revert <port> <bak-cfg> <cfg> <log> <pidf> <newpid> <pr
         echo "remote-session: --swap-model: the REVERTED proxy is not answering on :$port —" >&2
         echo "  the original config is restored at $cfg; start it with:" >&2
         echo "    $SCRIPT_DIR/$(basename "$0") ... (or relaunch the session)" >&2
-        echo "$rpid" > "$pidf"
+        _write_pidf "$pidf" "$rpid"
         return 1
     fi
-    echo "$rpid" > "$pidf"
+    _write_pidf "$pidf" "$rpid"
     echo "remote-session: --swap-model: reverted; the previous model is answering again on :$port" >&2
     return 0
 }
@@ -1351,8 +1361,8 @@ swap_model() { # swap_model <port> <alias> [force]
     for f in "$cfg" "$pidf" "$log"; do
         [[ -r "$f" ]] || { echo "remote-session: --swap-model: missing $f — is a session running on :$port?" >&2; return 2; }
     done
-    pid="$(cat "$pidf" 2>/dev/null)"
-    _is_our_proxy "$pid" "$port" || {
+    pid="$(awk '{print $1}' "$pidf" 2>/dev/null)"
+    _is_our_proxy "$(cat "$pidf" 2>/dev/null)" "$port" || {
         echo "remote-session: --swap-model: pid ${pid:-<none>} on :$port is not one of our proxies; refusing." >&2
         return 2; }
     # HEALTHY REFUSAL: a log written inside the window means the proxy answered something
@@ -1396,7 +1406,7 @@ swap_model() { # swap_model <port> <alias> [force]
     _decide_native_route "$prov" "$model"
     write_proxy_config "$scratch_cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 2
     scratch_pid="$(LA_PROXY_HOOKS_RATE_LIMIT=0 _spawn_proxy_on "$scratch" "$scratch_cfg" "$scratch_log" "$prov")" || return 2
-    echo "$scratch_pid" > "$scratch_pidf"
+    _write_pidf "$scratch_pidf" "$scratch_pid"
     if ! _wait_proxy_ready "$scratch" "$scratch_pid" 90; then
         echo "remote-session: --swap-model: pre-flight proxy did not become ready -> ABORT, nothing changed." >&2
         kill "$scratch_pid" 2>/dev/null; rm -f "$scratch_pidf" "$scratch_cfg" "$scratch_log"
@@ -1435,7 +1445,7 @@ swap_model() { # swap_model <port> <alias> [force]
         _swap_revert "$port" "$bak" "$cfg" "$log" "$pidf" "" "$prov"; return 1; }
     # The .owner file is NOT touched: the session keeps its launcher identity, so --stop and
     # stale-cleanup still recognize this proxy as theirs.
-    echo "$newpid" > "$pidf"
+    _write_pidf "$pidf" "$newpid"
     if ! _wait_proxy_ready "$port" "$newpid" 300; then
         _swap_revert "$port" "$bak" "$cfg" "$log" "$pidf" "$newpid" "$prov"
         return 1
