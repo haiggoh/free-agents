@@ -76,6 +76,15 @@ class StateTests(unittest.TestCase):
         self.file.write_text(json.dumps(doc7))
         self.assertEqual(sms.load(self.cfg).hidden_providers, [])
 
+    def test_hidden_providers_survive_an_intercept_agents_save(self):
+        # 0.50.0 regression (found by the 0.50.0 review): save_intercept_agents rebuilds the
+        # doc from the read sections — it must carry hidden_providers through, or that
+        # save wipes the hide-toggle list.
+        sms.save_hidden_providers(self.cfg, ["groq"])
+        sms.save_intercept_agents(self.cfg, "1")
+        self.assertEqual(sms.load(self.cfg).hidden_providers, ["groq"],
+                         "an unrelated section save must not drop hidden_providers")
+
     def test_provider_default_is_a_sentinel_that_means_omit(self):
         # Fails if provider_default is turned into a real effort string.
         sms.save_effort(self.cfg, "remote_api_session", "provider_default")

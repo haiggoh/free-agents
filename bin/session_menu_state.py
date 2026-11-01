@@ -610,10 +610,10 @@ def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, _, memguard, thinking, _hidden = found
+                effort, limiter, last, temperature, _, memguard, thinking, hidden = found
             else:
-                effort, limiter, last, temperature, memguard, thinking = {}, {}, {}, {}, {}, {}
-            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking))
+                effort, limiter, last, temperature, memguard, thinking, hidden = {}, {}, {}, {}, {}, {}, []
+            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden))
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
     except OSError as exc:
