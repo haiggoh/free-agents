@@ -366,6 +366,33 @@ What each `csl` picker setting does and where it lands. Persisted choices live i
 | Show broken / old / local-capable / trials (filters) | list visibility only | in-memory flags |
 | `LA_REMOTE_CLAUDE_SETTINGS=<file>` | extra settings overlay for every free-API session | merged at launch (deny rules added, never substituted) |
 
+### What 0.50.x added
+
+- **Lowkey any-model:** `lowkey --provider <id> --api-model <id>` routes through a free remote
+  provider (same path as `remote-agent-dispatch.py`); the Lowkey screen has a real "Choose API
+  model…" chooser fed from the remote inventory. Local menu order: Choose model → Mode → Launch
+  → Set session name → Model settings.
+- **API-keys hide toggle:** per-provider Hide/Show for the choose-model list (keys stay on
+  disk); persisted as the `hidden_providers` section of the session-menu store (schema 8).
+- **Theme:** per-lane hue rotation (arrows ±5°, Enter/click +20°) and a shell-mode colour
+  slice in the lane swatch.
+- **Offline handling:** when the network is down, connect failures surface as
+  "network unreachable (wifi off?) — the model is fine; retry when back online" instead of a
+  provider error, and the fallback chain is not burned (non-retriable `offline` class).
+- **Rate limiter, de-anonymized:** stamps carry their owner (session id/pid);
+  `rate_limiter.py owners` lists per-owner window counts, `set-owner <id> --rpm-scale 0.5
+  --priority` throttles/prioritizes one session live, `probe` reports how many in-window
+  slots belong to OTHER sessions (tells "concurrent sessions" apart from a real defect).
+  The priority reserve is OFF by default (`LA_LIMITER_RESERVE=0`) — enable only when you
+  want a session to draw from the reserved 20%.
+- **Backend manager:** promoted version shows the pin emoji (About + version list); the
+  backend chooser is a picker list (no cycling row, no standalone list-releases); backends
+  are hardware-gated (CUDA hidden on Mac, listed first on CUDA machines). Backend venvs now
+  live in `$XDG_DATA_HOME/free-agents/backends` (default `~/.local/share/free-agents/backends`);
+  the legacy `~/.venvs` is still read so nothing installed breaks.
+- **`csl --inventory` / About:** counts exclude hidden providers and match the rendered list;
+  registry auto-sync runs as one batched call.
+
 ## How it works
 
 Claude Code talks to an Anthropic-compatible endpoint. A local MLX backend exposes one
