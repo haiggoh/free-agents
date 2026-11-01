@@ -53,6 +53,10 @@ except OSError:
     __version__ = "0.10.3-dev"  # fallback if VERSION file missing
 
 PROGRESS_MODE = "compact"
+# 0.50.0 (lowkey-any-model-api): when --provider is given, requests route through a free
+# REMOTE API provider instead of the local server.
+API_PROVIDER = None
+API_MODEL = ""
 PROGRESS_LABEL = "lowkey"
 # OpenAI-style `reasoning_effort` sent with every chat-completions request, or None to
 # omit the field and let the server/template decide. Rapid-MLX validates it against this
@@ -300,6 +304,42 @@ def run_librarian_with_progress(cmd: list) -> int:
     return return_code
 
 
+def dispatch_messages_api(
+    provider_id: str,
+    model_id: str,
+    messages: list,
+    max_tokens: int,
+) -> str:
+    """0.50.0 (lowkey-any-model-api): route the chat through a free remote API provider —
+    the same path remote-agent-dispatch.py uses (remote_provider_core + remote_http)."""
+    import remote_http
+    import remote_provider_core
+
+    if not messages:
+        print("[-] Refusing to dispatch an empty message list.", file=sys.stderr)
+        return ""
+    provider = remote_provider_core.get(provider_id)
+    if not provider:
+        print(f"[-] unknown provider {provider_id!r}", file=sys.stderr)
+        return ""
+    if not provider.config_present():
+        print(f"✖ provider {provider_id} needs a key in "
+              f"${{LA_API_KEYS_DIR:-~/.api_keys}}/{provider_id}", file=sys.stderr)
+        return ""
+    body = {"model": model_id, "messages": messages, "max_tokens": max_tokens}
+    if REASONING_EFFORT is not None:
+        body["reasoning_effort"] = REASONING_EFFORT
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_path = os.path.join(tmpdir, "output.txt")
+        with open(out_path, "w", encoding="utf-8") as out_fd:
+            remote_http.stream_chat(provider, body, tmpdir, out_fd, timeout=600)
+        try:
+            with open(out_path, encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+
+
 def dispatch_messages(
     port: int,
     model_alias: str,
@@ -307,6 +347,9 @@ def dispatch_messages(
     max_tokens: int,
 ) -> str:
     """Dispatch a structured chat-completions message list."""
+    if API_PROVIDER:
+        # 0.50.0: an API model was chosen — ignore the local port, route remotely.
+        return dispatch_messages_api(API_PROVIDER, API_MODEL or model_alias, messages, max_tokens)
     if not messages:
         print("[-] Refusing to dispatch an empty message list.", file=sys.stderr)
         return ""
@@ -864,6 +907,18 @@ def main():
         help="Local model alias (e.g. qwen-3.8-operator, qwen-3.8-thinking, gemma-4-26b)",
     )
     parser.add_argument(
+        "--provider",
+        default="",
+        help="Free remote API provider id (e.g. nvidia, gemini — see remote-agent-dispatch.py "
+             "--help); with it, requests route through that provider instead of a local model",
+    )
+    parser.add_argument(
+        "--api-model",
+        default="",
+        help="Upstream model id for --provider (e.g. mistralai/mistral-large-4 on nvidia); "
+             "defaults to the provider's first known-good model",
+    )
+    parser.add_argument(
         "--profile",
         default="",
         help="Local runtime profile ID (e.g., qwen38-rapid-operator); if given, overrides --model "
@@ -922,6 +977,15 @@ def main():
     )
 
     args = parser.parse_args()
+    if args.api_model and not args.provider:
+        parser.error("--api-model requires --provider")
+    global API_PROVIDER, API_MODEL
+    API_PROVIDER = args.provider or None
+    API_MODEL = args.api_model
+    if API_PROVIDER and not API_MODEL:
+        import remote_provider_core
+        _p = remote_provider_core.get(API_PROVIDER)
+        API_MODEL = (_p.default_models[0] if _p and getattr(_p, "default_models", None) else "")
     assistant_label = model_display_label(args.model)
     PROGRESS_MODE = args.progress
     PROGRESS_LABEL = assistant_label

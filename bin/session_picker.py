@@ -1183,7 +1183,8 @@ class Picker(App):
                 self._hydrate_catalogs(self.screen_model)   # cached lists paint at once
         elif nav.target == "lowkey":
             local = self.cache.get("local")
-            self.screen_model = m.LowkeyScreen(s, local, nav.owner)
+            self.screen_model = m.LowkeyScreen(s, local, nav.owner,
+                                               api_agents=self.cache.get("remote") or [])
         elif nav.target == "download":
             # 0.22.3's background loading dropped the catalog load, so this screen always
             # opened empty. It now loads like local/remote and fills in via _loaded().

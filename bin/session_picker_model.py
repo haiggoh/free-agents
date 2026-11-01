@@ -2925,12 +2925,16 @@ class LowkeyScreen(Screen):
     title = f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Lowkey — model evaluation chat"
 
     def __init__(self, settings: Settings, models: "list[LocalModel] | None" = None,
-                 owner: str = DIRECT_ROOT):
+                 owner: str = DIRECT_ROOT, api_agents: "list | None" = None):
         super().__init__(settings, owner)
         self.session_name = ""
         self.mode = "convo"                    # convo | oneshot (toggle, user 2026-10-30)
         self._choose_model_visible = False     # local model list is NOT open by default
         self._models_loaded = False
+        # 0.50.0 item 8 (lowkey-any-model-api): the API chooser is REAL — a second accordion
+        # group fed from the remote inventory; picking a row selects it for lowkey.
+        self.api_agents = [a for a in (api_agents or []) if a.model_id and a.model_id != "SELECT"]
+        self.api_selection = None              # (provider, model_id) once an API row is picked
         self.set_models(models or [])
 
     def set_models(self, models: list[LocalModel]):
@@ -2939,9 +2943,15 @@ class LowkeyScreen(Screen):
         for mdl in models:
             buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(mdl)
         order = sorted(buckets, key=lambda f: (f == "Other", f.lower()))
-        self.accordion.set_groups([
+        groups = [
             Group(f, f"{f} ({len(buckets[f])})", [Item(x.alias, model_names.readable(x.alias)) for x in buckets[f]])
-            for f in order])
+            for f in order]
+        if self.api_agents:
+            groups.append(Group(
+                "api", f"API models ({len(self.api_agents)})",
+                [Item(f"{a.provider}:{a.model_id}", f"{a.display or a.model_id} ({a.provider})")
+                 for a in self.api_agents]))
+        self.accordion.set_groups(groups)
         self.accordion.collapse()              # nothing open until "Choose local model…"
         self._models_loaded = True
 
@@ -2969,6 +2979,16 @@ class LowkeyScreen(Screen):
     def _toggle_choose_model(self):
         self._choose_model_visible = not self._choose_model_visible
 
+    def _toggle_choose_api(self):
+        # open/close the API-models group
+        g = next((g for g in self.accordion.groups if g.id == "api"), None)
+        if g is None:
+            return
+        if self.accordion.open_group == "api":
+            self.accordion.collapse()
+        else:
+            self.accordion.open_group = "api"
+
     def _thinking_label(self):
         v = self.settings.lowkey_thinking
         return "ON (default)" if v is None else ("ON" if v else "OFF")
@@ -2981,6 +3001,10 @@ class LowkeyScreen(Screen):
         # "advanced" group is dropped entirely — no action sits in a "settings" section.
         acts = [
             Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose local model…", self._toggle_choose_model, section="models"),
+        ]
+        if self.api_agents:
+            acts.append(Action("a", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose API model…", self._toggle_choose_api, section="models"))
+        acts += [
             Action("m", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Mode: {'Convo' if self.mode == 'convo' else 'One-shot'}",
                    self._toggle_mode, section="main"),
             Action("p", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}{'Start convo' if self.mode == 'convo' else 'Start one-shot'}",
@@ -3005,6 +3029,10 @@ class LowkeyScreen(Screen):
         return acts
 
     def _base(self):
+        if self.api_selection:
+            prov, model_id = self.api_selection
+            return ["lowkey", "--provider", prov, "--api-model", model_id,
+                    "--effort", self.settings.lowkey_effort]
         sel = self.accordion.selected_id
         if not sel or sel not in self.models:
             return None
@@ -3041,7 +3069,12 @@ class LowkeyScreen(Screen):
 
     def activate_selected(self):
         # Click/Enter on a model row only SELECTS it (user 2026-10-30: highlight-to-choose
-        # is finicky); launching is the explicit `p`/`g` actions.
+        # is finicky); launching is the explicit `p`/`g` actions. An API row selects the
+        # (provider, model) pair for lowkey (0.50.0 item 8).
+        sel = self.accordion.selected_id
+        if sel and ":" in sel and any(f"{a.provider}:{a.model_id}" == sel for a in self.api_agents):
+            prov, model_id = sel.split(":", 1)
+            self.api_selection = (prov, model_id)
         return None
 
     def one_shot(self, prompt: str):

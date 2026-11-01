@@ -846,6 +846,24 @@ class LowkeyTests(unittest.TestCase):
                                 "--prompt", "summarise X"])
         self.assertIsNone(lk.one_shot(""))
 
+    def test_api_model_chooser_selects_and_launches_with_provider(self):
+        # 0.50.0 item 8 (lowkey-any-model-api): the Lowkey screen offers a REAL API
+        # chooser (a second accordion group from the remote inventory); picking a row
+        # selects (provider, model) and launching passes --provider/--api-model.
+        s = m.Settings(lowkey_effort="low")
+        api = [m.RemoteAgent("nvidia-mistral-large4", "nvidia", "Mistral Large 4", "unknown",
+                             model_id="mistralai/mistral-large-4")]
+        lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT, api_agents=api)
+        self.assertIn("a", {a.key for a in lk.actions()})
+        self.assertTrue(any(g.id == "api" for g in lk.accordion.groups))
+        lk.accordion.select("nvidia:mistralai/mistral-large-4")
+        lk.activate_selected()
+        self.assertEqual(lk.api_selection, ("nvidia", "mistralai/mistral-large-4"))
+        req = lk._convo()
+        self.assertEqual(req.argv,
+                         ["lowkey", "--convo", "--provider", "nvidia",
+                          "--api-model", "mistralai/mistral-large-4", "--effort", "low"])
+
     def test_menu_order_choose_mode_launch_name_settings_last(self):
         # 0.50.0 (waypoint lowkey-menu-drop-the-advanced): C) Choose model first,
         # M) Mode, G) Launch, S) Set session name, Model settings group LAST — and no
