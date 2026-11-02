@@ -1,3 +1,17 @@
+## [0.50.4] — 2026-11-02
+
+### Fixed — load-sensitive tests no longer flake on a busy limiter (knobs now on by default)
+
+- Tests marked `pytest.mark.load_sensitive` now automatically run with the rate-limiter
+  priority lane from 0.50.1: `LA_LIMITER_RESERVE=0.2` (20% of the bucket reserved for priority
+  acquisitions, normal traffic stops at 80%) and `LA_LIMITER_PRIORITY=1` (this process draws
+  from the reserve). Set by the autouse `tests/conftest.py::_limiter_knobs_for_load_sensitive`
+  fixture; subprocesses inherit the env. Mutation-tested
+  (`tests/test_loadscale.py::LimiterKnobDefaultTests`).
+- Usage documented for future sessions: fixture docstring in `tests/conftest.py`,
+  `tests/test_loadscale.py`, and `rtc-ship.json` `_comment_limiter_knobs` (manual/live:
+  `set-owner <id> --priority [--rpm-scale 0.2]`, `owners`, `probe`).
+
 ## [0.50.3] — 2026-11-02
 
 
