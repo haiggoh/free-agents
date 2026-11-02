@@ -29,6 +29,14 @@ for _k in SCRUBBED_ENV:
 
 os.environ.setdefault("LA_URL_OPENER", "true")
 
+# Quota-ledger sandbox (0.50.3): remote-agent-dispatch appends to the quota ledger after every
+# completed call, so any test that stubs a successful dispatch would write the user's REAL
+# ~/.local/share/local-agent/remote-usage.jsonl (it did, during 0.50.2/0.50.3 development).
+# FORCED, not setdefault: an override inherited from the shell may point at the real dir.
+# Subprocesses inherit it. Tests that exercise the override itself use monkeypatch.setenv.
+import tempfile as _tempfile  # noqa: E402
+os.environ["FA_QUOTA_LEDGER_DIR"] = _tempfile.mkdtemp(prefix="fa-quota-test-")
+
 _REAL_SETTINGS = Path.home() / ".claude" / "settings.json"
 
 
@@ -83,3 +91,19 @@ def pytest_configure(config):
         return _orig_write(provider, rows)
 
     _m.write_catalog_cache = _guarded_write
+
+    # Quota-ledger tripwire (0.50.3): an in-process append under the REAL ledger dir fails
+    # the test, whatever path the caller passed (write_ledger is the one writer).
+    from quota import telemetry as _qt
+
+    _real_ledger_dir = _qt.DEFAULT_LEDGER_DIR.resolve()
+    _orig_ledger = _qt.write_ledger
+
+    def _guarded_ledger(record, ledger_path=_qt.DEFAULT_LEDGER_PATH):
+        if Path(ledger_path).resolve().parent == _real_ledger_dir:
+            raise AssertionError(
+                f"test wrote the REAL quota ledger {ledger_path}; FA_QUOTA_LEDGER_DIR must "
+                "point at a sandbox (conftest sets one for the whole run)")
+        return _orig_ledger(record, ledger_path)
+
+    _qt.write_ledger = _guarded_ledger

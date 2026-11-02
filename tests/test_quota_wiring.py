@@ -53,6 +53,25 @@ def _ok_result(**kw):
     return core.Result(**base)
 
 
+def test_suite_sandboxes_the_ledger_by_default():
+    # conftest pins FA_QUOTA_LEDGER_DIR for the whole run (subprocesses inherit it): a test
+    # that stubs a successful dispatch without thinking about the ledger must not reach $HOME.
+    assert telemetry.ledger_dir() != telemetry.DEFAULT_LEDGER_DIR
+
+
+def test_tripwire_refuses_the_real_ledger(monkeypatch):
+    # SAFE EVEN WITHOUT THE GUARD: os.open is stubbed, so a missing tripwire fails on the
+    # sentinel instead of writing the user's real ledger (a first version of this test did).
+    def _no_disk(*a, **k):
+        raise RuntimeError("WOULD WRITE THE REAL LEDGER")
+    monkeypatch.setattr(telemetry.os, "open", _no_disk)
+    monkeypatch.setattr(telemetry, "_ensure_ledger_dir", lambda p: p)
+    rec = telemetry.QuotaRecord(provider_id="groq", credential_id="", model_id="m",
+                                provenance="unknown", source="local-ledger", observed_at="x")
+    with pytest.raises(AssertionError, match="REAL quota ledger"):
+        telemetry.write_ledger(rec, telemetry.DEFAULT_LEDGER_PATH)
+
+
 def test_subset_drops_credentials():
     got = remote_http.quota_header_subset([
         ("Authorization", "Bearer sk-secret"), ("x-api-key", "k"), ("Set-Cookie", "c=1"),
