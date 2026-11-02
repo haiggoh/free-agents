@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.50.2`. See `CHANGELOG.md`.
+`0.50.3`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -112,6 +112,20 @@ section below. Landed code awaiting a number still belongs in the changelog; onl
 are specs.
 
 ---
+
+## `0.50.3` — Remote-provider extraction (shipped 2026-11-02)
+
+Extracted from the 2026-09-26 remote-provider/quota plan after reconciling it against 0.50.1
+(plan: `~/.claude/plans/2026-11-02-free-agents-remote-provider-extraction.md`). **Done:** the
+router's failover contract (hard failure / partial stops the walk), GitHub Models retired via
+`retired_message` on the Python side, the quota ledger fed from real dispatches.
+**Superseded, not built:** a `remote-renewable-first` router mode (`free-agent-tool.py` +
+`dispatch-preferences.json` already walk a preference order); the old NVIDIA-first session
+order (user decision 0.49.7 H3). **Still open, each gated:** a statusline quota segment (after
+the ledger has real lines); multi-key credential aliases (design approval — never migrate the
+flat `~/.api_keys/<provider>` files silently, never rotate keys to multiply a quota); live
+qualification of mistral/zai/siliconflow/llm7/kilo/vercel/sambanova/modelscope/streamlake/
+huggingface (approved live calls, one provider at a time); opt-in key validation in setup.
 
 ## `0.49.1` — Picker consistency patch (reserved 2026-10-31)
 

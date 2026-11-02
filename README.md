@@ -368,6 +368,11 @@ What each `csl` picker setting does and where it lands. Persisted choices live i
 
 ### What 0.50.x added
 
+- **Quota ledger (0.50.3):** every completed remote dispatch appends its provider's rate-limit
+  headers (allowlisted — never credentials) to `~/.local/share/local-agent/remote-usage.jsonl`;
+  read it with `python3 bin/quota/telemetry.py --show-ledger`, redirect it with
+  `FA_QUOTA_LEDGER_DIR`. `agent-fallback.py` now stops on a hard failure or partial output
+  instead of trying the next provider.
 - **Lowkey any-model:** `lowkey --provider <id> --api-model <id>` routes through a free remote
   provider (same path as `remote-agent-dispatch.py`); the Lowkey screen has a real "Choose API
   model…" chooser fed from the remote inventory. Local menu order: Choose model → Mode → Launch

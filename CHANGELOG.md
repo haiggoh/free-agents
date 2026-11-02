@@ -1,3 +1,36 @@
+## [0.50.3] — 2026-11-02
+
+
+### Fixed — the dispatch router's failover contract (extracted from the 2026-09-26 remote-provider plan)
+
+- `agent-fallback.py`: a hard remote failure (auth / malformed / policy / partial / transport /
+  offline) now STOPS the walk with exit 2. It used to break only the per-provider retry loop and
+  move on to the next provider — the exact thing the router's own docstring forbids. A failed
+  local run that already wrote text is now `partial`: the text is kept in `output.txt` and the
+  prompt is NOT re-sent to a remote lane. The route record gains `stopped_on`. Retriable failures
+  (quota / transient / timeout / model unavailable) still advance as before.
+  Tests: tests/test_agent_fallback_invariant.py (first tests this router has had).
+- GitHub Models is retired on the Python side too: the registry's existing `retired_message`
+  (already refused by the session launcher) now removes a provider from `IMPLEMENTED` and
+  `CATALOG_SCANABLE` (no more catalog scans of a 410 endpoint), and `remote-provider-doctor.py`
+  reports state `retired` before any key check. Tests: tests/test_registry_retired.py.
+
+### Added — the quota ledger finally fills
+
+- `bin/quota/` (A/R/E/? provenance parsers + ledger) had shipped with tests but no caller, and
+  the HTTP layer kept no response headers beyond Retry-After. `remote_http.stream_chat` now
+  captures an ALLOWLIST of rate-limit/quota headers (`x-ratelimit*`, `ratelimit*`, `x-quota*`,
+  `retry-after`) onto `Result.quota_headers` (never serialized), and `remote-agent-dispatch.py`
+  appends one line per completed call or quota refusal to
+  `~/.local/share/local-agent/remote-usage.jsonl` (created 0600; one O_APPEND write per line).
+  Fail-open: a telemetry error is one `quota: not recorded (…)` stderr line, never a changed exit
+  code. `FA_QUOTA_LEDGER_DIR` overrides the directory and fails loudly when unusable. Read it with
+  `python3 bin/quota/telemetry.py --show-ledger`. Header parsers were written from provider docs:
+  the first real dispatches after this release are their first live input.
+  Tests: tests/test_quota_wiring.py.
+- Still planned, not shipped: a statusline quota segment (needs a populated ledger), multi-key
+  credential aliases, and live qualification of the newer remote providers.
+
 ## [0.50.2] — 2026-11-02
 
 ### Fixed — `csl --inventory` wall time (~22 s → ~4.6 s on this machine; TSV output byte-identical, diff-verified)
@@ -29,6 +62,7 @@
 - docs/feature-parity-0501.md known-gaps reconciled: `csl-inventory-takes-23s-wall` closed,
   `local-pyright-binary-broken` closed (the CLI binary runs again), and rtc-ship's
   `--bump-versions` confirmed already shipped in run-to-completion 1.0.1/1.0.2.
+ fd027cf (docs+version: 0.50.2 — changelog, README, roadmap (done / superseded / still gated))
 
 ## [0.50.1] — 2026-11-01
 
