@@ -2977,10 +2977,20 @@ class LowkeyScreen(Screen):
             Group(f, f"{f} ({len(buckets[f])})", [Item(x.alias, model_names.readable(x.alias)) for x in buckets[f]])
             for f in order]
         if self.api_agents:
+            # One row per model (user 2026-10-29, reaffirmed 2026-11-02): the roster may list a
+            # -thinking alias next to the base alias with the SAME model_id; the base alias
+            # represents the model, first-seen position preserved — the same rule as
+            # RemoteScreen._regroup. Without this the api group carried duplicate Item ids
+            # and render_model died with OptionList DuplicateID (csl crash 2026-11-02).
+            by_model: dict = {}
+            for a in self.api_agents:
+                by_model.setdefault((a.provider, a.model_id or a.alias), []).append(a)
+            deduped = [next((x for x in g if not x.alias.endswith("-thinking")), g[0])
+                       for g in by_model.values()]
             groups.append(Group(
-                "api", f"API models ({len(self.api_agents)})",
+                "api", f"API models ({len(deduped)})",
                 [Item(f"{a.provider}:{a.model_id}", f"{a.display or a.model_id} ({a.provider})")
-                 for a in self.api_agents]))
+                 for a in deduped]))
         self.accordion.set_groups(groups)
         self.accordion.collapse()              # nothing open until "Choose local model…"
         self._models_loaded = True
