@@ -165,13 +165,13 @@ check(core.get("gemini") is not None and core.get("gemini").tier == core.RENEWIN
 check(set(core.PROVIDERS) == {"gemini", "groq", "openrouter", "cloudflare",
                               "github", "cerebras", "nvidia", "mistral",
                               "zai", "siliconflow", "llm7", "kilo", "vercel",
-                              "sambanova", "modelscope", "streamlake"},
-      "all sixteen providers are declared from remote-registry.yaml")
+                              "sambanova", "modelscope", "streamlake", "huggingface"},
+      "all seventeen providers are declared from remote-registry.yaml")
 check(core.get("cerebras").tier == core.TRIAL, "cerebras is classified TRIAL (not free)")
 check(core.IMPLEMENTED == {"gemini", "nvidia", "groq", "openrouter", "cloudflare",
                            "mistral", "zai", "siliconflow", "llm7", "kilo",
-                           "vercel", "sambanova", "modelscope", "streamlake"},
-      "fourteen providers are implemented; github is declared but excluded")
+                           "vercel", "sambanova", "modelscope", "streamlake", "huggingface"},
+      "fifteen providers are implemented; github (retired) and cerebras (trial) are excluded")
 check(core.RATE_LIMITED <= core.IMPLEMENTED and "nvidia" in core.RATE_LIMITED,
       "nvidia dispatches go through the machine-wide limiter")
 check(not core.get("groq") and core.get("groq").tier == core.RENEWING_FREE or True,
@@ -503,10 +503,14 @@ print("== remote-provider-registry: YAML round-trip ==")
 reg = load("reg", "remote_provider_registry.py")
 # The registry loaded from config/remote-registry.yaml should have the same
 # provider count and tier distribution as when we verify against it directly.
-check(len(reg.PROVIDERS) == 16,
-      "registry parsed 16 providers from remote-registry.yaml")
-check(len(reg.ENTRIES) == 49,
-      "registry parsed 49 model entries from remote-registry.yaml")
+check(len(reg.PROVIDERS) == 17,
+      "registry parsed 17 providers from remote-registry.yaml")
+# Derived from the YAML text (an independent count), not pinned: the roster changes often.
+_yaml_aliases = sum(1 for _ln in open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "config", "remote-registry.yaml"), encoding="utf-8")
+    if _ln.startswith("  - alias:"))
+check(_yaml_aliases > 0 and len(reg.ENTRIES) == _yaml_aliases,
+      "registry parsed every model entry in remote-registry.yaml (%d)" % _yaml_aliases)
 check(reg.get("gemini").tier == reg.RENEWING_FREE,
       "registry tier: gemini = renewing_free")
 check(reg.get("cerebras").tier == reg.TRIAL,
@@ -518,9 +522,10 @@ check("github" not in reg.IMPLEMENTED,
 check(reg.CATALOG_SCANABLE == {
     "gemini", "groq", "nvidia", "openrouter", "cloudflare",
     "mistral", "siliconflow", "llm7", "kilo", "vercel",
-    "sambanova", "modelscope", "streamlake",
-    "cerebras", "github"},
-      "catalog-scannable: 15 providers have a callable /models endpoint")
+    "sambanova", "modelscope", "streamlake", "huggingface", "zai",
+    "cerebras"},
+      "catalog-scannable: 16 providers have a callable /models endpoint "
+      "(github is retired: its retired_message keeps the 410 catalog out, 0.50.2)")
 
 # Restore the ambient env (see the _saved_keys_dir note at the top).
 if _saved_keys_dir is None:
