@@ -1,3 +1,35 @@
+## [0.50.2] — 2026-11-02
+
+### Fixed — `csl --inventory` wall time (~22 s → ~4.6 s on this machine; TSV output byte-identical, diff-verified)
+
+- `bin/la-detect-backend.py --gate` no longer runs the rapid/oMLX engine probes even though its
+  own `--help` says it skips them — each probe spawns an engine venv python (~1 s). Mutation-
+  tested: `tests/test_detect_backend.py::test_gate_mode_skips_engine_probes` (red with the probes
+  in gate mode, green after, red again on revert).
+- `la_auto_scan_models` (config/config-lib.sh) is called ONCE per `csl --inventory` (was twice)
+  and spawns ~6 processes instead of ~120 per call: one find lists candidate dirs, candidacy is
+  checked with builtins+glob, exclusions via one grep, and ONE find answers the weight rule
+  (size +1M, depth ≤ 3) for all dirs at once. `-L` kept for symlink farms; the exclusion regex
+  is escaped by pure parameter expansion (no per-pattern sed).
+- Alias sanitization in `bin/csl` uses pure expansion instead of a sed spawn per folder.
+- `tests/test_inventory_auto_scan.sh` gains fixtures pinning depth-3 weights, symlink farms,
+  gguf-only and tiny-gguf dirs (14/14).
+
+### Added — `load_sensitive` pytest marker for load-dependent tests
+
+- The 9 modules that spawn real processes (picker PTY harness, litellm proxy, real venv
+  creation) carry `pytestmark = pytest.mark.load_sensitive`; the marker is registered in
+  tests/conftest.py with its recipe. On a loaded shared box the gate runs
+  `pytest -m "not load_sensitive"` instead of flaking one-per-run at load > 10.
+  Marker tests in tests/test_loadscale.py are mutation-checked (dropping one module's
+  mark turns them red).
+
+### Docs
+
+- docs/feature-parity-0501.md known-gaps reconciled: `csl-inventory-takes-23s-wall` closed,
+  `local-pyright-binary-broken` closed (the CLI binary runs again), and rtc-ship's
+  `--bump-versions` confirmed already shipped in run-to-completion 1.0.1/1.0.2.
+
 ## [0.50.1] — 2026-11-01
 
 ### Fixed — wifi-cutoff error handling (plan wifi-cutoff_error_handling_free-agents.md)
