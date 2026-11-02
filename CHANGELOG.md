@@ -24,7 +24,9 @@
   appends one line per completed call or quota refusal to
   `~/.local/share/local-agent/remote-usage.jsonl` (created 0600; one O_APPEND write per line).
   Fail-open: a telemetry error is one `quota: not recorded (…)` stderr line, never a changed exit
-  code. `FA_QUOTA_LEDGER_DIR` overrides the directory and fails loudly when unusable. Read it with
+  code. `FA_QUOTA_LEDGER_DIR` overrides the directory and fails loudly when unusable (missing
+  parent, or a regular file). The test suite pins it to a temp dir for every run, and a conftest
+  tripwire fails any test that writes the real ledger. Read it with
   `python3 bin/quota/telemetry.py --show-ledger`. Header parsers were written from provider docs:
   the first real dispatches after this release are their first live input.
   Tests: tests/test_quota_wiring.py.
