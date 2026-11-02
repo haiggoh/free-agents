@@ -197,7 +197,7 @@ multimodal, 1M context, served NVFP4 on NVIDIA NIM since 2026-10-29 (released by
 on tool use — observed in a live full Claude Code session from day one; faster and more
 responsive than GLM 5.3 Flash in full sessions (user 2026-10-31).
 
-**Nemotron 3 Ultra** — `nvidia-nemotron-ultra` / `nvidia-nemotron-ultra-thinking`
+**Nemotron 3 Ultra** — `nvidia-nemotron-ultra` (thinking is the picker's `j` toggle, not a second alias)
 Capable on clearly-instructed work, relatively fast, 1M context. Tends to think for long
 stretches before reporting in. Two habits make it pleasant: the thinking blocks are
 readable as they stream, and **interjecting a queued prompt while it is still thinking
@@ -206,20 +206,20 @@ Caveat (2026-10-15): it can act rash — occasionally presenting unfinished, unt
 as done — and it struggles with complex, loosely-scoped problems. Scope asks tightly and
 verify its "done" before shipping. Nemotron 3 Super takes these shortcuts even more often.
 
-**Nemotron 3 Super** — `nvidia-nemotron3` / `nvidia-nemotron3-thinking`
+**Nemotron 3 Super** — `nvidia-nemotron3`
 Extremely fast, but takes the path of least resistance and declares goals fulfilled
 prematurely. Good for quick, well-scoped asks; check its "done".
 
-**GLM 5.3 — RETIRED 2026-10-31** — `nvidia-glm53-full` / `nvidia-glm53-full-thinking`
+**GLM 5.3 — RETIRED 2026-10-31** — `nvidia-glm53-full`
 (z-ai/glm-5.3): NVIDIA answers **410 Gone** — "reached its end of life on
 2026-10-28T08:00:00Z" — and the live catalog no longer lists the id (checked 2026-10-31,
-GET only). Both aliases are hidden from the picker via `config/broken-nvidia-models.json`.
+GET only). The alias is hidden from the picker via `config/broken-nvidia-models.json`.
 Use **Mistral Large 4** above instead. Was: very smart reasoning model, excellent at
 understanding context and finding problems and solutions on its own — comparatively slow
 (~1-minute door charge before the first token), ideal for unattended overnight work.
 1M context.
 
-**GLM 5.3 Flash** — `nvidia-glm53` / `nvidia-glm53-thinking`
+**GLM 5.3 Flash** — `nvidia-glm53`
 Sharp: it takes over GLM 5.3 full's reputation for investigating the
 context and finding problems and solutions on its own — the quality successor of the
 retired full model, not a downgrade. Thinking and output well balanced; 1M context.

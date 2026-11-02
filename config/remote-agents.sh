@@ -64,10 +64,11 @@ LA_REMOTE_AGENTS=(
   # ════════════════════════════════════════════════════════════════════════════════
   # Ordered by USER PREFERENCE first, then GENERATION EVIDENCE: confirmed lanes first,
   # partially-working next, never-produced-a-token last (each row states its evidence).
-  # 2026-10-15 user preference for the session picker: GLM 5.3 Flash (thinking) leads, then
-  # GLM 5.3 (thinking), Ultra (thinking), Super (thinking), Lightning (thinking), Laguna,
-  # then the non-thinking variants mirrored (Lightning after Super); the remaining visible
-  # models and the hidden broken rows follow.
+  # 2026-10-15 user preference for the session picker: GLM 5.3 Flash leads, then GLM 5.3,
+  # Ultra, Super, Lightning, Laguna, then the remaining visible models and the hidden broken
+  # rows follow. 2026-11-02: the separate -thinking variant rows were REMOVED — one entry per
+  # model; thinking is the picker's `j` toggle, not a second roster row (the duplicates crashed
+  # the Lowkey api chooser with OptionList DuplicateID).
   # 2026-10-31: z-ai/glm-5.3 (GLM full) retired by NVIDIA — 410 Gone, EOL 2026-10-28T08:00:00Z
   # (live catalog 2026-10-31 no longer lists it). Its rows moved to the hidden section below;
   # Mistral Large 4 (Le Chonk) leads the visible order.
@@ -75,13 +76,9 @@ LA_REMOTE_AGENTS=(
   # Hand-curated nvidia order (user 2026-10-20; top pick updated 2026-10-29: Mistral Large 4
   # leads after GLM 5.3's retirement from the NVIDIA API).
   "nvidia-mistral-large4|nvidia|mistralai/mistral-large-4-1t-a52b|Mistral Large 4 (Le Chonk)|unknown|TOP PICK for full free sessions (2026-10-29). 1.05T total / 52B active granular MoE, multimodal, 1M context, NVFP4 on NIM since 2026-10-29; fills the gap left by GLM 5.3's retirement from the NVIDIA API. Faster and more responsive than GLM 5.3 Flash in full sessions (user 2026-10-31).|1m"
-  "nvidia-glm53-thinking|nvidia|z-ai/glm-5.3-flash|Z.ai GLM 5.3 Flash (thinking)|unknown|Same model as nvidia-glm53 — thinking is always-on on NIM; this alias defaults reasoning_effort high. Sharp: takes over GLM 5.3 full's deep-work reputation (finds problems and solutions on its own; 1M context). Speed caveat: the 1-4s figure is a stateless ping — in a full session Le Chonk is faster and more responsive (user 2026-10-31).|-"
-  "nvidia-nemotron3-thinking|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.|-"
-  "nvidia-lightning-thinking|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B (thinking)|unknown|Reasoning enabled — stronger reasoning. Verified 2026-10-02.|-"
   "nvidia-glm53|nvidia|z-ai/glm-5.3-flash|Z.ai GLM 5.3 Flash|unknown|Quality work: inherits GLM 5.3's sharpness at investigating context — finds problems and solutions on its own; the quality successor of the retired GLM 5.3 full (410 EOL 2026-10-28). Speed caveat: the 1-4s figure is a stateless single-prompt ping — in a full session no model is that fast and Le Chonk is faster and more responsive (user 2026-10-31). Always-thinking on NIM (chat_template_kwargs inert, measured 2026-10-13; reasoning_effort is the only dial). Non-streaming fine for small outputs. Earlier 'empty' verdicts were the probe max_tokens artifact.|-"
   "nvidia-step5-preview|nvidia|stepfun-ai/step-5-preview|StepFun Step 5 Preview|unknown|SESSION-PROVEN (user 2026-10-24): an 18-hour session, 589 turns, ZERO API errors — shipped cost-tracker 0.16.0-0.18.0 across three worktrees. Median turn 23 s. Now ranks above Nemotron 3 Ultra; also in the dispatch order and session fallbacks. Blazingly fast, but quality varies: it tends to loop back and forth on misapplied tool uses it struggles with (user 2026-10-31).|1m"
   "nvidia-deepseek-v4|nvidia|deepseek-ai/deepseek-v4.1-flash|DeepSeek V4.1 Flash|unknown|WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.|-"
-  "nvidia-nemotron-ultra-thinking|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)|unknown|Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02. Moved behind stepfun/deepseek (user 2026-10-31).|1m"
   "nvidia-nemotron-ultra|nvidia|nvidia/nemotron-3-ultra-550b-a55b|NVIDIA Nemotron 3 Ultra 550B-A55B|unknown|★ PREFERRED DEFAULT (user preference, 2026-09-19). GENERATION-CONFIRMED 2/2 probes (2026-09-15). Largest NIM model; reasoning disabled by default.|1m"
   "nvidia-nemotron3|nvidia|nvidia/nemotron-3-super-120b-a12b|NVIDIA Nemotron 3 Super 120B-A12B|unknown|GENERATION-CONFIRMED 2/2 probes + a live session (2026-09-15). Reasoning disabled by default.|-"
   "nvidia-lightning|nvidia|nvidia/nemotron-3.5-lightning-30b-a3b|NVIDIA Nemotron 3.5 Lightning 30B-A3B|unknown|GENERATION-CONFIRMED 2/2 probes (2026-09-15). Small/fast MoE — best utility pick. Reasoning disabled by default.|-"
@@ -89,7 +86,6 @@ LA_REMOTE_AGENTS=(
   "nvidia-muse-glimmer|nvidia|meta/muse-glimmer-30b|Meta Muse Glimmer 30B|unknown|RESTORED 2026-10-13: earlier 'empty' verdicts were the probe max_tokens=24 artifact; fixed probe (512 budget) answers OK. Occasional HTTP 500 historically (1/5).|-"
   "nvidia-gemma4|nvidia|google/gemma-4-31b-it|Google Gemma 4 31B IT|unknown|RESTORED 2026-10-13: the 2026-10-11 timeouts were transient capacity; fixed probe answers OK.|-"
   "nvidia-kimi-k3|nvidia|moonshotai/kimi-k3|Moonshot Kimi K3|unknown|⚠️ RETIRED: NVIDIA returns 410 Gone since 2026-10-15 (end of life). Earlier probes timed out (2026-10-10/13). Hidden via broken-nvidia-models.json.|-"
-  "nvidia-glm53-full-thinking|nvidia|z-ai/glm-5.3|Z.ai GLM 5.3 (thinking)|unknown|⚠️ RETIRED: NVIDIA returns 410 Gone — \"reached its end of life on 2026-10-28T08:00:00Z\" (session error, 2026-10-31). Live catalog check 2026-10-31 (remote-session.sh --models, GET only): z-ai/glm-5.3 no longer listed, only z-ai/glm-5.3-flash. Hidden via broken-nvidia-models.json. Was: SLOW LANE deep-work model — ~1min door charge, excellent quality. Use nvidia-mistral-large4 (Le Chonk) or nvidia-glm53.|-"
   "nvidia-glm53-full|nvidia|z-ai/glm-5.3|Z.ai GLM 5.3|unknown|⚠️ RETIRED: NVIDIA returns 410 Gone — \"reached its end of life on 2026-10-28T08:00:00Z\" (session error, 2026-10-31). Live catalog check 2026-10-31 (remote-session.sh --models, GET only): z-ai/glm-5.3 no longer listed, only z-ai/glm-5.3-flash. Hidden via broken-nvidia-models.json. Was: SLOW LANE — ~1min NVIDIA-side door charge before first token + reasoning volume; excellent quality. Use nvidia-mistral-large4 (Le Chonk) or nvidia-glm53.|-"
   "nvidia-gptoss|nvidia|openai/gpt-oss-20b|OpenAI GPT-OSS 20B|unknown|⚠️ BROKEN: connect/read timeouts — deployment unresponsive (re-audit 2026-10-13 with fixed probe; earlier 'empty' verdicts were partly the max_tokens=24 artifact). Hidden via broken-nvidia-models.json.|-"
   "nvidia-kimi-k26|nvidia|moonshotai/kimi-k2.6|Moonshot Kimi K2.6|unknown|⚠️ BROKEN: HTTP 404 on probes — not provisioned for account. Hidden via broken-nvidia-models.json.|-"
@@ -105,9 +101,7 @@ LA_REMOTE_AGENTS=(
   # ★ 3.8 FIRST, preferred over 3.6 for as long as it stays available (operator, 2026-09-15).
   # If 3.8 is withdrawn or starts erroring, 3.6 below is the fallback and is still VERIFIED.
   "gemini-3.8-flash|gemini|gemini-3.8-flash|Google Gemini 3.8 Flash|renewing_free|★ PREFERRED Gemini. Catalog-listed; newer than 3.6. Thinking off for latency.|-"
-  "gemini-3.8-flash-thinking|gemini|gemini-3.8-flash|Google Gemini 3.8 Flash (thinking)|renewing_free|Preferred Gemini, thinking ON — slower, stronger reasoning.|-"
   "gemini-flash|gemini|gemini-3.6-flash|Google Gemini 3.6 Flash|renewing_free|FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable.|-"
-  "gemini-flash-thinking|gemini|gemini-3.6-flash|Google Gemini 3.6 Flash (thinking)|renewing_free|VERIFIED weights; thinking ON — slower, stronger reasoning.|-"
   "gemini-flash-lite|gemini|gemini-3.1-flash-lite|Google Gemini 3.1 Flash Lite|renewing_free|VERIFIED in catalogue. Utility tier: cheapest/fastest, weaker tool use.|-"
   # --- Groq: fastest tokens/sec of any free lane
   "groq-oss120|groq|openai/gpt-oss-120b|OpenAI GPT-OSS 120B|renewing_free|VERIFIED chat+tools. Very fast; best once Gemini quota is spent.|-"

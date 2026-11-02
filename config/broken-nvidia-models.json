@@ -1,6 +1,6 @@
 {
   "description": "NVIDIA models that are known to be non-functional on NVIDIA NIM API. Distinction: 'broken' = model endpoint fails (timeout/404) regardless of account tier; 'paid_only' = model works but requires paid subscription (separate tier in remote-agents.sh). These models are hidden by default via --show-broken / 'u' toggle, NOT by --show-paid-only / 'p' toggle.",
-  "last_updated": "2026-10-31",
+  "last_updated": "2026-11-02",
   "models": [
     {
       "model_id": "moonshotai/kimi-k3",
@@ -56,15 +56,7 @@
       "reason": "HTTP 410 Gone: NVIDIA retired the model — \"reached its end of life on 2026-10-28T08:00:00Z\" (session error quoted by the user, 2026-10-31). Live catalog check 2026-10-31 (remote-session.sh --models nvidia-mistral-large4, GET only): z-ai/glm-5.3 no longer listed; only z-ai/glm-5.3-flash remains.",
       "status": "broken",
       "failure_mode": "end_of_life",
-      "evidence": "410 detail 2026-10-31; catalog GET 2026-10-31 confirms absence. Use nvidia-mistral-large4 (Mistral Large 4, Le Chonk) or nvidia-glm53 (Flash). Alias nvidia-glm53-full-thinking shares this model_id and is listed separately below."
-    },
-    {
-      "model_id": "z-ai/glm-5.3",
-      "alias": "nvidia-glm53-full-thinking",
-      "reason": "Same model_id as nvidia-glm53-full: HTTP 410 Gone, end of life 2026-10-28T08:00:00Z. Hidden via this file.",
-      "status": "broken",
-      "failure_mode": "end_of_life",
-      "evidence": "See the nvidia-glm53-full entry; catalog GET 2026-10-31."
+      "evidence": "410 detail 2026-10-31; catalog GET 2026-10-31 confirms absence. Use nvidia-mistral-large4 (Mistral Large 4, Le Chonk) or nvidia-glm53 (Flash). The former nvidia-glm53-full-thinking alias was removed with the 2026-11-02 one-entry-per-model dedup."
     }
   ]
 }

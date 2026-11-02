@@ -360,33 +360,6 @@
       "autocompact_default": "1m"
     },
     {
-      "alias": "nvidia-glm53-thinking",
-      "provider": "nvidia",
-      "model_id": "z-ai/glm-5.3-flash",
-      "display": "Z.ai GLM 5.3 Flash (thinking)",
-      "tier": "unknown",
-      "notes": "Same model as nvidia-glm53 — thinking is always-on on NIM; this alias defaults reasoning_effort high. Sharp: takes over GLM 5.3 full's deep-work reputation (finds problems and solutions on its own; 1M context). Speed caveat: the 1-4s figure is a stateless ping — in a full session Le Chonk is faster and more responsive (user 2026-10-31).",
-      "autocompact_default": "-"
-    },
-    {
-      "alias": "nvidia-nemotron3-thinking",
-      "provider": "nvidia",
-      "model_id": "nvidia/nemotron-3-super-120b-a12b",
-      "display": "NVIDIA Nemotron 3 Super 120B-A12B (thinking)",
-      "tier": "unknown",
-      "notes": "Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02.",
-      "autocompact_default": "-"
-    },
-    {
-      "alias": "nvidia-lightning-thinking",
-      "provider": "nvidia",
-      "model_id": "nvidia/nemotron-3.5-lightning-30b-a3b",
-      "display": "NVIDIA Nemotron 3.5 Lightning 30B-A3B (thinking)",
-      "tier": "unknown",
-      "notes": "Reasoning enabled — stronger reasoning. Verified 2026-10-02.",
-      "autocompact_default": "-"
-    },
-    {
       "alias": "nvidia-glm53",
       "provider": "nvidia",
       "model_id": "z-ai/glm-5.3-flash",
@@ -412,15 +385,6 @@
       "tier": "unknown",
       "notes": "WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.",
       "autocompact_default": "-"
-    },
-    {
-      "alias": "nvidia-nemotron-ultra-thinking",
-      "provider": "nvidia",
-      "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
-      "display": "NVIDIA Nemotron 3 Ultra 550B-A55B (thinking)",
-      "tier": "unknown",
-      "notes": "Reasoning enabled — stronger reasoning, uses reasoning_content. Verified 2026-10-02. Moved behind stepfun/deepseek (user 2026-10-31).",
-      "autocompact_default": "1m"
     },
     {
       "alias": "nvidia-nemotron-ultra",
@@ -483,15 +447,6 @@
       "display": "Moonshot Kimi K3",
       "tier": "unknown",
       "notes": "⚠️ RETIRED: NVIDIA returns 410 Gone since 2026-10-15 (end of life). Earlier probes timed out (2026-10-10/13). Hidden via broken-nvidia-models.json.",
-      "autocompact_default": "-"
-    },
-    {
-      "alias": "nvidia-glm53-full-thinking",
-      "provider": "nvidia",
-      "model_id": "z-ai/glm-5.3",
-      "display": "Z.ai GLM 5.3 (thinking)",
-      "tier": "unknown",
-      "notes": "⚠️ RETIRED: NVIDIA returns 410 Gone — \"reached its end of life on 2026-10-28T08:00:00Z\" (session error, 2026-10-31). Live catalog check 2026-10-31 (remote-session.sh --models, GET only): z-ai/glm-5.3 no longer listed, only z-ai/glm-5.3-flash. Hidden via broken-nvidia-models.json. Was: SLOW LANE deep-work model — ~1min door charge, excellent quality. Use nvidia-mistral-large4 (Le Chonk) or nvidia-glm53.",
       "autocompact_default": "-"
     },
     {
@@ -558,30 +513,12 @@
       "autocompact_default": "-"
     },
     {
-      "alias": "gemini-3.8-flash-thinking",
-      "provider": "gemini",
-      "model_id": "gemini-3.8-flash",
-      "display": "Google Gemini 3.8 Flash (thinking)",
-      "tier": "renewing_free",
-      "notes": "Preferred Gemini, thinking ON — slower, stronger reasoning.",
-      "autocompact_default": "-"
-    },
-    {
       "alias": "gemini-flash",
       "provider": "gemini",
       "model_id": "gemini-3.6-flash",
       "display": "Google Gemini 3.6 Flash",
       "tier": "renewing_free",
       "notes": "FALLBACK. VERIFIED chat+tools over multiple sessions; use when 3.8 is unavailable.",
-      "autocompact_default": "-"
-    },
-    {
-      "alias": "gemini-flash-thinking",
-      "provider": "gemini",
-      "model_id": "gemini-3.6-flash",
-      "display": "Google Gemini 3.6 Flash (thinking)",
-      "tier": "renewing_free",
-      "notes": "VERIFIED weights; thinking ON — slower, stronger reasoning.",
       "autocompact_default": "-"
     },
     {

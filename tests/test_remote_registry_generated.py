@@ -501,6 +501,15 @@ printf "GITHUB_TOKEN=${{GITHUB_TOKEN:-unset}}\\n"
         with self.assertRaises(ValueError):
             rrg.validate(dup_alias)
 
+        # One entry per model (2026-11-02): same provider + model_id under a SECOND alias
+        # (the old -thinking variants) is a duplicate model, not a new row — the Lowkey api
+        # chooser crashed with OptionList DuplicateID on exactly this shape
+        dup_model = json.loads(json.dumps(valid_dict))
+        dup_model["entries"].append({**dup_model["entries"][0], "alias": "alias1-thinking"})
+        with self.assertRaises(ValueError) as ctx:
+            rrg.validate(dup_model)
+        self.assertIn("one entry per model", str(ctx.exception).lower())
+
         # Pipe in entry notes
         pipe_notes = json.loads(json.dumps(valid_dict))
         pipe_notes["entries"][0]["notes"] = "has|pipe"
@@ -512,6 +521,21 @@ printf "GITHUB_TOKEN=${{GITHUB_TOKEN:-unset}}\\n"
         bad_key["providers"]["mismatched"] = bad_key["providers"].pop("p1")
         with self.assertRaises(ValueError):
             rrg.validate(bad_key)
+
+    def test_committed_roster_has_one_entry_per_model(self) -> None:
+        """2026-11-02: no two committed entries may share (provider, model_id) — the
+        -thinking duplicates crashed the picker (DuplicateID) until they were removed;
+        rrg.validate() now refuses them, this test pins the committed data."""
+        if not _has_pyyaml():
+            self.skipTest("pyyaml not installed")
+        data = rrg.load(ROOT / "config" / "remote-registry.yaml")
+        rrg.validate(data)  # must not raise: the committed YAML is the validated source
+        seen: dict[tuple[str, str], str] = {}
+        for e in data["entries"]:
+            key = (e["provider"], e["model_id"])
+            self.assertNotIn(key, seen,
+                             f"duplicate model {key}: '{seen.get(key)}' and '{e['alias']}'")
+            seen[key] = e["alias"]
 
     def test_quoting(self) -> None:
         """Quoting handles single quotes properly in generated bash functions."""

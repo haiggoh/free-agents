@@ -195,6 +195,7 @@ def validate(data: dict[str, Any]) -> None:
                 )
 
     seen_aliases: set[str] = set()
+    seen_models: dict[tuple[str, str], str] = {}
     for entry in entries:
         if not isinstance(entry, dict):
             raise ValueError("All entries must be mappings")
@@ -207,6 +208,22 @@ def validate(data: dict[str, Any]) -> None:
         if alias in seen_aliases:
             raise ValueError(f"Duplicate entry alias: '{alias}'")
         seen_aliases.add(alias)
+
+        # One entry per model (user 2026-10-29 / 2026-11-02): two aliases sharing a
+        # (provider, model_id) are the same model — the -thinking variants were a workaround
+        # from before the `j` thinking toggle existed. Pickers collapse such rows anyway
+        # (RemoteScreen._regroup, LowkeyScreen.set_models), but the data root must not carry
+        # them: the Lowkey api group rendered duplicate Item ids and crashed the picker with
+        # OptionList DuplicateID (2026-11-02).
+        model_key = (entry["provider"], entry["model_id"])
+        if model_key in seen_models:
+            other = seen_models[model_key]
+            raise ValueError(
+                f"Duplicate model: entries '{other}' and '{alias}' share "
+                f"provider '{entry['provider']}' + model_id '{entry['model_id']}' — "
+                f"one entry per model; thinking is the picker's `j` toggle, not a second row"
+            )
+        seen_models[model_key] = alias
 
         prov = entry["provider"]
         if prov not in providers:

@@ -32,12 +32,14 @@ def broken_aliases():
 
 
 class BrokenListTests(unittest.TestCase):
-    def test_both_glm_full_aliases_listed_as_end_of_life(self):
+    def test_glm_full_alias_listed_as_end_of_life(self):
+        # 2026-11-02: one entry per model — the -thinking variant row is gone from the
+        # registry, so only the base alias needs the broken-list entry
         models = json.loads(BROKEN.read_text())["models"]
         entries = [m for m in models if m.get("model_id") == "z-ai/glm-5.3"]
         self.assertEqual({e["alias"] for e in entries},
-                         {"nvidia-glm53-full", "nvidia-glm53-full-thinking"},
-                         "both GLM-full aliases must be in broken-nvidia-models.json")
+                         {"nvidia-glm53-full"},
+                         "the GLM-full alias must be in broken-nvidia-models.json")
         for e in entries:
             self.assertEqual(e["failure_mode"], "end_of_life")
             self.assertIn("2026-10-28T08:00:00Z", e["reason"],
@@ -46,7 +48,7 @@ class BrokenListTests(unittest.TestCase):
     def test_every_registry_row_for_the_eol_id_is_hidden(self):
         # a row for a retired id may exist (RETIRED note, like Kimi K3) but must be hidden
         glm_full = {a for a, _, mid in registry_rows() if mid == "z-ai/glm-5.3"}
-        self.assertEqual(glm_full, {"nvidia-glm53-full", "nvidia-glm53-full-thinking"})
+        self.assertEqual(glm_full, {"nvidia-glm53-full"})
         self.assertLessEqual(glm_full, broken_aliases(),
                              "a registry row for a retired id must be hidden via broken-nvidia-models.json")
 
