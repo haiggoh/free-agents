@@ -8,8 +8,17 @@
   move on to the next provider — the exact thing the router's own docstring forbids. A failed
   local run that already wrote text is now `partial`: the text is kept in `output.txt` and the
   prompt is NOT re-sent to a remote lane. The route record gains `stopped_on`. Retriable failures
-  (quota / transient / timeout / model unavailable) still advance as before.
+  (quota / transient / timeout / model unavailable) still advance as before, and so does an
+  end-of-life (410) DEFAULT model when no `--model` is pinned — the next provider uses its own.
   Tests: tests/test_agent_fallback_invariant.py (first tests this router has had).
+- `agent-fallback.py` read the dispatcher's STDOUT as the remote answer, but the dispatcher writes
+  its answer only to `output.txt` — so a remote success returned a banner line (`payload≈N
+  chars…`, which also went to stdout instead of stderr). Each attempt now gets its own
+  `--outdir` / `--json-out`; the answer, a cut stream's partial text, and the exact
+  `error_class` are read back from files.
+- The router's key-liveness doctor pre-check never ran: it passed `(provider, tier)` tuples as
+  argv (TypeError, swallowed) and capped the list at five. It now passes every provider id, so a
+  dead key is filtered BEFORE the first call — load-bearing now that a hard failure stops.
 - GitHub Models is retired on the Python side too: the registry's existing `retired_message`
   (already refused by the session launcher) now removes a provider from `IMPLEMENTED` and
   `CATALOG_SCANABLE` (no more catalog scans of a 410 endpoint), and `remote-provider-doctor.py`
