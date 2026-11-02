@@ -22,6 +22,8 @@ LA_TEST_* (test-harness knobs) are kept.
 import os
 from pathlib import Path
 
+import pytest
+
 SCRUBBED_ENV = sorted(k for k in os.environ
                       if k.startswith(("LA_", "_LA_")) and not k.startswith("LA_TEST_"))
 for _k in SCRUBBED_ENV:
@@ -36,6 +38,28 @@ os.environ.setdefault("LA_URL_OPENER", "true")
 # Subprocesses inherit it. Tests that exercise the override itself use monkeypatch.setenv.
 import tempfile as _tempfile  # noqa: E402
 os.environ["FA_QUOTA_LEDGER_DIR"] = _tempfile.mkdtemp(prefix="fa-quota-test-")
+
+
+@pytest.fixture(autouse=True)
+def _limiter_knobs_for_load_sensitive(request, monkeypatch):
+    # 0.50.4: tests marked `load_sensitive` may run while a concurrent session hammers the
+    # shared nvidia rate limiter, and the limiter is the flake source (waypoint
+    # pty-litellm-venv-tests-flake). Give marked tests the priority lane BY DEFAULT instead of
+    # waiting for a quiet limiter — the knobs exist since 0.50.1 (bin/rate_limiter.py):
+    #   LA_LIMITER_RESERVE=0.2  reserve 20% of the bucket for priority acquisitions; normal
+    #                           traffic stops at 80% (limit*(1-reserve)). Default 0.0 = off.
+    #   LA_LIMITER_PRIORITY=1   this process acquires with priority=True, drawing from the reserve.
+    # The limiter reads both from the env AT CALL TIME, and subprocesses inherit os.environ,
+    # so monkeypatch covers in-process limiter use and spawned proxy/dispatch children alike.
+    # Manual / live-session use (marked tests don't need this — it is set here automatically):
+    #   LA_LIMITER_RESERVE=0.2 in the priority process's env, or
+    #   python3 bin/rate_limiter.py set-owner <session-id> --priority [--rpm-scale 0.2]
+    #   python3 bin/rate_limiter.py owners   # who holds the window
+    #   python3 bin/rate_limiter.py probe    # external occupancy of MY bucket
+    # Also documented in rtc-ship.json "_comment_limiter_knobs" and tests/test_loadscale.py.
+    if request.node.get_closest_marker("load_sensitive"):
+        monkeypatch.setenv("LA_LIMITER_RESERVE", "0.2")
+        monkeypatch.setenv("LA_LIMITER_PRIORITY", "1")
 
 _REAL_SETTINGS = Path.home() / ".claude" / "settings.json"
 

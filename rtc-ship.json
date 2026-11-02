@@ -15,5 +15,7 @@
   "refresh_plugin": "free-agents",
   "test_workers": 12,
 
-  "_comment_tests": "No test_cmd: the main suite is the pytest default, and the two extra venv gates run from .rtc/pre-flight.sh."
+  "_comment_tests": "No test_cmd: the main suite is the pytest default, and the two extra venv gates run from .rtc/pre-flight.sh.",
+
+  "_comment_limiter_knobs": "Limiter knobs for load-sensitive/critical tests (rate_limiter.py shipped 0.50.1; wired ON BY DEFAULT in tests/conftest.py _limiter_knobs_for_load_sensitive since 0.50.4): tests marked pytest.mark.load_sensitive automatically run with LA_LIMITER_RESERVE=0.2 (reserve 20% of the bucket for priority acquisitions; normal traffic stops at 80%) and LA_LIMITER_PRIORITY=1 (this process draws from the reserve), so they don't flake when a concurrent session fills the limiter. Manual/live use: LA_LIMITER_RESERVE=0.2 in the priority process's env, or `python3 bin/rate_limiter.py set-owner <session-id> --priority [--rpm-scale 0.2]` to throttle/prioritize one live session, `... owners` to list window holders, `... probe` for external occupancy of your bucket. Details: tests/test_loadscale.py LimiterKnobDefaultTests; bin/rate_limiter.py _reserve_frac/try_acquire."
 }

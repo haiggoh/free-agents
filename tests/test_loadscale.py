@@ -3,10 +3,13 @@
 
 Usage: python3 tests/test_loadscale.py [-v]
 """
+import os
 import subprocess
 import sys
 import unittest
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import loadscale  # noqa: E402
@@ -14,6 +17,11 @@ import loadscale  # noqa: E402
 # Modules whose tests spawn real processes / drive the picker PTY harness and therefore
 # flake under extreme shared-box load (the 2026-11-01 pty-litellm-venv flake). They must
 # carry pytest.mark.load_sensitive so `-m "not load_sensitive"` can deselect them.
+# Marked tests ALSO get the limiter priority knobs by default (conftest
+# _limiter_knobs_for_load_sensitive): LA_LIMITER_RESERVE=0.2 + LA_LIMITER_PRIORITY=1, so
+# they draw from the reserved 20% of the rate-limiter bucket instead of flaking when a
+# concurrent session fills it. See LimiterKnobDefaultTests below and rtc-ship.json
+# "_comment_limiter_knobs" for manual/live use.
 LOAD_SENSITIVE_MODULES = [
     "test_session_picker_pty.py",
     "test_picker_load_race.py",
@@ -84,6 +92,32 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
         # planted positive: this unmarked module must still collect — otherwise the
         # "not" expression deselected everything and the assertion above is vacuous
         self.assertIn("test_loadscale.py", collected, out[:400])
+
+
+class LimiterKnobDefaultTests(unittest.TestCase):
+    """0.50.4: tests marked `load_sensitive` get the rate-limiter priority knobs BY DEFAULT,
+    so they don't flake when a concurrent session hammers the shared limiter.
+
+    The knobs (bin/rate_limiter.py, shipped 0.50.1):
+      LA_LIMITER_RESERVE=0.2  reserve 20% of the bucket for PRIORITY acquisitions; normal
+                              traffic stops at 80% (limit*(1-reserve)). Default 0.0 = off.
+      LA_LIMITER_PRIORITY=1   this process acquires with priority=True and draws from the reserve.
+    Manual / live-session use (NOT needed for marked tests — conftest sets it):
+      LA_LIMITER_RESERVE=0.2 in the env of the priority process, or
+      python3 bin/rate_limiter.py set-owner <session-id> --priority [--rpm-scale 0.2]
+      python3 bin/rate_limiter.py owners    # who is eating the bucket
+      python3 bin/rate_limiter.py probe     # my bucket's external occupancy
+    Also documented in rtc-ship.json "_comment_limiter_knobs".
+    """
+
+    @pytest.mark.load_sensitive
+    def test_marked_test_gets_reserve_and_priority_by_default(self):
+        self.assertEqual(os.environ.get("LA_LIMITER_RESERVE"), "0.2")
+        self.assertEqual(os.environ.get("LA_LIMITER_PRIORITY"), "1")
+
+    def test_unmarked_test_gets_neither_knob(self):
+        self.assertNotIn("LA_LIMITER_RESERVE", os.environ)
+        self.assertNotIn("LA_LIMITER_PRIORITY", os.environ)
 
 
 if __name__ == "__main__":
