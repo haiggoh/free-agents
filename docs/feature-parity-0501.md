@@ -100,8 +100,12 @@ regression reports (nvidia catalog pollution, lowkey API list, About pin/count, 
   brew now ships libsimdjson.36. The 252 full-project errors are the known pre-existing
   pile (waypoint `free-agents-preexisting-pyright-defects`), not the binary gap.
   Waypoint `local-pyright-binary-broken` closed.
-- `rtc-ship.sh --versions-only` is check-only; a separate bump action is wanted — waypoint
-  `rtc-ship-sh-split-the-version` (run-to-completion repo).
+- ~~`rtc-ship.sh --versions-only` check-only, bump action wanted~~ ALREADY SHIPPED:
+  run-to-completion 1.0.1 (c12627f) split `--bump-versions` (writes exactly the declared
+  surfaces) from `--versions-only`/`--check-versions` (verify only), hardened in 1.0.2
+  (95bc4d8, atomic writes). Verified 2026-11-01: `tests/test_rtc_ship.sh` 60/60 incl. the
+  bump-versions section; `--help` documents the flag. The waypoint was already pruned
+  from the store; nothing left to do.
 
 ## README coverage
 
