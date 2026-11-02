@@ -36,7 +36,7 @@
       "tier": "renewing_free",
       "env": ["GITHUB_TOKEN"],
       "key_source": "GitHub → Settings → Developer settings → Tokens (needs models:read scope)",
-      "notes": "Rate limits are per-token and reset. Model catalog is a separate endpoint (models.github.ai/catalog/models), not /models. Declared; later phase."
+      "notes": "Rate limits are per-token and reset. Model catalog is a separate endpoint (models.github.ai/catalog/models), not /models. RETIRED 2026-09-14 (catalog HTTP 410): do not create a token for it."
     },
     "cerebras": {
       "display": "Cerebras",

@@ -41,8 +41,8 @@ Usage:
                       [--files F ... --allow-remote-files]
                       [--max-attempts N] [--dry-run] [--json-out PATH]
 
-Exit: 0 a lane produced output · 2 a hard, non-retriable failure in every lane
-     attempted · 3 all permitted lanes failed for a retriable reason (a signal
+Exit: 0 a lane produced output · 2 the first hard, non-retriable failure (or a
+     partial output) stopped the walk, or no lane was runnable · 3 all permitted lanes failed for a retriable reason (a signal
      to the caller that another attempt later, after a Retry-After wait, may
      succeed).
 """
@@ -165,16 +165,24 @@ def _run_local(prompt, files, model, max_tokens, outdir, dry_run, timeout,
 
 
 def _run_remote(provider_id, prompt, files, model, max_tokens, outdir, dry_run,
-                timeout, allow_files, json_out):
+                timeout, allow_files, json_out, attempt=1):
     """Drive remote-agent-dispatch.py as a subprocess. Returns (ok, answer_text,
-    retriable, reason). The REMOTE banner is printed by the child, so the user
-    sees provider/model/key/destination before anything transmits.
+    retriable, reason, error_class). The REMOTE banner is printed by the child, so the
+    user sees provider/model/key/destination before anything transmits.
+
+    The child writes its answer ONLY to <outdir>/output.txt and its Result to --json-out;
+    its stdout is not an answer channel. Each attempt gets its own dir, so the answer (or
+    a cut stream's partial text) and the exact error_class are read back from files.
     """
+    adir = os.path.join(outdir, "remote-%s-%d" % (provider_id, attempt))
+    rjson = os.path.join(adir, "result.json")
+    os.makedirs(adir, exist_ok=True)
     cmd = [sys.executable, REMOTE_DISPATCH,
            "--provider", provider_id,
            "--prompt", prompt,
            "--max-tokens", str(max_tokens),
-           "--timeout", str(timeout)]
+           "--timeout", str(timeout),
+           "--outdir", adir, "--json-out", rjson]
     if model:
         cmd += ["--model", model]
     if files:
@@ -187,11 +195,20 @@ def _run_remote(provider_id, prompt, files, model, max_tokens, outdir, dry_run,
     # Surface the child's stderr (the REMOTE banner + any failure reason) verbatim.
     if proc.stderr:
         sys.stderr.write(proc.stderr)
-    answer = (proc.stdout or "").strip()
+    try:
+        with open(os.path.join(adir, "output.txt"), encoding="utf-8") as fh:
+            answer = fh.read().strip()
+    except OSError:
+        answer = ""
+    try:
+        with open(rjson, encoding="utf-8") as fh:
+            eclass = json.load(fh).get("error_class", "") or ""
+    except (OSError, ValueError):
+        eclass = ""   # pre-flight refusal (no key, bad args): the child wrote no Result
     # Exit contract from remote-agent-dispatch: 0 ok · 3 retriable · 2 hard.
     retriable = proc.returncode == 3
     ok = proc.returncode == 0
-    return ok, answer, retriable, (proc.stderr or "").strip()[:200]
+    return ok, answer, retriable, (proc.stderr or "").strip()[:200], eclass
 
 
 def loopback_probe(mode):
@@ -271,10 +288,14 @@ def main(argv=None):
     doctor_ids = None
     if remote_plan and not a.skip_doctor:
         # Cheap, read-only key liveness check so we don't burn a turn on a dead key.
+        # Provider IDS, all of them: remote_plan holds (pid, tier) tuples, and passing those
+        # as argv raised TypeError (swallowed below), so the doctor never ran; a [:5] cap
+        # would also drop every provider after the fifth from doctor_ids. With hard failures
+        # now stopping the walk, a dead key MUST be filtered here, before the first call.
         try:
             dproc = subprocess.run(
                 [sys.executable, os.path.join(BIN_DIR, "remote-provider-doctor.py"),
-                 "--json", *remote_plan[:5]],
+                 "--json", *[pid for pid, _tier in remote_plan]],
                 capture_output=True, text=True, timeout=60)
             ddata = json.loads(dproc.stdout) if dproc.stdout.strip() else {}
             doctor_ids = {r["provider"] for r in ddata.get("results", [])
@@ -315,12 +336,12 @@ def main(argv=None):
         last_retriable = False
         for attempt in range(1, max(1, a.max_attempts) + 1):
             record["attempts"] += 1
-            ok, answer, retriable, reason = _run_remote(
+            ok, answer, retriable, reason, eclass = _run_remote(
                 pid, a.prompt, a.files, a.model, a.max_tokens, outdir,
-                a.dry_run, a.timeout, a.allow_remote_files, a.json_out)
+                a.dry_run, a.timeout, a.allow_remote_files, a.json_out, attempt=attempt)
             record["lanes"].append({"lane": "remote", "provider": pid, "tier": tier,
                                     "attempt": attempt, "ok": ok, "retriable": retriable,
-                                    "output_chars": len(answer),
+                                    "error_class": eclass, "output_chars": len(answer),
                                     "reason": reason[:160]})
             if ok:
                 final_answer = answer
@@ -329,6 +350,11 @@ def main(argv=None):
                 _report(record, a, final_answer, outdir, code=0)
                 return 0
             last_retriable = retriable
+            # An end-of-life DEFAULT model is "model unavailable" for THIS provider only:
+            # with no --model pinned, the next provider uses its own default. Never retry
+            # the same provider (same EOL id); advance. A pinned model stays a hard stop.
+            if eclass == "model_eol" and not a.model:
+                break
             # Only retry the SAME provider on a retriable reason, and only within
             # the ceiling. A hard reason (auth / malformed / policy / partial /
             # transport / offline) STOPS the whole walk: the contract above forbids

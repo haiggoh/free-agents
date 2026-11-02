@@ -109,7 +109,7 @@ def banner(provider, body, attached, dry_run, allow_files):
     print("            payload≈%d chars, %d message(s)%s" % (
         total_chars, len(body.get("messages", [])),
         (", %d attached file(s) APPROVED via --allow-remote-files: %s"
-         % (len(attached), ", ".join(attached)) if attached else "")))
+         % (len(attached), ", ".join(attached)) if attached else "")), file=sys.stderr)
     print(file=sys.stderr)
 
 

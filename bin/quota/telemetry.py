@@ -240,6 +240,8 @@ def ledger_dir() -> Path:
     if not raw:
         return DEFAULT_LEDGER_DIR
     path = Path(raw).expanduser()
+    if path.exists() and not path.is_dir():
+        raise ValueError("%s=%s: exists and is not a directory" % (LEDGER_DIR_ENV, raw))
     if not path.is_dir() and not path.parent.is_dir():
         raise ValueError("%s=%s: neither it nor its parent directory exists" % (LEDGER_DIR_ENV, raw))
     return path

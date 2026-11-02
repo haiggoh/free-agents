@@ -167,3 +167,18 @@ def test_dispatch_dry_run_records_nothing(dispatch, ledger, monkeypatch, tmp_pat
     assert code == 0
     assert not ledger.exists()
 
+
+
+def test_override_pointing_at_a_file_is_loud(tmp_path, monkeypatch):
+    f = tmp_path / "not-a-dir"
+    f.write_text("x")
+    monkeypatch.setenv("FA_QUOTA_LEDGER_DIR", str(f))
+    with pytest.raises(ValueError, match="FA_QUOTA_LEDGER_DIR"):
+        telemetry.ledger_dir()
+
+
+def test_dispatch_banner_writes_nothing_to_stdout(dispatch, capsys):
+    prov = dispatch.get("groq")
+    dispatch.banner(prov, {"model": "m", "messages": [{"role": "user", "content": "hi"}]}, [],
+                    False, False)
+    assert capsys.readouterr().out == ""
