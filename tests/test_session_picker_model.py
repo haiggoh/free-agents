@@ -854,7 +854,10 @@ class LowkeyTests(unittest.TestCase):
         api = [m.RemoteAgent("nvidia-mistral-large4", "nvidia", "Mistral Large 4", "unknown",
                              model_id="mistralai/mistral-large-4")]
         lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT, api_agents=api)
-        self.assertIn("a", {a.key for a in lk.actions()})
+        # 0.52.0: the separate "a" row is gone — one "c" Choose model row opens the combined
+        # list; the api group is still there as the first group.
+        self.assertIn("c", {a.key for a in lk.actions()})
+        self.assertNotIn("a", {a.key for a in lk.actions()})
         self.assertTrue(any(g.id == "api" for g in lk.accordion.groups))
         lk.accordion.select("nvidia:mistralai/mistral-large-4")
         lk.activate_selected()
