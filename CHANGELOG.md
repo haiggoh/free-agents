@@ -1,3 +1,23 @@
+## [0.50.6] — 2026-11-03
+
+### Fixed — one stalled preference no longer eats the whole dispatch wall-clock cap
+
+- `free-agent-tool.py`: the 600 s `wall_clock_cap_s` gated only the *start* of an attempt, so a
+  single remote attempt could run 300 s per silent socket read (the dispatcher's default
+  `--timeout`) or 1800 s in total (the subprocess timeout). Measured in five sessions on
+  2026-11-03: two stalls (`[timeout] HTTP 0 — The read operation timed out`) or one 1800 s attempt
+  used up the cap, and failover never reached the next model. (The suspected 503 retry loop was
+  not the cause: a Gemini 503 already fails over at once.)
+- Each attempt now gets what is left of the cap, floored at `min_attempt_s` (180 s) so a late
+  attempt still has a fair window, and gives up after `attempt_stall_s` (120 s) without a byte.
+  The stall timer is per read, so an answer that is actively streaming is never cut by it. Both
+  knobs sit next to the cap in `config/dispatch-preferences.json` under `paid_fallback`. The entry's
+  own `timeout` still wins when it is shorter. Worst case is now about 780 s instead of about 2400 s.
+- Waypoint `free-agents-dispatch-a`. Mutation-tested: each of the three halves (budget passed,
+  stall reaches the HTTP layer, budget bounds the subprocess) is caught by one test.
+- Version note: 0.50.5 is the picker duplicate-ID fix, still on its own branch; it ships after this
+  one under a newer number.
+
 ## [0.50.4] — 2026-11-02
 
 ### Fixed — load-sensitive tests no longer flake on a busy limiter (knobs now on by default)

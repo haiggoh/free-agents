@@ -153,7 +153,7 @@ class FailoverTests(Base):
         env = dict(self.env, FA_DISPATCH_PREFS=str(p))
         tried = []
 
-        def fake_dispatch(entry, prompt, env_, thinking_effort=None):
+        def fake_dispatch(entry, prompt, env_, thinking_effort=None, **_kw):
             tried.append(entry["id"])
             self.prompts.append(prompt)
             ok, text = outcomes[entry["id"]]
@@ -235,7 +235,7 @@ class SparseSetupTests(Base):
         env = dict(self.env, FA_DISPATCH_PREFS=str(p))
         out, err = io.StringIO(), io.StringIO()
         real = (fat.dispatch_entry, fat.local_on_disk)
-        fat.dispatch_entry = lambda entry, prompt, env_, thinking_effort=None: f"answer from {entry['id']}"
+        fat.dispatch_entry = lambda entry, prompt, env_, thinking_effort=None, **_kw: f"answer from {entry['id']}"
         fat.local_on_disk = lambda a: a in local
         try:
             with redirect_stdout(out), redirect_stderr(err):
@@ -299,7 +299,7 @@ class UnknownAvoidFamilyTests(Base):
         env = dict(self.env, FA_DISPATCH_PREFS=str(p))
         out, err = io.StringIO(), io.StringIO()
         real = (fat.dispatch_entry, fat.local_on_disk)
-        fat.dispatch_entry = lambda entry, prompt, env_, thinking_effort=None: f"answer from {entry['id']}"
+        fat.dispatch_entry = lambda entry, prompt, env_, thinking_effort=None, **_kw: f"answer from {entry['id']}"
         fat.local_on_disk = lambda a: False
         try:
             with redirect_stdout(out), redirect_stderr(err):
@@ -395,6 +395,40 @@ class RemoteDispatchTests(Base):
         self.assertIn("HTTP 503", str(cm.exception))
         self.assertNotEqual(str(cm.exception).strip(), "]")
 
+    def test_attempt_is_bounded_by_the_budget_and_the_stall_timeout(self):
+        # waypoint free-agents-dispatch-a (2026-11-03): one attempt ran 1800s (subprocess timeout)
+        # or 300s per stall (the dispatcher's default --timeout), eating the whole 600s cap.
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["cmd"], seen["timeout"] = cmd, kw.get("timeout")
+            return subprocess.CompletedProcess(cmd, 3, stdout="", stderr="✖ REMOTE gemini failed: x")
+
+        real, fat.subprocess.run = fat.subprocess.run, fake_run
+        try:
+            with self.assertRaises(fat.DispatchFailed):
+                fat.dispatch_entry(R1, "p", {}, timeout_s=90, stall_s=45)
+        finally:
+            fat.subprocess.run = real
+        self.assertEqual(seen["timeout"], 90, "the remaining budget bounds the whole attempt")
+        self.assertEqual(seen["cmd"][seen["cmd"].index("--timeout") + 1], "45",
+                         "the stall timeout reaches the HTTP layer")
+
+    def test_entry_timeout_still_wins_when_it_is_shorter(self):
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["timeout"] = kw.get("timeout")
+            return subprocess.CompletedProcess(cmd, 3, stdout="", stderr="x")
+
+        real, fat.subprocess.run = fat.subprocess.run, fake_run
+        try:
+            with self.assertRaises(fat.DispatchFailed):
+                fat.dispatch_entry(dict(R1, timeout=30), "p", {}, timeout_s=500)
+        finally:
+            fat.subprocess.run = real
+        self.assertEqual(seen["timeout"], 30)
+
 
 class HelpTests(unittest.TestCase):
     def test_help_prints_usage_and_runs_nothing(self):
@@ -462,7 +496,10 @@ class Exhaustion(unittest.TestCase):
         os.environ.update(env)
         calls = {"n": 0}
 
-        def fake_dispatch(entry, prompt, e, thinking_effort=None):
+        self.dispatch_calls = []
+
+        def fake_dispatch(entry, prompt, e, thinking_effort=None, **kw):
+            self.dispatch_calls.append((entry["id"], kw))
             ok, text = fake.get(entry["id"], (False, "boom"))
             if ok:
                 return text
@@ -504,6 +541,22 @@ class Exhaustion(unittest.TestCase):
         self.assertEqual(len(res["attempts"]), 0, "the cap fires before any new attempt starts")
         self.assertIn("wall-clock cap", err)
         self.assertFalse(res["paid_fallback_allowed"])
+
+    def test_each_attempt_gets_the_remaining_budget_floored_and_failover_continues(self):
+        # A stalled first preference must not eat the cap: attempt 1 gets the whole remaining
+        # budget, attempt 2 (started at 500s) gets the min_attempt_s floor, not 100s.
+        keys = tempfile.mkdtemp()
+        for name in ("gemini", "nvidia"):
+            Path(keys, name).write_text("fixture-key")
+        code, _out, err = self.run_main({"prompt": "hi"}, {}, keys_dir=keys,
+                                        monotonic=[0.0, 0.0, 500.0, 650.0, 700.0])
+        self.assertEqual(code, 1)
+        self.assertGreaterEqual(len(self.dispatch_calls), 2, "failover reached the second preference")
+        first, second = self.dispatch_calls[0][1], self.dispatch_calls[1][1]
+        self.assertEqual(first["timeout_s"], 600)
+        self.assertEqual(second["timeout_s"], fat.DEFAULT_PAID_FALLBACK["min_attempt_s"])
+        self.assertEqual(first["stall_s"], fat.DEFAULT_PAID_FALLBACK["attempt_stall_s"])
+        self.assertIn("wall-clock cap", err)
 
     def test_total_failure_arms_the_mark_for_this_session(self):
         keys = tempfile.mkdtemp()

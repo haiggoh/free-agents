@@ -414,11 +414,16 @@ def route_of(entry) -> str:
     return f"local {entry['alias']} · stateless dispatch"
 
 
-def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED) -> str:
+def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED,
+                   timeout_s=None, stall_s=None) -> str:
     """Run one preference entry; raise DispatchFailed so the caller tries the next.
 
     thinking_effort: the resolved reasoning_effort from resolve_thinking(). Left at the
-    sentinel (direct callers, older tests) the entry's own reasoning_effort stands."""
+    sentinel (direct callers, older tests) the entry's own reasoning_effort stands.
+    timeout_s: the most this ONE attempt may take (run() passes what is left of the wall-clock
+    cap); the entry's own "timeout" still wins when it is shorter. stall_s: seconds of silence
+    on the socket before a remote attempt gives up (the dispatcher's --timeout is a per-read
+    timer, not a total, so a streaming answer is never cut by it)."""
     if entry.get("kind") == "remote":
         import tempfile
         outdir = tempfile.mkdtemp(prefix="fa-free-agent-")   # fresh: never a previous run's output
@@ -429,8 +434,13 @@ def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED) -> str:
         effort = entry.get("reasoning_effort") if thinking_effort is _UNRESOLVED else thinking_effort
         if effort:
             cmd += ["--reasoning-effort", str(effort)]
+        if stall_s:
+            cmd += ["--timeout", f"{stall_s:g}"]
+        limit = entry.get("timeout", 1800)
+        if timeout_s is not None:
+            limit = min(limit, timeout_s)
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=entry.get("timeout", 1800))
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=limit)
         except subprocess.TimeoutExpired as err:
             raise DispatchFailed(f"timed out after {err.timeout}s") from err
         out = Path(outdir) / "output.txt"
@@ -466,7 +476,14 @@ def attach_files(prompt: str, files) -> str:
 # Honest-exhaustion policy (cloud-screen plan Task 4): only sent-and-failed requests count;
 # the values are tunable in config/dispatch-preferences.json under "paid_fallback".
 DEFAULT_PAID_FALLBACK = {"min_real_attempts": 3, "min_providers": 2,
-                         "retry_after_max_s": 30, "wall_clock_cap_s": 600}
+                         "retry_after_max_s": 30, "wall_clock_cap_s": 600,
+                         # Per-attempt budget (waypoint free-agents-dispatch-a, 2026-11-03): the cap
+                         # used to gate only the START of an attempt, so one stalled preference ran
+                         # 300s per silent read or 1800s in total and failover never got past it.
+                         # An attempt now gets what is left of the cap, floored at min_attempt_s
+                         # so a late attempt still gets a fair window, and gives up after
+                         # attempt_stall_s of silence (a streaming answer is never cut by it).
+                         "attempt_stall_s": 120, "min_attempt_s": 180}
 # remote-agent-dispatch.py does not surface Retry-After to its caller (verified 2026-10-24:
 # its stderr carries only error_class + HTTP status + reason), so a 429 is a real failure
 # with no retry; retry_after_max_s stays in the policy for the day the dispatch surfaces it.
@@ -528,10 +545,12 @@ def run(input_data, env) -> int:
     started = time.monotonic()
     attempts = []
     for entry in order:
-        if time.monotonic() - started > policy["wall_clock_cap_s"]:
+        elapsed = time.monotonic() - started     # ONE clock read per attempt: gate and budget agree
+        if elapsed > policy["wall_clock_cap_s"]:
             print(f"free-agents: wall-clock cap ({policy['wall_clock_cap_s']}s) reached — "
                   f"{entry['id']} and the remaining preferences are not attempted", file=sys.stderr)
             break
+        budget = max(policy["wall_clock_cap_s"] - elapsed, policy["min_attempt_s"])
         resolved_thinking, think_effort, think_overridden, think_note = resolve_thinking(entry, role)
         print(f"free-agents: offloading to {entry.get('display', entry['id'])} "
               f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"
@@ -543,7 +562,8 @@ def run(input_data, env) -> int:
             # gets the same fact the session banner shows (review finding 6, 2026-10-25).
             print(f"free-agents: thinking note: {think_note}", file=sys.stderr)
         try:
-            text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort)
+            text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort,
+                                  timeout_s=budget, stall_s=policy["attempt_stall_s"])
         except DispatchFailed as err:
             attempts.append({"id": entry["id"], "provider": entry.get("provider") or route_of(entry),
                              "ok": False, "error": str(err)})
