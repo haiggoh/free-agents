@@ -94,7 +94,7 @@
 
 **Interfaces:** `gui-launcher.py {generate,check,repair,remove} [--dest DIR] [--dry-run] [--force] [--help]`. Generated bundle: `CFBundleIdentifier = io.github.haiggoh.free-agents.launcher`, `FreeAgentsLauncherContract = 1`, `FreeAgentsGeneratedAt`, `FreeAgentsSourceRoot` (diagnostic only). Per-user config `~/.config/free-agents/gui-launcher.json` = `{"contract":1,"plugin_hint":"<root at setup>","channel":"brew|curl|marketplace|checkout","venv":"<path>"}`.
 
-Decisions: applet runs `Contents/Resources/locate.sh` via `do shell script`, which resolves the root in brief order (`FREE_AGENTS_PLUGIN` from the config file, else highest plugin-cache version, else `plugin_hint`) and launches `bin/free-agents-gui --native` **detached** (`nohup … >log 2>&1 &`, log at `~/Library/Logs/free-agents/gui.log`, rotated at 1 MB); a non-zero exit with a message on stdout ⇒ applet `display dialog` with that message and an "Open log" button. The applet is stay-open only if the prototype shows the Python process cannot own a Dock identity; otherwise it quits after hand-off (record which in QUALIFICATION.md).
+`locate.sh` is the platform-neutral launcher contract shared with the Linux Desktop Entry (Task 14): POSIX `sh`, no macOS-only tools in the resolve path; the only per-OS part is `present_error()` (macOS: print for the applet's dialog; Linux: zenity/kdialog/notify-send/log). Decisions: applet runs `Contents/Resources/locate.sh` via `do shell script`, which resolves the root in brief order (`FREE_AGENTS_PLUGIN` from the config file, else highest plugin-cache version, else `plugin_hint`) and launches `bin/free-agents-gui --native` **detached** (`nohup … >log 2>&1 &`, log at `~/Library/Logs/free-agents/gui.log`, rotated at 1 MB); a non-zero exit with a message on stdout ⇒ applet `display dialog` with that message and an "Open log" button. The applet is stay-open only if the prototype shows the Python process cannot own a Dock identity; otherwise it quits after hand-off (record which in QUALIFICATION.md).
 
 - [ ] Step 1: tests — `test_generate_into_tmp_creates_owned_bundle` (plist keys present, `codesign --verify --strict` exit 0), `test_generate_twice_is_idempotent` (same contract ⇒ no rewrite unless `--force`), `test_refuses_foreign_app_at_dest` (dest has a bundle with another identifier ⇒ exit 1, untouched, `cmp`), `test_dry_run_writes_nothing`, `test_remove_only_owned_and_keeps_config_and_venv`, `test_locate_under_finder_env_finds_plugin` (`env -i HOME=$tmp PATH=/usr/bin:/bin` with a fake plugin cache of two versions ⇒ picks the higher), `test_locate_missing_venv_prints_setup_command` (exit 3, stdout names `setup-gui.sh`), `test_new_plugin_version_found_without_regeneration`.
 - [ ] Step 2: FAIL. Step 3: implement (`osacompile -o`, write plist via `plistlib`, copy icon, `codesign --force --sign - --deep`). Generation into a `*.tmp` sibling then atomic rename, so a failed regenerate keeps the working app. Step 4: PASS. Step 5: commit.
@@ -181,8 +181,23 @@ Shared scenario table (`tests/gui_scenarios.py`): each scenario = start screen, 
 ### Task 13: Channel integration
 `free-agents gui setup` (= `setup-gui.sh` + `gui-launcher.py generate`) offered as an explicit optional step by the curl `.sh` installer and documented for marketplace users. Homebrew (the `homebrew-tap-fa` repo, `Formula/free-agents.rb`): test whether `post_install` can write `~/Applications` under Brew's sandbox; expected answer is no ⇒ `caveats` naming the single follow-up command. Bottle built on CI never contains the app. Update/repair: plugin upgrade ⇒ app keeps working (Task 3 test), contract bump ⇒ `repair` regenerates beside the old app and swaps only after `check` passes.
 
-### Task 14: Linux companion
-`gui-launcher.py generate` writes `~/.local/share/applications/free-agents.desktop` (`Terminal=false`, `Exec=` with Desktop Entry quoting rules, `TryExec`), pywebview Qt (`PyQt6-WebEngine`) or GTK (`WebKit2GTK`) detected and named in `setup-gui.sh --check`; never as root, never `--no-sandbox`. Qualify concrete profiles (Ubuntu 24.04 GNOME Wayland, Fedora KDE X11) in `docs/gui/QUALIFICATION.md`; others UNTESTED.
+### Task 14: Linux companion launcher (the `.app` equivalent)
+
+There is no bundle on Linux: the launcher is a per-user Desktop Entry plus an icon, wrapping the SAME `locate.sh` contract as the macOS applet (Task 3), so discovery, venv checks and error text are never forked.
+
+| Concern | macOS | Linux |
+|---|---|---|
+| Artefact | applet via `osacompile` | `~/.local/share/applications/io.github.haiggoh.free-agents.desktop` (`Type=Application`, `Terminal=false`, `Categories=Development;`, `StartupWMClass` matching the pywebview window) |
+| Icon | `applet.icns` | PNG 64/128/256 + SVG in `~/.local/share/icons/hicolor/*/apps/io.github.haiggoh.free-agents.*`, `Icon=` by name |
+| Locator | `Contents/Resources/locate.sh` | `~/.local/share/free-agents/gui-launcher/locate.sh` (same file); `Exec=` = quoted absolute path to it (Desktop Entry rules: `%%` for literal `%`, no inline shell), `TryExec=` same path |
+| Pre-Python error | `display dialog` | `zenity` → `kdialog` → `notify-send` → log only; log at `${XDG_STATE_HOME:-~/.local/state}/free-agents/gui.log` (1 MB rotation) |
+| Renderer | WKWebView | pywebview Qt (`PyQt6-WebEngine` wheel) or GTK (`WebKit2GTK` system package); `setup-gui.sh --check` names the missing package for the detected distro |
+| Trust | local generation + ad-hoc sign | app-menu entries need no "Allow launching" (that prompt is for Desktop-folder files — never placed there); never as root; never `--no-sandbox` / `QTWEBENGINE_DISABLE_SANDBOX` |
+| Registration | LaunchServices | `update-desktop-database ~/.local/share/applications` when present (absence is not an error) |
+| Ownership | `Info.plist` bundle id + contract key | `X-FreeAgents-Launcher-Contract=1` key; foreign file at the path ⇒ refuse |
+| Session hand-off | `open -a Terminal` | `$FA_GUI_TERMINAL`, else `x-terminal-emulator` / `gnome-terminal --` / `konsole -e` / `xterm -e` (per-emulator argv table, tested) |
+
+Tests (`tests/test_gui_launcher.py`, run on any OS by targeting a tmp XDG tree): `test_desktop_entry_validates` (`desktop-file-validate` when installed, else a parser check of required keys), `test_exec_quotes_path_with_space_and_percent`, `test_linux_refuses_foreign_entry`, `test_remove_linux_keeps_config_and_venv`, `test_error_hook_falls_back_to_log_without_zenity`. Qualify concrete profiles (Ubuntu 24.04 GNOME Wayland, Fedora KDE X11) in `docs/gui/QUALIFICATION.md`; others UNTESTED.
 
 ---
 
