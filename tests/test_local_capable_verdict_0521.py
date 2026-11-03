@@ -11,6 +11,14 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import pytest  # noqa: E402
+
+# This file imports the app module (session_picker), which needs rich/textual — only the
+# picker venv has them. The main suite collects this file but must SKIP it there (the same
+# convention as the PilotCase files), so skip the module where those are missing.
+pytest.importorskip("rich")
+pytest.importorskip("textual")
+
 
 class LocalCapableVerdictReal(unittest.TestCase):
     def _sp(self):
