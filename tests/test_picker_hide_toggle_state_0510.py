@@ -358,52 +358,6 @@ class LowkeyUnifiedList(unittest.TestCase):
         self.assertNotIn("API model", models_rows[0].label)
 
 
-class LocalCapableVerdictReal(unittest.TestCase):
-    """0.52.1: the local-capable verdict must use the REAL function (not a stub) — the 0.52.0
-    claim was paper-only because the verdict path ignored PARAM_COUNT_OVERRIDES and its
-    offline HF rung, so vendor-documented small models were never judged capable."""
-
-    def _sp(self):
-        from picker_harness import ROOT
-        sys.path.insert(0, str(ROOT / "bin"))
-        import session_picker as sp
-        return sp
-
-    def test_overrides_make_small_models_capable_big_ones_not(self):
-        sp = self._sp()
-        with mock.patch.dict(os.environ, {"LA_MEMORY_BUDGET_GB": "100"}):
-            sp._VERDICT_MEMO.clear()
-            self.assertTrue(sp.catalog_local_capable("nvidia", "snowflake-arctic-embed-l"))
-            self.assertTrue(sp.catalog_local_capable("nvidia", "kosmos-2"))
-            self.assertTrue(sp.catalog_local_capable("nvidia", "laguna-xs-2.1"))
-            self.assertFalse(sp.catalog_local_capable("nvidia", "nvidia/nemotron-3-ultra-550b-a55b"))
-            self.assertFalse(sp.catalog_local_capable("nvidia", "glm-5.3-flash"))
-
-    def test_pinned_rows_get_the_real_verdict_and_filter_by_default(self):
-        sp = self._sp()
-        m = self._model()
-        agents = [
-            m.RemoteAgent("laguna", "nvidia", "Laguna XS", "unknown", model_id="laguna-xs-2.1"),
-            m.RemoteAgent("nvidia-a", "nvidia", "NVIDIA A", "unknown", model_id="nvidia-a"),
-            m.RemoteAgent("arctic", "nvidia", "Arctic Embed", "unknown", model_id="arctic-embed-l"),
-        ]
-        with mock.patch.dict(os.environ, {"LA_MEMORY_BUDGET_GB": "100"}):
-            sp._VERDICT_MEMO.clear()
-            for a in agents:   # what the app's _loaded does for kind == "remote"
-                a.local_capable = sp.catalog_local_capable(a.provider, a.model_id)
-        s = m.Settings()
-        s.catalog_local_capable = sp.catalog_local_capable
-        scr = m.RemoteScreen(s, agents=agents)
-        ids = [i.id for g in scr.accordion.groups for i in g.items]
-        self.assertEqual(ids, ["nvidia-a"], f"capable pinned rows hidden by default: {ids}")
-
-    def _model(self):
-        from picker_harness import ROOT
-        sys.path.insert(0, str(ROOT / "bin"))
-        import session_picker_model as m
-        return m
-
-
 class RightClickPty(PTYCase):
     """0.52.1: right-click copy through the REAL terminal event path (SGR mouse sequences into
     the pty, pbcopy recorder on PATH) — the 0.51.0 test invoked the handler directly, which
