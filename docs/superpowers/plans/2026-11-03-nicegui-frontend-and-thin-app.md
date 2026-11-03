@@ -203,6 +203,6 @@ Tests (`tests/test_gui_launcher.py`, run on any OS by targeting a tmp XDG tree):
 
 ## Offload annotation (credit-efficient mode)
 
-- Textual screen/action/setting inventory → `local:` free stateless dispatch (done 2026-11-03, checked against source before use in Task 7/11).
+- Textual screen/action/setting inventory → `local:` free stateless dispatch, split per file (first attempt 2026-11-03 failed: Gemini HTTP 503, then the 600 s wall-clock cap ended the run before any fallback; nothing returned). Needed by Task 7, not before; check against source before use.
 - Task 12 scenario-table expansion and Task 11 per-screen `GUI_PENDING` removal drafts → free dispatch first pass, reviewed here.
 - Tasks 1–10 stay `cloud:` this session: native-window/Finder qualification and design critique need tool-driving and visual judgement in the session the user is present in (expires once Phase A is qualified).
