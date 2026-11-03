@@ -78,7 +78,12 @@ def build_selftest_page() -> None:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    from nicegui import ui
+    from nicegui import app, ui
+    ready = os.environ.get("LA_GUI_READY_FILE")
+    if ready:
+        # The launcher (install/gui-launcher/locate.sh) waits for this: a page has CONNECTED,
+        # i.e. the window loaded the UI — "frontend ready", not merely "process started".
+        app.on_connect(lambda: Path(ready).touch())
     if args.selftest:
         build_selftest_page()
     else:
