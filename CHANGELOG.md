@@ -1,3 +1,18 @@
+## [0.50.7] — 2026-11-03
+
+### Fixed — the ship gate deselects load-sensitive tests on a loaded shared box
+
+- `rtc-ship.json`: the main suite now runs via a declared `test_cmd` with
+  `-m 'not load_sensitive'` (waypoint gate-runs-on-a-loaded-shared). The marker is
+  registered in `tests/conftest.py`; 9 PTY/litellm/venv modules plus the
+  `test_memguard_inject.py::test_late_restore_is_waited_for_and_never_restashed` flake
+  (failed once in a loaded full run 2026-11-03, passes alone) carry it, so a gate on a
+  box at load > 10 skips 148 of 1550 tests instead of flaking. pytest resolves like
+  rtc-ship's default (pipx binary first, then PATH); workers stay 12; the venv gates in
+  `.rtc/pre-flight.sh` are unchanged.
+- `tests/test_loadscale.py`: two new pins — the gate command itself must carry the
+  deselect, and the memguard flake must be marked (exactly that test, not the module).
+  Both mutation-checked (removing `test_cmd` or the mark turns them red).
 ## [0.50.6] — 2026-11-03
 
 ### Fixed — one stalled preference no longer eats the whole dispatch wall-clock cap

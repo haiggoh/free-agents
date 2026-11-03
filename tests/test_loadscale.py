@@ -93,6 +93,28 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
         # "not" expression deselected everything and the assertion above is vacuous
         self.assertIn("test_loadscale.py", collected, out[:400])
 
+    def test_the_gate_itself_deselects_load_sensitive(self):
+        # waypoint gate-runs-on-a-loaded-shared: the marker only helps if the SHIP GATE
+        # runs with -m "not load_sensitive" — rtc-ship.json's test_cmd is that command.
+        import json
+        cfg = json.loads((self.HERE.parent / "rtc-ship.json").read_text())
+        cmd = cfg.get("test_cmd", "")
+        self.assertIn("-m", cmd)
+        self.assertIn("not load_sensitive", cmd.replace('"', "'"),
+                      "rtc-ship.json test_cmd must deselect load_sensitive for a loaded gate")
+
+    def test_memguard_late_restore_flake_is_marked(self):
+        # Flaked in a loaded full-suite run 2026-11-03 (passes alone in 1.7s): marked so the
+        # gate deselects exactly this test — NOT the whole module, the rest still gates.
+        out = self._collect("-m", "load_sensitive", "test_memguard_inject.py")
+        names = {line.split("::")[-1].split("[")[0] for line in out.splitlines() if "::" in line}
+        self.assertEqual(names, {"test_late_restore_is_waited_for_and_never_restashed"}, out[:400])
+        out2 = self._collect("-m", "not load_sensitive", "test_memguard_inject.py")
+        modules = {line.split("::")[0].split("/")[-1] for line in out2.splitlines() if "::" in line}
+        self.assertIn("test_memguard_inject.py", modules, "the rest of the module must still collect")
+        names2 = {line.split("::")[-1].split("[")[0] for line in out2.splitlines() if "::" in line}
+        self.assertNotIn("test_late_restore_is_waited_for_and_never_restashed", names2)
+
 
 class LimiterKnobDefaultTests(unittest.TestCase):
     """0.50.4: tests marked `load_sensitive` get the rate-limiter priority knobs BY DEFAULT,
