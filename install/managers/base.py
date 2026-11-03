@@ -703,6 +703,37 @@ class BackendManager(
                   "upgrade; `manage-backend.py … repair` can rebuild it later.", file=sys.stderr)
         return result
 
+    def normalize_before_pin(self, version: str, home: Path | None = None) -> str:
+        """0.51.0 root cause of the About double-line: a pin must NEVER point at a venv built
+        on a Homebrew patch keg — that venv breaks at the next Python patch upgrade, which is
+        exactly how About ended up showing 'pinned <ver>' next to '⚠ pinned-keg <ver>' (two
+        version numbers that look like racing). Normalize the installed venv onto the
+        patch-stable opt/ path first; refuse to pin a venv that cannot be normalized."""
+        target = self.resolve_target(version, home)
+        if not target.is_dir():
+            raise ManagerError(f"cannot normalize {self.VENV_PREFIX}-{version}: "
+                               f"not installed at {target}")
+        if venv_durability(target) == "durable":
+            return "durable"
+        result = self.after_venv_created(target)
+        if result == "pinned-keg":
+            # A venv that does not RUN is the validator's/rollback's job — its error names the
+            # rollback, and those tests depend on it. Refuse only a RUNNABLE keg venv that
+            # still cannot be normalized: pinning that one is what breaks at the next patch.
+            exe = next((p for p in sorted((target / "bin").glob("python*")) if p.is_symlink()), None)
+            runs = False
+            if exe is not None:
+                try:
+                    runs = subprocess.run([str(exe), "-c", "import encodings"],
+                                          capture_output=True).returncode == 0
+                except OSError:
+                    runs = False
+            if runs:
+                raise ManagerError(
+                    f"refusing to pin {self.VENV_PREFIX}-{version}: its venv is built on a Homebrew "
+                    f"patch keg and cannot be normalized in place; `repair` rebuilds it first")
+        return result
+
     def sha256_file(self, path: Path) -> str:
         """Compute SHA256 hash of a file."""
         import hashlib

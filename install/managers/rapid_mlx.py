@@ -164,6 +164,10 @@ class RapidMLXManager(BackendManager):
             raise ManagerError("Repository required for pin promotion")
         if not dry_run:
             self.validate_environment(version)
+            # 0.51.0: never pin onto a patch-keg venv — normalize onto opt/ first (About
+            # double-line root cause), refuse if it cannot be normalized. AFTER validate:
+            # a dead venv must keep failing with the validate/rollback error, not this guard.
+            self.normalize_before_pin(version)
 
         plan = self._plan_pin_update(version)
         return self._apply_pin_plan(plan, dry_run=dry_run)

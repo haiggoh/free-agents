@@ -51,6 +51,9 @@ class VLLMMLXManager(BackendManager):
         self.require_version(version)
         if not dry_run:
             self.validate_environment(version)
+            # 0.51.0: same root-cause guard as rapid-mlx — never pin onto a patch-keg venv
+            # (after validate, so a dead venv still fails with the rollback error).
+            self.normalize_before_pin(version)
         repo = Path(getattr(self, "_repo", None) or Path(__file__).resolve().parents[2])
         expected = f"{self.home}/.venvs/{self.VENV_PREFIX}-{version}/bin"
 
