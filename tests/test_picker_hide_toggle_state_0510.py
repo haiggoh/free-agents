@@ -73,5 +73,41 @@ class BackendChooserOrder(PilotCase):
         self.run_picker(s)
 
 
+class RightClickCopy(PilotCase):
+    """0.51.0 item E: right-click (mouse button 3) on a row copies that row's text; Cmd+C
+    (super+c) stays bound to copy the terminal selection. A plain left click must NOT copy."""
+
+    def test_right_click_copies_hovered_row_but_left_click_does_not(self):
+        async def s(app, pilot, h):
+            from textual.events import MouseUp
+            from textual.widgets import OptionList
+            copied = []
+            app.copy_to_clipboard = lambda t: copied.append(t)
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            rows = app.query_one("#rows", OptionList)
+            rows._mouse_hovering_over = 3   # the "Hide nvidia ... (currently shown)" row
+            right = MouseUp(rows, 5, 3, 0, 0, 3, False, False, False, screen_x=5, screen_y=3)
+            rows._on_mouse_up(right)
+            await h.pilot.pause(0.2)
+            self.assertTrue(any("choose-model list" in c for c in copied),
+                            f"right-click did not copy the hovered row: {copied}")
+            self.assertTrue(right._stop_propagation, "right-click must be consumed, not activate the row")
+            # planted negative: a plain left click (button 1) without a drag copies nothing
+            left = MouseUp(rows, 5, 3, 0, 0, 1, False, False, False, screen_x=5, screen_y=3)
+            rows._drag_start = None
+            rows._on_mouse_up(left)
+            await h.pilot.pause(0.2)
+            self.assertEqual(len(copied), 1, f"left click must not copy: {copied}")
+        self.run_picker(s)
+
+    def test_cmd_c_stays_bound_to_copy_selection(self):
+        async def s(app, pilot, h):
+            keys = [b.key for b in app.BINDINGS]
+            self.assertIn("super+c", keys)
+            self.assertIn("ctrl+c", keys)
+        self.run_picker(s)
+
+
 if __name__ == "__main__":
     unittest.main()

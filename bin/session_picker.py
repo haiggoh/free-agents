@@ -556,6 +556,21 @@ class HoverOptionList(OptionList):
         super()._on_mouse_down(event)
 
     def _on_mouse_up(self, event):
+        # 0.51.0 (user): right-click (button 3) copies the hovered row's text, same target as
+        # the drag-select copy below; a plain left click still activates the entry as before.
+        if event.button == 3:
+            idx = self._mouse_hovering_over
+            if idx is not None:
+                try:
+                    opt = self.get_option_at_index(idx)
+                    label = str(getattr(opt, "prompt", opt))
+                except Exception:
+                    label = ""
+                if label:
+                    self.app.copy_to_clipboard(label)
+                    self.app.notify(f"Copied: {label[:40]}", timeout=1.5)
+                    event.stop()
+                    return
         # 0.50.0 F3: long-click+drag (>= 2 chars) over a menu entry copies that entry's
         # text (the selection path — Cmd+C copies any selection); a plain click passes
         # through and activates the entry as before.
