@@ -109,5 +109,51 @@ class RightClickCopy(PilotCase):
         self.run_picker(s)
 
 
+class RemoteHomeRow(PilotCase):
+    """0.51.0 item B: on the remote picker (opened from home), Back to Home is a row exactly
+    two lines after the last provider row (one blank line between), NOT an actions-pane entry;
+    one less empty line before the first provider; the b key still works."""
+
+    async def _open_remote_list(self, h):
+        await h.press("r")
+        await h.wait_screen("RemoteScreen")
+        await h.press("c")                     # open the choose-model list
+        await h.wait_for(lambda: bool(h.labels("rows")), "rows loaded")
+        await h.pilot.pause(0.3)
+
+    def test_back_row_two_lines_after_last_provider(self):
+        async def s(app, pilot, h):
+            await self._open_remote_list(h)
+            rows = h.labels("rows")
+            home_idx = next(i for i, r in enumerate(rows) if "Back to Home" in r)
+            last_prov = max(i for i, r in enumerate(rows) if i < home_idx and r.strip())
+            self.assertEqual(home_idx, last_prov + 2,
+                             f"Back must sit exactly two lines after the last provider row: {rows}")
+            self.assertEqual(rows[home_idx - 1], "", f"one blank line between: {rows}")
+            acts = h.labels("actions")
+            self.assertFalse(any("Back to Home" in a for a in acts),
+                             f"Back must not also be in the actions pane: {acts}")
+            rows_w = app.query_one("#rows")
+            self.assertEqual(int(rows_w.styles.margin_top or 0), 0,
+                             "one less empty line before the first provider (margin_top)")
+        self.run_picker(s)
+
+    def test_back_row_activates_home(self):
+        async def s(app, pilot, h):
+            await self._open_remote_list(h)
+            await h.goto_row("group", "__home__")
+            await h.press("enter")
+            await h.wait_screen("HomeScreen")
+        self.run_picker(s)
+
+    def test_b_key_still_returns_home(self):
+        async def s(app, pilot, h):
+            await h.press("r")
+            await h.wait_screen("RemoteScreen")
+            await h.press("b")
+            await h.wait_screen("HomeScreen")
+        self.run_picker(s)
+
+
 if __name__ == "__main__":
     unittest.main()

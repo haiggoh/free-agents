@@ -1350,6 +1350,8 @@ class Picker(App):
         rows.display = show_models
         # flex spacer keeps status+version at the bottom when no model list is shown
         self.query_one("#layout", Vertical).set_class(not show_models, "no-rows")
+        # 0.51.0 (user): on the remote model list, one less empty line before the first provider.
+        rows.styles.margin_top = 0 if isinstance(sm, m.RemoteScreen) else 1
         # No input box unless a prompt is actually pending (user 2026-10-30: About and
         # other plain menus must not show an empty textbox at the bottom).
         if not getattr(self, "pending_prompt", None):
@@ -1725,6 +1727,10 @@ class Picker(App):
         acc = self.screen_model.accordion
         if h == ("group", m.NEW_MODELS_GROUP):
             self._open_register_panel()
+            return
+        if h == ("group", m.HOME_ROW_GROUP):
+            # 0.51.0: the Back-to-Home action row at the foot of the remote model list.
+            self.dispatch(m.Nav("home", m.HOME_OWNED))
             return
         if h[0] == "group":
             if acc.is_open(h[1]):
