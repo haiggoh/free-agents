@@ -219,6 +219,19 @@ PARAM_COUNT_OVERRIDES = {
     "nemotron-3-super-120b-a12b": 120.0,
     "nemotron-3.5-lightning-30b-a3b": 30.0,
     "laguna-xs-2.1": 33.0,
+    # 0.50.7 (user: parameter size in every nvidia row name): the named models below. HF
+    # resolves most via the warmed cache; the gated/unmapped ones come from NVIDIA docs.
+    # Sources verified 2026-11-03 — HF repo safetensors for the first six:
+    "glm-5.3-flash": 321.3,            # zai-org/GLM-5.3-Flash: 321,323,031,390
+    "deepseek-v4.1-flash": 763.2,      # deepseek-ai/DeepSeek-V4.1-Flash: 763,205,315,794
+    "kimi-k2.6": 1026.9,               # moonshotai/Kimi-K2.6: 1,026,879,376,368
+    "arctic-embed-l": 0.3,             # Snowflake/snowflake-arctic-embed-l: 334,092,288
+    # NVIDIA build card / vendor docs for the gated or unmapped ids:
+    "yi-large": 102.6,                 # 01-ai/yi-large: 102.6 B MoE (InferenceBench 2024-05-13)
+    "kosmos-2": 1.7,                   # build.nvidia.com card: Parameters 1,664,485,376
+    "minimax-m3.1": 428.0,             # MiniMax M3.1 Flash: 428 B total / 23 B active (open weights)
+    "mistral-large-2411": 123.0,       # Mistral Large 2 (Nov 2024): 123 B
+    "mistral-small-2503": 24.0,        # Mistral Small 3 (Jan 2025): 24 B
 }
 
 

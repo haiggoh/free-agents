@@ -29,7 +29,14 @@
   delaying ROWS, fixed above. Test `tests/test_picker_startup_perf_0507.py` pins first paint
   not waiting for the roster (t_paint 0.87 s against an 8 s stubbed roster; mutation
   "first paint waits for inventory" → red).
-- (Task 3) parameter size in every nvidia row name + infobox name dedupe + large→small sort
+- Every named nvidia model now carries its parameter size in the row name
+  (`PARAM_COUNT_OVERRIDES`, sources verified 2026-11-03: HF safetensors for glm-5.3-flash 321 B,
+  deepseek-v4.1-flash 763 B, kimi-k2.6 1.03 T, arctic-embed-l 0.3 B; NVIDIA build card / vendor
+  docs for the gated ids yi-large 102.6 B MoE, kosmos-2 1.7 B, minimax-m3.1 428 B,
+  mistral-large-2411 123 B, mistral-small-2503 24 B). Sizes render via the existing
+  `· 1.05T` suffix (word-boundary dedupe, never doubled), rows sort large→small with unknowns
+  last, and the infobox never repeats the model name. Tests:
+  `tests/test_picker_row_metadata_0507.py` (4 tests; mutation: dropping an override → red).
 - (Task 4) copy unblocked under `csl`
 - (Task 5) About remote count == remote picker subheadline
 - (Task 7) `bin/launch-remote-window.sh` + handover SKILL.md prompt-link flip
