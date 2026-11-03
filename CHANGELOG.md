@@ -1,3 +1,15 @@
+## [0.52.0] — 2026-11-03
+
+### Added
+- **Statusline quota segment** `bin/la-statusline-quota.sh`: prints one JSON segment
+  (`{"label":"quota","text":"today $X/$40","level":...}`) ONLY when the cost-tracker ledger
+  holds at least one real line — missing/empty/corrupt ledger means no segment, never an
+  error or a $0/$40. Today's figure sums (cum − baseline) over lines dated today UTC; legacy
+  2-field lines read with baseline 0. Env overrides: LA_STATUSLINE_LEDGER_DIR (or
+  COST_TRACKER_LEDGER_DIR), LA_STATUSLINE_CAP_USD, WARN/CRIT pct. Tests: 13/13
+  (tests/test_statusline_quota_segment.sh). Renderer hookup in cost-tracker is tracked as
+  waypoint `cost-tracker-wire-la`.
+
 ## [0.51.0] — 2026-11-03
 
 ### Fixed / changed (user-reported 2026-11-03)
