@@ -50,7 +50,14 @@
   disagree, including mid-load (both count landed rows). Tests:
   `tests/test_picker_about_parity_0508.py` (3 tests incl. a pilot end-to-end; mutation:
   agents-only subheadline → 3 red).
-- (Task 7) `bin/launch-remote-window.sh` + handover SKILL.md prompt-link flip
+- New `bin/launch-remote-window.sh`: deterministic interactive launcher — hard-requires a TTY
+  (clear one-line refusal when headless, e.g. from an agent Bash tool), `--help` verified by
+  running, unknown flag → exit 3 + usage, then execs `csl remote "$@"`. The handover skill
+  (`skills/free-session-handover/SKILL.md`) now launches via this script and passes the handoff
+  in the LINK form (`--prompt "Read <handoff.md> first and follow it exactly…"`) instead of
+  `--prompt-file` — so the handoff path lands in the successor's transcript and
+  `handover-verify.sh --expect` can match it. Tests: `tests/test_launch_remote_window.sh`
+  (18 checks incl. a pty-driven launch with a stubbed csl; mutation: TTY guard removed → red).
 
 ## [0.50.7] — 2026-11-03
 

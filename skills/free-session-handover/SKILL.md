@@ -58,27 +58,31 @@ for the whole session, then continue autonomously from its Next action."*
    A handover is interactive by definition; a headless Bash-tool launch is for offloading (see the
    `offload` skill), never for a handover. The launcher takes its own free port in 4141–4151;
    nothing needs stopping beforehand. A launch without its first prompt yields an IDLE session
-   (measured twice, 2026-10-25): pass the handoff as the initial prompt — `--prompt-file
-   <handoff.md>` (v0.46.0; the file must exist and be non-empty). Launch mechanics (incidents
-   2026-10-31, details in `references/launch-incidents-2026-10-31.md`):
-   - resolve the launcher first — `remote-session.sh` is only on the agent Bash tool's PATH, not a
-     login shell's: `RS="$(command -v remote-session.sh)"`;
-   - drive a REAL window via `~/.claude/scripts/sudo-in-terminal.sh --command "'$RS' <alias>
-     --prompt-file <handoff.md> --effort <level>" --verify '<LISTEN on 4141-4151>' --label '<t>'`
-     (verify = port/LISTEN; `pgrep -f` matches the driver's own argv);
+   (measured twice, 2026-10-25): pass the handoff as the initial prompt — in the LINK form,
+   `--prompt "Read <handoff.md> first and follow it exactly…"` (0.50.8; the prompt TEXT names
+   the path, so the path lands in the successor's transcript — see step 3). Launch mechanics:
+   - **prefer `bin/launch-remote-window.sh <alias> --effort <level> --prompt "Read <handoff.md>
+     first and follow it exactly…"`** (0.50.8): it hard-requires a TTY and execs `csl remote`, so a
+     real window opens when run in Terminal.app and it REFUSES headless from an agent Bash tool;
+   - when the agent shell has no TTY, drive a REAL window via
+     `~/.claude/scripts/sudo-in-terminal.sh --command "launch-remote-window.sh <alias>
+     --prompt 'Read <handoff.md> first…' --effort <level>" --verify '<LISTEN on 4141-4151>'
+     --label '<t>'` (verify = port/LISTEN; `pgrep -f` matches the driver's own argv);
    - pass `--effort` explicitly or rely on the stored last-launch effort (0.49.3+ default) — never
      an unset default when the stored one is higher;
    - **invoking this skill IS the launch authorization** — name concerns (blind-trust, branch
      pushes) but launch; defer only on the user's explicit doc-only request;
-   - if `--prompt-file` is unavailable, make "paste this first prompt" the top-line action to the
+   - if `--prompt` is unavailable, make "paste this first prompt" the top-line action to the
      user — never type into an existing session's terminal.
 3. Confirm it STARTED WORK, not that its port listens: `bin/handover-verify.sh --expect '<a text
-   line from the doc, e.g. its title>' --pid <pid> --timeout 120` — VERIFIED only when the new
-   session's transcript contains that text (sessionId from `~/.claude/sessions/<pid>.json`;
-   transcript found by globbing). `--prompt-file` sends the file's CONTENTS, so the handoff PATH
-   never lands in the transcript — expecting it reports NOT_VERIFIED on a correct handover
-   (2026-10-31). A LISTEN alone proves nothing (measured: LISTEN over an idle session). Never
-   print process argv, which can contain keys.
+   line from the doc, e.g. its title or the handoff PATH>' --pid <pid> --timeout 120` — VERIFIED
+   only when the new session's transcript contains that text (sessionId from
+   `~/.claude/sessions/<pid>.json`; transcript found by globbing). With the LINK form
+   (`--prompt "Read <path> first…"`) the handoff PATH DOES land in the transcript as the prompt
+   text, so `--expect '<handoff path>'` works (0.50.8; with the old `--prompt-file` it sent the
+   file's CONTENTS and the path never appeared — expecting it reported NOT_VERIFIED on a
+   correct handover, 2026-10-31). A LISTEN alone proves nothing (measured: LISTEN over an idle
+   session). Never print process argv, which can contain keys.
 4. **Then** stop the old session, by its own pid or port only. Never `remote-session.sh --stop`,
    never a blanket stop: other proxies in the band serve sessions you cannot see.
 
@@ -99,8 +103,9 @@ provider default — never let a handover silently drop to medium when the store
 A dispatch returns and ends; a spawned session is an independent agent with its own goal loop.
 **A free session never starts another remote session** — the one exception is a user-ordered
 handover: a single successor, linear (A→B), launched before its predecessor stops, reaching the
-successor as its INITIAL PROMPT (`--prompt-file`), never typed into an existing session's
-terminal. Full rationale: `references/operational-notes.md`.
+successor as its INITIAL PROMPT (`--prompt` with the handoff path in the text — the link form,
+0.50.8), never typed into an existing session's terminal. Full rationale:
+`references/operational-notes.md`.
 
 ## Standing rules template (paste into the handoff)
 

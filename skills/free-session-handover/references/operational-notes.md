@@ -15,7 +15,8 @@ two of them fight over one worktree. **A free session never starts another remot
 one exception is a user-ordered handover: a single successor, linear (A→B, never A→B and C),
 launched before its predecessor stops.
 
-The handover reaches the successor as its INITIAL PROMPT (`--prompt-file`), never typed into an
+The handover reaches the successor as its INITIAL PROMPT (`--prompt` with the handoff path in
+the text — the link form since 0.50.8; before that `--prompt-file`), never typed into an
 existing session's terminal: typing it mid-session stacks a new executor's goal loop onto a live
 one, and the typed text lands in whatever context the session happens to hold (measured
 2026-10-25).
