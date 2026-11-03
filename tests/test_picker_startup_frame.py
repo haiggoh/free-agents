@@ -23,7 +23,10 @@ def loading_emoji():
     return re.search(r'^EMOJI_LOADING="([^"]*)"', (ROOT / "config/emoji.sh").read_text(), re.M).group(1)
 
 
-def pty_bytes(env_extra, until=b"", secs=3.0):
+def pty_bytes(env_extra, until=b"", secs=30.0):
+    """Everything the picker writes to a PTY until it EXITS (EOF/EIO), `until` appears, or the
+    `secs` ceiling. Waiting on the exit, not on a fixed window: a fixed 3 s read killed a picker
+    that had not started yet on a loaded machine and returned b'' (2026-11-03)."""
     pid, fd = pty.fork()
     if pid == 0:
         os.execve(str(PICKER), [str(PICKER)], {**os.environ, "TERM": "xterm-256color", **env_extra})
@@ -32,9 +35,12 @@ def pty_bytes(env_extra, until=b"", secs=3.0):
         r, _, _ = select.select([fd], [], [], 0.05)
         if r:
             try:
-                buf += os.read(fd, 65536)
-            except OSError:
+                chunk = os.read(fd, 65536)
+            except OSError:             # EIO: the child exited and closed the PTY
                 break
+            if not chunk:               # EOF
+                break
+            buf += chunk
         if until and until in buf:
             break
     try:
@@ -57,6 +63,18 @@ class StartupFrame(unittest.TestCase):
         buf = pty_bytes({"LA_PICKER_VENV": "/nonexistent"})
         self.assertIn(b"\x1b[?1049l", buf, "the alternate screen must be left on an early exit")
         self.assertIn(b"\x1b[?25h", buf.split(b"\x1b[?1049h", 1)[1], "the cursor must come back")
+
+    def test_a_slow_start_is_waited_for_not_cut_off(self):
+        # Regression (2026-11-03, load average 28): pty_bytes read for a FIXED 3 s and killed the
+        # picker before its first byte, so the early-exit test saw b''. BASH_ENV delays the bash
+        # wrapper's start by 4 s, deterministically; the reader must wait for the child to exit.
+        slow = Path(os.environ.get("TMPDIR", "/tmp")) / f"picker-slow-start-{os.getpid()}.sh"
+        slow.write_text("sleep 4\n")
+        try:
+            buf = pty_bytes({"LA_PICKER_VENV": "/nonexistent", "BASH_ENV": str(slow)})
+        finally:
+            slow.unlink()
+        self.assertIn(b"\x1b[?1049l", buf, "a picker that starts slowly must still be read to its exit")
 
     def test_pipe_and_help_get_no_escape_bytes(self):
         piped = subprocess.run([str(PICKER)], env={**os.environ, "LA_PICKER_VENV": "/nonexistent"},

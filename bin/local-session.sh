@@ -17,13 +17,6 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
 
-# Source config and shared emoji
-# shellcheck source=/dev/null
-. "$SCRIPT_DIR/../config/config-lib.sh"
-# shellcheck source=/dev/null
-. "$SCRIPT_DIR/../config/emoji.sh"
-la_load_config || exit 2
-
 usage() {
     cat <<'HELP'
 local-session.sh — launch a LOCAL Claude Code session (MLX inference on this machine)
@@ -73,6 +66,20 @@ Examples:
 
 HELP
 }
+
+# --help is static text and is answered BEFORE la_load_config (2026-11-03): loading first made
+# --help fail without a config, and under heavy load it ran past the help sweep's 15 s alarm.
+# Same any-position semantics as the argument loop below. Test: tests/test_local_session_help_first.sh
+for _arg in "$@"; do
+    case "$_arg" in -h|--help) usage; exit 0 ;; esac
+done
+
+# Source config and shared emoji
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/../config/config-lib.sh"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/../config/emoji.sh"
+la_load_config || exit 2
 
 # ---- argument parsing (BEFORE any work — --help must never launch anything) ----
 ALIAS=""

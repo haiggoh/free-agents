@@ -32,7 +32,11 @@ assert_contains() {
     local label="$3"
 
     printf '%s' "$haystack" | grep -qF -- "$needle"
-    check "$?" "$label"
+    local rc=$?
+    check "$rc" "$label"
+    # On a miss, show what la-evict actually printed (its ranking table included): a bare FAIL
+    # line left the 2026-11-03 tier-1 inversion undiagnosable from the gate log.
+    [ "$rc" -eq 0 ] || printf '%s\n' "$haystack" | sed 's/^/        | /'
 }
 
 is_running() {

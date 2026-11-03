@@ -123,7 +123,12 @@ la_register plain-mlx    plain-mlx    omlx "" "" false "" high "" "" ""
 CFG
 [ -s "$SCRATCH/config/config.local.sh" ] || { echo "FATAL: scratch registry is empty" >&2; exit 1; }
 
-out=$(env -u LA_LIVE_CONFIG_DIR LA_MOESPRESSO_BIN= LA_CONFIG_DIR="$SCRATCH/config" \
+# Every hotswap call below pins LA_SKIP_RAM_PREFLIGHT=1. The RAM preflight sits between the
+# weight-format gate and the backend, and it reads the REAL machine's free RAM and swap: under
+# memory pressure it refused first, so cases 5 and 6 failed with "neither refused nor reached the
+# backend" (measured 2026-11-03 at 29.9 GB swap; reproduce with LA_RAM_FLOOR_GB=9999). RAM is not
+# what this file tests, and test_backend_bin_health.sh already pins it the same way.
+out=$(env -u LA_LIVE_CONFIG_DIR LA_SKIP_RAM_PREFLIGHT=1 LA_MOESPRESSO_BIN= LA_CONFIG_DIR="$SCRATCH/config" \
       "$SCRATCH/bin/local-llm-hotswap.sh" ds-coder 2>&1); rc=$?
 if [ "$rc" -ne 0 ]; then
   ok "a foreign-format artifact makes hotswap exit non-zero (rc=$rc)"
@@ -157,7 +162,7 @@ fi
 # 5. PLANTED POSITIVE — a negative result needs one. With the override set, the SAME artifact must
 #    get PAST the gate (failing later, for the missing backend binary), proving the refusal above
 #    came from the gate and not from some unrelated early exit.
-out=$(env -u LA_LIVE_CONFIG_DIR LA_GATE_WEIGHT_FORMAT=0 LA_CONFIG_DIR="$SCRATCH/config" \
+out=$(env -u LA_LIVE_CONFIG_DIR LA_SKIP_RAM_PREFLIGHT=1 LA_GATE_WEIGHT_FORMAT=0 LA_CONFIG_DIR="$SCRATCH/config" \
       "$SCRATCH/bin/local-llm-hotswap.sh" ds-coder 2>&1); rc=$?
 if printf '%s' "$out" | grep -q 'not readable by any installed backend'; then
   bad "LA_GATE_WEIGHT_FORMAT=0 did not bypass the gate — the negative above may prove nothing"
@@ -170,7 +175,7 @@ fi
 # 6. A plain artifact must NOT be refused by this gate. Without this case a gate that refuses
 #    EVERYTHING would look like a working gate, so the assertion demands the refusal be absent AND
 #    a later stage actually be reached — otherwise "not refused" could just mean "nothing ran".
-out=$(env -u LA_LIVE_CONFIG_DIR LA_MOESPRESSO_BIN= LA_CONFIG_DIR="$SCRATCH/config" \
+out=$(env -u LA_LIVE_CONFIG_DIR LA_SKIP_RAM_PREFLIGHT=1 LA_MOESPRESSO_BIN= LA_CONFIG_DIR="$SCRATCH/config" \
       "$SCRATCH/bin/local-llm-hotswap.sh" plain-mlx 2>&1); rc=$?
 if printf '%s' "$out" | grep -q 'not readable by any installed backend'; then
   bad "a plain MLX artifact was refused by the weight-format gate — the gate over-reaches"

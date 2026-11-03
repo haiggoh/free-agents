@@ -25,6 +25,29 @@
 - Known, not fixed here: while Gemini is overloaded it answers HTTP/2 with a fast `503` but sends
   NOTHING on HTTP/1.1 (curl, measured twice, 45 s and no bytes). The stdlib transport speaks only
   HTTP/1.1, so it waits out the 120 s stall before failing over. Tracked as a follow-up waypoint.
+
+### Fixed — three tests that passed or failed depending on the machine's load (found by this release's gate)
+
+The release gate went red with 4 failures under load average 28 (swap 33/34 GB, endpoint-security
+daemons at ~350% CPU). All 4 passed on `main` when run alone, so each one was traced:
+
+- `test_hotswap_weight_format_gate.sh`: cases 5 and 6 must reach the backend, but the RAM
+  preflight in between reads the REAL machine's free RAM and refused first. The hotswap calls now
+  pin `LA_SKIP_RAM_PREFLIGHT=1` (RAM is not what the file tests). Reproduced with
+  `LA_RAM_FLOOR_GB=9999`: 2 failures before, 12/12 after.
+- `local-session.sh` loaded the whole config before answering `--help`, so `--help` exited 2 on a
+  machine without a config and, under load, ran past the help sweep's 15 s alarm (exit 142). It
+  now answers `-h`/`--help` before `la_load_config` (0.9 s → 0.23 s). New test
+  `tests/test_local_session_help_first.sh` (no config dir = deterministic; a planted positive
+  checks that real runs still load config).
+- `test_picker_startup_frame.py`: its PTY reader read for a FIXED 3 s and then killed the picker,
+  which had not printed anything yet on the loaded machine (`b''`). It now reads until the picker
+  exits, with a 30 s ceiling. New test: a 4 s `BASH_ENV` start delay, red before, green after.
+- `test_la_evict.sh` (tier 1 evicted the older of two servers once) is NOT explained: it did not
+  reproduce under 16 CPU-saturating processes or with two suites racing for the lock (serialized
+  correctly). Its `assert_contains` now prints la-evict's output, ranking table included, on a
+  miss, so the next occurrence can be diagnosed. Tracked as a waypoint.
+
 - Waypoint `free-agents-dispatch-a`. Mutation-tested: 7 mutations across the budget, the ceiling,
   the stall flag, the subprocess bound, the address order, the per-address timeout and the
   connection hook, each caught by a test.
