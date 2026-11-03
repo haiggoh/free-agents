@@ -120,6 +120,7 @@ from remote_provider_registry import (  # noqa: F401,F403
     RATE_LIMITED,
     CATALOG_SCANABLE,
     ENTRIES,
+    Result,          # 0.53.0: the ONE Result dataclass lives in the registry module
 )
 
 
@@ -128,58 +129,11 @@ def get(provider_id):
 
 
 # --- the structured result record -------------------------------------------
-# A dispatch — local or remote — returns one of these. It is the single
-# vocabulary that the router, the skill, and any ledger build on, so "what
-# actually happened" is machine-readable rather than prose.
-@dataclass
-class Result:
-    ok: bool
-    provider: str                 # "local" for the local lane
-    tier: str                     # a provider tier, or LOCAL
-    model_requested: str
-    model_effective: str
-    status: int = 0               # HTTP status (0 = no response / local)
-    error_class: str = ""         # "" | quota | transient | timeout | model_unavailable |
-                                  #   auth | malformed | policy | partial | transport | ok
-    error_reason: str = ""        # human-readable failure reason (the exact one)
-    usage: dict = field(default_factory=dict)   # the provider's usage block, verbatim
-    partial: bool = False         # output started then the stream was cut
-    stream_complete: bool = False # saw the terminal [DONE] / finished cleanly
-    output_chars: int = 0
-    output_path: str = ""
-    elapsed: float = 0.0
-    retry_after: float = 0.0      # seconds, from a Retry-After header if the provider sent one
-    attempts: int = 1
-    # Allowlisted rate-limit/quota response headers (remote_http.quota_header_subset), fed to
-    # bin/quota. In-memory only: deliberately NOT part of to_dict()'s schema.
-    quota_headers: dict = field(default_factory=dict)
-
-    @property
-    def retriable(self):
-        """True iff the router is allowed to fail over / retry on THIS result.
-
-        The plan is explicit: fall back only on quota, transient failure,
-        timeout-before-output, or model unavailability. Never on auth, malformed
-        request, policy refusal, or partial output. Encoded here so no caller can
-        drift.
-        """
-        if self.ok:
-            return False
-        return self.error_class in ("quota", "transient", "timeout", "model_unavailable")
-
-    def to_dict(self):
-        return {
-            "schema_version": SCHEMA_VERSION, "ok": self.ok,
-            "provider": self.provider, "tier": self.tier,
-            "model_requested": self.model_requested,
-            "model_effective": self.model_effective,
-            "status": self.status, "error_class": self.error_class,
-            "error_reason": self.error_reason, "usage": self.usage,
-            "partial": self.partial, "stream_complete": self.stream_complete,
-            "output_chars": self.output_chars, "output_path": self.output_path,
-            "elapsed": round(self.elapsed, 3), "retry_after": self.retry_after,
-            "attempts": self.attempts,
-        }
+# A dispatch — local or remote — returns one Result (re-exported from
+# remote_provider_registry, the single definition since 0.53.0 — the duplicate
+# dataclass here used to drift). It is the single vocabulary that the router,
+# the skill, and any ledger build on, so "what actually happened" is
+# machine-readable rather than prose.
 
 
 def classify(status, body="", error=""):

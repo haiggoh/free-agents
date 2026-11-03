@@ -268,7 +268,7 @@ def main(argv=None):
     # Privacy posture, asserted (not assumed) before anything runs.
     loopback_probe(a.mode)
 
-    tiers = _tiers_allowed(a.mode)
+    tiers = _tiers_allowed(a.mode) or []   # 0.53.0: pyright reportOptionalIterable — a None here must not be iterated
     remote_plan = _remote_providers_for_mode(a.mode, requested=a.remote_provider)
 
     print("ROUTING mode=%s  local=%s  remote_tiers=%s  remote_providers=%s" % (

@@ -174,7 +174,9 @@ check(core.IMPLEMENTED == {"gemini", "nvidia", "groq", "openrouter", "cloudflare
       "fifteen providers are implemented; github (retired) and cerebras (trial) are excluded")
 check(core.RATE_LIMITED <= core.IMPLEMENTED and "nvidia" in core.RATE_LIMITED,
       "nvidia dispatches go through the machine-wide limiter")
-check(not core.get("groq") and core.get("groq").tier == core.RENEWING_FREE or True,
+# 0.53.0: this check used to end in "or True" and could never fail (paper-only). Now it can:
+groq = core.get("groq")
+check(groq is not None and groq.tier == core.RENEWING_FREE,
       "groq (declared) carries its tier even while unimplemented")
 
 

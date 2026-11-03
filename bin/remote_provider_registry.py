@@ -224,6 +224,10 @@ class Result:
     elapsed: float = 0.0
     retry_after: float = 0.0      # seconds, from a Retry-After header if the provider sent one
     attempts: int = 1
+    # 0.53.0: this is now the ONE Result dataclass (remote_provider_core re-exports it).
+    # Allowlisted rate-limit/quota response headers (remote_http.quota_header_subset), fed to
+    # bin/quota. In-memory only: deliberately NOT part of to_dict()'s schema.
+    quota_headers: dict = field(default_factory=dict)
 
     @property
     def retriable(self):
