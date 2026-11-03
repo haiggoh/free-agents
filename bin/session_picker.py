@@ -2374,9 +2374,12 @@ class Picker(App):
         # Textual copies via OSC 52, which macOS Terminal.app ignores (Textual's own docs say
         # so) — that is why copying silently did nothing. Also hand the text to the system
         # clipboard: pbcopy on macOS, wl-copy/xclip elsewhere when present. Never fatal.
+        # 0.50.8: /usr/bin/pbcopy is an ABSOLUTE candidate too — a csl-launched child can run
+        # with a stripped PATH where `which pbcopy` finds nothing, and then OSC 52 alone is
+        # ignored by Terminal.app, i.e. copy silently blocked under csl.
         super().copy_to_clipboard(text)
         import shutil
-        for cmd in (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"]):
+        for cmd in (["pbcopy"], ["/usr/bin/pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"]):
             if shutil.which(cmd[0]):
                 try:
                     subprocess.run(cmd, input=text, text=True, timeout=3, check=False)

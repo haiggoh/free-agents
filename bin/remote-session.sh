@@ -407,6 +407,20 @@ _lc_load_policy
 # read using ITS $$. csl passes the exact path via CSL_NAV_FILE; fall back to $$ only
 # for a standalone --csl-owner invocation with no parent to hand a path to.
 # Format: first line = navigation target (home/local/quit), subsequent lines = KEY=VALUE state sync
+_copy_clipboard() { # _copy_clipboard <text> — best-effort system clipboard, never fatal (0.50.8)
+    # pbcopy on macOS (PATH first, then the ABSOLUTE path — a csl-launched child can run with a
+    # stripped PATH where `command -v pbcopy` finds nothing), wl-copy/xclip elsewhere.
+    local text="$1" c
+    for c in pbcopy /usr/bin/pbcopy wl-copy; do
+        if [[ "$c" == /* ]]; then [ -x "$c" ] || continue; else command -v "$c" >/dev/null 2>&1 || continue; fi
+        printf '%s' "$text" | "$c" 2>/dev/null && return 0
+    done
+    if command -v xclip >/dev/null 2>&1; then
+        printf '%s' "$text" | xclip -selection clipboard 2>/dev/null && return 0
+    fi
+    return 1
+}
+
 _nav() {
     local target="$1"
     shift
@@ -1669,7 +1683,7 @@ if [[ -z "$ALIAS" && "$MODE" == "launch" ]]; then
                 _box row "  t) Telemetry: $( [[ "$TELEMETRY_ENABLED" -eq 1 ]] && echo "ON" || echo "OFF" )    l) Local-capable: $( [[ "$LOCAL_CAPABLE_SHOWN" -eq 1 ]] && echo "SHOWN" || echo "HIDDEN" )"
                 _box row "  m) MCPs: $( [[ "${LA_REMOTE_ENABLE_MCP:-0}" -eq 1 ]] && echo "ENABLED" || echo "DISABLED" )    u) $EMOJI_BROKEN_MODELS Unworking: $( [[ "${SHOW_BROKEN_MODELS:-0}" -eq 1 ]] && echo "SHOWN" || echo "HIDDEN" )"
                 _box row "  p) Paid-only models: $( [[ "$SHOW_PAID_ONLY_MODELS" -eq 1 ]] && echo "SHOWN" || echo "HIDDEN" )"
-                _box row "  q) Quit"
+                _box row "  y) Copy a row's launch command    q) Quit"
                 _box bottom
                 printf "Select [1-%d] (h/e/s/f/R/k/a/t/l/m/u/p/q): " "${#choices[@]}" >&2
                 read -r -p "" sel >&2 || { _nav "quit"; return 0; }
@@ -1721,6 +1735,25 @@ if [[ -z "$ALIAS" && "$MODE" == "launch" ]]; then
                         continue ;;
                     p|P)
                         SHOW_PAID_ONLY_MODELS=$(( 1 - SHOW_PAID_ONLY_MODELS ))
+                        continue ;;
+                    y|Y)
+                        # 0.50.8: the csl-owned menu had NO copy at all (Ctrl+C just killed the
+                        # read and quit) while the picker's status line promises copy — so the
+                        # csl route gets an explicit copy action for a row's launch command.
+                        local cy calias cmdline
+                        printf "  Copy launch command for [1-%d] (empty cancels): " "${#choices[@]}" >&2
+                        read -r -p "" cy >&2 || { _nav "quit"; return 0; }
+                        if [[ "$cy" =~ ^[0-9]+$ ]] && [ "$cy" -ge 1 ] && [ "$cy" -le "${#choices[@]}" ]; then
+                            calias="${current_choices[$((cy-1))]}"
+                            cmdline="csl remote $calias"
+                            if _copy_clipboard "$cmdline"; then
+                                echo "  Copied to clipboard: $cmdline" >&2
+                            else
+                                echo "  No clipboard tool available; command: $cmdline" >&2
+                            fi
+                        else
+                            echo "  Copy cancelled." >&2
+                        fi
                         continue ;;
                     c|C)
                         # Choose effort

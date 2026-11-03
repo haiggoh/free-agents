@@ -323,5 +323,23 @@ print(len(seen), sorted(seen))
 check $? "all framed rows share ONE display width (got: $box_widths)"
 assert_no_grep '║.*║.*║' "$out" 'no row renders a stray frame character mid-line'
 
+echo "== 11. y copies a row's launch command to the clipboard (0.50.8: csl menu had no copy) =="
+STUBBIN="$SB/tmp/stubbin"; mkdir -p "$STUBBIN"
+CLIP="$SB/tmp/clip.txt"; : > "$CLIP"
+printf '#!/bin/sh\ncat > "%s"\n' "$CLIP" > "$STUBBIN/pbcopy"; chmod +x "$STUBBIN/pbcopy"
+out="$(remote_menu 'y\n1\nq\n' "PATH=$STUBBIN:$PATH")"
+assert_grep "y) Copy a row's launch command" "$out" 'the menu offers the copy action'
+assert_grep "Copied to clipboard: csl remote $REMOTE_ONE" "$out" 'y + row 1 copies the launch command'
+assert_eq "csl remote $REMOTE_ONE" "$(cat "$CLIP")" 'the stubbed pbcopy received exactly the launch command'
+assert_eq quit "$(nav_target)" 'q after copying still quits cleanly'
+# row numbers track the FILTERED list: with the hidden row revealed, row 1 is still $REMOTE_ONE
+out="$(remote_menu 'f\ny\n1\nq\n' "PATH=$STUBBIN:$PATH")"
+assert_eq "csl remote $REMOTE_ONE" "$(cat "$CLIP")" 'after f, row 1 is still the first roster entry'
+# empty input cancels and copies nothing
+: > "$CLIP"
+out="$(remote_menu 'y\n\nq\n' "PATH=$STUBBIN:$PATH")"
+assert_grep 'Copy cancelled.' "$out" 'empty row number cancels the copy'
+assert_eq "" "$(cat "$CLIP")" 'cancelled copy writes nothing to the clipboard'
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

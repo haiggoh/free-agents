@@ -37,7 +37,13 @@
   `· 1.05T` suffix (word-boundary dedupe, never doubled), rows sort large→small with unknowns
   last, and the infobox never repeats the model name. Tests:
   `tests/test_picker_row_metadata_0507.py` (4 tests; mutation: dropping an override → red).
-- (Task 4) copy unblocked under `csl`
+- Copy works under csl now, on both routes: the picker's `copy_to_clipboard` also tries the
+  ABSOLUTE `/usr/bin/pbcopy` (a csl-launched child can run with a stripped PATH where
+  `which pbcopy` finds nothing, and OSC 52 alone is ignored by Terminal.app — copy was
+  silently blocked), and the csl-owned shell menu (`csl remote`) gained a `y` action that
+  copies a row's launch command to the clipboard (it had no copy at all; Ctrl+C just quit).
+  Tests: `tests/test_picker_copy_0508.py` (2 pilot tests, mutation-checked: binding removed /
+  copy disabled → red) + `tests/test_csl_menu.sh` section 11 (stubbed pbcopy).
 - (Task 5) About remote count == remote picker subheadline
 - (Task 7) `bin/launch-remote-window.sh` + handover SKILL.md prompt-link flip
 
