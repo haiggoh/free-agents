@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# free-agents-gui — start the optional native Free Agents GUI (NiceGUI in a native window).
+#
+# Usage: free-agents-gui [--native | --browser [--port N]] [--selftest] [--help]
+#   --native     open a native window (default; WKWebView on macOS, Qt/GTK on Linux)
+#   --browser    serve on 127.0.0.1 only, no window (development and automated tests)
+#   --port N     port for --browser (default: a free port, printed on stdout)
+#   --selftest   minimal page whose button round-trips through the shared core
+#
+# Environment:
+#   LA_GUI_VENV            GUI venv (default ~/.local/share/free-agents/gui-venv); set but not a
+#                          directory = error
+#   LA_GUI_SELFTEST_FILE   --selftest writes its round-trip result here
+#
+# If the venv is missing this prints the one command that creates it and exits 3. The Textual
+# picker (session-picker / csl) never depends on this script or its venv.
+set -uo pipefail
+usage() { sed -n '2,/^set -uo/{/^set -uo/d;s/^# \{0,1\}//;p;}' "$0"; }
+for a in "$@"; do
+  case "$a" in
+    -h|--help) usage; exit 0 ;;
+    --native|--browser|--selftest|--port|[0-9]*) ;;
+    *) echo "free-agents-gui: unknown option: $a" >&2; usage >&2; exit 2 ;;
+  esac
+done
+_s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
+BIN="$(cd -P "$(dirname "$_s")" && pwd)"
+if [ -n "${LA_GUI_VENV:-}" ] && [ ! -d "$LA_GUI_VENV" ]; then
+  echo "free-agents-gui: LA_GUI_VENV=$LA_GUI_VENV is set but is not a directory" >&2
+  exit 2
+fi
+VENV="${LA_GUI_VENV:-$HOME/.local/share/free-agents/gui-venv}"
+PY="$VENV/bin/python"
+if [ ! -x "$PY" ] || ! "$PY" -c 'import nicegui, webview' 2>/dev/null; then
+  echo "free-agents-gui: the GUI is not installed yet. Run once:" >&2
+  echo "  $(cd "$BIN/.." && pwd)/install/setup-gui.sh" >&2
+  exit 3
+fi
+exec "$PY" "$BIN/fa_gui/main.py" "$@"

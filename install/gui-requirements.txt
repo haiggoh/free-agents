@@ -1,0 +1,9 @@
+# Pinned dependencies for the OPTIONAL native GUI (bin/free-agents-gui). Installed ONLY into the
+# per-user venv created by install/setup-gui.sh — never a global Python, never the picker venv
+# (the Textual TUI must keep working without any of these) and never an inference-runtime venv.
+# Bump deliberately and re-run tests/test_gui_env.py and tests/test_gui_playwright.py.
+#
+# pywebview pulls its platform renderer: pyobjc (Cocoa/WKWebView) on macOS. On Linux the Qt
+# renderer needs the extra line in gui-requirements-linux-qt.txt (or the system WebKitGTK).
+nicegui==3.19.0
+pywebview==6.2.1
