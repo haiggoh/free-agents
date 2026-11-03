@@ -5,9 +5,11 @@ the new state is saved")."""
 import os
 import sys
 import unittest
+from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from picker_harness import PilotCase  # noqa: E402
+from picker_harness import PTYCase, PilotCase  # noqa: E402
 
 
 class HideToggleState(PilotCase):
@@ -81,6 +83,21 @@ class HideSemantics(PilotCase):
             sm = app.screen_model
             self.assertNotIn("nvidia", [g.id for g in sm.accordion.groups],
                              "hidden provider must be gone from the remote model list")
+            # and from lowkey's combined api list too (every model selection list)
+            await h.press("escape")             # the live filter box owns keys while the list is open
+            await h.press("b")
+            await h.wait_screen("HomeScreen")
+            await h.press("o")
+            await h.wait_screen("LowkeyScreen")
+            await h.press("c")
+            await h.wait_for(lambda: bool(h.labels("rows")), "lowkey rows")
+            await h.goto_row("group", "api")
+            await h.press("right")
+            await h.pilot.pause(0.3)
+            rows = app.query_one("#rows")
+            ids = [rows.get_option_at_index(i).id for i in range(rows.option_count)]
+            self.assertFalse(any(str(i).startswith("i:nvidia:") for i in ids),
+                             f"hidden provider must be gone from lowkey's api list too: {ids}")
         self.run_picker(s)
 
 
@@ -339,6 +356,79 @@ class LowkeyUnifiedList(unittest.TestCase):
         self.assertEqual(models_rows[0].key, "c")
         self.assertIn("Choose model", models_rows[0].label)
         self.assertNotIn("API model", models_rows[0].label)
+
+
+class LocalCapableVerdictReal(unittest.TestCase):
+    """0.52.1: the local-capable verdict must use the REAL function (not a stub) — the 0.52.0
+    claim was paper-only because the verdict path ignored PARAM_COUNT_OVERRIDES and its
+    offline HF rung, so vendor-documented small models were never judged capable."""
+
+    def _sp(self):
+        from picker_harness import ROOT
+        sys.path.insert(0, str(ROOT / "bin"))
+        import session_picker as sp
+        return sp
+
+    def test_overrides_make_small_models_capable_big_ones_not(self):
+        sp = self._sp()
+        with mock.patch.dict(os.environ, {"LA_MEMORY_BUDGET_GB": "100"}):
+            sp._VERDICT_MEMO.clear()
+            self.assertTrue(sp.catalog_local_capable("nvidia", "snowflake-arctic-embed-l"))
+            self.assertTrue(sp.catalog_local_capable("nvidia", "kosmos-2"))
+            self.assertTrue(sp.catalog_local_capable("nvidia", "laguna-xs-2.1"))
+            self.assertFalse(sp.catalog_local_capable("nvidia", "nvidia/nemotron-3-ultra-550b-a55b"))
+            self.assertFalse(sp.catalog_local_capable("nvidia", "glm-5.3-flash"))
+
+    def test_pinned_rows_get_the_real_verdict_and_filter_by_default(self):
+        sp = self._sp()
+        m = self._model()
+        agents = [
+            m.RemoteAgent("laguna", "nvidia", "Laguna XS", "unknown", model_id="laguna-xs-2.1"),
+            m.RemoteAgent("nvidia-a", "nvidia", "NVIDIA A", "unknown", model_id="nvidia-a"),
+            m.RemoteAgent("arctic", "nvidia", "Arctic Embed", "unknown", model_id="arctic-embed-l"),
+        ]
+        with mock.patch.dict(os.environ, {"LA_MEMORY_BUDGET_GB": "100"}):
+            sp._VERDICT_MEMO.clear()
+            for a in agents:   # what the app's _loaded does for kind == "remote"
+                a.local_capable = sp.catalog_local_capable(a.provider, a.model_id)
+        s = m.Settings()
+        s.catalog_local_capable = sp.catalog_local_capable
+        scr = m.RemoteScreen(s, agents=agents)
+        ids = [i.id for g in scr.accordion.groups for i in g.items]
+        self.assertEqual(ids, ["nvidia-a"], f"capable pinned rows hidden by default: {ids}")
+
+    def _model(self):
+        from picker_harness import ROOT
+        sys.path.insert(0, str(ROOT / "bin"))
+        import session_picker_model as m
+        return m
+
+
+class RightClickPty(PTYCase):
+    """0.52.1: right-click copy through the REAL terminal event path (SGR mouse sequences into
+    the pty, pbcopy recorder on PATH) — the 0.51.0 test invoked the handler directly, which
+    cannot catch a delivery failure."""
+
+    def test_right_click_on_a_row_reaches_pbcopy(self):
+        stubs = Path(self.env["CSL_SELF"]).parent
+        pbrec = Path(self.tmp.name) / "pbcopy.log"
+        (stubs / "pbcopy").write_text('#!/bin/sh\ncat >> "$PBREC"\n')
+        (stubs / "pbcopy").chmod(0o755)
+        self.env["PBREC"] = str(pbrec)
+        self.env["PATH"] = f"{stubs}:{os.environ.get('PATH', '')}"
+        self.spawn("remote")
+        self.wait_for("Remote API Session Picker")
+        self.send("c")                      # open the model list
+        self.wait_for("NVIDIA A")           # stub roster row rendered
+        self.send("\x1b[<32;10;16M")        # move over the first model row (any-event mode 1003)
+        self.send("\x1b[<2;10;16M")         # right button down (SGR button 2 -> button 3)
+        self.send("\x1b[<2;10;16m")         # right button up
+        self.pump(1.0)
+        got = pbrec.read_text().strip() if pbrec.exists() else ""
+        self.assertIn("NVIDIA A", got,
+                      f"right-click on a model row must copy that row via pbcopy; got {got!r}; "
+                      f"screen tail: {self.screen()[-400:]}")
+        self.send("q")
 
 
 class ClipboardMechanism(PilotCase):

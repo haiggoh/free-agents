@@ -63,6 +63,17 @@ DEFAULT_KV_OVERHEAD_GB = 8.0
 # (T4, user 2026-10-20) — never from a hardcoded machine size.
 DEFAULT_BUDGET_GB = 96.0
 
+
+def fits_with_total(total_b: float, quant: str = "4bit", budget_gb=None) -> bool:
+    """The visibility rule applied to a KNOWN total parameter count (in billions) — e.g. from
+    the picker's PARAM_COUNT_OVERRIDES: weights = total_b * bpw(quant) + KV overhead must fit
+    the budget. 0.52.1: the picker's local-capable verdict used to go through estimate()
+    alone, whose id-parse misses vendor-documented ids (arctic-embed-l, kosmos-2,
+    laguna-xs-2.1) and whose HF rung needs the warmed cache — so those models were never
+    judged local-capable in practice (the filter never hid anything)."""
+    budget, _src = _resolve_budget_gb(budget_gb)
+    return (total_b * BYTES_PER_WEIGHT[quant] + DEFAULT_KV_OVERHEAD_GB) <= budget
+
 # Share of the device memory the estimator treats as usable budget. Unified RAM is
 # shared with the OS/GPU, so 75% — the standing convention (96 GB of a 128 GB Mac).
 # VRAM is dedicated to the GPU, so its share is higher.

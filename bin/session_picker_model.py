@@ -1486,9 +1486,13 @@ def api_agents_for(settings, agents) -> list:
     """0.51.0: ONE filter for every lowkey API-chooser feed site (constructor, the
     inventory-landed handler, the render-time fill): SELECT placeholders out, the shared
     visibility rules in, and a row with an EMPTY model_id is keyed on its alias instead of
-    being dropped — that silent drop is why lowkey showed no API models at all."""
+    being dropped — that silent drop is why lowkey showed no API models at all.
+    0.52.1: hidden providers are excluded too — the api-setup hide option hides them from
+    EVERY model selection list, lowkey's api chooser included (it leaked here before)."""
+    hidden = set(getattr(settings, "hidden_providers", None) or [])
     return [a for a in (agents or [])
-            if a.model_id != "SELECT" and (a.model_id or a.alias) and _agent_visible(settings, a)]
+            if a.model_id != "SELECT" and (a.model_id or a.alias)
+            and a.provider not in hidden and _agent_visible(settings, a)]
 
 
 def _catalog_probe_agent(settings, prov: str, c, tier: str) -> RemoteAgent:

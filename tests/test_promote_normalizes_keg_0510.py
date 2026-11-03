@@ -99,5 +99,49 @@ class PromoteNormalizesKeg(unittest.TestCase):
                          "the failed normalize must restore the original keg state byte-for-byte")
 
 
+class PromoteViaCliNormalizesKeg(PromoteNormalizesKeg):
+    """The REAL entry path: install/manage-backend.py ... promote — what the picker's
+    "Promote pins" row runs. The 0.52.0 tests drove mgr.promote_pins() directly, which is how
+    a paper-only changelog claim happens; this drives the CLI end to end."""
+
+    def setUp(self):
+        super().setUp()
+        # The real CLI validates with `pip check`, which a --without-pip venv fails — so the
+        # 0.2.0 fixture venv is rebuilt WITH pip and keg-based again (same shape as the
+        # fragile 0.16.10 on the real machine).
+        import shutil
+        from test_venv_durability import EXE
+        shutil.rmtree(self.target)
+        subprocess.run([sys.executable, "-m", "venv", str(self.target)], check=True)
+        script = self.target / "bin" / "rapid-mlx"
+        script.write_text(f'#!{self.target}/bin/python\nprint("rapid-mlx 0.2.0")\n')
+        script.chmod(0o755)
+        fw = self.brew.framework_bin("3.14.8_2")
+        for name in os.listdir(self.target / "bin"):
+            link = self.target / "bin" / name
+            if link.is_symlink() and (name == EXE or not os.readlink(link).startswith("python")):
+                link.unlink()
+                link.symlink_to(fw / EXE)
+        cfg = self.target / "pyvenv.cfg"
+        lines = [ln for ln in cfg.read_text().splitlines() if not ln.startswith(("home =", "executable ="))]
+        cfg.write_text("\n".join([f"home = {fw}", f"executable = {fw / EXE}", *lines]) + "\n")
+        assert venv_durability(self.target) == "pinned-keg"
+
+    def test_manage_backend_cli_promote_normalizes_the_keg_venv(self):
+        env = dict(os.environ)
+        env["HOME"] = str(self.home)
+        env["HOMEBREW_PREFIX"] = str(self.brew.root)
+        for k in ("LA_LIVE_CONFIG_DIR", "_LA_LIVE_FOR", "LA_CONFIG_DIR", "LA_RAPID_BIN"):
+            env.pop(k, None)
+        r = subprocess.run([sys.executable, str(REPO / "install" / "manage-backend.py"),
+                            "--home", str(self.home), "--backend", "rapid-mlx",
+                            "promote", "0.2.0", "--repo", str(self.repo)],
+                           capture_output=True, text=True, env=env, timeout=300)
+        self.assertEqual(r.returncode, 0, r.stderr[-600:])
+        self.assertEqual(venv_durability(self.target), "durable",
+                         "CLI promote must normalize the keg venv onto opt/ first")
+        self.assertIn("0.2.0", self.live.read_text(), "the live pin must move")
+
+
 if __name__ == "__main__":
     unittest.main()

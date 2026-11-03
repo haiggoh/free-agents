@@ -204,6 +204,13 @@ def catalog_local_capable(provider, model_id):
     (fail-open)."""
     def compute():
         try:
+            # 0.52.1: the count comes from model_param_count FIRST (PARAM_COUNT_OVERRIDES +
+            # id parse + HF cache). The estimator's own id-parse misses vendor-documented
+            # ids and its HF rung needs the warmed cache, so going through estimate() alone
+            # left those models "unknown" — never hidden, in practice.
+            total = model_param_count(provider, model_id)
+            if total:
+                return _footprint().fits_with_total(total)
             return _footprint().estimate(model_id, use_hf=True, hf_offline=True)["suggested"] == "local-capable"
         except Exception:
             return False

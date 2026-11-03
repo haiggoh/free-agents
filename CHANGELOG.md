@@ -1,3 +1,25 @@
+## [0.52.1] — 2026-11-03
+
+### Fixed (user-tested 2026-11-03: the 0.51.0/0.52.0 changelog claims below were paper-only — tests now capture the real behavior)
+- **Local-capable verdict**: `catalog_local_capable` now takes the parameter count from
+  `model_param_count` (PARAM_COUNT_OVERRIDES first) and applies the estimator's fit rule via
+  the new `fits_with_total()` in estimate-model-footprint.py. The old path only parsed the id
+  / needed the warmed HF cache, so vendor-documented small models (arctic-embed-l 0.3B,
+  kosmos-2 1.7B, laguna-xs-2.1 33B) were never judged capable and never filtered. Verified
+  live on this machine: those now report capable; a 550B model does not.
+- **Hide-option semantics**: `api_agents_for` now excludes hidden providers too, so the
+  api-setup hide option hides them from EVERY model selection list — lowkey's combined api
+  chooser included (it leaked there before). The pilot test now covers api setup + remote
+  picker + lowkey.
+- **Right-click copy**: covered by a PTY-level test driving real SGR mouse sequences into the
+  pty with a pbcopy recorder (right-click on a model row copies that row). The 0.51.0 test
+  invoked the handler directly and could not catch a delivery failure.
+- **Promote onto a patch-keg venv**: the normalize-before-pin guard is now exercised through
+  the real CLI entry (`manage-backend.py … promote`), not just the manager method. The
+  existing keg venv on this machine (rapid-mlx-0.16.10) was normalized onto opt/ with the
+  repo's own `durability.py normalize` (byte-restoring on failure) — About no longer shows
+  "pinned 1.0.0" next to "⚠ pinned-keg 0.16.10"; the venv still runs.
+
 ## [0.52.0] — 2026-11-03
 
 ### Added
