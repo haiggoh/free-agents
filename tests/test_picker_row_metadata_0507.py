@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/test_picker_row_metadata_0507.py — 0.50.7 Task 3: param size in every nvidia row
+"""tests/test_picker_row_metadata_0507.py — 0.50.8 Task 3: param size in every nvidia row
 name, infobox name-dedupe, large→small sort of non-pinned rows.
 
 User (verbatim): nvidia rows must carry the parameter size in the ENTRY NAME (GLM 5.3 Flash,

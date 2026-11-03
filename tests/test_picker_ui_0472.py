@@ -206,7 +206,7 @@ class SizeSortAndLabelTests(unittest.TestCase):
 
     def test_nemotron_ultra_ranks_behind_stepfun_and_deepseek(self):
         # User 2026-10-31: in the hand-curated NVIDIA order, Nemotron 3 Ultra comes AFTER
-        # StepFun Step 5 and DeepSeek V4.1 Flash — both are superior to it. (0.50.7: the
+        # StepFun Step 5 and DeepSeek V4.1 Flash — both are superior to it. (0.50.8: the
         # -thinking variant row no longer exists — one entry per model; thinking is the
         # picker's `j` toggle — so only the base alias is asserted.)
         # The inventory is generated from config/remote-registry.yaml into

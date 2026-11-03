@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""tests/test_picker_startup_perf_0507.py — 0.50.7 Task 2: startup perf vs CHANGELOG claims.
+"""tests/test_picker_startup_perf_0507.py — 0.50.8 Task 2: startup perf vs CHANGELOG claims.
 
 CHANGELOG claims the first paint never waits on detection or inventory. Measured on the
-0.50.7 branch (real binary, PTY, this machine, 2026-11-03): first byte 0.04 s, startup
+0.50.8 branch (real binary, PTY, this machine, 2026-11-03): first byte 0.04 s, startup
 loading label until ~6.4 s, settled ~13.5 s — and baseline main measured 0.09 s / 6.0 s /
-10.2 s, so no regression. The >30 s reports were the pre-0.50.7 serial HF warm-up delaying
+10.2 s, so no regression. The >30 s reports were the pre-0.50.8 serial HF warm-up delaying
 ROWS (fixed in Task 1, tests/test_picker_async_load_0507.py).
 
 Pinned here (load-tolerant, generous ceiling): with the remote roster stubbed to land after
@@ -103,7 +103,7 @@ class StartupPerf(PTYCase):
                 t_full = time.monotonic() - t0
                 break
         self.assertIsNotNone(t_full, f"startup never settled within {FULL_CEILING_S}s")
-        print(f"\n  0.50.7 startup: t_paint={t_paint:.2f}s t_full={t_full:.2f}s "
+        print(f"\n  0.50.8 startup: t_paint={t_paint:.2f}s t_full={t_full:.2f}s "
               f"(roster stub delay {ROSTER_DELAY_S}s)")
 
 

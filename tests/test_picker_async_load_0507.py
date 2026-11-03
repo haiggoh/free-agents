@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/test_picker_async_load_0507.py — 0.50.7: providers must not wait for each other.
+"""tests/test_picker_async_load_0507.py — 0.50.8: providers must not wait for each other.
 
 User (verbatim): providers "shouldn't wait for each other to draw their menu entries…
 what's already loaded should also show as soon as its ready… at least on a per-group
@@ -237,7 +237,7 @@ class PerGroupFill(PilotCase):
                 await h.wait_for(lambda: isinstance(sm.catalogs.get("nvidia"), list),
                                  "nvidia rows delivered", secs=10)
                 self.assertFalse(warm_done.is_set(),
-                                 "rows landed only after the warm-up finished — the 0.50.7 regression")
+                                 "rows landed only after the warm-up finished — the 0.50.8 regression")
                 await h.wait_for(warm_done.is_set, "background warm-up", secs=10)
             finally:
                 self.sp._warm_hf_cache = orig_warm

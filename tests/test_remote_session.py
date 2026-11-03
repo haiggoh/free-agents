@@ -147,7 +147,7 @@ exit 0
         # 2026-10-31: the GLM 5.3 full rows left the curated order — 410 Gone, EOL
         # 2026-10-28T08:00:00Z (live catalog no longer lists z-ai/glm-5.3); hidden via
         # broken-nvidia-models.json, so they no longer occupy curated positions.
-        # 2026-11-02/03 (0.50.7): ONE ENTRY PER MODEL — the -thinking variant rows are gone
+        # 2026-11-02/03 (0.50.8): ONE ENTRY PER MODEL — the -thinking variant rows are gone
         # (they were duplicate model_ids and crashed the picker with DuplicateID); thinking is
         # now the picker's `j` toggle, not a second roster row. The surviving base aliases keep
         # their curated positions: GLM 5.3 Flash, then stepfun + deepseek above Nemotron 3 Ultra

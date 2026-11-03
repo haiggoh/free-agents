@@ -197,7 +197,7 @@ CATALOG_PREFIX = "cat:"     # catalog row ids: cat:<provider>:<model id>
 
 # Loading animation frames — hourglass alternating between flowing sand (⏳) and done (⌛️).
 # They live HERE (not in session_picker.py) because the per-group catalog placeholder renders
-# in this module (0.50.7); the app aliases them so both sides share one source.
+# in this module (0.50.8); the app aliases them so both sides share one source.
 LOADING_FRAMES = [ec.EMOJI_LOADING_STR, ec.EMOJI_LOADING_DONE_STR]
 LOADING_DOTS = (".  ", ".. ", "...")
 
@@ -1480,7 +1480,7 @@ class RemoteScreen(Screen):
         # provider -> list[CatalogModel] once loaded, or an error string; absent = not fetched.
         self.catalogs: dict = {}
         self._catalog_pending: set = set()
-        # 0.50.7: set by the app on every render — the loading-animation tick (drives the
+        # 0.50.8: set by the app on every render — the loading-animation tick (drives the
         # per-group placeholder label) and the providers whose catalog fetch is IN FLIGHT
         # right now (their groups show the placeholder even before they are opened).
         self.loading_frame = 0
@@ -1612,7 +1612,7 @@ class RemoteScreen(Screen):
     def _catalog_items(self, prov: str, pinned: list) -> list:
         cat = self.catalogs.get(prov)
         if (prov in self._catalog_pending or prov in getattr(self, "_fetch_in_flight", ())) and cat is None:
-            # 0.50.7: the placeholder ANIMATES with the app's loading tick but its row id is
+            # 0.50.8: the placeholder ANIMATES with the app's loading tick but its row id is
             # fixed — a per-tick id would re-introduce the DuplicateID crash class.
             tick = getattr(self, "loading_frame", 0)
             return [Item(f"{CATALOG_PREFIX}{prov}:__loading__",

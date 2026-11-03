@@ -60,7 +60,7 @@ except ImportError:
 # (e.g., model list loading). Startup shows loading immediately with NO delay.
 LOADING_INDICATOR_DELAY_S = 0.2
 
-# Loading animation frames/dots/label live in the MODEL (session_picker_model) since 0.50.7 —
+# Loading animation frames/dots/label live in the MODEL (session_picker_model) since 0.50.8 —
 # the per-group catalog placeholder renders there and must share this exact animation.
 # Aliased here so the app's own labels (status line, startup policy) keep one source.
 LOADING_FRAMES = m.LOADING_FRAMES
@@ -219,7 +219,7 @@ PARAM_COUNT_OVERRIDES = {
     "nemotron-3-super-120b-a12b": 120.0,
     "nemotron-3.5-lightning-30b-a3b": 30.0,
     "laguna-xs-2.1": 33.0,
-    # 0.50.7 (user: parameter size in every nvidia row name): the named models below. HF
+    # 0.50.8 (user: parameter size in every nvidia row name): the named models below. HF
     # resolves most via the warmed cache; the gated/unmapped ones come from NVIDIA docs.
     # Sources verified 2026-11-03 — HF repo safetensors for the first six:
     "glm-5.3-flash": 321.3,            # zai-org/GLM-5.3-Flash: 321,323,031,390
@@ -305,7 +305,7 @@ def load_remote_catalog(kind):
         msg = (r.stderr or "").strip().splitlines()
         raise RuntimeError(msg[-1] if msg else f"catalog exited {r.returncode}")
     rows = [m.CatalogModel.from_line(ln) for ln in r.stdout.splitlines() if "\t" in ln]
-    # 0.50.7: the HF size/age warm-up NO LONGER runs here — it was serial (up to
+    # 0.50.8: the HF size/age warm-up NO LONGER runs here — it was serial (up to
     # HF_WARM_LIMIT ids x 4 s timeout each) and ran BEFORE the rows were returned, so a
     # provider's group stayed on its placeholder for minutes. The app now delivers these
     # rows first and warms in a background thread (_warm_catalog_bg).
@@ -1026,7 +1026,7 @@ class Picker(App):
             data, err = [], (str(exc) if kind.startswith("versions:")
                              else f"{kind} model list failed to load: {exc}")
         self.call_from_thread(self._loaded, kind, data, err)
-        # 0.50.7: deliver the rows FIRST (above), then warm the HF cache in the background —
+        # 0.50.8: deliver the rows FIRST (above), then warm the HF cache in the background —
         # the warm-up must never delay a provider's rows (it used to run inside
         # load_remote_catalog, serially, before the rows were returned).
         if (kind.startswith("rcat:") and data and not err
@@ -1036,7 +1036,7 @@ class Picker(App):
             threading.Thread(target=self._warm_catalog_bg, args=(ids,), daemon=True).start()
 
     def _warm_catalog_bg(self, model_ids):
-        """HF size/age warm-up for a landed catalog, in the background (0.50.7). Re-renders
+        """HF size/age warm-up for a landed catalog, in the background (0.50.8). Re-renders
         when it finishes so the parameter sizes paint in — without having delayed the rows."""
         try:
             _warm_hf_cache(model_ids)
@@ -1161,7 +1161,7 @@ class Picker(App):
         if isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and (
                 "remote" in loading or getattr(sm, "_catalog_pending", None)
                 or any(k.startswith("rcat:") for k in loading)):
-            return "remote"      # 0.50.7: per-provider catalog fetches animate too, not only the roster
+            return "remote"      # 0.50.8: per-provider catalog fetches animate too, not only the roster
         if isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and getattr(sm, "_choose_model_visible", True) and "local" in loading:
             return "local"
         if isinstance(sm, m.DownloadScreen) and "catalog" in loading:
@@ -1347,7 +1347,7 @@ class Picker(App):
             search.focus()
         self._search_owner = sm if search.display else None
 
-        # 0.50.7: hand the remote screen the current animation tick and the providers whose
+        # 0.50.8: hand the remote screen the current animation tick and the providers whose
         # catalog fetch is in flight right now, so every pending group renders its own
         # animated placeholder (stable row id — a per-tick id would be a DuplicateID).
         if isinstance(sm, m.RemoteScreen):

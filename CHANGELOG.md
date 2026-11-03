@@ -25,7 +25,7 @@
   (5 tests; mutation-checked: sync warm-up re-added → 2 red, wait-for-all-providers → red).
 - Startup perf measured and pinned (Task 2): real binary in a PTY on 2026-11-03 — first byte
   0.04 s, startup loading label until ~6.4 s, settled ~13.5 s (baseline 0.50.6: 0.09 s /
-  6.0 s / 10.2 s — no regression). The pre-0.50.7 ">30 s" reports were the serial HF warm-up
+  6.0 s / 10.2 s — no regression). The pre-0.50.8 ">30 s" reports were the serial HF warm-up
   delaying ROWS, fixed above. Test `tests/test_picker_startup_perf_0507.py` pins first paint
   not waiting for the roster (t_paint 0.87 s against an 8 s stubbed roster; mutation
   "first paint waits for inventory" → red).
