@@ -24,7 +24,7 @@
 case "${1:-}" in
   -h|--help)
     printf 'Usage: bash %s [--help]\n\n%s\n' "$0" \
-      ".rtc/pre-flight.sh — extra test gates rtc-ship.sh runs before packaging: the litellm and picker venv gates, plus the live_proxy gate (tests/live_proxy: REAL LiteLLM vs a fake OpenAI upstream, serial — cold starts ≈3 min; collected only with FA_LIVE_PROXY_GATE=1, set here). Env: FA_LITELLM_PY, FA_PICKER_PY override the venv interpreters; FA_LIVE_PROXY_TESTS overrides the live gate's test path (an empty dir must FAIL the gate)."
+      ".rtc/pre-flight.sh — extra test gates rtc-ship.sh runs before packaging: the litellm and picker venv gates, plus the live_proxy gate (tests/live_proxy: REAL LiteLLM vs a fake OpenAI upstream, serial — cold starts ≈3 min; collected only with FA_LIVE_PROXY_GATE=1, set here), plus the gui venv gate (tests/test_gui_browser.py). Env: FA_LITELLM_PY, FA_PICKER_PY, FA_GUI_PY override the venv interpreters; FA_LIVE_PROXY_TESTS overrides the live gate's test path (an empty dir must FAIL the gate)."
     exit 0 ;;
   "") ;;
   *) printf 'Usage: bash %s [--help]  (unknown argument: %s)\n' "$0" "$1" >&2; exit 2 ;;
@@ -34,9 +34,11 @@ set -uo pipefail
 
 LITELLM_PY=${FA_LITELLM_PY:-$HOME/.local/pipx/venvs/litellm/bin/python}
 PICKER_PY=${FA_PICKER_PY:-$HOME/.local/share/free-agents/picker-venv/bin/python}
+GUI_PY=${FA_GUI_PY:-$HOME/.local/share/free-agents/gui-venv/bin/python}
 
 LITELLM_TESTS="tests/test_la_proxy_hooks.py tests/test_anthropic_route.py tests/test_litellm_contract.py tests/test_bridge_shim.py"
 PICKER_TESTS="tests/test_session_picker_pty.py tests/test_new_features.py tests/test_local_capable_verdict_0521.py tests/test_picker_load_race_matrix_0540.py tests/test_lowkey_api_groups_0540.py tests/test_hf_params_cache_0540.py tests/test_back_row_rule_0540.py tests/test_hotkey_shift_0540.py tests/test_picker_copy_keyboard_0540.py tests/test_cycle_indicators_0555.py tests/test_cycle_ui_0554.py tests/test_hf_warm_completes_0541.py tests/test_hf_cache_writer_0541.py tests/test_no_real_notifications_0541.py tests/test_lowkey_keep_open_0541.py tests/test_lowkey_api_label_0541.py tests/test_lowkey_spinner_0541.py tests/test_registry_section_migration_0541.py tests/test_local_action_emoji_0541.py tests/test_dispatch_none_timeout_0562.py tests/test_quit_icon_hover_0562.py tests/test_picker_limits_infobox.py tests/test_large_context_filter.py tests/test_roster_warm_0621.py"
+GUI_TESTS="tests/test_gui_browser.py"
 
 # Only what EXISTS: a renamed or deleted test file must not reach pytest as a path error, and a
 # gate whose files are ALL gone must fail rather than "pass" over nothing.
@@ -132,19 +134,22 @@ run_live_gate() {  # run_live_gate — serial, NO -m filter: the delivery proofs
 
 # All three gates in parallel: independent interpreters, and each gate is dominated by
 # interpreter startup (the live gate by the first cold proxy start).
-a=$(mktemp -d); b=$(mktemp -d); c=$(mktemp -d)
+a=$(mktemp -d); b=$(mktemp -d); c=$(mktemp -d); e=$(mktemp -d)
 ( run_gate litellm "$LITELLM_PY" "$LITELLM_TESTS" >"$a/out" 2>&1; echo $? >"$a/rc" ) &
 pa=$!
 ( run_gate picker  "$PICKER_PY"  "$PICKER_TESTS"  >"$b/out" 2>&1; echo $? >"$b/rc" ) &
 pb=$!
 ( run_live_gate >"$c/out" 2>&1; echo $? >"$c/rc" ) &
 pc=$!
-wait "$pa" "$pb" "$pc"
-cat "$a/out" "$b/out" "$c/out"
+( run_gate gui     "$GUI_PY"     "$GUI_TESTS"     >"$e/out" 2>&1; echo $? >"$e/rc" ) &
+pe=$!
+wait "$pa" "$pb" "$pc" "$pe"
+cat "$a/out" "$b/out" "$c/out" "$e/out"
 rc=0
 [ "$(cat "$a/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
 [ "$(cat "$b/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
 [ "$(cat "$c/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
-rm -rf "$a" "$b" "$c"
+[ "$(cat "$e/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
+rm -rf "$a" "$b" "$c" "$e"
 [ "$rc" = 0 ] || echo "✖ pre-flight gates FAILED" >&2
 exit "$rc"
