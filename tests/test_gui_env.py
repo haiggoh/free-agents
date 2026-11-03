@@ -75,6 +75,16 @@ class MainArgTests(unittest.TestCase):
         # argparse's own refusal, not "can't open file" (which also exits 2)
         self.assertIn("unrecognized arguments: --bogus", r.stderr)
 
+    def test_spawn_child_import_does_not_run_main(self):
+        # Native mode re-imports main.py as "__mp_main__" in a SPAWN child; running main() there
+        # killed the window process before it opened (2026-11-03). Importing under that name
+        # must define things and return — here argv is --bogus, so running main() would exit 2.
+        code = ("import runpy, sys; sys.argv=['main.py','--bogus']; "
+                f"runpy.run_path({str(MAIN)!r}, run_name='__mp_main__'); print('imported-only')")
+        r = _run([sys.executable, "-c", code])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("imported-only", r.stdout)
+
     def test_main_help_without_gui_packages(self):
         r = _run([sys.executable, str(MAIN), "--help"])
         self.assertEqual(r.returncode, 0, r.stderr)

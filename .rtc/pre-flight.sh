@@ -7,6 +7,7 @@
 #
 #   LiteLLM contract — test_la_proxy_hooks.py, test_anthropic_route.py, test_litellm_contract.py
 #   picker pilots    — test_session_picker_pty.py, test_new_features.py
+#   gui (NiceGUI)    — test_gui_browser.py (GUI venv from install/setup-gui.sh --dev)
 #
 # The main suite alone SKIPS all five files, so without this hook a release ships untested code in
 # the proxy contract and the TUI. That is the whole reason these gates exist.
@@ -17,14 +18,14 @@
 # are created by this repo's own scripts, so a missing one is a broken environment, not a reason to
 # ship blind. Set FA_ALLOW_MISSING_VENVS=1 to keep the old warning-and-continue behaviour.
 #
-# Env: FA_LITELLM_PY / FA_PICKER_PY   interpreters for the two gates (defaults below)
+# Env: FA_LITELLM_PY / FA_PICKER_PY / FA_GUI_PY   interpreters for the gates (defaults below)
 #      FA_ALLOW_MISSING_VENVS=1        degrade to the old warning instead of failing
 # Usage: ./.rtc/pre-flight.sh   (run by rtc-ship.sh from the repo root)
 # --help must never run the real work (0.50.0 help sweep): parse args before anything else.
 case "${1:-}" in
   -h|--help)
     printf 'Usage: bash %s [--help]\n\n%s\n' "$0" \
-      ".rtc/pre-flight.sh — extra test gates rtc-ship.sh runs before packaging (litellm + picker venvs). Env: FA_LITELLM_PY, FA_PICKER_PY override the venv interpreters."
+      ".rtc/pre-flight.sh — extra test gates rtc-ship.sh runs before packaging (litellm + picker + gui venvs). Env: FA_LITELLM_PY, FA_PICKER_PY, FA_GUI_PY override the venv interpreters."
     exit 0 ;;
   "") ;;
   *) printf 'Usage: bash %s [--help]  (unknown argument: %s)\n' "$0" "$1" >&2; exit 2 ;;
@@ -34,9 +35,11 @@ set -uo pipefail
 
 LITELLM_PY=${FA_LITELLM_PY:-$HOME/.local/pipx/venvs/litellm/bin/python}
 PICKER_PY=${FA_PICKER_PY:-$HOME/.local/share/free-agents/picker-venv/bin/python}
+GUI_PY=${FA_GUI_PY:-$HOME/.local/share/free-agents/gui-venv/bin/python}
 
 LITELLM_TESTS="tests/test_la_proxy_hooks.py tests/test_anthropic_route.py tests/test_litellm_contract.py"
 PICKER_TESTS="tests/test_session_picker_pty.py tests/test_new_features.py tests/test_local_capable_verdict_0521.py tests/test_picker_load_race_matrix_0540.py tests/test_lowkey_api_groups_0540.py tests/test_hf_params_cache_0540.py tests/test_back_row_rule_0540.py tests/test_hotkey_shift_0540.py tests/test_picker_copy_keyboard_0540.py"
+GUI_TESTS="tests/test_gui_browser.py"
 
 # Only what EXISTS: a renamed or deleted test file must not reach pytest as a path error, and a
 # gate whose files are ALL gone must fail rather than "pass" over nothing.
@@ -72,17 +75,20 @@ run_gate() {  # run_gate <name> <interpreter> <space-separated test files>
   return 1
 }
 
-# Both gates in parallel: independent interpreters, and the gate is dominated by interpreter startup.
-a=$(mktemp -d); b=$(mktemp -d)
+# All gates in parallel: independent interpreters, and the gate is dominated by interpreter startup.
+a=$(mktemp -d); b=$(mktemp -d); c=$(mktemp -d)
 ( run_gate litellm "$LITELLM_PY" "$LITELLM_TESTS" >"$a/out" 2>&1; echo $? >"$a/rc" ) &
 pa=$!
 ( run_gate picker  "$PICKER_PY"  "$PICKER_TESTS"  >"$b/out" 2>&1; echo $? >"$b/rc" ) &
 pb=$!
-wait "$pa" "$pb"
-cat "$a/out" "$b/out"
+( run_gate gui     "$GUI_PY"     "$GUI_TESTS"     >"$c/out" 2>&1; echo $? >"$c/rc" ) &
+pc=$!
+wait "$pa" "$pb" "$pc"
+cat "$a/out" "$b/out" "$c/out"
 rc=0
 [ "$(cat "$a/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
 [ "$(cat "$b/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
-rm -rf "$a" "$b"
+[ "$(cat "$c/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
+rm -rf "$a" "$b" "$c"
 [ "$rc" = 0 ] || echo "✖ pre-flight gates FAILED" >&2
 exit "$rc"
