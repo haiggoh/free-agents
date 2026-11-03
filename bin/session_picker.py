@@ -60,18 +60,16 @@ except ImportError:
 # (e.g., model list loading). Startup shows loading immediately with NO delay.
 LOADING_INDICATOR_DELAY_S = 0.2
 
-# Loading animation frames - hourglass alternating between flowing sand (⏳) and done (⌛️)
-LOADING_FRAMES = [ec.EMOJI_LOADING_STR, ec.EMOJI_LOADING_DONE_STR]
+# Loading animation frames/dots/label live in the MODEL (session_picker_model) since 0.50.7 —
+# the per-group catalog placeholder renders there and must share this exact animation.
+# Aliased here so the app's own labels (status line, startup policy) keep one source.
+LOADING_FRAMES = m.LOADING_FRAMES
 # One beat = 0.4 s: the hourglass flips every 2 beats (0.8 s) and the dots grow . .. ... every
 # beat. At 0.15 s the two hourglass glyphs (nearly identical at terminal size) blurred into
 # one, so the animation looked static (measured: frames did alternate; user saw no motion).
 LOADING_INTERVAL = 0.4
-LOADING_DOTS = (".  ", ".. ", "...")
-
-
-def loading_label(tick: int, what: str = "loading") -> str:
-    """Hourglass frame, then the label with 1-3 dots padded to a fixed width (nothing jumps)."""
-    return f"{LOADING_FRAMES[(tick // 2) % len(LOADING_FRAMES)]} {what}{LOADING_DOTS[tick % len(LOADING_DOTS)]}"
+LOADING_DOTS = m.LOADING_DOTS
+loading_label = m.loading_label
 
 REPO = BIN.parent
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
@@ -294,8 +292,10 @@ def load_remote_catalog(kind):
         msg = (r.stderr or "").strip().splitlines()
         raise RuntimeError(msg[-1] if msg else f"catalog exited {r.returncode}")
     rows = [m.CatalogModel.from_line(ln) for ln in r.stdout.splitlines() if "\t" in ln]
-    if os.environ.get("LA_PICKER_HF_LOOKUP", "1") != "0":
-        _warm_hf_cache([c.model_id for c in rows][:HF_WARM_LIMIT])
+    # 0.50.7: the HF size/age warm-up NO LONGER runs here — it was serial (up to
+    # HF_WARM_LIMIT ids x 4 s timeout each) and ran BEFORE the rows were returned, so a
+    # provider's group stayed on its placeholder for minutes. The app now delivers these
+    # rows first and warms in a background thread (_warm_catalog_bg).
     return rows
 
 
@@ -1013,6 +1013,28 @@ class Picker(App):
             data, err = [], (str(exc) if kind.startswith("versions:")
                              else f"{kind} model list failed to load: {exc}")
         self.call_from_thread(self._loaded, kind, data, err)
+        # 0.50.7: deliver the rows FIRST (above), then warm the HF cache in the background —
+        # the warm-up must never delay a provider's rows (it used to run inside
+        # load_remote_catalog, serially, before the rows were returned).
+        if (kind.startswith("rcat:") and data and not err
+                and os.environ.get("LA_PICKER_HF_LOOKUP", "1") != "0"):
+            ids = [c.model_id for c in data][:HF_WARM_LIMIT]
+            import threading
+            threading.Thread(target=self._warm_catalog_bg, args=(ids,), daemon=True).start()
+
+    def _warm_catalog_bg(self, model_ids):
+        """HF size/age warm-up for a landed catalog, in the background (0.50.7). Re-renders
+        when it finishes so the parameter sizes paint in — without having delayed the rows."""
+        try:
+            _warm_hf_cache(model_ids)
+        except Exception:
+            return
+
+        def apply():
+            sm = self.screen_model
+            if isinstance(sm, m.RemoteScreen) and getattr(sm, "_choose_model_visible", False):
+                self.render_model()
+        self.call_from_thread(apply)
 
     def _loaded(self, kind, data, err):
         self._loading.discard(kind)
@@ -1123,8 +1145,10 @@ class Picker(App):
         """The inventory the visible screen is waiting on, if any (drives the loading line)."""
         sm = self.screen_model
         loading = getattr(self, "_loading", set())
-        if isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and "remote" in loading:
-            return "remote"
+        if isinstance(sm, m.RemoteScreen) and sm._choose_model_visible and (
+                "remote" in loading or getattr(sm, "_catalog_pending", None)
+                or any(k.startswith("rcat:") for k in loading)):
+            return "remote"      # 0.50.7: per-provider catalog fetches animate too, not only the roster
         if isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and getattr(sm, "_choose_model_visible", True) and "local" in loading:
             return "local"
         if isinstance(sm, m.DownloadScreen) and "catalog" in loading:
@@ -1309,6 +1333,14 @@ class Picker(App):
             search.placeholder = "type to filter models — results narrow from the first character"
             search.focus()
         self._search_owner = sm if search.display else None
+
+        # 0.50.7: hand the remote screen the current animation tick and the providers whose
+        # catalog fetch is in flight right now, so every pending group renders its own
+        # animated placeholder (stable row id — a per-tick id would be a DuplicateID).
+        if isinstance(sm, m.RemoteScreen):
+            sm.loading_frame = self._loading_frame
+            sm._fetch_in_flight = {a.provider for a in (self.cache.get("remote") or [])
+                                   if f"rcat:{a.alias}" in getattr(self, "_loading", set())}
 
         # Check if screen has accordion with groups (RuntimeManagerScreen has accordion but no groups)
         has_groups = hasattr(sm, 'accordion') and sm.accordion is not None and len(sm.accordion.groups) > 0

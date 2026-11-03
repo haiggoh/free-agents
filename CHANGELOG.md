@@ -16,7 +16,13 @@
 
 ### Changed — picker async load, row param sizes, copy in csl, About parity, launcher + handover link (in progress at renumber time; completed bullets land below before ship)
 
-- (Task 1) async per-provider load order with per-group loading animation
+- Picker: each provider's model list fills as soon as THAT provider's catalog lands. The serial
+  HF size/age warm-up no longer delays the rows (it ran before the rows were returned, up to
+  200 ids x 4 s per provider); it now runs in a background thread after they deliver and
+  re-renders so the sizes paint in. Every pending group shows its own ANIMATED loading
+  placeholder (stable row id — the DuplicateID crash class cannot return), and the local list
+  renders while the remote roster is still loading. Tests: `tests/test_picker_async_load_0507.py`
+  (5 tests; mutation-checked: sync warm-up re-added → 2 red, wait-for-all-providers → red).
 - (Task 2) startup perf reconciled with CHANGELOG claims
 - (Task 3) parameter size in every nvidia row name + infobox name dedupe + large→small sort
 - (Task 4) copy unblocked under `csl`
