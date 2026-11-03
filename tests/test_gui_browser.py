@@ -91,6 +91,26 @@ def browser():
         b.close()
 
 
+def test_app_signals_ready_and_renders_home_from_core(browser, tmp_path):
+    # locate.sh waits for LA_GUI_READY_FILE: it must appear once a page has CONNECTED, and the
+    # page must be the shared core's Home screen (its title + its action rows), not a stub.
+    ready = tmp_path / "ready"
+    srv = Server(env={"LA_GUI_READY_FILE": str(ready)})
+    try:
+        assert not ready.exists(), "ready before any page connected"
+        page = browser.new_page()
+        page.goto(srv.url)
+        page.wait_for_selector("text=Session Launcher", timeout=15000)
+        deadline = time.time() + 10
+        while time.time() < deadline and not ready.exists():
+            time.sleep(0.1)
+        assert ready.exists()
+        assert page.locator("text=Local sessions").count() >= 1
+        assert page.locator("text=Remote free API sessions").count() >= 1
+    finally:
+        assert srv.stop() == []
+
+
 def test_browser_selftest_round_trip(browser, tmp_path):
     out = tmp_path / "selftest.json"
     srv = Server("--selftest", env={"LA_GUI_SELFTEST_FILE": str(out)})
