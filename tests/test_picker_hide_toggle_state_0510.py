@@ -252,5 +252,30 @@ class RemoteLocalCapableFilterSort(unittest.TestCase):
                          f"local-capable rows must move to the very bottom of their group: {ids}")
 
 
+class ClipboardMechanism(PilotCase):
+    """0.51.0 regression guard (user 2026-11-03: the 0.50.8 changelog claimed 'copy works under
+    csl on both routes' but it did not): copy_to_clipboard must reach the SYSTEM clipboard
+    (pbcopy) even when PATH is stripped, as in a csl-launched child — OSC 52 alone is ignored
+    by Terminal.app."""
+
+    def test_copy_reaches_pbcopy_even_with_empty_path(self):
+        async def s(app, pilot, h):
+            import subprocess
+            from unittest import mock
+            calls = []
+
+            def fake_run(cmd, *a, **k):
+                calls.append((list(cmd), k.get("input")))
+                return mock.Mock(returncode=0)
+
+            with mock.patch.dict(os.environ, {"PATH": ""}), \
+                    mock.patch.object(subprocess, "run", side_effect=fake_run):
+                app.copy_to_clipboard("hello-clip")
+            pb = [(c, i) for c, i in calls if c[0].endswith("pbcopy")]
+            self.assertTrue(any(i == "hello-clip" for _, i in pb),
+                            f"pbcopy must receive the text even with PATH='' (csl stripped env): {calls}")
+        self.run_picker(s)
+
+
 if __name__ == "__main__":
     unittest.main()

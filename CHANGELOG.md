@@ -1,3 +1,15 @@
+## [0.51.0] — 2026-11-03
+
+### Fixed / changed (user-reported 2026-11-03)
+- **Picker API-keys hide/show toggle** now states the current state in the row label ("(currently shown/hidden)") and confirms the save with a visible flash; rows re-render after any in-place toggle (previously the rebuilt list never repainted, so the toggle looked like a no-op).
+- **Remote picker**: "Back to Home" is a row exactly two lines after the last provider (one blank line between), not an actions-pane entry by the infobox; one less empty line before the first provider; the `b` key binding is unchanged.
+- **Remote picker**: local-capable models (e.g. Laguna XS 33B, Snowflake Arctic Embed 0.3B, Microsoft Kosmos 2 1.7B) are now filtered out by default exactly like catalog rows — pinned inventory rows get the same local-capable verdict — and when shown (`local_capable_shown`) they sort to the very bottom of their provider group.
+- **Backend manager**: the "Choose backend" chooser renders ahead of all menu options; the selection marker reads "← selected", not "← current" (the menu is about which backend to modify, not which is in use).
+- **TUI copy**: right-click (button 3) on a row copies its text and is consumed; drag-select and Cmd/Ctrl+C copy unchanged; `copy_to_clipboard` reaches `/usr/bin/pbcopy` even with a stripped PATH (csl-launched children) — regression test added (the 0.50.8 "copy works under csl" claim did not hold in practice).
+- **Cloud Session Configuration** probe row ("e") now always flashes its verdict (refused on a free lane / not-eligible / eligible / unknown) and the info box explains a refusal — it no longer looks like a no-op placeholder.
+- **Lowkey API model chooser** loads the remote roster again: rows with an empty model_id are keyed on their alias instead of silently dropped, and the fill no longer depends on screen-build vs inventory-load ordering.
+- **Backend managers**: `promote` never pins onto a Homebrew patch-keg venv — the target venv is normalized onto the patch-stable `opt/` path first, and a runnable venv that cannot be normalized is refused (repair first). Root cause of the About screen showing "pinned X" next to "⚠ pinned-keg Y" at the same time. The ⚠ flag stays for genuinely broken venvs.
+
 ## [0.50.8] — 2026-11-03
 
 ### Fixed — picker DuplicateID crash and duplicate model rows, fixed at both the render and the data root (renumbered from the reserved 0.50.5; 0.50.6 and the ship-gate 0.50.7 both shipped on main first, so this bundle ships as 0.50.8 — a lower number is never seen as an update)
