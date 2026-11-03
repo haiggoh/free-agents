@@ -14,13 +14,65 @@ Call `stream_chat` and it returns a `remote_provider_core.Result` plus the
 streamed text (and reasoning text) the caller persists to disk.
 """
 import http.client
+import itertools
 import json
 import os
+import socket
 import sys
 import time
 from urllib.parse import urlparse
 
 from remote_provider_core import Result, classify
+
+# Per-address connect timeout. A network that black-holes IPv6 (a SYN that never gets a SYN-ACK)
+# used to cost the FULL read timeout per address: stock socket.create_connection walks the DNS
+# list in order, and providers list IPv6 first (Gemini: 8 IPv6 ahead of 8 IPv4), so a dispatch
+# sat 8 x 300 s in SYN_SENT while curl answered in 4 s (measured 2026-11-03, waypoint
+# free-agents-dispatch-a). A healthy TCP connect takes well under a second; 10 s is generous.
+CONNECT_TIMEOUT_S = 10.0
+
+
+def ordered_addresses(host, port):
+    """getaddrinfo() results with IPv4 first, the families interleaved (v4, v6, v4, v6, ...).
+
+    A cheap stand-in for Happy Eyeballs (RFC 8305), which the stdlib only has for asyncio:
+    IPv4 is the family that works on every network we have measured, and interleaving still
+    reaches IPv6 early on an IPv6-only network."""
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    v4 = [i for i in infos if i[0] == socket.AF_INET]
+    other = [i for i in infos if i[0] != socket.AF_INET]
+    return [i for pair in itertools.zip_longest(v4, other) for i in pair if i is not None]
+
+
+def create_connection(address, timeout=None, source_address=None, *_a, **_kw):
+    """Drop-in for socket.create_connection, as http.client calls it: each address gets at most
+    CONNECT_TIMEOUT_S (or the read timeout, when that is shorter), and the connected socket then
+    switches to the read timeout. Raises the last error when every address fails."""
+    host, port = address[0], address[1]
+    per_addr = CONNECT_TIMEOUT_S if not timeout else min(CONNECT_TIMEOUT_S, timeout)
+    last = None
+    for family, type_, proto, _canon, sockaddr in ordered_addresses(host, port):
+        sock = socket.socket(family, type_, proto)
+        try:
+            sock.settimeout(per_addr)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+        except OSError as exc:
+            last = exc
+            sock.close()
+            continue
+        sock.settimeout(timeout)
+        return sock
+    raise last or OSError("getaddrinfo returned no address for %s" % host)
+
+
+def new_connection(scheme, host, port, timeout):
+    """An http.client connection that connects through create_connection() above."""
+    cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
+    conn = cls(host, port, timeout=timeout)
+    conn._create_connection = create_connection   # the stdlib's own hook, present 3.9 - 3.15
+    return conn
 
 
 class _CountingFD:
@@ -153,8 +205,7 @@ def stream_chat(provider, body, outdir, out_fd, rfd=None, timeout=120.0,
     rfd_proxy = _CountingFD(rfd)
 
     try:
-        conn = http.client.HTTPSConnection(host, port, timeout=timeout) \
-            if parsed.scheme == "https" else http.client.HTTPConnection(host, port, timeout=timeout)
+        conn = new_connection(parsed.scheme, host, port, timeout)
         conn.request(method, path, body=data, headers=headers)
         resp = conn.getresponse()
         status = resp.status

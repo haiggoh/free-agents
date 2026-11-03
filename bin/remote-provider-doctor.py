@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from remote_provider_core import (PROVIDERS, IMPLEMENTED, get, TIER_CHOICES)  # noqa: E402
+from remote_http import new_connection  # noqa: E402  IPv4-first, short per-address connect
 
 
 def state_for(usable, detail):
@@ -62,8 +63,7 @@ def check_models(provider, timeout=15.0):
     path = parsed.path + ("?" + parsed.query if parsed.query else "")
 
     try:
-        conn = http.client.HTTPSConnection(host, port, timeout=timeout) \
-            if parsed.scheme == "https" else http.client.HTTPConnection(host, port, timeout=timeout)
+        conn = new_connection(parsed.scheme, host, port, timeout)
         conn.request("GET", path, headers=provider.auth_headers())
         resp = conn.getresponse()
         body = resp.read().decode("utf-8", "replace")

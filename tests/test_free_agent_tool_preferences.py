@@ -553,7 +553,8 @@ class Exhaustion(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertGreaterEqual(len(self.dispatch_calls), 2, "failover reached the second preference")
         first, second = self.dispatch_calls[0][1], self.dispatch_calls[1][1]
-        self.assertEqual(first["timeout_s"], 600)
+        self.assertEqual(first["timeout_s"], fat.DEFAULT_PAID_FALLBACK["attempt_max_s"],
+                         "the first preference may not spend the whole 600 s cap alone")
         self.assertEqual(second["timeout_s"], fat.DEFAULT_PAID_FALLBACK["min_attempt_s"])
         self.assertEqual(first["stall_s"], fat.DEFAULT_PAID_FALLBACK["attempt_stall_s"])
         self.assertIn("wall-clock cap", err)

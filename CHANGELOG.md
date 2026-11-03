@@ -8,13 +8,26 @@
   2026-11-03: two stalls (`[timeout] HTTP 0 — The read operation timed out`) or one 1800 s attempt
   used up the cap, and failover never reached the next model. (The suspected 503 retry loop was
   not the cause: a Gemini 503 already fails over at once.)
-- Each attempt now gets what is left of the cap, floored at `min_attempt_s` (180 s) so a late
-  attempt still has a fair window, and gives up after `attempt_stall_s` (120 s) without a byte.
-  The stall timer is per read, so an answer that is actively streaming is never cut by it. Both
+- Each attempt now gets what is left of the cap, at most `attempt_max_s` (300 s, so the first
+  preference cannot spend the whole cap alone) and at least `min_attempt_s` (180 s, so a late
+  attempt still has a fair window). It gives up after `attempt_stall_s` (120 s) without a byte;
+  that timer is per read, so an answer that is actively streaming is never cut by it. All three
   knobs sit next to the cap in `config/dispatch-preferences.json` under `paid_fallback`. The entry's
-  own `timeout` still wins when it is shorter. Worst case is now about 780 s instead of about 2400 s.
-- Waypoint `free-agents-dispatch-a`. Mutation-tested: each of the three halves (budget passed,
-  stall reaches the HTTP layer, budget bounds the subprocess) is caught by one test.
+  own `timeout` still wins when it is shorter.
+- `remote_http.py` (and `remote-provider-doctor.py`, which shares the transport now): connects
+  IPv4-first with the families interleaved and at most 10 s per address. Stock
+  `socket.create_connection` gives every DNS address the FULL timeout in turn; Gemini lists 8 IPv6
+  addresses ahead of its IPv4 ones, and on a network that black-holes IPv6 the dispatch sat in
+  `SYN_SENT` (seen with `lsof`) for 8 x 300 s while curl answered in 4 s.
+- Dogfooded before merge with the same one-word dispatch: the old code spent its whole 600 s on
+  Gemini and attempted nothing else; the new code failed Gemini over and Mistral Large 4 answered,
+  146 s end to end.
+- Known, not fixed here: while Gemini is overloaded it answers HTTP/2 with a fast `503` but sends
+  NOTHING on HTTP/1.1 (curl, measured twice, 45 s and no bytes). The stdlib transport speaks only
+  HTTP/1.1, so it waits out the 120 s stall before failing over. Tracked as a follow-up waypoint.
+- Waypoint `free-agents-dispatch-a`. Mutation-tested: 7 mutations across the budget, the ceiling,
+  the stall flag, the subprocess bound, the address order, the per-address timeout and the
+  connection hook, each caught by a test.
 - Version note: 0.50.5 is the picker duplicate-ID fix, still on its own branch; it ships after this
   one under a newer number.
 

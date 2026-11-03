@@ -442,7 +442,7 @@ def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED,
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=limit)
         except subprocess.TimeoutExpired as err:
-            raise DispatchFailed(f"timed out after {err.timeout}s") from err
+            raise DispatchFailed(f"timed out after {err.timeout:.0f}s (this attempt's budget)") from err
         out = Path(outdir) / "output.txt"
         text = out.read_text() if out.exists() else ""
         if r.returncode != 0 or not text.strip():
@@ -480,10 +480,11 @@ DEFAULT_PAID_FALLBACK = {"min_real_attempts": 3, "min_providers": 2,
                          # Per-attempt budget (waypoint free-agents-dispatch-a, 2026-11-03): the cap
                          # used to gate only the START of an attempt, so one stalled preference ran
                          # 300s per silent read or 1800s in total and failover never got past it.
-                         # An attempt now gets what is left of the cap, floored at min_attempt_s
-                         # so a late attempt still gets a fair window, and gives up after
-                         # attempt_stall_s of silence (a streaming answer is never cut by it).
-                         "attempt_stall_s": 120, "min_attempt_s": 180}
+                         # An attempt now gets what is left of the cap, at most attempt_max_s (so the
+                         # first preference cannot spend the whole cap alone) and at least
+                         # min_attempt_s (so a late attempt still gets a fair window), and gives
+                         # up after attempt_stall_s of silence (a streaming answer is never cut).
+                         "attempt_stall_s": 120, "attempt_max_s": 300, "min_attempt_s": 180}
 # remote-agent-dispatch.py does not surface Retry-After to its caller (verified 2026-10-24:
 # its stderr carries only error_class + HTTP status + reason), so a 429 is a real failure
 # with no retry; retry_after_max_s stays in the policy for the day the dispatch surfaces it.
@@ -550,7 +551,8 @@ def run(input_data, env) -> int:
             print(f"free-agents: wall-clock cap ({policy['wall_clock_cap_s']}s) reached — "
                   f"{entry['id']} and the remaining preferences are not attempted", file=sys.stderr)
             break
-        budget = max(policy["wall_clock_cap_s"] - elapsed, policy["min_attempt_s"])
+        budget = max(min(policy["wall_clock_cap_s"] - elapsed, policy["attempt_max_s"]),
+                     policy["min_attempt_s"])
         resolved_thinking, think_effort, think_overridden, think_note = resolve_thinking(entry, role)
         print(f"free-agents: offloading to {entry.get('display', entry['id'])} "
               f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"

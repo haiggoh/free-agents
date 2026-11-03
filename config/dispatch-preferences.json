@@ -178,6 +178,7 @@
   "retry_after_max_s": 30,
   "wall_clock_cap_s": 600,
   "attempt_stall_s": 120,
+  "attempt_max_s": 300,
   "min_attempt_s": 180
  }
 }
