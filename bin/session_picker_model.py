@@ -1436,6 +1436,61 @@ class LocalScreen(Screen):
         return LaunchRequest("local", argv, env, mdl.alias)
 
 
+def _agent_visible(settings, agent) -> bool:
+    """Module-level mirror of RemoteScreen._visible, so shared counting code and the screen
+    can never drift (0.50.8)."""
+    s = settings
+    if not agent.has_key:
+        return False
+    if agent.tier == "trial" and not s.include_trials:
+        return False
+    if agent.local_capable and not s.local_capable_shown:
+        return False
+    if agent.broken and not s.show_broken:
+        return False
+    if agent.old and not s.show_old:
+        return False
+    return True
+
+
+def _catalog_probe_agent(settings, prov: str, c, tier: str) -> RemoteAgent:
+    """The probe agent a catalog row is judged and rendered through — ONE construction site,
+    so counts can never disagree with rendered rows (0.50.8: module-level for sharing)."""
+    def fn(name):
+        f = getattr(settings, name, None)
+        return bool(f and f(prov, c.model_id))
+    return RemoteAgent(f"{CATALOG_PREFIX}{prov}:{c.model_id}", prov, c.model_id, tier,
+                       local_capable=fn("catalog_local_capable"),
+                       old=fn("catalog_model_old"),
+                       model_id=c.model_id)
+
+
+def remote_visibility_counts(settings, agents, catalogs) -> tuple[int, int]:
+    """ONE counting function for the remote model list (0.50.8), shared by the RemoteScreen
+    subheadline and the About stats so the two can never disagree: (visible, hidden), with
+    catalog rows included. Parity must also hold with a PARTIALLY loaded catalog — both sides
+    count the rows that have landed, not the whole roster."""
+    hidden_prov = set(getattr(settings, "hidden_providers", None) or [])
+    vis = sum(1 for a in agents
+              if _agent_visible(settings, a) and a.model_id != "SELECT" and a.provider not in hidden_prov)
+    hidden = sum(1 for a in agents if not _agent_visible(settings, a) and a.model_id != "SELECT")
+    for prov, cat in (catalogs or {}).items():
+        if not isinstance(cat, list) or not cat or prov in hidden_prov:
+            continue
+        have = {a.model_id for a in agents if a.provider == prov
+                and a.model_id != "SELECT" and _agent_visible(settings, a)}
+        pinned0 = next((a for a in agents if a.provider == prov and a.model_id != "SELECT"), None)
+        tier = pinned0.tier if pinned0 else "unknown"
+        for c in cat:
+            if c.model_id in have:
+                continue
+            if _agent_visible(settings, _catalog_probe_agent(settings, prov, c, tier)):
+                vis += 1
+            else:
+                hidden += 1
+    return vis, hidden
+
+
 class RemoteScreen(Screen):
     title = f"{ec.SESSION_EMOJI_FREE_API_STR} Remote API Session Picker"
     lane_key = "r"
@@ -1450,27 +1505,9 @@ class RemoteScreen(Screen):
         if self.search:
             n = sum(len(g.items) for g in self.accordion.groups if not g.id.startswith("__"))
             return f'{n} model(s) matching "{self.search}"  — the filter box above the list is live; empty shows all'
-        hidden_prov = set(getattr(self.settings, "hidden_providers", None) or [])   # 0.50.1
-        vis = sum(1 for a in self.agents
-                  if self._visible(a) and a.model_id != "SELECT" and a.provider not in hidden_prov)
-        hidden = self.hidden_count()
-        for prov, cat in self.catalogs.items():
-            if not isinstance(cat, list) or not cat or prov in hidden_prov:
-                continue
-            # Same tier/dedupe rules as _catalog_items, so this count can never disagree
-            # with the rendered rows (2026-10-27: the subheadline under the title counted
-            # the agent roster only and read as fiction next to the real lists).
-            have = {a.model_id for a in self.agents if a.provider == prov
-                    and a.model_id != "SELECT" and self._visible(a)}
-            pinned0 = next((a for a in self.agents if a.provider == prov and a.model_id != "SELECT"), None)
-            tier = pinned0.tier if pinned0 else "unknown"
-            for c in cat:
-                if c.model_id in have:
-                    continue
-                if self._visible(self._catalog_probe(prov, c, tier)):
-                    vis += 1
-                else:
-                    hidden += 1
+        # 0.50.8: the count comes from the ONE shared function the About stats use too —
+        # the subheadline and About can never disagree (was an inline copy that drifted).
+        vis, hidden = remote_visibility_counts(self.settings, self.agents, self.catalogs)
         return f"{vis} model(s) visible  (hidden: {hidden})"
 
     def __init__(self, settings: Settings, agents: list[RemoteAgent] | None = None, owner: str = DIRECT_ROOT):
@@ -1602,12 +1639,9 @@ class RemoteScreen(Screen):
 
     # --- live provider catalogs (pinned aliases first, then everything the provider lists) ---
     def _catalog_probe(self, prov: str, c, tier: str) -> RemoteAgent:
-        """The probe agent a catalog row is judged and rendered through — ONE construction
-        site, so the subheadline counts can never disagree with the rendered rows."""
-        return RemoteAgent(f"{CATALOG_PREFIX}{prov}:{c.model_id}", prov, c.model_id, tier,
-                           local_capable=self._catalog_local_capable(prov, c.model_id),
-                           old=self._catalog_old(prov, c.model_id),
-                           model_id=c.model_id)
+        """The probe agent a catalog row is judged and rendered through — delegates to the
+        module-level construction site (0.50.8) so counts can never disagree with rows."""
+        return _catalog_probe_agent(self.settings, prov, c, tier)
 
     def _catalog_items(self, prov: str, pinned: list) -> list:
         cat = self.catalogs.get(prov)
@@ -1792,21 +1826,9 @@ class RemoteScreen(Screen):
         return "\n".join([base, *filter(None, notices)])
 
     def _visible(self, agent: RemoteAgent) -> bool:
-        s = self.settings
-        # A model whose provider has no saved key cannot launch, so it is not listed at all.
-        if not agent.has_key:
-            return False
-        if agent.tier == "trial" and not s.include_trials:
-            return False
-        if agent.local_capable and not s.local_capable_shown:
-            return False
-        if agent.broken and not s.show_broken:
-            return False
-        # The age filter (T6): only catalog probes carry old=True — pinned registry rows
-        # have no dates and are never hidden by it.
-        if agent.old and not s.show_old:
-            return False
-        return True
+        # 0.50.8: delegates to the module-level _agent_visible (one source for the screen
+        # and the shared counting function).
+        return _agent_visible(self.settings, agent)
 
     def hidden_count(self) -> int:
         return sum(1 for a in self.agents if not self._visible(a) and a.model_id != "SELECT")

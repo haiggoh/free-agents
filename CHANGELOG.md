@@ -44,7 +44,12 @@
   copies a row's launch command to the clipboard (it had no copy at all; Ctrl+C just quit).
   Tests: `tests/test_picker_copy_0508.py` (2 pilot tests, mutation-checked: binding removed /
   copy disabled → red) + `tests/test_csl_menu.sh` section 11 (stubbed pbcopy).
-- (Task 5) About remote count == remote picker subheadline
+- About's remote model numbers now come from the SAME counting function as the remote picker
+  subheadline (`m.remote_visibility_counts`), over the same data (roster + the catalogs the
+  remote screen would see: disk cache + this session's fetches) — the two can no longer
+  disagree, including mid-load (both count landed rows). Tests:
+  `tests/test_picker_about_parity_0508.py` (3 tests incl. a pilot end-to-end; mutation:
+  agents-only subheadline → 3 red).
 - (Task 7) `bin/launch-remote-window.sh` + handover SKILL.md prompt-link flip
 
 ## [0.50.7] — 2026-11-03

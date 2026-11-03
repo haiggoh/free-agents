@@ -955,14 +955,20 @@ class Picker(App):
             pass
         try:
             agents = self.cache.get("remote") or []
-            hidden_prov = set(getattr(self.settings, "hidden_providers", None) or [])   # 0.50.1
-            agents = [a for a in agents if a.provider not in hidden_prov]
             provs = sorted({a.provider for a in agents if a.has_key})
             st["providers"] = ", ".join(provs) if provs else "none"
             if agents:
                 lane = m.RemoteScreen(self.settings, agents)
-                st["remote_visible"] = sum(1 for a in agents if lane._visible(a) and a.model_id != "SELECT")
-                st["remote_hidden"] = lane.hidden_count()
+                # 0.50.8: About counts through the ONE shared function the RemoteScreen
+                # subheadline uses, over the SAME data — roster + the catalogs the remote
+                # screen would see (disk cache + this session's fetches). Counts the rows
+                # that have landed, so parity holds even mid-load.
+                lane.load_cached_catalogs()
+                for prov, rows in getattr(self, "catalog_rows", {}).items():
+                    if rows:
+                        lane.catalogs[prov] = list(rows)
+                st["remote_visible"], st["remote_hidden"] = m.remote_visibility_counts(
+                    self.settings, lane.agents, lane.catalogs)
         except Exception:
             pass
         rl = getattr(self.settings, "rate_limiter", None) or {}
