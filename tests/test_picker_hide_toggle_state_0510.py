@@ -155,5 +155,40 @@ class RemoteHomeRow(PilotCase):
         self.run_picker(s)
 
 
+class CloudProbeVerdictSurfaced(unittest.TestCase):
+    """0.51.0 item F: the Cloud Session Configuration "e" probe row must not look like a no-op —
+    its verdict (refused on a free lane / not-eligible / eligible / unknown) is flashed and, for
+    refused, shown in the info box."""
+
+    def _screen(self):
+        from picker_harness import ROOT
+        sys.path.insert(0, str(ROOT / "bin"))
+        import session_picker_model as m
+        flashes = []
+        s = m.Settings()
+        s.on_flash = lambda msg: flashes.append(str(msg))
+        return m, m.CloudConfigScreen(s), flashes
+
+    def _probe(self, scr, payload):
+        from unittest import mock
+        fake = mock.Mock(stdout=payload, stderr="")
+        with mock.patch("subprocess.run", return_value=fake):
+            scr._run_probe()
+
+    def test_refusal_is_flashed_and_shown_in_infobox(self):
+        m, scr, flashes = self._screen()
+        self._probe(scr, '{"verdict": "refused", "evidence": "this shell is a free lane (http://localhost:4141) — nothing to measure"}')
+        self.assertEqual(scr.settings.eligibility["verdict"], "refused")
+        self.assertTrue(any("refused" in f and "free lane" in f for f in flashes),
+                        f"refusal must be flashed visibly, got {flashes}")
+        self.assertIn("refused", scr.info_text(None).lower())
+
+    def test_not_eligible_flashes_verdict(self):
+        m, scr, flashes = self._screen()
+        self._probe(scr, '{"verdict": "not-eligible", "evidence": "safety notice in stream"}')
+        self.assertTrue(any("not-eligible" in f for f in flashes), flashes)
+        self.assertIn("Cost note", scr.info_text(None))
+
+
 if __name__ == "__main__":
     unittest.main()

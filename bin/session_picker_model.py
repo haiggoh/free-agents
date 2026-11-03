@@ -2156,7 +2156,9 @@ class CloudConfigScreen(Screen):
 
     def _run_probe(self):
         """Row e: the user CONFIRMED the small request (the ConfirmPanel path asks before this
-        runs). The probe is cached; its verdict feeds the cost box."""
+        runs). The probe is cached; its verdict feeds the cost box. 0.51.0 (user: on a free lane
+        the row looked like a no-op): the verdict is always SURFACED as a flash, so a refusal
+        (free lane — nothing to measure) is visible instead of silent."""
         import subprocess as sp
         probe_py = Path(__file__).resolve().parent / "fa-eligibility-probe.py"
         r = sp.run([sys.executable, str(probe_py), "--json"],
@@ -2165,6 +2167,10 @@ class CloudConfigScreen(Screen):
             self.settings.eligibility = json.loads(r.stdout)
         except ValueError:
             self.settings.eligibility = {"verdict": "unknown", "evidence": (r.stderr or r.stdout)[:200]}
+        verdict = (self.settings.eligibility or {}).get("verdict", "unknown")
+        evidence = str((self.settings.eligibility or {}).get("evidence", ""))
+        if self.settings.on_flash:
+            self.settings.on_flash(f"Auto-mode probe: {verdict}" + (f" — {evidence[:80]}" if evidence else ""))
 
     def info_text(self, item_id: str | None) -> str:
         """The three routing modes, each with its one-line contract (plain Action rows pass
@@ -2172,6 +2178,9 @@ class CloudConfigScreen(Screen):
         ONLY when the cached verdict is not-eligible (A3: facts, only for users it applies to)."""
         extra = ""
         el = self.settings.eligibility
+        if el and el.get("verdict") == "refused":
+            extra = ("\n\nProbe refused: this shell is a free lane — nothing to measure "
+                     "(cached verdict; run it from a paid/cloud shell to measure).")
         if el and el.get("verdict") == "not-eligible":
             extra = ("\n\nCost note: on this setup auto mode's safety checks are billed as normal "
                      "token usage. Bypass with allow/deny rules avoids those calls; the lasting fix "
