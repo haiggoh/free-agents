@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 RS="$ROOT/bin/remote-session.sh"
 HV="$ROOT/bin/handover-verify.sh"
-ALIAS="nvidia-glm53-full-thinking"   # resolves with a catalog read only, no generation
+ALIAS="nvidia-glm53"   # resolves with a catalog read only, no generation (0.50.7: the -thinking variant rows are gone — one entry per model)
 passed=0; failed=0
 # Two call shapes:  check <rc> -eq <want> "<label>"     (a comparison)
 #                   check <0|1>      "<label>"          (an already-computed verdict)

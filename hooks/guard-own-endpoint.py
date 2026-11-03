@@ -306,21 +306,21 @@ SELF_TESTS = [
     # C0 (v0.46.0): an agent-side launch WITHOUT its first prompt starts an idle session
     # (measured twice on 2026-10-25 — the Step 5 launch, then this GLM launch). The user's
     # own picker/shell launches never pass through this hook, so they are unaffected.
-    ("http://localhost:4141", "remote-session.sh nvidia-glm53-full-thinking", False),
+    ("http://localhost:4141", "remote-session.sh nvidia-glm53-full", False),
     ("http://localhost:4141",
-     'sudo-in-terminal.sh --command "remote-session.sh nvidia-glm53-thinking --effort high"', False),
-    ("http://localhost:4141", "open -a Terminal remote-session.sh nvidia-glm53-thinking", False),
+     'sudo-in-terminal.sh --command "remote-session.sh nvidia-glm53 --effort high"', False),
+    ("http://localhost:4141", "open -a Terminal remote-session.sh nvidia-glm53", False),
     ("http://localhost:4141",
-     "osascript -e 'do script \"remote-session.sh nvidia-glm53-thinking\"'", False),
+     "osascript -e 'do script \"remote-session.sh nvidia-glm53\"'", False),
     ("http://localhost:4141",
-     "remote-session.sh nvidia-glm53-thinking --prompt-file ~/.claude/plans/handoff.md", True),
+     "remote-session.sh nvidia-glm53 --prompt-file ~/.claude/plans/handoff.md", True),
     ("http://localhost:4141",
-     "remote-session.sh nvidia-glm53-thinking --prompt 'read the handoff first'", True),
+     "remote-session.sh nvidia-glm53 --prompt 'read the handoff first'", True),
     ("http://localhost:4141", "remote-session.sh --list", True),
     ("http://localhost:4141", "remote-session.sh --help", True),
-    ("http://localhost:4141", "remote-session.sh --dry-run glm-thinking", True),
-    ("http://localhost:4141", "remote-session.sh --verify glm-thinking", True),
-    ("http://localhost:4141", "remote-session.sh --models glm-thinking", True),
+    ("http://localhost:4141", "remote-session.sh --dry-run nvidia-glm53", True),
+    ("http://localhost:4141", "remote-session.sh --verify nvidia-glm53", True),
+    ("http://localhost:4141", "remote-session.sh --models nvidia-glm53", True),
     ("http://localhost:4141", "remote-session.sh --inventory", True),
     ("http://localhost:4141", "remote-session.sh --stop 4145", True),  # not this session's port
     ("http://localhost:4141", "remote-session.sh --swap-model 4145 other-alias", True),
@@ -335,7 +335,7 @@ SELF_TESTS = [
     # ...while a real launch by path, or with a dotted alias, is still caught.
     ("http://localhost:4141",
      "$HOME/x/bin/remote-session.sh gemini-3.8-flash", False),
-    ("http://localhost:4141", "cd /tmp && bin/remote-session.sh nvidia-glm53-thinking", False),
+    ("http://localhost:4141", "cd /tmp && bin/remote-session.sh nvidia-glm53", False),
     # Prose that MENTIONS the script (a commit message, an echo): the next word is not a
     # roster alias, and an unknown alias exits 2 before anything starts, so it cannot
     # produce an idle session (false positive measured 2026-10-27 on a commit message).
@@ -343,7 +343,7 @@ SELF_TESTS = [
      'git commit -m "fix: naming remote-session.sh as a file is not a launch"', True),
     ("http://localhost:4141", "echo 'then remote-session.sh launches it'", True),
     # A QUOTED alias is still a launch (and must not crash the check into failing open).
-    ("http://localhost:4141", 'remote-session.sh "nvidia-glm53-thinking"', False),
+    ("http://localhost:4141", 'remote-session.sh "nvidia-glm53"', False),
     # FP measured 2026-10-31: the rule TEXT inside a quoted argument of an UNRELATED
     # command is not a kill/stop. Verb regexes must see only command-position words,
     # so quoted contents are masked before matching (the port search stays on the raw

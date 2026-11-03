@@ -205,15 +205,17 @@ class SizeSortAndLabelTests(unittest.TestCase):
         self.assertNotIn("· 8B", labels["g-y"])                 # name already states it: deduped
 
     def test_nemotron_ultra_ranks_behind_stepfun_and_deepseek(self):
-        # User 2026-10-31: in the hand-curated NVIDIA order, Nemotron 3 Ultra (both variants)
-        # comes AFTER StepFun Step 5 and DeepSeek V4.1 Flash — both are superior to it.
+        # User 2026-10-31: in the hand-curated NVIDIA order, Nemotron 3 Ultra comes AFTER
+        # StepFun Step 5 and DeepSeek V4.1 Flash — both are superior to it. (0.50.7: the
+        # -thinking variant row no longer exists — one entry per model; thinking is the
+        # picker's `j` toggle — so only the base alias is asserted.)
         # The inventory is generated from config/remote-registry.yaml into
         # config/remote-agents.sh (LA_REMOTE_AGENTS), so assert on the generated file.
         roster = (ROOT / "config" / "remote-agents.sh").read_text(encoding="utf-8")
         order = [ln.split("|", 1)[0].strip().strip('"') for ln in roster.splitlines()
                  if ln.startswith('  "') and "|nvidia|" in ln]
         i = {alias: n for n, alias in enumerate(order)}
-        for variant in ("nvidia-nemotron-ultra", "nvidia-nemotron-ultra-thinking"):
+        for variant in ("nvidia-nemotron-ultra",):
             self.assertIn(variant, i, f"{variant} missing from the nvidia roster")
             self.assertGreater(i[variant], i["nvidia-step5-preview"],
                                f"{variant} must rank after nvidia-step5-preview: {order}")

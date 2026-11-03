@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/test_picker_lowkey_api_dedupe_0505.py — 0.50.5: the Lowkey API chooser must not
+"""tests/test_picker_lowkey_api_dedupe_0505.py — 0.50.7: the Lowkey API chooser must not
 crash with DuplicateID when the roster lists two aliases for one model.
 
 Root cause (crash 2026-11-02, csl on Lowkey -> "Choose API model…"): the registry still

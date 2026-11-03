@@ -141,29 +141,26 @@ exit 0
         # because its limits are generous with no known DAILY quota (the constraint that
         # ends a Gemini working session), and because real sessions run on it. Changing
         # this line should mean changing the preferred lane on purpose -- not drifting into it.
-        # Order by user preference (2026-10-15, supersedes the 0.15.1 Ultra-first preference):
-        # thinking variants lead (GLM 5.3 Flash, GLM 5.3, Ultra, Super, Lightning), then the
-        # non-thinking variants mirrored (Lightning after Super); Laguna XS follows the
-        # non-thinking block — 33B/3B-active puts it below them by size (poolside.ai).
-        # 2026-10-29: Mistral Large 4 (Le Chonk) leads the hand-curated nvidia list by user
+        # Order by user preference (2026-10-15, supersedes the 0.15.1 Ultra-first preference),
+        # then 2026-10-29: Mistral Large 4 (Le Chonk) leads the hand-curated nvidia list by user
         # decision (GLM 5.3 retired from the NVIDIA API) — supersedes the 2026-10-15 order.
         # 2026-10-31: the GLM 5.3 full rows left the curated order — 410 Gone, EOL
         # 2026-10-28T08:00:00Z (live catalog no longer lists z-ai/glm-5.3); hidden via
         # broken-nvidia-models.json, so they no longer occupy curated positions.
+        # 2026-11-02/03 (0.50.7): ONE ENTRY PER MODEL — the -thinking variant rows are gone
+        # (they were duplicate model_ids and crashed the picker with DuplicateID); thinking is
+        # now the picker's `j` toggle, not a second roster row. The surviving base aliases keep
+        # their curated positions: GLM 5.3 Flash, then stepfun + deepseek above Nemotron 3 Ultra
+        # (user 2026-10-24/31 — both are superior to it), then the Super/Lightning/Laguna block
+        # (33B/3B-active puts Laguna below them by size, poolside.ai).
         self.assertEqual(rows[0][0], 'nvidia-mistral-large4')
-        self.assertEqual(rows[1][0], 'nvidia-glm53-thinking')
-        self.assertEqual(rows[2][0], 'nvidia-nemotron3-thinking')
-        self.assertEqual(rows[3][0], 'nvidia-lightning-thinking')
-        self.assertEqual(rows[4][0], 'nvidia-glm53')
-        # stepfun + deepseek above BOTH Nemotron 3 Ultra variants (user 2026-10-24 for the base
-        # alias, 2026-10-31 extended to the thinking variant — both are superior to it)
-        self.assertEqual(rows[5][0], 'nvidia-step5-preview')
-        self.assertEqual(rows[6][0], 'nvidia-deepseek-v4')
-        self.assertEqual(rows[7][0], 'nvidia-nemotron-ultra-thinking')
-        self.assertEqual(rows[8][0], 'nvidia-nemotron-ultra')
-        self.assertEqual(rows[9][0], 'nvidia-nemotron3')
-        self.assertEqual(rows[10][0], 'nvidia-lightning')
-        self.assertEqual(rows[11][0], 'nvidia-laguna')
+        self.assertEqual(rows[1][0], 'nvidia-glm53')
+        self.assertEqual(rows[2][0], 'nvidia-step5-preview')
+        self.assertEqual(rows[3][0], 'nvidia-deepseek-v4')
+        self.assertEqual(rows[4][0], 'nvidia-nemotron-ultra')
+        self.assertEqual(rows[5][0], 'nvidia-nemotron3')
+        self.assertEqual(rows[6][0], 'nvidia-lightning')
+        self.assertEqual(rows[7][0], 'nvidia-laguna')
         self.assertEqual(rows[0][1], 'nvidia')
         # NVIDIA occupies the whole leading block; Gemini follows as tier 2 rather than vanishing.
         leading = list(itertools.takewhile(lambda r: r[1] == 'nvidia', rows))
@@ -1043,7 +1040,7 @@ with open(os.environ['CLAUDE_MAXOUT_ENV'],'w') as f:
 
         def child_value(*extra):
             capture.unlink(missing_ok=True)
-            result = self.run_cli('nvidia-nemotron-ultra-thinking', *extra, '-p', 'fixture prompt')
+            result = self.run_cli('nvidia-nemotron-ultra', *extra, '-p', 'fixture prompt')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(capture.exists(), 'claude was never launched')
             return capture.read_text(), result.stderr

@@ -1,3 +1,28 @@
+## [0.50.8] — 2026-11-03
+
+### Fixed — picker DuplicateID crash and duplicate model rows, fixed at both the render and the data root (renumbered from the reserved 0.50.5; 0.50.6 and the ship-gate 0.50.7 both shipped on main first, so this bundle ships as 0.50.8 — a lower number is never seen as an update)
+
+- `bin/session_picker_model.py` `LowkeyScreen.set_models` dedupes the api group by
+  `(provider, model_id)`, survivor = first non-"-thinking" alias, so the Textual OptionList can
+  never be handed duplicate option ids (the 2026-11-02 crash when pressing "c" then "a").
+  Tests: `tests/test_picker_lowkey_api_dedupe_0505.py` (5 tests, mutation-checked).
+- `bin/remote-registry-generate.py` `validate()` now rejects duplicate `(provider, model_id)`
+  ("one entry per model"); the 7 leftover `-thinking` rows were dropped from
+  `config/remote-registry.yaml` and `config/remote-registry.json`, `config/remote-agents.sh`
+  (45 entries, 0 duplicate model keys, `--check` OK) regenerated; `config/broken-nvidia-models.json`
+  keeps the glm53-full EOL 2026-10-28T08:00:00Z evidence with its entry removed; README
+  -thinking mentions removed. Tests: `tests/test_remote_registry_generated.py`,
+  `tests/test_glm53_retired_0493.py`.
+
+### Changed — picker async load, row param sizes, copy in csl, About parity, launcher + handover link (in progress at renumber time; completed bullets land below before ship)
+
+- (Task 1) async per-provider load order with per-group loading animation
+- (Task 2) startup perf reconciled with CHANGELOG claims
+- (Task 3) parameter size in every nvidia row name + infobox name dedupe + large→small sort
+- (Task 4) copy unblocked under `csl`
+- (Task 5) About remote count == remote picker subheadline
+- (Task 7) `bin/launch-remote-window.sh` + handover SKILL.md prompt-link flip
+
 ## [0.50.7] — 2026-11-03
 
 ### Fixed — the ship gate deselects load-sensitive tests on a loaded shared box
@@ -13,6 +38,7 @@
 - `tests/test_loadscale.py`: two new pins — the gate command itself must carry the
   deselect, and the memguard flake must be marked (exactly that test, not the module).
   Both mutation-checked (removing `test_cmd` or the mark turns them red).
+
 ## [0.50.6] — 2026-11-03
 
 ### Fixed — one stalled preference no longer eats the whole dispatch wall-clock cap
@@ -66,8 +92,8 @@ daemons at ~350% CPU). All 4 passed on `main` when run alone, so each one was tr
 - Waypoint `free-agents-dispatch-a`. Mutation-tested: 7 mutations across the budget, the ceiling,
   the stall flag, the subprocess bound, the address order, the per-address timeout and the
   connection hook, each caught by a test.
-- Version note: 0.50.5 is the picker duplicate-ID fix, still on its own branch; it ships after this
-  one under a newer number.
+- Version note: 0.50.5 was the picker duplicate-ID fix, still on its own branch; it ships after
+  this one as 0.50.7 under a newer number.
 
 ## [0.50.4] — 2026-11-02
 
