@@ -168,6 +168,9 @@ class PilotCase(_StubbedEnv):
                 h = PilotHelper(self, app, pilot)
                 await h.settle()
                 await scenario(app, pilot, h)
+            # 0.53.0: stop and join the daemon background threads BEFORE the tempdir cleanup
+            # (addCleanup) runs — a live stats thread racing rmtree was the Errno 66 flake.
+            app.stop_background()
             return app
         return asyncio.run(main())
 

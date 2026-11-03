@@ -743,6 +743,8 @@ class Picker(App):
         # class attribute 786d487 set, so Apple Terminal still got LinuxDriver (stray `p`).
         # None = let Textual pick its default driver.
         super().__init__(driver_class=_DRIVER_CLASS, ansi_color=True)
+        self._bg_stop = None       # 0.53.0: set in on_mount; see stop_background()
+        self._bg_threads = []
         self.theme = "textual-ansi"
         # The verdict memo is per picker session: a fresh app must not inherit another
         # app's fit/age/param verdicts (measured 2026-10-28: the full suite's age-filter
@@ -950,8 +952,27 @@ class Picker(App):
         self.call_after_refresh(self._prefetch, ("local", "remote"))
         self.set_interval(LOADING_INTERVAL, self._tick_loading)
         import threading
-        threading.Thread(target=self._detect_hw_async, daemon=True).start()
-        threading.Thread(target=self._gather_stats_async, daemon=True).start()
+        # 0.53.0: track the daemon background threads and give them a stop event, so
+        # stop_background() can join them before a test's temp dirs are removed
+        # (flake-pre-existing-pty-picker: Errno 66 rmtree race with _gather_stats_async).
+        self._bg_stop = threading.Event()
+        self._bg_threads = []
+        for target in (self._detect_hw_async, self._gather_stats_async):
+            t = threading.Thread(target=target, daemon=True)
+            self._bg_threads.append(t)
+            t.start()
+
+    def stop_background(self, timeout: float = 5.0):
+        """0.53.0: signal and join the daemon background threads (About stats, hw detect,
+        prefetch, catalog warm-up). Call after run_test() exits, BEFORE any temp-dir cleanup —
+        a still-running stats thread calling call_from_thread on a closed loop is what raced
+        the TemporaryDirectory cleanup (Errno 66)."""
+        ev = getattr(self, "_bg_stop", None)
+        if ev is not None:
+            ev.set()
+        for t in getattr(self, "_bg_threads", []):
+            if t.is_alive():
+                t.join(timeout)
 
     def _gather_stats_async(self):
         """About-screen usage stats, gathered in the background (never blocks the first
@@ -969,9 +990,11 @@ class Picker(App):
         # so the About counts are real, never a false 0 from an empty-not-yet-loaded cache.
         import time as _time
         for _ in range(40):
+            if self._bg_stop is not None and self._bg_stop.is_set():
+                return                      # 0.53.0: stopping — never touch the closed loop
             if self.cache.get("local") is not None and self.cache.get("remote") is not None:
                 break
-            _time.sleep(0.5)
+            _time.sleep(0.1)
         try:
             models = self.cache.get("local") or []
             st["local_models"] = len([x for x in models if not getattr(x, "auto_scanned", False)])
@@ -1010,7 +1033,10 @@ class Picker(App):
             self.settings.stats = st
             if isinstance(self.screen_model, m.AboutScreen):
                 self.render_model()
-        self.call_from_thread(apply)
+        try:
+            self.call_from_thread(apply)
+        except RuntimeError:
+            pass    # 0.53.0: loop already closed during shutdown — the flake's warning source
 
     def _detect_hw_async(self):
         """Background hardware detection: runs after the menu is already painted, caches
@@ -1030,7 +1056,10 @@ class Picker(App):
             # keys, 2026-10-29).
             if before != after:
                 self.render_model()
-        self.call_from_thread(apply)
+        try:
+            self.call_from_thread(apply)
+        except RuntimeError:
+            pass    # 0.53.0: loop closed during shutdown
 
     # --- background inventory ----------------------------------------------------------------
     LOADERS = {"local": "load_local_models", "remote": "load_remote_agents", "catalog": "load_catalog"}
@@ -1043,7 +1072,9 @@ class Picker(App):
             if kind in self.cache or kind in self._loading:
                 continue                      # cached, or a load is already running (coalesce)
             self._loading.add(kind)
-            threading.Thread(target=self._load_in_thread, args=(kind,), daemon=True).start()
+            t = threading.Thread(target=self._load_in_thread, args=(kind,), daemon=True)
+            self._bg_threads.append(t)      # 0.53.0: tracked for stop_background()
+            t.start()
 
     def _load_in_thread(self, kind):
         try:
@@ -1057,12 +1088,18 @@ class Picker(App):
                     note = auto_sync_registry(data)
                     if note:
                         data = load_local_models()         # the registry changed: read it again
-                        self.call_from_thread(self._warn_here, note)
+                        try:
+                            self.call_from_thread(self._warn_here, note)
+                        except RuntimeError:
+                            pass    # 0.53.0: loop closed during shutdown
         except Exception as exc:              # surfaced as a status warning, never swallowed
             # A versions screen shows its own failure in place of "nothing to choose" (_loaded).
             data, err = [], (str(exc) if kind.startswith("versions:")
                              else f"{kind} model list failed to load: {exc}")
-        self.call_from_thread(self._loaded, kind, data, err)
+        try:
+            self.call_from_thread(self._loaded, kind, data, err)
+        except RuntimeError:
+            pass    # 0.53.0: loop closed during shutdown
         # 0.50.8: deliver the rows FIRST (above), then warm the HF cache in the background —
         # the warm-up must never delay a provider's rows (it used to run inside
         # load_remote_catalog, serially, before the rows were returned).
@@ -1070,7 +1107,9 @@ class Picker(App):
                 and os.environ.get("LA_PICKER_HF_LOOKUP", "1") != "0"):
             ids = [c.model_id for c in data][:HF_WARM_LIMIT]
             import threading
-            threading.Thread(target=self._warm_catalog_bg, args=(ids,), daemon=True).start()
+            t = threading.Thread(target=self._warm_catalog_bg, args=(ids,), daemon=True)
+            self._bg_threads.append(t)      # 0.53.0: tracked for stop_background()
+            t.start()
 
     def _warm_catalog_bg(self, model_ids):
         """HF size/age warm-up for a landed catalog, in the background (0.50.8). Re-renders
@@ -1084,7 +1123,10 @@ class Picker(App):
             sm = self.screen_model
             if isinstance(sm, m.RemoteScreen) and getattr(sm, "_choose_model_visible", False):
                 self.render_model()
-        self.call_from_thread(apply)
+        try:
+            self.call_from_thread(apply)
+        except RuntimeError:
+            pass    # 0.53.0: loop closed during shutdown
 
     def _loaded(self, kind, data, err):
         self._loading.discard(kind)

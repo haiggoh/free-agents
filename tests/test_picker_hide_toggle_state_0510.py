@@ -358,6 +358,21 @@ class LowkeyUnifiedList(unittest.TestCase):
         self.assertNotIn("API model", models_rows[0].label)
 
 
+class BackgroundThreadsStopped(PilotCase):
+    """0.53.0 (flake-pre-existing-pty-picker): run_picker must stop+join the daemon background
+    threads before the harness's tempdir cleanup — that join is what prevents the Errno 66
+    rmtree race. Mutation guard: without the stop_background() call, _bg_stop is never set."""
+
+    def test_bg_threads_stopped_and_joined_after_run(self):
+        async def s(app, pilot, h):
+            pass
+        app = self.run_picker(s)
+        self.assertTrue(app._bg_stop is not None and app._bg_stop.is_set(),
+                        "stop_background() must set the stop event")
+        alive = [t for t in app._bg_threads if t.is_alive()]
+        self.assertEqual(alive, [], f"background threads still alive after run: {alive}")
+
+
 class RightClickPty(PTYCase):
     """0.52.1: right-click copy through the REAL terminal event path (SGR mouse sequences into
     the pty, pbcopy recorder on PATH) — the 0.51.0 test invoked the handler directly, which
