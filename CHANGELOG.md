@@ -1,3 +1,23 @@
+## [0.53.0] — 2026-11-04
+
+### Fixed
+- **PTY teardown flake (root fix)**: the picker's daemon background threads are tracked and
+  joined via `stop_background()` before test tempdirs are removed, and every `call_from_thread`
+  site is guarded against the closed loop — the Errno 66 rmtree race is gone, not just retried.
+  Mutation-checked (removing the harness stop call goes red).
+- **One Result dataclass**: `remote_provider_registry` owns it (with `quota_headers`);
+  `remote_provider_core` re-exports it — the duplicate had drifted. The script-style
+  `tests/remote/test_remote_fallback.py` is now gated (new `test_remote_fallback_gate.py` runs
+  it and requires exit 0); its `or True` check can fail now; the pyright
+  reportOptionalIterable in agent-fallback is fixed.
+
+### Changed
+- **Live provider qualification (bounded, 2026-11-04)**: one tiny generation per candidate on
+  the free NVIDIA account — `minimaxai/minimax-m3.1-flash` qualified (HTTP 200) and is pinned as
+  `nvidia-minimax-m3-1-flash`; `01-ai/yi-large` and `microsoft/kosmos-2` answered HTTP 404
+  "not provisioned for this account" and are on the broken list with that evidence
+  (account_provisioning). Registry regenerated (46 entries), `--check` OK, 20/20 registry tests.
+
 ## [0.52.1] — 2026-11-03
 
 ### Fixed (user-tested 2026-11-03: the 0.51.0/0.52.0 changelog claims below were paper-only — tests now capture the real behavior)

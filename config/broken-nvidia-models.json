@@ -1,7 +1,23 @@
 {
   "description": "NVIDIA models that are known to be non-functional on NVIDIA NIM API. Distinction: 'broken' = model endpoint fails (timeout/404) regardless of account tier; 'paid_only' = model works but requires paid subscription (separate tier in remote-agents.sh). These models are hidden by default via --show-broken / 'u' toggle, NOT by --show-paid-only / 'p' toggle.",
-  "last_updated": "2026-11-02",
+  "last_updated": "2026-11-04",
   "models": [
+    {
+      "model_id": "01-ai/yi-large",
+      "alias": "nvidia-yi-large",
+      "reason": "HTTP 404 Not Found — function not provisioned for this NVIDIA account ('Function ... Not found for account ...'), same as kimi-k2.6: an account provisioning issue, not a tier restriction.",
+      "status": "broken",
+      "failure_mode": "account_provisioning",
+      "evidence": "2026-11-04 bounded qualification dispatch (single tiny generation, free account): HTTP 404 'Function not found for account'. Catalog GET lists the id, but no generation route exists for this account."
+    },
+    {
+      "model_id": "microsoft/kosmos-2",
+      "alias": "nvidia-kosmos-2",
+      "reason": "HTTP 404 Not Found — function not provisioned for this NVIDIA account. (Also 1.7B params, so local-capable and hidden from the API model list by default since 0.52.1.)",
+      "status": "broken",
+      "failure_mode": "account_provisioning",
+      "evidence": "2026-11-04 bounded qualification dispatch (single tiny generation, free account): HTTP 404 'Function not found for account'."
+    },
     {
       "model_id": "moonshotai/kimi-k3",
       "alias": "nvidia-kimi-k3",

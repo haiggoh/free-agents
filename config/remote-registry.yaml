@@ -442,6 +442,18 @@ entries:
       sessions (user 2026-10-31).
     autocompact_default: 1m
 
+  - alias: nvidia-minimax-m3-1-flash
+    provider: nvidia
+    model_id: minimaxai/minimax-m3.1-flash
+    display: MiniMax M3.1 Flash
+    tier: unknown
+    notes: >-
+      QUALIFIED 2026-11-04 (0.53.0 live qualification, waypoint 0-52-0-live-qualification-of):
+      one bounded dispatch generation on the free NVIDIA account returned HTTP 200 with a
+      correct answer. 428B total / 23B active (open weights; PARAM_COUNT_OVERRIDES). Not
+      local-capable at 4-bit on this device, so it stays in the API list.
+    autocompact_default: "-"
+
   - alias: nvidia-glm53
     provider: nvidia
     model_id: z-ai/glm-5.3-flash
