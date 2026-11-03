@@ -1079,6 +1079,16 @@ class Picker(App):
                 self._set_policy(getattr(self.screen_model, "policy", ""))
                 self.query_one("#version", Static).update(getattr(self.screen_model, "version_line", ""))
         self.cache[kind] = data
+        if kind == "remote" and data:
+            # 0.51.0: pinned inventory rows get the SAME local-capable verdict as catalog
+            # rows, so the remote picker can filter them (default) / sort them last (shown) —
+            # before this only catalog rows were ever judged, so Laguna XS & co. showed.
+            for a in data:
+                if not a.local_capable:
+                    try:
+                        a.local_capable = bool(catalog_local_capable(a.provider, a.model_id or a.alias))
+                    except Exception:
+                        pass
         if err and err not in self.state_warnings and not kind.startswith("versions:"):
             self.state_warnings.append(err)
         sm = self.screen_model
@@ -1093,7 +1103,7 @@ class Picker(App):
         elif isinstance(sm, m.LowkeyScreen) and kind == "remote":
             # 0.50.1: the API-model chooser is fed from the remote inventory — fill it when
             # the inventory lands (the screen may have been built before it was cached).
-            sm.api_agents = [a for a in (data or []) if a.model_id and a.model_id != "SELECT"]
+            sm.api_agents = m.api_agents_for(sm.settings, data)
             sm.set_models(list(sm.models.values()))
             self._rerender_keep_focus()
         if kind == "remote":
@@ -1378,6 +1388,21 @@ class Picker(App):
             sm.loading_frame = self._loading_frame
             sm._fetch_in_flight = {a.provider for a in (self.cache.get("remote") or [])
                                    if f"rcat:{a.alias}" in getattr(self, "_loading", set())}
+        if isinstance(sm, m.LowkeyScreen):
+            # 0.51.0 (user: "lowkey can't load the remote model list"): the API chooser must
+            # not depend on which won the race, screen-build or inventory-load — fill from
+            # the cache at render time when the screen was built empty.
+            remote = self.cache.get("remote") or []
+            filled_api = False
+            if remote and not sm.api_agents:
+                sm.api_agents = m.api_agents_for(sm.settings, remote)
+                filled_api = True
+            local = self.cache.get("local") or []
+            if local and not sm._models_loaded:
+                sm.set_models(local)
+                sm._models_loaded = True
+            elif filled_api:
+                sm.set_models(list(sm.models.values()))
 
         # Check if screen has accordion with groups (RuntimeManagerScreen has accordion but no groups)
         has_groups = hasattr(sm, 'accordion') and sm.accordion is not None and len(sm.accordion.groups) > 0

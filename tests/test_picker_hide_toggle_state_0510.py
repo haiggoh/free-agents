@@ -190,5 +190,67 @@ class CloudProbeVerdictSurfaced(unittest.TestCase):
         self.assertIn("Cost note", scr.info_text(None))
 
 
+class LowkeyApiGroup(PilotCase):
+    """0.51.0 item G: lowkey's API chooser must actually load the remote roster (a row with an
+    empty model_id is keyed on its alias, not dropped) regardless of build/load ordering."""
+
+    def test_api_group_filled_from_remote_inventory(self):
+        async def s(app, pilot, h):
+            await h.pilot.pause(2.5)
+            sm = app.screen_model
+            self.assertEqual(len(sm.api_agents), 3,
+                             f"api_agents must come from the remote roster: {sm.api_agents}")
+            api = next(g for g in sm.accordion.groups if g.id == "api")
+            ids = [i.id for i in api.items]
+            self.assertEqual(set(ids), {"nvidia:nvidia-a", "gemini:gemini-flash", "cerebras:cerebras-oss"},
+                             f"api rows keyed provider:model-or-alias: {ids}")
+            self.assertTrue(all("@" not in i and not i.endswith(":") for i in ids), ids)
+        self.run_picker(s, start="lowkey")
+
+
+class RemoteLocalCapableFilterSort(unittest.TestCase):
+    """0.51.0 (user, corrected to the REMOTE session picker): local-capable models (Laguna XS
+    33B, Arctic Embed 0.3B, Kosmos 2 1.7B — small enough to fit in RAM) must be FILTERED OUT
+    of the remote model list by default, and when shown they sit at the very BOTTOM of their
+    provider group."""
+
+    def _model(self):
+        from picker_harness import ROOT
+        sys.path.insert(0, str(ROOT / "bin"))
+        import session_picker_model as m
+        return m
+
+    def _screen(self, agents, shown):
+        m = self._model()
+        s = m.Settings()
+        s.local_capable_shown = shown
+        capable = {a.model_id for a in agents if a.local_capable}
+        s.catalog_local_capable = lambda p, mid: mid in capable
+        return m.RemoteScreen(s, agents=agents)
+
+    def _agents(self):
+        m = self._model()
+        return [
+            m.RemoteAgent("laguna", "nvidia", "Laguna XS", "unknown", local_capable=True, model_id="laguna"),
+            m.RemoteAgent("nvidia-a", "nvidia", "NVIDIA A", "unknown", model_id="nvidia-a"),
+            m.RemoteAgent("gemini-flash", "gemini", "Gemini Flash", "renewing_free", model_id="gemini-flash"),
+            m.RemoteAgent("arctic", "nvidia", "Arctic Embed", "unknown", local_capable=True, model_id="arctic"),
+        ]
+
+    def test_local_capable_hidden_by_default(self):
+        scr = self._screen(self._agents(), shown=False)
+        for g in scr.accordion.groups:
+            ids = [i.id for i in g.items]
+            self.assertNotIn("laguna", ids)
+            self.assertNotIn("arctic", ids)
+
+    def test_when_shown_local_capable_sit_at_bottom_of_group(self):
+        scr = self._screen(self._agents(), shown=True)
+        nvidia = next(g for g in scr.accordion.groups if g.id == "nvidia")
+        ids = [i.id for i in nvidia.items]
+        self.assertEqual(ids, ["nvidia-a", "laguna", "arctic"],
+                         f"local-capable rows must move to the very bottom of their group: {ids}")
+
+
 if __name__ == "__main__":
     unittest.main()

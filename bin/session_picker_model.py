@@ -1457,6 +1457,15 @@ def _agent_visible(settings, agent) -> bool:
     return True
 
 
+def api_agents_for(settings, agents) -> list:
+    """0.51.0: ONE filter for every lowkey API-chooser feed site (constructor, the
+    inventory-landed handler, the render-time fill): SELECT placeholders out, the shared
+    visibility rules in, and a row with an EMPTY model_id is keyed on its alias instead of
+    being dropped — that silent drop is why lowkey showed no API models at all."""
+    return [a for a in (agents or [])
+            if a.model_id != "SELECT" and (a.model_id or a.alias) and _agent_visible(settings, a)]
+
+
 def _catalog_probe_agent(settings, prov: str, c, tier: str) -> RemoteAgent:
     """The probe agent a catalog row is judged and rendered through — ONE construction site,
     so counts can never disagree with rendered rows (0.50.8: module-level for sharing)."""
@@ -1580,6 +1589,11 @@ class RemoteScreen(Screen):
             items = [Item(a.alias, self._pin_row_label(prov, a))
                      for a in pinned]
             items += self._catalog_items(prov, buckets[prov])
+            # 0.51.0 (user): when local-capable rows ARE shown, they sit at the very BOTTOM
+            # of their provider group (by default they are filtered out entirely by
+            # _visible — pinned rows get the verdict annotated in the app's _loaded).
+            items = ([i for i in items if not self._row_capable(prov, i.id)]
+                     + [i for i in items if self._row_capable(prov, i.id)])
             if self.search and not items:
                 continue                       # a search shows only providers with a match
             label = f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})"
@@ -1692,6 +1706,24 @@ class RemoteScreen(Screen):
         """The local-capable verdict for a catalog row (Settings.catalog_local_capable, set by the picker)."""
         fn = getattr(self.settings, "catalog_local_capable", None)
         return bool(fn and fn(prov, model_id))
+
+    def _row_capable(self, prov: str, item_id: str) -> bool:
+        """0.51.0: the local-capable verdict for ANY row of this screen — pinned alias or
+        catalog row — so shown local-capable rows can be sorted to the bottom of the group."""
+        fn = getattr(self.settings, "catalog_local_capable", None)
+        if fn is None:
+            return False
+        if item_id.startswith(CATALOG_PREFIX):
+            model = item_id.split(":", 2)[2]
+        else:
+            agent = next((a for a in self.agents if a.alias == item_id), None)
+            model = (agent.model_id if agent else "") or ""
+        if not model:
+            return False
+        try:
+            return bool(fn(prov, model))
+        except Exception:
+            return False
 
     def _pin_row_label(self, prov: str, a) -> str:
         # Tier and lane tags each carry their own "  · " separator, and BOTH can be empty
@@ -3045,7 +3077,7 @@ class LowkeyScreen(Screen):
         self._models_loaded = False
         # 0.50.0 item 8 (lowkey-any-model-api): the API chooser is REAL — a second accordion
         # group fed from the remote inventory; picking a row selects it for lowkey.
-        self.api_agents = [a for a in (api_agents or []) if a.model_id and a.model_id != "SELECT"]
+        self.api_agents = api_agents_for(self.settings, api_agents)
         self.api_selection = None              # (provider, model_id) once an API row is picked
         self.set_models(models or [])
 
@@ -3071,7 +3103,8 @@ class LowkeyScreen(Screen):
                        for g in by_model.values()]
             groups.append(Group(
                 "api", f"API models ({len(deduped)})",
-                [Item(f"{a.provider}:{a.model_id}", f"{a.display or a.model_id} ({a.provider})")
+                [Item(f"{a.provider}:{a.model_id or a.alias}",
+                      f"{a.display or a.model_id or a.alias} ({a.provider})")
                  for a in deduped]))
         self.accordion.set_groups(groups)
         self.accordion.collapse()              # nothing open until "Choose local model…"
