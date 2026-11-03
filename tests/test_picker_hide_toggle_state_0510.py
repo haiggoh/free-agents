@@ -291,6 +291,56 @@ class RemoteLocalCapableFilterSort(unittest.TestCase):
                          f"local-capable rows must move to the very bottom of their group: {ids}")
 
 
+class LowkeyUnifiedList(unittest.TestCase):
+    """0.52.0 (user): lowkey has ONE "Choose model 📡 🦾" action opening a combined list — the
+    API group plus a third-level "Local models" wrapper group around all family groups. The
+    separate "Choose API model…" row is gone."""
+
+    def _model(self):
+        from picker_harness import ROOT
+        sys.path.insert(0, str(ROOT / "bin"))
+        import session_picker_model as m
+        return m
+
+    def test_combined_list_api_first_local_wrapper_third_level(self):
+        from types import SimpleNamespace
+        m = self._model()
+        agents = [m.RemoteAgent("nvidia-a", "nvidia", "NVIDIA A", "unknown", model_id="nvidia-a")]
+        locals_ = [SimpleNamespace(alias="qwen-3.8-operator", family="qwen"),
+                   SimpleNamespace(alias="llama-4-scout", family="llama")]
+        lk = m.LowkeyScreen(m.Settings(), locals_, api_agents=agents)
+        self.assertEqual([g.id for g in lk.groups()], ["api", "local"])
+        local = next(g for g in lk.groups() if g.id == "local")
+        self.assertTrue(all(isinstance(i, m.Group) for i in local.items),
+                        "family groups must nest inside the Local models group")
+        self.assertEqual([i.id for i in local.items], ["llama", "qwen"])  # alphabetical families
+        # three-level flatten: headers always render; items render for the open branch
+        lk.accordion.expand("api")
+        kinds = [(k, o.id) for k, o in lk.accordion.rows()]
+        for expected in [("group", "api"), ("group", "local"), ("item", "nvidia:nvidia-a")]:
+            self.assertIn(expected, kinds)
+        lk.accordion.expand("local")
+        lk.accordion.expand("qwen")
+        kinds = [(k, o.id) for k, o in lk.accordion.rows()]
+        for expected in [("group", "local"), ("group", "qwen"), ("item", "qwen-3.8-operator")]:
+            self.assertIn(expected, kinds)
+        # is_open walks ancestors: opening qwen also opens its parent "local"
+        self.assertTrue(lk.accordion.is_open("local"))
+        self.assertFalse(lk.accordion.is_open("api"))
+        # selecting a nested local model still resolves through _group_of
+        self.assertEqual(lk.accordion._group_of("llama-4-scout"), "llama")
+
+    def test_single_choose_model_action_no_api_row(self):
+        m = self._model()
+        agents = [m.RemoteAgent("a", "nvidia", "A", "unknown", model_id="a")]
+        lk = m.LowkeyScreen(m.Settings(), [], api_agents=agents)
+        models_rows = [a for a in lk.actions() if a.section == "models"]
+        self.assertEqual(len(models_rows), 1)
+        self.assertEqual(models_rows[0].key, "c")
+        self.assertIn("Choose model", models_rows[0].label)
+        self.assertNotIn("API model", models_rows[0].label)
+
+
 class ClipboardMechanism(PilotCase):
     """0.51.0 regression guard (user 2026-11-03: the 0.50.8 changelog claimed 'copy works under
     csl on both routes' but it did not): copy_to_clipboard must reach the SYSTEM clipboard

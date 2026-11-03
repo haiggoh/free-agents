@@ -777,18 +777,32 @@ class Accordion:
         # In multi-open (search) mode: the groups the USER folded. A regroup recomputes
         # multi_open from this — never from what happened to be open last time.
         self.multi_open_folded: set = set()
+        # 0.52.0: one nesting level (a Group inside a group's items — lowkey's "Local models"
+        # wrapper). child group id -> parent group id; is_open() walks up so opening a nested
+        # group also opens its ancestors.
+        self._parents: dict = {}
 
     def is_open(self, group_id: str) -> bool:
         if self.multi_open is not None:
             return group_id in self.multi_open
-        return group_id == self.open_group
+        cur = self.open_group
+        while cur is not None:
+            if cur == group_id:
+                return True
+            cur = self._parents.get(cur)
+        return False
 
     def set_groups(self, groups: list[Group]):
         self.groups = groups
-        ids = {g.id for g in groups}
+        self._parents = {}
+        for g in groups:
+            for i in g.items:
+                if isinstance(i, Group):
+                    self._parents[i.id] = g.id
+        ids = {g.id for g in groups} | set(self._parents)
         if self.open_group not in ids:
             self.open_group = None
-        if self.selected_id and not any(i.id == self.selected_id for g in groups for i in g.items):
+        if self.selected_id and self._group_of(self.selected_id) is None:
             self.selected_id = None
         if self.selected_id:
             self.open_group = self._group_of(self.selected_id)
@@ -798,12 +812,17 @@ class Accordion:
 
     def _group_of(self, item_id):
         for g in self.groups:
-            if any(i.id == item_id for i in g.items):
-                return g.id
+            for i in g.items:
+                if isinstance(i, Group):
+                    if any(x.id == item_id for x in i.items):
+                        return i.id
+                elif i.id == item_id:
+                    return g.id
         return None
 
     def expand(self, group_id: str) -> bool:
-        if any(g.id == group_id for g in self.groups):
+        all_ids = {g.id for g in self.groups} | set(self._parents)
+        if group_id in all_ids:
             self.open_group = group_id
             if self.multi_open is not None:
                 self.multi_open.add(group_id)
@@ -836,12 +855,19 @@ class Accordion:
         return True
 
     def rows(self):
-        """Flattened visible rows: ('group', Group) headers and ('item', Item) for open ones."""
+        """Flattened visible rows: ('group', Group) headers and ('item', Item) for open ones.
+        0.52.0: a Group nested in another group's items renders as a third-level header."""
         out = []
         for g in self.groups:
             out.append(("group", g))
             if self.is_open(g.id):
-                out.extend(("item", i) for i in g.items)
+                for i in g.items:
+                    if isinstance(i, Group):
+                        out.append(("group", i))
+                        if self.is_open(i.id):
+                            out.extend(("item", x) for x in i.items)
+                    else:
+                        out.append(("item", i))
         return out
 
 
@@ -3069,9 +3095,12 @@ class LowkeyScreen(Screen):
         for mdl in models:
             buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(mdl)
         order = sorted(buckets, key=lambda f: (f == "Other", f.lower()))
-        groups = [
-            Group(f, f"{f} ({len(buckets[f])})", [Item(x.alias, model_names.readable(x.alias)) for x in buckets[f]])
+        # 0.52.0 (user): ONE combined model list — the per-family groups nest as a third
+        # level under a single "Local models" group, next to the API group.
+        family_groups = [
+            Group(f, f"  {f} ({len(buckets[f])})", [Item(x.alias, model_names.readable(x.alias)) for x in buckets[f]])
             for f in order]
+        groups = []
         if self.api_agents:
             # One row per model (user 2026-10-29, reaffirmed 2026-11-02): the roster may list a
             # -thinking alias next to the base alias with the SAME model_id; the base alias
@@ -3084,12 +3113,15 @@ class LowkeyScreen(Screen):
             deduped = [next((x for x in g if not x.alias.endswith("-thinking")), g[0])
                        for g in by_model.values()]
             groups.append(Group(
-                "api", f"API models ({len(deduped)})",
+                "api", f"API models {ec.SESSION_EMOJI_FREE_API_STR} ({len(deduped)})",
                 [Item(f"{a.provider}:{a.model_id or a.alias}",
                       f"{a.display or a.model_id or a.alias} ({a.provider})")
                  for a in deduped]))
+        if family_groups:
+            groups.append(Group(
+                "local", f"Local models {ec.SESSION_EMOJI_LOCAL_STR} ({len(models)})", family_groups))
         self.accordion.set_groups(groups)
-        self.accordion.collapse()              # nothing open until "Choose local model…"
+        self.accordion.collapse()              # nothing open until "Choose model…"
         self._models_loaded = True
 
     def _cycle_effort(self):
@@ -3137,10 +3169,13 @@ class LowkeyScreen(Screen):
         # last), S) Set session name, and the Model settings group LAST. The old
         # "advanced" group is dropped entirely — no action sits in a "settings" section.
         acts = [
-            Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose local model…", self._toggle_choose_model, section="models"),
+            # 0.52.0 (user): ONE "Choose model 📡 🦾" row opens the combined list (api group +
+            # "Local models" wrapper) — the separate "Choose API model…" row is gone (it was a
+            # no-op unless the local list had been opened first).
+            Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose model {ec.SESSION_EMOJI_FREE_API_STR} {ec.SESSION_EMOJI_LOCAL_STR}"
+                        + (" (shown)" if self._choose_model_visible else "…"),
+                   self._toggle_choose_model, section="models"),
         ]
-        if self.api_agents:
-            acts.append(Action("a", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose API model…", self._toggle_choose_api, section="models"))
         acts += [
             Action("m", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Mode: {'Convo' if self.mode == 'convo' else 'One-shot'}",
                    self._toggle_mode, section="main"),

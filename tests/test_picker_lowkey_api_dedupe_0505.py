@@ -95,8 +95,9 @@ class LowkeyApiRenderTests(unittest.TestCase):
             stub.write_text(inventory_stub(dup_inv))
 
             async def scenario(app, pilot, h):
-                await h.press("c")          # "Choose local model…": rows become visible
-                await h.press("a")          # "Choose API model…": opens the api group
+                await h.press("c")          # 0.52.0: "Choose model 📡 🦾…" opens the combined list
+                await h.goto_row("group", "api")
+                await h.press("right")      # expand the API group
                 await pilot.pause()
                 app.render_model()          # explicit re-render: raised DuplicateID pre-fix
                 rows = app.query_one("#rows")

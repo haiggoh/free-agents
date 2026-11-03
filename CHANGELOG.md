@@ -22,6 +22,20 @@
   SELECTION lists only — the provider row and its Open/Add/Show actions stay in the api
   setup screen itself.
 
+### Changed
+- **Lowkey model list is unified** (user 2026-11-03): the separate "Choose API model…" row is
+  gone (it was a no-op unless the local list had been opened first); the single
+  "C) Choose model 📡 🦾" opens one combined list — the API group plus all local family
+  groups nested as a third level under one "Local models 🦾" group (the accordion now
+  supports one nesting level; opening a nested group opens its ancestors).
+- **Multi-key credential aliases** (`bin/remote-keys.sh`): `~/.api_keys/aliases.json` maps a
+  provider to an ordered list of credential file names — the first existing+readable wins,
+  missing aliases fall through to the next, a malformed map or an existing-but-refused
+  alias (symlink/not-owned/empty) aborts loudly naming it, and with no entry the direct
+  file is used exactly as before. The store stays one file per key; key material is never
+  copied; `--resolve` prints the chosen file. 14/14 shell tests
+  (tests/test_remote_keys_aliases.sh).
+
 ## [0.51.0] — 2026-11-03
 
 ### Fixed / changed (user-reported 2026-11-03)
