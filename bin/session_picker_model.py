@@ -1170,7 +1170,6 @@ class LaunchRequest:
 
 
 NEW_MODELS_GROUP = "__new_models__"   # the "Register new local models…" action header
-HOME_ROW_GROUP = "__home__"            # 0.51.0: the "Back to Home" action row at the foot of the remote model list
 
 
 class LocalScreen(Screen):
@@ -1610,13 +1609,6 @@ class RemoteScreen(Screen):
             # No provider key at all: the list is an instruction, not a roster of unusable models.
             groups = [Group("__nokeys__", f"{ec.EMOJI_KEY_STR} No API key saved yet",
                             [Item("__nokeys__:k", "Press K (API keys) to set one up — every listed provider has a free tier")])]
-        if self.owner == HOME_OWNED:
-            # 0.51.0 (user 2026-11-03): Back to Home is a row in the list, exactly two lines
-            # after the last provider (the __sep__ blank row sits between), not an
-            # actions-pane entry by the infobox. The "b" key keeps working via the hidden
-            # nav action (nav_actions below).
-            groups.append(Group("__sep__", "", []))
-            groups.append(Group(HOME_ROW_GROUP, f"{ec.EMOJI_HOME_STR} Back to Home", [], style="action"))
         self.accordion.set_groups(groups)
         if self.search:
             # The one exception to the one-open rule: every matching provider is open, and a
@@ -1897,16 +1889,6 @@ class RemoteScreen(Screen):
 
     def _choose_model_label(self):
         return "Choose model…" if not self._choose_model_visible else "Choose model (shown)"
-
-    def nav_actions(self):
-        acts = super().nav_actions()
-        if self.owner == HOME_OWNED:
-            # 0.51.0: the Back row lives in the model list (see _regroup); hide the pane
-            # entry so it is not shown twice, but keep the "b" key binding.
-            for a in acts:
-                if a.section == "nav":
-                    a.section = "hidden"
-        return acts
 
     def actions(self):
         s = self.settings

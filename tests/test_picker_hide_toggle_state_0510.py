@@ -51,6 +51,39 @@ class HideToggleState(PilotCase):
         self.run_picker(s)
 
 
+class HideSemantics(PilotCase):
+    """User semantics 2026-11-03: the api-setup hide option exists ONLY to hide the provider
+    from the MODEL SELECTION lists — it must never hide the provider from the api setup
+    screen itself (the provider row and its Open/Add/Show actions stay)."""
+
+    def test_hide_keeps_provider_in_api_setup_but_removes_it_from_model_lists(self):
+        async def s(app, pilot, h):
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            await h.goto_row("item", "hide:nvidia")
+            await h.press("enter")
+            await h.pilot.pause(0.4)
+            # the API setup still lists NVIDIA with its actions; the row says Show (hidden)
+            rows = h.labels("rows")
+            self.assertTrue(any(r.lstrip("▾▸ ").startswith("NVIDIA") for r in rows),
+                            f"api setup must keep the provider row: {rows}")
+            self.assertTrue(any("Show nvidia in the choose-model list (currently hidden)" in r for r in rows),
+                            f"toggle row must flip to Show: {rows}")
+            self.assertTrue(any("Open NVIDIA signup page" in r for r in rows), rows)
+            # but the remote model list no longer has the nvidia group
+            await h.press("b")
+            await h.wait_screen("HomeScreen")
+            await h.press("r")
+            await h.wait_screen("RemoteScreen")
+            await h.press("c")
+            await h.wait_for(lambda: bool(h.labels("rows")), "rows loaded")
+            await h.pilot.pause(0.3)
+            sm = app.screen_model
+            self.assertNotIn("nvidia", [g.id for g in sm.accordion.groups],
+                             "hidden provider must be gone from the remote model list")
+        self.run_picker(s)
+
+
 class BackendChooserOrder(PilotCase):
     """0.51.0 item D: on the backend manager the "Choose backend" chooser renders AHEAD of all
     menu options, and the selection marker says "selected", never "current" (the menu is about
@@ -70,6 +103,22 @@ class BackendChooserOrder(PilotCase):
             text = h.text()
             self.assertIn("← selected", text)
             self.assertNotIn("← current", text)
+        self.run_picker(s)
+
+    def test_exactly_two_blank_rows_then_menu_items_not_pinned_to_bottom(self):
+        async def s(app, pilot, h):
+            await h.press("v")
+            await h.wait_screen("RuntimeManagerScreen")
+            ids = [w.id for w in app.query_one("#layout").children]
+            # chooser rows, then the 2-row gap, then the menu items — in that DOM order
+            self.assertEqual(ids.index("rows") + 1, ids.index("gap"), ids)
+            self.assertEqual(ids.index("gap") + 1, ids.index("actions"), ids)
+            # the chooser hugs its rows (not 1fr, which is what pinned the items to the bottom)
+            self.assertIn("auto", str(app.query_one("#rows").styles.height))
+            # exactly two free rows between chooser and menu items
+            self.assertEqual(str(app.query_one("#gap").styles.height), "2")
+            # the remaining space goes to the spacer, so menu items sit right under the gap
+            self.assertIn("1fr", str(app.query_one("#spacer").styles.height))
         self.run_picker(s)
 
 
@@ -109,10 +158,10 @@ class RightClickCopy(PilotCase):
         self.run_picker(s)
 
 
-class RemoteHomeRow(PilotCase):
-    """0.51.0 item B: on the remote picker (opened from home), Back to Home is a row exactly
-    two lines after the last provider row (one blank line between), NOT an actions-pane entry;
-    one less empty line before the first provider; the b key still works."""
+class RemoteBackAboveList(PilotCase):
+    """0.51.0 item B (corrected by user 2026-11-03): on the remote picker, Back to Home renders
+    ABOVE the model list (actions pane on top) so it stays visible without scrolling — not
+    below the providers. One less empty line before the first provider. The b key works."""
 
     async def _open_remote_list(self, h):
         await h.press("r")
@@ -121,32 +170,22 @@ class RemoteHomeRow(PilotCase):
         await h.wait_for(lambda: bool(h.labels("rows")), "rows loaded")
         await h.pilot.pause(0.3)
 
-    def test_back_row_two_lines_after_last_provider(self):
+    def test_back_renders_above_the_model_list_and_stays_visible(self):
         async def s(app, pilot, h):
             await self._open_remote_list(h)
-            rows = h.labels("rows")
-            home_idx = next(i for i, r in enumerate(rows) if "Back to Home" in r)
-            last_prov = max(i for i, r in enumerate(rows) if i < home_idx and r.strip())
-            self.assertEqual(home_idx, last_prov + 2,
-                             f"Back must sit exactly two lines after the last provider row: {rows}")
-            self.assertEqual(rows[home_idx - 1], "", f"one blank line between: {rows}")
+            ids = [w.id for w in app.query_one("#layout").children]
+            self.assertLess(ids.index("actions"), ids.index("rows"),
+                            f"actions pane (with Back to Home) must render ABOVE the model list: {ids}")
             acts = h.labels("actions")
-            self.assertFalse(any("Back to Home" in a for a in acts),
-                             f"Back must not also be in the actions pane: {acts}")
+            self.assertTrue(any("Back to Home" in a for a in acts), acts)
+            rows = h.labels("rows")
+            self.assertFalse(any("Back to Home" in r for r in rows), rows)
             rows_w = app.query_one("#rows")
             self.assertEqual(int(rows_w.styles.margin_top or 0), 0,
                              "one less empty line before the first provider (margin_top)")
         self.run_picker(s)
 
-    def test_back_row_activates_home(self):
-        async def s(app, pilot, h):
-            await self._open_remote_list(h)
-            await h.goto_row("group", "__home__")
-            await h.press("enter")
-            await h.wait_screen("HomeScreen")
-        self.run_picker(s)
-
-    def test_b_key_still_returns_home(self):
+    def test_b_key_returns_home(self):
         async def s(app, pilot, h):
             await h.press("r")
             await h.wait_screen("RemoteScreen")

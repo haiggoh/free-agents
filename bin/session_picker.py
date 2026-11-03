@@ -695,6 +695,13 @@ class Picker(App):
        list is hidden, the spacer takes the flex space, so the nav line never jumps up
        when switching home <-> lane <-> lowkey (user 2026-10-30). */
     #layout.no-rows #spacer { height: 1fr; }
+    /* Backend manager (0.51.0, user 2026-11-03): the chooser hugs its rows; exactly TWO blank
+       rows (#gap) separate it from the menu items, which must NOT be pinned to the window
+       bottom — the spacer takes the remaining flex space instead. */
+    #gap { height: 0; }
+    #layout.compact-rows #rows { height: auto; }
+    #layout.compact-rows #gap { height: 2; }
+    #layout.compact-rows #spacer { height: 1fr; }
     /* Secondary text is grey (ANSI bright-black): readable on light AND dark terminals.
        Only background and main text are the terminal's own defaults. */
     /* Remote info box: model notes for the hovered/highlighted row, framed like a tooltip. */
@@ -913,6 +920,7 @@ class Picker(App):
             yield OptionList(id="actions")
             yield SearchInput(id="search")
             yield HoverOptionList(id="rows")
+            yield Static("", id="gap")
             yield Static("", id="spacer")
             yield Static("", id="info")
             yield PromptInput(id="prompt")
@@ -1360,6 +1368,9 @@ class Picker(App):
         rows.display = show_models
         # flex spacer keeps status+version at the bottom when no model list is shown
         self.query_one("#layout", Vertical).set_class(not show_models, "no-rows")
+        # 0.51.0 (user 2026-11-03): on the backend manager the chooser hugs its rows and the
+        # menu items follow after exactly two blank rows — not pinned to the window bottom.
+        self.query_one("#layout", Vertical).set_class(isinstance(sm, m.RuntimeManagerScreen), "compact-rows")
         # 0.51.0 (user): on the remote model list, one less empty line before the first provider.
         rows.styles.margin_top = 0 if isinstance(sm, m.RemoteScreen) else 1
         # No input box unless a prompt is actually pending (user 2026-10-30: About and
@@ -1471,7 +1482,7 @@ class Picker(App):
         if show_models and has_groups and rendered and (
                 all(a.section == "nav" for a in rendered)
                 or isinstance(sm, m.RuntimeManagerScreen)):
-            layout.move_child(actions_list, after=self.query_one("#rows"))
+            layout.move_child(actions_list, after=self.query_one("#gap"))
             # The pane moved below the rows: rows take focus and a valid highlight, so arrow
             # navigation starts in the content. (Before, the pane on top held focus and the
             # first Down handed it over — that hand-over assumed actions-on-top.)
@@ -1752,10 +1763,6 @@ class Picker(App):
         acc = self.screen_model.accordion
         if h == ("group", m.NEW_MODELS_GROUP):
             self._open_register_panel()
-            return
-        if h == ("group", m.HOME_ROW_GROUP):
-            # 0.51.0: the Back-to-Home action row at the foot of the remote model list.
-            self.dispatch(m.Nav("home", m.HOME_OWNED))
             return
         if h[0] == "group":
             if acc.is_open(h[1]):

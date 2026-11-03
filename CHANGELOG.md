@@ -10,6 +10,18 @@
   (tests/test_statusline_quota_segment.sh). Renderer hookup in cost-tracker is tracked as
   waypoint `cost-tracker-wire-la`.
 
+### Fixed
+- **Remote picker**: "Back to Home" renders ABOVE the model list again (actions pane on top,
+  always visible without scrolling) — the 0.51.0 placement two lines after the last provider
+  made users scroll down to find it (user correction 2026-11-03). One less empty line before
+  the first provider stays.
+- **Backend manager**: after the chooser list there are exactly two blank rows before the
+  menu items, and the menu items are no longer pinned to the bottom of the window (the
+  chooser hugs its rows; the spacer takes the remaining space).
+- **API-setup hide option semantics pinned by test**: it hides the provider from the MODEL
+  SELECTION lists only — the provider row and its Open/Add/Show actions stay in the api
+  setup screen itself.
+
 ## [0.51.0] — 2026-11-03
 
 ### Fixed / changed (user-reported 2026-11-03)
