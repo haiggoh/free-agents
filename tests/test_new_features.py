@@ -59,7 +59,7 @@ class BackendManagerScreen(PilotCase):
                 await h.goto_row("item", backend)
                 await h.press("enter")                                   # chooser sets it
                 # wait for the SELECTION marker, not the item name (items are always listed)
-                await h.wait_for(lambda: f"{backend}  ← current" in h.text(), f"{backend} chosen")
+                await h.wait_for(lambda: f"{backend}  ← selected" in h.text(), f"{backend} chosen")   # 0.51.0: "selected", not "current"
 
             # 0.49.0: snapshot/promote/remove/repair live in the shared venv base, so vllm-mlx
             # keeps the rows this test used to see hidden (old contract: remove was Rapid-only)
@@ -220,7 +220,7 @@ class APIKeysScreen(PilotCase):
             self.assertIn("NVIDIA: ❌ Missing", rows[0])   # NVIDIA first, expanded
             self.assertIn("Open NVIDIA signup page", rows[1])
             self.assertIn("Add NVIDIA key", rows[2])
-            self.assertIn("Hide nvidia in the choose-model list", rows[3])   # 0.50.0 third item (slug)
+            self.assertIn("Hide nvidia in the choose-model list (currently shown)", rows[3])   # 0.50.0 third item; 0.51.0 state suffix
             for name in ("Google Gemini", "Groq", "OpenRouter"):
                 self.assertIn(name, h.text())
             # The separator blank line sits AFTER NVIDIA's items (open/add/hide), never

@@ -640,6 +640,9 @@ class Settings:
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
     on_hidden_providers_saved: Callable[[list], object] | None = None
+    # 0.51.0: transient visible confirmation (toast) when a screen saves state — e.g. the
+    # hide/show toggle. Wired to the app's notify; looked up at CALL time so tests can spy.
+    on_flash: Callable[[str], object] | None = None
     # Called with (lane, value) when the user CONFIRMS a temperature change; persists it.
     on_temperature_saved: Callable[[str, str], object] | None = None
     # Called with (bool | None) when the user changes the session thinking toggle; persists it.
@@ -2756,7 +2759,9 @@ class RuntimeManagerScreen(Screen):
             self.settings.runtime_backend = cur
         self.accordion.set_groups([Group(
             "backends", "Choose backend",
-            [Item(b, f"{b}" + ("  ← current" if b == cur else "")) for b in choices])])
+            # 0.51.0 (user 2026-11-03): "selected", not "current" — this menu is about which
+            # backend to MODIFY (update/delete/pin), not which one is in use.
+            [Item(b, f"{b}" + ("  ← selected" if b == cur else "")) for b in choices])])
         self.accordion.open_group = "backends"     # the chooser stays open while picking
 
     def groups(self):
@@ -2832,10 +2837,12 @@ class APIKeysScreen(Screen):
 
     def _hide_item(self, slug: str) -> tuple:
         """(item_id, label) for the hide/show toggle — the id flips with the state so
-        activating it again reverses the toggle."""
+        activating it again reverses the toggle, and the label STATES the current state
+        (0.51.0, user 2026-11-03: the toggle must reveal its state, not just the action)."""
         hidden = slug in (self.settings.hidden_providers or [])
         verb = "Show" if hidden else "Hide"
-        return f"{'show' if hidden else 'hide'}:{slug}", f"{verb} {slug} in the choose-model list"
+        state = "currently hidden" if hidden else "currently shown"
+        return f"{'show' if hidden else 'hide'}:{slug}", f"{verb} {slug} in the choose-model list ({state})"
 
     def info_text(self, item_id: str | None) -> str:
         """The info box under the list: what the highlighted provider needs BEFORE a key works
@@ -2942,6 +2949,12 @@ class APIKeysScreen(Screen):
             if self.settings.on_hidden_providers_saved:
                 self.settings.on_hidden_providers_saved(hidden)
             self._rebuild_groups()
+            # 0.51.0 (user 2026-11-03): the save must be VISIBLE, not a silent rebuild —
+            # a flash message names the provider and the new state.
+            if self.settings.on_flash:
+                self.settings.on_flash(
+                    f"Saved — {slug} is now "
+                    f"{'hidden from' if slug in hidden else 'shown in'} the choose-model list")
             return None
         return None
 

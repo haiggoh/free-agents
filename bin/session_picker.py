@@ -759,6 +759,7 @@ class Picker(App):
             on_thinking_saved=self._save_thinking,
             hidden_providers=list(state.hidden_providers),
             on_hidden_providers_saved=self._save_hidden_providers,
+            on_flash=lambda msg: self.notify(msg, severity="information", timeout=2.5),
             security_review=cloud["security_review"],
             security_review_custom=cloud["custom_model"],
             security_review_offered=cloud["plugin_active"],
@@ -1421,9 +1422,13 @@ class Picker(App):
         # so Back is the last row on screen like every other submenu (user 2026-10-31: it used
         # to sit at the very top because the pane is mounted above #rows). Nav-only screens
         # WITHOUT rows (About) must NOT move — an empty 1fr #rows would push Back under a blank
-        # gap (out-of-family review finding 2). Screens with real actions keep the pane on top.
+        # gap (out-of-family review finding 2). Screens with real actions keep the pane on top —
+        # EXCEPT the backend manager (user 2026-11-03): its "Choose backend" chooser goes AHEAD
+        # of all the menu options, so its pane moves below the rows too.
         layout = self.query_one("#layout")
-        if show_models and has_groups and rendered and all(a.section == "nav" for a in rendered):
+        if show_models and has_groups and rendered and (
+                all(a.section == "nav" for a in rendered)
+                or isinstance(sm, m.RuntimeManagerScreen)):
             layout.move_child(actions_list, after=self.query_one("#rows"))
             # The pane moved below the rows: rows take focus and a valid highlight, so arrow
             # navigation starts in the content. (Before, the pane on top held focus and the
@@ -1730,6 +1735,12 @@ class Picker(App):
         elif isinstance(self.screen_model, m.RuntimeManagerScreen):
             # 0.50.0 item 5: choosing a backend in the harmonica chooser re-renders, so the
             # "← current" marker and the per-backend op rows update.
+            self.render_model(keep=f"i:{h[1]}")
+        else:
+            # 0.51.0 (user: the hide/show toggle "doesn't reveal its state"): activate_selected()
+            # returning None means the screen mutated in place (the API-keys hide/show toggle
+            # rebuilt its accordion) — re-render so the new state is actually VISIBLE in the
+            # rows, not only present in the model.
             self.render_model(keep=f"i:{h[1]}")
 
     def on_key(self, event):
