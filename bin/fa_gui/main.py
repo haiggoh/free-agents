@@ -51,17 +51,27 @@ def build_selftest_page() -> None:
     from nicegui import ui
     import session_picker_model as m
 
+    path = os.environ.get("LA_GUI_SELFTEST_FILE")
+    record: dict = {}
+
+    def write(**kv):
+        record.update(kv)
+        if path:
+            Path(path).write_text(json.dumps(record))
+
     @ui.page("/")
-    def index():
+    async def index(client):
         ui.label("Free Agents — selftest").props('id="title"')
         out = ui.label("").props('id="result"')
 
         def click():
             version = m.plugin_version()
-            path = os.environ.get("LA_GUI_SELFTEST_FILE")
-            if path:
-                Path(path).write_text(json.dumps({"clicked": True, "version": version}))
+            write(clicked=True, version=version)
             out.set_text(f"core says free-agents v{version}")
+
+        # "connected" = the page's websocket reached this backend: a loaded UI, not an open port.
+        await client.connected()
+        write(connected=True)
 
         ui.button("Round trip", on_click=click).props('id="roundtrip"')
 
@@ -85,5 +95,8 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-if __name__ in {"__main__", "__mp_main__"}:
+# "__main__" ONLY: native mode opens the window in a multiprocessing SPAWN child, which re-imports
+# this file as "__mp_main__". Running main() there exited the child before it opened the window,
+# and the parent then shut down with exit 0 and no output (measured 2026-11-03).
+if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

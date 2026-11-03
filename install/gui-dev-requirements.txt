@@ -1,0 +1,4 @@
+# TEST-ONLY additions to the GUI venv (install/setup-gui.sh --dev). Never needed to run the GUI.
+# After installing: <gui-venv>/bin/python -m playwright install chromium webkit
+playwright==1.64.1
+pytest==9.2.0
