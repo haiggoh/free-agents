@@ -435,6 +435,9 @@ class TruststoreInject(unittest.TestCase):
     silent when absent (old venv). The HF warm-up needs this on TLS-inspecting networks."""
 
     def test_called_when_present_silent_when_absent(self):
+        import pytest
+        pytest.importorskip("rich")      # session_picker (the app) needs rich/textual —
+        pytest.importorskip("textual")   # only the picker venv has them; skip in the main suite
         from picker_harness import ROOT
         import types
         sys.path.insert(0, str(ROOT / "bin"))
