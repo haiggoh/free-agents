@@ -41,10 +41,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 8
-READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8)
+SCHEMA_VERSION = 9
+READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
 SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature",
-            "intercept_agents", "memguard", "thinking", "hidden_providers")
+            "intercept_agents", "memguard", "thinking", "hidden_providers", "lowkey_filters")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown",
@@ -154,6 +154,9 @@ class State:
     # 0.50.0 (api-keys-provider-hide-toggle): providers hidden from the choose-model
     # list. The key stays on disk; only the listing is hidden, reversible any time.
     hidden_providers: list = field(default_factory=list)
+    # 0.54.0: lowkey picker toggles (e.g. remote_filters: apply the Remote screen's filters
+    # to lowkey's API list) — opt-in, persisted like the other lowkey settings.
+    lowkey_filters: dict = field(default_factory=dict)
     warnings: list = field(default_factory=list)
 
 
@@ -259,6 +262,8 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list]:
         raise ValueError("thinking needs schema_version 7")
     if doc["schema_version"] < 8 and "hidden_providers" in doc:
         raise ValueError("hidden_providers needs schema_version 8")
+    if doc["schema_version"] < 9 and "lowkey_filters" in doc:
+        raise ValueError("lowkey_filters needs schema_version 9")
     memguard = doc.get("memguard", {})
     if not isinstance(memguard, dict):
         raise ValueError("preference sections must be JSON objects")
@@ -268,6 +273,9 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list]:
     hidden = doc.get("hidden_providers", [])
     if not isinstance(hidden, list) or not all(isinstance(x, str) for x in hidden):
         raise ValueError("hidden_providers must be a list of provider slugs")
+    lowkey_filters = doc.get("lowkey_filters", {})
+    if not isinstance(lowkey_filters, dict) or not all(isinstance(v, bool) for v in lowkey_filters.values()):
+        raise ValueError("lowkey_filters must be a JSON object of booleans")
     effort = doc.get("effort", {})
     limiter = doc.get("rate_limiter", {})
     last = doc.get("last_launched", {})
@@ -293,7 +301,7 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list]:
     # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
     for lane, tier in tiers.items():
         last[f"{lane}:tier"] = tier
-    return effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden
+    return effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters
 
 
 def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict, dict, list] | None:
@@ -325,7 +333,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.warnings.append(f"{exc}; using built-in defaults and leaving the file untouched")
         return state
     if found:
-        effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden = found
+        effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
@@ -335,6 +343,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.memguard.update(memguard)
         state.thinking_session = thinking.get("session")
         state.hidden_providers = list(hidden)
+        state.lowkey_filters.update(lowkey_filters)
     return state
 
 
@@ -438,7 +447,7 @@ def _write(config_dir: Path, doc: dict) -> None:
 
 
 def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking=None,
-         hidden_providers=None) -> dict:
+         hidden_providers=None, lowkey_filters=None) -> dict:
     doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
            "last_launched": {k: v for k, v in last.items() if ":" not in k},
            "temperature": temperature,
@@ -452,11 +461,13 @@ def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinkin
         doc["thinking"] = thinking
     if hidden_providers:
         doc["hidden_providers"] = list(hidden_providers)
+    if lowkey_filters:
+        doc["lowkey_filters"] = dict(lowkey_filters)
     return doc
 
 
 def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinking=None,
-            mutate_hidden=None) -> str | None:
+            mutate_hidden=None, mutate_lowkey_filters=None) -> str | None:
     """Apply `mutate(effort, limiter, last_launched, temperature)` (or one of the section hooks)
     under the lock. Returns a warning or None.
 
@@ -470,19 +481,21 @@ def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinkin
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden = found
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters = found
             else:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden = \
-                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, []
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters = \
+                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, [], {}
             if mutate_hidden is not None:
                 mutate_hidden(hidden)
+            elif mutate_lowkey_filters is not None:
+                mutate_lowkey_filters(lowkey_filters)
             elif mutate_thinking is not None:
                 mutate_thinking(thinking)
             elif mutate_memguard is not None:
                 mutate_memguard(memguard)
             else:
                 mutate(effort, limiter, last, temperature)
-            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden)
+            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters)
             _write(config_dir, doc)
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
@@ -581,6 +594,16 @@ def save_thinking_session(config_dir: Path | str, value: bool | None) -> str | N
     return _update(config_dir, None, mutate_thinking=mutate_thinking)
 
 
+def save_lowkey_filters(config_dir: Path | str, key: str, value: bool) -> str | None:
+    """Persist one lowkey picker toggle (0.54.0, schema 9 section lowkey_filters)."""
+    if not isinstance(value, bool):
+        raise ValueError("lowkey filter toggles must be true or false")
+
+    def mutate_lowkey_filters(filters):
+        filters[key] = value
+    return _update(config_dir, None, mutate_lowkey_filters=mutate_lowkey_filters)
+
+
 def save_hidden_providers(config_dir: Path | str, providers: list) -> str | None:
     """Persist which providers are hidden from the choose-model list (0.50.0 api-keys
     hide toggle). The keys stay on disk; only the listing is hidden. Empty clears the
@@ -610,10 +633,10 @@ def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, _, memguard, thinking, hidden = found
+                effort, limiter, last, temperature, _, memguard, thinking, hidden, lowkey_filters = found
             else:
-                effort, limiter, last, temperature, memguard, thinking, hidden = {}, {}, {}, {}, {}, {}, []
-            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden))
+                effort, limiter, last, temperature, memguard, thinking, hidden, lowkey_filters = {}, {}, {}, {}, {}, {}, [], {}
+            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden, lowkey_filters))
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
     except OSError as exc:

@@ -396,6 +396,35 @@ def status_line(sm: "Screen") -> str:
     return "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies"
 
 
+def matches_query(q: str, model_id: str, display: str = "") -> bool:
+    """0.54.0: the ONE live-filter predicate (casefolded substring on id or display), shared by
+    every model list screen — Remote/Local delegate here, Lowkey (D3) uses it too."""
+    q = (q or "").casefold()
+    return q in (model_id or "").casefold() or q in (display or "").casefold()
+
+
+def catalog_param_size(settings, prov: str, model_id: str) -> "float | None":
+    """0.54.0: the one parameter-count lookup for row labels and the size sort
+    (Settings.model_param_count, set by the picker); None when unknown. RemoteScreen and
+    LowkeyScreen both delegate here so the two lists can never sort differently."""
+    fn = getattr(settings, "model_param_count", None)
+    if fn is None:
+        return None
+    try:
+        return fn(prov, model_id)
+    except Exception:
+        return None
+
+
+def param_size_suffix(settings, prov: str, model_id: str, display: str) -> str:
+    """0.54.0: '  · 1.05T' appended when the size is known and the name does not already state
+    it (word-boundary match, shared by Remote and Lowkey rows)."""
+    label = format_param_count(catalog_param_size(settings, prov, model_id))
+    if not label or re.search(r"\b" + re.escape(label) + r"\b", display or "", re.IGNORECASE):
+        return ""
+    return f"  · {label}"
+
+
 def size_sorted(rows, size_of):
     """Rows largest-first (user 2026-10-20: parameter size is a rough capability signal).
 
@@ -601,6 +630,9 @@ class Settings:
     lowkey_effort: str = sms.DEFAULT_EFFORT["lowkey"]
     lowkey_temperature: str = sms.DEFAULT_TEMPERATURE["lowkey"]
     lowkey_thinking: "bool | None" = None   # Lowkey's own thinking toggle (user 2026-10-30)
+    # 0.54.0 (D3): opt-in — apply the Remote screen's filters to lowkey's API list. Persisted
+    # via on_lowkey_filters_saved -> sms.save_lowkey_filters (schema 9 lowkey_filters section).
+    lowkey_remote_filters: bool = False
     stats: dict = field(default_factory=dict)  # About-screen usage stats, gathered at picker start
     # Session thinking toggle (both lanes; waypoint fa-thinking-toggle). None = the launch
     # default, which is thinking ON for session launches; True/False = a remembered choice the
@@ -640,6 +672,8 @@ class Settings:
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
     on_hidden_providers_saved: Callable[[list], object] | None = None
+    # Called with (key, bool) when a lowkey picker toggle changes; persists it (0.54.0).
+    on_lowkey_filters_saved: Callable[[str, bool], object] | None = None
     # 0.51.0: transient visible confirmation (toast) when a screen saves state — e.g. the
     # hide/show toggle. Wired to the app's notify; looked up at CALL time so tests can spy.
     on_flash: Callable[[str], object] | None = None
@@ -1688,8 +1722,8 @@ class RemoteScreen(Screen):
         self._models_loaded = bool(self.agents)
 
     def _matches(self, model_id: str, display: str = "") -> bool:
-        q = self.search.casefold()
-        return q in (model_id or "").casefold() or q in (display or "").casefold()
+        # 0.54.0: delegates to the shared matches_query (Lowkey's filter uses it too)
+        return matches_query(self.search, model_id, display)
 
     def set_search(self, query: str):
         """Filter model names across every provider. Driven LIVE by the filter box above the
@@ -1788,27 +1822,13 @@ class RemoteScreen(Screen):
 
     def _size_suffix(self, prov: str, model_id: str, display: str) -> str:
         """'  · 1.05T' appended to a row name when the size is known and the name does not
-        already state it (user 2026-10-29: param size in the name by default, not a separate
-        column, and never duplicated when the name already carries it)."""
-        label = format_param_count(self._catalog_size(prov, model_id))
-        # Word-boundary match, not substring: "8B" must NOT dedup against a name that only
-        # CONTAINS it ("Foo-128B") — out-of-family review finding 4, 2026-10-31.
-        if not label or re.search(r"\b" + re.escape(label) + r"\b", display or "", re.IGNORECASE):
-            return ""
-        return f"  · {label}"
+        already state it (user 2026-10-29). 0.54.0: delegates to the shared param_size_suffix."""
+        return param_size_suffix(self.settings, prov, model_id, display)
 
     def _catalog_size(self, prov: str, model_id: str) -> "float | None":
-        """The parameter count for the size sort (Settings.model_param_count, set by the
-        picker), or None when unknown — the row then sorts after the sized ones. A broken
-        verdict degrades to None, never to a render failure."""
-        fn = getattr(self.settings, "model_param_count", None)
-        if fn is None:
-            return None
-        try:
-            v = fn(prov, model_id)
-        except Exception:
-            return None
-        return float(v) if isinstance(v, (int, float)) and v > 0 else None
+        """The parameter count for the size sort. 0.54.0: delegates to the shared
+        catalog_param_size (Lowkey sorts by the same rule)."""
+        return catalog_param_size(self.settings, prov, model_id)
 
     def _catalog_old(self, prov: str, model_id: str) -> bool:
         """Whether a catalog row predates the age cutoff (Settings.catalog_model_old, set
@@ -3146,10 +3166,49 @@ class LowkeyScreen(Screen):
         # 0.54.0: store the RAW roster; set_models filters through visible_agents (the one
         # home) so the opt-in Remote-filter toggle (Task 2) can re-filter without a second copy.
         self.api_agents = list(api_agents or [])
-        self._remote_filters = False           # Task 2 toggle, default OFF (D3)
+        self.api_catalogs: dict = {}           # provider -> list[CatalogModel], set_api_catalogs
+        self.search = ""                       # live filter (D3): same #search mechanism as Remote
+        self._remote_filters = bool(getattr(settings, "lowkey_remote_filters", False))  # D3 toggle
         self.api_selection = None              # RemoteAgent once an API row is picked (0.54.0)
         self._api_by_id = {}                   # item id -> RemoteAgent, built in set_models
         self.set_models(models or [])
+
+    def info_text(self, item_id: str | None) -> str:
+        """The info box under the list (0.54.0 D3: lowkey is a model-list screen now)."""
+        if item_id and item_id in self._api_by_id:
+            a = self._api_by_id[item_id]
+            model = a.model_id or "(provider default model)"
+            return (f"{a.display or a.model_id or a.alias}\nProvider: {a.provider}\n"
+                    f"Upstream model id: {model}")
+        if item_id and item_id in self.models:
+            return f"Local model {item_id} (MLX)"
+        return "Highlight a row for its provider and model id."
+
+    def set_api_catalogs(self, catalogs: dict) -> None:
+        """0.54.0 Task 2 (D3): feed lowkey's API chooser the provider catalogs (pinned rows first,
+        then catalog rows inside each provider group). Called by the app's cache->screen sync."""
+        self.api_catalogs = dict(catalogs or {})
+        self.set_models(list(self.models.values()))
+
+    def set_search(self, query: str):
+        """Live filter for the model list — the session pickers' mechanism (the #search Input
+        drives this; 0.54.0 D3 adds the bar to lowkey too). Empty clears and restores all."""
+        self.search = (query or "").strip()
+        if not self.search:
+            self.accordion.multi_open_folded = set()
+            self.accordion.multi_open = None
+            self.accordion.open_group = None
+        self.set_models(list(self.models.values()))
+
+    def _toggle_remote_filters(self):
+        """D3 opt-in: apply the Remote screen's filters to lowkey's API list. Persisted like the
+        other lowkey settings (on_lowkey_filters_saved -> sms.save_lowkey_filters)."""
+        self._remote_filters = not self._remote_filters
+        s = self.settings
+        s.lowkey_remote_filters = self._remote_filters
+        if s.on_lowkey_filters_saved:
+            s.on_lowkey_filters_saved("remote_filters", self._remote_filters)
+        self.set_models(list(self.models.values()))
 
     def set_models(self, models: list[LocalModel]):
         self.models = {mdl.alias: mdl for mdl in models}
@@ -3163,21 +3222,53 @@ class LowkeyScreen(Screen):
             Group(f, f"  {f} ({len(buckets[f])})", [Item(x.alias, model_names.readable(x.alias)) for x in buckets[f]])
             for f in order]
         groups = []
-        # 0.54.0: the API group is built from visible_agents (ONE visibility+dedupe home — the
-        # private copy that caused the 2026-11-02 DuplicateID crash is gone), with the
-        # Remote-screen filters opt-in via self._remote_filters (Task 2 toggle, D3).
+        # 0.54.0 Task 2 (D3): the API section is one collapsible group PER PROVIDER ("NVIDIA (n)",
+        # "Mistral (n)", …), pinned rows first then catalog rows, same size sort as the Remote
+        # screen, hidden providers excluded. Visibility/dedupe come from visible_agents (the
+        # one home, Task 4); the Remote-screen filters are opt-in via self._remote_filters.
         deduped = api_agents_for(self.settings, self.api_agents,
                                  remote_filters=self._remote_filters)
-        if deduped:
-            # resolve the selected item id back to the agent OBJECT from the SAME id
-            # expression as the Item — an empty model_id keys on the alias, and passing that
-            # alias as --api-model sent the wrong upstream id.
-            self._api_by_id = {f"{a.provider}:{a.model_id or a.alias}": a for a in deduped}
-            groups.append(Group(
-                "api", f"API models {ec.SESSION_EMOJI_FREE_API_STR} ({len(deduped)})",
-                [Item(f"{a.provider}:{a.model_id or a.alias}",
-                      f"{a.display or a.model_id or a.alias} ({a.provider})")
-                 for a in deduped]))
+        prov_groups = []
+        # resolve the selected item id back to the agent OBJECT from the SAME id expression as
+        # the Item — an empty model_id keys on the alias, and passing that alias as --api-model
+        # sent the wrong upstream id (0.54.0 Task 1).
+        self._api_by_id = {f"{a.provider}:{a.model_id or a.alias}": a for a in deduped}
+        provs = list(dict.fromkeys([a.provider for a in deduped] + list(self.api_catalogs)))
+        for prov in provs:
+            if is_provider_hidden(self.settings, prov):
+                continue
+            pinned = [a for a in deduped if a.provider == prov]
+            if prov != "nvidia":
+                pinned = size_sorted(pinned, lambda a: catalog_param_size(self.settings, prov, a.model_id or a.alias))
+            if self.search:
+                pinned = [a for a in pinned
+                          if matches_query(self.search, a.model_id or a.alias, a.display)]
+            items = [Item(f"{a.provider}:{a.model_id or a.alias}",
+                          f"{a.display or a.model_id or a.alias} ({PROVIDER_LABELS.get(prov, prov)})"
+                          f"{param_size_suffix(self.settings, prov, a.model_id or a.alias, a.display)}")
+                     for a in pinned]
+            have = {a.model_id for a in pinned if a.model_id}
+            tier = pinned[0].tier if pinned else "unknown"
+            cat = self.api_catalogs.get(prov) or []
+            for c in size_sorted(list(cat), lambda c: catalog_param_size(self.settings, prov, c.model_id)):
+                if c.model_id in have:
+                    continue                     # already a pinned row
+                probe = _catalog_probe_agent(self.settings, prov, c, tier)
+                if not _agent_visible(self.settings, probe):
+                    continue
+                self._api_by_id[f"{prov}:{c.model_id}"] = probe
+                name = model_names.readable(c.model_id)
+                if self.search and not matches_query(self.search, c.model_id, name):
+                    continue
+                items.append(Item(f"{CATALOG_PREFIX}{prov}:{c.model_id}",
+                                  f"  {name}{param_size_suffix(self.settings, prov, c.model_id, name)}"))
+            if self.search and not items:
+                continue                         # a search shows only providers with a match
+            if items:
+                prov_groups.append(Group(prov, f"{PROVIDER_LABELS.get(prov, prov)} ({len(items)})", items))
+        if prov_groups:
+            total = sum(len(g.items) for g in prov_groups)
+            groups.append(Group("api", f"API models {ec.SESSION_EMOJI_FREE_API_STR} ({total})", prov_groups))
         if family_groups:
             groups.append(Group(
                 "local", f"Local models {ec.SESSION_EMOJI_LOCAL_STR} ({len(models)})", family_groups))
@@ -3256,6 +3347,10 @@ class LowkeyScreen(Screen):
                     effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(), section="model"),
             setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or '<provider default>'}",
                     TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(), section="model"),
+            # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
+            Action("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "
+                        f"{'ON' if self._remote_filters else 'OFF'}",
+                   self._toggle_remote_filters, section="model"),
         ]
         acts += self.nav_actions()
         check_action_table(acts)

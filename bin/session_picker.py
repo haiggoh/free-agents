@@ -447,7 +447,7 @@ class PromptInput(Input):
         # calling it here too inserted every paste twice.
 
 
-MODEL_LIST_SCREENS = (m.LocalScreen, m.RemoteScreen)   # the screens whose list has the live filter
+MODEL_LIST_SCREENS = (m.LocalScreen, m.RemoteScreen, m.LowkeyScreen)   # 0.54.0 (D3): lowkey's list has the live filter too
 
 
 class SearchInput(Input):
@@ -790,6 +790,8 @@ class Picker(App):
             on_thinking_saved=self._save_thinking,
             hidden_providers=list(state.hidden_providers),
             on_hidden_providers_saved=self._save_hidden_providers,
+            lowkey_remote_filters=bool(state.lowkey_filters.get("remote_filters", False)),
+            on_lowkey_filters_saved=self._save_lowkey_filters,
             on_flash=lambda msg: self.notify(msg, severity="information", timeout=2.5),
             security_review=cloud["security_review"],
             security_review_custom=cloud["custom_model"],
@@ -827,6 +829,13 @@ class Picker(App):
 
     def _save_hidden_providers(self, providers):
         warning = sms.save_hidden_providers(self._config_dir(), providers)
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
+
+    def _save_lowkey_filters(self, key, value):
+        warning = sms.save_lowkey_filters(self._config_dir(), key, value)
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
 
@@ -1782,6 +1791,20 @@ class Picker(App):
                 # 0.54.0: raw roster in; set_models filters via visible_agents (one home)
                 sm.api_agents = list(remote)
                 sm._sync_src_remote = remote
+                changed = True
+            # 0.54.0 Task 2 (D3): feed lowkey the provider catalogs from this session's fetches
+            # and the disk cache (never the network) — same sources the Remote screen hydrates.
+            cats = {}
+            for prov in dict.fromkeys(a.provider for a in (remote or [])):
+                if m.is_provider_hidden(sm.settings, prov):
+                    continue
+                rows = self.catalog_rows.get(prov) if hasattr(self, "catalog_rows") else None
+                if not rows:
+                    rows = m.read_catalog_cache(prov)
+                if rows:
+                    cats[prov] = rows
+            if cats and cats != getattr(sm, "api_catalogs", None):
+                sm.set_api_catalogs(cats)
                 changed = True
             if changed:
                 sm.set_models(local if local is not None else list(sm.models.values()))

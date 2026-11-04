@@ -499,10 +499,12 @@ class StateTests(unittest.TestCase):
         # would reject a file its schema claim says it understands (workflow finding #7 pattern).
         sms.save_thinking_session(self.cfg, False)
         doc = json.loads(self.file.read_text())
-        self.assertEqual(doc["schema_version"], 8)
-        self.assertIn(7, sms.READABLE_SCHEMAS)          # schema-7 files still load
-        # Simulate the OLD reader: schemas 1..7 only. It must refuse LOUDLY, not load.
-        with mock.patch.object(sms, "READABLE_SCHEMAS", (1, 2, 3, 4, 5, 6, 7)):
+        # 0.54.0: schema 9 (lowkey_filters section); the invariant the test guards is that a
+        # NEW key ships under a NEW schema number so older readers refuse loudly.
+        self.assertEqual(doc["schema_version"], 9)
+        self.assertIn(8, sms.READABLE_SCHEMAS)          # schema-8 files still load
+        # Simulate the OLD reader: schemas 1..8 only. It must refuse LOUDLY, not load.
+        with mock.patch.object(sms, "READABLE_SCHEMAS", (1, 2, 3, 4, 5, 6, 7, 8)):
             state = sms.load(self.cfg)
             self.assertTrue(any("schema_version" in w for w in state.warnings))
             self.assertIsNone(state.thinking_session)   # defaults, not a silent half-read

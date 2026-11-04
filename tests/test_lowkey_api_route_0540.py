@@ -258,6 +258,18 @@ def test_nvidia_api_path_acquires_limiter(tmp_path, monkeypatch):
 
 # --- the picker side: LowkeyScreen --------------------------------------------------------
 
+
+def _api_item_id(lk, suffix):
+    """Find the API row whose id ends with `suffix` (rows nest one level under provider groups)."""
+    api = next(g for g in lk.groups() if g.id == "api")
+    for it in api.items:
+        rows = it.items if isinstance(it, m.Group) else [it]
+        for row in rows:
+            if row.id.endswith(suffix):
+                return row.id
+    raise AssertionError(f"no api row ending {suffix!r} in {[i.id for i in api.items]}")
+
+
 def _agent(model_id="test/model", alias="nvidia-test", provider="nvidia"):
     return m.RemoteAgent(alias, provider, f"Test {model_id}", "unknown", model_id=model_id)
 
@@ -270,8 +282,7 @@ def test_empty_model_id_uses_provider_default():
     """An API agent with an EMPTY model_id (alias-only) launches the provider DEFAULT model —
     the alias must never be passed as --api-model (that was the 0.53.1 bug)."""
     lk = m.LowkeyScreen(m.Settings(), [], api_agents=[_agent(model_id="", alias="foo-alias")])
-    api = next(g for g in lk.groups() if g.id == "api")
-    lk.accordion.select(api.items[0].id)
+    lk.accordion.select(_api_item_id(lk, "foo-alias"))
     lk.activate_selected()
     base = lk._base()
     assert base is not None and "--provider" in base and "nvidia" in base
@@ -282,8 +293,7 @@ def test_local_pick_after_api_pick_launches_local():
     """Selecting an API row then a LOCAL row must launch the local model — api_selection is
     cleared on a local pick (0.53.1 leaked it, so the local pick still launched the API)."""
     lk = m.LowkeyScreen(m.Settings(), [_local_model()], api_agents=[_agent()])
-    api = next(g for g in lk.groups() if g.id == "api")
-    lk.accordion.select(api.items[0].id)
+    lk.accordion.select(_api_item_id(lk, "test/model"))
     lk.activate_selected()
     assert lk.api_selection is not None, "API row did not register a selection"
     lk.accordion.select("qwen-3.8-operator")

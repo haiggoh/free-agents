@@ -877,7 +877,8 @@ class LowkeyTests(unittest.TestCase):
         s.last_launched_model = {"lowkey": "gemma-4-26b"}     # so the "g" launch action exists
         lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
         acts = [a for a in lk.actions() if a.section != "nav"]
-        self.assertEqual([a.key for a in acts], ["c", "m", "p", "g", "s", "j", "e", "t"])
+        # 0.54.0 (D3): the "f" opt-in Remote-filters toggle joins the model settings group
+        self.assertEqual([a.key for a in acts], ["c", "m", "p", "g", "s", "j", "e", "t", "f"])
         self.assertNotIn("settings", {a.section for a in lk.actions()},
                          "the advanced group is dropped entirely in 0.50.0")
 
