@@ -45,6 +45,13 @@ def build() -> None:
       .switch.on .knob { left: 18px; }
       .btn-flat { box-shadow: none !important; border-radius: 4px !important; padding: 2px 8px !important;
                   text-transform: none !important; }
+      /* M3 primary action (filled dark, white text) — only for Go launch / Choose model */
+      .btn-primary { background: #000 !important; color: #fff !important; border: none !important;
+                     border-radius: 20px !important; padding: 6px 16px !important; box-shadow: 0 1px 2px rgba(0,0,0,.2) !important; }
+      .btn-primary:hover { background: #333 !important; }
+      .cycle-row { display: flex; align-items: center; }
+      /* switch: knob always bright white + subtle M3 shadow so it is visible on any track */
+      .switch .knob { background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,.4) !important; }
     </style>""", shared=True)
 
     loader = Loader()
@@ -75,18 +82,18 @@ def build() -> None:
                 choices = list(action.choices)
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1}
                 if binary:
+                    # switch INLINE in the same row as the option label (user 2026-11-04)
                     on = bool(action.value()) if action.value else False
-                    sw = ui.element("div").classes(f"switch{' on' if on else ''}")
-                    sw.on("click", lambda a=action, s=sw: _toggle_binary(a, s))
                     with ui.row().classes("cycle-row items-center gap-2 w-full"):
+                        sw = ui.element("div").classes(f"switch{' on' if on else ''}")
+                        sw.on("click", lambda a=action, s=sw: _toggle_binary(a, s))
                         ui.label(cycle_label(action)).classes("cycle-value")
-                        sw
                 else:
                     with ui.row().classes("cycle-row items-center gap-1 w-full"):
-                        val = ui.label(cycle_label(action)).classes("cycle-value")
                         left = ui.label("<").classes("cycle-arrow cycle-left")
-                        left.on("click", lambda a=action, v=val: _cycle(a, v, -1))
+                        val = ui.label(cycle_label(action)).classes("cycle-value")
                         right = ui.label(">").classes("cycle-arrow cycle-right")
+                        left.on("click", lambda a=action, v=val: _cycle(a, v, -1))
                         right.on("click", lambda a=action, v=val: _cycle(a, v, +1))
             else:
                 res = action.run() if (action is not None and action.run is not None) else None
@@ -150,7 +157,7 @@ def build() -> None:
                     if stub:
                         Path(stub).write_text(json.dumps({"argv": argv}))
 
-                launch = ui.button("Launch", on_click=do_launch).classes("gui-launch btn-flat")
+                launch = ui.button("Launch", on_click=do_launch).classes("gui-launch btn-primary")
                 launch.props["disabled"] = True
 
                 def paint(models, query):
@@ -167,16 +174,16 @@ def build() -> None:
                                 continue
                             any_shown = True
                             open_ = prov in state["open"]
-                            hdr = ui.button(("▾ " if open_ else "▸ ") + f"{prov} ({len(shown_rows)})",
-                                            on_click=lambda p=prov: toggle_group(p)).classes("group-header btn-flat")
+                            hdr = ui.label(("▾ " if open_ else "▸ ") + f"{prov} ({len(shown_rows)})").classes("menu-item group-header")
                             hdr.props["data-group"] = prov
+                            hdr.on("click", lambda p=prov: toggle_group(p))
                             if open_:
                                 for mdl in shown_rows:
                                     name = getattr(mdl, "display", None) or getattr(mdl, "alias", "")
                                     mid = getattr(mdl, "model_id", "") or getattr(mdl, "alias", "")
-                                    row = ui.button(f"{name}  ·  {mid}",
-                                                    on_click=lambda m=mid: select_model(m)).classes("model-row btn-flat")
+                                    row = ui.label(f"    {name}  ·  {mid}").classes("menu-item model-row")
                                     row.props["data-model"] = mid
+                                    row.on("click", lambda m=mid: select_model(m))
                         if not any_shown:
                             ui.label("No models — every provider needs an API key (open API keys)"
                                     ).props('class="empty-state"')

@@ -36,6 +36,8 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
     select/toggle — never a button that cycles."""
     out = []
     for a in screen.actions():
+        if a.section == "hidden":
+            continue        # hidden rows (e.g. the duplicate lane shortcut) never render — 2026-11-04 user test
         sid = semantic_id(screen, a)
         if sid in GUI_PENDING:
             continue
