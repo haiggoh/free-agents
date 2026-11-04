@@ -421,12 +421,15 @@ class LowkeyApiSelect(unittest.TestCase):
         sel = api.items[0].id                      # "nvidia:nvidia-a" (alias-keyed)
         self.assertTrue(lk.accordion.select(sel))
         lk.activate_selected()
-        self.assertEqual(lk.api_selection, ("nvidia", "nvidia-a"),
-                         "selecting the api row must register the api selection")
+        # 0.54.0: api_selection is the RemoteAgent object (was a tuple); an alias-only row
+        # (empty model_id) must NOT pass the alias as --api-model — provider default instead.
+        self.assertIsNotNone(lk.api_selection, "selecting the api row must register the api selection")
+        self.assertEqual(lk.api_selection.provider, "nvidia")
+        self.assertEqual(lk.api_selection.alias, "nvidia-a")
         req = lk._convo()
         self.assertIn("--provider", req.argv)
         self.assertIn("nvidia", req.argv)
-        self.assertIn("--api-model", req.argv)
+        self.assertNotIn("--api-model", req.argv)
         self.assertNotIn("--model", req.argv[:4])
 
 

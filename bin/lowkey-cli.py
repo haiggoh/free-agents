@@ -41,8 +41,21 @@ import urllib.error
 # would not be found. Every other script in this bin/ resolves its own location
 # the same way, for the same reason.
 BIN_DIR = os.path.dirname(os.path.realpath(__file__))
-HOTSWAP_SCRIPT = os.path.join(BIN_DIR, "local-llm-hotswap.sh")
 LIBRARIAN_SCRIPT = os.path.join(BIN_DIR, "librarian-dispatch.py")
+
+
+def _hotswap_script() -> str:
+    """0.54.0: LA_LOWKEY_HOTSWAP_SCRIPT overrides the hotswap path (tests stub it). A SET but
+    missing file aborts naming the var — never a silent fallthrough to the default."""
+    env = os.environ.get("LA_LOWKEY_HOTSWAP_SCRIPT")
+    if env:
+        if not os.path.isfile(env):
+            raise RuntimeError(f"LA_LOWKEY_HOTSWAP_SCRIPT is set but not a file: {env}")
+        return env
+    return os.path.join(BIN_DIR, "local-llm-hotswap.sh")
+
+
+HOTSWAP_SCRIPT = _hotswap_script()
 
 # Version source of truth: ../VERSION (single canonical location)
 _VERSION_PATH = os.path.join(os.path.dirname(BIN_DIR), "VERSION")
@@ -96,10 +109,11 @@ def _run_hotswap_visible(cmd) -> subprocess.CompletedProcess:
 
 def hotswap_get_port(model_alias: str) -> tuple[int, str]:
     """Run local-llm-hotswap.sh to ensure model server is active and get port + dispatch model ID."""
-    if not os.path.isfile(HOTSWAP_SCRIPT):
-        raise FileNotFoundError(f"Hotswap script not found: {HOTSWAP_SCRIPT}")
+    script = _hotswap_script()
+    if not os.path.isfile(script):
+        raise FileNotFoundError(f"Hotswap script not found: {script}")
 
-    cmd = [HOTSWAP_SCRIPT, model_alias]
+    cmd = [script, model_alias]
     res = _run_hotswap_visible(cmd)
 
     if res.returncode != 0:
@@ -332,7 +346,13 @@ def dispatch_messages_api(
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path = os.path.join(tmpdir, "output.txt")
         with open(out_path, "w", encoding="utf-8") as out_fd:
-            remote_http.stream_chat(provider, body, tmpdir, out_fd, timeout=600)
+            result = remote_http.stream_chat(provider, body, tmpdir, out_fd, timeout=600)
+        # 0.54.0: stream_chat never raises — it reports failure in Result. Discarding the
+        # result turned every 429/TLS/limiter failure into an empty reply with no reason.
+        if not result.ok:
+            print(f"[-] {provider_id} API call failed ({result.error_class or 'error'}): "
+                  f"{result.error_reason}", file=sys.stderr)
+            return ""
         try:
             with open(out_path, encoding="utf-8") as f:
                 return f.read().strip()
@@ -341,7 +361,7 @@ def dispatch_messages_api(
 
 
 def dispatch_messages(
-    port: int,
+    port: int | None,
     model_alias: str,
     messages: list,
     max_tokens: int,
@@ -426,7 +446,7 @@ def dispatch_messages(
 
 
 def run_single_prompt(
-    port: int,
+    port: int | None,
     model_alias: str,
     prompt_text: str,
     max_tokens: int,
@@ -584,7 +604,7 @@ def compact_history_if_needed(
     history: list,
     rolling_summary: str,
     max_chars: int,
-    port: int,
+    port: int | None,
     model_alias: str,
     max_tokens: int,
 ):
@@ -986,7 +1006,14 @@ def main():
         import remote_provider_core
         _p = remote_provider_core.get(API_PROVIDER)
         API_MODEL = (_p.default_models[0] if _p and getattr(_p, "default_models", None) else "")
-    assistant_label = model_display_label(args.model)
+    # 0.54.0: with --provider the session is keyed and labelled on the API model, never on the
+    # local default alias (that is why an API launch used to show/ resume as "qwen").
+    if API_PROVIDER:
+        session_model = f"{API_PROVIDER}:{API_MODEL}"
+        assistant_label = model_display_label(API_MODEL or API_PROVIDER)
+    else:
+        session_model = args.model
+        assistant_label = model_display_label(args.model)
     PROGRESS_MODE = args.progress
     PROGRESS_LABEL = assistant_label
     REASONING_EFFORT = args.effort
@@ -1015,7 +1042,9 @@ def main():
     # If --profile is given, it overrides --model
     if args.profile:
         # Use the profile to find the model alias
-        import os
+        # 0.54.0: no `import os` here — a function-level import makes `os` a LOCAL of main(),
+        # so `:file` (os.path.abspath below) raised UnboundLocalError whenever --profile was
+        # absent. os is already imported at module level.
         sys_path = sys.path; sys_path.insert(0, os.path.dirname(os.path.realpath(__file__)))
         from load_profile_models import load_profiles
         profiles = load_profiles()
@@ -1036,7 +1065,11 @@ def main():
     # DRY-RUN: show resolved configuration and exit without launching
     if args.dry_run:
         print("=== DRY RUN — lowkey-cli.py configuration ===")
-        print(f"  Model alias    : {args.model}")
+        if API_PROVIDER:
+            print(f"  Provider       : {API_PROVIDER}")
+            print(f"  API model      : {API_MODEL}")
+        else:
+            print(f"  Model alias    : {args.model}")
         print(f"  Display label  : {assistant_label}")
         print(f"  Mode           : {'conversation' if args.convo else 'single-shot'}")
         if args.prompt:
@@ -1050,17 +1083,31 @@ def main():
         print(f"  Session        : {args.session if args.session else 'none (ephemeral)'}")
         print(f"  Model mismatch : {'ALLOWED' if args.allow_session_model_mismatch else 'BLOCKED'}")
         print(f"  Progress       : {args.progress}")
-        print(f"  Hotswap script : {HOTSWAP_SCRIPT}")
+        if not API_PROVIDER:
+            print(f"  Hotswap script : {HOTSWAP_SCRIPT}")
         print(f"  Librarian      : {LIBRARIAN_SCRIPT}")
         print(f"  Session dir    : {SESSION_DIR}")
         print()
-        print("  Would hotswap model, start server, and dispatch.")
+        if API_PROVIDER:
+            print("  Would dispatch via the API provider — NO local server, no hotswap.")
+        else:
+            print("  Would hotswap model, start server, and dispatch.")
         print("  DRY RUN — nothing started, no network call made.")
         sys.exit(0)
 
-    print(f"[*] Hotswapping local model '{args.model}'...", file=sys.stderr)
-    port, served_model_id = hotswap_get_port(args.model)
-    print(f"[✓] Local model ready on port {port} (serves: {served_model_id})", file=sys.stderr)
+    # 0.54.0: an API selection never starts a local server — the hotswap (and its 16 GB load)
+    # ran unconditionally before, so `--provider nvidia --api-model …` still launched a local
+    # Qwen. All dispatch paths (single-shot, convo, compaction) divert to the API inside
+    # dispatch_messages; port stays None and is never used in API mode.
+    if API_PROVIDER:
+        port = None
+        served_model_id = API_MODEL
+        print(f"[✓] API model {API_PROVIDER}:{API_MODEL} (no local server started)",
+              file=sys.stderr)
+    else:
+        print(f"[*] Hotswapping local model '{args.model}'...", file=sys.stderr)
+        port, served_model_id = hotswap_get_port(args.model)
+        print(f"[✓] Local model ready on port {port} (serves: {served_model_id})", file=sys.stderr)
 
     # --- CONVOLUTION MODE ---
     if args.convo:
@@ -1092,7 +1139,7 @@ def main():
                     resumed_existing_session,
                 ) = load_named_session(
                     args.session,
-                    args.model,
+                    session_model,
                     args.allow_session_model_mismatch,
                 )
             except ValueError as exc:
@@ -1155,7 +1202,7 @@ def main():
                 )
                 active_session_path = autosave_named_session(
                     args.session,
-                    args.model,
+                    session_model,
                     conversation_history,
                     rolling_summary,
                     compacted_message_count,
@@ -1175,7 +1222,7 @@ def main():
             except (EOFError, KeyboardInterrupt):
                 active_session_path = autosave_named_session(
                     args.session,
-                    args.model,
+                    session_model,
                     conversation_history,
                     rolling_summary,
                     compacted_message_count,
@@ -1221,7 +1268,7 @@ def main():
                 if args.session:
                     print("\n--- Named Session ---")
                     print(f"Name: {args.session}")
-                    print(f"Model: {args.model}")
+                    print(f"Model: {session_model}")
                     print(f"Path: {active_session_path or named_session_path(args.session)}")
                     print("Autosave: enabled")
                     print("---------------------\n")
@@ -1242,7 +1289,7 @@ def main():
 
                 active_session_path = autosave_named_session(
                     args.session,
-                    args.model,
+                    session_model,
                     conversation_history,
                     rolling_summary,
                     compacted_message_count,
@@ -1269,7 +1316,7 @@ def main():
             if command in ['exit', 'quit', 'q']:
                 active_session_path = autosave_named_session(
                     args.session,
-                    args.model,
+                    session_model,
                     conversation_history,
                     rolling_summary,
                     compacted_message_count,
@@ -1296,7 +1343,7 @@ def main():
                 compacted_message_count += newly_compacted
                 active_session_path = autosave_named_session(
                     args.session,
-                    args.model,
+                    session_model,
                     conversation_history,
                     rolling_summary,
                     compacted_message_count,
@@ -1346,7 +1393,7 @@ def main():
             )
             active_session_path = autosave_named_session(
                 args.session,
-                args.model,
+                session_model,
                 conversation_history,
                 rolling_summary,
                 compacted_message_count,

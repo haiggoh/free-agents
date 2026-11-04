@@ -141,7 +141,15 @@ RATE_LIMITED = {"nvidia"}
 def _load_registry(path=None):
     """Read the generated config/remote-registry.json; return (PROVIDERS, ENTRIES, CATALOG_SCANABLE).
 
-    A provider with `retired_message` is never catalog-scannable: its endpoint is gone."""
+    A provider with `retired_message` is never catalog-scannable: its endpoint is gone.
+
+    0.54.0: LA_REMOTE_REGISTRY_JSON overrides the JSON path (tests point a provider at a local
+    fake server). A SET but missing file aborts naming the var — never a silent fallthrough."""
+    env = os.environ.get("LA_REMOTE_REGISTRY_JSON")
+    if env and path is None:
+        if not os.path.isfile(env):
+            raise RuntimeError(f"LA_REMOTE_REGISTRY_JSON is set but not a file: {env}")
+        path = env
     with open(path or _JSON_PATH, encoding="utf-8") as fh:
         data = json.load(fh)
 

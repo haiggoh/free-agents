@@ -861,7 +861,9 @@ class LowkeyTests(unittest.TestCase):
         self.assertTrue(any(g.id == "api" for g in lk.accordion.groups))
         lk.accordion.select("nvidia:mistralai/mistral-large-4")
         lk.activate_selected()
-        self.assertEqual(lk.api_selection, ("nvidia", "mistralai/mistral-large-4"))
+        # 0.54.0: api_selection is the RemoteAgent object (was a (provider, model_id) tuple)
+        self.assertEqual(lk.api_selection.provider, "nvidia")
+        self.assertEqual(lk.api_selection.model_id, "mistralai/mistral-large-4")
         req = lk._convo()
         self.assertEqual(req.argv,
                          ["lowkey", "--convo", "--provider", "nvidia",

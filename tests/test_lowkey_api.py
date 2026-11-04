@@ -24,7 +24,13 @@ def load_lowkey():
 
 
 class FakeStreamResult:
+    """Models the real remote_provider_core.Result contract: stream_chat never raises, it
+    reports ok/error_class/error_reason (0.54.0: lowkey now reads result.ok)."""
+
     def __init__(self):
+        self.ok = True
+        self.error_class = ""
+        self.error_reason = ""
         self.output_path = None
 
     def to_dict(self):

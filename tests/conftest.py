@@ -39,6 +39,19 @@ os.environ.setdefault("LA_URL_OPENER", "true")
 import tempfile as _tempfile  # noqa: E402
 os.environ["FA_QUOTA_LEDGER_DIR"] = _tempfile.mkdtemp(prefix="fa-quota-test-")
 
+# 0.54.0 Task 1 Step 0 — fence the machine-wide shared state BEFORE any new test exists.
+# The scrub above deleted every inherited LA_*, which makes rate limiting ON at its DEFAULT
+# (real) path: a test reaching remote_http with provider nvidia would write the REAL
+# ~/.claude/free-agents/.nvidia_throttle_state — the one bucket every live session on this
+# box queues on. The HF params cache (~/.cache/free-agents/hf-params.json) is user data for
+# the same reason. FORCED, not setdefault (an inherited override may point at the real file);
+# subprocesses inherit both. The tripwires in pytest_configure fail any in-process write that
+# still resolves to the real files.
+os.environ["LA_NVIDIA_THROTTLE_STATE"] = str(
+    Path(_tempfile.mkdtemp(prefix="fa-throttle-test-")) / "throttle.json")
+os.environ["LA_HF_PARAMS_CACHE"] = str(
+    Path(_tempfile.mkdtemp(prefix="fa-hfparams-test-")) / "hf-params.json")
+
 
 @pytest.fixture(autouse=True)
 def _limiter_knobs_for_load_sensitive(request, monkeypatch):
@@ -131,3 +144,33 @@ def pytest_configure(config):
         return _orig_ledger(record, ledger_path)
 
     _qt.write_ledger = _guarded_ledger
+
+    # Throttle-bucket tripwire (0.54.0 Task 1 Step 0): with LA_NVIDIA_THROTTLE_STATE forced
+    # above, limiter instances point at the per-run temp file; any open/write that still
+    # resolves to the REAL shared bucket (shared with live sessions and this very session's
+    # proxy) fails the test. _locked is the choke point every acquire goes through; _save is
+    # SmoothTokenBucket's separate atomic write.
+    import rate_limiter as _rl
+    _real_throttle = _rl.DEFAULT_STATE.resolve()
+
+    def _guard_path(self):
+        if Path(self.path).resolve() == _real_throttle:
+            raise AssertionError(
+                f"test opened the REAL throttle state {self.path} — LA_NVIDIA_THROTTLE_STATE "
+                "is forced to a sandbox by conftest; pass an explicit temp path instead")
+
+    for _cls in (_rl.SmoothTokenBucket, _rl.SlidingWindowLimiter):
+        _orig_locked = _cls._locked
+
+        def _guarded_locked(self, _orig=_orig_locked):
+            _guard_path(self)
+            return _orig(self)
+
+        _cls._locked = _guarded_locked
+    _orig_save = _rl.SmoothTokenBucket._save
+
+    def _guarded_save(self):
+        _guard_path(self)
+        return _orig_save(self)
+
+    _rl.SmoothTokenBucket._save = _guarded_save

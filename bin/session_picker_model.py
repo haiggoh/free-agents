@@ -3110,7 +3110,8 @@ class LowkeyScreen(Screen):
         # 0.50.0 item 8 (lowkey-any-model-api): the API chooser is REAL — a second accordion
         # group fed from the remote inventory; picking a row selects it for lowkey.
         self.api_agents = api_agents_for(self.settings, api_agents)
-        self.api_selection = None              # (provider, model_id) once an API row is picked
+        self.api_selection = None              # RemoteAgent once an API row is picked (0.54.0)
+        self._api_by_id = {}                   # item id -> RemoteAgent, built in set_models
         self.set_models(models or [])
 
     def set_models(self, models: list[LocalModel]):
@@ -3136,6 +3137,10 @@ class LowkeyScreen(Screen):
                 by_model.setdefault((a.provider, a.model_id or a.alias), []).append(a)
             deduped = [next((x for x in g if not x.alias.endswith("-thinking")), g[0])
                        for g in by_model.values()]
+            # 0.54.0: resolve the selected item id back to the agent OBJECT from the SAME id
+            # expression as the Item — an empty model_id keys on the alias, and passing that
+            # alias as --api-model sent the wrong upstream id.
+            self._api_by_id = {f"{a.provider}:{a.model_id or a.alias}": a for a in deduped}
             groups.append(Group(
                 "api", f"API models {ec.SESSION_EMOJI_FREE_API_STR} ({len(deduped)})",
                 [Item(f"{a.provider}:{a.model_id or a.alias}",
@@ -3225,14 +3230,33 @@ class LowkeyScreen(Screen):
         return acts
 
     def _base(self):
-        if self.api_selection:
-            prov, model_id = self.api_selection
-            return ["lowkey", "--provider", prov, "--api-model", model_id,
-                    "--effort", self.settings.lowkey_effort]
+        if self.api_selection is not None:
+            a = self.api_selection
+            argv = ["lowkey", "--provider", a.provider]
+            # 0.54.0: an alias-only row (empty model_id) launches the provider DEFAULT model —
+            # never pass the alias as --api-model.
+            if a.model_id:
+                argv += ["--api-model", a.model_id]
+            return argv + ["--effort", self.settings.lowkey_effort]
         sel = self.accordion.selected_id
         if not sel or sel not in self.models:
             return None
         return ["lowkey", "--model", sel, "--effort", self.settings.lowkey_effort]
+
+    def _launch_key(self) -> str | None:
+        """The last-launch key: the API item id (provider:model) for an API selection, else the
+        local alias. 0.54.0: `g` (Go launch last) rebuilds from this pair."""
+        if self.api_selection is not None:
+            a = self.api_selection
+            return f"{a.provider}:{a.model_id or a.alias}"
+        return self.accordion.selected_id
+
+    def _remember_launch(self, key: str):
+        s = self.settings
+        if s.last_launched_model is not None:
+            s.last_launched_model["lowkey"] = key
+        if s.on_last_launched:
+            s.on_last_launched("lowkey", key, None)
 
     def _env(self):
         v = self.settings.lowkey_thinking
@@ -3242,7 +3266,19 @@ class LowkeyScreen(Screen):
         last = self.settings.last_launched_model.get("lowkey")
         if not last:
             return None
-        argv = ["lowkey", "--convo", "--model", last, "--effort", self.settings.lowkey_effort]
+        argv = ["lowkey", "--convo"]
+        if ":" in last:
+            # 0.54.0: an API launch is stored as provider:model — rebuild --provider/--api-model
+            # (a bare --model <provider:model> relaunched a nonsense local alias before).
+            prov, rest = last.split(":", 1)
+            argv += ["--provider", prov]
+            agent = self._api_by_id.get(last)
+            model_id = agent.model_id if agent is not None else (rest if "/" in rest else "")
+            if model_id:
+                argv += ["--api-model", model_id]
+        else:
+            argv += ["--model", last]
+        argv += ["--effort", self.settings.lowkey_effort]
         if self.session_name:
             argv += ["--session", self.session_name]
         return LaunchRequest("lowkey", argv, self._env(), last)
@@ -3261,26 +3297,31 @@ class LowkeyScreen(Screen):
         argv = [base[0], "--convo"] + base[1:]
         if self.session_name:
             argv += ["--session", self.session_name]
-        return LaunchRequest("lowkey", argv, self._env(), self.accordion.selected_id)
+        key = self._launch_key()
+        if key:
+            self._remember_launch(key)
+        return LaunchRequest("lowkey", argv, self._env(), key or "")
 
     def activate_selected(self):
         # Click/Enter on a model row only SELECTS it (user 2026-10-30: highlight-to-choose
         # is finicky); launching is the explicit `p`/`g` actions. An API row selects the
-        # (provider, model) pair for lowkey (0.50.0 item 8).
+        # RemoteAgent for lowkey (0.50.0 item 8); a LOCAL row clears it (0.54.0: the selection
+        # used to leak, so a later local pick still launched the API model).
         sel = self.accordion.selected_id
-        # 0.53.1: item ids are keyed provider:(model_id or alias) since 0.52.1 — the check must
-        # use the SAME key, or selecting an api row with an empty model_id never registered and
-        # the launch fell through to a local model (user report 2026-11-04).
-        if sel and ":" in sel and any(f"{a.provider}:{a.model_id or a.alias}" == sel for a in self.api_agents):
-            prov, model_id = sel.split(":", 1)
-            self.api_selection = (prov, model_id)
+        if sel and sel in self._api_by_id:
+            self.api_selection = self._api_by_id[sel]
+        elif sel and sel in self.models:
+            self.api_selection = None
         return None
 
     def one_shot(self, prompt: str):
         base = self._base()
         if base is None or not prompt.strip():
             return None
-        return LaunchRequest("lowkey", base + ["--prompt", prompt], self._env(), self.accordion.selected_id)
+        key = self._launch_key()
+        if key:
+            self._remember_launch(key)
+        return LaunchRequest("lowkey", base + ["--prompt", prompt], self._env(), key or "")
 
 
 @dataclass
