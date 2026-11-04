@@ -373,6 +373,82 @@ class BackgroundThreadsStopped(PilotCase):
         self.assertEqual(alive, [], f"background threads still alive after run: {alive}")
 
 
+class ApiKeysHomeRow(PilotCase):
+    """0.53.1 (user report): in api setup, Back to Home is the row right AFTER the provider
+    (harmonica) list — not pinned at the bottom pane."""
+
+    def test_back_row_is_last_row_after_providers_and_activates_home(self):
+        async def s(app, pilot, h):
+            import session_picker_model as m
+            app.goto(m.Nav("home", m.HOME_OWNED))    # csl-launched home is HOME_OWNED
+            await h.pilot.pause(0.4)
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            rows = app.query_one("#rows")
+            ids = [rows.get_option_at_index(i).id for i in range(rows.option_count)]
+            self.assertEqual(ids[-1], "g:__home__", f"last row must be the Back action row: {ids}")
+            acts = h.labels("actions")
+            self.assertFalse(any("Back to Home" in a for a in acts), acts)
+            await h.goto_row("group", "__home__")
+            await h.press("enter")
+            await h.wait_screen("HomeScreen")
+        self.run_picker(s)
+
+    def test_b_key_still_returns_home(self):
+        async def s(app, pilot, h):
+            import session_picker_model as m
+            app.goto(m.Nav("home", m.HOME_OWNED))
+            await h.pilot.pause(0.4)
+            await h.press("k")
+            await h.wait_screen("APIKeysScreen")
+            await h.press("b")
+            await h.wait_screen("HomeScreen")
+        self.run_picker(s)
+
+
+class LowkeyApiSelect(unittest.TestCase):
+    """0.53.1 (user report): selecting an api model in lowkey must route the launch to the api
+    server, not a local model. Root cause: the selection check keyed provider:model_id while
+    item ids are provider:(model_id or alias) — empty model_id never matched."""
+
+    def test_selecting_api_row_sets_api_selection_and_api_launch_argv(self):
+        from picker_harness import ROOT
+        sys.path.insert(0, str(ROOT / "bin"))
+        import session_picker_model as m
+        agents = [m.RemoteAgent("nvidia-a", "nvidia", "NVIDIA A", "unknown", model_id="")]
+        lk = m.LowkeyScreen(m.Settings(), [], api_agents=agents)
+        api = next(g for g in lk.groups() if g.id == "api")
+        sel = api.items[0].id                      # "nvidia:nvidia-a" (alias-keyed)
+        self.assertTrue(lk.accordion.select(sel))
+        lk.activate_selected()
+        self.assertEqual(lk.api_selection, ("nvidia", "nvidia-a"),
+                         "selecting the api row must register the api selection")
+        req = lk._convo()
+        self.assertIn("--provider", req.argv)
+        self.assertIn("nvidia", req.argv)
+        self.assertIn("--api-model", req.argv)
+        self.assertNotIn("--model", req.argv[:4])
+
+
+class TruststoreInject(unittest.TestCase):
+    """0.53.1: _inject_os_truststore calls truststore.inject_into_ssl when present and is
+    silent when absent (old venv). The HF warm-up needs this on TLS-inspecting networks."""
+
+    def test_called_when_present_silent_when_absent(self):
+        from picker_harness import ROOT
+        import types
+        sys.path.insert(0, str(ROOT / "bin"))
+        import session_picker as sp
+        calls = []
+        fake = types.ModuleType("truststore")
+        fake.inject_into_ssl = lambda: calls.append(1)
+        with mock.patch.dict(sys.modules, {"truststore": fake}):
+            sp._inject_os_truststore()
+        self.assertEqual(calls, [1])
+        with mock.patch.dict(sys.modules, {"truststore": None}):
+            sp._inject_os_truststore()   # must not raise
+
+
 class RightClickPty(PTYCase):
     """0.52.1: right-click copy through the REAL terminal event path (SGR mouse sequences into
     the pty, pbcopy recorder on PATH) — the 0.51.0 test invoked the handler directly, which

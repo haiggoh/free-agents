@@ -1042,6 +1042,8 @@ class Picker(App):
         """Background hardware detection: runs after the menu is already painted, caches
         the result, and re-renders only if the values actually changed."""
         hw = _detect_hw()
+        if self._bg_stop is not None and self._bg_stop.is_set():
+            return                      # 0.53.0: stopping — never touch the closed loop
         _write_hw_cache(hw)
 
         def apply():
@@ -1058,8 +1060,8 @@ class Picker(App):
                 self.render_model()
         try:
             self.call_from_thread(apply)
-        except RuntimeError:
-            pass    # 0.53.0: loop closed during shutdown
+        except Exception:
+            pass    # 0.53.0: loop closed/cancelled during shutdown (RuntimeError, CancelledError)
 
     # --- background inventory ----------------------------------------------------------------
     LOADERS = {"local": "load_local_models", "remote": "load_remote_agents", "catalog": "load_catalog"}
@@ -1813,6 +1815,13 @@ class Picker(App):
         if h == ("group", m.NEW_MODELS_GROUP):
             self._open_register_panel()
             return
+        if h == ("group", m.HOME_ROW_GROUP):
+            # 0.53.1: trailing Back row after the api-keys provider list (not at the bottom).
+            if getattr(self.screen_model, "owner", "") == m.HOME_OWNED:
+                self.dispatch(m.Nav("home", m.HOME_OWNED))
+            else:
+                self.dispatch(m.BACK)
+            return
         if h[0] == "group":
             if acc.is_open(h[1]):
                 acc.collapse(h[1])
@@ -2522,7 +2531,21 @@ class Picker(App):
         self.exit(130)
 
 
+def _inject_os_truststore():
+    """0.53.1: on TLS-inspecting networks (corporate wifi) every Python HTTPS call fails with
+    CERTIFICATE_VERIFY_FAILED because certifi's bundle lacks the corporate CA while the macOS
+    Keychain has it. The picker venv now ships truststore — inject the OS trust store so the HF
+    warm-up (parameter sizes in the row names) actually works there. Old venv without
+    truststore -> skip silently (fail-open, pre-0.53.1 behavior)."""
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
+
+
 def main(argv):
+    _inject_os_truststore()
     ap = argparse.ArgumentParser(prog="session-picker",
                                  description="Free Agents session picker (arrow keys, letter shortcuts).")
     ap.add_argument("screen", nargs="?", default="home",

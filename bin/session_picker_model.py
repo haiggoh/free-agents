@@ -963,7 +963,7 @@ OOM_PROTECTION_NAME = "RAM usage out-of-memory protection"
 
 
 def _tool_actions(backend: bool = True, local_session: bool = False, home: bool = False,
-                  settings_keys: tuple = ()):
+                  settings_keys: tuple = (), owner: str = DIRECT_ROOT):
     # settings_keys (user 2026-10-30): on lane screens these keys are SETTINGS and fold into
     # the "Advanced" group — k/n on Remote, u/v on Local.
     def sec(k):
@@ -982,7 +982,9 @@ def _tool_actions(backend: bool = True, local_session: bool = False, home: bool 
         acts.append(Action("u", f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}{OOM_PROTECTION_NAME}", lambda: Nav("memguard"),
                            section=sec("u")))
     if not local_session:
-        acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys"), section=sec("k")))
+        # 0.53.1: carry the owner so api keys opened from the csl home is HOME_OWNED (gets the
+        # trailing Back-to-Home row); a bare Nav("api_keys") defaulted to DIRECT_ROOT (Quit).
+        acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys", owner), section=sec("k")))
         if not home:
             acts.append(Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section=sec("n")))
     return acts if backend else [a for a in acts if a.key != "v"]
@@ -1167,7 +1169,7 @@ class HomeScreen(Screen):
                    lambda: Nav("remote", HOME_OWNED), section="lanes"),
             Action("o", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Lowkey — model evaluation chat", lambda: Nav("tool:lowkey"), section="lanes"),
         ]
-        tools = _tool_actions(home=True)          # [k API keys, v Backend manager]
+        tools = _tool_actions(home=True, owner=self.owner)          # [k API keys, v Backend manager]
         acts.append(tools[0])                     # API keys first …
         acts.append(Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools"))  # … download directly after
         acts.append(tools[1])                     # Backend manager (blank line after it)
@@ -1196,6 +1198,7 @@ class LaunchRequest:
 
 
 NEW_MODELS_GROUP = "__new_models__"   # the "Register new local models…" action header
+HOME_ROW_GROUP = "__home__"            # 0.53.1: trailing "Back to Home" action row after the api-keys provider list
 
 
 class LocalScreen(Screen):
@@ -2887,10 +2890,27 @@ class APIKeysScreen(Screen):
                     Item(*self._hide_item(slug)),
                 ]
             ))
-        self.accordion.set_groups(groups)
+        self.accordion.set_groups(self._with_home_row(groups))
         # Default expand NVIDIA (first group)
         if groups:
             self.accordion.open_group = groups[0].id
+
+    def nav_actions(self):
+        acts = super().nav_actions()
+        if self.owner in (HOME_OWNED, SUB):
+            # 0.53.1 (user): the Back row renders as the last row AFTER the provider list
+            # (_with_home_row), not in the bottom pane; keep the "b" key binding.
+            for a in acts:
+                if a.section == "nav":
+                    a.section = "hidden"
+        return acts
+
+    def _with_home_row(self, groups):
+        """0.53.1: append the Back action row after the last provider group (not at the bottom)."""
+        if self.owner in (HOME_OWNED, SUB):
+            label = f"{ec.EMOJI_HOME_STR} Back to Home" if self.owner == HOME_OWNED else self.back_label
+            groups.append(Group(HOME_ROW_GROUP, label, [], style="action"))
+        return groups
 
     # Account requirements a user must meet BEFORE a key can work, shown on the provider's row so
     # they are seen while choosing, not discovered as a 403 inside the first session.
@@ -2979,7 +2999,7 @@ class APIKeysScreen(Screen):
                     Item("more:show", "Show all providers"),
                 ]
             ))
-        self.accordion.set_groups(groups)
+        self.accordion.set_groups(self._with_home_row(groups))
         # Default expand NVIDIA (first group)
         if groups:
             self.accordion.open_group = groups[0].id
@@ -3248,7 +3268,10 @@ class LowkeyScreen(Screen):
         # is finicky); launching is the explicit `p`/`g` actions. An API row selects the
         # (provider, model) pair for lowkey (0.50.0 item 8).
         sel = self.accordion.selected_id
-        if sel and ":" in sel and any(f"{a.provider}:{a.model_id}" == sel for a in self.api_agents):
+        # 0.53.1: item ids are keyed provider:(model_id or alias) since 0.52.1 — the check must
+        # use the SAME key, or selecting an api row with an empty model_id never registered and
+        # the launch fell through to a local model (user report 2026-11-04).
+        if sel and ":" in sel and any(f"{a.provider}:{a.model_id or a.alias}" == sel for a in self.api_agents):
             prov, model_id = sel.split(":", 1)
             self.api_selection = (prov, model_id)
         return None

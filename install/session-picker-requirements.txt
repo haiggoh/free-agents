@@ -10,3 +10,6 @@ mdurl==0.1.2
 platformdirs==4.12.2
 pygments==2.21.0
 typing-extensions==4.16.0
+# 0.53.1: OS trust store injection for the HF parameter-size warm-up on TLS-inspecting
+# networks (same pin as the litellm venv's shim uses); injected guarded in session_picker.py.
+truststore==0.10.5

@@ -1,3 +1,19 @@
+## [0.53.1] — 2026-11-04
+
+### Fixed (user-reported on 0.53.0)
+- **Api setup**: "Back to Home" is now the row right AFTER the provider (harmonica) list, not
+  pinned at the bottom pane; the "k" action carries the home owner so the screen is home-owned
+  when opened from the csl home; the `b` key binding still works.
+- **Lowkey api selection**: selecting an api model row now registers the api selection — the
+  check keyed `provider:model_id` while row ids are `provider:(model_id or alias)`, so an empty
+  model_id never matched and the launch fell through to a local model. Launch argv now carries
+  `--provider`/`--api-model`.
+- **Parameter sizes on TLS-inspecting networks**: the picker venv now ships `truststore`
+  (pinned 0.10.5) and the picker injects the OS trust store at startup (guarded, fail-open), so
+  the HF warm-up that fills parameter counts in row names works on corporate wifi — verified
+  live (huggingface.co answers 200 via truststore; before, every warm call failed with
+  CERTIFICATE_VERIFY_FAILED and most nvidia rows showed no size).
+
 ## [0.53.0] — 2026-11-04
 
 ### Fixed
