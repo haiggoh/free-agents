@@ -26,3 +26,22 @@ instance; failure drills (renamed venv / missing plugin → dialog) NOT yet run 
 
 UNTESTED: clean default Mac, other macOS versions, Intel, Homebrew bottle lifecycle, MDM-restricted
 Macs, Linux (no Linux runtime on this machine).
+
+## 2026-11-04 — failure drills on the real app (Task 4 remainder, run by session 86018b5a)
+
+Both drills launched the real `~/Applications/Free Agents.app` via `open` with a Finder-like
+environment (`env -i HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin`):
+
+- Drill A — `GUI_VENV=/nonexistent` in `~/.config/free-agents/gui-launcher.conf`: the app showed
+  a native dialog naming `install/setup-gui.sh` (user-confirmed: "Dialog naming setup-gui.sh
+  (expected)"). `locate.sh --launch` under the same env printed the missing-venv message and
+  exited 2.
+- Drill B — `FREE_AGENTS_PLUGIN=/nonexistent`: native dialog about the bad plugin path
+  (user-confirmed expected); `locate.sh --launch` printed "… is not a Free Agents plugin dir."
+  and exited 2.
+- After each drill the config was restored byte-identical (`cmp` against the pre-drill copy:
+  RESTORED-IDENTICAL) and `locate.sh --check` resolved plugin + gui venv again with exit 0.
+
+Task 4 is therefore complete on this Mac: generation, code validity (adhoc signature, spctl
+expected rejection for non-quarantined), Finder first-launch, native selftest round trip, clean
+process exit, and both failure drills with actionable native dialogs.
