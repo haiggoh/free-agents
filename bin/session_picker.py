@@ -37,6 +37,33 @@ import session_menu_state as sms  # noqa: E402
 import cloud_session_env as cse  # noqa: E402
 import session_picker_model as m  # noqa: E402
 
+# Task 6 (nicegui plan): the non-terminal core lives in picker_core; re-imported here so
+# existing tests that patch session_picker.<name> keep working (same objects).
+from picker_core import (  # noqa: E402,F401
+    _run,
+    load_local_models,
+    MISSING_MODELS,
+    auto_sync_registry,
+    load_remote_agents,
+    _FOOTPRINT,
+    _footprint,
+    _VERDICT_MEMO,
+    _memoized_verdict,
+    PARAM_COUNT_OVERRIDES,
+    catalog_local_capable,
+    model_param_count,
+    catalog_model_old,
+    _warm_hf_cache,
+    load_remote_catalog,
+    HF_WARM_LIMIT,
+    load_catalog,
+    command_for,
+    _mb,
+    load_versions,
+    TOOLS,
+    Savers, build_settings, build_screen, ScreenBuild,
+)
+
 try:
     from rich.cells import cell_len
     from rich.text import Text
@@ -626,26 +653,6 @@ def load_versions(kind: str) -> list[m.VersionEntry]:
 
 PROVIDER_SIGNUP_URLS = m.PROVIDER_SIGNUP_URLS   # one table: install/setup-api-keys.py
 
-TOOLS = {
-    "tool:keys": lambda: ["python3", str(REPO / "install/setup-api-keys.py")],
-    "tool:rl-status": lambda: ["python3", str(BIN / "rate_limiter.py"), "status"],
-    "tool:rl-lane": lambda: ["python3", str(BIN / "rate_limiter.py"), "lane-toggle",
-                             "--user-approved"],
-    "tool:report": lambda: ["bash", str(BIN / "local-capable-filter.sh"), "--report",
-                            str(REPO / "config/local-capable-remote-models.psv"), "--roster",
-                            str(REPO / "config/remote-agents.sh")],
-    # Backend manager (install/manage-backend.py): backend -> argv. Version-taking operations
-    # (install/validate/info/snapshot/promote/remove) go through VersionsScreen.argv_for. "tool:rl-reset" is
-    # the RATE LIMITER state reset; it is handled as a typed-confirm prompt, never run directly.
-    "tool:rt-releases": lambda b: _mb(b, "releases", "--pre"),
-    "tool:rt-launchd-status": lambda b: _mb(b, "launchd", "status"),
-    "tool:rt-launchd-run-once": lambda b: _mb(b, "launchd", "run-once"),
-    "tool:rt-launchd-install": lambda b: _mb(b, "launchd", "install"),
-    "tool:rt-launchd-uninstall": lambda b: _mb(b, "launchd", "uninstall"),
-    "tool:keys:add": lambda slug: ["python3", str(REPO / "install/setup-api-keys.py"), slug],
-}
-
-
 class PromptInput(Input):
     """The inline prompt. With submit_on_paste set (API keys), a paste replaces the field and
     submits at once, like the old wizard's bracketed-paste reader: a key can never be pasted
@@ -1076,11 +1083,13 @@ class Picker(App):
         # app's fit/age/param verdicts (measured 2026-10-28: the full suite's age-filter
         # tests share one process, and a cached cutoff from an earlier test leaked).
         _VERDICT_MEMO.clear()
-        state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
-        self.state_warnings = list(state.warnings)
+        # Task 6: persistence lives in picker_core.Savers; the app aliases its lists so appends
+        # via state_warnings/state_notices land in the Savers lists (and vice versa).
+        self.savers = Savers(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
+        self.state_warnings = self.savers.warnings
         # 0.50.0 F4: informational notes (cleanups, paste fixes) are NOT warnings — they get
         # the info emoji, not ⚠️ (which is reserved for problems).
-        self.state_notices = []
+        self.state_notices = self.savers.notices
         # A security-review override left behind while the plugin is not active is removed, and the
         # removal is SHOWN (0.42.0): the row is hidden then, so a kept override would be stale state.
         try:
@@ -1093,50 +1102,9 @@ class Picker(App):
                 f"removed {', '.join(removed)} from ~/.claude/settings.json: the security-guidance "
                 "plugin is not active, so the setting did nothing")
         cloud = cse.load()      # read-only; reflects ~/.claude/settings.json + installed plugins
-        self.settings = m.Settings(
-            local_effort=state.effort["local_session"],
-            remote_effort=state.effort["remote_api_session"],
-            lowkey_effort=state.effort["lowkey"],
-            local_temperature=state.temperature.get("local_session", sms.DEFAULT_TEMPERATURE["local_session"]),
-            remote_temperature=state.temperature.get("remote_api_session", sms.DEFAULT_TEMPERATURE["remote_api_session"]),
-            lowkey_temperature=state.temperature.get("lowkey", sms.DEFAULT_TEMPERATURE["lowkey"]),
-            thinking_session=state.thinking_session,
-            rate_limiter=dict(state.rate_limiter),
-            memguard=dict(state.memguard),
-            local_registry=dict(state.local_registry),   # 0.55.8 Task 8: the migrated section
-            remote_filters=dict(state.remote_filters),   # 0.62.0 C9: schema-11 section
-            auto_mode=int(os.environ.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
-            telemetry=os.environ.get("CSL_TELEMETRY", "0") == "1",
-            stop_hook=os.environ.get("CSL_STOP_HOOK", "0") == "1",   # OFF by default (0.22.3)
-            watcher=os.environ.get("CSL_WATCH", "0") == "1",
-            enable_mcp=os.environ.get("LA_ENABLE_MCP", "1") == "1",   # default ON (user 2026-10-15); explicit env wins
-            include_trials=not flags.exclude_trials,
-            local_capable_shown=flags.local_capable_shown or os.environ.get("CSL_LOCAL_CAPABLE") == "1",
-            show_old=getattr(flags, "show_old", False),
-            on_effort_saved=self._save_effort,
-            on_temperature_saved=self._save_temperature,
-            on_thinking_saved=self._save_thinking,
-            hidden_providers=list(state.hidden_providers),
-            on_hidden_providers_saved=self._save_hidden_providers,
-            lowkey_remote_filters=bool(state.lowkey_filters.get("remote_filters", False)),
-            on_lowkey_filters_saved=self._save_lowkey_filters,
-            on_flash=lambda msg: self.notify(msg, severity="information", timeout=2.5),
-            security_review=cloud["security_review"],
-            security_review_custom=cloud["custom_model"],
-            security_review_offered=cloud["plugin_active"],
-            routes={p: cse.route(p) for p in cse.ROUTE_PATHS},
-            on_cloud_saved=self._save_cloud,
-            on_local_registry_saved=self._save_lr,
-            # "Go last": restored from the store; written when a launch request is made.
-            last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
-                                 **state.last_launched},
-            last_launched_tier=dict(state.last_launched_tier),
-            last_launched_mode=dict(state.last_launched_mode),
-            on_last_launched=self._save_last_launched,
-            catalog_local_capable=catalog_local_capable,
-            model_param_count=model_param_count,
-            model_context_window=model_context_window,
-            catalog_model_old=catalog_model_old)
+        # Task 6: Settings come from the shared core (picker_core.build_settings), so the NiceGUI
+        # frontend builds the identical object.
+        self.settings = build_settings(flags, self.savers)
         self.start = start
         self.nav_stack: list = []          # callers of sub-screens (Back returns to them)
         self.screen_model: m.Screen | None = None
@@ -1741,69 +1709,24 @@ class Picker(App):
     def goto(self, nav: m.Nav):
         scoped = getattr(self, "_screen_warnings", set())
         if scoped:
-            self.state_warnings = [w for w in self.state_warnings if w not in scoped]
+            self.state_warnings[:] = [w for w in self.state_warnings if w not in scoped]  # in-place: keep the Savers alias
             self._screen_warnings = set()
         # Build screen WITHOUT loading inventory (lazy loading)
         # Inventory will be loaded on-demand when user toggles "Choose model"
+        # Task 6: screen construction lives in the shared core (picker_core.build_screen), so the
+        # NiceGUI frontend builds the identical screen object.
         s = self.settings
-        if nav.target == "home":
-            local = self.cache.get("local")
-            remote = self.cache.get("remote")
-            self.screen_model = m.HomeScreen(s, len(local) if local else None, len(remote) if remote else None,
-                                             self._home_catalog_total(), nav.owner)
-        elif nav.target == "about":
-            self.screen_model = m.AboutScreen(s, nav.owner)
-        elif nav.target == "local":
-            # Pass models only if already cached; otherwise pass None for lazy loading
-            local = self.cache.get("local")
-            self.screen_model = m.LocalScreen(s, local, nav.owner)
-            if local is not None:
-                self.screen_model.set_models(local, MISSING_MODELS)
-        elif nav.target == "remote":
-            remote = self.cache.get("remote")
-            self.screen_model = m.RemoteScreen(s, remote, nav.owner)
-            if remote is not None:
-                self._hydrate_catalogs(self.screen_model)   # cached lists paint at once
-        elif nav.target == "lowkey":
-            local = self.cache.get("local")
-            self.screen_model = m.LowkeyScreen(s, local, nav.owner,
-                                               api_agents=self.cache.get("remote") or [])
-        elif nav.target == "download":
-            # 0.22.3's background loading dropped the catalog load, so this screen always
-            # opened empty. It now loads like local/remote and fills in via _loaded().
-            catalog_data = self.cache.get("catalog")
-            if catalog_data:
-                entries, free, head = catalog_data
-            else:
-                entries, free, head = [], 0.0, 100.0
-                self._prefetch(("catalog",))
-            self.screen_model = m.DownloadScreen(s, entries, free, head, nav.owner)
-        elif nav.target == "rate_limiter":
-            self.screen_model = m.RateLimiterScreen(s, nav.owner, on_save=self._save_rl)
-        elif nav.target == "memguard":
-            self.screen_model = m.MemoryGuardScreen(s, nav.owner, on_save=self._save_mg)
-        elif nav.target == "runtime_manager":
-            self.screen_model = m.RuntimeManagerScreen(s, nav.owner)
-        elif nav.target == "runtime":
-            self.screen_model = m.RuntimeScreen(s, nav.owner)
-        elif nav.target == "runtime_launchd":
-            self.screen_model = m.LaunchdScreen(s, nav.owner)
-        elif nav.target == "api_keys":
-            self.screen_model = m.APIKeysScreen(s, nav.owner)
-        elif nav.target.startswith("runtime_versions:"):
+        build = build_screen(nav, s, self.cache,
+                             catalog_counts=getattr(self, "catalog_counts", None),
+                             savers=self.savers)
+        if nav.target == "remote" and self.cache.get("remote") is not None:
+            self._hydrate_catalogs(build.screen)   # cached lists paint at once
+        if nav.target.startswith("runtime_versions:"):
             # Always a fresh list: an install/remove a moment ago changes what is there.
-            sm = m.VersionsScreen(s, nav.target.split(":", 1)[1], owner=m.SUB)
-            self.cache.pop(sm.inventory_kind, None)
-            self._prefetch((sm.inventory_kind,))
-            self.screen_model = sm
-        elif nav.target == "remote_filters":
-            self.screen_model = m.RemoteFiltersScreen(s, nav.owner)
-        elif nav.target == "cloud_config":
-            self.screen_model = m.CloudConfigScreen(s, nav.owner)
-        elif nav.target == "theme_config":
-            self.screen_model = m.ThemeConfigScreen(s, nav.owner)
-        else:
-            raise ValueError(nav.target)
+            self.cache.pop(build.screen.inventory_kind, None)
+        if build.prefetch:
+            self._prefetch(build.prefetch)
+        self.screen_model = build.screen
 
         self.nav = nav
         self.render_model()
@@ -3175,7 +3098,7 @@ class Picker(App):
                     input(f"\n[picker] finished (exit {rc}). Press Enter to return…")
                 except (EOFError, KeyboardInterrupt):
                     pass
-        self.state_warnings = [w for w in self.state_warnings if not w.startswith("last child")]
+        self.state_warnings[:] = [w for w in self.state_warnings if not w.startswith("last child")]  # in-place: keep the Savers alias
         if rc not in (0, None):
             self.state_warnings.append(f"last child exited {rc}")
         if isinstance(self.screen_model, m.DownloadScreen):   # a download changes what is on disk
