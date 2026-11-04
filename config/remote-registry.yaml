@@ -512,7 +512,7 @@ entries:
   - alias: nvidia-yi-large
     provider: nvidia
     model_id: 01-ai/yi-large
-    display: Yi Large
+    display: 01.AI Yi Large
     tier: unknown
     notes: >-
       BROKEN on the free NVIDIA account 2026-11-04: HTTP 404 "Function not found for account"
