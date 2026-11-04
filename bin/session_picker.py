@@ -239,6 +239,34 @@ PARAM_COUNT_OVERRIDES = {
     "minimax-m3.1": 428.0,             # MiniMax M3.1 Flash: 428 B total / 23 B active (open weights)
     "mistral-large-2411": 123.0,       # Mistral Large 2 (Nov 2024): 123 B
     "mistral-small-2503": 24.0,        # Mistral Small 3 (Jan 2025): 24 B
+    # 0.54.0 Task 3: FULL model ids (contain "/") so each key matches exactly one catalog id —
+    # the substring patterns above are pre-existing and left alone. All nine below are HF-gated
+    # (HF API answers 401, verified 2026-11-04) and sized from the vendor's own page, fetched
+    # 2026-11-04: "# <id>: <count> — <source URL>, fetched 2026-11-04 (HF API 401)".
+    "ai21labs/jamba-1.5-large-instruct": 398.0,   # docs.ai21.com/docs/jamba-foundation-models: Jamba Large 398B total / 94B active
+    "mistralai/mistral-large": 123.0,             # mistral.ai/news/mistral-large-2407: "123 billion parameters"
+    "mistralai/mistral-large-2-instruct": 123.0,  # Mistral Large 2 (2411) 123B — docs.mistral.ai/models
+    "nvidia/nemotron-parse-2.0": 0.905,           # build.nvidia.com/nvidia/nemotron-parse-2.0/modelcard: "Number of model parameters: 905M"
+    "nvidia/nemotron-parse": 1.0,                 # build.nvidia.com/nvidia/nemotron-parse/modelcard: "Number of Parameters: <1B" (upper bound)
+    "nvidia/ai-synthetic-video-detector": 0.172,  # build.nvidia.com/nvidia/synthetic-video-detector/modelcard: "1.72 * 10^8"
+}
+
+# 0.54.0 Task 3: HF-gated NVIDIA ids with NO public parameter count — each entry names >= 2
+# sources checked and their result. Marking an id unknown is legitimate only after both were
+# actually fetched (2026-11-04). model_param_count returns None for these (sorts last).
+PARAM_COUNT_UNKNOWN = {
+    "nvidia/embed-qa-4": (
+        "no public parameter count found — HF API 401 (gated, 2026-11-04); "
+        "docs.api.nvidia.com/nim/reference/nvidia-embed-qa-4 fetched 2026-11-04: no count stated; "
+        "build.nvidia.com/nvidia/embed-qa-4/modelcard is JS-only"),
+    "nvidia/nvclip": (
+        "no public parameter count found — HF API 401 (gated, 2026-11-04); "
+        "docs.api.nvidia.com/nim/reference/nvidia-nvclip fetched 2026-11-04: no count stated; "
+        "build.nvidia.com/nvidia/nvclip/modelcard empty"),
+    "nvidia/vila": (
+        "no public count for the NIM vila variant — HF API 401 (gated, 2026-11-04); "
+        "docs.api.nvidia.com/nim/reference/nvidia-vila fetched 2026-11-04: no count stated; "
+        "NVlabs/VILA GitHub lists family sizes 3B/8B/13B/40B but not which the NIM id serves"),
 }
 
 
@@ -252,8 +280,13 @@ def model_param_count(provider, model_id):
     def compute():
         try:
             for pat, b in PARAM_COUNT_OVERRIDES.items():
-                if pat in (model_id or ""):
-                    return float(b)
+                if "/" in pat:
+                    # 0.54.0: full-id keys match EXACTLY (a prefix key like
+                    # "mistralai/mistral-large" would also match mistral-large-2-instruct)
+                    if pat == model_id:
+                        return float(b)
+                elif pat in (model_id or ""):
+                    return float(b)          # pre-existing substring keys, unchanged
             fp = _footprint()
             total = fp.parse_params(model_id)["total_b"]
             if total is None:
@@ -1132,7 +1165,14 @@ class Picker(App):
 
         def apply():
             sm = self.screen_model
+            # 0.54.0 Task 3: after the warm-up, REBUILD the groups — the size suffix is baked
+            # into the Item label at regroup/catalog-build time, so a bare render_model never
+            # painted the sizes. Remote (list open) and Lowkey's API groups both.
             if isinstance(sm, m.RemoteScreen) and getattr(sm, "_choose_model_visible", False):
+                sm._refresh_keep_open()
+                self.render_model()
+            elif isinstance(sm, m.LowkeyScreen) and getattr(sm, "_choose_model_visible", False):
+                sm.set_models(list(sm.models.values()))
                 self.render_model()
         try:
             self.call_from_thread(apply)
@@ -1750,6 +1790,21 @@ class Picker(App):
                 sm.catalogs[prov] = rows
                 if from_disk:
                     sm._catalog_stale.add(prov)          # disk-cached: still owes one live revision
+                    # 0.54.0 Task 3: a DISK-hydrated catalog also triggers the HF warm-up —
+                    # before, only a live `rcat:` load did, so every disk-cache-only start
+                    # (the common one!) showed sizes only after an unrelated live fetch.
+                    # Once per provider per picker session; honours LA_PICKER_HF_LOOKUP.
+                    if (os.environ.get("LA_PICKER_HF_LOOKUP", "1") != "0"
+                            and not hasattr(self, "_warmed_providers")):
+                        self._warmed_providers = set()
+                    if (os.environ.get("LA_PICKER_HF_LOOKUP", "1") != "0"
+                            and prov not in self._warmed_providers):
+                        self._warmed_providers.add(prov)
+                        import threading
+                        ids = [c.model_id for c in rows][:HF_WARM_LIMIT]
+                        t = threading.Thread(target=self._warm_catalog_bg, args=(ids,), daemon=True)
+                        self._bg_threads.append(t)
+                        t.start()
                 changed = True
         if changed:
             # The groups on the screen were built BEFORE hydration: without a regroup the

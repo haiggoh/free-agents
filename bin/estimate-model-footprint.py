@@ -148,19 +148,57 @@ def _hf_cache_path() -> pathlib.Path:
     return pathlib.Path(root) / "free-agents" / "hf-params.json"
 
 
+class HFError:
+    """0.54.0: a classified HF failure — the cache rules distinguish `network` (TLS/timeout/
+    DNS: must NEVER be cached as an answer) from `http` with a status (401/404 = a real
+    "HF has no such repo" negative; other statuses are transient)."""
+
+    def __init__(self, kind: str, status: "int | None" = None):
+        self.kind = kind                      # "network" | "http"
+        self.status = status
+
+    def __repr__(self):
+        return f"HFError({self.kind!r}, status={self.status!r})"
+
+
 def _hf_get(url: str, timeout: float):
-    """GET JSON from the HF API. Tests replace this function; None on any failure.
+    """GET JSON from the HF API. Tests replace this function.
+
+    Returns the decoded JSON, or an HFError — NEVER None: None made a TLS failure
+    indistinguishable from "no such repo", and the old cache then stored `total: null`
+    for 30 days (the 2026-11-04 09:33 poisoned-cache incident).
 
     0.54.0: the request goes through fa_tls.client_context() — on TLS-inspecting networks the
     plain default context rejects the chain (VERIFY_X509_STRICT vs the missing-AKI inspection
     CA) and the HF size warm-up silently never runs."""
+    import urllib.error
     import urllib.request
     import fa_tls
     try:
         with urllib.request.urlopen(url, timeout=timeout, context=fa_tls.client_context()) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return HFError("http", exc.code)
     except Exception:
-        return None
+        return HFError("network")
+
+
+NEG_CACHE_TTL_S = 7 * 86400      # a 401/404 "HF has no such repo" is cached short, not 30 days
+
+
+def _cache_entry_fresh(hit, now: float) -> bool:
+    """0.54.0 cache read rule: a v2 entry is fresh within its TTL; a v2 NEGATIVE entry
+    (total null) is fresh only within neg_until (never the 30-day TTL); a LEGACY v1 entry
+    (no "v" key) with total null is STALE and refetched — that is the poisoned shape; a
+    legacy entry WITH a count still answers (no mass refetch)."""
+    if not isinstance(hit, dict):
+        return False
+    if "v" in hit:
+        if hit.get("total") is None:
+            return hit.get("neg_until", 0) > now   # negative: neg_until governs, not the TTL
+        return now - hit.get("at", 0) < HF_CACHE_TTL_S
+    # legacy v1 entry: null total = stale (refetch); a real count still answers
+    return hit.get("total") is not None and now - hit.get("at", 0) < HF_CACHE_TTL_S
 
 
 def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = False):
@@ -172,7 +210,11 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
     Ambiguity (two base repos) is "unknown": a wrong count is worse than none. The same GET
     also carries createdAt (the T6 age filter reads it offline from this cache); entries
     written before that field existed are refetched ONCE to gain it, and a failed refetch
-    keeps the count it already had."""
+    keeps the count it already had.
+
+    0.54.0 cache WRITE rules (v2 entries): a NETWORK error writes NOTHING (a TLS failure is
+    never an answer); HTTP 401/404 writes {"v":2,"total":null,"neg_until":now+7d}; other HTTP
+    statuses write nothing (transient); success writes {"v":2,...}."""
     cache_path = _hf_cache_path()
     key = model_id.lower()
     try:
@@ -180,26 +222,47 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
     except (OSError, ValueError):
         cache = {}
     hit = cache.get(key)
-    fresh = bool(hit) and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S
+    now = time.time()
+    fresh = _cache_entry_fresh(hit, now)
     if offline:
         # A render-time read never waits on the network: any fresh entry answers, with or
         # without a date (an offline entry lacking one is simply not old yet).
-        return (hit.get("total"), hit.get("repo")) if fresh else (None, None)
-    if fresh and "created" in hit:
-        return hit.get("total"), hit.get("repo")   # complete entry (created None = HF had none)
+        return (hit.get("total"), hit.get("repo")) if fresh and isinstance(hit, dict) else (None, None)
+    if fresh and isinstance(hit, dict) and ("v" in hit or "created" in hit):
+        # v2 entries (incl. negatives) and v1 entries that already gained `created` answer
+        # without a refetch; a v1 entry with a count but no `created` refetches ONCE to gain
+        # it (and keeps the count if that refetch fails) — never a mass refetch.
+        return hit.get("total"), hit.get("repo")
 
     from urllib.parse import quote
     total = repo = created = None
+    saw_network_error = False
+    saw_transient_http = False
+    saw_negative_http = False
     if "/" in model_id:
         obj = _hf_get(f"{HF_API}/{quote(model_id, safe='/')}?expand[]=safetensors&expand[]=createdAt", timeout)
-        if isinstance(obj, dict) and (obj.get("safetensors") or {}).get("total"):
+        if isinstance(obj, HFError):
+            if obj.kind == "network":
+                saw_network_error = True
+            elif obj.status in (401, 404):
+                saw_negative_http = True
+            else:
+                saw_transient_http = True
+        elif isinstance(obj, dict) and (obj.get("safetensors") or {}).get("total"):
             total, repo = obj["safetensors"]["total"], obj.get("id", model_id)
             created = obj.get("createdAt")
     if total is None:
         tail = model_id.split("/")[-1]
         found = _hf_get(f"{HF_API}?search={quote(tail)}&limit=50"
                         f"&expand[]=safetensors&expand[]=createdAt", timeout)
-        if isinstance(found, list):
+        if isinstance(found, HFError):
+            if found.kind == "network":
+                saw_network_error = True
+            elif found.status in (401, 404):
+                saw_negative_http = True
+            else:
+                saw_transient_http = True
+        elif isinstance(found, list):
             exact = [m for m in found if isinstance(m, dict)
                      and str(m.get("id", "")).split("/")[-1].lower() == tail.lower()
                      and (m.get("safetensors") or {}).get("total")]
@@ -217,14 +280,26 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
         total, repo = hit.get("total"), hit.get("repo")
     if created is None and isinstance(hit, dict) and hit.get("created"):
         created = hit.get("created")
-    cache[key] = {"total": total, "repo": repo, "created": created, "at": time.time()}
-    try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(cache, indent=1, sort_keys=True))
-        tmp.replace(cache_path)
-    except OSError:
-        pass                                  # a read-only cache costs a lookup, never a verdict
+    # 0.54.0 write rules: a NETWORK error or a transient (5xx) http error writes NOTHING —
+    # never cached as an answer; 401/404 or a 200 with no unique match -> short negative;
+    # success -> v2 entry.
+    if saw_network_error or saw_transient_http:
+        pass                                  # no write: a failure is not an answer
+    elif total is not None or created is not None:
+        cache[key] = {"v": 2, "total": total, "repo": repo, "created": created, "at": now}
+    elif isinstance(hit, dict) and hit.get("v") == 2 and hit.get("total") is None:
+        pass                              # keep the existing negative entry as is
+    else:
+        cache[key] = {"v": 2, "total": None, "repo": repo, "created": created,
+                      "at": now, "neg_until": now + NEG_CACHE_TTL_S}
+    if not (saw_network_error or saw_transient_http):
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(cache, indent=1, sort_keys=True))
+            tmp.replace(cache_path)
+        except OSError:
+            pass                          # a read-only cache costs a lookup, never a verdict
     return total, repo
 
 
