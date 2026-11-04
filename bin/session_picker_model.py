@@ -1871,9 +1871,16 @@ class RemoteScreen(Screen):
             self._refresh_keep_open()
             return
         self.catalog_refresh_error.pop(prov, None)
-        self.catalogs[prov] = (err.split(": ", 1)[-1] if err else list(rows))
-        if not err and rows:
-            write_catalog_cache(prov, rows)
+        if err:
+            self.catalogs[prov] = err.split(": ", 1)[-1]
+        else:
+            # 0.54.0 Task 5: store [] for an empty live reply — "known empty" so
+            # catalog_kind_needed stops re-asking (an unset entry made the open group show
+            # __loading__ forever). _hydrate_catalogs still falls through to the disk cache
+            # for an empty list, because an empty live reply is INCONCLUSIVE, not "no models".
+            self.catalogs[prov] = list(rows)
+            if rows:
+                write_catalog_cache(prov, rows)
         self._refresh_keep_open()
 
     def _refresh_keep_open(self):

@@ -1151,20 +1151,9 @@ class Picker(App):
         if err and err not in self.state_warnings and not kind.startswith("versions:"):
             self.state_warnings.append(err)
         sm = self.screen_model
-        # Fill an already-open list in place; otherwise just refresh counts/labels.
-        if isinstance(sm, m.RemoteScreen) and kind == "remote" and (not sm._models_loaded or not sm.agents):
-            sm.agents = data
-            sm._regroup()
-            self._hydrate_catalogs(sm)         # cached rosters paint at once (T2)
-        elif isinstance(sm, (m.LocalScreen, m.LowkeyScreen)) and kind == "local" and not getattr(sm, "_models_loaded", False):
-            sm.set_models(data, *([MISSING_MODELS] if isinstance(sm, m.LocalScreen) else []))
-            sm._models_loaded = True
-        elif isinstance(sm, m.LowkeyScreen) and kind == "remote":
-            # 0.50.1: the API-model chooser is fed from the remote inventory — fill it when
-            # the inventory lands (the screen may have been built before it was cached).
-            # 0.54.0: raw roster in; set_models filters via visible_agents (one home).
-            sm.api_agents = list(data or [])
-            sm.set_models(list(sm.models.values()))
+        # 0.54.0 Task 5: the three per-kind fill branches above are gone — ONE idempotent
+        # cache→screen sync does it, whatever the order of load vs screen build.
+        if self._sync_screen_from_cache(sm):
             self._rerender_keep_focus()
         if kind == "remote":
             # Eager warm-up: fetch every keyed provider's catalog once this session, so the
@@ -1192,6 +1181,7 @@ class Picker(App):
                 sm.catalog_total = self._home_catalog_total()   # the sum grows as fetches land
             if isinstance(sm, m.RemoteScreen):
                 sm.set_catalog(kind.split(":", 1)[1], data, err)
+                self._sync_screen_from_cache(sm)   # 0.54.0: a late catalog paints without a keystroke
             if err in self.state_warnings:
                 self.state_warnings.remove(err)    # shown as the group's own error row instead
             self.cache.pop(kind, None)             # the screen keeps it; a failed load can be retried
@@ -1402,7 +1392,11 @@ class Picker(App):
         rows.clear_options()
         self.row_ids = []
 
-        # Handle lazy loading when "Choose model" is toggled
+        # 0.54.0 Task 5: ONE idempotent cache→screen sync at every render — the former
+        # race-dependent fill sites (the render-time lowkey fill below, _handle_lazy_load's
+        # inline fills, _loaded's per-kind branches) are replaced by this single call.
+        self._sync_screen_from_cache(sm)
+        # Handle lazy loading when "Choose model" is toggled (triggering only; filling is the sync)
         self._handle_lazy_load()
         # An open remote provider group fetches its live catalog once, in the background. Every
         # way a group opens (Enter, Right, the automatic first group) passes through here.
@@ -1451,23 +1445,8 @@ class Picker(App):
             sm.loading_frame = self._loading_frame
             sm._fetch_in_flight = {a.provider for a in (self.cache.get("remote") or [])
                                    if f"rcat:{a.alias}" in getattr(self, "_loading", set())}
-        if isinstance(sm, m.LowkeyScreen):
-            # 0.51.0 (user: "lowkey can't load the remote model list"): the API chooser must
-            # not depend on which won the race, screen-build or inventory-load — fill from
-            # the cache at render time when the screen was built empty.
-            remote = self.cache.get("remote") or []
-            filled_api = False
-            if remote and not sm.api_agents:
-                # 0.54.0: store the RAW roster — set_models filters through visible_agents
-                # with the opt-in Remote-filter toggle (D3), not a private copy here.
-                sm.api_agents = list(remote)
-                filled_api = True
-            local = self.cache.get("local") or []
-            if local and not sm._models_loaded:
-                sm.set_models(local)
-                sm._models_loaded = True
-            elif filled_api:
-                sm.set_models(list(sm.models.values()))
+        # (the LowkeyScreen render-time fill that lived here is gone — _sync_screen_from_cache
+        # at the top of this render does it, idempotently, 0.54.0 Task 5)
 
         # Check if screen has accordion with groups (RuntimeManagerScreen has accordion but no groups)
         has_groups = hasattr(sm, 'accordion') and sm.accordion is not None and len(sm.accordion.groups) > 0
@@ -1720,28 +1699,23 @@ class Picker(App):
             self._prefetch((kind,))
 
     def _handle_lazy_load(self) -> bool:
-        """Check if current screen needs lazy loading and trigger it.
-        Returns True if lazy loading was triggered."""
+        """Cache-miss TRIGGER only: starts (or joins) the background load. Filling the screen is
+        _sync_screen_from_cache's job (0.54.0 Task 5) — this used to fill inline with
+        race-dependent `not _models_loaded` guards that a flag set on an empty roster defeated.
+        Returns True if a load was triggered."""
         sm = self.screen_model
-        # Check LocalScreen
-        if isinstance(sm, m.LocalScreen) and getattr(sm, '_choose_model_visible', False):
-            if not getattr(sm, '_models_loaded', False):
-                self._maybe_load_inventory("local")
-                if "local" in self.cache:
-                    sm.set_models(self.cache["local"], MISSING_MODELS)
-                    sm._models_loaded = True
-                return True
-        # Check RemoteScreen
-        if isinstance(sm, m.RemoteScreen) and getattr(sm, '_choose_model_visible', False):
-            # The agent list, not just the flag: an early _regroup() during the roster load
-            # used to set the flag on an EMPTY roster, and this then never filled (2026-10-27).
-            if not getattr(sm, '_models_loaded', False) or not getattr(sm, 'agents', None):
-                self._maybe_load_inventory("remote")
-                if "remote" in self.cache:
-                    sm.agents = self.cache["remote"]
-                    sm._regroup()  # Re-group with loaded agents (sets _models_loaded)
-                    self._hydrate_catalogs(sm)   # cached rosters paint at once (T2)
-                return True
+        if not getattr(sm, '_choose_model_visible', False):
+            return False
+        if isinstance(sm, m.RemoteScreen):
+            self._maybe_load_inventory("remote")
+            return True
+        if isinstance(sm, m.LocalScreen):
+            self._maybe_load_inventory("local")
+            return True
+        if isinstance(sm, m.LowkeyScreen):
+            self._maybe_load_inventory("local")
+            self._maybe_load_inventory("remote")
+            return True
         return False
 
     def _hydrate_catalogs(self, sm):
@@ -1754,7 +1728,10 @@ class Picker(App):
             self.catalog_rows = {}     # this session's fetch results, keyed by provider
         changed = False
         for prov in dict.fromkeys(a.provider for a in sm.agents):
-            if prov in sm.catalogs or prov in sm._catalog_pending:
+            # 0.54.0 Task 5: an EMPTY live reply ([] in catalogs) is INCONCLUSIVE — fall through
+            # to the disk cache instead of pinning the provider pinned-only.
+            cat = sm.catalogs.get(prov)
+            if (isinstance(cat, list) and cat) or isinstance(cat, str) or prov in sm._catalog_pending:
                 continue
             rows = self.catalog_rows.get(prov) or None   # an empty LIVE reply is inconclusive: fall through to disk
             from_disk = rows is None
@@ -1770,6 +1747,45 @@ class Picker(App):
             # accordion still carries the pinned-only labels and rows (review finding 13's
             # coverage test pinned this hole — the store updated but the render never saw it).
             sm._refresh_keep_open()
+        return changed
+
+    def _sync_screen_from_cache(self, sm) -> bool:
+        """0.54.0 Task 5: ONE idempotent cache→screen sync. Derives the screen's rows from
+        self.cache + self.catalog_rows + the disk catalog cache on EVERY call. It holds NO
+        'already loaded' guard of its own — the per-screen flags did, and a flag set on an
+        EMPTY roster (constructor with models=None) is exactly what made late data never
+        paint — so calling it from _loaded AND from every render is safe and order-independent.
+        Returns True when the screen's rows changed."""
+        changed = False
+        if isinstance(sm, m.RemoteScreen):
+            remote = self.cache.get("remote")
+            if remote is not None and getattr(sm, "_sync_src", None) is not remote:
+                sm.agents = remote
+                sm._regroup()
+                sm._sync_src = remote
+                changed = True
+            changed = self._hydrate_catalogs(sm) or changed
+        elif isinstance(sm, m.LocalScreen):
+            local = self.cache.get("local")
+            if local is not None and getattr(sm, "_sync_src", None) is not local:
+                sm.set_models(local, MISSING_MODELS)
+                sm._models_loaded = True
+                sm._sync_src = local
+                changed = True
+        elif isinstance(sm, m.LowkeyScreen):
+            local = self.cache.get("local")
+            remote = self.cache.get("remote")
+            if getattr(sm, "_sync_src_local", None) is not local and local is not None:
+                sm._sync_src_local = local
+                changed = True
+            if getattr(sm, "_sync_src_remote", None) is not remote and remote is not None:
+                # 0.54.0: raw roster in; set_models filters via visible_agents (one home)
+                sm.api_agents = list(remote)
+                sm._sync_src_remote = remote
+                changed = True
+            if changed:
+                sm.set_models(local if local is not None else list(sm.models.values()))
+        return changed
 
     def _home_catalog_total(self):
         """The home row's honest number: the catalog-model sum over the providers the user
