@@ -31,6 +31,8 @@ def build() -> None:
     from fa_gui.jobs import STALE, Loader
 
     ui.add_head_html("""<style>
+      html, body { -webkit-font-smoothing: antialiased !important; text-rendering: optimizeLegibility !important;
+                   font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif !important; }
       .menu-item { color: #000 !important; text-decoration: none !important; background: none !important;
                    border: none !important; box-shadow: none !important; padding: 2px 6px; cursor: pointer; }
       .menu-item:hover { color: #0b57d0 !important; }   /* M3-ish blue, not the default link blue */
