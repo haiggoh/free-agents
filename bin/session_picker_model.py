@@ -81,6 +81,15 @@ class Action:
     # Settings rows (toggle / multi-choice): step(+1|-1). Enter, click and Right call +1, Left
     # calls -1. None = a plain action (navigation, launch, tool) that only Enter/click runs.
     step: Callable[[int], object] | None = None
+    # Task 5 (nicegui plan): typed setting metadata so GUI adapters render a real control
+    # (select/toggle) instead of parse-the-label or cycle-a-button. name = label without the
+    # current value; empty id ⇒ adapters derive f"{type(screen).__name__}.{key}".
+    choices: tuple | None = None
+    value: Callable[[], object] | None = None
+    put: Callable[[object], object] | None = None
+    name: str = ""
+    choice_label: Callable[[object], str] | None = None
+    id: str = ""
 
 
 # The collapsed group rows in the lane pickers (user 2026-10-29/30): while folded, the
@@ -94,15 +103,18 @@ MODEL_GROUP = Action("0", "Model", lambda: None, section="model")
 
 
 def setting(key: str, label: str, choices, get: Callable[[], object], put: Callable[[object], object],
-            enabled: bool = True, section: str = "settings") -> Action:
-    """A row whose value cycles through `choices` in either direction (wraps)."""
+            enabled: bool = True, section: str = "settings", *, name: str = "",
+            choice_label: Callable[[object], str] | None = None) -> Action:
+    """A row whose value cycles through `choices` in either direction (wraps).
+    Task 5: also fills the typed metadata (choices/value/put/name/choice_label) for GUI adapters."""
     def step(d: int):
         try:
             i = list(choices).index(get())
         except ValueError:
             i = -1 if d > 0 else 0
         put(list(choices)[(i + d) % len(choices)])
-    return Action(key, label, lambda: step(1), enabled=enabled, section=section, step=step)
+    return Action(key, label, lambda: step(1), enabled=enabled, section=section, step=step,
+                  choices=tuple(choices), value=get, put=put, name=name, choice_label=choice_label)
 
 
 def check_action_table(actions) -> None:
@@ -2449,6 +2461,10 @@ class ThemeConfigScreen(Screen):
         r, g, b = [int(accent.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4)]
         return round(colorsys.rgb_to_hls(r, g, b)[0] * 360)  # noqa: E741 -- hls tuple unpack below
 
+    def _set_hue(self, which: str, deg: int) -> None:
+        """Task 5: absolute hue set — the typed `put` for the hue rows."""
+        self._shift_hue(which, (int(deg) - self._hue_deg(which)) % 360)
+
     def _shift_hue(self, which: str, deg: int):
         """0.50.0 (theme-hue-shift-shell-swatch): rotate the lane accent's hue by deg —
         arrows step ±5°, Enter/click +20° — re-derive the border, persist. The shell-mode
@@ -2479,12 +2495,19 @@ class ThemeConfigScreen(Screen):
             setting("r", self._lane_label("remote"), presets,
                     lambda: self.remote_theme["theme"]["accent_color"],
                     lambda v: self._set_accent("remote", v)),
+            # Task 5: continuous steppers carry typed metadata too (choices = the 5° grid,
+            # value = current hue, put = absolute set) — not via setting(), whose choices are
+            # finite presets, but with the same fields the typed-rows test requires.
             Action("y", f"Hue local: {self._hue_deg('local')}°  (←/→ 5°, Enter/click 20°)",
                    lambda: self._shift_hue("local", 20),
-                   step=lambda d: self._shift_hue("local", 5 * d)),
+                   step=lambda d: self._shift_hue("local", 5 * d),
+                   choices=tuple(range(0, 360, 5)), value=lambda: self._hue_deg("local"),
+                   put=lambda v: self._set_hue("local", v), name="Hue local"),
             Action("u", f"Hue remote: {self._hue_deg('remote')}°  (←/→ 5°, Enter/click 20°)",
                    lambda: self._shift_hue("remote", 20),
-                   step=lambda d: self._shift_hue("remote", 5 * d)),
+                   step=lambda d: self._shift_hue("remote", 5 * d),
+                   choices=tuple(range(0, 360, 5)), value=lambda: self._hue_deg("remote"),
+                   put=lambda v: self._set_hue("remote", v), name="Hue remote"),
             Action("d", "Restore defaults", lambda: self._restore_defaults()),
         ]
         acts += self.nav_actions()
