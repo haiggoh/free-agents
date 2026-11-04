@@ -32,7 +32,7 @@ def build() -> None:
 
     ui.add_head_html("""<style>
       html, body { -webkit-font-smoothing: antialiased !important; text-rendering: optimizeLegibility !important;
-                   font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif !important; }
+                   font-family: -apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI', Roboto, sans-serif !important; }
       .menu-item { color: #000 !important; text-decoration: none !important; background: none !important;
                    border: none !important; box-shadow: none !important; padding: 2px 6px; cursor: pointer; }
       .menu-item:hover { color: #0b57d0 !important; }   /* M3-ish blue, not the default link blue */
@@ -45,6 +45,7 @@ def build() -> None:
       .switch .knob { width: 14px; height: 14px; border-radius: 50%; background: #fff; position: absolute;
                       top: 2px; left: 2px; }
       .switch.on .knob { left: 18px; }
+      .version-footer { position: fixed !important; bottom: 6px !important; left: 0; right: 0; text-align: center; }
       .btn-flat { box-shadow: none !important; border-radius: 4px !important; padding: 2px 8px !important;
                   text-transform: none !important; }
       /* M3 primary action (filled dark, white text) — only for Go launch / Choose model */
@@ -66,9 +67,26 @@ def build() -> None:
             shared["settings"] = pc.build_settings(None, shared["savers"])
         return shared["settings"]
 
-    def cycle_label(action) -> str:
+    def _cycle_value(action):
         # label text must match what csl shows on toggle (user 2026-11-04): choice_label first,
+        # bools → ON/OFF BEFORE the int-keyed tables (False == 0 matched Auto-mode labels),
         # then the model's own label tables (Auto-mode 0/1/2 → Off/Classifier/…, etc.)
+        try:
+            v = action.value() if action.value else None
+        except Exception:
+            v = None
+        if action.choice_label and v is not None:
+            v = action.choice_label(v)
+        elif isinstance(v, bool):
+            v = "ON" if v else "OFF"
+        elif v is not None:
+            for table in (getattr(m, "AUTO_MODE_LABELS", {}), getattr(m, "CLASSIFIER_SOURCE_LABELS", {})):
+                if v in table:
+                    v = table[v]
+                    break
+        return v
+
+    def cycle_label(action) -> str:
         name = action.name or action.label.split(":")[0]
         try:
             v = action.value() if action.value else None
@@ -76,15 +94,14 @@ def build() -> None:
             v = None
         if action.choice_label and v is not None:
             v = action.choice_label(v)
+        elif isinstance(v, bool):
+            v = "ON" if v else "OFF"
         elif v is not None:
             for table in (getattr(m, "AUTO_MODE_LABELS", {}), getattr(m, "CLASSIFIER_SOURCE_LABELS", {})):
                 if v in table:
                     v = table[v]
                     break
-            else:
-                if isinstance(v, bool):
-                    v = "ON" if v else "OFF"
-        return f"{name}: {v}"
+        return f"{name}: {_cycle_value(action)}"
 
     def render_rows(scr) -> None:
         for c in render_plan(scr):
@@ -92,21 +109,23 @@ def build() -> None:
                            if (a.id or f"{type(scr).__name__}.{a.key}") == c.action_id), None)
             if c.kind in ("select", "toggle") and action is not None and action.choices is not None:
                 choices = list(action.choices)
-                binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1}
+                binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
                 if binary:
                     # switch AFTER the action item, inline in the same row; the knob child div
                     # is what makes the circle visible (it was missing entirely before)
                     on = bool(action.value()) if action.value else False
                     with ui.row().classes("cycle-row items-center gap-2 w-full"):
                         ui.label(cycle_label(action)).classes("cycle-value")
-                        sw = ui.element("div").classes(f"switch{' on' if on else ''}")
+                        sw = ui.button("", on_click=lambda a=action: _toggle_binary(a, sw)).classes(f"switch{' on' if on else ''} btn-flat")
                         with sw:
                             ui.element("div").classes("knob")
-                        sw.on("click", lambda a=action, s=sw: _toggle_binary(a, s))
                 else:
+                    # csl order: <name>: < value >  — arrow between end of item and the state
+                    name = (action.name or action.label.split(":")[0]) if action else c.label
                     with ui.row().classes("cycle-row items-center gap-1 w-full"):
+                        ui.label(f"{name}:").classes("cycle-name")
                         left = ui.label("<").classes("cycle-arrow cycle-left")
-                        val = ui.label(cycle_label(action)).classes("cycle-value")
+                        val = ui.label(str(_cycle_value(action))).classes("cycle-value")
                         right = ui.label(">").classes("cycle-arrow cycle-right")
                         left.on("click", lambda a=action, v=val: _cycle(a, v, -1))
                         right.on("click", lambda a=action, v=val: _cycle(a, v, +1))
@@ -156,7 +175,7 @@ def build() -> None:
         body = render_shell(scr.title, scr.policy if isinstance(scr.policy, str) else "")
         with body:
             render_rows(scr)
-        ui.label(f"free-agents v{m.plugin_version()}").classes("text-xs italic opacity-50 mt-4")
+        ui.label(f"free-agents v{m.plugin_version()}").classes("text-xs italic opacity-50 version-footer")
 
     def make_lane(target: str, kind: str, loader_fn) -> None:
         @ui.page(f"/{target}")
