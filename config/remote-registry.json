@@ -423,6 +423,24 @@
       "autocompact_default": "200k"
     },
     {
+      "alias": "nvidia-yi-large",
+      "provider": "nvidia",
+      "model_id": "01-ai/yi-large",
+      "display": "Yi Large",
+      "tier": "unknown",
+      "notes": "BROKEN on the free NVIDIA account 2026-11-04: HTTP 404 \"Function not found for account\" (account_provisioning) — hidden via broken-nvidia-models.json. 102.6B MoE MoE (PARAM_COUNT_OVERRIDES; InferenceBench 2024-05-13).",
+      "autocompact_default": "-"
+    },
+    {
+      "alias": "nvidia-kosmos-2",
+      "provider": "nvidia",
+      "model_id": "microsoft/kosmos-2",
+      "display": "Microsoft Kosmos 2",
+      "tier": "unknown",
+      "notes": "BROKEN on the free NVIDIA account 2026-11-04: HTTP 404 \"Function not found for account\" (account_provisioning) — hidden via broken-nvidia-models.json. 1.7B params (PARAM_COUNT_OVERRIDES; build.nvidia.com card) — local-capable, so hidden from the API list by default since 0.52.1 anyway.",
+      "autocompact_default": "-"
+    },
+    {
       "alias": "nvidia-minimax-m3-1-flash",
       "provider": "nvidia",
       "model_id": "minimaxai/minimax-m3.1-flash",
