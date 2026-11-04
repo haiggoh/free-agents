@@ -57,6 +57,9 @@ import time
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import fa_tls  # 0.54.0: one TLS choke point for every remote caller
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 ROSTER = REPO / "config" / "remote-agents.sh"
 DEFAULT_LOG = pathlib.Path(os.environ.get(
@@ -155,7 +158,7 @@ def probe_one(row, want_tools=False, timeout=90):
                                 headers={"Content-Type": "application/json",
                                          "Authorization": f"Bearer {key}"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=fa_tls.client_context()) as r:
             payload = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         detail = ""

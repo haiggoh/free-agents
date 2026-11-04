@@ -44,6 +44,9 @@ Parser vocab (verified): auto,mistral,qwen,qwen3_coder,llama,hermes,harmony,gpt-
 import argparse, json, os, re, shutil, signal, subprocess, sys, time, urllib.request, urllib.error
 from datetime import datetime, timezone
 
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import fa_tls  # 0.54.0: one TLS choke point for every remote caller
+
 HOME = os.path.expanduser("~")
 VENV = f"{HOME}/.local-llm/bin"
 MODELS_DIR = f"{HOME}/.models"
@@ -133,7 +136,7 @@ def http_json(url, payload=None, timeout=60, stream=False):
                                  method="POST" if data else "GET")
     t0 = now()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=fa_tls.client_context()) as r:
             if stream:
                 chunks = 0
                 for line in r:

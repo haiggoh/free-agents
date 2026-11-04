@@ -68,9 +68,15 @@ def create_connection(address, timeout=None, source_address=None, *_a, **_kw):
 
 
 def new_connection(scheme, host, port, timeout):
-    """An http.client connection that connects through create_connection() above."""
+    """An http.client connection that connects through create_connection() above.
+
+    0.54.0: https connections carry fa_tls.client_context() — the ONE choke point that makes
+    TLS-inspecting networks work for every remote caller (chain + hostname verification stay
+    ON; pinned by tests/test_fa_tls_0540.py)."""
+    import fa_tls
     cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
-    conn = cls(host, port, timeout=timeout)
+    kw = {"context": fa_tls.client_context()} if scheme == "https" else {}
+    conn = cls(host, port, timeout=timeout, **kw)
     conn._create_connection = create_connection   # the stdlib's own hook, present 3.9 - 3.15
     return conn
 

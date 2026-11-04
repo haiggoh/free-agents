@@ -182,18 +182,122 @@ echo "REPO=${{LA_REPO[{alias}]:-}}"
     return serve, spoof, subdir, repo
 
 
+# 0.54.0 Task 0: the hotswap failure message must carry the REASON, never the empty
+# `Hotswap failed: ` seen on 0.53.1. Env overrides exist so tests can stub the hotswap; a SET
+# but invalid override aborts naming it (never a silent fallthrough to the default).
+DEFAULT_HOTSWAP_TIMEOUT_S = 120.0
+
+
+def _hotswap_script() -> Path:
+    """The hotswap script to run: FA_HOTSWAP_SCRIPT when set (must exist), else the repo's."""
+    env = os.environ.get("FA_HOTSWAP_SCRIPT")
+    if env:
+        p = Path(env)
+        if not p.is_file():
+            raise RuntimeError(f"FA_HOTSWAP_SCRIPT is set but not a file: {env}")
+        return p
+    return REPO_ROOT / "bin" / "local-llm-hotswap.sh"
+
+
+def _hotswap_timeout_s() -> float:
+    raw = os.environ.get("FA_HOTSWAP_TIMEOUT_S")
+    if not raw:
+        return DEFAULT_HOTSWAP_TIMEOUT_S
+    try:
+        v = float(raw)
+    except ValueError:
+        raise RuntimeError(f"FA_HOTSWAP_TIMEOUT_S is set but not a number: {raw!r}") from None
+    if v <= 0:
+        raise RuntimeError(f"FA_HOTSWAP_TIMEOUT_S must be > 0, got {raw!r}")
+    return v
+
+
+def _hotswap_meta_dir() -> Path:
+    """Where local-llm-hotswap.sh writes server_<port>.meta (pid=...); FA_HOTSWAP_META_DIR
+    overrides for tests and must be an existing directory when set."""
+    env = os.environ.get("FA_HOTSWAP_META_DIR")
+    if env:
+        p = Path(env)
+        if not p.is_dir():
+            raise RuntimeError(f"FA_HOTSWAP_META_DIR is set but not a directory: {env}")
+        return p
+    return Path.home() / ".claude" / "logs" / "local-agents-configs"
+
+
+def _tail(text, limit: int = 400) -> str:
+    if not text:
+        return ""
+    if isinstance(text, bytes):                 # TimeoutExpired output can be bytes
+        text = text.decode("utf-8", "replace")
+    text = text.strip()
+    return text if len(text) <= limit else "…" + text[-limit:]
+
+
+def _orphan_pids(meta_dir: Path, started: float) -> list:
+    """Servers this attempt started that are STILL RUNNING: server_*.meta files touched since
+    `started` whose pid answers os.kill(pid, 0). Reported, never killed by the dispatcher."""
+    orphans = []
+    try:
+        metas = list(meta_dir.glob("server_*.meta"))
+    except OSError:
+        return orphans
+    for m in metas:
+        try:
+            if m.stat().st_mtime < started - 1:
+                continue
+            pid = None
+            port = m.stem.split("_", 1)[1] if "_" in m.stem else "?"
+            for line in m.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("pid="):
+                    pid = int(line.split("=", 1)[1].strip())
+                    break
+            if pid is None:
+                continue
+            os.kill(pid, 0)                      # raises when the pid is dead
+            orphans.append((pid, port, str(m)))
+        except (OSError, ValueError):
+            continue
+    return orphans
+
+
+def _hotswap_failure_message(result: subprocess.CompletedProcess) -> str:
+    """exit status + the hotswap's own last words (stderr first, then stdout)."""
+    out = _tail(result.stderr) or _tail(result.stdout)
+    return f"Hotswap failed (exit {result.returncode}): {out or '<no output>'}"
+
+
+def _hotswap_timeout_message(exc: subprocess.TimeoutExpired, started: float,
+                             timeout_s: float, meta_dir: Path) -> str:
+    partial = _tail(getattr(exc, "stderr", None) or getattr(exc, "output", None)
+                    or getattr(exc, "stdout", None))
+    orphans = _orphan_pids(meta_dir, started)
+    msg = (f"Hotswap timed out after {timeout_s:g}s"
+           f"{': ' + partial if partial else ' (no output captured)'}")
+    if orphans:
+        listing = "; ".join(f"pid {pid} (port {port}, {path})" for pid, port, path in orphans)
+        msg += (f" — server(s) started by this attempt still running: {listing}. "
+                "Left running; kill them manually if unwanted.")
+    return msg
+
+
 def execute_local_dispatch(alias: str, prompt: str, spoof_id: str, max_tokens: int = 8192) -> str:
     """Execute a dispatch against a local model via hotswap + curl."""
     # First hotswap the model to get a port
-    hotswap = REPO_ROOT / "bin" / "local-llm-hotswap.sh"
-    result = subprocess.run(
-        [str(hotswap), alias],
-        capture_output=True,
-        text=True,
-        timeout=120
-    )
+    hotswap = _hotswap_script()
+    timeout_s = _hotswap_timeout_s()
+    started = time.time()
+    try:
+        result = subprocess.run(
+            [str(hotswap), alias],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(_hotswap_timeout_message(exc, started, timeout_s,
+                                                    _hotswap_meta_dir())) from exc
     if result.returncode != 0:
-        raise RuntimeError(f"Hotswap failed: {result.stderr}")
+        raise RuntimeError(_hotswap_failure_message(result))
 
     # Extract port from output
     import re

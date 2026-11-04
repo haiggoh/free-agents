@@ -507,12 +507,17 @@ def forward_request(
         if backend.scheme == "https"
         else http.client.HTTPConnection
     )
+    # 0.54.0: https backends get fa_tls.client_context() — one choke point for TLS-inspecting
+    # networks (chain + hostname verification stay ON).
+    import fa_tls
+    conn_kw = {"context": fa_tls.client_context()} if backend.scheme == "https" else {}
 
     port = backend.port
     connection = connection_class(
         backend.hostname,
         port=port,
         timeout=600,
+        **conn_kw,
     )
 
     base_path = backend.path.rstrip("/")
@@ -1253,9 +1258,11 @@ def replay_fixture(
     response_body = b""
 
     try:
+        import fa_tls  # 0.54.0: one TLS choke point for remote callers
         with urllib.request.urlopen(
             request,
             timeout=timeout,
+            context=fa_tls.client_context(),
         ) as response:
             response_status = response.status
             response_body = response.read()

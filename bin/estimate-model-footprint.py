@@ -149,10 +149,15 @@ def _hf_cache_path() -> pathlib.Path:
 
 
 def _hf_get(url: str, timeout: float):
-    """GET JSON from the HF API. Tests replace this function; None on any failure."""
+    """GET JSON from the HF API. Tests replace this function; None on any failure.
+
+    0.54.0: the request goes through fa_tls.client_context() — on TLS-inspecting networks the
+    plain default context rejects the chain (VERIFY_X509_STRICT vs the missing-AKI inspection
+    CA) and the HF size warm-up silently never runs."""
     import urllib.request
+    import fa_tls
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(url, timeout=timeout, context=fa_tls.client_context()) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None

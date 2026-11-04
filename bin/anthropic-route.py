@@ -40,6 +40,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fa_tls  # 0.54.0: one TLS choke point for every remote caller
+
 DEFINITE_NO = {400, 404, 405, 422}
 
 
@@ -76,7 +79,7 @@ def probe(base: str, model: str, key: str) -> tuple[int | None, str]:
                  "anthropic-beta": "effort-2025-11-24",
                  "x-api-key": key, "authorization": f"Bearer {key}"})
     try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=45, context=fa_tls.client_context()) as resp:
             return resp.status, resp.read(2000).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read(2000).decode("utf-8", "replace")
