@@ -1468,12 +1468,17 @@ class LocalScreen(Screen):
         return LaunchRequest("local", argv, env, mdl.alias)
 
 
-def _agent_visible(settings, agent) -> bool:
-    """Module-level mirror of RemoteScreen._visible, so shared counting code and the screen
-    can never drift (0.50.8)."""
+def is_provider_hidden(settings, provider: str) -> bool:
+    """0.54.0: the ONE home for reading the hidden-provider list. Every other site calls this
+    (pinned by the source scan in tests/test_row_visibility_single_source_0540.py)."""
+    return provider in set(getattr(settings, "hidden_providers", None) or [])
+
+
+def _agent_remote_filters(settings, agent) -> bool:
+    """The Remote-screen FILTER predicates only (trial / local_capable / broken / old). The
+    always-on rules (keyless, SELECT, hidden provider, dedupe) live in visible_agents, not
+    here — they are not filters, they are launchability."""
     s = settings
-    if not agent.has_key:
-        return False
     if agent.tier == "trial" and not s.include_trials:
         return False
     if agent.local_capable and not s.local_capable_shown:
@@ -1485,17 +1490,50 @@ def _agent_visible(settings, agent) -> bool:
     return True
 
 
-def api_agents_for(settings, agents) -> list:
-    """0.51.0: ONE filter for every lowkey API-chooser feed site (constructor, the
-    inventory-landed handler, the render-time fill): SELECT placeholders out, the shared
-    visibility rules in, and a row with an EMPTY model_id is keyed on its alias instead of
-    being dropped — that silent drop is why lowkey showed no API models at all.
-    0.52.1: hidden providers are excluded too — the api-setup hide option hides them from
-    EVERY model selection list, lowkey's api chooser included (it leaked here before)."""
-    hidden = set(getattr(settings, "hidden_providers", None) or [])
-    return [a for a in (agents or [])
-            if a.model_id != "SELECT" and (a.model_id or a.alias)
-            and a.provider not in hidden and _agent_visible(settings, a)]
+def _agent_visible(settings, agent) -> bool:
+    """Full predicate (kept for RemoteScreen._visible and the shared counts, 0.50.8):
+    keyless rows can never launch, plus the remote filters."""
+    if not agent.has_key:
+        return False
+    return _agent_remote_filters(settings, agent)
+
+
+def visible_agents(settings, agents, *, remote_filters: bool = True) -> list:
+    """0.54.0: ONE row-visibility + dedupe function for EVERY model list (Remote, Lowkey, any
+    future one). ALWAYS applied (launchability, not a filter): SELECT placeholders and rows
+    with neither model_id nor alias dropped, hidden providers dropped, keyless rows dropped
+    (a keyless row cannot launch), and dedupe on (provider, model_id or alias) keeping the
+    first non--thinking alias at the first-seen position. remote_filters=True additionally
+    applies the Remote-screen filters (_agent_remote_filters); the Remote screen always passes
+    True, lowkey's opt-in toggle (Task 2, D3) passes its value.
+
+    A row with an EMPTY model_id is keyed on its alias, never silently dropped — that silent
+    drop is why lowkey showed no API models at all (0.51.0)."""
+    out = []
+    pos = {}
+    for a in (agents or []):
+        if a.model_id == "SELECT" or not (a.model_id or a.alias):
+            continue
+        if is_provider_hidden(settings, a.provider) or not a.has_key:
+            continue
+        if remote_filters and not _agent_remote_filters(settings, a):
+            continue
+        key = (a.provider, a.model_id or a.alias)
+        if key in pos:
+            i = pos[key]
+            if out[i].alias.endswith("-thinking") and not a.alias.endswith("-thinking"):
+                out[i] = a                    # base alias represents the model, position kept
+            continue
+        pos[key] = len(out)
+        out.append(a)
+    return out
+
+
+def api_agents_for(settings, agents, *, remote_filters: bool = False) -> list:
+    """0.54.0: thin wrapper over visible_agents for lowkey's API chooser — the always-on rules
+    apply, the Remote-screen filters are OPT-IN (Task 2's toggle; D3: OFF shows what the
+    Remote screen would hide, keyless/hidden/duplicate rows stay absent)."""
+    return visible_agents(settings, agents, remote_filters=remote_filters)
 
 
 def _catalog_probe_agent(settings, prov: str, c, tier: str) -> RemoteAgent:
@@ -1515,12 +1553,14 @@ def remote_visibility_counts(settings, agents, catalogs) -> tuple[int, int]:
     subheadline and the About stats so the two can never disagree: (visible, hidden), with
     catalog rows included. Parity must also hold with a PARTIALLY loaded catalog — both sides
     count the rows that have landed, not the whole roster."""
-    hidden_prov = set(getattr(settings, "hidden_providers", None) or [])
-    vis = sum(1 for a in agents
-              if _agent_visible(settings, a) and a.model_id != "SELECT" and a.provider not in hidden_prov)
-    hidden = sum(1 for a in agents if not _agent_visible(settings, a) and a.model_id != "SELECT")
+    # 0.54.0: the pinned side counts through visible_agents (the one home); hidden-provider
+    # reads go through is_provider_hidden.
+    vis = len(visible_agents(settings, agents, remote_filters=True))
+    hidden = sum(1 for a in agents
+                 if a.model_id != "SELECT" and (a.model_id or a.alias)
+                 and not _agent_visible(settings, a))
     for prov, cat in (catalogs or {}).items():
-        if not isinstance(cat, list) or not cat or prov in hidden_prov:
+        if not isinstance(cat, list) or not cat or is_provider_hidden(settings, prov):
             continue
         have = {a.model_id for a in agents if a.provider == prov
                 and a.model_id != "SELECT" and _agent_visible(settings, a)}
@@ -1586,12 +1626,9 @@ class RemoteScreen(Screen):
     def _regroup(self):
         buckets: dict[str, list] = {}
         order = []
-        hidden_prov = set(self.settings.hidden_providers or [])   # 0.50.0 hide toggle
-        for agent in self.agents:
-            if not self._visible(agent):
-                continue
-            if agent.provider in hidden_prov:
-                continue
+        # 0.54.0: visibility + hidden providers + the -thinking dedupe all come from the ONE
+        # function (visible_agents) — this screen no longer keeps private copies that drift.
+        for agent in visible_agents(self.settings, self.agents, remote_filters=True):
             if agent.provider not in buckets:
                 order.append(agent.provider)
             buckets.setdefault(agent.provider, []).append(agent)
@@ -1603,19 +1640,9 @@ class RemoteScreen(Screen):
             # NVIDIA's pinned order is curated by hand (user 2026-10-20: "except nvidia we
             # have sorted those manually very deliberately") — every other provider's pins
             # sort size-descending, unknowns last in inventory order.
-            pinned = [a for a in buckets[prov] if a.model_id != "SELECT"]
+            pinned = buckets[prov]
             if prov != "nvidia":
                 pinned = size_sorted(pinned, lambda a: self._catalog_size(prov, a.model_id))
-            # One row per model (user 2026-10-29): the -thinking duplicate aliases were a
-            # workaround from before the `j` thinking toggle existed; the toggle owns the
-            # mode now (the launcher's capability table forces it where a model requires
-            # or lacks thinking). The base (non--thinking) alias represents the model;
-            # first-seen (curated/size) order is preserved.
-            by_model: dict = {}
-            for a in pinned:
-                by_model.setdefault(a.model_id or a.alias, []).append(a)
-            pinned = [next((x for x in g if not x.alias.endswith("-thinking")), g[0])
-                      for g in by_model.values()]
             if self.search:
                 pinned = [a for a in pinned if self._matches(a.model_id, a.display)]
             items = [Item(a.alias, self._pin_row_label(prov, a))
@@ -2922,7 +2949,7 @@ class APIKeysScreen(Screen):
         warning = self.ACCOUNT_WARNINGS.get(slug)
         if warning:
             status = f"{status}  {warning}"
-        if slug in (self.settings.hidden_providers or []):
+        if is_provider_hidden(self.settings, slug):
             status += "  · hidden from model list"
         return status
 
@@ -2930,7 +2957,7 @@ class APIKeysScreen(Screen):
         """(item_id, label) for the hide/show toggle — the id flips with the state so
         activating it again reverses the toggle, and the label STATES the current state
         (0.51.0, user 2026-11-03: the toggle must reveal its state, not just the action)."""
-        hidden = slug in (self.settings.hidden_providers or [])
+        hidden = is_provider_hidden(self.settings, slug)
         verb = "Show" if hidden else "Hide"
         state = "currently hidden" if hidden else "currently shown"
         return f"{'show' if hidden else 'hide'}:{slug}", f"{verb} {slug} in the choose-model list ({state})"
@@ -2941,7 +2968,7 @@ class APIKeysScreen(Screen):
         registry's measured notes. Shown for a provider row and for its Open/Add items."""
         slug = item_id.split(":", 1)[-1] if item_id else None
         if item_id and (item_id.startswith("hide:") or item_id.startswith("show:")):
-            hidden = slug in (self.settings.hidden_providers or [])
+            hidden = is_provider_hidden(self.settings, slug or "")
             return (f"{'Show' if hidden else 'Hide'} this provider in the choose-model list. "
                     "The key stays on disk — only the remote model list hides the provider's group. "
                     "Unlike 'Open signup page' (browser) and 'Add key' (credential wizard), this "
@@ -3109,7 +3136,10 @@ class LowkeyScreen(Screen):
         self._models_loaded = False
         # 0.50.0 item 8 (lowkey-any-model-api): the API chooser is REAL — a second accordion
         # group fed from the remote inventory; picking a row selects it for lowkey.
-        self.api_agents = api_agents_for(self.settings, api_agents)
+        # 0.54.0: store the RAW roster; set_models filters through visible_agents (the one
+        # home) so the opt-in Remote-filter toggle (Task 2) can re-filter without a second copy.
+        self.api_agents = list(api_agents or [])
+        self._remote_filters = False           # Task 2 toggle, default OFF (D3)
         self.api_selection = None              # RemoteAgent once an API row is picked (0.54.0)
         self._api_by_id = {}                   # item id -> RemoteAgent, built in set_models
         self.set_models(models or [])
@@ -3126,18 +3156,13 @@ class LowkeyScreen(Screen):
             Group(f, f"  {f} ({len(buckets[f])})", [Item(x.alias, model_names.readable(x.alias)) for x in buckets[f]])
             for f in order]
         groups = []
-        if self.api_agents:
-            # One row per model (user 2026-10-29, reaffirmed 2026-11-02): the roster may list a
-            # -thinking alias next to the base alias with the SAME model_id; the base alias
-            # represents the model, first-seen position preserved — the same rule as
-            # RemoteScreen._regroup. Without this the api group carried duplicate Item ids
-            # and render_model died with OptionList DuplicateID (csl crash 2026-11-02).
-            by_model: dict = {}
-            for a in self.api_agents:
-                by_model.setdefault((a.provider, a.model_id or a.alias), []).append(a)
-            deduped = [next((x for x in g if not x.alias.endswith("-thinking")), g[0])
-                       for g in by_model.values()]
-            # 0.54.0: resolve the selected item id back to the agent OBJECT from the SAME id
+        # 0.54.0: the API group is built from visible_agents (ONE visibility+dedupe home — the
+        # private copy that caused the 2026-11-02 DuplicateID crash is gone), with the
+        # Remote-screen filters opt-in via self._remote_filters (Task 2 toggle, D3).
+        deduped = api_agents_for(self.settings, self.api_agents,
+                                 remote_filters=self._remote_filters)
+        if deduped:
+            # resolve the selected item id back to the agent OBJECT from the SAME id
             # expression as the Item — an empty model_id keys on the alias, and passing that
             # alias as --api-model sent the wrong upstream id.
             self._api_by_id = {f"{a.provider}:{a.model_id or a.alias}": a for a in deduped}

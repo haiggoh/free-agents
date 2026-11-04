@@ -1162,7 +1162,8 @@ class Picker(App):
         elif isinstance(sm, m.LowkeyScreen) and kind == "remote":
             # 0.50.1: the API-model chooser is fed from the remote inventory — fill it when
             # the inventory lands (the screen may have been built before it was cached).
-            sm.api_agents = m.api_agents_for(sm.settings, data)
+            # 0.54.0: raw roster in; set_models filters via visible_agents (one home).
+            sm.api_agents = list(data or [])
             sm.set_models(list(sm.models.values()))
             self._rerender_keep_focus()
         if kind == "remote":
@@ -1457,7 +1458,9 @@ class Picker(App):
             remote = self.cache.get("remote") or []
             filled_api = False
             if remote and not sm.api_agents:
-                sm.api_agents = m.api_agents_for(sm.settings, remote)
+                # 0.54.0: store the RAW roster — set_models filters through visible_agents
+                # with the opt-in Remote-filter toggle (D3), not a private copy here.
+                sm.api_agents = list(remote)
                 filled_api = True
             local = self.cache.get("local") or []
             if local and not sm._models_loaded:
