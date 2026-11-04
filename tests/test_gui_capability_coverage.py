@@ -35,14 +35,18 @@ def semantic_id(screen, a) -> str:
 
 class CapabilityCoverage(unittest.TestCase):
     def test_every_action_rendered_or_pending(self):
-        emitted = set()
+        # hidden-section rows never render and are never pending (they duplicate a rendered
+        # action, e.g. the lane shortcut) — exactly the rendered_actions rule in the model
         for target, scr in full_matrix():
-            for c in adapter.render_plan(scr):
-                emitted.add(c.action_id)
+            rendered = {c.action_id for c in adapter.render_plan(scr)}
             for a in scr.actions():
                 sid = semantic_id(scr, a)
+                if a.section == "hidden":
+                    with self.subTest(target=target, action=sid):
+                        self.assertNotIn(sid, rendered, "hidden rows must not render")
+                    continue
                 with self.subTest(target=target, action=sid):
-                    self.assertTrue(sid in emitted or sid in adapter.GUI_PENDING,
+                    self.assertTrue(sid in rendered or sid in adapter.GUI_PENDING,
                                     f"{sid} neither rendered nor pending")
 
     def test_pending_entries_still_exist(self):
@@ -57,6 +61,8 @@ class CapabilityCoverage(unittest.TestCase):
     def test_typed_setting_rendered_as_select_not_button(self):
         for _t, scr in full_matrix():
             for a in scr.actions():
+                if a.section == "hidden":
+                    continue
                 if a.choices is not None:
                     sid = semantic_id(scr, a)
                     kinds = [c.kind for c in adapter.render_plan(scr) if c.action_id == sid]
