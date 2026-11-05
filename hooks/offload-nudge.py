@@ -122,16 +122,17 @@ GUARD_HOOKS = ("guard-own-endpoint.py", "guard-tool-owned-state.py", "read-pages
 
 
 def _load_primer(hooks_dir: Path, name: str) -> str:
-    """The PRIMER constant of a hyphenated hook file, imported by path; "" on any problem."""
-    import importlib.util
+    """The PRIMER constant of a hook file, read via AST — a session-start hook must never
+    EXECUTE a guard module just to read a string (a future module-level import could hang
+    the start). "" on any problem (fail-open)."""
+    import ast
     try:
-        spec = importlib.util.spec_from_file_location(
-            name.replace("-", "_").removesuffix(".py"), hooks_dir / name)
-        if not spec or not spec.loader:
-            return ""
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return getattr(mod, "PRIMER", "") or ""
+        tree = ast.parse((hooks_dir / name).read_text(encoding="utf-8"))
+        for node in tree.body:
+            if (isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "PRIMER" for t in node.targets)):
+                return ast.literal_eval(node.value)
+        return ""
     except Exception:
         return ""
 

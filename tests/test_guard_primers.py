@@ -51,3 +51,15 @@ def test_exempt_set_is_exactly_the_mode_aware_guard():
     # If cloud-agent-intercept stops being the only mode-aware guard, revisit the exemption.
     assert EXEMPT == {"cloud-agent-intercept.py"}
     assert "cloud-agent-intercept.py" in set(_pretooluse_scripts())
+
+
+def test_offload_nudge_sessionstart_entry_is_timeboxed():
+    # The nudge now also reads the guard PRIMERs at session start — a hung read must never
+    # stall the start, so the hook entry carries a timeout like its siblings.
+    for entry in HOOKS["SessionStart"]:
+        for hook in entry["hooks"]:
+            if "offload-nudge.py" in hook["command"]:
+                timeout = hook.get("timeout")
+                assert isinstance(timeout, int) and 0 < timeout <= 5, hook
+                return
+    raise AssertionError("offload-nudge.py SessionStart entry not found in hooks.json")
