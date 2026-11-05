@@ -46,6 +46,9 @@ Environment:
   LA_GUARD_DISABLE=1        turn the guard off entirely
 """
 
+# SessionStart primer (injected by hooks/offload-nudge.py's guards_section): one line, <= 140 chars.
+PRIMER = "Never kill or restart the endpoint behind this session (ports 4141-4151, 8000-8010 run live sessions)."
+
 import json
 import os
 import re

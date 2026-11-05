@@ -25,6 +25,11 @@ Hook protocol: PreToolUse payload as JSON on stdin {"tool_name": ..., "tool_inpu
 Deny = JSON decision on stdout + exit 2; allow = exit 0 with no output. `--self-test` runs the
 built-in cases; `--help` prints this text.
 """
+
+# SessionStart primer (injected by hooks/offload-nudge.py's guards_section): one line, <= 140 chars.
+# The WYS overlap is mentioned here once on purpose (waypoint read-pages-guard-duplicate).
+PRIMER = "Read's pages= is PDF-only; page text files with offset=/limit= (also WYS rule tool/read-pages-non-pdf)."
+
 import json
 import sys
 

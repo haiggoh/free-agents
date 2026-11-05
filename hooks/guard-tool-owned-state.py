@@ -43,6 +43,9 @@ Environment:
   LA_STATE_GUARD_DISABLE=1    turn the guard off (a deliberate, human-driven repair)
 """
 
+# SessionStart primer (injected by hooks/offload-nudge.py's guards_section): one line, <= 140 chars.
+PRIMER = "Never hand-edit installed_plugins.json / the plugin cache — edit the source repo, bump its version, then claude plugin update."
+
 import json
 import os
 import re
