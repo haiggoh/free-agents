@@ -96,7 +96,7 @@ def main(argv: list[str]) -> int:
         print(f"free-agents-gui: serving http://{HOST}:{port}", flush=True)
         ui.run(**common)
     else:
-        ui.run(native=True, window_size=(1100, 760), **common)
+        ui.run(native=True, window_size=(1100, 950), **common)   # taller default: room for >=4 list rows (user 2026-11-05)
     return 0
 
 

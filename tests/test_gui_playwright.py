@@ -183,6 +183,31 @@ class GuiPlaywrightTests(unittest.TestCase):
                         "infobox must sit at the bottom of the window (shell p-6 + mt-2 ≈ 32-40px)")
         p.close()
 
+    def test_list_min_height_and_emergency_window_scroll(self):
+        # user 2026-11-05: the fixed shell is the NORM (window never scrolls, list scrolls
+        # internally, infobox pinned); window-level scroll is the EMERGENCY exception, only
+        # when the list area would shrink below ~4 rows (groups expanded + short window)
+        p = self.page()
+        p.click('.nav-row[data-target="remote"]')
+        p.wait_for_selector(".gui-search input", timeout=240000)
+        shell = p.locator(".lane-shell")
+        self.assertLessEqual(shell.evaluate("e=>e.scrollHeight"), shell.evaluate("e=>e.clientHeight") + 1,
+                             "norm: the window must not scroll")
+        p.locator(".action-row", has_text="Choose model").first.click()
+        p.wait_for_selector(".lane-list .group-header", timeout=120000)
+        p.locator(".lane-list .group-header").first.click()      # expand provider group
+        p.wait_for_selector(".model-row", state="visible", timeout=120000)
+        self.open_groups(p)                                        # expand Model settings + Advanced too
+        p.set_viewport_size({"width": 1280, "height": 500})        # short window
+        p.wait_for_timeout(800)
+        lst = p.locator(".lane-list")
+        self.assertGreaterEqual(lst.evaluate("e=>e.getBoundingClientRect().height"), 130,
+                                "list keeps >= ~4 rows even in a short window (min-height)")
+        self.assertEqual(lst.evaluate("e=>getComputedStyle(e).overflowY"), "auto")
+        self.assertGreater(shell.evaluate("e=>e.scrollHeight"), shell.evaluate("e=>e.clientHeight"),
+                           "emergency: shell scrolls only when the list area would be too small")
+        p.close()
+
     def test_nav_home_remote_back(self):
         p = self.page()
         p.click('.nav-row[data-target="remote"]')
