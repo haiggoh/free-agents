@@ -48,6 +48,7 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
     """Map every action of the screen to a control. Typed setting rows (choices set) become
     select/toggle — never a button that cycles."""
     acts = [a for a in screen.actions() if a.section != "hidden"]   # hidden rows never render — 2026-11-04 user test
+    member_group: dict[int, str] = {}
     if isinstance(screen, LANE_SCREENS):
         nav = [a for a in acts if a.section == "nav"]
         lanes = [a for a in acts if a.section == "lanes"]
@@ -58,10 +59,12 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
         if model:
             ordered.append(m.MODEL_GROUP)
             ordered += model
+            member_group.update({id(a): "model" for a in model})
         if adv:
             ordered.append(m.SETTINGS_GROUP)
             ordered += adv
-        ordered += lanes + nav          # nav always last (csl rule 2026-10-30)
+            member_group.update({id(a): "settings" for a in adv})
+        ordered += lanes + nav          # nav always last (csl rule 2026-10-30) — NEVER inside a group
     else:
         ordered = acts
     out = []
@@ -83,5 +86,6 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
             kind = "nav"
         else:
             kind = "button"
-        out.append(RenderedControl(action_id=sid, kind=kind, label=a.label, enabled=a.enabled))
+        out.append(RenderedControl(action_id=sid, kind=kind, label=a.label, enabled=a.enabled,
+                                   group=member_group.get(id(a), "")))
     return out

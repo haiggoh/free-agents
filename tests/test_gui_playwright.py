@@ -160,6 +160,29 @@ class GuiPlaywrightTests(unittest.TestCase):
                                 "Model settings group must hold the effort/temperature/thinking rows")
         p.close()
 
+    def test_model_list_scrolls_internally_infobox_pinned(self):
+        # user 2026-11-05: an expanded long model list must scroll the LIST, not the window —
+        # the infobox stays pinned to the bottom of the window
+        p = self.page()
+        p.click('.nav-row[data-target="remote"]')
+        p.wait_for_selector(".gui-search input", timeout=240000)
+        p.locator(".action-row", has_text="Choose model").first.click()
+        p.wait_for_selector(".lane-list .group-header", timeout=240000)
+        p.locator(".lane-list .group-header").first.click()     # expand the provider group
+        p.wait_for_selector(".model-row", state="visible", timeout=120000)
+        lst = p.locator(".lane-list")
+        self.assertEqual(lst.evaluate("e=>getComputedStyle(e).overflowY"), "auto",
+                         "the model list itself must be the scroller")
+        doc_h = p.evaluate("()=>document.scrollingElement.scrollHeight")
+        win_h = p.evaluate("()=>window.innerHeight")
+        self.assertLessEqual(doc_h, win_h + 1, "the window must not scroll with the list open")
+        info = p.locator("#infobox")
+        self.assertTrue(info.is_visible())
+        box = info.bounding_box()
+        self.assertLess(abs((box["y"] + box["height"]) - win_h), 48,
+                        "infobox must sit at the bottom of the window (shell p-6 + mt-2 ≈ 32-40px)")
+        p.close()
+
     def test_nav_home_remote_back(self):
         p = self.page()
         p.click('.nav-row[data-target="remote"]')
@@ -337,6 +360,42 @@ class GuiGroupDefaultTests(unittest.TestCase):
                 adv = p.locator('.group-header[data-group="settings"]')
                 self.assertIn("▸", adv.inner_text(), "Advanced starts folded (csl settings_collapsed=True)")
                 self.assertFalse(adv.locator("xpath=following-sibling::div[1]").is_visible())
+                browser.close()
+        finally:
+            app.stop()
+
+
+    def test_go_launch_and_nav_stay_top_level(self):
+        # user 2026-11-05: "Go launch" sits directly above "Choose model" (csl order), and
+        # Back-to-Home / Switch-lane must NEVER be hidden inside a folded group
+        app = GuiApp(REMOTE_INV)
+        try:
+            (app.cfg / "session-menu.local.json").write_text(
+                '{"schema_version": 2, "last_launched": {"local_session": "qwen-3.8-operator"}}')
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch()
+                p = browser.new_page()
+                p.goto(app.base + "/local")
+                p.wait_for_selector(".group-header", timeout=240000)
+                go = p.locator(".action-row", has_text="Go launch")
+                self.assertEqual(go.count(), 1, "Go launch row must render on the lane screen")
+                self.assertTrue(go.first.is_visible(), "Go launch must be top-level, not inside a group")
+                choose = p.locator(".action-row", has_text="Choose model").first
+                self.assertLess(go.first.bounding_box()["y"], choose.bounding_box()["y"],
+                                "Go launch must sit above Choose model")
+                # both groups folded, yet nav rows still visible at top level
+                self.assertIn("▸", p.locator('.group-header[data-group="model"]').inner_text())
+                self.assertTrue(p.locator('.nav-row[data-target="home"]').is_visible(),
+                                "Back to Home must stay visible with Advanced folded")
+                self.assertTrue(p.locator('.nav-row[data-target="remote"]').is_visible(),
+                                "Switch-lane must stay visible with Advanced folded")
+                # and clicking it actually launches (LaunchRequest -> stub), like a model-row click
+                go.first.click()
+                p.wait_for_timeout(2000)
+                rec = json.loads(app.launch_stub.read_text())
+                self.assertIn("--picker-launch", rec["argv"])   # command_for(req) builds this form
+                self.assertIn("qwen-3.8-operator", rec["argv"])
                 browser.close()
         finally:
             app.stop()

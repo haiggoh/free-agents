@@ -33,7 +33,8 @@ def build() -> None:
 
     ui.add_head_html("""<style>
       html, body { -webkit-font-smoothing: antialiased !important; text-rendering: optimizeLegibility !important;
-                   font-family: -apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI', Roboto, sans-serif !important; }
+                   font-family: -apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI', Roboto, sans-serif !important;
+                   margin: 0 !important; padding: 0 !important; }   /* lane shell is 100vh — no page scroll */
       .menu-item { color: #000 !important; text-decoration: none !important; background: none !important;
                    border: none !important; box-shadow: none !important; padding: 2px 6px; cursor: pointer; }
       .menu-item:hover { color: #0b57d0 !important; }   /* M3-ish blue, not the default link blue */
@@ -65,6 +66,15 @@ def build() -> None:
       /* the action item itself is the control (csl parity): hover like a link, click = toggle / ▶ */
       .row-action { cursor: pointer; }
       .row-action:hover { color: #0b57d0 !important; }
+      /* lane pages: fixed-height shell — the model list scrolls internally, the infobox
+         stays pinned to the bottom instead of being overlapped (user 2026-11-05) */
+      .lane-shell { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+      .lane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+      .lane-list { flex: 1; min-height: 0; overflow-y: auto; }
+      /* cap the Quasar wrapper chain too — q-page's own 100vh min-height is what made the
+         document 32px taller than the shell and scrollable */
+      body:has(.lane-shell) .q-layout, body:has(.lane-shell) .q-page-container,
+      body:has(.lane-shell) .q-page, body:has(.lane-shell) .nicegui-content { height: 100vh; min-height: 0 !important; overflow: hidden; }
     </style>""",
  shared=True)
 
@@ -125,7 +135,7 @@ def build() -> None:
         # csl parity (m.rendered_actions): lane screens fold model/settings rows under two
         # collapsible headers — "🔩 Model settings" / "🛠️ Advanced", triangle before the name,
         # both folded by default. The GUI keeps the rows in the DOM and folds with display:none.
-        cur = None
+        boxes: dict = {}
         collapsed = shared.setdefault("collapsed", {"model": True, "settings": True})
         for c in render_plan(scr):
             action = next((a for a in scr.actions()
@@ -144,9 +154,12 @@ def build() -> None:
                     h.set_text(f"{e} {'▸' if collapsed[g] else '▾'} {lbl}")
                     b.props["style"] = "display:none" if collapsed[g] else ""
                 hdr.on("click", _toggle_group)
-                cur = box
+                boxes[gid] = box
                 continue
-            with (cur if cur is not None else nullcontext()):
+            # rows carry their group in c.group — nav/lanes/top rows have "" and stay
+            # top-level, so Back/Switch can never end up hidden inside a folded group
+            target = boxes.get(c.group) if c.group else None
+            with (target if target is not None else nullcontext()):
                 _render_row(c, action)
 
     def _render_row(c, action) -> None:
@@ -201,8 +214,12 @@ def build() -> None:
                     row.on("click", lambda a=action: _run_action(a))
 
     def _run_action(action) -> None:
-        if action is not None and action.run is not None:
-            action.run()
+        if action is None or action.run is None:
+            return
+        res = action.run()
+        # "Go launch" returns a LaunchRequest — run it exactly like a model-row click
+        if isinstance(res, m.LaunchRequest) and shared.get("launch_req"):
+            shared["launch_req"](res)
 
     def _cycle(action, val, d: int) -> None:
         if action.step:
@@ -222,12 +239,13 @@ def build() -> None:
         if val is not None:
             val.set_text(_binary_label(action))   # ON/OFF next to the switch, in sync with it
 
-    def render_shell(title: str, subtitle: str):
-        with ui.column().classes("w-full max-w-3xl mx-auto p-6 gap-2"):
+    def render_shell(title: str, subtitle: str, lane: bool = False):
+        outer = "w-full max-w-3xl mx-auto p-6 gap-2" + (" lane-shell" if lane else "")
+        with ui.column().classes(outer):
             ui.label(title).props('id="title"').classes("text-2xl font-bold")
             if subtitle:
                 ui.label(subtitle).classes("text-sm opacity-70").props('id="subtitle"')
-            return ui.column().classes("w-full gap-1")
+            return ui.column().classes("w-full gap-1" + (" lane-body" if lane else ""))
 
     @ui.page("/")
     @ui.page("/home")
@@ -247,23 +265,26 @@ def build() -> None:
         async def page(client):
             await client.connected()
             scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache).screen
-            body = render_shell(scr.title, scr.policy if isinstance(scr.policy, str) else "")
+            body = render_shell(scr.title, scr.policy if isinstance(scr.policy, str) else "", lane=True)
             shared["toggle_list"] = lambda: None     # placeholder; reassigned below before any click can fire
             with body:
                 render_rows(scr)
                 search = ui.input(placeholder="type to filter models").classes("gui-search w-full")
-                list_box = ui.column().classes("w-full gap-1")
+                list_box = ui.column().classes("w-full gap-1 lane-list")
                 list_box.props["style"] = "display:none"     # hidden until "Choose model" (csl parity)
                 info = ui.label("").classes("text-xs opacity-70 border-t pt-2 mt-2 w-full").props('id="infobox"')
                 state = {"open": set()}
 
+                def _launch_req(req):
+                    # the delivery hook: model-row clicks and the "Go launch" action both land here
+                    stub = os.environ.get("FA_GUI_LAUNCH_STUB")
+                    if stub:
+                        Path(stub).write_text(json.dumps({"argv": pc.command_for(req)}))
+                shared["launch_req"] = _launch_req
+
                 def do_launch(mid, mdl=None):
                     # csl launches the model directly on row click — no Launch button (user 2026-11-04)
-                    stub = os.environ.get("FA_GUI_LAUNCH_STUB")
-                    req = m.LaunchRequest(target, [target, "--model", mid], {}, mid)
-                    argv = pc.command_for(req)
-                    if stub:
-                        Path(stub).write_text(json.dumps({"argv": argv}))
+                    _launch_req(m.LaunchRequest(target, [target, "--model", mid], {}, mid))
 
                 def paint(models, query):
                     list_box.clear()
