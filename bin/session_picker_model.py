@@ -1674,12 +1674,21 @@ class RemoteScreen(Screen):
     def _regroup(self):
         buckets: dict[str, list] = {}
         order = []
-        # 0.54.0: visibility + hidden providers + the -thinking dedupe all come from the ONE
-        # function (visible_agents) — this screen no longer keeps private copies that drift.
-        for agent in visible_agents(self.settings, self.agents, remote_filters=True):
+        # 0.54.0: the -thinking dedupe + hidden/keyless rules come from the ONE function
+        # (visible_agents) — but a provider whose ONLY row is a SELECT placeholder must still
+        # get its group (the placeholder never renders; its catalog IS the roster, 2026-10-20),
+        # so group EXISTENCE is computed from the full visibility predicate, rows from
+        # visible_agents.
+        for agent in self.agents:
+            if not _agent_visible(self.settings, agent) or is_provider_hidden(self.settings, agent.provider):
+                continue
             if agent.provider not in buckets:
                 order.append(agent.provider)
-            buckets.setdefault(agent.provider, []).append(agent)
+            buckets.setdefault(agent.provider, [])
+        visible = visible_agents(self.settings, self.agents, remote_filters=True)
+        vis_by_prov: dict[str, list] = {}
+        for agent in visible:
+            vis_by_prov.setdefault(agent.provider, []).append(agent)
         groups = []
         for prov in order:
             # A "choose model" placeholder (registry model_id SELECT) is not a launchable row —
@@ -1688,14 +1697,14 @@ class RemoteScreen(Screen):
             # NVIDIA's pinned order is curated by hand (user 2026-10-20: "except nvidia we
             # have sorted those manually very deliberately") — every other provider's pins
             # sort size-descending, unknowns last in inventory order.
-            pinned = buckets[prov]
+            pinned = vis_by_prov.get(prov, [])
             if prov != "nvidia":
                 pinned = size_sorted(pinned, lambda a: self._catalog_size(prov, a.model_id))
             if self.search:
                 pinned = [a for a in pinned if self._matches(a.model_id, a.display)]
             items = [Item(a.alias, self._pin_row_label(prov, a))
                      for a in pinned]
-            items += self._catalog_items(prov, buckets[prov])
+            items += self._catalog_items(prov, pinned)
             # 0.51.0 (user): when local-capable rows ARE shown, they sit at the very BOTTOM
             # of their provider group (by default they are filtered out entirely by
             # _visible — pinned rows get the verdict annotated in the app's _loaded).
@@ -1905,16 +1914,9 @@ class RemoteScreen(Screen):
             self._refresh_keep_open()
             return
         self.catalog_refresh_error.pop(prov, None)
-        if err:
-            self.catalogs[prov] = err.split(": ", 1)[-1]
-        else:
-            # 0.54.0 Task 5: store [] for an empty live reply — "known empty" so
-            # catalog_kind_needed stops re-asking (an unset entry made the open group show
-            # __loading__ forever). _hydrate_catalogs still falls through to the disk cache
-            # for an empty list, because an empty live reply is INCONCLUSIVE, not "no models".
-            self.catalogs[prov] = list(rows)
-            if rows:
-                write_catalog_cache(prov, rows)
+        self.catalogs[prov] = (err.split(": ", 1)[-1] if err else list(rows))
+        if not err and rows:
+            write_catalog_cache(prov, rows)
         self._refresh_keep_open()
 
     def _refresh_keep_open(self):

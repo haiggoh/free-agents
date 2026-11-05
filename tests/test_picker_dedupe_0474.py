@@ -103,8 +103,21 @@ class LowkeyLabelTests(unittest.TestCase):
             self.assertNotIn("${", str(a.label), a.label)
 
     def test_status_line_single_source_pinned(self):
-        self.assertEqual(m.status_line(None),
-                         "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies")
+        # 0.54.0: the line is terminal-aware (copy hint) — pin the DEFAULT branch with the
+        # terminal env cleared; the Apple_Terminal/kitty variants are pinned in
+        # tests/test_picker_copy_keyboard_0540.py
+        import os as _os
+        saved = (_os.environ.get("TERM_PROGRAM"), _os.environ.get("TERM"))
+        _os.environ.pop("TERM_PROGRAM", None)
+        _os.environ.pop("TERM", None)
+        try:
+            self.assertEqual(m.status_line(None),
+                             "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies")
+        finally:
+            if saved[0] is not None:
+                _os.environ["TERM_PROGRAM"] = saved[0]
+            if saved[1] is not None:
+                _os.environ["TERM"] = saved[1]
         src = (ROOT / "bin" / "session_picker.py").read_text()
         self.assertIn("m.status_line(sm)", src)   # the picker must not inline its own copy
 

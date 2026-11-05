@@ -54,7 +54,7 @@ class RemoteSessionTests(unittest.TestCase):
                     # fixture every launch path aborts before doing anything.
                     'config/emoji.sh', 'config/dispatch-preferences.json',
                     'config/broken-nvidia-models.json',
-                    'bin/session-fallbacks.py'):
+                    'bin/session-fallbacks.py', 'bin/fa_tls.py'):   # 0.54.0: anthropic-route.py imports it
             shutil.copy2(ROOT / rel, self.root / rel)
         source = (self.root / 'bin/remote-session.sh').read_text()
         (self.root / 'bin/library.sh').write_text(source.split('# ---- argument parsing')[0])

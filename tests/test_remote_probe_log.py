@@ -53,7 +53,7 @@ class _RecordingUrlopen:
         self.payload = payload
         self.bodies = []
 
-    def __call__(self, req, timeout=None):
+    def __call__(self, req, timeout=None, **kw):  # 0.54.0: fa_tls passes context=
         self.bodies.append(json.loads(req.data.decode()))
         return _Resp(self.payload)
 
@@ -142,7 +142,7 @@ class ProbeLogTests(unittest.TestCase):
         self.assertEqual(self.limiter.acquired, 0)
 
     def test_http_429_is_tagged_and_notifies_limiter(self):
-        def raise_429(req, timeout=None):
+        def raise_429(req, timeout=None, **kw):  # 0.54.0: fa_tls passes context=
             hdrs = email.message.Message()
             hdrs["Retry-After"] = "12"
             raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests",

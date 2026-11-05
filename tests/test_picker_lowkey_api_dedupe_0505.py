@@ -32,10 +32,18 @@ def dup_agents():
 
 
 class LowkeyApiDedupeTests(unittest.TestCase):
+    def _api_rows(self, lk):
+        # 0.54.0 (D3): the api group carries one subgroup per provider; rows nest inside
+        api = next(g for g in lk.groups() if g.id == "api")
+        rows = []
+        for sub in api.items:
+            rows.extend(sub.items if isinstance(sub, m.Group) else [sub])
+        return api, rows
+
     def test_api_group_has_one_item_per_model_id(self):
         lk = m.LowkeyScreen(m.Settings(), [], api_agents=dup_agents())
-        api = next(g for g in lk.groups() if g.id == "api")
-        ids = [i.id for i in api.items]
+        api, rows = self._api_rows(lk)
+        ids = [i.id for i in rows]
         # two registry rows for z-ai/glm-5.3-flash collapse to ONE row — the crash was
         # OptionList DuplicateID on the second "i:nvidia:z-ai/glm-5.3-flash"
         # (item id = f"{provider}:{model_id}"; nvidia model ids already carry the prefix)
@@ -44,8 +52,8 @@ class LowkeyApiDedupeTests(unittest.TestCase):
     def test_base_alias_represents_the_model(self):
         # same rule as RemoteScreen._regroup (0.47.4): the non--thinking variant wins
         lk = m.LowkeyScreen(m.Settings(), [], api_agents=dup_agents())
-        api = next(g for g in lk.groups() if g.id == "api")
-        self.assertEqual(api.items[0].label, "Z.ai GLM 5.3 Flash (nvidia)")
+        api, rows = self._api_rows(lk)
+        self.assertEqual(rows[0].label, "Z.ai GLM 5.3 Flash (NVIDIA)")
 
     def test_all_accordion_item_ids_unique(self):
         # the render-path invariant render_model relies on: OptionList forbids duplicate
@@ -61,8 +69,8 @@ class LowkeyApiDedupeTests(unittest.TestCase):
         lk = m.LowkeyScreen(m.Settings(), [])
         lk.api_agents = dup_agents()
         lk.set_models([])
-        api = next(g for g in lk.groups() if g.id == "api")
-        self.assertEqual([i.id for i in api.items],
+        api, rows = self._api_rows(lk)
+        self.assertEqual([i.id for i in rows],
                          ["nvidia:z-ai/glm-5.3-flash", "nvidia:nvidia/nemotron-3-ultra-550b-a55b"])
 
 
