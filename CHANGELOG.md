@@ -1,3 +1,19 @@
+## [0.55.1] — 2026-11-05
+
+### Added — csl cycle indicators (Textual picker)
+
+- Every cycleable action row (any row with left/right stepping) now renders with bold ◀ ▶
+  indicators flanking the label; the label is padded to a fixed width so ▶ does not jump
+  when a cycled value changes width.
+- Clicking ◀ steps the row exactly like the Left key, ▶ exactly like Right (routed through
+  the same `_step_action` path); clicking the row label or pressing Enter runs the row's
+  activation. Row clicks activate exactly once (Textual MRO dispatch quirk handled with
+  `prevent_default`, not `super()._on_click`).
+- Theme-menu hue rows keep their deliberate split: Enter/click = ±20°, ◀/▶/arrow keys =
+  ∓5° (the model already carried the split; the TUI now routes click/Enter to `run()`).
+- Delivery-level PTY tests (`tests/test_cycle_indicators_0555.py`): real mouse clicks on the
+  glyphs step like the arrow keys, label click/Enter = +20° on hue rows, indicators appear
+  only on cycle rows; mutation-checked (glyph handler disabled → red).
 ## [0.55.0] — 2026-11-05
 
 ### Added — session-start guard primers (prevention; the PreToolUse hooks stay the safety net)
