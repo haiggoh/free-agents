@@ -39,15 +39,18 @@ def build() -> None:
       .cycle-arrow { color: #000 !important; background: none !important; border: none !important;
                      box-shadow: none !important; padding: 0 3px; cursor: pointer; font-weight: bold; }
       .cycle-arrow:hover { color: #0b57d0 !important; }
-      .q-btn.switch, .switch.q-btn { background: #bbb !important; background-color: #bbb !important; color: transparent !important; border: none !important; }
-      .q-btn.switch.on, .switch.q-btn.on { background: #000 !important; background-color: #000 !important; }
+      /* Quasar checkbox wrapper styled as the M3 pill switch. Quasar keeps state on the
+         WRAPPER (aria-checked + q-checkbox__inner--truthy), not the hidden native input,
+         so the visuals key off [aria-checked="true"] and Quasar's own box is hidden. */
       .switch { width: 34px; height: 18px; border-radius: 9px; background: #bbb; position: relative;
-                cursor: pointer; display: inline-block; vertical-align: middle;
+                cursor: pointer; margin: 0; padding: 0; flex: 0 0 auto;
                 transition: background-color .18s cubic-bezier(.4,0,.2,1); }
-      .switch.on { background: #000; }
-      .switch .knob { width: 14px; height: 14px; border-radius: 50%; background: #fff; position: absolute;
-                      top: 2px; left: 2px; }
-      .switch.on .knob { left: 18px; }
+      .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+                border-radius: 50%; background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,.4) !important;
+                transition: left .18s cubic-bezier(.4,0,.2,1); pointer-events: none; }
+      .switch[aria-checked="true"] { background: #000; }
+      .switch[aria-checked="true"]::after { left: 18px; }
+      .switch .q-checkbox__inner { display: none !important; }
       .version-footer { position: fixed !important; bottom: 6px !important; left: 0; right: 0; text-align: center; }
       .btn-flat { box-shadow: none !important; border-radius: 4px !important; padding: 2px 8px !important;
                   text-transform: none !important; }
@@ -56,9 +59,6 @@ def build() -> None:
                      border-radius: 20px !important; padding: 6px 16px !important; box-shadow: 0 1px 2px rgba(0,0,0,.2) !important; }
       .btn-primary:hover { background: #333 !important; }
       .cycle-row { display: flex; align-items: center; }
-      /* switch: knob always bright white + subtle M3 shadow so it is visible on any track */
-      .switch .knob { background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,.4) !important; pointer-events: none !important;
-                transition: left .18s cubic-bezier(.4,0,.2,1); }
     </style>""", shared=True)
 
     loader = Loader()
@@ -116,16 +116,15 @@ def build() -> None:
                 choices = list(action.choices)
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
                 if binary:
-                    # switch AFTER the action item, inline in the same row; the knob child div
-                    # is what makes the circle visible (it was missing entirely before)
+                    # native checkbox styled as the M3 pill switch — toggles reliably;
+                    # :checked drives the knob slide + track fade via CSS transitions
                     on = bool(action.value()) if action.value else False
                     with ui.row().classes("cycle-row items-center gap-2 w-full"):
                         name = (action.name or action.label.split(":")[0]) if action else c.label
                         ui.label(f"{name}:").classes("cycle-name")
                         ui_label_val = ui.label(str(_cycle_value(action))).classes("cycle-value")
-                        sw = ui.button("", on_click=lambda a=action, v=ui_label_val: _toggle_binary(a, sw, v)).classes(f"switch{' on' if on else ''} btn-flat").style("background:#000 !important" if on else "background:#bbb !important").style("color:transparent !important; border:none !important; border-radius:9px !important; width:34px !important; height:18px !important; padding:0 !important; min-height:0 !important")
-                        with sw:
-                            ui.element("div").classes("knob")
+                        sw = ui.checkbox("", value=on, on_change=lambda e, a=action, v=ui_label_val: _toggle_binary(a, e.value, v)).classes("switch")
+                        sw.props["aria-label"] = name
                 else:
                     # csl order: <name>: < value >  — arrow between end of item and the state
                     name = (action.name or action.label.split(":")[0]) if action else c.label
@@ -159,17 +158,15 @@ def build() -> None:
             action.step(d)
         val.set_text(str(_cycle_value(action)))
 
-    def _toggle_binary(action, sw, val=None) -> None:
-        # flip the visual state directly AND cycle the underlying setting (the model's
-        # choices may be (None, False, True) — value truthiness alone can't show the flip)
-        if action.step:
-            action.step(1)
-        if "on" in sw.classes:
-            sw.remove_class("on")
-            sw.style("background:#bbb !important")
-        else:
-            sw.add_class("on")
-            sw.style("background:#000 !important")
+    def _toggle_binary(action, on, val=None) -> None:
+        # step until the underlying value matches the requested state (choices may be
+        # (None, False, True) — one step may not reach it); the checkbox's own :checked
+        # drives the visual tween.
+        for _ in range(3):
+            if bool(action.value()) == bool(on):
+                break
+            if action.step:
+                action.step(1)
         if val is not None:
             val.set_text(str(_cycle_value(action)))   # show the new state next to the switch
 
