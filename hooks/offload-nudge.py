@@ -129,9 +129,17 @@ def _load_primer(hooks_dir: Path, name: str) -> str:
     try:
         tree = ast.parse((hooks_dir / name).read_text(encoding="utf-8"))
         for node in tree.body:
-            if (isinstance(node, ast.Assign)
-                    and any(isinstance(t, ast.Name) and t.id == "PRIMER" for t in node.targets)):
-                return ast.literal_eval(node.value)
+            # plain Assign and annotated AnnAssign both carry the PRIMER constant
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign):
+                if node.value is None:
+                    continue  # bare annotation (PRIMER: str) carries no value
+                targets, value = [node.target], node.value
+            else:
+                continue
+            if any(isinstance(t, ast.Name) and t.id == "PRIMER" for t in targets):
+                return ast.literal_eval(value)
         return ""
     except Exception:
         return ""

@@ -202,3 +202,17 @@ class GuardPrimerSection(unittest.TestCase):
         self.assertIn("saves no money", text)
         for primer in self._primers().values():
             self.assertIn(primer, text)
+
+    def test_load_primer_accepts_plain_and_annotated_assignment(self):
+        # a future PRIMER: str = "..." (AnnAssign) must not silently drop the primer
+        import tempfile
+        from pathlib import Path
+        d = Path(tempfile.mkdtemp(prefix="primer-ast-"))
+        (d / "plain-guard.py").write_text('PRIMER = "plain primer"\n')
+        (d / "annotated-guard.py").write_text('PRIMER: str = "annotated primer"\n')
+        (d / "no-primer.py").write_text('X = 1\n')
+        mod = self._mod()
+        self.assertEqual(mod._load_primer(d, "plain-guard.py"), "plain primer")
+        self.assertEqual(mod._load_primer(d, "annotated-guard.py"), "annotated primer")
+        self.assertEqual(mod._load_primer(d, "no-primer.py"), "")
+        self.assertEqual(mod._load_primer(d, "missing.py"), "")
