@@ -36,7 +36,7 @@ def build() -> None:
                    font-family: -apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI', Roboto, sans-serif !important;
                    margin: 0 !important; padding: 0 !important; }   /* lane shell is 100vh — no page scroll */
       .menu-item { color: #000 !important; text-decoration: none !important; background: none !important;
-                   border: none !important; box-shadow: none !important; padding: 2px 6px; cursor: pointer; }
+                   border: none !important; box-shadow: none !important; padding: 1px 5px; line-height: 1.3; cursor: pointer; }
       .menu-item:hover { color: #0b57d0 !important; }   /* M3-ish blue, not the default link blue */
       .cycle-arrow { color: #000 !important; background: none !important; border: none !important;
                      box-shadow: none !important; padding: 0 3px; cursor: pointer; font-weight: bold; }
@@ -60,17 +60,24 @@ def build() -> None:
       .btn-primary { background: #000 !important; color: #fff !important; border: none !important;
                      border-radius: 20px !important; padding: 6px 16px !important; box-shadow: 0 1px 2px rgba(0,0,0,.2) !important; }
       .btn-primary:hover { background: #333 !important; }
-      .cycle-row { display: flex; align-items: center; }
+      .cycle-row { display: flex; align-items: center; line-height: 1.25; }
       /* ON/OFF value chip: fixed width so a 2- vs 3-letter word never shifts the switch (user 2026-11-05) */
       .cycle-value-bin { display: inline-block; min-width: 3ch; }
       /* the action item itself is the control (csl parity): hover like a link, click = toggle / ▶ */
       .row-action { cursor: pointer; }
       .row-action:hover { color: #0b57d0 !important; }
       /* lane pages: fixed-height shell — the model list scrolls internally, the infobox
-         stays pinned to the bottom instead of being overlapped (user 2026-11-05) */
-      .lane-shell { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
-      .lane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-      .lane-list { flex: 1; min-height: 0; overflow-y: auto; }
+         stays pinned to the bottom instead of being overlapped (user 2026-11-05).
+         EMERGENCY ONLY: if the list area would shrink below ~4 rows (groups expanded +
+         short window), the shell itself scrolls — the window scrolls as a last resort,
+         the norm stays fixed-shell (user 2026-11-05 clarification). */
+      .lane-shell { height: 100vh; overflow-y: auto; display: flex; flex-direction: column; }
+      .lane-body { flex: 1 0 auto; min-height: 0; display: flex; flex-direction: column; }
+      .lane-list { flex: 0 1 auto; min-height: 136px; max-height: 60vh; overflow-y: auto; gap: 0 !important; }
+      #infobox { margin-top: auto; }                      /* pinned to the window bottom in the norm */
+      /* tighter rows inside the model list than everywhere else (user 2026-11-05) */
+      .lane-list .model-row { padding: 0 4px !important; line-height: 1.15 !important; }
+      .lane-list .group-header { padding: 0 4px !important; line-height: 1.2 !important; }
       /* cap the Quasar wrapper chain too — q-page's own 100vh min-height is what made the
          document 32px taller than the shell and scrollable */
       body:has(.lane-shell) .q-layout, body:has(.lane-shell) .q-page-container,
@@ -240,7 +247,7 @@ def build() -> None:
             val.set_text(_binary_label(action))   # ON/OFF next to the switch, in sync with it
 
     def render_shell(title: str, subtitle: str, lane: bool = False):
-        outer = "w-full max-w-3xl mx-auto p-6 gap-2" + (" lane-shell" if lane else "")
+        outer = "w-full max-w-3xl mx-auto p-4 gap-1" + (" lane-shell" if lane else "")   # tighter overall spacing (user 2026-11-05)
         with ui.column().classes(outer):
             ui.label(title).props('id="title"').classes("text-2xl font-bold")
             if subtitle:
