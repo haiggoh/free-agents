@@ -42,7 +42,8 @@ def build() -> None:
       .q-btn.switch, .switch.q-btn { background: #bbb !important; background-color: #bbb !important; color: transparent !important; border: none !important; }
       .q-btn.switch.on, .switch.q-btn.on { background: #000 !important; background-color: #000 !important; }
       .switch { width: 34px; height: 18px; border-radius: 9px; background: #bbb; position: relative;
-                cursor: pointer; display: inline-block; vertical-align: middle; }
+                cursor: pointer; display: inline-block; vertical-align: middle;
+                transition: background-color .18s cubic-bezier(.4,0,.2,1); }
       .switch.on { background: #000; }
       .switch .knob { width: 14px; height: 14px; border-radius: 50%; background: #fff; position: absolute;
                       top: 2px; left: 2px; }
@@ -56,7 +57,8 @@ def build() -> None:
       .btn-primary:hover { background: #333 !important; }
       .cycle-row { display: flex; align-items: center; }
       /* switch: knob always bright white + subtle M3 shadow so it is visible on any track */
-      .switch .knob { background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,.4) !important; pointer-events: none !important; }
+      .switch .knob { background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,.4) !important; pointer-events: none !important;
+                transition: left .18s cubic-bezier(.4,0,.2,1); }
     </style>""", shared=True)
 
     loader = Loader()
@@ -120,8 +122,8 @@ def build() -> None:
                     with ui.row().classes("cycle-row items-center gap-2 w-full"):
                         name = (action.name or action.label.split(":")[0]) if action else c.label
                         ui.label(f"{name}:").classes("cycle-name")
-                        ui.label(str(_cycle_value(action))).classes("cycle-value")
-                        sw = ui.button("", on_click=lambda a=action: _toggle_binary(a, sw)).classes(f"switch{' on' if on else ''} btn-flat").style("background:#000 !important" if on else "background:#bbb !important").style("color:transparent !important; border:none !important; border-radius:9px !important; width:34px !important; height:18px !important; padding:0 !important; min-height:0 !important")
+                        ui_label_val = ui.label(str(_cycle_value(action))).classes("cycle-value")
+                        sw = ui.button("", on_click=lambda a=action, v=ui_label_val: _toggle_binary(a, sw, v)).classes(f"switch{' on' if on else ''} btn-flat").style("background:#000 !important" if on else "background:#bbb !important").style("color:transparent !important; border:none !important; border-radius:9px !important; width:34px !important; height:18px !important; padding:0 !important; min-height:0 !important")
                         with sw:
                             ui.element("div").classes("knob")
                 else:
@@ -157,7 +159,7 @@ def build() -> None:
             action.step(d)
         val.set_text(str(_cycle_value(action)))
 
-    def _toggle_binary(action, sw) -> None:
+    def _toggle_binary(action, sw, val=None) -> None:
         # flip the visual state directly AND cycle the underlying setting (the model's
         # choices may be (None, False, True) — value truthiness alone can't show the flip)
         if action.step:
@@ -168,6 +170,8 @@ def build() -> None:
         else:
             sw.add_class("on")
             sw.style("background:#000 !important")
+        if val is not None:
+            val.set_text(str(_cycle_value(action)))   # show the new state next to the switch
 
     def render_shell(title: str, subtitle: str):
         with ui.column().classes("w-full max-w-3xl mx-auto p-6 gap-2"):
