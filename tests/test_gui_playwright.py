@@ -122,6 +122,22 @@ class GuiPlaywrightTests(unittest.TestCase):
             raise
         return p
 
+    def expand_provider_groups(self, p):
+        # paint() rebuilds the list on every toggle, so re-query the headers after each
+        # click — a stale element reference silently misses
+        while True:
+            hdrs = p.locator(".lane-list .group-header")
+            clicked = False
+            for i in range(hdrs.count()):
+                h = hdrs.nth(i)
+                if "▸" in h.inner_text():
+                    h.click()
+                    clicked = True
+                    p.wait_for_timeout(500)
+                    break
+            if not clicked:
+                return
+
     def open_groups(self, p):
         # lane screens start with "Model settings" / "Advanced" folded (csl parity) — wait for
         # the headers to render (SPA nav is async), expand any still showing ▸, then wait until
@@ -231,15 +247,19 @@ class GuiPlaywrightTests(unittest.TestCase):
         self.assertIn("Remote", p.locator("#title").inner_text())
         p.click('.nav-row[data-target="home"]')
         p.wait_for_selector('.nav-row[data-target="remote"]', timeout=180000)
-        self.assertIn("Free Agents", p.locator("#title").inner_text())
+        self.assertIn("Session Launcher", p.locator("#title").inner_text())
         p.close()
 
     def test_search_filters_rows(self):
         p = self.page()
         p.click('.nav-row[data-target="remote"]')
+        p.wait_for_selector(".gui-search input", timeout=240000)
+        p.locator(".action-row", has_text="Choose model").first.click()   # open the list
+        p.wait_for_selector(".lane-list .group-header", timeout=240000)
+        self.expand_provider_groups(p)                                    # expand all provider groups
         p.wait_for_selector(".model-row", timeout=240000)
         self.assertEqual(p.locator(".model-row").count(), 2)
-        p.fill(".gui-search input", "mistral")
+        p.fill(".gui-search input", "nvidia")
         p.wait_for_timeout(1500)
         self.assertEqual(p.locator(".model-row").count(), 1)
         self.assertIn("NVIDIA A", p.locator(".model-row").first.inner_text())
@@ -347,16 +367,20 @@ class GuiPlaywrightTests(unittest.TestCase):
         self.assertNotEqual(c0, c1, "row click on a cycle row must step +1 like the ▶ arrow")
         p.close()
 
-    def test_keyboard_focus_reaches_launch(self):
+    def test_model_row_click_launches(self):
+        # csl parity: clicking a model row launches it directly (no Launch button) —
+        # the LaunchRequest goes through the shared core's command_for into the stub
         p = self.page()
         p.click('.nav-row[data-target="remote"]')
-        p.wait_for_selector(".model-row", timeout=240000)
+        p.wait_for_selector(".gui-search input", timeout=240000)
+        p.locator(".action-row", has_text="Choose model").first.click()
+        p.wait_for_selector(".lane-list .group-header", timeout=240000)
+        self.expand_provider_groups(p)
         p.locator(".model-row").first.click()
-        p.locator(".gui-launch").focus()
-        p.keyboard.press("Enter")
         p.wait_for_timeout(3000)
         rec = json.loads(self.app.launch_stub.read_text())
-        self.assertIn("--model", rec["argv"])
+        self.assertIn("--model", rec["argv"])          # remote lane: remote-session.sh --model <alias>
+        self.assertIn("nvidia-a", rec["argv"])
         p.close()
 
 
