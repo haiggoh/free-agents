@@ -392,7 +392,21 @@ def _model_identity(alias: str) -> str:
 
 def status_line(sm: "Screen") -> str:
     """The nav-instructions line at the very bottom of EVERY screen — single source of
-    truth (user 2026-10-30); pinned by a fixture test so it cannot drift per screen."""
+    truth (user 2026-10-30); pinned by a fixture test so it cannot drift per screen.
+
+    0.54.0 (D5): the copy hint is terminal-honest. Apple Terminal never forwards ⌘C and
+    ignores OSC 52, so there the line says "highlight text to copy it" (copy-on-select);
+    ⌘-forwarding terminals (kitty keyboard protocol: kitty/Ghostty/WezTerm/iTerm2-CSI-u)
+    also get the ⌘C note. The ⌘R (mouse-reporting) route is NOT taught."""
+    import os
+    term_program = (os.environ.get("TERM_PROGRAM") or "").lower()
+    term = (os.environ.get("TERM") or "").lower()
+    if term_program == "apple_terminal" or "apple_terminal" in term:
+        return "  ↑↓ move · Enter/click select · ←→ change setting · highlight text to copy it"
+    kitty = any(t in term or t in term_program for t in ("kitty", "ghostty", "wezterm", "iterm"))
+    if kitty:
+        return ("  ↑↓ move · Enter/click select · ←→ change setting · highlight text to copy it"
+                " · ⌘C copies the highlighted row")
     return "  ↑↓ move · Enter/click select · ←→ change setting · drag selects text, ⌘C/Ctrl+C copies"
 
 

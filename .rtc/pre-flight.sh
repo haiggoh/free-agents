@@ -36,7 +36,7 @@ LITELLM_PY=${FA_LITELLM_PY:-$HOME/.local/pipx/venvs/litellm/bin/python}
 PICKER_PY=${FA_PICKER_PY:-$HOME/.local/share/free-agents/picker-venv/bin/python}
 
 LITELLM_TESTS="tests/test_la_proxy_hooks.py tests/test_anthropic_route.py tests/test_litellm_contract.py"
-PICKER_TESTS="tests/test_session_picker_pty.py tests/test_new_features.py tests/test_local_capable_verdict_0521.py tests/test_picker_load_race_matrix_0540.py tests/test_lowkey_api_groups_0540.py tests/test_hf_params_cache_0540.py tests/test_back_row_rule_0540.py tests/test_hotkey_shift_0540.py"
+PICKER_TESTS="tests/test_session_picker_pty.py tests/test_new_features.py tests/test_local_capable_verdict_0521.py tests/test_picker_load_race_matrix_0540.py tests/test_lowkey_api_groups_0540.py tests/test_hf_params_cache_0540.py tests/test_back_row_rule_0540.py tests/test_hotkey_shift_0540.py tests/test_picker_copy_keyboard_0540.py"
 
 # Only what EXISTS: a renamed or deleted test file must not reach pytest as a path error, and a
 # gate whose files are ALL gone must fail rather than "pass" over nothing.

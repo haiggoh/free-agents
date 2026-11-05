@@ -596,8 +596,10 @@ class HoverOptionList(OptionList):
         super()._on_mouse_down(event)
 
     def _on_mouse_up(self, event):
-        # 0.51.0 (user): right-click (button 3) copies the hovered row's text, same target as
-        # the drag-select copy below; a plain left click still activates the entry as before.
+        # 0.51.0 (user): right-click (button 3) copies the hovered row's text; a plain left
+        # click still activates the entry as before. 0.54.0: drag-select copy moved to the
+        # app-level on_mouse_up (copy-on-select for EVERY widget) — ONE copy path, one
+        # indicator (Picker._show_copied).
         if event.button == 3:
             idx = self._mouse_hovering_over
             if idx is not None:
@@ -607,26 +609,7 @@ class HoverOptionList(OptionList):
                 except Exception:
                     label = ""
                 if label:
-                    self.app.copy_to_clipboard(label)
-                    self.app.notify(f"Copied: {label[:40]}", timeout=1.5)
-                    event.stop()
-                    return
-        # 0.50.0 F3: long-click+drag (>= 2 chars) over a menu entry copies that entry's
-        # text (the selection path — Cmd+C copies any selection); a plain click passes
-        # through and activates the entry as before.
-        start = getattr(self, "_drag_start", None)
-        self._drag_start = None
-        if m._drag_selects(start, (event.x, event.y)):
-            idx = self._mouse_hovering_over
-            if idx is not None:
-                try:
-                    opt = self.get_option_at_index(idx)
-                    label = str(getattr(opt, "prompt", opt))
-                except Exception:
-                    label = ""
-                if label:
-                    self.app.copy_to_clipboard(label)
-                    self.app.notify(f"Copied: {label[:40]}", timeout=1.5)
+                    self.app.copy_and_indicate(label)
                     event.stop()
                     return
         super()._on_mouse_up(event)
@@ -750,6 +733,9 @@ class Picker(App):
     #prompt { display: none; }
     /* The live model filter: hidden until the remote choose-model list opens (render_model). */
     #search { display: none; height: auto; padding: 0 1; margin-top: 1; color: ansi_default; }
+    /* 0.54.0 copy indicator: the information toast is BLUE (the toast's own class is
+       `Toast.-information` — textual/widgets/_toast.py). */
+    Toast.-information, Toast.-information .toast--title { color: #4da3ff; border-left: outer #4da3ff; }
     OptionList { background: ansi_default; color: ansi_default; border: none; }
     OptionList:focus { background: ansi_default; color: ansi_default; border: none; }
     /* Highlight and hover never paint a block: soft-blue text (ANSI bright-blue, which every
@@ -2595,37 +2581,105 @@ class Picker(App):
         except Exception as exc:
             self.state_warnings.append(f"Error saving key: {exc}")
 
-    def copy_to_clipboard(self, text: str) -> None:
+    def copy_to_clipboard(self, text: str) -> bool:
         # Textual copies via OSC 52, which macOS Terminal.app ignores (Textual's own docs say
         # so) — that is why copying silently did nothing. Also hand the text to the system
         # clipboard: pbcopy on macOS, wl-copy/xclip elsewhere when present. Never fatal.
         # 0.50.8: /usr/bin/pbcopy is an ABSOLUTE candidate too — a csl-launched child can run
         # with a stripped PATH where `which pbcopy` finds nothing, and then OSC 52 alone is
         # ignored by Terminal.app, i.e. copy silently blocked under csl.
+        # 0.54.0: returns True only when a clipboard COMMAND exited 0 — OSC 52 alone does not
+        # count (Terminal.app ignores it), so a False is reported as a failed copy, never as one.
         super().copy_to_clipboard(text)
         import shutil
         for cmd in (["pbcopy"], ["/usr/bin/pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"]):
             if shutil.which(cmd[0]):
                 try:
-                    subprocess.run(cmd, input=text, text=True, timeout=3, check=False)
+                    res = subprocess.run(cmd, input=text, text=True, timeout=3, check=False)
                 except (OSError, subprocess.SubprocessError):
                     continue
-                break
+                if res.returncode == 0:
+                    return True
+        return False
+
+    def _show_copied(self, text: str) -> None:
+        """0.54.0: ONE copy indicator for EVERY copy path (copy-on-select, right-click, super+c,
+        ctrl+c on a selection). Exact text `copied {n} chars to clipboard` (Python characters,
+        `1 char` singular, lowercase), blue info toast, bottom-right (Textual's notify default),
+        ~3 s. Toast CSS class: `Toast.-information` (textual/widgets/_toast.py:53)."""
+        n = len(text)
+        self.notify(f"copied {n} char{'s' if n != 1 else ''} to clipboard",
+                    severity="information", timeout=3)
+
+    def _show_copy_failed(self) -> None:
+        self.notify("copy failed — no clipboard command available", severity="error", timeout=3)
+
+    def copy_and_indicate(self, text: str) -> bool:
+        ok = self.copy_to_clipboard(text)
+        if ok:
+            self._show_copied(text)
+        else:
+            self._show_copy_failed()
+        return ok
+
+    def _highlighted_option_label(self) -> str:
+        """The highlighted row's text in whichever list owns the highlight (rows or actions) —
+        the same label source as the right-click copy path."""
+        from textual.widgets import OptionList
+        for sel in ("#rows", "#actions"):
+            try:
+                lst = self.query_one(sel, OptionList)
+            except Exception:
+                continue
+            if lst.highlighted is not None and 0 <= lst.highlighted < lst.option_count:
+                opt = lst.get_option_at_index(lst.highlighted)
+                return str(getattr(opt, "prompt", opt))
+        return ""
 
     def action_copy_selection(self):
+        # 0.54.0 (D5 ⌘C): selection present → copy it (unchanged, highlight cleared); NO
+        # selection → copy the highlighted row's text; nothing highlighted → the indicator
+        # says so. Ctrl+C keeps its copy-or-quit behavior via action_copy_or_quit.
         text = self.screen.get_selected_text()
         if text:
-            self.copy_to_clipboard(text)
+            ok = self.copy_and_indicate(text)
             self.screen.clear_selection()
-            self.notify("Copied", timeout=1.5)
-        return bool(text)
+            return ok
+        label = self._highlighted_option_label()
+        if label:
+            return self.copy_and_indicate(label)
+        self.notify("nothing to copy", severity="information", timeout=3)
+        return False
 
     def action_copy_or_quit(self):
-        if not self.action_copy_selection():
-            self.action_quit_now()
+        # Ctrl+C keeps its exact pre-0.54.0 behavior (D5): a selection copies, otherwise QUIT —
+        # it must NOT fall through to the highlighted row (that is the ⌘C/super+c path).
+        text = self.screen.get_selected_text()
+        if text:
+            self.copy_and_indicate(text)
+            self.screen.clear_selection()
+            return
+        self.action_quit_now()
 
     def action_quit_now(self):
         self.exit(130)
+
+    # 0.54.0 copy-on-select: ONE app-level handler — a COMPLETED drag selection (mouse up
+    # after a >=2-char drag, in ANY widget: menu rows, info box, About, any Static) copies the
+    # selected text once and does NOT clear the selection. Fires on mouse-up only, never on
+    # mouse-move, so one drag = one pbcopy. (Textual 3.7.1 has no selection-complete message;
+    # screen.py:356 only pushes selection_updated per widget on every change.)
+    def on_mouse_down(self, event):
+        self._app_drag_start = (event.screen_x, event.screen_y)
+
+    def on_mouse_up(self, event):
+        start = getattr(self, "_app_drag_start", None)
+        self._app_drag_start = None
+        if start is None or not m._drag_selects(start, (event.screen_x, event.screen_y)):
+            return
+        text = self.screen.get_selected_text()
+        if text:
+            self.copy_and_indicate(text)
 
 
 def _inject_os_truststore():
