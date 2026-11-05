@@ -667,7 +667,7 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
     and stop at the retry ceiling.
   - `continue-on-fallback` — keeps work moving on a free lane when the local model cannot serve and
     the cloud budget is spent.
-- **hooks** (`hooks/hooks.json`) — SessionStart `offload-nudge.py` (paid session: free offloading is the default; free session: cross-family review only) and
+- **hooks** (`hooks/hooks.json`) — SessionStart `offload-nudge.py` (paid session: free offloading is the default; free session: cross-family review only; either way it also injects each PreToolUse guard's one-line `PRIMER` via `guards_section()` — prevention, so the guards stay a safety net — and the Agent/Workflow primer line goes silent when both route modes are `paid`, the same menu opt-out that turns the intercept hook off) and
   `transcript-identity.py` (marks local and free-API transcripts); UserPromptSubmit
   `session-title-prefix.py` (emoji + model on the session name); PreToolUse `guard-own-endpoint.py`
   (refuses killing the endpoint serving this session), `guard-tool-owned-state.py` (refuses
