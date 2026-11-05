@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import session_picker_model as m
@@ -61,6 +62,9 @@ def build() -> None:
       .cycle-row { display: flex; align-items: center; }
       /* ON/OFF value chip: fixed width so a 2- vs 3-letter word never shifts the switch (user 2026-11-05) */
       .cycle-value-bin { display: inline-block; min-width: 3ch; }
+      /* the action item itself is the control (csl parity): hover like a link, click = toggle / ▶ */
+      .row-action { cursor: pointer; }
+      .row-action:hover { color: #0b57d0 !important; }
     </style>""",
  shared=True)
 
@@ -118,9 +122,34 @@ def build() -> None:
         return True if on else False
 
     def render_rows(scr) -> None:
+        # csl parity (m.rendered_actions): lane screens fold model/settings rows under two
+        # collapsible headers — "🔩 Model settings" / "🛠️ Advanced", triangle before the name,
+        # both folded by default. The GUI keeps the rows in the DOM and folds with display:none.
+        cur = None
+        collapsed = shared.setdefault("collapsed", {"model": True, "settings": True})
         for c in render_plan(scr):
             action = next((a for a in scr.actions()
                            if (a.id or f"{type(scr).__name__}.{a.key}") == c.action_id), None)
+            if c.kind == "group":
+                gid = c.group
+                is_collapsed = collapsed.get(gid, True)
+                emoji = "🔩" if gid == "model" else "🛠️"
+                hdr = ui.label(f"{emoji} {'▸' if is_collapsed else '▾'} {c.label}").classes("menu-item group-header row-action")
+                hdr.props["data-group"] = gid
+                box = ui.column().classes("w-full gap-1")
+                box.props["style"] = "display:none" if is_collapsed else ""
+
+                def _toggle_group(g=gid, h=hdr, b=box, e=emoji, lbl=c.label):
+                    collapsed[g] = not collapsed.get(g, True)
+                    h.set_text(f"{e} {'▸' if collapsed[g] else '▾'} {lbl}")
+                    b.props["style"] = "display:none" if collapsed[g] else ""
+                hdr.on("click", _toggle_group)
+                cur = box
+                continue
+            with (cur if cur is not None else nullcontext()):
+                _render_row(c, action)
+
+    def _render_row(c, action) -> None:
             if c.kind in ("select", "toggle") and action is not None and action.choices is not None:
                 choices = list(action.choices)
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
@@ -130,21 +159,32 @@ def build() -> None:
                     # keys off .switch[aria-checked="true"] for the track fade + knob slide
                     with ui.row().classes("cycle-row items-center gap-2 w-full"):
                         name = (action.name or action.label.split(":")[0]) if action else c.label
-                        ui.label(f"{name}:").classes("cycle-name")
-                        ui_label_val = ui.label(_binary_label(action)).classes("cycle-value cycle-value-bin")
+                        name_lbl = ui.label(f"{name}:").classes("cycle-name row-action")
+                        ui_label_val = ui.label(_binary_label(action)).classes("cycle-value cycle-value-bin row-action")
                         sw = ui.checkbox("", value=_binary_on(action),
                                          on_change=lambda e, a=action, v=ui_label_val: _toggle_binary(a, e.value, v)).classes("switch")
                         sw.props["aria-label"] = name
+                        def _row_toggle(a=action, s=sw, v=ui_label_val):
+                            # click on the item == the switch: sync its visual, apply the value.
+                            # _toggle_binary puts the EXACT choice, so a double fire is a no-op.
+                            new_on = not _binary_on(a)
+                            s.set_value(new_on)
+                            _toggle_binary(a, new_on, v)
+                        name_lbl.on("click", _row_toggle)
+                        ui_label_val.on("click", _row_toggle)
                 else:
                     # csl order: <name>: < value >  — arrow between end of item and the state
                     name = (action.name or action.label.split(":")[0]) if action else c.label
                     with ui.row().classes("cycle-row items-center gap-1 w-full"):
-                        ui.label(f"{name}:").classes("cycle-name")
+                        name_lbl = ui.label(f"{name}:").classes("cycle-name row-action")
                         left = ui.label("<").classes("cycle-arrow cycle-left")
-                        val = ui.label(str(_cycle_value(action))).classes("cycle-value")
+                        val = ui.label(str(_cycle_value(action))).classes("cycle-value row-action")
                         right = ui.label(">").classes("cycle-arrow cycle-right")
                         left.on("click", lambda a=action, v=val: _cycle(a, v, -1))
                         right.on("click", lambda a=action, v=val: _cycle(a, v, +1))
+                        # csl parity: clicking the action item itself == Enter/click == ▶ (+1)
+                        name_lbl.on("click", lambda a=action, v=val: _cycle(a, v, +1))
+                        val.on("click", lambda a=action, v=val: _cycle(a, v, +1))
             elif c.kind == "nav" and action is not None and action.run is not None:
                 # nav-section rows only RETURN a Nav, so calling run() here is side-effect-free.
                 # Mutating "button" rows must NEVER run at render time (auto-sync bug 2026-11-05).
