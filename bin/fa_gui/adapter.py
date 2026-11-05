@@ -18,6 +18,11 @@ import session_picker_model as m
 # a stale entry fails the coverage test).
 GUI_PENDING: dict[str, str] = {}
 
+# Sections whose rows are pure navigation: their run() only RETURNS a Nav, so the GUI may call
+# it safely to learn the target and render a link. Mutating run-only rows must NOT be in here —
+# the GUI never calls run() on a "button" row at render time (auto-sync bug, 2026-11-05).
+NAV_SECTIONS = {"nav", "lanes", "tools", "appearance"}
+
 
 @dataclass
 class RenderedControl:
@@ -43,7 +48,7 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
             continue
         if a.choices is not None:
             kind = "toggle" if len(a.choices) == 2 and set(a.choices) <= {False, True} else "select"
-        elif a.section == "nav":
+        elif a.section in NAV_SECTIONS:
             kind = "nav"
         else:
             kind = "button"

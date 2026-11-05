@@ -781,6 +781,15 @@ class Settings:
 # Same presets as main's bash menu (0.21.7). "" = leave it to the provider.
 TEMPERATURES = ("", "0.0", "0.3", "0.7", "1.0", "1.5", "2.0")
 
+# The one label for "no value set" on optional numeric rows (temperature). csl shows it in the
+# row label; the NiceGUI adapter reads this SAME constant for the value chip — never re-invent
+# the phrasing in a second place (user 2026-11-05: avoid drift between csl and the GUI).
+NOT_SET_LABEL = "not set"
+
+def temperature_display(v) -> str:
+    """Row-label text for a temperature value: "" / None -> NOT_SET_LABEL, anything else as-is."""
+    return NOT_SET_LABEL if v is None or v == "" else str(v)
+
 def _load_key_providers():
     """The provider table of install/setup-api-keys.py — the ONE list of providers a key can be set
     up for. The picker used to keep two hand-copied tables, and a provider added to the wizard
@@ -1485,7 +1494,8 @@ class LocalScreen(Screen):
             setting("y", f"{ec.gap(ec.EMOJI_REGISTRY_SYNC_STR)}Auto-sync local registry with the disk (no prompts): "
                         f"{'ON' if s.local_registry.get('auto_sync') else 'OFF'}",
                     (False, True), lambda: bool(s.local_registry.get("auto_sync")),
-                    self._put_registry_auto_sync, labels=("OFF", "ON")),
+                    self._put_registry_auto_sync, labels=("OFF", "ON"),
+                    name="Auto-sync local registry"),
         ]
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
@@ -1503,8 +1513,9 @@ class LocalScreen(Screen):
 
     def _put_registry_auto_sync(self, v):
         """The Local screen's auto-sync row (0.43.0; a cycle stepper since 0.55.6): same store
-        key the guard screen used, persisted through the on_memguard_saved callback the Picker
-        wires to sms.save_memguard. Sets the value it receives (direction-aware stepping)."""
+        key the guard screen used, persisted through the on_local_registry_saved callback the
+        Picker wires to sms.save_local_registry. Sets the value it receives (direction-aware
+        stepping). Typed (choices/value/put) so GUI adapters render a real toggle."""
         self.settings.local_registry["auto_sync"] = bool(v)
         if self.settings.on_local_registry_saved:
             self.settings.on_local_registry_saved({"auto_sync": bool(v)})
@@ -3622,6 +3633,13 @@ class LowkeyScreen(Screen):
             think_get=lambda: s.lowkey_thinking, think_set=self._set_thinking)
         # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
         acts += [
+            setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
+                    (None, False), lambda: s.lowkey_thinking, self._set_thinking, section="model"),
+            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.lowkey_effort} (sent as reasoning_effort)",
+                    effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(), section="model"),
+            setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {temperature_display(s.lowkey_temperature)}",
+                    TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(), section="model"),
+            # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
             setting("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "
                         f"{'ON' if self._remote_filters else 'OFF'}",
                     (False, True), lambda: self._remote_filters, self._put_remote_filters,
