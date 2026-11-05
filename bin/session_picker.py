@@ -2078,7 +2078,13 @@ class Picker(App):
                 event.stop()
                 return
 
-        if key == "escape" or (len(key) == 1 and key.isalpha() and key.islower()):
+        if key == "escape" or (len(key) == 1 and key.isalpha()):
+            # 0.54.0 Task 12: shift+letter runs the SAME action as the letter (labels render
+            # the key uppercase, but dispatch used islower() so Shift+letter did nothing).
+            # Normalised HERE, at the one dispatch point — and only AFTER the search-input
+            # branch above, so uppercase still types into the live filter / prompt inputs.
+            if len(key) == 1:
+                key = key.lower()
             keep = self._highlighted()
             idx = next((i for i, a in enumerate(getattr(self, "action_ids", [])) if a.key == key), None)
             if idx is None:
