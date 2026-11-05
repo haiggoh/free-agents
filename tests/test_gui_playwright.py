@@ -18,6 +18,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GUI_PY = Path(os.environ.get("FA_GUI_PY", str(Path.home() / ".local/share/free-agents/gui-venv/bin/python")))
+sys.path.insert(0, str(ROOT / "bin"))
+import session_picker_model as m2  # the test reads the SAME NOT_SET_LABEL constant csl uses
 
 REMOTE_INV = ("nvidia-a\tnvidia\tNVIDIA A\tunknown\t0\t1\t0\tnvidia-a\n"
               "gemini-flash\tgemini\tGemini Flash\trenewing_free\t0\t1\t0\tgemini-flash\n")
@@ -190,6 +192,33 @@ class GuiPlaywrightTests(unittest.TestCase):
         sw.click()
         p.wait_for_timeout(2000)
         self.assertEqual(sw.get_attribute("aria-checked"), aria_before, "second click must flip back")
+        p.close()
+
+    def test_binary_rows_on_off_sync_and_unset_label(self):
+        # thinking row: switch and label must move together between ON and OFF — never None,
+        # never a click that leaves the label unchanged (user 2026-11-05). None is the row's
+        # ON/default state, so the switch starts ON.
+        p = self.page()
+        p.click('.nav-row[data-target="remote"]')
+        p.wait_for_selector(".switch", timeout=240000)
+        think = p.locator(".cycle-row", has_text="Thinking").first
+        sw = think.locator(".switch")
+        chip = think.locator(".cycle-value")
+        v0 = chip.inner_text().strip()
+        self.assertIn(v0, ("ON", "OFF"), f"binary label must be ON/OFF, got {v0!r}")
+        self.assertEqual(sw.get_attribute("aria-checked"), "true" if v0 == "ON" else "false")
+        w0 = chip.evaluate("e=>e.getBoundingClientRect().width")
+        sw.click()
+        p.wait_for_timeout(1500)
+        v1 = chip.inner_text().strip()
+        self.assertEqual(v1, "OFF" if v0 == "ON" else "ON", "label must flip in sync with the switch")
+        self.assertNotIn(v1, ("None", ""))
+        self.assertEqual(sw.get_attribute("aria-checked"), "true" if v1 == "ON" else "false")
+        w1 = chip.evaluate("e=>e.getBoundingClientRect().width")
+        self.assertEqual(w0, w1, "ON vs OFF chip must keep the switch in place (fixed min-width)")
+        # temperature row: unset value shows the model's shared NOT_SET_LABEL, not ""/"None"
+        temp = p.locator(".cycle-row", has_text="Temperature").first
+        self.assertEqual(temp.locator(".cycle-value").inner_text().strip(), m2.NOT_SET_LABEL)
         p.close()
 
     def test_keyboard_focus_reaches_launch(self):
