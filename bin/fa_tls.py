@@ -28,15 +28,24 @@ import ssl
 import sys
 
 
-def client_context() -> ssl.SSLContext:
+def client_context(cafile: "str | None" = None) -> ssl.SSLContext:
     """A TLS client context that works on TLS-inspecting networks without disabling
     verification: truststore (OS keychain) when importable, else the stdlib default context
-    with ONLY ssl.VERIFY_X509_STRICT cleared."""
-    try:
-        import truststore  # type: ignore
-        ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    except ImportError:
-        ctx = ssl.create_default_context()
+    with ONLY ssl.VERIFY_X509_STRICT cleared. `cafile` (tests only) trusts an extra CA via the
+    stdlib context, since a truststore context reads the OS store and cannot take one."""
+    if cafile:
+        # Tests only: trust an extra CA. (Under a truststore-injected venv the test restores
+        # ssl.SSLContext to truststore's saved original first, so this stays the pristine class.)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.load_verify_locations(cafile=cafile)
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.check_hostname = True
+    else:
+        try:
+            import truststore  # type: ignore
+            ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        except ImportError:
+            ctx = ssl.create_default_context()
     # 0.54.0: the inspection CA has no AKI and python >=3.13 rejects such certs under
     # VERIFY_X509_STRICT by default. Clear ONLY that flag; CERT_REQUIRED + check_hostname
     # keep the chain and the hostname honest (pinned by tests/test_fa_tls_0540.py).

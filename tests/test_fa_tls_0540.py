@@ -24,6 +24,21 @@ BIN = Path(__file__).resolve().parent.parent / "bin"
 sys.path.insert(0, str(BIN))
 
 
+@pytest.fixture(autouse=True)
+def _pristine_ssl_for_cafile_tests(monkeypatch):
+    """The picker venv injects truststore into ssl.SSLContext at interpreter start, which would
+    verify against the OS keychain and ignore the test's temp CA. Restore the saved original for
+    the duration of each test (truststore._api keeps it as _original_SSLContext)."""
+    import ssl
+    try:
+        import truststore._api as tapi
+        orig = tapi._original_SSLContext
+    except Exception:
+        orig = None
+    if orig is not None and ssl.SSLContext is not orig:
+        monkeypatch.setattr(ssl, "SSLContext", orig)
+
+
 def _load_bin_module(name: str, filename: str):
     """Load a bin/ module whose filename may contain dashes (free-agent-tool.py)."""
     spec = importlib.util.spec_from_file_location(name, BIN / filename)
@@ -110,11 +125,20 @@ def test_strict_flag_cleared_but_chain_verified(tmp_path, monkeypatch):
     try:
         strict = ssl.create_default_context(cafile=str(ca))
         strict.verify_flags |= ssl.VERIFY_X509_STRICT
-        with pytest.raises(ssl.SSLError, match="Authority Key Identifier"):
+        # LibreSSL (the system python 3.15 backend) rejects the AKI-less leaf under STRICT with
+        # "Missing Authority Key Identifier" — that is the corporate-network failure reproduced.
+        # OpenSSL 3.x backends may accept an AKI-less leaf, so the rejection is asserted only on
+        # LibreSSL; on every backend, verification staying ON is proven by the untrusted-CA and
+        # hostname-mismatch tests below.
+        strict_rejects = False
+        try:
             _connect(srv.port, strict)
+        except ssl.SSLError:
+            strict_rejects = True
+        if "LibreSSL" in ssl.OPENSSL_VERSION:
+            assert strict_rejects, "LibreSSL+STRICT must reject the AKI-less fixture cert"
 
-        ctx = fa_tls.client_context()
-        ctx.load_verify_locations(cafile=str(ca))           # trust the temp CA
+        ctx = fa_tls.client_context(cafile=str(ca))          # trust the temp CA (test-only kwarg)
         assert not (ctx.verify_flags & ssl.VERIFY_X509_STRICT), "strict flag must be cleared"
         assert ctx.check_hostname, "hostname verification must stay ON"
         assert ctx.verify_mode == ssl.CERT_REQUIRED, "chain verification must stay ON"
@@ -134,8 +158,7 @@ def test_untrusted_ca_still_rejected(tmp_path, monkeypatch):
     _openssl_gen(other)                                       # a SECOND, different CA
     srv = _TLSServer(leaf, key)
     try:
-        ctx = fa_tls.client_context()
-        ctx.load_verify_locations(cafile=str(other / "ca.crt"))  # trust the WRONG CA
+        ctx = fa_tls.client_context(cafile=str(other / "ca.crt"))  # trust the WRONG CA
         with pytest.raises(ssl.SSLError):
             _connect(srv.port, ctx)
     finally:
@@ -149,8 +172,7 @@ def test_hostname_mismatch_still_rejected(tmp_path, monkeypatch):
     ca, leaf, key = _openssl_gen(tmp_path)
     srv = _TLSServer(leaf, key)
     try:
-        ctx = fa_tls.client_context()
-        ctx.load_verify_locations(cafile=str(ca))
+        ctx = fa_tls.client_context(cafile=str(ca))
         with socket.create_connection(("127.0.0.1", srv.port), timeout=5) as s:
             with pytest.raises(ssl.SSLError):
                 ctx.wrap_socket(s, server_hostname="example.com")
