@@ -208,6 +208,22 @@ class GuiPlaywrightTests(unittest.TestCase):
                            "emergency: shell scrolls only when the list area would be too small")
         p.close()
 
+    def test_subscreens_render_via_generic_route(self):
+        # continuation plan Phase 3: every buildable screen target renders its real rows
+        # through the generic route (not the catch-all); unknown paths still get the
+        # catch-all with a Back-to-Home link
+        p = self.page()
+        for target, needle in (("memguard", "RAM"), ("api_keys", "API"), ("theme_config", "Hue")):
+            p.goto(f"{self.app.base}/{target}")
+            p.wait_for_selector(".action-row, .cycle-row", timeout=240000)
+            self.assertTrue(p.locator(".action-row, .cycle-row").count() > 0,
+                            f"/{target} must render real rows")
+            self.assertIn(needle, p.locator("body").inner_text(), f"/{target} content should mention {needle}")
+        p.goto(f"{self.app.base}/definitely-not-a-screen")
+        p.wait_for_selector(".menu-item", timeout=240000)
+        self.assertIn("not built yet", p.content())
+        p.close()
+
     def test_nav_home_remote_back(self):
         p = self.page()
         p.click('.nav-row[data-target="remote"]')

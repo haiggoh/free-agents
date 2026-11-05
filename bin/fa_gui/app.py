@@ -262,7 +262,7 @@ def build() -> None:
         await client.connected()
         s = get_settings()
         scr = pc.build_screen(m.Nav("home", m.HOME_OWNED), s, loader.cache).screen
-        body = render_shell(scr.title, scr.policy if isinstance(scr.policy, str) else "")
+        body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
             render_rows(scr)
         ui.label(f"free-agents v{m.plugin_version()}").classes("text-xs italic opacity-50 version-footer")
@@ -272,7 +272,7 @@ def build() -> None:
         async def page(client):
             await client.connected()
             scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache).screen
-            body = render_shell(scr.title, scr.policy if isinstance(scr.policy, str) else "", lane=True)
+            body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "", lane=True)
             shared["toggle_list"] = lambda: None     # placeholder; reassigned below before any click can fire
             with body:
                 render_rows(scr)
@@ -363,9 +363,24 @@ def build() -> None:
     make_lane("remote", "remote", pc.load_remote_agents)
 
     @ui.page("/{full_path:path}")
-    def not_built(full_path: str):
-        # registered LAST so it never shadows the real routes; never a dead end in testing
-        with ui.column().classes("w-full max-w-3xl mx-auto p-6 gap-3"):
-            ui.label(f"/{full_path}").classes("text-2xl font-bold")
-            ui.label("This screen is not built yet.").classes("text-sm opacity-70")
-            back = ui.link("🏠 Back to Home", "/home").classes("menu-item")
+    async def screen_or_catchall(client, full_path: str):
+        # registered LAST so it never shadows the real routes. Known screen targets render
+        # through the shared core (same rows the Textual picker shows); unknown paths get
+        # the catch-all with Back-to-Home — never a dead end.
+        await client.connected()
+        target = full_path
+        scr = None
+        if target not in ("quit", "back"):          # not pages — handled by the launcher
+            try:
+                scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache).screen
+            except Exception:
+                scr = None
+        if scr is None:
+            with ui.column().classes("w-full max-w-3xl mx-auto p-6 gap-3"):
+                ui.label(f"/{full_path}").classes("text-2xl font-bold")
+                ui.label("This screen is not built yet.").classes("text-sm opacity-70")
+                ui.link("🏠 Back to Home", "/home").classes("menu-item")
+            return
+        body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
+        with body:
+            render_rows(scr)
