@@ -1,3 +1,23 @@
+## [0.55.0] — 2026-11-05
+
+### Added — session-start guard primers (prevention; the PreToolUse hooks stay the safety net)
+
+- Each PreToolUse guard (`hooks/guard-own-endpoint.py`, `guard-tool-owned-state.py`,
+  `read-pages-guard.py`) carries a one-line `PRIMER` constant (<= 140 chars). The existing
+  SessionStart hook `hooks/offload-nudge.py` appends them via `guards_section()` — one
+  injection, no new hook — plus an Agent/Workflow line naming only the route paths NOT set
+  to `paid`.
+- Opt-out parity with the menu: when both `route agent` and `route workflow` are `paid` (the
+  csl toggle that turns the intercept hook off), the nudge's agent paragraph and the
+  Agent/Workflow primer line are omitted too. Free sessions keep the council nudge plus the
+  guard lines (own-endpoint matters most there); the intercept passes through on free
+  sessions, so no agent line there.
+- PRIMERs are read via AST — a guard module is never executed at session start — and the
+  nudge hook entry now carries `timeout: 5`. Barrier: `tests/test_guard_primers.py` fails the
+  suite when a PreToolUse hook script in `hooks/hooks.json` lacks a PRIMER (exempt: the
+  mode-aware `cloud-agent-intercept.py`). Full (agent, workflow) mode matrix covered in
+  `tests/test_offload_nudge.py`. Suite 1509 passed, tests/lint.sh clean.
+
 ## [0.54.0] — 2026-11-05
 
 ### Fixed (claims-vs-reality bug bash — every fix names the outcome-level test that proves it)
