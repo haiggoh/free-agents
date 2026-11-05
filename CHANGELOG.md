@@ -1,3 +1,63 @@
+## [0.54.0] — 2026-11-05
+
+### Fixed (claims-vs-reality bug bash — every fix names the outcome-level test that proves it)
+- **TLS on inspecting networks**: every remote caller in `bin/` now goes through one client
+  context (`bin/fa_tls.py`: truststore when importable, else stdlib with ONLY
+  `VERIFY_X509_STRICT` cleared — chain and hostname verification stay on). Live-verified:
+  `integrate.api.nvidia.com/v1/models` answers 200 on this corporate network. Hotswap failures
+  now carry their reason, exit status, and (on timeout) any still-running server pid.
+  Tests: `tests/test_fa_tls_0540.py`.
+- **Lowkey API launch**: `--provider nvidia --api-model …` never starts a local model (the
+  hotswap ran unconditionally before), the session label/key is `provider:model`, API errors
+  show their reason, `g` relaunches the API pair, an empty `model_id` uses the provider default,
+  and a local pick after an API pick launches local. The NVIDIA limiter acquisition is pinned
+  in the user-visible process. Live smoke (one authorised generation): reply OK, exit 0, no
+  local server. Tests: `tests/test_lowkey_api_route_0540.py`.
+- **Picker duplicates/hidden providers**: ONE `visible_agents()`/`is_provider_hidden()` home for
+  every list; a property test builds all 16 screens and asserts unique item ids and no hidden
+  rows; a source scan fails when `hidden_providers` is read outside the allow-list. Tests:
+  `tests/test_row_visibility_single_source_0540.py`.
+- **Roster load/paint races**: one idempotent `App._sync_screen_from_cache` replaces five
+  race-dependent fill sites; the 5-case race matrix (screen/data/keystroke/disk-cache/late
+  catalog, on Remote AND Lowkey) yields rows identical to the all-data-first reference.
+  Tests: `tests/test_picker_load_race_matrix_0540.py`.
+- **Parameter counts**: network failures are never cached as answers (cache schema v2 with
+  `neg_until` negatives; legacy v1 null entries refetched); disk-hydrated catalogs trigger the
+  HF warm-up and the groups regroup so sizes repaint on Remote AND Lowkey; 6 new full-id
+  overrides with vendor sources fetched 2026-11-04; `PARAM_COUNT_UNKNOWN` names ≥2 checked
+  sources per id. Live coverage probe: 85 NVIDIA ids → 82 sized, 3 documented unknown.
+  Tests: `tests/test_hf_params_cache_0540.py`, probe: `scripts/probe-param-coverage.py`.
+- **Back row (D1)**: Back/Quit is the last item of the actions pane on every screen (the 0.53.1
+  api-keys accordion row is gone); rendered-DOM tests over all 16 screens. Tests:
+  `tests/test_back_row_rule_0540.py`.
+- **Shift+letter hotkeys**: shift+letter runs the same action as the letter on every screen;
+  uppercase still types into search/prompt inputs; panels still own their keys. Tests:
+  `tests/test_hotkey_shift_0540.py`.
+- **TUI copy (D5)**: ⌘C (`super+c`) copies the selection or, with none, the highlighted row;
+  copy-on-select fires once per completed drag in any widget; ONE blue `copied N chars to
+  clipboard` indicator for every path; a failed clipboard shows an error, never a false
+  "copied"; the footer is honest on Apple Terminal (highlight-to-copy, no ⌘R teaching).
+  Tests: `tests/test_picker_copy_keyboard_0540.py`.
+- **Agent/Workflow replacement parity**: the routing text lives once in a marked block of
+  `skills/offload/SKILL.md`; the PreToolUse intercept routes Agent per `route[agent]` AND
+  Workflow per `route[workflow]` and emits the block verbatim; the SessionStart nudge is
+  generated from the same block; the honest-exhaustion mark is claimed atomically by
+  `tool_use_id` and consumed only at PostToolUse, so a veto by another hook no longer burns
+  the one allowed paid call. Tests: `tests/test_routing_single_source_0540.py`,
+  `tests/test_offload_nudge_single_source_0540.py`.
+- **Session identity visibility**: identity-step failures print one visible warning and log
+  their stderr instead of `2>/dev/null || true`; the local spinner-verb fallback list is
+  de-run-oned. Tests: `tests/test_identity_failures_visible_0540.sh`.
+
+### Added
+- **Lowkey API chooser (D3)**: one collapsible group per provider with pinned + catalog rows,
+  the Remote screen's size sort, an opt-in "Apply Remote-screen filters" toggle (`f`, persisted
+  in the new schema-9 `lowkey_filters` section), and the session pickers' live search bar.
+  Tests: `tests/test_lowkey_api_groups_0540.py`.
+
+### Not done (gated — follow-up 0.54.1)
+- Task 7b (Terminal.app copy gestures needing the user's D2 results) and Task 10b (the live
+  local-session identity checklist, D4) — both need human eyes on a real terminal/session.
 ## [0.53.1] — 2026-11-04
 
 ### Fixed (user-reported on 0.53.0)
