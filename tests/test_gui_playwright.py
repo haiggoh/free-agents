@@ -122,6 +122,44 @@ class GuiPlaywrightTests(unittest.TestCase):
             raise
         return p
 
+    def open_groups(self, p):
+        # lane screens start with "Model settings" / "Advanced" folded (csl parity) — wait for
+        # the headers to render (SPA nav is async), expand any still showing ▸, then wait until
+        # a cycle row is actually visible
+        # only the lane fold headers — the model list's provider headers reuse .group-header
+        # (inside the hidden list box) and clicking one of those times out as invisible
+        p.wait_for_selector('.group-header[data-group="model"], .group-header[data-group="settings"]',
+                            timeout=120000)
+        for sel in ("model", "settings"):
+            hdr = p.locator(f'.group-header[data-group="{sel}"]')
+            if "▸" in hdr.inner_text():
+                hdr.click()
+        p.wait_for_selector(".cycle-row", state="visible", timeout=120000)
+
+    def test_lane_groups_collapse_and_expand(self):
+        p = self.page()
+        p.click('.nav-row[data-target="remote"]')
+        p.wait_for_selector(".group-header", timeout=240000)
+        hdrs = {h.get_attribute("data-group"): h for h in p.locator(".group-header").all()}
+        self.assertIn("model", hdrs)
+        self.assertIn("settings", hdrs)
+        self.assertIn("Model settings", hdrs["model"].inner_text())
+        self.assertIn("Advanced", hdrs["settings"].inner_text())
+        hdr = hdrs["model"]
+        box = hdr.locator("xpath=following-sibling::div[1]")
+        arrow0 = "▸" in hdr.inner_text()
+        vis0 = box.is_visible()
+        hdr.click()
+        p.wait_for_timeout(800)
+        self.assertNotEqual("▸" in hdr.inner_text(), arrow0, "header click must flip the triangle")
+        self.assertNotEqual(box.is_visible(), vis0, "header click must fold/expand the group box")
+        if not box.is_visible():                       # make sure it ends expanded
+            hdr.click()
+            p.wait_for_timeout(800)
+        self.assertGreaterEqual(box.locator(".cycle-row", has_text="Effort").count(), 1,
+                                "Model settings group must hold the effort/temperature/thinking rows")
+        p.close()
+
     def test_nav_home_remote_back(self):
         p = self.page()
         p.click('.nav-row[data-target="remote"]')
@@ -147,6 +185,7 @@ class GuiPlaywrightTests(unittest.TestCase):
         p = self.page()
         p.click('.nav-row[data-target="remote"]')
         p.wait_for_selector(".gui-search input", timeout=240000)
+        self.open_groups(p)
         rows = p.locator(".cycle-row")
         rows.first.wait_for(state="visible", timeout=240000)
         before = rows.first.locator(".cycle-value").inner_text()
@@ -165,6 +204,7 @@ class GuiPlaywrightTests(unittest.TestCase):
         # input, so :checked CSS would silently never fire (measured 2026-11-05).
         p = self.page()
         p.click('.nav-row[data-target="remote"]')
+        self.open_groups(p)
         sw = p.locator(".switch").first
         sw.wait_for(state="visible", timeout=240000)
         row = sw.locator("xpath=ancestor::div[contains(@class,'cycle-row')]")
@@ -200,7 +240,7 @@ class GuiPlaywrightTests(unittest.TestCase):
         # ON/default state, so the switch starts ON.
         p = self.page()
         p.click('.nav-row[data-target="remote"]')
-        p.wait_for_selector(".switch", timeout=240000)
+        self.open_groups(p)
         think = p.locator(".cycle-row", has_text="Thinking").first
         sw = think.locator(".switch")
         chip = think.locator(".cycle-value")
@@ -219,6 +259,28 @@ class GuiPlaywrightTests(unittest.TestCase):
         # temperature row: unset value shows the model's shared NOT_SET_LABEL, not ""/"None"
         temp = p.locator(".cycle-row", has_text="Temperature").first
         self.assertEqual(temp.locator(".cycle-value").inner_text().strip(), m2.NOT_SET_LABEL)
+        p.close()
+
+    def test_action_item_click_equals_control(self):
+        # csl parity: the action item itself is the control — binary row click toggles like the
+        # switch (label AND aria-checked move together), cycle row click steps +1 like ▶.
+        p = self.page()
+        p.click('.nav-row[data-target="remote"]')
+        self.open_groups(p)
+        think = p.locator(".cycle-row", has_text="Thinking").first
+        v0 = think.locator(".cycle-value").inner_text().strip()
+        think.locator(".cycle-name").click()          # click the item, not the switch
+        p.wait_for_timeout(1500)
+        v1 = think.locator(".cycle-value").inner_text().strip()
+        self.assertEqual(v1, "OFF" if v0 == "ON" else "ON", "row click must toggle the binary row")
+        self.assertEqual(think.locator(".switch").get_attribute("aria-checked"),
+                         "true" if v1 == "ON" else "false", "switch visual must follow the row click")
+        eff = p.locator(".cycle-row", has_text="Effort").first
+        c0 = eff.locator(".cycle-value").inner_text().strip()
+        eff.locator(".cycle-name").click()            # click the item, not the ▶ arrow
+        p.wait_for_timeout(1500)
+        c1 = eff.locator(".cycle-value").inner_text().strip()
+        self.assertNotEqual(c0, c1, "row click on a cycle row must step +1 like the ▶ arrow")
         p.close()
 
     def test_keyboard_focus_reaches_launch(self):
@@ -252,6 +314,29 @@ class GuiStaleTests(unittest.TestCase):
                 p.wait_for_timeout(4000)         # let the slow first load land — must be Stale
                 self.assertEqual(p.locator(".model-row").count(), 2,
                                  "the late slow load must not overwrite the list")
+                browser.close()
+        finally:
+            app.stop()
+
+
+class GuiGroupDefaultTests(unittest.TestCase):
+    def test_lane_groups_start_folded_like_csl(self):
+        # fresh app: model_collapsed / settings_collapsed default True in csl — the GUI must
+        # start with both group headers showing ▸ and their boxes hidden
+        app = GuiApp(REMOTE_INV)
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch()
+                p = browser.new_page()
+                p.goto(app.base + "/remote")
+                hdr = p.locator('.group-header[data-group="model"]')
+                hdr.wait_for(state="visible", timeout=240000)
+                self.assertIn("▸", hdr.inner_text(), "Model settings starts folded (csl model_collapsed=True)")
+                self.assertFalse(hdr.locator("xpath=following-sibling::div[1]").is_visible())
+                adv = p.locator('.group-header[data-group="settings"]')
+                self.assertIn("▸", adv.inner_text(), "Advanced starts folded (csl settings_collapsed=True)")
+                self.assertFalse(adv.locator("xpath=following-sibling::div[1]").is_visible())
                 browser.close()
         finally:
             app.stop()
