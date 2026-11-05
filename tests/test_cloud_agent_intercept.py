@@ -164,7 +164,13 @@ class Hook(unittest.TestCase):
         hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]
         entry = [h for h in hooks if any("cloud-agent-intercept.py" in x["command"] for x in h["hooks"])]
         self.assertEqual(len(entry), 1)
-        self.assertEqual(entry[0]["matcher"], "Agent")
+        # 0.54.0: Agent AND Workflow are both routed (route[agent] / route[workflow])
+        self.assertEqual(entry[0]["matcher"], "Agent|Workflow")
+        # and a PostToolUse entry releases the atomically claimed fallback mark
+        post = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"].get("PostToolUse", [])
+        post_entry = [h for h in post if any("cloud-agent-intercept.py" in x["command"] for x in h["hooks"])]
+        self.assertEqual(len(post_entry), 1)
+        self.assertEqual(post_entry[0]["matcher"], "Agent|Workflow")
 
 
 def cse_key():

@@ -34,22 +34,29 @@ bin/csl                       # a full interactive session on either free lane
 Self-check before you claim you offloaded anything: **name the process that ran the tokens.** If
 the answer is not "a localhost port" or "a free provider's API", it was not free.
 
+<!-- fa:routing:begin — SINGLE SOURCE OF TRUTH for the routing text the hooks emit verbatim.
+     0.54.0: hooks/cloud-agent-intercept.py and hooks/offload-nudge.py read this block via
+     bin/offload_routing.py; editing it changes the hooks. Keep under 1,500 bytes. No model
+     NAMES here (rosters rot — point to `bin/free-agent-tool.py --list`). -->
 ## Default routing on a PAID session — decide the route BEFORE the call
 
-1. **Self-contained text work** (review, analysis, extraction, drafting, a cross-check) → a
-   stateless dispatch through `bin/free-agent-tool.py`. Attach the inputs as `"files"`: the model
-   cannot read the disk. It walks `config/dispatch-preferences.json` and fails over on its own.
-2. **Work that must read files or run commands** → a free SESSION (`remote-session.sh <alias>`,
-   or `csl` locally). For OFFLOADING (you stay in this session) run that session HEADLESS in the
-   background. For a HANDOVER (a successor session the user will type into) always launch
-   INTERACTIVE in its own Terminal window — see `free-session-handover`; a headless launch is never
-   correct for a handover (incident 2026-10-31).
-3. **A paid subagent** only with a stated reason: security-critical work, the final verification of
-   a free result, or a free lane that is measured as failing right now.
-
-**Announce the model and route BEFORE every offload** ("offloading to Gemini 3.8 Flash, stateless
-dispatch"). The tool prints the model it tried on stderr and returns `model_used` and `route`;
-repeat those in your reply. Session models are NOT the dispatch order — see `free-session-handover`.
+1. **Shape test first.** Self-contained text work (review, analysis, extraction, drafting, a
+   cross-check) → a STATELESS dispatch: `python3 bin/free-agent-tool.py` with
+   `{"prompt": ..., "files": [paths]}` (a dispatch cannot read the disk; `--list` shows the
+   preference order). Work that must read files or run commands → a free SESSION, headless in
+   the background: `remote-session.sh <alias> -p "<brief>"` (args after the alias pass through to `claude`). A HANDOVER is always INTERACTIVE
+   in its own Terminal window (free-session-handover).
+2. **Announce the model and route to the user BEFORE offloading** (the tool prints the model it
+   tried on stderr; the result JSON carries `model_used`/`route` — repeat them in your reply).
+   Brief delegates with the `brief-the-delegate` skill; session system prompts:
+   `config/local-agent-system-prompt.txt`, `config/remote-agent-system-prompt.txt`.
+3. **Parallel fan-out** (`superpowers:dispatching-parallel-agents`): independent pieces =
+   several parallel Bash calls (dispatches), or several free sessions.
+4. **A paid subagent** only with a stated reason (security-critical, final check of the
+   free result, a free lane failing now) — and only once free attempts are honestly
+   exhausted (result says `"paid_fallback_allowed": true`): then ONE native call is let
+   through (the honest-exhaustion mark).
+<!-- fa:routing:end -->
 
 ## Decide at decomposition — annotate every step before reading any input
 

@@ -60,7 +60,7 @@
         ]
       },
       {
-        "matcher": "Agent",
+        "matcher": "Agent|Workflow",
         "hooks": [
           {
             "type": "command",
@@ -75,6 +75,18 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/read-pages-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/cloud-agent-intercept.py\"",
             "timeout": 5
           }
         ]

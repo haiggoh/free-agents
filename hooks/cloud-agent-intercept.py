@@ -46,57 +46,79 @@ def is_free_session(base_url: Optional[str]) -> bool:
         return False
 
 
+def _plugin_root(env: Dict[str, str]) -> str:
+    """CLAUDE_PLUGIN_ROOT when set, else this checkout (the hook lives in <root>/hooks)."""
+    root = env.get("CLAUDE_PLUGIN_ROOT")
+    if root:
+        return root
+    return str(Path(__file__).resolve().parents[1])
+
+
 def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str,
-                      env: Optional[Dict[str, str]] = None) -> str:
-    """Build the deny reason: the exact Bash invocation, then the mode's tail."""
-    prompt = tool_input.get("prompt", "")
-    subagent_type = tool_input.get("subagent_type", "general-purpose")
-    description = tool_input.get("description", "")
+                      env: Optional[Dict[str, str]] = None, tool_name: str = "Agent") -> str:
+    """Build the deny reason. Agent calls get the exact dispatch heredoc; BOTH Agent and
+    Workflow get the free-SESSION command and the offload skill's routing block (generated
+    from the marked block in skills/offload/SKILL.md — never a second copy here, 0.54.0)."""
+    import offload_routing
+    routing = offload_routing.routing_block(plugin_root)
+    free_session = f"{plugin_root}/bin/remote-session.sh <alias> -p \"<brief>\""
+    if tool_name == "Agent":
+        prompt = tool_input.get("prompt", "")
+        subagent_type = tool_input.get("subagent_type", "general-purpose")
+        description = tool_input.get("description", "")
 
-    free_tool = os.path.join(plugin_root, "bin", "free-agent-tool.py")
-    payload = {"prompt": prompt, "subagent_type": subagent_type, "description": description}
-    payload_json = json.dumps(payload, separators=(",", ":"))
+        free_tool = os.path.join(plugin_root, "bin", "free-agent-tool.py")
+        payload = {"prompt": prompt, "subagent_type": subagent_type, "description": description}
+        payload_json = json.dumps(payload, separators=(",", ":"))
 
-    # A QUOTED heredoc delimiter passes the JSON verbatim: no quote in the prompt can end the
-    # string early or be expanded by the shell (an inline '...' broke on any apostrophe).
-    delim = "FA_AGENT_JSON"
-    while delim in payload_json:
-        delim += "_"
+        # A QUOTED heredoc delimiter passes the JSON verbatim: no quote in the prompt can end the
+        # string early or be expanded by the shell (an inline '...' broke on any apostrophe).
+        delim = "FA_AGENT_JSON"
+        while delim in payload_json:
+            delim += "_"
+        head = (
+            f"{_lane_mark(env or os.environ)} free-agents: replacement: run this subagent for FREE "
+            f"via Bash instead of paid Sonnet.\n"
+            f"  python3 \"{free_tool}\" <<'{delim}'\n{payload_json}\n{delim}\n"
+            f"Returns JSON: {{\"content\": \"...\", \"model_used\": \"...\", \"route\": \"...\"}}.\n"
+            f"Before running it, tell the user which model it goes to (`python3 \"{free_tool}\" --list` "
+            f"shows the preference order); free models are not equal.\n"
+            f"It is a STATELESS dispatch: the model cannot read files or run commands. Add the files "
+            f"it needs as \"files\": [paths] (their contents are attached). Work that must drive tools "
+            f"belongs in a free session, not here: {free_session}\n"
+            f"Independent tasks may be launched as several parallel Bash calls.\n"
+            f"Original description: {description}\n"
+        )
+    else:
+        # Workflow: no Agent-only heredoc (it would read Agent-only keys and emit an empty prompt)
+        head = (
+            f"{_lane_mark(env or os.environ)} free-agents: this {tool_name} call is routed to a "
+            f"free lane (route[{'workflow' if tool_name == 'Workflow' else 'agent'}]={mode}).\n"
+            f"Tool-using work belongs in a free SESSION, headless in the background: {free_session}\n"
+        )
     if mode == "free-only":
         tail = (
-            "This lane is set to Free only — it NEVER falls back to paid for Agent calls. "
+            "This lane is set to Free only — it NEVER falls back to paid. "
             "Change it in csl -> Cloud Session Configuration, or "
             "`bin/cloud_session_env.py set route agent free-first` / `paid`.\n"
         )
     else:
         tail = (
             "Free-first lane: after this session's free attempts are honestly exhausted "
-            "(the dispatch result then says \"paid_fallback_allowed\": true), ONE native Agent "
-            "call is let through automatically. Check the attempts in free-agent-tool.py's "
-            "output; force the mode with `bin/cloud_session_env.py set route agent paid`.\n"
+            "(the dispatch result then says \"paid_fallback_allowed\": true), ONE native call "
+            "is let through automatically. Force the mode with "
+            "`bin/cloud_session_env.py set route agent paid`.\n"
         )
-    return (
-        f"{_lane_mark(env or os.environ)} free-agents: replacement: run this subagent for FREE "
-        f"via Bash instead of paid Sonnet.\n"
-        f"  python3 \"{free_tool}\" <<'{delim}'\n{payload_json}\n{delim}\n"
-        f"Returns JSON: {{\"content\": \"...\", \"model_used\": \"...\", \"route\": \"...\"}}.\n"
-        f"Before running it, tell the user which model it goes to (`python3 \"{free_tool}\" --list` "
-        f"shows the preference order); free models are not equal.\n"
-        f"It is a STATELESS dispatch: the model cannot read files or run commands. Add the files "
-        f"it needs as \"files\": [paths] (their contents are attached). Work that must drive tools "
-        f"belongs in a free session (remote-session.sh / csl), not here.\n"
-        f"Independent tasks may be launched as several parallel Bash calls.\n"
-        f"Original description: {description}\n"
-        f"{tail}"
-    )
+    return head + tail + "\n--- routing (from the offload skill) ---\n" + routing + "\n"
 
 
 def decide(payload: Dict[str, Any], env: Dict[str, str]) -> Optional[Dict[str, Any]]:
     """
     Pure decision function for testing. Returns hookSpecificOutput dict or None (pass through).
+    0.54.0: Agent AND Workflow are routed per their own route path (route[agent]/route[workflow]).
     """
     tool_name = payload.get("tool_name")
-    if tool_name != "Agent":
+    if tool_name not in ("Agent", "Workflow"):
         return None
 
     if is_free_session(env.get("ANTHROPIC_BASE_URL")):
@@ -104,7 +126,7 @@ def decide(payload: Dict[str, Any], env: Dict[str, str]) -> Optional[Dict[str, A
 
     # Resolve the mode; an unreadable settings layer never blocks the user (fail open).
     try:
-        mode = cse.route("agent", env) if cse else "free-first"
+        mode = cse.route("agent" if tool_name == "Agent" else "workflow", env) if cse else "free-first"
     except Exception:
         return None
 
@@ -112,11 +134,15 @@ def decide(payload: Dict[str, Any], env: Dict[str, str]) -> Optional[Dict[str, A
         return None
 
     tool_input = payload.get("tool_input", {})
-    plugin_root = env.get("CLAUDE_PLUGIN_ROOT", "<plugin>")
+    plugin_root = _plugin_root(env)
 
     if mode == "free-first" and fm is not None:
         try:
-            mark = fm.consume_mark(str(payload.get("session_id") or ""))
+            # 0.54.0 4b: ATOMICALLY claim the mark keyed by tool_use_id (os.rename) — a second
+            # parallel PreToolUse finds no mark and is denied; a call vetoed by ANOTHER hook
+            # never gets a PostToolUse, so its in-flight mark is restored after the TTL.
+            mark = fm.claim_mark(str(payload.get("session_id") or ""),
+                                 str(payload.get("tool_use_id") or ""))
         except Exception:
             mark = None
         if mark:
@@ -126,7 +152,8 @@ def decide(payload: Dict[str, Any], env: Dict[str, str]) -> Optional[Dict[str, A
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": build_deny_reason(tool_input, plugin_root, mode, env),
+            "permissionDecisionReason": build_deny_reason(tool_input, plugin_root, mode, env,
+                                                          tool_name=tool_name),
         }
     }
 
@@ -287,7 +314,17 @@ def main() -> int:
     except Exception:
         return 0
 
-    if payload.get("tool_name") != "Agent":
+    # 0.54.0 4b: PostToolUse for Agent|Workflow releases the atomically claimed mark — the one
+    # allowed paid call is consumed only when the call actually RAN.
+    if payload.get("hook_event_name") == "PostToolUse" and fm is not None:
+        try:
+            fm.release_inflight(str(payload.get("session_id") or ""),
+                                str(payload.get("tool_use_id") or ""))
+        except Exception:
+            pass
+        return 0
+
+    if payload.get("tool_name") not in ("Agent", "Workflow"):
         return 0
 
     result = decide(payload, dict(os.environ))
