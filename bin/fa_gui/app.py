@@ -118,7 +118,7 @@ def build() -> None:
                     # is what makes the circle visible (it was missing entirely before)
                     on = bool(action.value()) if action.value else False
                     with ui.row().classes("cycle-row items-center gap-2 w-full"):
-                        ui.label(cycle_label(action)).classes("cycle-value")
+                        ui.label(str(_cycle_value(action))).classes("cycle-value")
                         sw = ui.button("", on_click=lambda a=action: _toggle_binary(a, sw)).classes(f"switch{' on' if on else ''} btn-flat")
                         with sw:
                             ui.element("div").classes("knob")
@@ -153,7 +153,7 @@ def build() -> None:
     def _cycle(action, val, d: int) -> None:
         if action.step:
             action.step(d)
-        val.set_text(cycle_label(action))
+        val.set_text(str(_cycle_value(action)))
 
     def _toggle_binary(action, sw) -> None:
         # flip the visual state directly AND cycle the underlying setting (the model's
