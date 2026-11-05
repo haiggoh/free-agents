@@ -1912,13 +1912,7 @@ class Picker(App):
         if h == ("group", m.NEW_MODELS_GROUP):
             self._open_register_panel()
             return
-        if h == ("group", m.HOME_ROW_GROUP):
-            # 0.53.1: trailing Back row after the api-keys provider list (not at the bottom).
-            if getattr(self.screen_model, "owner", "") == m.HOME_OWNED:
-                self.dispatch(m.Nav("home", m.HOME_OWNED))
-            else:
-                self.dispatch(m.BACK)
-            return
+        # 0.54.0 (D1): HOME_ROW_GROUP is gone — Back is a real actions-pane item everywhere.
         if h[0] == "group":
             if acc.is_open(h[1]):
                 acc.collapse(h[1])

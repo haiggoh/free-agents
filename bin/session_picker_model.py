@@ -1232,7 +1232,7 @@ class LaunchRequest:
 
 
 NEW_MODELS_GROUP = "__new_models__"   # the "Register new local models…" action header
-HOME_ROW_GROUP = "__home__"            # 0.53.1: trailing "Back to Home" action row after the api-keys provider list
+HOME_ROW_GROUP = "__home__"            # 0.53.1 constant kept for the 0.54.0 removal path; no longer created (D1)
 
 
 class LocalScreen(Screen):
@@ -2944,27 +2944,14 @@ class APIKeysScreen(Screen):
                     Item(*self._hide_item(slug)),
                 ]
             ))
-        self.accordion.set_groups(self._with_home_row(groups))
+        self.accordion.set_groups(groups)
         # Default expand NVIDIA (first group)
         if groups:
             self.accordion.open_group = groups[0].id
 
-    def nav_actions(self):
-        acts = super().nav_actions()
-        if self.owner in (HOME_OWNED, SUB):
-            # 0.53.1 (user): the Back row renders as the last row AFTER the provider list
-            # (_with_home_row), not in the bottom pane; keep the "b" key binding.
-            for a in acts:
-                if a.section == "nav":
-                    a.section = "hidden"
-        return acts
-
-    def _with_home_row(self, groups):
-        """0.53.1: append the Back action row after the last provider group (not at the bottom)."""
-        if self.owner in (HOME_OWNED, SUB):
-            label = f"{ec.EMOJI_HOME_STR} Back to Home" if self.owner == HOME_OWNED else self.back_label
-            groups.append(Group(HOME_ROW_GROUP, label, [], style="action"))
-        return groups
+    # 0.54.0 (D1): NO _with_home_row / hidden re-sectioning here — Back is the last item of the
+    # actions pane like every other screen (the nav-only pane renders below the provider
+    # accordion on this screen, which is exactly the D1 placement for API keys).
 
     # Account requirements a user must meet BEFORE a key can work, shown on the provider's row so
     # they are seen while choosing, not discovered as a 403 inside the first session.
@@ -3053,7 +3040,7 @@ class APIKeysScreen(Screen):
                     Item("more:show", "Show all providers"),
                 ]
             ))
-        self.accordion.set_groups(self._with_home_row(groups))
+        self.accordion.set_groups(groups)
         # Default expand NVIDIA (first group)
         if groups:
             self.accordion.open_group = groups[0].id

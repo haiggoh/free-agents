@@ -256,8 +256,10 @@ class LowkeyApiGroup(PilotCase):
             sm = app.screen_model
             self.assertEqual(len(sm.api_agents), 3,
                              f"api_agents must come from the remote roster: {sm.api_agents}")
+            import session_picker_model as mm
             api = next(g for g in sm.accordion.groups if g.id == "api")
-            ids = [i.id for i in api.items]
+            # 0.54.0 (D3): the api group carries one subgroup per provider; model rows nest inside
+            ids = [i.id for sub in api.items if isinstance(sub, mm.Group) for i in sub.items]
             self.assertEqual(set(ids), {"nvidia:nvidia-a", "gemini:gemini-flash", "cerebras:cerebras-oss"},
                              f"api rows keyed provider:model-or-alias: {ids}")
             self.assertTrue(all("@" not in i and not i.endswith(":") for i in ids), ids)
@@ -333,8 +335,9 @@ class LowkeyUnifiedList(unittest.TestCase):
         self.assertEqual([i.id for i in local.items], ["llama", "qwen"])  # alphabetical families
         # three-level flatten: headers always render; items render for the open branch
         lk.accordion.expand("api")
+        lk.accordion.expand("nvidia")          # 0.54.0 (D3): provider subgroup nests the row
         kinds = [(k, o.id) for k, o in lk.accordion.rows()]
-        for expected in [("group", "api"), ("group", "local"), ("item", "nvidia:nvidia-a")]:
+        for expected in [("group", "api"), ("group", "local"), ("group", "nvidia"), ("item", "nvidia:nvidia-a")]:
             self.assertIn(expected, kinds)
         lk.accordion.expand("local")
         lk.accordion.expand("qwen")
@@ -377,20 +380,25 @@ class ApiKeysHomeRow(PilotCase):
     """0.53.1 (user report): in api setup, Back to Home is the row right AFTER the provider
     (harmonica) list — not pinned at the bottom pane."""
 
-    def test_back_row_is_last_row_after_providers_and_activates_home(self):
+    def test_back_is_last_actions_pane_item_and_activates_home(self):
+        # 0.54.0 (D1, user-answered): Back/Back to Home is the LAST item of the ACTIONS PANE on
+        # every screen — never an accordion row. On api keys the nav-only pane renders below the
+        # provider accordion, so Back is the last pane item below the list.
         async def s(app, pilot, h):
             import session_picker_model as m
+            from textual.widgets import OptionList
             app.goto(m.Nav("home", m.HOME_OWNED))    # csl-launched home is HOME_OWNED
             await h.pilot.pause(0.4)
             await h.press("k")
             await h.wait_screen("APIKeysScreen")
             rows = app.query_one("#rows")
             ids = [rows.get_option_at_index(i).id for i in range(rows.option_count)]
-            self.assertEqual(ids[-1], "g:__home__", f"last row must be the Back action row: {ids}")
-            acts = h.labels("actions")
-            self.assertFalse(any("Back to Home" in a for a in acts), acts)
-            await h.goto_row("group", "__home__")
-            await h.press("enter")
+            self.assertNotIn("g:__home__", ids, f"no accordion Back row may exist (D1): {ids}")
+            actions = app.query_one("#actions", OptionList)
+            last = actions.get_option_at_index(actions.option_count - 1)
+            self.assertTrue("Back" in str(last.prompt),
+                            f"last actions-pane item must be Back/Back to Home: {last.prompt!r}")
+            await h.press("b")
             await h.wait_screen("HomeScreen")
         self.run_picker(s)
 
@@ -418,7 +426,8 @@ class LowkeyApiSelect(unittest.TestCase):
         agents = [m.RemoteAgent("nvidia-a", "nvidia", "NVIDIA A", "unknown", model_id="")]
         lk = m.LowkeyScreen(m.Settings(), [], api_agents=agents)
         api = next(g for g in lk.groups() if g.id == "api")
-        sel = api.items[0].id                      # "nvidia:nvidia-a" (alias-keyed)
+        sub = next(i for i in api.items if isinstance(i, m.Group))   # 0.54.0 (D3): provider subgroup
+        sel = sub.items[0].id                      # "nvidia:nvidia-a" (alias-keyed)
         self.assertTrue(lk.accordion.select(sel))
         lk.activate_selected()
         # 0.54.0: api_selection is the RemoteAgent object (was a tuple); an alias-only row
