@@ -48,6 +48,7 @@ from picker_core import (  # noqa: E402,F401
     _VERDICT_MEMO,
     _memoized_verdict,
     PARAM_COUNT_OVERRIDES,
+    PARAM_COUNT_UNKNOWN,
     catalog_local_capable,
     model_param_count,
     catalog_model_old,
@@ -445,6 +446,8 @@ class Picker(App):
         # Task 6: Settings come from the shared core (picker_core.build_settings), so the NiceGUI
         # frontend builds the identical object.
         self.settings = build_settings(flags, self.savers)
+        # flash messages (save confirmations) are a TUI concern — main wires this in __init__
+        self.settings.on_flash = lambda msg: self.notify(msg, severity="information", timeout=2.5)
 
         self.start = start
         self.nav_stack: list = []          # callers of sub-screens (Back returns to them)
