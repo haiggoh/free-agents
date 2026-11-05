@@ -118,3 +118,87 @@ class LaneBrandingTests(unittest.TestCase):
         text = nudge("https://gateway.example.com", LA_SESSION_KIND_EMOJI="☁️")
         self.assertFalse(text.startswith(("📡", "🦾", "☁️")), text[:60])
         self.assertTrue(text.startswith("free-agents is installed"), text[:60])
+
+
+class GuardPrimerSection(unittest.TestCase):
+    """guards_section (session-start guard primers): the SessionStart injection carries each
+    PreToolUse guard's PRIMER once; the Agent/Workflow line follows the route modes and
+    disappears when BOTH paths are paid — route=paid is the menu opt-out that turns the
+    intercept hook off, so its primer text goes with it."""
+
+    PRIMER_HOOKS = ("guard-own-endpoint.py", "guard-tool-owned-state.py", "read-pages-guard.py")
+
+    @staticmethod
+    def _primers():
+        import importlib.util
+        out = {}
+        for name in GuardPrimerSection.PRIMER_HOOKS:
+            spec = importlib.util.spec_from_file_location(
+                name.replace("-", "_").removesuffix(".py"), HOOK.parent / name)
+            assert spec and spec.loader
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            out[name] = mod.PRIMER
+        return out
+
+    @staticmethod
+    def _mod():
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("offload_nudge_under_test", HOOK)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def section(self, free=False, **modes):
+        return self._mod().guards_section(modes or None, free)
+
+    def test_three_guard_primers_present(self):
+        text = self.section()
+        for name, primer in self._primers().items():
+            self.assertIn(primer, text, name)
+        self.assertIn("guards", text)
+
+    def test_route_matrix_names_only_non_paid_paths(self):
+        for agent in ("paid", "free-first", "free-only"):
+            for workflow in ("paid", "free-first", "free-only"):
+                text = self.section(agent=agent, workflow=workflow)
+                for name, primer in self._primers().items():
+                    self.assertIn(primer, text, (agent, workflow, name))
+                nonpaid = [p for p in ("agent", "workflow")
+                           if {"agent": agent, "workflow": workflow}[p] != "paid"]
+                agent_lines = [ln for ln in text.splitlines() if "intercepted on:" in ln]
+                if nonpaid:
+                    self.assertEqual(len(agent_lines), 1, (agent, workflow))
+                    self.assertIn(f"intercepted on: {', '.join(nonpaid)} ", agent_lines[0])
+                else:
+                    self.assertEqual(agent_lines, [], (agent, workflow))
+
+    def test_free_session_gets_guard_lines_but_no_agent_line(self):
+        # free sessions pass through the intercept, but own-endpoint matters most there
+        text = self.section(free=True)
+        for primer in self._primers().values():
+            self.assertIn(primer, text)
+        self.assertNotIn("intercepted on:", text)
+
+    def test_paid_nudge_returns_empty_when_both_paths_paid(self):
+        self.assertEqual(self._mod().paid_nudge("/plug", {"agent": "paid", "workflow": "paid"}), "")
+
+    def test_main_both_paid_silences_agent_part_but_keeps_guard_lines(self):
+        text = nudge("https://gateway.example.com", FA_ROUTE_AGENT="paid", FA_ROUTE_WORKFLOW="paid")
+        self.assertNotIn("only when you ask", text.lower())
+        self.assertNotIn("intercepted on:", text)
+        for primer in self._primers().values():
+            self.assertIn(primer, text)
+
+    def test_main_mixed_routing_names_workflow_only(self):
+        text = nudge("https://gateway.example.com", FA_ROUTE_AGENT="paid", FA_ROUTE_WORKFLOW="free-first")
+        self.assertIn("only when you ask", text.lower())  # mixed: the paid paragraph stays
+        self.assertIn("intercepted on: workflow ", text)
+        self.assertNotIn("intercepted on: agent", text)
+
+    def test_main_free_session_keeps_council_nudge_and_guard_lines(self):
+        text = nudge("http://127.0.0.1:4143")
+        self.assertIn("saves no money", text)
+        for primer in self._primers().values():
+            self.assertIn(primer, text)

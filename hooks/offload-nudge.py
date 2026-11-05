@@ -9,6 +9,9 @@ injects its nudge at SessionStart; this brings offload up to that bar.
 
 A PAID session gets the free-offload-by-default nudge; a FREE one (localhost base URL) gets the
 council nudge instead: no cost reason to offload, but a cross-family review still adds quality.
+Either way, guards_section() appends each PreToolUse guard's PRIMER (one line each) so the model
+knows the traps at session start; the Agent/Workflow intercept's line follows the route modes and
+is omitted when both paths are paid (the menu opt-out turns that hook off too).
 
 Fail-safe: any error → no output, exit 0. Never break or slow a session start.
 """
@@ -69,6 +72,10 @@ def paid_nudge(root: str, modes: dict | None = None) -> str:
     tool = f"{root}/bin/free-agent-tool.py" if root else "the plugin's bin/free-agent-tool.py"
     modes = modes or {}
     agent_mode = modes.get("agent", "free-first")
+    if agent_mode == "paid" and modes.get("workflow", "free-first") == "paid":
+        # Both paths opted out via the menu (route=paid): the intercept hook is off, so the
+        # start hook says nothing about it either — guards_section still adds the other guards.
+        return ""
     if agent_mode == "paid":
         return (
             "free-agents is installed, but the Agent path is set to PAID: the native Agent tool "
@@ -110,11 +117,52 @@ def free_nudge(root: str) -> str:
         "skill (council routing)."
     )
 
+
+GUARD_HOOKS = ("guard-own-endpoint.py", "guard-tool-owned-state.py", "read-pages-guard.py")
+
+
+def _load_primer(hooks_dir: Path, name: str) -> str:
+    """The PRIMER constant of a hyphenated hook file, imported by path; "" on any problem."""
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location(
+            name.replace("-", "_").removesuffix(".py"), hooks_dir / name)
+        if not spec or not spec.loader:
+            return ""
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return getattr(mod, "PRIMER", "") or ""
+    except Exception:
+        return ""
+
+
+def guards_section(modes: dict | None, free: bool) -> str:
+    """One line per PreToolUse guard's PRIMER, injected once at SessionStart (prevention, so the
+    guards stay a safety net). The Agent/Workflow intercept line names only paths NOT routed
+    paid — route=paid is the menu opt-out that turns that hook off, so its text goes with it;
+    on a FREE session the intercept passes through, so no agent line (the three guards still
+    apply — own-endpoint matters most there). Fail-open: any error -> ""."""
+    try:
+        hooks_dir = Path(__file__).resolve().parent
+        lines = [f"  - {p}" for p in (_load_primer(hooks_dir, n) for n in GUARD_HOOKS) if p]
+        modes = modes or {}
+        guarded = [p for p in ("agent", "workflow") if modes.get(p, "free-first") != "paid"]
+        if not free and guarded:
+            lines.append(f"  - Agent/Workflow calls are intercepted on: {', '.join(guarded)} "
+                         f"(route=paid opts that path out).")
+        if not lines:
+            return ""
+        return ("🛡 free-agents PreToolUse guards — know these before they fire:\n"
+                + "\n".join(lines))
+    except Exception:
+        return ""
+
+
 def main():
     # 0.50.0 help sweep: --help prints usage and never emits hook output.
     if any(a in ("-h", "--help") for a in sys.argv[1:]):
-        print("offload-nudge.py — SessionStart hook: prints the offload/council nudge as "
-              "hook JSON on stdout. Usage: python3 offload-nudge.py [--help]")
+        print("offload-nudge.py — SessionStart hook: prints the offload/council nudge plus each "
+              "PreToolUse guard's primer as hook JSON on stdout. Usage: python3 offload-nudge.py [--help]")
         return 0
     try:
         root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
@@ -134,8 +182,13 @@ def main():
                 modes = {path: cse.route(path, dict(os.environ)) for path in cse.ROUTE_PATHS}
             except Exception:
                 modes = None                       # fail open to the free-first nudge
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
-                                                 "additionalContext": (free_nudge(root) if free else paid_nudge(root, modes))}}))
+        text = free_nudge(root) if free else paid_nudge(root, modes)
+        section = guards_section(modes, free)
+        if section:
+            text = f"{text}\n{section}" if text else section
+        if text:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                     "additionalContext": text}}))
     except Exception:
         pass
     return 0
