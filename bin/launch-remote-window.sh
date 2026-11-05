@@ -40,9 +40,8 @@ case "${1:-}" in
 esac
 
 # Pass-through flags only; anything else starting with '-' is a usage error (never
-# silently swallowed into the launch).
-KNOWN_FLAGS=(--effort --prompt --dry-run --list)
-prev=""
+# silently swallowed into the launch). 0.54.0: the dead KNOWN_FLAGS array and prev
+# assignment (shellcheck SC2034) are removed — the case below already validates the flags.
 for a in "$@"; do
     case "$a" in
         -*) case "$a" in
@@ -50,7 +49,6 @@ for a in "$@"; do
                 *) echo "launch-remote-window.sh: unknown flag: $a" >&2; usage >&2; exit 3 ;;
             esac ;;
     esac
-    prev="$a"
 done
 
 if [ ! -t 0 ]; then
