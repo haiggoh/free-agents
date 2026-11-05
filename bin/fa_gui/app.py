@@ -118,8 +118,10 @@ def build() -> None:
                     # is what makes the circle visible (it was missing entirely before)
                     on = bool(action.value()) if action.value else False
                     with ui.row().classes("cycle-row items-center gap-2 w-full"):
+                        name = (action.name or action.label.split(":")[0]) if action else c.label
+                        ui.label(f"{name}:").classes("cycle-name")
                         ui.label(str(_cycle_value(action))).classes("cycle-value")
-                        sw = ui.button("", on_click=lambda a=action: _toggle_binary(a, sw)).classes(f"switch{' on' if on else ''} btn-flat")
+                        sw = ui.button("", on_click=lambda a=action: _toggle_binary(a, sw)).classes(f"switch{' on' if on else ''} btn-flat").style("background:#000 !important" if on else "background:#bbb !important").style("color:transparent !important; border:none !important; border-radius:9px !important; width:34px !important; height:18px !important; padding:0 !important; min-height:0 !important")
                         with sw:
                             ui.element("div").classes("knob")
                 else:
@@ -162,8 +164,10 @@ def build() -> None:
             action.step(1)
         if "on" in sw.classes:
             sw.remove_class("on")
+            sw.style("background:#bbb !important")
         else:
             sw.add_class("on")
+            sw.style("background:#000 !important")
 
     def render_shell(title: str, subtitle: str):
         with ui.column().classes("w-full max-w-3xl mx-auto p-6 gap-2"):
