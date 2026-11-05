@@ -59,7 +59,10 @@ def build() -> None:
                      border-radius: 20px !important; padding: 6px 16px !important; box-shadow: 0 1px 2px rgba(0,0,0,.2) !important; }
       .btn-primary:hover { background: #333 !important; }
       .cycle-row { display: flex; align-items: center; }
-    </style>""", shared=True)
+      /* ON/OFF value chip: fixed width so a 2- vs 3-letter word never shifts the switch (user 2026-11-05) */
+      .cycle-value-bin { display: inline-block; min-width: 3ch; }
+    </style>""",
+ shared=True)
 
     loader = Loader()
     shared: dict = {}
@@ -89,24 +92,30 @@ def build() -> None:
                 v = m.CLASSIFIER_SOURCE_LABELS[v]
             elif "auto" in lname and v in getattr(m, "AUTO_MODE_LABELS", {}):
                 v = m.AUTO_MODE_LABELS[v]
+        if v is None or v == "":
+            # unset optional value (temperature "" / None): the SAME label csl shows —
+            # read from the model, never rephrased here (user 2026-11-05)
+            v = m.NOT_SET_LABEL
         return v
 
-    def cycle_label(action) -> str:
-        name = action.name or action.label.split(":")[0]
+    def _binary_on(action) -> bool:
+        # None counts as ON: rows like thinking store None for their ON/default state
+        # (csl label "ON (default)"); only an explicit False/0 is OFF
         try:
             v = action.value() if action.value else None
         except Exception:
             v = None
-        if action.choice_label and v is not None:
-            v = action.choice_label(v)
-        elif isinstance(v, bool):
-            v = "ON" if v else "OFF"
-        elif v is not None:
-            for table in (getattr(m, "AUTO_MODE_LABELS", {}), getattr(m, "CLASSIFIER_SOURCE_LABELS", {})):
-                if v in table:
-                    v = table[v]
-                    break
-        return f"{name}: {_cycle_value(action)}"
+        return v not in (False, 0)
+
+    def _binary_label(action) -> str:
+        return "ON" if _binary_on(action) else "OFF"
+
+    def _binary_target(action, on: bool):
+        # the choice whose on-ness matches the request — e.g. thinking (None, False): ON -> None
+        for c in (action.choices or ()):
+            if (c not in (False, 0)) == bool(on):
+                return c
+        return True if on else False
 
     def render_rows(scr) -> None:
         for c in render_plan(scr):
@@ -116,14 +125,15 @@ def build() -> None:
                 choices = list(action.choices)
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
                 if binary:
-                    # native checkbox styled as the M3 pill switch — toggles reliably;
-                    # :checked drives the knob slide + track fade via CSS transitions
-                    on = bool(action.value()) if action.value else False
+                    # native checkbox styled as the M3 pill switch; Quasar keeps state in the
+                    # wrapper's aria-checked (the hidden native input never checks), and the CSS
+                    # keys off .switch[aria-checked="true"] for the track fade + knob slide
                     with ui.row().classes("cycle-row items-center gap-2 w-full"):
                         name = (action.name or action.label.split(":")[0]) if action else c.label
                         ui.label(f"{name}:").classes("cycle-name")
-                        ui_label_val = ui.label(str(_cycle_value(action))).classes("cycle-value")
-                        sw = ui.checkbox("", value=on, on_change=lambda e, a=action, v=ui_label_val: _toggle_binary(a, e.value, v)).classes("switch")
+                        ui_label_val = ui.label(_binary_label(action)).classes("cycle-value cycle-value-bin")
+                        sw = ui.checkbox("", value=_binary_on(action),
+                                         on_change=lambda e, a=action, v=ui_label_val: _toggle_binary(a, e.value, v)).classes("switch")
                         sw.props["aria-label"] = name
                 else:
                     # csl order: <name>: < value >  — arrow between end of item and the state
@@ -135,19 +145,20 @@ def build() -> None:
                         right = ui.label(">").classes("cycle-arrow cycle-right")
                         left.on("click", lambda a=action, v=val: _cycle(a, v, -1))
                         right.on("click", lambda a=action, v=val: _cycle(a, v, +1))
+            elif c.kind == "nav" and action is not None and action.run is not None:
+                # nav-section rows only RETURN a Nav, so calling run() here is side-effect-free.
+                # Mutating "button" rows must NEVER run at render time (auto-sync bug 2026-11-05).
+                res = action.run()
+                target = "home" if res.target == "home" else res.target
+                # ui.link for real SPA navigation; .menu-item CSS overrides the link look
+                row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
+                row.props["data-target"] = target
             else:
-                res = action.run() if (action is not None and action.run is not None) else None
-                if isinstance(res, m.Nav):
-                    target = "home" if res.target == "home" else res.target
-                    # ui.link for real SPA navigation; .menu-item CSS overrides the link look
-                    row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
-                    row.props["data-target"] = target
+                row = ui.label(c.label).classes("menu-item action-row")
+                if action is not None and action.key == "c" and shared.get("toggle_list"):
+                    row.on("click", lambda: shared["toggle_list"]())   # "Choose model" toggles the list
                 else:
-                    row = ui.label(c.label).classes("menu-item action-row")
-                    if action is not None and action.key == "c" and shared.get("toggle_list"):
-                        row.on("click", lambda: shared["toggle_list"]())   # "Choose model" toggles the list
-                    else:
-                        row.on("click", lambda a=action: _run_action(a))
+                    row.on("click", lambda a=action: _run_action(a))
 
     def _run_action(action) -> None:
         if action is not None and action.run is not None:
@@ -159,16 +170,17 @@ def build() -> None:
         val.set_text(str(_cycle_value(action)))
 
     def _toggle_binary(action, on, val=None) -> None:
-        # step until the underlying value matches the requested state (choices may be
-        # (None, False, True) — one step may not reach it); the checkbox's own :checked
-        # drives the visual tween.
-        for _ in range(3):
-            if bool(action.value()) == bool(on):
-                break
-            if action.step:
+        # set the EXACT choice via put when the row is typed — stepping a (None, False) list
+        # can land on None and label it wrong; the checkbox's own aria-checked drives the tween
+        if action.put is not None:
+            action.put(_binary_target(action, on))
+        elif action.step:
+            for _ in range(len(action.choices or ()) + 1):
+                if _binary_on(action) == bool(on):
+                    break
                 action.step(1)
         if val is not None:
-            val.set_text(str(_cycle_value(action)))   # show the new state next to the switch
+            val.set_text(_binary_label(action))   # ON/OFF next to the switch, in sync with it
 
     def render_shell(title: str, subtitle: str):
         with ui.column().classes("w-full max-w-3xl mx-auto p-6 gap-2"):

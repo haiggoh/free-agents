@@ -732,6 +732,15 @@ class Settings:
 # Same presets as main's bash menu (0.21.7). "" = leave it to the provider.
 TEMPERATURES = ("", "0.0", "0.3", "0.7", "1.0", "1.5", "2.0")
 
+# The one label for "no value set" on optional numeric rows (temperature). csl shows it in the
+# row label; the NiceGUI adapter reads this SAME constant for the value chip — never re-invent
+# the phrasing in a second place (user 2026-11-05: avoid drift between csl and the GUI).
+NOT_SET_LABEL = "not set"
+
+def temperature_display(v) -> str:
+    """Row-label text for a temperature value: "" / None -> NOT_SET_LABEL, anything else as-is."""
+    return NOT_SET_LABEL if v is None or v == "" else str(v)
+
 def _load_key_providers():
     """The provider table of install/setup-api-keys.py — the ONE list of providers a key can be set
     up for. The picker used to keep two hand-copied tables, and a provider added to the wizard
@@ -1415,7 +1424,7 @@ class LocalScreen(Screen):
         acts = [
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.local_effort}", effort_choices("local_session"),
                     lambda: s.local_effort, lambda v: self._set_effort(v), section="model"),
-            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.local_temperature or '<provider default>'}",
+            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {temperature_display(s.local_temperature)}",
                     TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v), section="model"),
             thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
@@ -1425,9 +1434,12 @@ class LocalScreen(Screen):
                    section="hidden"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp")),
-            Action("y", f"Auto-sync local registry with the disk (no prompts): "
+            setting("y", f"Auto-sync local registry with the disk (no prompts): "
                         f"{'ON' if s.memguard.get('registry_auto_sync') else 'OFF'}",
-                   self._toggle_registry_auto_sync),
+                    (False, True),
+                    lambda: bool(s.memguard.get("registry_auto_sync")),
+                    self._put_registry_auto_sync,
+                    name="Auto-sync local registry"),
         ]
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
@@ -1443,10 +1455,11 @@ class LocalScreen(Screen):
         check_action_table(acts)
         return acts
 
-    def _toggle_registry_auto_sync(self):
+    def _put_registry_auto_sync(self, v):
         """The Local screen's auto-sync row (0.43.0): same store key the guard screen used,
-        persisted through the on_memguard_saved callback the Picker wires to sms.save_memguard."""
-        v = not self.settings.memguard.get("registry_auto_sync")
+        persisted through the on_memguard_saved callback the Picker wires to sms.save_memguard.
+        Typed (choices/value/put) so GUI adapters render a real toggle — run() is step(1)."""
+        v = bool(v)
         self.settings.memguard["registry_auto_sync"] = v
         if self.settings.on_memguard_saved:
             self.settings.on_memguard_saved({"registry_auto_sync": v})
@@ -2010,7 +2023,7 @@ class RemoteScreen(Screen):
         acts = [
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {_effort_label(s.remote_effort)}",
                     effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v), section="model"),
-            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.remote_temperature or '<provider default>'}",
+            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {temperature_display(s.remote_temperature)}",
                     TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v), section="model"),
             thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into a group
@@ -3371,7 +3384,7 @@ class LowkeyScreen(Screen):
                     (None, False), lambda: s.lowkey_thinking, self._set_thinking, section="model"),
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.lowkey_effort} (sent as reasoning_effort)",
                     effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(), section="model"),
-            setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or '<provider default>'}",
+            setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {temperature_display(s.lowkey_temperature)}",
                     TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(), section="model"),
             # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
             Action("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "
