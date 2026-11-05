@@ -595,6 +595,35 @@ class HoverOptionList(OptionList):
         self._drag_start = (event.x, event.y)
         super()._on_mouse_down(event)
 
+    async def _on_click(self, event):
+        # NOTE: Textual's MRO dispatch calls EVERY class's _on_click, so never call
+        # super()._on_click here — replicate OptionList._on_click and prevent_default().
+        # Cycle-indicator plan: a click on a cycle row's ◀/▶ glyph steps it (±1) like the
+        # Left/Right keys instead of activating the row.
+        event.prevent_default()
+        idx = event.style.meta.get("option") if event.style is not None else None
+        if idx is None or self._options[idx].disabled:
+            return
+        if self.id == "actions":
+            try:
+                text = str(self.get_option_at_index(idx).prompt)
+            except Exception:
+                text = ""
+            if "◀" in text and "▶" in text:
+                # Click x is screen-relative: compare against the content region's
+                # absolute screen x (list has padding 0 1, no border)
+                col = event.screen_x - self.scrollable_content_region.x
+                if col == text.index("◀"):
+                    self.app._click_indicator(idx, -1)
+                    event.stop()
+                    return
+                if col == text.rindex("▶"):
+                    self.app._click_indicator(idx, +1)
+                    event.stop()
+                    return
+        self.highlighted = idx
+        self.action_select()
+
     def _on_mouse_up(self, event):
         # 0.51.0 (user): right-click (button 3) copies the hovered row's text; a plain left
         # click still activates the entry as before. 0.54.0: drag-select copy moved to the
@@ -954,7 +983,7 @@ class Picker(App):
         with Vertical(id="layout"):
             yield Static("", id="title")
             yield Static("", id="policy")
-            yield OptionList(id="actions")
+            yield HoverOptionList(id="actions")   # cycle-indicator glyph clicks (◀/▶)
             yield SearchInput(id="search")
             yield HoverOptionList(id="rows")
             yield Static("", id="gap")
@@ -1539,6 +1568,14 @@ class Picker(App):
         self.action_ids = []  # Track action IDs for keyboard navigation
         rendered, self._collapsed_actions = m.rendered_actions(sm)
         collapsed = bool(self._collapsed_actions)
+        # Cycle-indicator plan: pad cycle-row labels to one fixed width so the ▶ glyph does not
+        # jump sideways when a cycled value changes width (same lesson as the nicegui ON/OFF
+        # chip min-width fix, 2026-11-05).
+        def _plain(a):
+            return a.label.plain if isinstance(a.label, Text) else str(a.label)
+        cycle_w = max((len(_plain(a)) for a in rendered
+                       if a.step is not None and a not in (m.SETTINGS_GROUP, m.MODEL_GROUP)),
+                      default=0)
         # A nav-ONLY actions pane on a screen WITH rows (API keys setup) renders BELOW the rows,
         # so Back is the last row on screen like every other submenu (user 2026-10-31: it used
         # to sit at the very top because the pane is mounted above #rows). Nav-only screens
@@ -1591,10 +1628,15 @@ class Picker(App):
             # label and flattens every style — the 0.35.0 swatch/hex-colour bug
             # (user 2026-10-15; the f-string predates the theme work entirely).
             prompt = Text(f"  {a.key.upper()}) ")
+            if a.step is not None:           # cycle row: ◀ ▶ indicators, clickable (0.55.x plan)
+                prompt.append("◀ ", style="bold")
             if isinstance(a.label, Text):
                 prompt += a.label            # rich Text + Text keeps the spans
             else:
                 prompt.append(str(a.label))
+            if a.step is not None:
+                prompt.append(" " * max(0, cycle_w - len(_plain(a))))   # fixed ▶ column
+                prompt.append(" ▶", style="bold")
             if enabled_str:
                 prompt.append(enabled_str)
             actions_list.add_option(Option(prompt, id=f"a:{len(self.action_ids)-1}"))
@@ -1700,14 +1742,32 @@ class Picker(App):
             self.screen_model.toggle_model_group()
             self._rerender_keep_action(action_index)
             return
-        if action.step is not None:
+        if action.step is not None and action.run is not None:
+            # Enter/click on a cycle row runs the row's activation: for plain settings
+            # run() == step(+1) (identical to Right); the theme hue rows deliberately use
+            # ±20° here while ◀/▶/arrows step ±5° (cycle-indicator plan 2026-11-04)
+            result = action.run()
+        elif action.step is not None:
             self._step_action(action_index, +1)
             return
-        result = action.run()
+        else:
+            result = action.run()
         if result:
             self.dispatch(result, None)
         else:
             self._rerender_keep_action(action_index)
+
+    def _click_indicator(self, option_index: int, direction: int):
+        """◀/▶ glyph click: step the row like the Left/Right keys (never run/activate)."""
+        actions_list = self.query_one("#actions", OptionList)
+        if option_index >= actions_list.option_count:
+            return
+        oid = actions_list.get_option_at_index(option_index).id
+        if not oid.startswith("a:"):
+            return
+        action_index = int(oid[2:])
+        if action_index < len(self.action_ids) and self.action_ids[action_index].step is not None:
+            self._step_action(action_index, direction)
 
     def _step_action(self, action_index: int, direction: int):
         action = self.action_ids[action_index]
