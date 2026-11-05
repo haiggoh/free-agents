@@ -35,9 +35,12 @@ class NudgeTests(unittest.TestCase):
         for base in (None, "https://gateway.example.com"):
             text = nudge(base)
             self.assertIn("FREE OFFLOADING IS THE DEFAULT", text)
-            for word in ("Agent", "Workflow", "fan-out", "ANNOUNCE", "/plug/bin/free-agent-tool.py",
-                         "STATELESS", "SESSION", "Gemini 3.8 Flash"):
+            # 0.54.0 (Task 9): the detailed routing now comes from the offload skill's marked
+            # block (no hardcoded roster — "Gemini 3.8 Flash" must NOT appear any more)
+            for word in ("Agent", "Workflow", "fan-out", "Announce the model",
+                         "bin/free-agent-tool.py", "STATELESS", "SESSION"):
                 self.assertIn(word, text, word)
+            self.assertNotIn("Gemini 3.8 Flash", text)
 
     def test_free_session_gets_the_council_nudge_not_the_cost_one(self):
         # On a free session offloading saves no money, but a cross-family review still adds quality
@@ -86,7 +89,8 @@ class RouteModeNudges(unittest.TestCase):
         text = self.nudge_with()
         self.assertIn("FREE OFFLOADING IS THE DEFAULT", text)
         self.assertIn("paid_fallback_allowed", text)
-        self.assertIn("one native agent call", text.lower())
+        # 0.54.0 (Task 9): the fallback sentence now comes from the skill's routing block
+        self.assertIn("one native call", text.lower())
 
 
 class LaneBrandingTests(unittest.TestCase):

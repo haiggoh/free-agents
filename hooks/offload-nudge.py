@@ -40,6 +40,25 @@ def lane_mark() -> str:
         return "📡"
 
 
+def _routing_block(root: str) -> str:
+    """0.54.0 Task 9: the routing text comes from the marked block in the offload skill —
+    never a second copy here (a test goes RED if they diverge). Falls back to this checkout
+    when CLAUDE_PLUGIN_ROOT points at a partial copy (tests); the loud MISSING line only when
+    neither has the block."""
+    try:
+        bin_dir = str(Path(__file__).resolve().parent.parent / "bin")
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        import offload_routing
+        own = str(Path(__file__).resolve().parent.parent)
+        block = offload_routing.routing_block(root or own)
+        if block == offload_routing.MISSING and root and Path(root).resolve() != Path(own).resolve():
+            block = offload_routing.routing_block(own)
+        return block
+    except Exception:
+        return offload_routing.MISSING if "offload_routing" in sys.modules else ""
+
+
 def paid_nudge(root: str, modes: dict | None = None) -> str:
     """A PAID session, per the Agent path's routing mode (cloud_session_env.route).
 
@@ -63,36 +82,17 @@ def paid_nudge(root: str, modes: dict | None = None) -> str:
         )
     if agent_mode == "free-only":
         return (
-            "free-agents is installed and the Agent path is set to FREE ONLY: EVERY Agent/Task "
-            "call is redirected to a free model and the hook NEVER FALLS BACK to paid — not on "
-            "quota, not on errors, not after retries. The redirect message carries the exact "
-            f"dispatch to run: `python3 {tool} <<'JSON'` with {{\"prompt\": ..., \"files\": [paths]}} "
-            "(attach the files; a dispatch cannot read them). Announce the model and route to the "
-            "user before offloading — free models are not equal. Change the mode in csl -> Cloud "
-            "Session Configuration."
+            "free-agents is installed and the Agent path is set to FREE ONLY: EVERY Agent/Task/"
+            "Workflow call is redirected to a free model and the hook NEVER FALLS BACK to paid. "
+            "Change the mode in csl -> Cloud Session Configuration.\n"
+            + _routing_block(root)
         )
     return (
         "free-agents is installed and this session runs on PAID inference, so FREE OFFLOADING IS "
-        "THE DEFAULT for delegated work. Before ANY Agent/Task call, Workflow, fan-out, parallel "
-        "subagents, /ultracode-style runs or a review agent, route the work to a free model "
-        "INSTEAD of a paid subagent: the native Agent tool can only start a paid model. Pick the "
-        "shape first: (1) self-contained text work (review, analysis, extraction, drafting, a "
-        "second opinion) → STATELESS dispatch: "
-        f"`python3 {tool} <<'JSON'` with {{\"prompt\": ..., \"files\": [paths]}} — attach the "
-        "files, because a dispatch cannot read them; it walks the maintainer's preference order "
-        "(`--list` shows it: Gemini 3.8 Flash, DeepSeek V4.1 Flash, GLM 5.3, GLM 5.3 Flash, Nemotron 3 Ultra, "
-        "then local DeepSeek V4 Flash, Laguna S, KAT Coder) and fails over by itself. Several "
-        "independent pieces = several parallel Bash calls. (2) Work that must read files or run "
-        "commands → a free SESSION (remote-session.sh <alias>, or csl for local), never a "
-        "stateless dispatch; session models differ from dispatch ones (Gemini quota runs out fast in "
-        "a session, DeepSeek is slow; GLM 5.3 is the session workhorse) — see the "
-        "free-session-handover skill, which also covers overnight handovers. ALWAYS ANNOUNCE the model and route to the user BEFORE offloading — "
-        "free models are not equal. A paid subagent needs a stated reason (security-critical, "
-        "final verification of the free result, or a free lane measured as failing now). Keep "
-        "judgment, integration and the final check on this session. After this session's free "
-        "attempts are honestly exhausted (a dispatch result says \"paid_fallback_allowed\": true), "
-        "ONE native Agent call is let through automatically — the honest-exhaustion escape; a "
-        "corrupt settings layer never blocks the call. Full guidance: the offload skill."
+        "THE DEFAULT for delegated work — before ANY Agent/Task/Workflow call, fan-out or "
+        "parallel subagents, route the work to a free model instead of a paid subagent (the "
+        "native Agent tool can only start a paid model).\n"
+        + _routing_block(root)
     )
 
 
