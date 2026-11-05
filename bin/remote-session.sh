@@ -2236,8 +2236,25 @@ printf '%s' "${EFFORT_CHOICE:-medium}" > "$LA_EFFORT_FILE" 2>/dev/null || true
 
 # SESSION IDENTITY RESOLUTION — emit deterministic identity for consumers
 # (statusline, transcript marker, hooks). Must run AFTER endpoint is known.
+# 0.54.0 Task 10a: identity steps fail OPEN but never silently — stderr is captured to the
+# identity log and ONE visible warning line names the failed step (the launch still proceeds).
+fa_identity_log() { printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/free-agents/identity-last.log"; }
+fa_identity_run() {  # fa_identity_run <step-name> <cmd...> — prints stdout, warns on failure
+    local step="$1"; shift
+    local out rc logf
+    logf="$(fa_identity_log)"
+    mkdir -p "$(dirname "$logf")" 2>/dev/null
+    out="$("$@" 2>>"$logf")"; rc=$?
+    if [ "$rc" -eq 0 ]; then
+        printf '%s' "$out"
+    else
+        echo "⚠ session identity: $step failed — see $(fa_identity_log)" >&2
+    fi
+    return 0
+}
+
 if [ -x "$SCRIPT_DIR/la-session-identity.sh" ]; then
-    SESSION_IDENTITY=$("$SCRIPT_DIR/la-session-identity.sh" 2>/dev/null || true)
+    SESSION_IDENTITY=$(fa_identity_run "la-session-identity.sh" "$SCRIPT_DIR/la-session-identity.sh")
     if [ -n "$SESSION_IDENTITY" ]; then
         export LA_SESSION_IDENTITY="$SESSION_IDENTITY"
         # Export individual fields for easy consumption by hooks/statusline
@@ -2254,10 +2271,12 @@ fi
 
 # SESSION-IDENTITY MOD — model-weighted spinner words (mods/session-identity); see the same
 # block in launch-claude-agent.sh. Before the settings generator, which reads LA_MOD_ATTACHED.
-LA_MOD_DIR="$("$SCRIPT_DIR/la-mod-attach.sh" 2>/dev/null || true)"
+LA_MOD_DIR=$(fa_identity_run "la-mod-attach.sh" "$SCRIPT_DIR/la-mod-attach.sh")
 if [ -n "$LA_MOD_DIR" ]; then
-    LA_MODEL_SPINNER_WORDS="$(LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
-        --emit-model-words --identity-json "${LA_SESSION_IDENTITY:-{\}}" 2>/dev/null || echo '[]')"
+    LA_MODEL_SPINNER_WORDS="$(fa_identity_run "generate-remote-settings.py --emit-model-words" \
+        env LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
+        --emit-model-words --identity-json "${LA_SESSION_IDENTITY:-{\}}")"
+    [ -n "$LA_MODEL_SPINNER_WORDS" ] || LA_MODEL_SPINNER_WORDS='[]'
     export LA_MODEL_SPINNER_WORDS
     LA_MOD_ATTACHED=1; export LA_MOD_ATTACHED
 fi
@@ -2270,9 +2289,10 @@ if [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -x "$SCRIPT_DIR/generate-remote-
         la_mktemp_json "${TMPDIR:-/tmp}/free-agents-settings"
     )"
     chmod 600 "$SETTINGS_FILE"
-    LA_SPOOF_MODEL_ID="$SPOOF_PRIMARY" LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
+    fa_identity_run "generate-remote-settings.py --output" \
+        env LA_SPOOF_MODEL_ID="$SPOOF_PRIMARY" LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
         --identity-json "$LA_SESSION_IDENTITY" \
-        --output "$SETTINGS_FILE" 2>/dev/null || true
+        --output "$SETTINGS_FILE" >/dev/null
     # Don't add to CLAUDE_EXTRA_ARGS yet — we may need to merge with blind-trust settings
 
     # THE THEME FILE must exist before the `theme` setting above can resolve to anything.
@@ -2287,8 +2307,8 @@ if [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -x "$SCRIPT_DIR/generate-remote-
     LA_THEME_DIR="$HOME/.claude/themes"
     LA_THEME_FILE="$LA_THEME_DIR/free-lime.json"
     if mkdir -p "$LA_THEME_DIR" 2>/dev/null; then
-        LA_THEME_NEW="$(LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" \
-            --emit-theme-file 2>/dev/null || true)"
+        LA_THEME_NEW="$(fa_identity_run "generate-remote-settings.py --emit-theme-file" \
+            env LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" --emit-theme-file)"
         if [ -n "$LA_THEME_NEW" ]; then
             if [ ! -f "$LA_THEME_FILE" ] || [ "$LA_THEME_NEW" != "$(cat "$LA_THEME_FILE" 2>/dev/null)" ]; then
                 printf '%s' "$LA_THEME_NEW" > "$LA_THEME_FILE" || true

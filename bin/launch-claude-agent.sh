@@ -624,10 +624,27 @@ _alias_hash=$(printf '%s' "${MODEL_ALIAS:-unknown}" | cksum | cut -d' ' -f1 | cu
 LA_SESSION_ID="${_ts}-${_pid}-${_alias_hash}"
 export LA_SESSION_ID
 
+# 0.54.0 Task 10a: identity steps fail OPEN but never silently — stderr is captured to the
+# identity log and ONE visible warning line names the failed step (the launch still proceeds).
+fa_identity_log() { printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/free-agents/identity-last.log"; }
+fa_identity_run() {  # fa_identity_run <step-name> <cmd...> — prints stdout, warns on failure
+    local step="$1"; shift
+    local out rc logf
+    logf="$(fa_identity_log)"
+    mkdir -p "$(dirname "$logf")" 2>/dev/null
+    out="$("$@" 2>>"$logf")"; rc=$?
+    if [ "$rc" -eq 0 ]; then
+        printf '%s' "$out"
+    else
+        echo "⚠ session identity: $step failed — see $(fa_identity_log)" >&2
+    fi
+    return 0
+}
+
 # SESSION IDENTITY RESOLUTION — emit deterministic identity for consumers
 # (statusline, transcript marker, hooks). Must run AFTER endpoint is known.
 if [ -x "$LAUNCH_DIR/la-session-identity.sh" ]; then
-    SESSION_IDENTITY=$("$LAUNCH_DIR/la-session-identity.sh" 2>/dev/null || true)
+    SESSION_IDENTITY=$(fa_identity_run "la-session-identity.sh" "$LAUNCH_DIR/la-session-identity.sh")
     if [ -n "$SESSION_IDENTITY" ]; then
         export LA_SESSION_IDENTITY="$SESSION_IDENTITY"
         # Export individual fields for easy consumption by hooks/statusline
@@ -646,11 +663,13 @@ fi
 # prints the mod folder only for a local/free session on a CLI with the mods API, so a gateway
 # session never loads it. Runs BEFORE the settings generator, which switches spinnerVerbs to
 # append (keeping Claude Code's own words for the turns the mod leaves alone) when it is on.
-LA_MOD_DIR="$("$LAUNCH_DIR/la-mod-attach.sh" 2>/dev/null || true)"
+LA_MOD_DIR=$(fa_identity_run "la-mod-attach.sh" "$LAUNCH_DIR/la-mod-attach.sh")
 if [ -n "$LA_MOD_DIR" ]; then
     # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
-    LA_MODEL_SPINNER_WORDS="$(LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
-        --emit-model-words --identity-json "${LA_SESSION_IDENTITY:-{\}}" 2>/dev/null || echo '[]')"
+    LA_MODEL_SPINNER_WORDS="$(fa_identity_run "generate-local-settings.py --emit-model-words" \
+        env LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
+        --emit-model-words --identity-json "${LA_SESSION_IDENTITY:-{\}}")"
+    [ -n "$LA_MODEL_SPINNER_WORDS" ] || LA_MODEL_SPINNER_WORDS='[]'
     export LA_MODEL_SPINNER_WORDS
     LA_MOD_ATTACHED=1; export LA_MOD_ATTACHED
     CLAUDE_EXTRA_ARGS+=(--plugin-dir "$LA_MOD_DIR")
@@ -665,9 +684,10 @@ if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-sett
     )"
     chmod 600 "$SETTINGS_FILE"
     # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
-    LA_SPOOF_MODEL_ID="$MODEL_SPOOF" LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
+    fa_identity_run "generate-local-settings.py --output" \
+        env LA_SPOOF_MODEL_ID="$MODEL_SPOOF" LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
         --identity-json "$LA_SESSION_IDENTITY" \
-        --output "$SETTINGS_FILE" 2>/dev/null || true
+        --output "$SETTINGS_FILE" >/dev/null
     if [ -f "$SETTINGS_FILE" ] && [ -s "$SETTINGS_FILE" ]; then
         LA_SETTINGS_LAYERS+=("$SETTINGS_FILE")
     fi
@@ -679,8 +699,8 @@ if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-sett
     LA_THEME_FILE="$LA_THEME_DIR/local-sky.json"
     if mkdir -p "$LA_THEME_DIR" 2>/dev/null; then
         # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
-        LA_THEME_NEW="$(LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" \
-            --emit-theme-file 2>/dev/null || true)"
+        LA_THEME_NEW="$(fa_identity_run "generate-local-settings.py --emit-theme-file" \
+            env LAUNCH_DIR="$LAUNCH_DIR" "$LAUNCH_DIR/generate-local-settings.py" --emit-theme-file)"
         if [ -n "$LA_THEME_NEW" ]; then
             if [ ! -f "$LA_THEME_FILE" ] || [ "$LA_THEME_NEW" != "$(cat "$LA_THEME_FILE" 2>/dev/null)" ]; then
                 printf '%s' "$LA_THEME_NEW" > "$LA_THEME_FILE" || true
