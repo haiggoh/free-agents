@@ -39,6 +39,8 @@ def build() -> None:
       .cycle-arrow { color: #000 !important; background: none !important; border: none !important;
                      box-shadow: none !important; padding: 0 3px; cursor: pointer; font-weight: bold; }
       .cycle-arrow:hover { color: #0b57d0 !important; }
+      .q-btn.switch, .switch.q-btn { background: #bbb !important; background-color: #bbb !important; color: transparent !important; border: none !important; }
+      .q-btn.switch.on, .switch.q-btn.on { background: #000 !important; background-color: #000 !important; }
       .switch { width: 34px; height: 18px; border-radius: 9px; background: #bbb; position: relative;
                 cursor: pointer; display: inline-block; vertical-align: middle; }
       .switch.on { background: #000; }
@@ -54,7 +56,7 @@ def build() -> None:
       .btn-primary:hover { background: #333 !important; }
       .cycle-row { display: flex; align-items: center; }
       /* switch: knob always bright white + subtle M3 shadow so it is visible on any track */
-      .switch .knob { background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,.4) !important; }
+      .switch .knob { background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,.4) !important; pointer-events: none !important; }
     </style>""", shared=True)
 
     loader = Loader()
@@ -80,10 +82,11 @@ def build() -> None:
         elif isinstance(v, bool):
             v = "ON" if v else "OFF"
         elif v is not None:
-            for table in (getattr(m, "AUTO_MODE_LABELS", {}), getattr(m, "CLASSIFIER_SOURCE_LABELS", {})):
-                if v in table:
-                    v = table[v]
-                    break
+            lname = (action.name or action.label or "").lower()
+            if "classifier" in lname and v in getattr(m, "CLASSIFIER_SOURCE_LABELS", {}):
+                v = m.CLASSIFIER_SOURCE_LABELS[v]
+            elif "auto" in lname and v in getattr(m, "AUTO_MODE_LABELS", {}):
+                v = m.AUTO_MODE_LABELS[v]
         return v
 
     def cycle_label(action) -> str:
@@ -153,9 +156,14 @@ def build() -> None:
         val.set_text(cycle_label(action))
 
     def _toggle_binary(action, sw) -> None:
+        # flip the visual state directly AND cycle the underlying setting (the model's
+        # choices may be (None, False, True) — value truthiness alone can't show the flip)
         if action.step:
             action.step(1)
-        sw.set_class("on" if (action.value() if action.value else False) else "")
+        if "on" in sw.classes:
+            sw.remove_class("on")
+        else:
+            sw.add_class("on")
 
     def render_shell(title: str, subtitle: str):
         with ui.column().classes("w-full max-w-3xl mx-auto p-6 gap-2"):
