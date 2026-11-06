@@ -2479,10 +2479,10 @@ class ThemeConfigScreen(Screen):
             setting("r", self._lane_label("remote"), presets,
                     lambda: self.remote_theme["theme"]["accent_color"],
                     lambda v: self._set_accent("remote", v)),
-            Action("y", f"Hue local: {self._hue_deg('local')}°  (←/→ 5°, Enter/click 20°)",
+            Action("y", f"Hue local: {self._hue_deg('local')}°",     # ◀ ▶ render around the value now
                    lambda: self._shift_hue("local", 20),
                    step=lambda d: self._shift_hue("local", 5 * d)),
-            Action("u", f"Hue remote: {self._hue_deg('remote')}°  (←/→ 5°, Enter/click 20°)",
+            Action("u", f"Hue remote: {self._hue_deg('remote')}°",
                    lambda: self._shift_hue("remote", 20),
                    step=lambda d: self._shift_hue("remote", 5 * d)),
             Action("d", "Restore defaults", lambda: self._restore_defaults()),

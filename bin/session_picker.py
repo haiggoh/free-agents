@@ -586,6 +586,31 @@ class HoverOptionList(OptionList):
         super()._on_mouse_move(event)
         if self._mouse_hovering_over != before:
             self.post_message(self.Hovered(self._mouse_hovering_over))
+        if self.id == "actions":
+            self._update_arrow_hover(event)
+
+    def _update_arrow_hover(self, event):
+        """Hover over a ◀/▶ glyph highlights only that glyph (0.55.2): recompute the hovered
+        glyph and re-render if it changed. The row itself never highlights (CSS override)."""
+        app = self.app
+        hover = None
+        idx = self._mouse_hovering_over
+        if idx is not None:
+            try:
+                opt = self.get_option_at_index(idx)
+                text = str(opt.prompt)
+                oid = opt.id
+            except Exception:
+                text, oid = "", None
+            if oid and "◀" in text and "▶" in text:
+                col = event.screen_x - self.scrollable_content_region.x
+                if abs(col - text.index("◀")) <= 1:
+                    hover = (oid, -1)
+                elif abs(col - text.rindex("▶")) <= 1:
+                    hover = (oid, +1)
+        if getattr(app, "_arrow_hover", None) != hover:
+            app._arrow_hover = hover
+            app.render_model()
 
     def _on_leave(self, event):
         super()._on_leave(event)
@@ -611,13 +636,14 @@ class HoverOptionList(OptionList):
                 text = ""
             if "◀" in text and "▶" in text:
                 # Click x is screen-relative: compare against the content region's
-                # absolute screen x (list has padding 0 1, no border)
+                # absolute screen x (list has padding 0 1, no border). The spaces around
+                # each glyph count as part of the arrow (user 2026-11-06: bigger hit target).
                 col = event.screen_x - self.scrollable_content_region.x
-                if col == text.index("◀"):
+                if abs(col - text.index("◀")) <= 1:
                     self.app._click_indicator(idx, -1)
                     event.stop()
                     return
-                if col == text.rindex("▶"):
+                if abs(col - text.rindex("▶")) <= 1:
                     self.app._click_indicator(idx, +1)
                     event.stop()
                     return
@@ -773,6 +799,12 @@ class Picker(App):
     OptionList > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: none; }
     OptionList:focus > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: bold; }
     OptionList > .option-list--option-hover { background: ansi_default; color: ansi_bright_blue; }
+    /* 0.55.2 (user 2026-11-06): hovering an arrow must highlight ONLY the arrow, never the
+       whole actions row — so the actions list gets no row-hover recolor at all; the ◀/▶
+       glyphs are permanently accent-styled and get a reverse highlight while hovered
+       (re-rendered per glyph by HoverOptionList._on_mouse_move). The rows list keeps the
+       soft-blue hover (the info box follows the pointer there). */
+    #actions > .option-list--option-hover { background: ansi_default; color: ansi_default; }
     /* Every text input (the live filter, the inline prompts): a SYMMETRIC rounded frame.
        Textual's default `tall` border draws barbs on the left that the right side has not
        (user 2026-10-22), so inputs looked lopsided; `round` matches the info box's frame. */
@@ -1568,13 +1600,42 @@ class Picker(App):
         self.action_ids = []  # Track action IDs for keyboard navigation
         rendered, self._collapsed_actions = m.rendered_actions(sm)
         collapsed = bool(self._collapsed_actions)
-        # Cycle-indicator plan: pad cycle-row labels to one fixed width so the ▶ glyph does not
-        # jump sideways when a cycled value changes width (same lesson as the nicegui ON/OFF
-        # chip min-width fix, 2026-11-05).
+        # Cycle-indicator placement (user 2026-11-06, nicegui parity): arrows flank the VALUE,
+        # not the whole row — "KEY) name: ◀ value ▶". The value is padded to one fixed width
+        # so the ▶ never jumps when a cycled value changes width (lesson from the nicegui
+        # ON/OFF chip min-width fix).
         def _plain(a):
             return a.label.plain if isinstance(a.label, Text) else str(a.label)
-        cycle_w = max((len(_plain(a)) for a in rendered
-                       if a.step is not None and a not in (m.SETTINGS_GROUP, m.MODEL_GROUP)),
+
+        def _split_value(a):
+            """(head, value) for a cycle row: head ends at the last ': ' (or the typed name);
+            value is the choice label when the row is typed, else the text after the colon."""
+            lbl = a.label
+            plain = lbl.plain if isinstance(lbl, Text) else str(lbl)
+            choice_label = getattr(a, "choice_label", None)
+            value_fn = getattr(a, "value", None)
+            if choice_label is not None and value_fn is not None:
+                try:
+                    v = choice_label(value_fn())
+                except Exception:
+                    v = None
+                if v is not None:
+                    name = getattr(a, "name", "")
+                    head = name if name else (plain.rsplit(": ", 1)[0] + ": " if ": " in plain else plain)
+                    return head, str(v)
+            if ": " in plain:
+                i = plain.rindex(": ")
+                j = i + 1
+                while j < len(plain) and plain[j] == " ":    # keep the lane pad in the head so
+                    j += 1                                     # both rows' values align (swatch col)
+                if isinstance(lbl, Text):
+                    return lbl[:j], lbl[j:]                    # keep swatch/color spans in the value
+                return plain[:j], plain[j:]
+            return plain, ""
+        cycle_rows = [a for a in rendered
+                      if a.step is not None and a not in (m.SETTINGS_GROUP, m.MODEL_GROUP)]
+        cycle_vals = {id(a): _split_value(a) for a in cycle_rows}
+        cycle_w = max((len(v.plain if isinstance(v, Text) else str(v)) for _, v in cycle_vals.values()),
                       default=0)
         # A nav-ONLY actions pane on a screen WITH rows (API keys setup) renders BELOW the rows,
         # so Back is the last row on screen like every other submenu (user 2026-10-31: it used
@@ -1628,15 +1689,28 @@ class Picker(App):
             # label and flattens every style — the 0.35.0 swatch/hex-colour bug
             # (user 2026-10-15; the f-string predates the theme work entirely).
             prompt = Text(f"  {a.key.upper()}) ")
-            if a.step is not None:           # cycle row: ◀ ▶ indicators, clickable (0.55.x plan)
-                prompt.append("◀ ", style="bold")
-            if isinstance(a.label, Text):
+            if a.step is not None:           # cycle row: arrows flank the VALUE (nicegui parity)
+                head, val = cycle_vals[id(a)]
+                oid = f"a:{len(self.action_ids)-1}"
+                hover = getattr(self, "_arrow_hover", None)
+                left_style = "bold reverse bright_yellow" if hover == (oid, -1) else "bold bright_yellow"
+                right_style = "bold reverse bright_yellow" if hover == (oid, +1) else "bold bright_yellow"
+                if isinstance(head, Text):
+                    prompt += head
+                else:
+                    prompt.append(str(head))
+                prompt.append("◀ ", style=left_style)    # accent: arrows are the buttons
+                val_plain = val.plain if isinstance(val, Text) else str(val)
+                if isinstance(val, Text):
+                    prompt += val
+                    prompt.append(" " * max(0, cycle_w - len(val_plain)))        # fixed ▶ column
+                else:
+                    prompt.append(val_plain + " " * max(0, cycle_w - len(val_plain)))
+                prompt.append("▶", style=right_style)
+            elif isinstance(a.label, Text):
                 prompt += a.label            # rich Text + Text keeps the spans
             else:
                 prompt.append(str(a.label))
-            if a.step is not None:
-                prompt.append(" " * max(0, cycle_w - len(_plain(a))))   # fixed ▶ column
-                prompt.append(" ▶", style="bold")
             if enabled_str:
                 prompt.append(enabled_str)
             actions_list.add_option(Option(prompt, id=f"a:{len(self.action_ids)-1}"))

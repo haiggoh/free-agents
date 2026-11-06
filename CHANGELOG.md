@@ -1,3 +1,16 @@
+## [0.55.2] — 2026-11-06
+
+### Fixed — cycle-indicator placement, hit area and hover (user 2026-11-06)
+
+- ◀ ▶ now flank the VALUE, not the whole row: cycle rows render as `name: ◀ value ▶`
+  (nicegui parity), with the value padded to a fixed width so ▶ never jumps when a
+  cycled value changes width. Theme rows keep their swatch/color spans in the value.
+- The spaces around each glyph count as part of the arrow for clicking (|col−glyph| ≤ 1).
+- Hovering a glyph highlights only that glyph (reverse accent, re-rendered per glyph);
+  the actions row itself no longer recolors on hover. The model-list hover is unchanged.
+- Hue rows drop the redundant `(←/→ 5°, Enter/click 20°)` hint — the arrows show it now.
+- PTY tests updated/extended (placement, fixed ▶ column, space-inclusive clicks,
+  glyph-only hover); harness normalizes the glyphs when matching label needles.
 ## [0.55.1] — 2026-11-05
 
 ### Added — csl cycle indicators (Textual picker)

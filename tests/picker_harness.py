@@ -63,6 +63,13 @@ def inventory_stub(text):
         "EOF\nexit 0; }; done\n" + RECORDER.split("\n", 1)[1]
 
 
+def _norm(s: str) -> str:
+    """0.55.2: cycle rows render "name: ◀ value ▶" — normalize so old "name: value" needles
+    still match: drop the glyphs and the one padding space they bring. Other spacing
+    (e.g. "0.16.1  (installed)") is preserved."""
+    return s.replace("◀ ", "").replace(" ▶", "").replace("◀", "").replace("▶", "")
+
+
 class _StubbedEnv(unittest.TestCase):
     """Temp dir with recorder stubs, a private config dir, a 700 keys dir, a workdir."""
 
@@ -206,7 +213,7 @@ class PilotHelper:
     def labels(self, which="actions"):
         from textual.widgets import OptionList
         ol = self.app.query_one(f"#{which}", OptionList)
-        return [str(ol.get_option_at_index(i).prompt) for i in range(ol.option_count)]
+        return [_norm(str(ol.get_option_at_index(i).prompt)) for i in range(ol.option_count)]
 
     def text(self):
         return "\n".join([self.title(), *self.labels("actions"), *self.labels("rows"), self.status()])
@@ -249,7 +256,7 @@ class PilotHelper:
         self.case.fail(f"timed out waiting for {what}; screen={self.screen()}\n{self.text()}")
 
     async def wait_text(self, needle, secs=8):
-        await self.wait_for(lambda: needle in self.text(), repr(needle), secs)
+        await self.wait_for(lambda: _norm(needle) in self.text(), repr(needle), secs)
 
     async def wait_screen(self, name, secs=8):
         await self.wait_for(lambda: self.screen() == name, f"screen {name}", secs)

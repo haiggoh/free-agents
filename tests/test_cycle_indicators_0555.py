@@ -65,6 +65,12 @@ class CycleIndicators(PilotCase):
                 if a.step is not None:
                     self.assertIn("◀", text, f"cycle row {a.key} missing ◀: {text!r}")
                     self.assertIn("▶", text, f"cycle row {a.key} missing ▶: {text!r}")
+                    # arrows flank the VALUE, not the whole row (user 2026-11-06, nicegui parity):
+                    # ◀ comes after the last ': ' and ▶ after the value
+                    if ": " in text:
+                        self.assertGreater(text.index("◀"), text.rindex(": "),
+                                           f"◀ must sit before the value, not the row: {text!r}")
+                    self.assertLess(text.index("◀"), text.rindex("▶"))
                 else:
                     self.assertNotIn("◀", text, f"non-cycle row {a.key} gained ◀: {text!r}")
                     self.assertNotIn("▶", text, f"non-cycle row {a.key} gained ▶: {text!r}")
@@ -86,6 +92,49 @@ class CycleIndicators(PilotCase):
             self.assertNotEqual(label0, label2, "clicking ◀ must step back")
             await h.press("right")                   # right arrow == ▶
             self.assertEqual(row_label(h, "e"), label0, "◀ then Right must return to the start value")
+            # the spaces around the glyph are part of the arrow (user 2026-11-06): clicking
+            # the space just left of ◀ must step back too
+            from textual.widgets import OptionList
+            ol = h.app.query_one("#actions", OptionList)
+            idx = next(i for i, a in enumerate(h.app.action_ids) if a.key == "e")
+            opt_i = next(j for j in range(ol.option_count)
+                         if ol.get_option_at_index(j).id == f"a:{idx}")
+            text = str(ol.get_option_at_index(opt_i).prompt)
+            space_col = 1 + text.index("◀") - 1
+            await h.pilot.click("#actions", offset=(space_col, opt_i))
+            await h.pilot.pause(0.3)
+            self.assertNotEqual(row_label(h, "e"), label0, "clicking the space before ◀ must step back")
+            await h.press("right")
+            self.assertEqual(row_label(h, "e"), label0)
+            # ▶ stays at a fixed column while the value changes width (no jumping)
+            await click_at_text(h, "e", "▶")
+            text_after = row_label(h, "e")
+            self.assertEqual(text.rindex("▶"), text_after.rindex("▶"),
+                             "▶ column must not move when the value width changes")
+        self.run_picker(s, start="local")
+
+    def test_arrow_hover_highlights_only_the_glyph(self):
+        async def s(app, pilot, h):
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
+            await h.expand_settings()
+            from textual.widgets import OptionList
+            ol = h.app.query_one("#actions", OptionList)
+            idx = next(i for i, a in enumerate(app.action_ids) if a.key == "e")
+            opt_i = next(j for j in range(ol.option_count)
+                         if ol.get_option_at_index(j).id == f"a:{idx}")
+            oid = ol.get_option_at_index(opt_i).id
+            text = str(ol.get_option_at_index(opt_i).prompt)
+            # hover the ◀ glyph (incl. its surrounding space): hover state tracks the glyph
+            await h.pilot.hover("#actions", offset=(1 + text.index("◀"), opt_i))
+            await h.pilot.pause(0.4)
+            self.assertEqual(getattr(app, "_arrow_hover", None), (oid, -1),
+                             "hovering ◀ must mark only that glyph")
+            # hover the middle of the row label: no glyph hover
+            await h.pilot.hover("#actions", offset=(1 + text.index("Effort") + 2, opt_i))
+            await h.pilot.pause(0.4)
+            self.assertIsNone(getattr(app, "_arrow_hover", None),
+                              "hovering the row label must not highlight any arrow")
         self.run_picker(s, start="local")
 
     def test_row_click_is_enter_and_hue_split(self):
@@ -103,7 +152,7 @@ class CycleIndicators(PilotCase):
                                   if ol.get_option_at_index(j).id == f"a:{idx}")
 
             def deg():
-                return int(re.search(r"Hue local: (\d+)°", row_label(h, "y")).group(1))
+                return int(re.search(r"(\d+)°", row_label(h, "y")).group(1))
 
             d0 = deg()
             # hue is re-read via an RGB round-trip, so allow ±1° quantization on every read
