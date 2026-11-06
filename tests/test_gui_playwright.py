@@ -398,6 +398,21 @@ class GuiStaleTests(unittest.TestCase):
                 p.click('.nav-row[data-target="home"]')
                 p.wait_for_selector('.nav-row[data-target="remote"]', timeout=180000)
                 p.click('.nav-row[data-target="remote"]')           # back while the first load is still running
+                p.wait_for_selector(".gui-search input", timeout=180000)
+                p.locator(".action-row", has_text="Choose model").first.click()
+                p.wait_for_selector(".lane-list .group-header", timeout=240000)
+                while True:                                   # expand all provider groups (re-query: paint rebuilds)
+                    hdrs = p.locator(".lane-list .group-header")
+                    clicked = False
+                    for i in range(hdrs.count()):
+                        h = hdrs.nth(i)
+                        if "▸" in h.inner_text():
+                            h.click()
+                            clicked = True
+                            p.wait_for_timeout(500)
+                            break
+                    if not clicked:
+                        break
                 p.wait_for_selector(".model-row", timeout=240000)
                 p.wait_for_timeout(4000)         # let the slow first load land — must be Stale
                 self.assertEqual(p.locator(".model-row").count(), 2,
@@ -475,7 +490,9 @@ class GuiEmptyTests(unittest.TestCase):
                 browser = pw.chromium.launch()
                 p = browser.new_page()
                 p.goto(app.base + "/remote")
-                p.wait_for_selector("#empty-state", timeout=180000)
+                p.wait_for_selector(".gui-search input", timeout=180000)
+                p.locator(".action-row", has_text="Choose model").first.click()   # open the (empty) list
+                p.wait_for_selector(".empty-state", timeout=180000)             # class, not id
                 browser.close()
         finally:
             app.stop()
