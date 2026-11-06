@@ -80,8 +80,11 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
                                        label="Model settings" if gid == "model" else "Advanced",
                                        group=gid))
             continue
-        if a.choices is not None:
-            kind = "toggle" if len(a.choices) == 2 and set(a.choices) <= {False, True} else "select"
+        if a.choices is not None or a.step is not None:
+            # cycle row: typed (choices) or a custom stepper without a choices tuple
+            # (e.g. the memguard percent rows) — both cycle via ◀ ▶
+            kind = "toggle" if (a.choices is not None and len(a.choices) == 2
+                                and set(a.choices) <= {False, True}) else "select"
         elif a.section in NAV_SECTIONS:
             kind = "nav"
         else:

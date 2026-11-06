@@ -114,9 +114,15 @@ def build() -> None:
             elif "auto" in lname and v in getattr(m, "AUTO_MODE_LABELS", {}):
                 v = m.AUTO_MODE_LABELS[v]
         if v is None or v == "":
-            # unset optional value (temperature "" / None): the SAME label csl shows —
-            # read from the model, never rephrased here (user 2026-11-05)
-            v = m.NOT_SET_LABEL
+            # untyped stepper (no value fn, e.g. memguard percent rows): show the value part
+            # of the row label (label was built with the current value at screen construction)
+            lbl = action.label if action is not None else ""
+            plain = lbl.plain if hasattr(lbl, "plain") else str(lbl)
+            if isinstance(v, str) and v == "" or v is None:
+                if ": " in plain:
+                    return plain.rsplit(": ", 1)[1].strip()
+                # unset optional value (temperature "" / None): the SAME label csl shows
+                return m.NOT_SET_LABEL
         return v
 
     def _binary_on(action) -> bool:
@@ -137,6 +143,16 @@ def build() -> None:
             if (c not in (False, 0)) == bool(on):
                 return c
         return True if on else False
+
+    def wire_rerender(body, nav) -> None:
+        """Rebuild a page's rows from a FRESH screen (untyped steppers embed the value in
+        their label, which is stale after a step — the csl re-renders the same way)."""
+        def _rerender():
+            scr2 = pc.build_screen(nav, get_settings(), loader.cache).screen
+            body.clear()
+            with body:
+                render_rows(scr2)
+        shared["rerender"] = _rerender
 
     def render_rows(scr) -> None:
         # csl parity (m.rendered_actions): lane screens fold model/settings rows under two
@@ -169,9 +185,54 @@ def build() -> None:
             with (target if target is not None else nullcontext()):
                 _render_row(c, action)
 
+    def _rich_html(t) -> str:
+        """rich Text -> HTML with inline span styles (theme swatches: 'on #FFD700' -> background).
+        The GUI used to str() these labels, flattening the swatches away (0.35.0-class bug)."""
+        import html as _html
+        pieces = []
+        pos = 0
+        for sp in sorted(t.spans, key=lambda s: s.start):
+            if sp.start > pos:
+                pieces.append(_html.escape(t.plain[pos:sp.start]))
+            seg = _html.escape(t.plain[sp.start:sp.end])
+            css = []
+            toks = str(sp.style).split()
+            i = 0
+            while i < len(toks):
+                tok = toks[i]
+                if tok == "on" and i + 1 < len(toks):          # rich writes "on #FFD700" as two tokens
+                    css.append(f"background:{toks[i + 1]}")
+                    i += 2
+                    continue
+                if tok == "bold":
+                    css.append("font-weight:bold")
+                elif tok.startswith("#"):
+                    css.append(f"color:{tok}")
+                i += 1
+            pieces.append(f'<span style="{";".join(css)}">{seg}</span>' if css else seg)
+            pos = max(pos, sp.end)
+        pieces.append(_html.escape(t.plain[pos:]))
+        return "".join(pieces)
+
+    def _label_value_html(action):
+        """The value part of a rich cycle-row label (after the last ': '), as HTML —
+        keeps the swatch spans. Returns None for plain labels. (Duck-typed: the GUI venv
+        has no rich — the model imports it only under TYPE_CHECKING.)"""
+        lbl = action.label if action is not None else None
+        if lbl is None or not hasattr(lbl, "spans") or not hasattr(lbl, "plain"):
+            return None
+        plain = lbl.plain
+        if ": " not in plain:
+            return _rich_html(lbl)
+        i = plain.rindex(": ")
+        j = i + 1
+        while j < len(plain) and plain[j] == " ":
+            j += 1
+        return _rich_html(lbl[j:])
+
     def _render_row(c, action) -> None:
-            if c.kind in ("select", "toggle") and action is not None and action.choices is not None:
-                choices = list(action.choices)
+            if c.kind in ("select", "toggle") and action is not None and action.step is not None:
+                choices = list(action.choices) if action.choices is not None else []
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
                 if binary:
                     # native checkbox styled as the M3 pill switch; Quasar keeps state in the
@@ -198,7 +259,14 @@ def build() -> None:
                     with ui.row().classes("cycle-row items-center gap-1 w-full"):
                         name_lbl = ui.label(f"{name}:").classes("cycle-name row-action")
                         left = ui.label("<").classes("cycle-arrow cycle-left")
-                        val = ui.label(str(_cycle_value(action))).classes("cycle-value row-action")
+                        val_html = _label_value_html(action) if action is not None else None
+                        if val_html is not None:
+                            # rich value (theme swatch): HTML, rebuilt on every cycle
+                            val = ui.element("div").classes("cycle-value row-action")
+                            with val:
+                                ui.html(val_html)
+                        else:
+                            val = ui.label(str(_cycle_value(action))).classes("cycle-value row-action")
                         right = ui.label(">").classes("cycle-arrow cycle-right")
                         left.on("click", lambda a=action, v=val: _cycle(a, v, -1))
                         right.on("click", lambda a=action, v=val: _cycle(a, v, +1))
@@ -209,12 +277,19 @@ def build() -> None:
                 # nav-section rows only RETURN a Nav, so calling run() here is side-effect-free.
                 # Mutating "button" rows must NEVER run at render time (auto-sync bug 2026-11-05).
                 res = action.run()
-                target = "home" if res.target == "home" else res.target
+                # tool panels that have a real GUI screen get mapped to it (lowkey, download)
+                target = {"tool:lowkey": "lowkey", "tool:download": "download"}.get(res.target, res.target)
+                target = "home" if target == "home" else target
                 # ui.link for real SPA navigation; .menu-item CSS overrides the link look
                 row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
                 row.props["data-target"] = target
             else:
-                row = ui.label(c.label).classes("menu-item action-row")
+                lbl = action.label if action is not None else None
+                if lbl is not None and hasattr(lbl, "spans") and hasattr(lbl, "plain"):
+                    # rich label (theme swatch rows): keep the span colors as HTML
+                    row = ui.html(_rich_html(lbl)).classes("menu-item action-row")
+                else:
+                    row = ui.label(c.label).classes("menu-item action-row")
                 if action is not None and action.key == "c" and shared.get("toggle_list"):
                     row.on("click", lambda: shared["toggle_list"]())   # "Choose model" toggles the list
                 else:
@@ -231,7 +306,18 @@ def build() -> None:
     def _cycle(action, val, d: int) -> None:
         if action.step:
             action.step(d)
-        val.set_text(str(_cycle_value(action)))
+        if action is not None and getattr(action, "value", None) is None and shared.get("rerender"):
+            # untyped stepper: its label embeds the value and is stale after the step —
+            # rebuild the page's rows from a fresh screen so the label (and dependents) update
+            shared["rerender"]()
+            return
+        html = _label_value_html(action) if action is not None else None
+        if html is not None and not hasattr(val, "set_text"):
+            val.clear()                       # rich value: rebuild the swatch HTML
+            with val:
+                ui.html(html)
+        else:
+            val.set_text(str(_cycle_value(action)))
 
     def _toggle_binary(action, on, val=None) -> None:
         # set the EXACT choice via put when the row is typed — stepping a (None, False) list
@@ -265,6 +351,7 @@ def build() -> None:
         body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
             render_rows(scr)
+        wire_rerender(body, m.Nav("home", m.HOME_OWNED))
         ui.label(f"free-agents v{m.plugin_version()}").classes("text-xs italic opacity-50 version-footer")
 
     def make_lane(target: str, kind: str, loader_fn) -> None:
@@ -276,6 +363,8 @@ def build() -> None:
             shared["toggle_list"] = lambda: None     # placeholder; reassigned below before any click can fire
             with body:
                 render_rows(scr)
+            wire_rerender(body, m.Nav(target, m.HOME_OWNED))
+            with body:
                 search = ui.input(placeholder="type to filter models").classes("gui-search w-full")
                 list_box = ui.column().classes("w-full gap-1 lane-list")
                 list_box.props["style"] = "display:none"     # hidden until "Choose model" (csl parity)
@@ -384,3 +473,4 @@ def build() -> None:
         body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
             render_rows(scr)
+        wire_rerender(body, m.Nav(full_path, m.HOME_OWNED))

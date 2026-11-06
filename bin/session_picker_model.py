@@ -2624,13 +2624,17 @@ class MemoryGuardScreen(Screen):
     def _toggle(self, key):
         self._set(key, not self.value(key))
 
-    def _cycle(self, key, steps):
-        """Next step that keeps soft below hard; a pair-breaking step is skipped, never saved."""
+    def _cycle(self, key, steps, d: int = 1):
+        """Next/previous step that keeps soft below hard; a pair-breaking step is skipped,
+        never saved. d=-1 walks backwards (GUI ◀ arrow)."""
         cur = self.value(key)
         order = list(steps)
-        start = order.index(cur) + 1 if cur in order else 0
+        if cur in order:
+            start = (order.index(cur) + d) % len(order)
+        else:
+            start = 0 if d > 0 else len(order) - 1
         for i in range(len(order)):
-            cand = order[(start + i) % len(order)]
+            cand = order[(start + i * d) % len(order)]
             soft = cand if key == "soft_pct" else self.value("soft_pct")
             hard = cand if key == "hard_pct" else self.value("hard_pct")
             if soft < hard:
@@ -2645,17 +2649,31 @@ class MemoryGuardScreen(Screen):
         def onoff(v):
             return "ON" if v else "OFF"
         acts = [
-            Action("g", f"{OOM_PROTECTION_NAME}: {onoff(on)}", lambda: self._toggle("enabled")),
-            Action("t", f"Start sessions inside tmux (lets the guard type /compact): {onoff(self.value('tmux'))}",
-                   lambda: self._toggle("tmux"), enabled=on),
+            # typed rows (choices/value/put/step) so the NiceGUI adapter renders switches and
+            # ◀ ▶ cycle arrows; csl behavior unchanged (run == step(+1) here)
+            setting("g", f"{OOM_PROTECTION_NAME}: {onoff(on)}", (False, True),
+                    lambda: bool(self.value("enabled")), lambda v: self._set("enabled", bool(v))),
+            setting("t", f"Start sessions inside tmux (lets the guard type /compact): {onoff(self.value('tmux'))}",
+                    (False, True), lambda: bool(self.value("tmux")), lambda v: self._set("tmux", bool(v)),
+                    enabled=on),
             Action("s", f"Compact at RAM ≥ {self.value('soft_pct')}% (when the session is idle)",
-                   lambda: self._cycle("soft_pct", self.SOFT_STEPS), enabled=on),
+                   lambda: self._cycle("soft_pct", self.SOFT_STEPS), enabled=on,
+                   step=lambda d: self._cycle("soft_pct", self.SOFT_STEPS, d),
+                   choices=tuple(self.SOFT_STEPS), value=lambda: self.value("soft_pct"),
+                   put=lambda v: self._set("soft_pct", v)),
             Action("h", f"Compact the largest session at once at RAM ≥ {self.value('hard_pct')}%",
-                   lambda: self._cycle("hard_pct", self.HARD_STEPS), enabled=on),
+                   lambda: self._cycle("hard_pct", self.HARD_STEPS), enabled=on,
+                   step=lambda d: self._cycle("hard_pct", self.HARD_STEPS, d),
+                   choices=tuple(self.HARD_STEPS), value=lambda: self.value("hard_pct"),
+                   put=lambda v: self._set("hard_pct", v)),
             Action("w", f"Wait for {self.value('quiet_s')}s of no typing before typing into a session",
-                   lambda: self._cycle("quiet_s", self.QUIET_STEPS), enabled=on),
-            Action("c", f"After a memory-limit abort, continue by itself: {onoff(self.value('auto_continue'))}",
-                   lambda: self._toggle("auto_continue"), enabled=on),
+                   lambda: self._cycle("quiet_s", self.QUIET_STEPS), enabled=on,
+                   step=lambda d: self._cycle("quiet_s", self.QUIET_STEPS, d),
+                   choices=tuple(self.QUIET_STEPS), value=lambda: self.value("quiet_s"),
+                   put=lambda v: self._set("quiet_s", v)),
+            setting("c", f"After a memory-limit abort, continue by itself: {onoff(self.value('auto_continue'))}",
+                    (False, True), lambda: bool(self.value("auto_continue")),
+                    lambda v: self._set("auto_continue", bool(v)), enabled=on),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
