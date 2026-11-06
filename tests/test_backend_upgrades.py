@@ -107,6 +107,46 @@ class Upgrades(unittest.TestCase):
     def omlx(self):
         return bu.Upgrade("omlx", "0.7.0", "0.7.1rc1", ["brew", "upgrade", "jundot/omlx/omlx"], "homebrew")
 
+    def test_prompt_prints_the_duration_and_options_notice_verbatim(self):
+        # user 2026-11-06: the notice text is user-verbatim and must stay true — the
+        # backend-manager menu offers both settings it names
+        self.seed(self.omlx())
+        out = io.StringIO()
+        bu.prompt(False, ask=lambda q: "n", run_live=lambda c: 0,
+                  run=FakeShell(brew={"omlx": "0.7.0"}), out=out)
+        self.assertIn(bu.UPGRADE_NOTICE, out.getvalue())
+        self.assertIn("This update may take several minutes", out.getvalue())
+
+    def test_notify_off_silences_the_prompt_completely(self):
+        self.seed(self.omlx())
+        bu.save_state({**bu.load_state(), "notify": False})
+        out = io.StringIO()
+        asked = []
+        rc = bu.prompt(False, ask=lambda q: asked.append(q) or "n", run_live=lambda c: 0,
+                       run=FakeShell(brew={"omlx": "0.7.0"}), out=out)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.getvalue(), "", "silenced: no output at all")
+        self.assertEqual(asked, [], "silenced: never asked")
+
+    def test_set_and_get_pref_flags_roundtrip(self):
+        script = str(Path(__file__).resolve().parents[1] / "install" / "backend_upgrades.py")
+        env = dict(os.environ, LA_BACKEND_UPGRADES_STATE=str(self.state))
+        r = subprocess.run([sys.executable, script, "--set-notify", "0"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(bu.load_state()["notify"])
+        r = subprocess.run([sys.executable, script, "--get", "notify"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.stdout.strip(), "0")
+        subprocess.run([sys.executable, script, "--set-auto-install", "1"], capture_output=True, text=True, env=env)
+        self.assertTrue(bu.load_state()["auto_install"])
+        r = subprocess.run([sys.executable, script, "--get", "auto_install"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.stdout.strip(), "1")
+        # defaults when unset: notify on, auto-install off
+        self.state.unlink()
+        r = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "install" / "backend_upgrades.py"),
+                            "--get", "notify"], capture_output=True, text=True,
+                           env=dict(os.environ, LA_BACKEND_UPGRADES_STATE=str(self.state)))
+        self.assertEqual(r.stdout.strip(), "1")
+
     def test_yes_runs_the_command_and_clears_it(self):
         self.seed(self.omlx())
         ran = []
@@ -253,3 +293,30 @@ class Upgrades(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UpgradePrefRows(unittest.TestCase):
+    """The backend-manager menu offers the two settings the launch notice names."""
+
+    def test_runtime_manager_has_notify_and_auto_install_toggles(self):
+        import session_picker_model as m
+        s = m.Settings()
+        scr = m.RuntimeManagerScreen(s)
+        rows = {a.key: a for a in scr.actions()}
+        self.assertIn("n", rows)
+        self.assertIn("a", rows)
+        for k in ("n", "a"):
+            self.assertIsNotNone(rows[k].step, f"{k} must be a cycleable toggle row")
+            self.assertIsNotNone(rows[k].run)
+        self.assertIn("Notify about backend upgrades at launch", rows["n"].label)
+        self.assertIn("automatically in the background", rows["a"].label)
+        # toggling persists into the backend_upgrades state file (bu reads the env at call time)
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.dict(os.environ, {"LA_BACKEND_UPGRADES_STATE": str(Path(d) / "s.json")}):
+                # main's Action has no put field — the row's run() is step(+1) = toggle
+                rows["n"].run()
+                self.assertFalse(bu.load_state()["notify"])
+                rows["a"].run()
+                self.assertTrue(bu.load_state()["auto_install"])

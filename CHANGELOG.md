@@ -1,3 +1,16 @@
+## [0.55.3] — 2026-11-06
+
+### Changed — backend-upgrade launch prompt (user 2026-11-06)
+
+- The prompt now says upgrades may take several minutes, can be skipped and done later from
+  the backend manager menu, and that notification/auto-install preferences live there
+  (user-verbatim notice text, asserted in tests).
+- New backend-manager toggles, persisted in `backend-upgrades.json`: "Notify about backend
+  upgrades at launch" (OFF silences the prompt completely) and "Install backend upgrades
+  automatically in the background" (ON runs pending upgrades with `--yes` in the background
+  at launch). `LA_BACKEND_UPGRADES=0` still overrides everything.
+- `install/backend_upgrades.py` gains `--set-notify 0|1`, `--set-auto-install 0|1`,
+  `--get <key>` for the csl launch path and tests.
 ## [0.55.2] — 2026-11-06
 
 ### Fixed — cycle-indicator placement, hit area and hover (user 2026-11-06)

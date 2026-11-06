@@ -2797,9 +2797,59 @@ def runtime_actions(screen) -> list:
             acts.append(Action(key, f"{ec.gap(VERSION_OP_EMOJI[op])}{label}", pick(op), section="tools"))
     acts.append(Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", screen.owner),
                        section="tools"))
+    if type(screen).__name__ == "RuntimeManagerScreen":
+        # the launch-prompt's settings live in the backend manager (not the launchd page)
+        acts += _upgrade_pref_rows()
     acts += screen.nav_actions()
     check_action_table(acts)
     return acts
+
+
+def _bu_state_path() -> Path:
+    """The launch-time upgrade state file — same resolution as install/backend_upgrades.py,
+    read directly as JSON (executing that module per screen build is slow enough to shift
+    PTY-test timing, and the state is a flat dict)."""
+    import os as _os
+    return Path(_os.environ.get("LA_BACKEND_UPGRADES_STATE")
+                or Path.home() / ".claude" / "free-agents" / "backend-upgrades.json")
+
+
+def _bu_pref(key, default):
+    import json as _json
+    try:
+        return bool(_json.loads(_bu_state_path().read_text()).get(key, default))
+    except Exception:
+        return default
+
+
+def _set_bu_pref(key, value):
+    import json as _json
+    p = _bu_state_path()
+    data = {}
+    try:
+        data = _json.loads(p.read_text())
+    except Exception:
+        pass
+    if not isinstance(data, dict):
+        data = {}
+    data[key] = bool(value)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(_json.dumps(data, indent=2) + "\n")
+    tmp.replace(p)
+
+
+def _upgrade_pref_rows():
+    """Backend-manager toggles backing the launch prompt's notice text (user 2026-11-06):
+    silencing the notification and installing upgrades automatically in the background."""
+    notify = lambda: _bu_pref("notify", True)          # noqa: E731
+    auto = lambda: _bu_pref("auto_install", False)     # noqa: E731
+    return [
+        setting("n", f"Notify about backend upgrades at launch: {'ON' if notify() else 'OFF'}",
+                (False, True), notify, lambda v: _set_bu_pref("notify", v)),
+        setting("a", f"Install backend upgrades automatically in the background: {'ON' if auto() else 'OFF'}",
+                (False, True), auto, lambda v: _set_bu_pref("auto_install", v)),
+    ]
 
 
 def about_backend_lines(home: Path, repo: Path) -> list[str]:

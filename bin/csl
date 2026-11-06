@@ -595,9 +595,16 @@ fi
 
 # Pending backend upgrades (found by the weekly check): ask yes/no before the picker opens, so an
 # accepted upgrade runs with no extra step (user 2026-10-15). Silent when nothing is pending, and
-# only with a terminal; LA_BACKEND_UPGRADES=0 turns the question off.
+# only with a terminal; LA_BACKEND_UPGRADES=0 turns the question off entirely.
+# The backend-manager menu can also silence the prompt or install in the background
+# (install/backend_upgrades.py --set-notify / --set-auto-install).
 if [ -t 0 ] && [ -t 1 ] && [ "${LA_BACKEND_UPGRADES:-1}" != "0" ]; then
-  python3 "$CSL_DIR/../install/backend_upgrades.py" --prompt || true
+  _bu="$CSL_DIR/../install/backend_upgrades.py"
+  if [ "$(python3 "$_bu" --get auto_install 2>/dev/null)" = "1" ]; then
+    python3 "$_bu" --prompt --yes >/dev/null 2>&1 &      # background: no prompt, no wait
+  elif [ "$(python3 "$_bu" --get notify 2>/dev/null)" != "0" ]; then
+    python3 "$_bu" --prompt || true
+  fi
 fi
 
 # No arguments: the shared picker, starting at Home. Zero on-disk local models is a valid

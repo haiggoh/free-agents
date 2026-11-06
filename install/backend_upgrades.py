@@ -289,9 +289,19 @@ def still_needed(u: Upgrade, run: Runner = _run) -> bool:
     return True
 
 
+# Shown once per launch when upgrades are pending (user 2026-11-06, verbatim). It must stay
+# TRUE: the backend-manager menu offers both settings it names (notify / auto-install).
+UPGRADE_NOTICE = ("This update may take several minutes, you can skip it now and update later "
+                  "anytime from the backend manager menu. If you don't like being notified about "
+                  "updates or prefer updates being automatically installed in the background, "
+                  "there's options for that, too.")
+
+
 def prompt(assume_yes: bool, ask: Callable[[str], str] = input, run_live: Callable | None = None,
            run: Runner = _run, out=sys.stdout) -> int:
     data = load_state()
+    if not assume_yes and not data.get("notify", True):
+        return 0          # silenced in the backend manager: no prompt, no output
     offers = pending(data)
     todo = [u for u in offers if still_needed(u, run)]
     stale = {u.backend for u in offers} - {u.backend for u in todo}
@@ -303,6 +313,7 @@ def prompt(assume_yes: bool, ask: Callable[[str], str] = input, run_live: Callab
     run_live = run_live or (lambda cmd: subprocess.run(cmd).returncode)
     failed = 0
     print(f"⬆️  {len(todo)} backend upgrade(s) available.", file=out)
+    print(UPGRADE_NOTICE, file=out)
     for u in todo:
         cmd = live_command(u)
         q = f"Upgrade {u.backend} {u.current} -> {u.latest}?  runs: {' '.join(cmd)}  [Y/n] "
@@ -332,9 +343,26 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--check", action="store_true", help="refresh the pending list (network)")
     mode.add_argument("--list", action="store_true", help="show pending upgrades (no network)")
     mode.add_argument("--prompt", action="store_true", help="ask and run accepted upgrades")
+    mode.add_argument("--set-notify", choices=("0", "1"),
+                      help="silence (0) or enable (1) the launch-time upgrade prompt")
+    mode.add_argument("--set-auto-install", choices=("0", "1"),
+                      help="install pending upgrades automatically in the background (1) or ask (0)")
+    mode.add_argument("--get", choices=("notify", "auto_install"), help="print a setting's value")
     ap.add_argument("--yes", action="store_true", help="with --prompt: run every pending upgrade")
     ap.add_argument("--json", action="store_true", help="with --list/--check: JSON output")
     args = ap.parse_args(argv)
+    if args.set_notify is not None or args.set_auto_install is not None:
+        data = load_state()
+        if args.set_notify is not None:
+            data["notify"] = args.set_notify == "1"
+        if args.set_auto_install is not None:
+            data["auto_install"] = args.set_auto_install == "1"
+        save_state(data)
+        print(f"notify={data.get('notify', True)} auto_install={data.get('auto_install', False)}")
+        return 0
+    if args.get:
+        print("1" if load_state().get(args.get, args.get == "notify") else "0")
+        return 0
     if args.check or args.list:
         items = check() if args.check else pending()
         if args.json:
