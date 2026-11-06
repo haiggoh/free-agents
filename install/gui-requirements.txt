@@ -7,3 +7,4 @@
 # renderer needs the extra line in gui-requirements-linux-qt.txt (or the system WebKitGTK).
 nicegui==3.19.0
 pywebview==6.2.1
+rich==15.0.0    # theme-config swatch labels are rich Text in the shared model; without it they flatten to plain str
