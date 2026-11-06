@@ -2788,14 +2788,17 @@ class MemoryGuardScreen(Screen):
         if self.on_save:
             self.on_save({key: value})
 
+    def _toggle(self, key):
+        self._set(key, not self.value(key))
+
     def _cycle(self, key, steps, d: int = 1):
         """Nearest step in direction d that keeps soft below hard; a pair-breaking step is
-        skipped, never saved (0.55.6: d=-1 walks backward)."""
+        skipped, never saved (0.55.6: d=-1 walks backward; GUI ◀ arrow)."""
         cur = self.value(key)
         order = list(steps)
         start = order.index(cur) + d if cur in order else (0 if d > 0 else len(order) - 1)
         for i in range(len(order)):
-            cand = order[(start + i) % len(order)]
+            cand = order[(start + i * d) % len(order)]
             soft = cand if key == "soft_pct" else self.value("soft_pct")
             hard = cand if key == "hard_pct" else self.value("hard_pct")
             if soft < hard:
@@ -2810,26 +2813,33 @@ class MemoryGuardScreen(Screen):
         def onoff(v):
             return "ON" if v else "OFF"
         acts = [
+            # rebase union: main's labels= + the branch's typed (choices/value/put) metadata
             setting("g", f"{OOM_PROTECTION_NAME}: {onoff(on)}",
-                    (False, True), lambda: self.value("enabled"),
+                    (False, True), lambda: bool(self.value("enabled")),
                     lambda v: self._set("enabled", bool(v)), labels=("OFF", "ON")),
             setting("t", f"Start sessions inside tmux (lets the guard type /compact): {onoff(self.value('tmux'))}",
-                    (False, True), lambda: self.value("tmux"),
+                    (False, True), lambda: bool(self.value("tmux")),
                     lambda v: self._set("tmux", bool(v)), labels=("OFF", "ON"), enabled=on),
             Action("s", f"Compact idle sessions at RAM: ≥{self.value('soft_pct')}%",
                    lambda: self._cycle("soft_pct", self.SOFT_STEPS),
                    step=lambda d: self._cycle("soft_pct", self.SOFT_STEPS, d),
-                   labels=tuple(f"≥{v}%" for v in self.SOFT_STEPS), enabled=on),
+                   labels=tuple(f"≥{v}%" for v in self.SOFT_STEPS), enabled=on,
+                   choices=tuple(self.SOFT_STEPS), value=lambda: self.value("soft_pct"),
+                   put=lambda v: self._set("soft_pct", v)),
             Action("h", f"Compact the largest session at once at RAM: ≥{self.value('hard_pct')}%",
                    lambda: self._cycle("hard_pct", self.HARD_STEPS),
                    step=lambda d: self._cycle("hard_pct", self.HARD_STEPS, d),
-                   labels=tuple(f"≥{v}%" for v in self.HARD_STEPS), enabled=on),
+                   labels=tuple(f"≥{v}%" for v in self.HARD_STEPS), enabled=on,
+                   choices=tuple(self.HARD_STEPS), value=lambda: self.value("hard_pct"),
+                   put=lambda v: self._set("hard_pct", v)),
             Action("w", f"Quiet time before the guard types into a session: {self.value('quiet_s')}s",
                    lambda: self._cycle("quiet_s", self.QUIET_STEPS),
                    step=lambda d: self._cycle("quiet_s", self.QUIET_STEPS, d),
-                   labels=tuple(f"{v}s" for v in self.QUIET_STEPS), enabled=on),
+                   labels=tuple(f"{v}s" for v in self.QUIET_STEPS), enabled=on,
+                   choices=tuple(self.QUIET_STEPS), value=lambda: self.value("quiet_s"),
+                   put=lambda v: self._set("quiet_s", v)),
             setting("c", f"After a memory-limit abort, continue by itself: {onoff(self.value('auto_continue'))}",
-                    (False, True), lambda: self.value("auto_continue"),
+                    (False, True), lambda: bool(self.value("auto_continue")),
                     lambda v: self._set("auto_continue", bool(v)), labels=("OFF", "ON"), enabled=on),
         ]
         acts += self.nav_actions()
