@@ -25,25 +25,45 @@ class Loader:
     def __init__(self, cache: dict | None = None):
         self.cache: dict = cache if cache is not None else {}
         self._kind_gen: dict[str, int] = {}
-        self._page_gen: int = 0
+        # Continuation plan Phase 2: page generations are PER CLIENT — one browser window
+        # navigating away must not stale another window's in-flight load. Key "" is the
+        # legacy client-less generation (old single-client contract).
+        self._page_gen: dict[str, int] = {}
+        # Identical concurrent loads for the same kind are COALESCED: one fn run, every
+        # waiter gets the same result (Phase 2 — duplicate cache-miss loads were not coalesced).
+        self._inflight: dict[str, asyncio.Task] = {}
 
-    def leave_page(self) -> None:
-        """Call when navigating away: results in flight for the old page come back Stale."""
-        self._page_gen += 1
+    def leave_page(self, client: str | None = None) -> None:
+        """Call when navigating away: results in flight for that client's old page come back
+        Stale. No argument = the legacy client-less generation only."""
+        key = client or ""
+        self._page_gen[key] = self._page_gen.get(key, 0) + 1
 
-    async def load(self, kind: str, fn: Callable[[], Any]) -> Any:   # T | Stale
-        """Return the cached value for `kind` if present, else run `fn` off-thread.
+    async def load(self, kind: str, fn: Callable[[], Any], client: str | None = None) -> Any:   # T | Stale
+        """Return the cached value for `kind` if present, else run `fn` off-thread (coalesced
+        with any identical in-flight load).
 
-        The result is applied only if no newer load for the same kind started and no page
-        change happened meanwhile; otherwise STALE is returned.
+        The result is applied only if no newer load for the same kind started and the calling
+        client's page generation did not change meanwhile; otherwise STALE is returned.
         """
         if kind in self.cache:
             return self.cache[kind]
-        kind_gen = self._kind_gen.get(kind, 0) + 1
-        self._kind_gen[kind] = kind_gen
-        page_gen = self._page_gen
-        result = await asyncio.to_thread(fn)
-        if self._kind_gen.get(kind, 0) != kind_gen or self._page_gen != page_gen:
+        key = client or ""
+        page_gen = self._page_gen.get(key, 0)
+        kind_gen = self._kind_gen.get(kind, 0)
+        task = self._inflight.get(kind)
+        creator = task is None
+        if creator:
+            kind_gen += 1
+            self._kind_gen[kind] = kind_gen
+            task = asyncio.ensure_future(asyncio.to_thread(fn))
+            self._inflight[kind] = task
+        result = await task
+        if self._page_gen.get(key, 0) != page_gen:
             return STALE
-        self.cache[kind] = result
+        if creator:
+            self._inflight.pop(kind, None)
+            if self._kind_gen.get(kind, 0) != kind_gen:
+                return STALE
+            self.cache[kind] = result
         return result

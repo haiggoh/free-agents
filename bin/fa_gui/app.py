@@ -86,14 +86,23 @@ def build() -> None:
  shared=True)
 
     loader = Loader()
-    shared: dict = {}
+    # Process-global, shared INTENTIONALLY: the settings object + its savers (field-level
+    # locked merge is the cross-frontend write path) and the loader's inventory cache.
+    settings_state: dict = {}
+    # Continuation plan Phase 2: everything else is PER CLIENT (keyed by the websocket
+    # client id) — collapse state, the list toggle, the launch hook and the rerender closure
+    # are re-set on every page build, so one browser tab must never advance another's.
+    client_states: dict = {}
+
+    def cstate(client) -> dict:
+        return client_states.setdefault(client.id, {})
 
     def get_settings():
-        if "settings" not in shared:
+        if "settings" not in settings_state:
             cfg = Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR)
-            shared["savers"] = pc.Savers(cfg)
-            shared["settings"] = pc.build_settings(None, shared["savers"])
-        return shared["settings"]
+            settings_state["savers"] = pc.Savers(cfg)
+            settings_state["settings"] = pc.build_settings(None, settings_state["savers"])
+        return settings_state["settings"]
 
     def _cycle_value(action):
         # label text must match what csl shows on toggle (user 2026-11-04): choice_label first,
@@ -144,22 +153,22 @@ def build() -> None:
                 return c
         return True if on else False
 
-    def wire_rerender(body, nav) -> None:
+    def wire_rerender(body, nav, st: dict) -> None:
         """Rebuild a page's rows from a FRESH screen (untyped steppers embed the value in
         their label, which is stale after a step — the csl re-renders the same way)."""
         def _rerender():
             scr2 = pc.build_screen(nav, get_settings(), loader.cache).screen
             body.clear()
             with body:
-                render_rows(scr2)
-        shared["rerender"] = _rerender
+                render_rows(scr2, st)
+        st["rerender"] = _rerender
 
-    def render_rows(scr) -> None:
+    def render_rows(scr, st: dict) -> None:
         # csl parity (m.rendered_actions): lane screens fold model/settings rows under two
         # collapsible headers — "🔩 Model settings" / "🛠️ Advanced", triangle before the name,
         # both folded by default. The GUI keeps the rows in the DOM and folds with display:none.
         boxes: dict = {}
-        collapsed = shared.setdefault("collapsed", {"model": True, "settings": True})
+        collapsed = st.setdefault("collapsed", {"model": True, "settings": True})
         for c in render_plan(scr):
             action = next((a for a in scr.actions()
                            if (a.id or f"{type(scr).__name__}.{a.key}") == c.action_id), None)
@@ -183,7 +192,7 @@ def build() -> None:
             # top-level, so Back/Switch can never end up hidden inside a folded group
             target = boxes.get(c.group) if c.group else None
             with (target if target is not None else nullcontext()):
-                _render_row(c, action)
+                _render_row(c, action, st)
 
     def _rich_html(t) -> str:
         """rich Text -> HTML with inline span styles (theme swatches: 'on #FFD700' -> background).
@@ -230,7 +239,7 @@ def build() -> None:
             j += 1
         return _rich_html(lbl[j:])
 
-    def _render_row(c, action) -> None:
+    def _render_row(c, action, st: dict) -> None:
             if c.kind in ("select", "toggle") and action is not None and action.step is not None:
                 choices = list(action.choices) if action.choices is not None else []
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
@@ -268,11 +277,11 @@ def build() -> None:
                         else:
                             val = ui.label(str(_cycle_value(action))).classes("cycle-value row-action")
                         right = ui.label(">").classes("cycle-arrow cycle-right")
-                        left.on("click", lambda a=action, v=val: _cycle(a, v, -1))
-                        right.on("click", lambda a=action, v=val: _cycle(a, v, +1))
+                        left.on("click", lambda a=action, v=val: _cycle(a, v, -1, st))
+                        right.on("click", lambda a=action, v=val: _cycle(a, v, +1, st))
                         # csl parity: clicking the action item itself == Enter/click == ▶ (+1)
-                        name_lbl.on("click", lambda a=action, v=val: _cycle(a, v, +1))
-                        val.on("click", lambda a=action, v=val: _cycle(a, v, +1))
+                        name_lbl.on("click", lambda a=action, v=val: _cycle(a, v, +1, st))
+                        val.on("click", lambda a=action, v=val: _cycle(a, v, +1, st))
             elif c.kind == "nav":
                 # Continuation plan Phase 1: the route comes from RenderedControl.target
                 # (Action.nav_target metadata) — run() is NEVER called at render time
@@ -289,26 +298,26 @@ def build() -> None:
                     row = ui.html(_rich_html(lbl)).classes("menu-item action-row")
                 else:
                     row = ui.label(c.label).classes("menu-item action-row")
-                if action is not None and action.key == "c" and shared.get("toggle_list"):
-                    row.on("click", lambda: shared["toggle_list"]())   # "Choose model" toggles the list
+                if action is not None and action.key == "c" and st.get("toggle_list"):
+                    row.on("click", lambda: st["toggle_list"]())   # "Choose model" toggles the list
                 else:
-                    row.on("click", lambda a=action: _run_action(a))
+                    row.on("click", lambda a=action: _run_action(a, st))
 
-    def _run_action(action) -> None:
+    def _run_action(action, st: dict) -> None:
         if action is None or action.run is None:
             return
         res = action.run()
         # "Go launch" returns a LaunchRequest — run it exactly like a model-row click
-        if isinstance(res, m.LaunchRequest) and shared.get("launch_req"):
-            shared["launch_req"](res)
+        if isinstance(res, m.LaunchRequest) and st.get("launch_req"):
+            st["launch_req"](res)
 
-    def _cycle(action, val, d: int) -> None:
+    def _cycle(action, val, d: int, st: dict) -> None:
         if action.step:
             action.step(d)
-        if action is not None and getattr(action, "value", None) is None and shared.get("rerender"):
+        if action is not None and getattr(action, "value", None) is None and st.get("rerender"):
             # untyped stepper: its label embeds the value and is stale after the step —
             # rebuild the page's rows from a fresh screen so the label (and dependents) update
-            shared["rerender"]()
+            st["rerender"]()
             return
         html = _label_value_html(action) if action is not None else None
         if html is not None and not hasattr(val, "set_text"):
@@ -345,24 +354,28 @@ def build() -> None:
         # first launch must not look dead: build the UI only once the websocket is up
         # (user 2026-11-04: menu rendered but no hover/click on first launch)
         await client.connected()
+        loader.leave_page(client=client.id)     # Phase 2: this client's old page is gone
+        st = cstate(client)
         s = get_settings()
         scr = pc.build_screen(m.Nav("home", m.HOME_OWNED), s, loader.cache).screen
         body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
-            render_rows(scr)
-        wire_rerender(body, m.Nav("home", m.HOME_OWNED))
+            render_rows(scr, st)
+        wire_rerender(body, m.Nav("home", m.HOME_OWNED), st)
         ui.label(f"free-agents v{m.plugin_version()}").classes("text-xs italic opacity-50 version-footer")
 
     def make_lane(target: str, kind: str, loader_fn) -> None:
         @ui.page(f"/{target}")
         async def page(client):
             await client.connected()
+            loader.leave_page(client=client.id)     # Phase 2: this client's old page is gone
+            st = cstate(client)
             scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache).screen
             body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "", lane=True)
-            shared["toggle_list"] = lambda: None     # placeholder; reassigned below before any click can fire
+            st["toggle_list"] = lambda: None     # placeholder; reassigned below before any click can fire
             with body:
-                render_rows(scr)
-            wire_rerender(body, m.Nav(target, m.HOME_OWNED))
+                render_rows(scr, st)
+            wire_rerender(body, m.Nav(target, m.HOME_OWNED), st)
             with body:
                 search = ui.input(placeholder="type to filter models").classes("gui-search w-full")
                 list_box = ui.column().classes("w-full gap-1 lane-list")
@@ -375,7 +388,7 @@ def build() -> None:
                     stub = os.environ.get("FA_GUI_LAUNCH_STUB")
                     if stub:
                         Path(stub).write_text(json.dumps({"argv": pc.command_for(req)}))
-                shared["launch_req"] = _launch_req
+                st["launch_req"] = _launch_req
 
                 def do_launch(mid, mdl=None):
                     # csl launches the model directly on row click — no Launch button (user 2026-11-04)
@@ -434,12 +447,12 @@ def build() -> None:
                     visible = list_box.props.get("style", "") != "display:none"
                     list_box.props["style"] = "display:none" if visible else ""
 
-                shared["toggle_list"] = toggle_list
+                st["toggle_list"] = toggle_list
 
                 search.on_value_change(lambda e: paint(loader.cache.get(kind) or [], e.value))
 
                 async def fill():
-                    result = await loader.load(kind, loader_fn)
+                    result = await loader.load(kind, loader_fn, client=client.id)
                     if result is STALE:
                         return
                     paint(result, search.value or "")
@@ -469,7 +482,9 @@ def build() -> None:
                 ui.label("This screen is not built yet.").classes("text-sm opacity-70")
                 ui.link("🏠 Back to Home", "/home").classes("menu-item")
             return
+        loader.leave_page(client=client.id)     # Phase 2: this client's old page is gone
+        st = cstate(client)
         body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
-            render_rows(scr)
-        wire_rerender(body, m.Nav(full_path, m.HOME_OWNED))
+            render_rows(scr, st)
+        wire_rerender(body, m.Nav(full_path, m.HOME_OWNED), st)
