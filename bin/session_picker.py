@@ -704,16 +704,22 @@ def _is_binary(action) -> bool:
     return len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
 
 
-def _knob_text(pos: int) -> Text:
+def _knob_text(pos: int, filled: bool, moving: bool = False, flash: bool = False) -> Text:
     """One frame of the toggle knob: the knob at column `pos` (0 = OFF end, KNOB_CELLS-1 = ON
-    end) on a KNOB_CELLS-wide track. The far half reads as ON: filled knob, heavy track,
-    plain colour; the near half as OFF: hollow knob, thin track, dim."""
-    on_side = pos >= ec.KNOB_CELLS // 2
-    track = ec.KNOB_TRACK_ON if on_side else ec.KNOB_TRACK_OFF
-    knob = ec.KNOB_ON if on_side else ec.KNOB_OFF
-    cells = [track] * ec.KNOB_CELLS
-    cells[pos] = knob
-    return Text("".join(cells), style=None if on_side else "dim")
+    end) on a KNOB_CELLS-wide track. `filled` is the state the knob SHOWS — ON = filled knob in
+    plain colour, OFF = hollow knob, dim. In flight (`moving`) it keeps the state it started
+    from, drawn small; `flash` paints only the knob in KNOB_FLASH_STYLE on arrival (a span
+    colour overrides the row's hover blue)."""
+    track = ec.KNOB_TRACK_ON if filled else ec.KNOB_TRACK_OFF
+    if moving:
+        knob = ec.KNOB_ON_MOVING if filled else ec.KNOB_OFF_MOVING
+    else:
+        knob = ec.KNOB_ON if filled else ec.KNOB_OFF
+    base = None if filled else "dim"
+    out = Text(track * pos, style=base)
+    out.append(knob, style=(ec.KNOB_FLASH_STYLE if flash and ec.KNOB_FLASH_STYLE else base))
+    out.append(track * (ec.KNOB_CELLS - 1 - pos), style=base)
+    return out
 
 
 class HoverOptionList(OptionList):
@@ -1943,7 +1949,7 @@ class Picker(App):
                 else:
                     prompt.append(val_plain)
                 prompt.append(" " * (chip_w - cell_len(val_plain) + 1))
-                prompt += _knob_text(self._knob_pos((type(sm).__name__, a.key), on))
+                prompt += _knob_text(*self._knob_frame((type(sm).__name__, a.key), on))
                 if getattr(a, "value_suffix", None) is not None:
                     prompt += a.value_suffix if isinstance(a.value_suffix, Text) else Text(str(a.value_suffix))
             elif a.step is not None:         # cycle row: arrows flank the VALUE (nicegui parity)
@@ -2181,34 +2187,45 @@ class Picker(App):
         action.step(direction)
         self._rerender_keep_action(action_index)
 
-    def _knob_pos(self, kkey, on: bool) -> int:
-        """Where to draw a binary row's knob on THIS render. The render is the choke point every
-        route passes (click, Enter, ←/→, hotkey), so the slide starts here: when a row's value
-        differs from the one last drawn, the knob starts at the old end and _knob_tick walks it
-        to the new one. Keyed by (screen class, hotkey) — option ids repeat across screens."""
+    def _knob_frame(self, kkey, on: bool) -> tuple:
+        """(pos, filled, moving, flash) for a binary row's knob on THIS render. The render is the
+        choke point every route passes (click, Enter, ←/→, hotkey), so the slide starts here:
+        when a row's value differs from the one last drawn, the knob starts at the old end and
+        _knob_tick walks it to the new one, keeping its OLD look in flight and flashing on
+        arrival. Keyed by (screen class, hotkey) — option ids repeat across screens.
+        Animation state per row: {"pos", "target", "filled", "flash"} (flash = frames left)."""
         if not hasattr(self, "_knob_last"):
             self._knob_last, self._knob_anim, self._knob_timer = {}, {}, None
         target = ec.KNOB_CELLS - 1 if on else 0
         last = self._knob_last.get(kkey)
         self._knob_last[kkey] = on
         anim = self._knob_anim.get(kkey)
-        if anim is not None:
-            anim[1] = target                  # flipped again mid-slide: head for the new end
-            return anim[0]
-        if last is None or last == on:
-            return target
-        start = 0 if on else ec.KNOB_CELLS - 1
-        self._knob_anim[kkey] = [start, target]
-        if self._knob_timer is None:
-            self._knob_timer = self.set_interval(ec.KNOB_FRAME_S, self._knob_tick)
-        return start
+        if anim is None and last is not None and last != on:
+            anim = self._knob_anim[kkey] = {"pos": 0 if on else ec.KNOB_CELLS - 1,
+                                            "target": target, "filled": last, "flash": 0}
+            if self._knob_timer is None:
+                self._knob_timer = self.set_interval(ec.KNOB_FRAME_S, self._knob_tick)
+        if anim is None:
+            return target, on, False, False
+        if anim["target"] != target:           # flipped again mid-slide: head for the new end
+            anim["target"], anim["flash"] = target, 0
+        if anim["flash"]:
+            return anim["pos"], on, False, True
+        return anim["pos"], anim["filled"], anim["pos"] != anim["target"], False
 
     def _knob_tick(self) -> None:
         for kkey, anim in list(self._knob_anim.items()):
-            if anim[0] == anim[1]:
-                del self._knob_anim[kkey]
+            if anim["pos"] != anim["target"]:
+                anim["pos"] += 1 if anim["target"] > anim["pos"] else -1
+                if anim["pos"] == anim["target"]:
+                    # arrival: the new state shows now, flashing if a flash style is set
+                    anim["flash"] = ec.KNOB_FLASH_FRAMES if ec.KNOB_FLASH_STYLE else 0
+                    if not anim["flash"]:
+                        del self._knob_anim[kkey]
+            elif anim["flash"] > 1:
+                anim["flash"] -= 1
             else:
-                anim[0] += 1 if anim[1] > anim[0] else -1
+                del self._knob_anim[kkey]
         if not self._knob_anim and self._knob_timer is not None:
             self._knob_timer.stop()
             self._knob_timer = None

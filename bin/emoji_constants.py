@@ -312,7 +312,14 @@ KNOB_OFF = "○"
 KNOB_ON = "●"
 KNOB_TRACK_OFF = "─"
 KNOB_TRACK_ON = "─"     # user 2026-11-07: the track stays thin when ON (no heavy ━)
-KNOB_FRAME_S = 0.09      # 2 moves × 90 ms ≈ the nicegui .18s slide
+KNOB_FRAME_S = 0.05      # user 2026-11-07: faster (2 moves × 50 ms) — a terminal has no in-between frames
+# In flight (user 2026-11-07): the knob keeps its OLD state, drawn small, so the state change
+# lands on arrival. Set these equal to KNOB_OFF / KNOB_ON to turn the size change off.
+KNOB_OFF_MOVING = "◦"
+KNOB_ON_MOVING = "•"
+# Arrival flash on the knob only (a span colour beats the row's hover blue). None = no flash.
+KNOB_FLASH_STYLE = "bright_white"
+KNOB_FLASH_FRAMES = 2    # ≈ 100 ms at KNOB_FRAME_S
 # The value words that put the knob at the ON end (first word of the value: "ON (default)" counts).
 KNOB_ON_WORDS = ("ON", "ENABLED", "SHOWN")
 

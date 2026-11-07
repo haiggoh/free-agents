@@ -17,7 +17,6 @@ import pytest  # noqa: E402
 
 pytestmark = pytest.mark.load_sensitive
 
-TRACK = set("○●─━")
 
 
 def _row(h, key):
@@ -35,12 +34,32 @@ N = ec.KNOB_CELLS
 END = N - 1
 
 
+KNOBS = ec.KNOB_OFF + ec.KNOB_ON + ec.KNOB_OFF_MOVING + ec.KNOB_ON_MOVING
+TRACK = set(KNOBS + ec.KNOB_TRACK_OFF + ec.KNOB_TRACK_ON)
+
+
 def _knob(text):
     """The KNOB_CELLS-wide knob at the end of the row, and the knob's column inside it."""
     tail = text.rstrip()[-N:]
     assert set(tail) <= TRACK, f"no knob at the row end: {text!r}"
-    pos = next(i for i, c in enumerate(tail) if c in "○●")
+    pos = next(i for i, c in enumerate(tail) if c in KNOBS)
     return tail, pos
+
+
+def _row_rich(h, key):
+    """The row's prompt as rich Text (styles intact)."""
+    from textual.widgets import OptionList
+    ol = h.app.query_one("#actions", OptionList)
+    idx = next(i for i, a in enumerate(h.app.action_ids) if a.key == key)
+    return next(ol.get_option_at_index(i).prompt for i in range(ol.option_count)
+                if ol.get_option_at_index(i).id == f"a:{idx}")
+
+
+def _knob_styles(rich):
+    """Every span style covering the knob character (the last knob glyph in the row)."""
+    plain = rich.plain.rstrip()
+    i = max(plain.rfind(c) for c in KNOBS)
+    return [str(sp.style) for sp in rich.spans if sp.start <= i < sp.end]
 
 
 class ToggleKnob(PilotCase):
@@ -93,6 +112,39 @@ class ToggleKnob(PilotCase):
             on_row = _row(h, "t")[1] if final == END else _row(h, "m")[1]
             self.assertEqual(_knob(on_row)[1], END, f"expected an ON row here: {on_row!r}")
             self.assertNotIn("━", _knob(on_row)[0], f"ON track must stay thin: {on_row!r}")
+        self.run_picker(s, start="local")
+
+
+    def test_knob_keeps_its_state_in_flight_and_flashes_on_arrival(self):
+        """User 2026-11-07: the knob keeps its OLD state (hollow+dim from OFF, filled from ON)
+        while travelling, drawn small; it becomes the new state only on arrival, and flashes
+        bright white there (overriding the row's hover blue) before resting."""
+        async def s(app, pilot, h):
+            await self._open()(h)
+            for _ in range(2):                         # OFF→ON, then ON→OFF
+                start_on = _knob(_row(h, "t")[1])[1] == END
+                frames = []                            # (plain tail, knob styles)
+                await pilot.press("t")
+                end = time.time() + 0.6
+                while time.time() < end:
+                    await pilot.pause(0.005)
+                    r = _row_rich(h, "t")
+                    f = (_knob(r.plain)[0], tuple(_knob_styles(r)))
+                    if not frames or frames[-1] != f:
+                        frames.append(f)
+                arrive = next(i for i, (t, _) in enumerate(frames)
+                              if (ec.KNOB_OFF if start_on else ec.KNOB_ON) in t)
+                in_flight = frames[:arrive]
+                self.assertTrue(in_flight, f"no in-flight frame: {frames}")
+                moving = ec.KNOB_ON_MOVING if start_on else ec.KNOB_OFF_MOVING
+                for t, _ in in_flight:
+                    self.assertIn(moving, t, f"in flight the knob must keep its old state, small: {frames}")
+                self.assertTrue(any(ec.KNOB_FLASH_STYLE in st for st in frames[arrive][1]),
+                                f"arrival frame must flash {ec.KNOB_FLASH_STYLE}: {frames[arrive]}")
+                rest = frames[-1]
+                self.assertFalse(any(ec.KNOB_FLASH_STYLE in st for st in rest[1]),
+                                 f"the flash must end: {frames}")
+                self.assertIn(ec.KNOB_OFF if start_on else ec.KNOB_ON, rest[0], frames)
         self.run_picker(s, start="local")
 
 
