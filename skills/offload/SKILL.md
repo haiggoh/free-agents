@@ -31,6 +31,8 @@ bin/lowkey-cli.py             # (alias lk) free LOCAL model
 bin/csl                       # a full interactive session on either free lane
 ```
 
+Persist a dispatch result with `free-agent-tool.py --out FILE` — it writes the FULL envelope (`content`, `model_used`, `route`, `attempts`, …) atomically; never save `content` alone.
+
 Self-check before you claim you offloaded anything: **name the process that ran the tokens.** If
 the answer is not "a localhost port" or "a free provider's API", it was not free.
 

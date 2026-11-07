@@ -127,3 +127,4 @@ message to the user lists: release URL, gate counts, dogfood output, and the rev
 ## 6. Progress log (append one line per milestone; commit it with that milestone)
 
 - 2026-11-07 20:10 — handoff written; `fbc840d` la-evict `--orphans`, test_la_evict 135/0, mutations 2+2 red.
+- 2026-11-07 ~20:40 — Phase 1 TDD: `free-agent-tool.py --out FILE` (atomic full-envelope persist via tmp+os.replace; exit-2 guards parsed before stdin/dispatch: missing value, unknown flag, `--out`+`--list`/`--help`, missing directory; failed write → exit 1 naming PATH, tmp cleaned). `tests/test_free_agent_tool_out.py` drives the real CLI as a subprocess against a loopback fake (LA_REMOTE_REGISTRY_JSON → provider nvidia → 127.0.0.1), 18/18 green; sibling suites 53/53 green; one-line persist note added to `skills/offload/SKILL.md` (outside the fa:routing block). Mutation checks: pending, recorded with Phase 2.

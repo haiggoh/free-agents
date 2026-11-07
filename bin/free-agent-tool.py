@@ -8,6 +8,11 @@ Usage:
                                      #  "avoid_family"?: e.g. "google" for a cross-family review}
   free-agent-tool.py --list          # show the dispatch order and what is available now; sends nothing
   free-agent-tool.py --help
+  free-agent-tool.py --out FILE < task.json
+                                     # same dispatch, and the result JSON is ALSO written
+                                     # atomically to FILE: the FULL envelope (content,
+                                     # model_used, display, route, family, role, attempts, …;
+                                     # on total failure the error object) — never bare content
 
 The model comes from the maintainer's PREFERENCE ORDER (config/dispatch-preferences.json): the
 first available entry runs, and a failed dispatch falls over to the next. Remote entries need
@@ -29,6 +34,12 @@ and the result JSON reports it ("thinking", "thinking_overridden", "thinking_not
 This is a STATELESS dispatch: one request, text in, text out. The model cannot read files or run
 commands, so pass what it needs in the prompt or as "files" (their contents are attached). Work
 that must drive tools belongs in a free SESSION (remote-session.sh / csl), not here.
+
+--out FILE persists the result: the file holds the full envelope (content, model_used, route,
+attempts, …), not bare `content` — always persist results with `--out` so the model and attempt
+history are never lost. The write is atomic (tmp file + rename in the same directory, fsynced);
+a FILE in a missing directory exits 2 BEFORE anything is dispatched; a failed write exits 1 and
+names FILE on stderr. --out cannot be combined with --list/--help.
 
 Environment:
   FA_DISPATCH_PREFS            preference file (default config/dispatch-preferences.local.json if
@@ -609,7 +620,7 @@ def exhausted(attempts: list, available: list, policy: dict) -> bool:
             and len(providers) >= policy.get("min_providers", 2))
 
 
-def run(input_data, env) -> int:
+def run(input_data, env, out_path=None) -> int:
     prompt = input_data.get("prompt", "")
     if not prompt:
         print(json.dumps({"error": "prompt is required"}), file=sys.stderr)
@@ -676,17 +687,18 @@ def run(input_data, env) -> int:
             print(f"free-agents: {entry['id']} failed ({err}) — trying the next preference", file=sys.stderr)
             continue
         attempts.append({"id": entry["id"], "provider": entry.get("provider") or route_of(entry), "ok": True})
-        print(json.dumps({"content": text, "model_used": entry["id"],
-                          "display": entry.get("display", entry["id"]), "route": route_of(entry),
-                          "family": entry.get("family"), "role": role,
-                          # null = not requested; false = requested but could not be honoured
-                          "role_matched": role_matched if role else None,
-                          "family_avoided": family_avoided if avoid else None,
-                          "thinking": resolved_thinking,
-                          "thinking_overridden": think_overridden,
-                          "thinking_note": think_note,
-                          "attempts": attempts}))
-        return 0
+        line = json.dumps({"content": text, "model_used": entry["id"],
+                           "display": entry.get("display", entry["id"]), "route": route_of(entry),
+                           "family": entry.get("family"), "role": role,
+                           # null = not requested; false = requested but could not be honoured
+                           "role_matched": role_matched if role else None,
+                           "family_avoided": family_avoided if avoid else None,
+                           "thinking": resolved_thinking,
+                           "thinking_overridden": think_overridden,
+                           "thinking_note": think_note,
+                           "attempts": attempts})
+        print(line)
+        return 0 if _persist(out_path, line) else 1
     allowed = exhausted(attempts, order, policy)
     err_obj = {"error": "every dispatch preference failed", "attempts": attempts,
                "paid_fallback_allowed": allowed}
@@ -697,7 +709,9 @@ def run(input_data, env) -> int:
                 fa_fallback_mark.write_mark(sid, attempts)
             except OSError as err:
                 print(f"free-agents: could not write the paid-fallback mark ({err})", file=sys.stderr)
-    print(json.dumps(err_obj), file=sys.stderr)
+    line = json.dumps(err_obj)
+    print(line, file=sys.stderr)
+    _persist(out_path, line)      # exit stays 1 either way; a failed write is named, never silent
     return 1
 
 
@@ -711,7 +725,7 @@ def list_order(env) -> int:
     return 0
 
 
-def run_by_role(input_data) -> int:
+def run_by_role(input_data, out_path=None) -> int:
     """Legacy routing (FA_DISPATCH_ROUTING=role): council-router.sh picks by role."""
     prompt = input_data.get("prompt", "")
     description = input_data.get("description", "")
@@ -729,31 +743,113 @@ def run_by_role(input_data) -> int:
             result = execute_litellm_dispatch(alias, full_prompt, repo)
         else:
             raise RuntimeError(f"Unknown serve backend: {serve}")
-        print(json.dumps({"content": result, "model_used": alias, "role": role, "backend": serve}))
-        return 0
+        line = json.dumps({"content": result, "model_used": alias, "role": role, "backend": serve})
+        print(line)
+        return 0 if _persist(out_path, line) else 1
     except Exception as e:
-        print(json.dumps({"error": str(e)}), file=sys.stderr)
+        line = json.dumps({"error": str(e)})
+        print(line, file=sys.stderr)
+        _persist(out_path, line)
         return 1
 
 
+USAGE = ("usage: free-agent-tool.py [--out FILE] < task.json   |   "
+         "free-agent-tool.py --list   |   free-agent-tool.py --help")
+
+
+def parse_args(args):
+    """Parse argv (after the program name) BEFORE anything reads stdin or dispatches.
+
+    Returns (out_path, mode, err): mode is "run" | "list" | "help"; err is set when the
+    arguments are invalid (the caller prints it with the usage line and exits 2). --out takes
+    a FILE value and may be combined with nothing else but another --out (last one wins);
+    --list/--help must stand alone."""
+    out_path = None
+    mode = None
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-h", "--help"):
+            if mode is not None or out_path is not None:
+                return None, None, f"{a} cannot be combined with other arguments\n{USAGE}"
+            mode = "help"
+        elif a == "--list":
+            if mode is not None or out_path is not None:
+                return None, None, f"--list cannot be combined with other arguments\n{USAGE}"
+            mode = "list"
+        elif a == "--out":
+            if mode is not None:
+                return None, None, f"--out cannot be combined with {mode!r}\n{USAGE}"
+            if i + 1 >= len(args):
+                return None, None, f"--out requires a FILE value\n{USAGE}"
+            out_path = args[i + 1]
+            i += 1
+        else:
+            return None, None, f"unknown argument {a!r} (see --help)\n{USAGE}"
+        i += 1
+    return out_path, (mode or "run"), None
+
+
+def write_envelope(out_path: str, line: str) -> None:
+    """Write `line` (the exact result JSON the tool prints) to out_path ATOMICALLY: a tmp file
+    in the SAME directory, fsync, then os.replace, so a reader never sees a half-written file.
+    Raises OSError on failure; the caller reports it naming out_path and exits 1 (a failed
+    write never silently succeeds). The tmp file is removed on failure."""
+    p = Path(out_path).expanduser()
+    tmp = p.with_name(f"{p.name}.tmp.{os.getpid()}")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, p)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _persist(out_path, line) -> bool:
+    """Write the result line to out_path when --out was given. True on success (or no --out);
+    on failure a stderr line names PATH and False is returned."""
+    if out_path is None:
+        return True
+    try:
+        write_envelope(out_path, line)
+        return True
+    except OSError as err:
+        print(f"free-agent-tool.py: --out write failed for {out_path}: {err}", file=sys.stderr)
+        return False
+
+
 def main():
-    args = sys.argv[1:]
-    if args and args[0] in ("-h", "--help"):
-        print(__doc__.strip())
-        return 0
-    if args and args[0] == "--list":
-        return list_order(os.environ)
-    if args:
-        print(f"free-agent-tool.py: unknown argument {args[0]!r} (see --help)", file=sys.stderr)
+    out_path, mode, err = parse_args(sys.argv[1:])
+    if err:
+        print(f"free-agent-tool.py: {err}", file=sys.stderr)
         return 2
+    if mode == "help":
+        print((__doc__ or "").strip())
+        return 0
+    if mode == "list":
+        return list_order(os.environ)
+    if out_path is not None:
+        parent = Path(out_path).expanduser().parent
+        if not parent.is_dir():
+            # Explicit overrides fail loudly: a FILE in a missing directory aborts with exit 2
+            # BEFORE stdin is read or any dispatch is attempted.
+            print(f"free-agent-tool.py: --out {out_path}: directory does not exist: {parent}\n{USAGE}",
+                  file=sys.stderr)
+            return 2
     try:
         input_data = json.loads(sys.stdin.read())
     except json.JSONDecodeError as e:
         print(json.dumps({"error": f"Invalid JSON input: {e}"}), file=sys.stderr)
         return 1
     if os.environ.get("FA_DISPATCH_ROUTING") == "role":
-        return run_by_role(input_data)
-    return run(input_data, os.environ)
+        return run_by_role(input_data, out_path=out_path)
+    return run(input_data, os.environ, out_path=out_path)
 
 
 if __name__ == "__main__":
