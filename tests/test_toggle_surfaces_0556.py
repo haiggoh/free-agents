@@ -10,7 +10,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from picker_harness import PilotCase  # noqa: E402
+from picker_harness import ROOT, PilotCase  # noqa: E402
 import pytest  # noqa: E402
 
 import session_picker_model as m  # noqa: E402
@@ -28,6 +28,16 @@ def assert_stepper(t, action, n_labels=None):
 
 def by_key(acts, k):
     return next(a for a in acts if a.key == k)
+
+
+def _action_option(h, key):
+    """(option_index_in_list, plain prompt text) for the action row with this shortcut key."""
+    from textual.widgets import OptionList
+    ol = h.app.query_one("#actions", OptionList)
+    idx = next(i for i, a in enumerate(h.app.action_ids) if a.key == key)
+    opt_i = next(i for i in range(ol.option_count)
+                 if ol.get_option_at_index(i).id == f"a:{idx}")
+    return opt_i, str(ol.get_option_at_index(opt_i).prompt)
 
 
 class LocalAndLowkeyRows(PilotCase):
@@ -231,3 +241,47 @@ class MemoryGuardRows(PilotCase):
         for k in ("t", "s", "h", "w", "c"):
             self.assertFalse(by_key(acts, k).enabled, f"row {k} must be disabled with the guard OFF")
         self.assertTrue(by_key(acts, "g").enabled, "the master toggle stays usable")
+
+
+class ThemeColumnAlignment(PilotCase):
+    def seed(self):
+        import shutil
+        for name in ("local-theme.json", "remote-theme.json"):
+            shutil.copy(ROOT / "config" / name, self.themes / name)
+
+    def test_theme_rows_share_one_value_column(self):
+        from rich.cells import cell_len
+        async def s(app, pilot, h):
+            self.seed()
+            await h.press("h")
+            await h.wait_screen("ThemeConfigScreen")
+            cols_left, cols_right = set(), set()
+            for key in ("l", "r", "y", "u"):
+                text = str(_action_option(h, key)[1])
+                cols_left.add(cell_len(text[:text.index("❮")]))
+                cols_right.add(cell_len(text[:text.rindex("❯")]))
+            self.assertEqual(len(cols_left), 1, f"❮ not in one column: {cols_left}")
+            self.assertEqual(len(cols_right), 1, f"❯ not in one column: {cols_right}")
+            # every value stays centered inside the shared cell
+            for key in ("l", "r", "y", "u"):
+                text = str(_action_option(h, key)[1])
+                seg = text[text.index("❮") + 1:text.rindex("❯")]
+                left = len(seg) - len(seg.lstrip(" "))
+                right = len(seg) - len(seg.rstrip(" "))
+                self.assertGreaterEqual(left, 1, text)
+                self.assertGreaterEqual(right, 1, text)
+                self.assertLessEqual(right, left + 1, text)
+        self.run_picker(s)
+
+    def test_other_screens_keep_per_row_width(self):
+        async def s(app, pilot, h):
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
+            await h.expand_settings()
+            widths = {}
+            for key in ("t", "m"):
+                text = str(_action_option(h, key)[1])
+                widths[key] = text.rindex("❯") - text.index("❮") - 1
+            self.assertNotEqual(widths["t"], widths["m"],
+                                "other screens keep the 0.55.4 per-row widths")
+        self.run_picker(s, start="local")

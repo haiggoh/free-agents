@@ -1663,6 +1663,24 @@ class Picker(App):
         cycle_rows = [a for a in rendered
                       if a.step is not None and a not in (m.SETTINGS_GROUP, m.MODEL_GROUP)]
         cycle_vals = {id(a): _split_value(a) for a in cycle_rows}
+        # 0.55.6 (user): screens that opt in (ThemeConfigScreen) share ONE centered value
+        # column — heads padded to the widest head so ❮ lines up, one value-cell width (the
+        # widest label across the rows) so ❯ does too. Other screens keep per-row widths.
+        align = bool(getattr(sm, "align_cycle_values", False))
+        align_head_w = 0
+        align_value_w = 0
+        if align:
+            align_head_w = max((cell_len(h.plain if isinstance(h, Text) else str(h))
+                                for h, _ in cycle_vals.values()), default=0)
+            row_widths = []
+            for a in cycle_rows:
+                if a.labels:
+                    row_widths.append(max(cell_len(x) for x in a.labels))
+                elif a.choices:
+                    row_widths.append(max(cell_len(str(c)) for c in a.choices))
+                else:
+                    row_widths.append(0)
+            align_value_w = max(row_widths, default=0)
         # A nav-ONLY actions pane on a screen WITH rows (API keys setup) renders BELOW the rows,
         # so Back is the last row on screen like every other submenu (user 2026-10-31: it used
         # to sit at the very top because the pane is mounted above #rows). Nav-only screens
@@ -1731,6 +1749,9 @@ class Picker(App):
                     prompt += head
                 else:
                     prompt.append(str(head))
+                if align:
+                    head_plain = head.plain if isinstance(head, Text) else str(head)
+                    prompt.append(" " * max(0, align_head_w - cell_len(head_plain)))
                 if getattr(a, "value_prefix", None) is not None:   # 0.55.5: outside the glyphs
                     if isinstance(a.value_prefix, Text):
                         prompt += a.value_prefix
@@ -1741,7 +1762,9 @@ class Picker(App):
                 # label (an ON/OFF toggle fits "OFF" plus one space each side) — 0.55.2 padded
                 # every row to the widest value anywhere. The value sits centered between the
                 # glyphs; one space is guaranteed on each side.
-                if a.labels:
+                if align:
+                    row_w = align_value_w
+                elif a.labels:
                     row_w = max(cell_len(x) for x in a.labels)
                 elif a.choices:
                     row_w = max(cell_len(str(c)) for c in a.choices)

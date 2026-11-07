@@ -164,12 +164,12 @@ class HueBalance(PilotCase):
             seg = _between(text)
             val = seg.strip()
             self.assertTrue(val.endswith("°"), text)
-            w = 4                                            # widest hue label "355°"
-            pad = w - len(val)
+            # 0.55.6: the theme screen's rows share ONE value cell (align_cycle_values), so
+            # the pad derives from the rendered cell, not a per-row width. The ° rule itself
+            # is unchanged: ONE extra leading space vs plain centering.
+            pad = len(seg) - len(val) - 2
             left = len(seg) - len(seg.lstrip(" "))
             right = len(seg) - len(seg.rstrip(" "))
-            # ONE extra leading space vs plain centering (plain would put the value at
-            # 1 + pad//2 leading spaces): the value shifts right to balance the thin "°".
             self.assertEqual(left, pad // 2 + 2,
                              f"val={val!r} seg={seg!r} (pad={pad})")
             self.assertGreaterEqual(right, 1, f"no space before ❯: {seg!r}")

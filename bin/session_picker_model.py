@@ -948,6 +948,11 @@ class Accordion:
 class Screen:
     title = ""
     lane_key = ""
+    # 0.55.6 (user): when True, the render pads every stepper row's head to the widest head
+    # and shares ONE value-cell width across the screen's cycle rows, so ❮ and ❯ each sit in
+    # one column (the theme menu's four rows read as a single centered column). Other
+    # screens keep the 0.55.4 per-row widths.
+    align_cycle_values = False
     # Lane pickers fold their settings rows under one group header (user 2026-10-29,
     # waypoint picker-collapsed-settings-group); every other screen renders plain rows.
     settings_collapsed = True    # the "Advanced" group starts folded (user 2026-10-29)
@@ -2394,6 +2399,9 @@ THEME_PRESETS = [
 class ThemeConfigScreen(Screen):
     """Theme color configuration for local and remote sessions.
 
+    The four value rows (two accents, two hues) share one centered value column
+    (align_cycle_values, 0.55.6 user).
+
     Two settings rows, one per lane, behaving exactly like the effort/temperature rows
     (user 2026-10-15): left/right arrows step the accent, Enter and mouse click step
     forward, wrapping through THEME_PRESETS; `d` restores the shipped defaults. The
@@ -2403,6 +2411,8 @@ class ThemeConfigScreen(Screen):
     repo (the 0.34.13 release shipped a cycled-over default otherwise).
     """
     title = f"{ec.EMOJI_THEME_STR} Theme Colors"
+
+    align_cycle_values = True   # 0.55.6 (user): ❮ and ❯ in one column across all four rows
 
     @staticmethod
     def _user_theme_path(name: str) -> Path:
