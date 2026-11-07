@@ -806,9 +806,11 @@ def effort_choices(lane: str) -> tuple:
     return sms.ALLOWED_EFFORT[lane]
 
 
-def _next(choices, current):
+def _next(choices, current, d: int = 1):
+    """The choice `d` steps away from `current`, wrapping (0.55.6: d=-1 steps backward;
+    the default keeps every existing 2-arg caller on the forward step)."""
     try:
-        return choices[(choices.index(current) + 1) % len(choices)]
+        return choices[(choices.index(current) + d) % len(choices)]
     except ValueError:
         return choices[0]
 
@@ -2589,30 +2591,47 @@ class RateLimiterScreen(Screen):
         if self.on_save:
             self.on_save({key: value})
 
-    def _cycle(self, key, steps, default):
-        self._set(key, _next(steps, self.value(key, default)))
+    def _cycle(self, key, steps, default, d: int = 1):
+        self._set(key, _next(steps, self.value(key, default), d))
 
     def actions(self):
         mode = self.value("mode", "sliding_window")
         acts = [
-            Action("o", f"Mode: {mode}", lambda: self._set(
-                "mode", _next(sms.RATE_LIMITER_MODES, mode))),
+            Action("o", f"Mode: {mode}",
+                   lambda: self._set("mode", _next(sms.RATE_LIMITER_MODES, mode)),
+                   step=lambda d: self._set("mode", _next(sms.RATE_LIMITER_MODES,
+                                                          self.value("mode", "sliding_window"), d)),
+                   labels=tuple(sms.RATE_LIMITER_MODES)),
             Action("r", f"Requests per minute: {self.value('rpm', 40)}",
-                   lambda: self._cycle("rpm", self.RPM_STEPS, 40)),
+                   lambda: self._cycle("rpm", self.RPM_STEPS, 40),
+                   step=lambda d: self._cycle("rpm", self.RPM_STEPS, 40, d),
+                   labels=tuple(str(v) for v in self.RPM_STEPS)),
             Action("c", (f"Bucket capacity: {self.value('bucket_capacity', 6)}"
                          if mode == "smooth_bucket" else "Bucket capacity: unavailable (smooth_bucket only)"),
                    lambda: self._cycle("bucket_capacity", self.CAP_STEPS, 6),
+                   step=lambda d: self._cycle("bucket_capacity", self.CAP_STEPS, 6, d),
+                   labels=tuple(str(v) for v in self.CAP_STEPS),
                    enabled=mode == "smooth_bucket"),
             Action("w", f"Max wait: {self.value('max_wait', 300)}s",
-                   lambda: self._cycle("max_wait", self.WAIT_STEPS, 300)),
+                   lambda: self._cycle("max_wait", self.WAIT_STEPS, 300),
+                   step=lambda d: self._cycle("max_wait", self.WAIT_STEPS, 300, d),
+                   labels=tuple(f"{v}s" for v in self.WAIT_STEPS)),
             Action("d", f"429 base cooldown: {self.value('cooldown', 30)}s",
-                   lambda: self._cycle("cooldown", self.COOLDOWN_STEPS, 30)),
+                   lambda: self._cycle("cooldown", self.COOLDOWN_STEPS, 30),
+                   step=lambda d: self._cycle("cooldown", self.COOLDOWN_STEPS, 30, d),
+                   labels=tuple(f"{v}s" for v in self.COOLDOWN_STEPS)),
             Action("u", f"429 max cooldown: {self.value('max_cooldown', 300)}s",
-                   lambda: self._cycle("max_cooldown", self.MAX_COOLDOWN_STEPS, 300)),
+                   lambda: self._cycle("max_cooldown", self.MAX_COOLDOWN_STEPS, 300),
+                   step=lambda d: self._cycle("max_cooldown", self.MAX_COOLDOWN_STEPS, 300, d),
+                   labels=tuple(f"{v}s" for v in self.MAX_COOLDOWN_STEPS)),
             Action("y", f"429 backoff multiplier: ×{self.value('backoff_multiplier', 2.0)}",
-                   lambda: self._cycle("backoff_multiplier", self.MULTIPLIER_STEPS, 2.0)),
+                   lambda: self._cycle("backoff_multiplier", self.MULTIPLIER_STEPS, 2.0),
+                   step=lambda d: self._cycle("backoff_multiplier", self.MULTIPLIER_STEPS, 2.0, d),
+                   labels=tuple(f"×{v}" for v in self.MULTIPLIER_STEPS)),
             Action("z", f"429 max retries: {self.value('max_retries', 5)}",
-                   lambda: self._cycle("max_retries", self.RETRY_STEPS, 5)),
+                   lambda: self._cycle("max_retries", self.RETRY_STEPS, 5),
+                   step=lambda d: self._cycle("max_retries", self.RETRY_STEPS, 5, d),
+                   labels=tuple(str(v) for v in self.RETRY_STEPS)),
             Action("i", "Show live limiter status", lambda: Nav("tool:rl-status"), section="tools"),
             Action("x", "Reset shared limiter state file", lambda: Nav("tool:rl-reset"), section="tools"),
         ]
@@ -2648,14 +2667,12 @@ class MemoryGuardScreen(Screen):
         if self.on_save:
             self.on_save({key: value})
 
-    def _toggle(self, key):
-        self._set(key, not self.value(key))
-
-    def _cycle(self, key, steps):
-        """Next step that keeps soft below hard; a pair-breaking step is skipped, never saved."""
+    def _cycle(self, key, steps, d: int = 1):
+        """Nearest step in direction d that keeps soft below hard; a pair-breaking step is
+        skipped, never saved (0.55.6: d=-1 walks backward)."""
         cur = self.value(key)
         order = list(steps)
-        start = order.index(cur) + 1 if cur in order else 0
+        start = order.index(cur) + d if cur in order else (0 if d > 0 else len(order) - 1)
         for i in range(len(order)):
             cand = order[(start + i) % len(order)]
             soft = cand if key == "soft_pct" else self.value("soft_pct")
@@ -2672,17 +2689,27 @@ class MemoryGuardScreen(Screen):
         def onoff(v):
             return "ON" if v else "OFF"
         acts = [
-            Action("g", f"{OOM_PROTECTION_NAME}: {onoff(on)}", lambda: self._toggle("enabled")),
-            Action("t", f"Start sessions inside tmux (lets the guard type /compact): {onoff(self.value('tmux'))}",
-                   lambda: self._toggle("tmux"), enabled=on),
-            Action("s", f"Compact at RAM ≥ {self.value('soft_pct')}% (when the session is idle)",
-                   lambda: self._cycle("soft_pct", self.SOFT_STEPS), enabled=on),
-            Action("h", f"Compact the largest session at once at RAM ≥ {self.value('hard_pct')}%",
-                   lambda: self._cycle("hard_pct", self.HARD_STEPS), enabled=on),
-            Action("w", f"Wait for {self.value('quiet_s')}s of no typing before typing into a session",
-                   lambda: self._cycle("quiet_s", self.QUIET_STEPS), enabled=on),
-            Action("c", f"After a memory-limit abort, continue by itself: {onoff(self.value('auto_continue'))}",
-                   lambda: self._toggle("auto_continue"), enabled=on),
+            setting("g", f"{OOM_PROTECTION_NAME}: {onoff(on)}",
+                    (False, True), lambda: self.value("enabled"),
+                    lambda v: self._set("enabled", bool(v)), labels=("OFF", "ON")),
+            setting("t", f"Start sessions inside tmux (lets the guard type /compact): {onoff(self.value('tmux'))}",
+                    (False, True), lambda: self.value("tmux"),
+                    lambda v: self._set("tmux", bool(v)), labels=("OFF", "ON"), enabled=on),
+            Action("s", f"Compact idle sessions at RAM: ≥{self.value('soft_pct')}%",
+                   lambda: self._cycle("soft_pct", self.SOFT_STEPS),
+                   step=lambda d: self._cycle("soft_pct", self.SOFT_STEPS, d),
+                   labels=tuple(f"≥{v}%" for v in self.SOFT_STEPS), enabled=on),
+            Action("h", f"Compact the largest session at once at RAM: ≥{self.value('hard_pct')}%",
+                   lambda: self._cycle("hard_pct", self.HARD_STEPS),
+                   step=lambda d: self._cycle("hard_pct", self.HARD_STEPS, d),
+                   labels=tuple(f"≥{v}%" for v in self.HARD_STEPS), enabled=on),
+            Action("w", f"Quiet time before the guard types into a session: {self.value('quiet_s')}s",
+                   lambda: self._cycle("quiet_s", self.QUIET_STEPS),
+                   step=lambda d: self._cycle("quiet_s", self.QUIET_STEPS, d),
+                   labels=tuple(f"{v}s" for v in self.QUIET_STEPS), enabled=on),
+            setting("c", f"After a memory-limit abort, continue by itself: {onoff(self.value('auto_continue'))}",
+                    (False, True), lambda: self.value("auto_continue"),
+                    lambda v: self._set("auto_continue", bool(v)), labels=("OFF", "ON"), enabled=on),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
@@ -3414,6 +3441,14 @@ class LowkeyScreen(Screen):
         if s.on_temperature_saved:
             s.on_temperature_saved("lowkey", s.lowkey_temperature)
 
+    def _set_lowkey_temperature(self, v):
+        """Direction-aware temperature put (0.55.6, review focus 2): the stepper hands us the
+        value to set; the persist path is the one _cycle_temperature has always used."""
+        s = self.settings
+        s.lowkey_temperature = v
+        if s.on_temperature_saved:
+            s.on_temperature_saved("lowkey", v)
+
     def _set_thinking(self, v):
         s = self.settings
         s.lowkey_thinking = v
@@ -3475,7 +3510,7 @@ class LowkeyScreen(Screen):
                     labels=tuple(_effort_label(c) for c in effort_choices("lowkey")),
                     section="model"),
             setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or 'not set'}",
-                    TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(),
+                    TEMPERATURES, lambda: s.lowkey_temperature, self._set_lowkey_temperature,
                     labels=tuple("not set" if t == "" else t for t in TEMPERATURES),
                     section="model"),
             # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.

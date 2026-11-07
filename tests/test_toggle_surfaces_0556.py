@@ -145,3 +145,89 @@ class CloudConfigRows(PilotCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RateLimiterRows(PilotCase):
+    def _screen(self, **kw):
+        s = m.Settings()
+        for k, v in kw.items():
+            setattr(s, k, v)
+        calls = []
+        scr = m.RateLimiterScreen(s, owner=m.DIRECT_ROOT, on_save=lambda d: calls.append(d))
+        return s, scr, calls
+
+    def test_rate_limiter_rows_are_steppers(self):
+        s, scr, calls = self._screen(mode="smooth_bucket")
+        acts = scr.actions()
+        r = by_key(acts, "r")
+        assert_stepper(self, r, 4)
+        self.assertEqual(tuple(r.labels), ("10", "20", "30", "40"))
+        self.assertEqual(tuple(by_key(acts, "w").labels), ("30s", "60s", "120s", "300s"))
+        self.assertEqual(tuple(by_key(acts, "d").labels), ("5s", "10s", "30s", "60s"))
+        self.assertEqual(tuple(by_key(acts, "u").labels), ("120s", "300s", "600s", "900s"))
+        self.assertEqual(tuple(by_key(acts, "y").labels), ("×1.5", "×2.0", "×3.0"))
+        self.assertEqual(tuple(by_key(acts, "z").labels), ("0", "3", "5", "10"))
+        for k in ("o", "r", "w", "d", "u", "y", "z"):
+            assert_stepper(self, by_key(acts, k))
+        assert_stepper(self, by_key(acts, "c"), 4)     # bucket capacity in smooth_bucket mode
+        _, scr2, _ = self._screen(mode="sliding_window")
+        self.assertFalse(by_key(scr2.actions(), "c").enabled,
+                         "capacity is smooth_bucket-only")
+        self.assertIsNone(by_key(acts, "i").step)
+        self.assertIsNone(by_key(acts, "x").step)
+
+    def test_rate_limiter_left_steps_backward(self):
+        s, scr, calls = self._screen(mode="smooth_bucket")
+        s.rate_limiter["rpm"] = 40
+        row = by_key(scr.actions(), "r")
+        row.step(-1)
+        self.assertEqual(s.rate_limiter["rpm"], 30, "Left must step BACKWARD")
+        self.assertIn({"rpm": 30}, calls, "the step must persist via on_save")
+
+
+class MemoryGuardRows(PilotCase):
+    def _screen(self, on=True):
+        s = m.Settings()
+        calls = []
+        scr = m.MemoryGuardScreen(s, owner=m.DIRECT_ROOT, on_save=lambda d: calls.append(d))
+        if not on:
+            s.memguard["enabled"] = False
+        return s, scr, calls
+
+    def test_memguard_rows_are_steppers(self):
+        s, scr, calls = self._screen()
+        acts = scr.actions()
+        for k in ("g", "t", "c"):
+            row = by_key(acts, k)
+            assert_stepper(self, row, 2)
+            self.assertEqual(tuple(row.labels), ("OFF", "ON"))
+        for k in ("s", "h", "w"):
+            assert_stepper(self, by_key(acts, k))
+        # the plan's wording decision: the value sits at the END, after the last ": "
+        self.assertIn("Compact idle sessions at RAM:", str(by_key(acts, "s").label))
+        self.assertIn("Compact the largest session at once at RAM:", str(by_key(acts, "h").label))
+        self.assertIn("Quiet time before the guard types into a session:", str(by_key(acts, "w").label))
+        self.assertEqual(tuple(by_key(acts, "s").labels), ("≥75%", "≥80%", "≥85%", "≥90%"))
+        self.assertEqual(tuple(by_key(acts, "w").labels), ("2s", "3s", "5s", "10s"))
+
+    def test_memguard_pair_never_breaks_either_direction(self):
+        s, scr, calls = self._screen()
+        s.memguard["soft_pct"] = 75
+        s.memguard["hard_pct"] = 90
+        srow = by_key(scr.actions(), "s")
+        hrow = by_key(scr.actions(), "h")
+        for direction in (+1, -1):
+            for _ in range(8):
+                srow.step(direction)
+                self.assertLess(s.memguard["soft_pct"], s.memguard["hard_pct"],
+                                f"soft {s.memguard['soft_pct']} >= hard {s.memguard['hard_pct']} after s.step({direction})")
+                hrow.step(direction)
+                self.assertLess(s.memguard["soft_pct"], s.memguard["hard_pct"],
+                                f"soft {s.memguard['soft_pct']} >= hard {s.memguard['hard_pct']} after h.step({direction})")
+
+    def test_memguard_rows_inert_when_guard_off(self):
+        s, scr, calls = self._screen(on=False)
+        acts = scr.actions()
+        for k in ("t", "s", "h", "w", "c"):
+            self.assertFalse(by_key(acts, k).enabled, f"row {k} must be disabled with the guard OFF")
+        self.assertTrue(by_key(acts, "g").enabled, "the master toggle stays usable")
