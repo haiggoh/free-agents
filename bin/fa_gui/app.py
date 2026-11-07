@@ -100,8 +100,10 @@ def build() -> None:
     # locked merge is the cross-frontend write path) and the loader's inventory cache.
     settings_state: dict = {}
     # Continuation plan Phase 2: everything else is PER CLIENT (keyed by the websocket
-    # client id) — collapse state, the list toggle, the launch hook and the rerender closure
-    # are re-set on every page build, so one browser tab must never advance another's.
+    # client id), so one browser tab never advances another's state. toggle_list /
+    # launch_req / rerender are REASSIGNED on every page build; `collapsed` is setdefault
+    # — fold state persists per tab across navigations (deliberate: csl keeps accordion
+    # state for the session too).
     client_states: dict = {}
 
     def cstate(client) -> dict:

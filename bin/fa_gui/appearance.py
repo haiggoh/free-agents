@@ -86,15 +86,21 @@ def load(path: Path) -> dict:
         warnings.warn(f"gui appearance file is not an object; using defaults, leaving {path} untouched")
         return dict(DEFAULTS)
     version = raw.get("schema_version", SCHEMA_VERSION)
-    if not isinstance(version, int) or version > SCHEMA_VERSION:
-        warnings.warn(f"gui appearance file has schema {version!r} > known {SCHEMA_VERSION}; "
+    if not isinstance(version, int) or isinstance(version, bool) or version > SCHEMA_VERSION:
+        warnings.warn(f"gui appearance file has schema {version!r} (known {SCHEMA_VERSION}); "
                       f"using defaults, leaving {path} untouched")
         return dict(DEFAULTS)
     doc = dict(DEFAULTS)
     doc.update(raw)                     # unknown keys carried
-    for key, value in doc.items():
-        if key in DEFAULTS or key == "schema_version":
-            _validate(key, value)       # a known key with a bad value is a hard error
+    try:
+        for key, value in doc.items():
+            if key in DEFAULTS or key == "schema_version":
+                _validate(key, value)   # a known key with a bad value
+    except ValueError as err:
+        # review finding: an invalid KNOWN key must warn + default, not crash the GUI at load
+        warnings.warn(f"gui appearance file has an invalid value ({err}); using defaults, "
+                      f"leaving {path} untouched")
+        return dict(DEFAULTS)
     return doc
 
 

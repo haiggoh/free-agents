@@ -22,10 +22,11 @@ class LoaderTests(unittest.TestCase):
         self.assertIs(b, a, "second load of the same kind returns the cache (no reload on Back)")
         self.assertEqual(len(calls), 1)
 
-    def test_slower_first_load_loses_to_newer_generation(self):
+    def test_concurrent_same_kind_loads_coalesce(self):
         # Continuation plan Phase 2: identical concurrent loads are COALESCED — one fn run,
-        # both callers get the same result (the kind-generation loser case only remains for
-        # a load that started after another for the same kind already finished uncached).
+        # both callers get the same result. No sleep between the two calls: on asyncio's
+        # single-threaded loop the cache-check -> _inflight write is one synchronous block,
+        # so the second caller MUST join the first's task (a race here would mean threads).
         async def run():
             ldr = Loader()
             calls = []
@@ -33,13 +34,11 @@ class LoaderTests(unittest.TestCase):
                 calls.append(1)
                 time.sleep(0.2)
                 return "slow"
-            t1 = asyncio.ensure_future(ldr.load("remote", slow))
-            await asyncio.sleep(0.02)
-            t2 = asyncio.ensure_future(ldr.load("remote", slow))
-            r1, r2 = await asyncio.gather(t1, t2)
+            r1, r2 = await asyncio.gather(ldr.load("remote", slow, client="A"),
+                                          ldr.load("remote", slow, client="B"))
             return r1, r2, calls
         r1, r2, calls = asyncio.run(run())
-        self.assertEqual(len(calls), 1, "concurrent same-kind loads must coalesce into one run")
+        self.assertEqual(len(calls), 1, "truly concurrent same-kind loads must coalesce into one run")
         self.assertEqual(r1, "slow")
         self.assertEqual(r2, "slow", "the coalesced caller gets the same result, not Stale")
 
