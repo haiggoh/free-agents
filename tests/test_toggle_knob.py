@@ -9,7 +9,6 @@ Run: ~/.local/share/free-agents/picker-venv/bin/python -m pytest tests/test_togg
 """
 import os
 import sys
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from picker_harness import PilotCase  # noqa: E402
@@ -62,6 +61,36 @@ def _knob_styles(rich):
     return [str(sp.style) for sp in rich.spans if sp.start <= i < sp.end]
 
 
+async def _record_toggle(h, pilot, key, secs=0.5):
+    """Press `key` and return every DRAWN frame of that row as (plain tail, knob styles),
+    recorded from INSIDE render_model. Sampling from outside misses frames: at 33 ms per frame
+    the whole animation (~133 ms) finishes while pilot.press is still processing the key
+    (measured 2026-11-08: first outside sample 157-175 ms after the press)."""
+    app = h.app
+    frames = []
+
+    def snap():
+        r = _row_rich(h, key)
+        f = (_knob(r.plain)[0], tuple(_knob_styles(r)))
+        if not frames or frames[-1] != f:
+            frames.append(f)
+
+    snap()
+    orig = app.render_model
+
+    def rec(*a, **k):
+        orig(*a, **k)
+        snap()
+
+    app.render_model = rec
+    try:
+        await pilot.press(key)
+        await pilot.pause(secs)
+    finally:
+        app.render_model = orig
+    return frames
+
+
 class ToggleKnob(PilotCase):
     def _open(self):
         async def go(h):
@@ -95,11 +124,8 @@ class ToggleKnob(PilotCase):
             _, before = _row(h, "t")
             start = _knob(before)[1]
             seen = []
-            await pilot.press("t")
-            end = time.time() + 0.6
-            while time.time() < end:
-                await pilot.pause(0.01)
-                pos = _knob(_row(h, "t")[1])[1]
+            for tail, _ in await _record_toggle(h, pilot, "t"):
+                pos = next(i for i, c in enumerate(tail) if c in KNOBS)
                 if not seen or seen[-1] != pos:
                     seen.append(pos)
             final = _knob(_row(h, "t")[1])[1]
@@ -117,24 +143,20 @@ class ToggleKnob(PilotCase):
 
     def test_knob_keeps_its_state_in_flight(self):
         """User 2026-11-07: the knob keeps its OLD state (hollow+dim from OFF, filled from ON)
-        while travelling, drawn small; it becomes the new state only on arrival. (The 25 ms
-        flash steps are too short to sample reliably here — test_flash_sequence pins them.)"""
+        while travelling, drawn small; it becomes the new state only on arrival, where the
+        flash steps show in order. Frames are recorded from inside the render (_record_toggle);
+        test_flash_sequence additionally pins the flash timing with recorded timers."""
         async def s(app, pilot, h):
             await self._open()(h)
             for _ in range(2):                         # OFF→ON, then ON→OFF
                 start_on = _knob(_row(h, "t")[1])[1] == END
-                frames = []                            # (plain tail, knob styles)
-                await pilot.press("t")
-                end = time.time() + 0.6
-                while time.time() < end:
-                    await pilot.pause(0.005)
-                    r = _row_rich(h, "t")
-                    f = (_knob(r.plain)[0], tuple(_knob_styles(r)))
-                    if not frames or frames[-1] != f:
-                        frames.append(f)
+                frames = await _record_toggle(h, pilot, "t")   # (plain tail, knob styles)
                 arrive = next(i for i, (t, _) in enumerate(frames)
                               if (ec.KNOB_OFF if start_on else ec.KNOB_ON) in t)
-                in_flight = frames[:arrive]
+                flashes = [c for _, st in frames[arrive:] for c in ec.KNOB_FLASH_STEPS if c in st]
+                self.assertEqual(flashes, list(ec.KNOB_FLASH_STEPS),
+                                 f"every flash step must be drawn, in order: {frames}")
+                in_flight = frames[1:arrive]           # frames[0] = the row before the press
                 self.assertTrue(in_flight, f"no in-flight frame: {frames}")
                 moving = ec.KNOB_ON_MOVING if start_on else ec.KNOB_OFF_MOVING
                 for t, _ in in_flight:
@@ -147,11 +169,12 @@ class ToggleKnob(PilotCase):
 
     def test_flash_sequence(self):
         """User 2026-11-07: on arrival the knob alone steps through KNOB_FLASH_STEPS (subheadline
-        cyan, then an in-between), each held KNOB_FLASH_STEP_S = half a frame, then rests.
+        cyan, then an in-between), each held KNOB_FLASH_STEP_S = one full frame, then rests.
         Timers are recorded instead of run, so every step is observed deterministically."""
         async def s(app, pilot, h):
             await self._open()(h)
-            self.assertEqual(ec.KNOB_FLASH_STEP_S, ec.KNOB_FRAME_S / 2)
+            self.assertEqual(ec.KNOB_FLASH_STEP_S, ec.KNOB_FRAME_S)
+            self.assertAlmostEqual(ec.KNOB_FRAME_S, 2 / 60)   # 2 refreshes at 60 Hz
             self.assertEqual(ec.KNOB_FLASH_STEPS[0], "bright_cyan")   # the #policy subheadline cyan
             self.assertIn("#policy { color: ansi_bright_cyan;", app.CSS)
             timers = []

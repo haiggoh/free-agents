@@ -312,17 +312,17 @@ KNOB_OFF = "○"
 KNOB_ON = "●"
 KNOB_TRACK_OFF = "─"
 KNOB_TRACK_ON = "─"     # user 2026-11-07: the track stays thin when ON (no heavy ━)
-KNOB_FRAME_S = 0.05      # user 2026-11-07: faster (2 moves × 50 ms) — a terminal has no in-between frames
+KNOB_FRAME_S = 2 / 60     # user 2026-11-08: faster; ≈33 ms = exactly 2 refreshes at 60 Hz (30 ms would alternate 1 and 2)
 # In flight (user 2026-11-07): the knob keeps its OLD state, drawn small, so the state change
 # lands on arrival. Set these equal to KNOB_OFF / KNOB_ON to turn the size change off.
 KNOB_OFF_MOVING = "◦"
 KNOB_ON_MOVING = "•"
 # Arrival flash on the knob only (a span colour beats the row's hover blue). User 2026-11-07:
 # white was too much and too long — use the subheadline's cyan (#policy is ansi_bright_cyan),
-# half a frame per step, with one in-between step fading toward the row colour. Each entry is a
-# rich colour; () = no flash.
+# one frame per step (2026-11-08; half a frame was not noticeable), with one in-between step
+# fading toward the row colour. Each entry is a rich colour; () = no flash.
 KNOB_FLASH_STEPS = ("bright_cyan", "cyan")
-KNOB_FLASH_STEP_S = 0.025   # half of KNOB_FRAME_S per step
+KNOB_FLASH_STEP_S = KNOB_FRAME_S   # user 2026-11-08: a FULL frame per step — half a frame was not noticeable
 # The value words that put the knob at the ON end (first word of the value: "ON (default)" counts).
 KNOB_ON_WORDS = ("ON", "ENABLED", "SHOWN")
 
