@@ -317,9 +317,12 @@ KNOB_FRAME_S = 0.05      # user 2026-11-07: faster (2 moves × 50 ms) — a term
 # lands on arrival. Set these equal to KNOB_OFF / KNOB_ON to turn the size change off.
 KNOB_OFF_MOVING = "◦"
 KNOB_ON_MOVING = "•"
-# Arrival flash on the knob only (a span colour beats the row's hover blue). None = no flash.
-KNOB_FLASH_STYLE = "bright_white"
-KNOB_FLASH_FRAMES = 2    # ≈ 100 ms at KNOB_FRAME_S
+# Arrival flash on the knob only (a span colour beats the row's hover blue). User 2026-11-07:
+# white was too much and too long — use the subheadline's cyan (#policy is ansi_bright_cyan),
+# half a frame per step, with one in-between step fading toward the row colour. Each entry is a
+# rich colour; () = no flash.
+KNOB_FLASH_STEPS = ("bright_cyan", "cyan")
+KNOB_FLASH_STEP_S = 0.025   # half of KNOB_FRAME_S per step
 # The value words that put the knob at the ON end (first word of the value: "ON (default)" counts).
 KNOB_ON_WORDS = ("ON", "ENABLED", "SHOWN")
 

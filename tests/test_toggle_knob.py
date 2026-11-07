@@ -115,10 +115,10 @@ class ToggleKnob(PilotCase):
         self.run_picker(s, start="local")
 
 
-    def test_knob_keeps_its_state_in_flight_and_flashes_on_arrival(self):
+    def test_knob_keeps_its_state_in_flight(self):
         """User 2026-11-07: the knob keeps its OLD state (hollow+dim from OFF, filled from ON)
-        while travelling, drawn small; it becomes the new state only on arrival, and flashes
-        bright white there (overriding the row's hover blue) before resting."""
+        while travelling, drawn small; it becomes the new state only on arrival. (The 25 ms
+        flash steps are too short to sample reliably here — test_flash_sequence pins them.)"""
         async def s(app, pilot, h):
             await self._open()(h)
             for _ in range(2):                         # OFF→ON, then ON→OFF
@@ -139,12 +139,44 @@ class ToggleKnob(PilotCase):
                 moving = ec.KNOB_ON_MOVING if start_on else ec.KNOB_OFF_MOVING
                 for t, _ in in_flight:
                     self.assertIn(moving, t, f"in flight the knob must keep its old state, small: {frames}")
-                self.assertTrue(any(ec.KNOB_FLASH_STYLE in st for st in frames[arrive][1]),
-                                f"arrival frame must flash {ec.KNOB_FLASH_STYLE}: {frames[arrive]}")
                 rest = frames[-1]
-                self.assertFalse(any(ec.KNOB_FLASH_STYLE in st for st in rest[1]),
+                self.assertFalse(any(c in st for st in rest[1] for c in ec.KNOB_FLASH_STEPS),
                                  f"the flash must end: {frames}")
                 self.assertIn(ec.KNOB_OFF if start_on else ec.KNOB_ON, rest[0], frames)
+        self.run_picker(s, start="local")
+
+    def test_flash_sequence(self):
+        """User 2026-11-07: on arrival the knob alone steps through KNOB_FLASH_STEPS (subheadline
+        cyan, then an in-between), each held KNOB_FLASH_STEP_S = half a frame, then rests.
+        Timers are recorded instead of run, so every step is observed deterministically."""
+        async def s(app, pilot, h):
+            await self._open()(h)
+            self.assertEqual(ec.KNOB_FLASH_STEP_S, ec.KNOB_FRAME_S / 2)
+            self.assertEqual(ec.KNOB_FLASH_STEPS[0], "bright_cyan")   # the #policy subheadline cyan
+            self.assertIn("#policy { color: ansi_bright_cyan;", app.CSS)
+            timers = []
+            app.set_timer = lambda delay, cb: timers.append((delay, cb))
+            app.set_interval = lambda delay, cb: type("T", (), {"stop": lambda self: None})()
+            k = ("FlashProbe", "z")
+            app._knob_frame(k, False)                   # first sight: at rest, OFF
+            app._knob_frame(k, True)                    # value flipped: slide starts
+            for _ in range(ec.KNOB_CELLS - 1):
+                app._knob_tick()                        # walk to the ON end
+            seen = [app._knob_frame(k, True)]
+            while timers:
+                delay, cb = timers.pop(0)
+                self.assertEqual(delay, ec.KNOB_FLASH_STEP_S)
+                cb()
+                seen.append(app._knob_frame(k, True))
+            flashes = [f[3] for f in seen]
+            self.assertEqual(flashes, list(ec.KNOB_FLASH_STEPS) + [None],
+                             f"flash steps then rest, in order: {seen}")
+            for pos, filled, moving, _ in seen:
+                self.assertEqual((pos, filled, moving), (END, True, False), seen)
+            # only the knob carries the flash colour, never the track
+            t = self.sp._knob_text(END, True, False, ec.KNOB_FLASH_STEPS[0])
+            flashed = [t.plain[sp.start:sp.end] for sp in t.spans if str(sp.style) == ec.KNOB_FLASH_STEPS[0]]
+            self.assertEqual(flashed, [ec.KNOB_ON], t.spans)
         self.run_picker(s, start="local")
 
 
