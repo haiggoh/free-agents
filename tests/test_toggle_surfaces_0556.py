@@ -34,7 +34,10 @@ def _action_option(h, key):
     """(option_index_in_list, plain prompt text) for the action row with this shortcut key."""
     from textual.widgets import OptionList
     ol = h.app.query_one("#actions", OptionList)
-    idx = next(i for i, a in enumerate(h.app.action_ids) if a.key == key)
+    keys = [a.key for a in h.app.action_ids]
+    if key not in keys:
+        raise AssertionError(f"no action row {key!r} on this screen; keys: {keys}")
+    idx = keys.index(key)
     opt_i = next(i for i in range(ol.option_count)
                  if ol.get_option_at_index(i).id == f"a:{idx}")
     return opt_i, str(ol.get_option_at_index(opt_i).prompt)
@@ -285,3 +288,73 @@ class ThemeColumnAlignment(PilotCase):
             self.assertNotEqual(widths["t"], widths["m"],
                                 "other screens keep the 0.55.4 per-row widths")
         self.run_picker(s, start="local")
+
+
+class RenderProof(PilotCase):
+    """0.55.6 Task 6: every converted setting row RENDERS the cycle glyphs (a converted label
+    with a forgotten step would render bare). Navigation per screen from existing PTY tests."""
+
+    def seed(self):
+        import shutil
+        for name in ("local-theme.json", "remote-theme.json"):
+            shutil.copy(ROOT / "config" / name, self.themes / name)
+
+    async def _expand_group(self, h, header):
+        """Open ONE collapsed harmonica group (expand_settings wants BOTH headers, which
+        screens without an Advanced group would wait on forever)."""
+        from textual.widgets import OptionList
+        await h.wait_text(header, 8)
+        ol = h.app.query_one("#actions", OptionList)
+        for i in range(ol.option_count):
+            if header in str(ol.get_option_at_index(i).prompt):
+                ol.highlighted = i
+                break
+        await h.pilot.press("enter")
+        await h.pilot.pause(0.3)
+
+    def _assert_rows_have_glyphs(self, h, keys):
+        for key in keys:
+            text = _action_option(h, key)[1]
+            self.assertIn("❮", text, f"row {key} renders bare: {text!r}")
+            self.assertIn("❯", text, f"row {key} renders bare: {text!r}")
+
+    def test_every_setting_row_renders_glyphs(self):
+        async def s(app, pilot, h):
+            self.seed()
+            await h.press("l")                       # Local
+            await h.wait_screen("LocalScreen")
+            await h.expand_settings()
+            self._assert_rows_have_glyphs(h, ("y",))          # auto-sync
+            await h.press("u")                                # RAM guard (guard ON by default)
+            await h.wait_screen("MemoryGuardScreen")
+            self._assert_rows_have_glyphs(h, ("g", "t", "s", "h", "w", "c"))
+            await h.press("b")
+            await h.press("b")                                # back to Home
+            await h.press("o")                                # Lowkey
+            await h.wait_screen("LowkeyScreen")
+            await self._expand_group(h, "▸ Model settings")   # e/f fold under it here
+            self._assert_rows_have_glyphs(h, ("e", "f"))      # effort + remote filters
+            await h.press("b")                                # Home
+            await h.press("r")                                # Remote
+            await h.wait_screen("RemoteScreen")
+            await h.press("y")                                # Filter settings submenu
+            await h.wait_screen("RemoteFiltersScreen")
+            self._assert_rows_have_glyphs(h, ("h", "f", "u", "o"))
+            self.assertNotIn("❮", _action_option(h, "x")[1], "the report row stays plain")
+            await h.press("b")
+            await h.press("b")                                # Home
+            await h.press("c")                                # Cloud session configuration
+            await h.wait_screen("CloudConfigScreen")
+            self._assert_rows_have_glyphs(h, ("x", "p", "d"))
+            await h.press("b")                                # Home
+            await h.press("r")                                # Remote (the limiter is its child)
+            await h.wait_screen("RemoteScreen")
+            await h.press("n")                                # NVIDIA rate limiter
+            await h.wait_screen("RateLimiterScreen")
+            self._assert_rows_have_glyphs(h, ("o", "r", "w", "d", "u", "y", "z"))
+            await h.press("b")                                # back to Remote
+            await h.press("b")                                # Home
+            await h.press("h")                                # Theme colors
+            await h.wait_screen("ThemeConfigScreen")
+            self._assert_rows_have_glyphs(h, ("l", "r", "y", "u"))
+        self.run_picker(s)
