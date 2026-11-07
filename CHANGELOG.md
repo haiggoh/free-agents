@@ -1,3 +1,32 @@
+## [0.55.6] — 2026-11-07
+
+### Added — `la-evict.sh --orphans`: the tier-0 orphan sweep, outside the ladder
+
+- Self-describing spelling of `--tier 0`: evicts only unattached servers, safe at any time,
+  runs tier 0 even mid-ladder, never reads or writes escalation state. Refused (exit 2) when
+  combined with `--tier`, `--all` or `--port`; `--help` states the guarantee.
+- Tests: `tests/test_la_evict.sh` 135 passed / 0 failed (was 128/7 before the flag); mutation
+  checks: dropping the conflict refusal → 2 red (`--tier`, `--all`; `--port` is also caught by
+  the pre-existing `--port`+`--tier` guard), making `--orphans` a bare/ladder run → 2 red.
+
+### Added — `free-agent-tool.py --out FILE`: persist the full dispatch envelope, atomically
+
+- Callers kept saving just the result's `content`, losing `model_used`/`route`/`attempts`.
+  `--out FILE` writes EXACTLY the JSON the tool prints — the full envelope on success, the
+  error object (`error`, `attempts`, `paid_fallback_allowed`) on total failure — via tmp file
+  + fsync + `os.replace` in the same directory, so a reader never sees a half-written file.
+- All arguments are parsed before stdin is read or anything is dispatched: `--out` without a
+  value (or a value starting with `-`), an unknown flag, `--out` combined with `--list`/`--help`,
+  or a FILE in a missing directory all exit 2 — the tests count the fake server's hits to prove
+  no dispatch was attempted. A failed write exits 1 and names FILE on stderr, and the tmp file
+  is removed. `--help` documents `--out`.
+- Tests: `tests/test_free_agent_tool_out.py` drives the REAL CLI as a subprocess against a
+  loopback fake provider (25 tests, red-first; 7 mutation checks each verified red); sibling
+  suites 53/53. An independent cross-family validator dispatch reviewed the diff and its one
+  real finding (flag-like `--out` value taken as a filename) plus coverage gaps are fixed.
+  `skills/offload/SKILL.md` now says: persist results with `--out FILE` (full envelope), never
+  save `content` alone.
+
 ## [0.55.5] — 2026-11-07
 
 ### Changed — menu wording, glyph styling and value-cell polish (user feedback round)
