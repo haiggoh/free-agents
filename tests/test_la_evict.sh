@@ -955,6 +955,44 @@ kill -TERM "$NB_D" 2>/dev/null || true
 wait_for_stopped "$NB_D" || true
 
 # ---------------------------------------------------------------------------
+printf '\n== --orphans: the tier-0 sweep, outside the ladder ==\n'
+# --orphans is the self-describing spelling of --tier 0: sweep only unattached
+# servers, safe at any time. It must run tier 0 EVEN WHEN the ladder sits higher,
+# and must leave the escalation state byte-identical (it neither reads nor writes it).
+STATE_FILE="$SB/orphans.state"
+printf '%s 1\n' "$(date +%s)" > "$STATE_FILE"     # mid-ladder: a bare run would go to tier 2
+cp "$STATE_FILE" "$SB/orphans.state.before"
+
+start_server rapid-mlx "$BASE"
+ORPH="$LAST_PID"
+sleep 2
+
+OUT="$(run_evict --orphans)"
+STATUS=$?
+check "$STATUS" "--orphans exits successfully"
+assert_contains "evicting (tier 0)" "$OUT" "--orphans runs tier 0 even mid-ladder"
+assert_stopped "$ORPH" "--orphans swept the unattached server"
+if cmp -s "$STATE_FILE" "$SB/orphans.state.before"; then
+    check 0 "--orphans leaves the escalation state byte-identical"
+else
+    check 1 "--orphans leaves the escalation state byte-identical"
+fi
+
+OUT="$(run_evict --orphans --tier 1 2>&1)"
+STATUS=$?
+if [ "$STATUS" -eq 2 ]; then check 0 "--orphans with --tier is a usage error"; else check 1 "--orphans with --tier is a usage error"; fi
+OUT="$(run_evict --orphans --all 2>&1)"
+STATUS=$?
+if [ "$STATUS" -eq 2 ]; then check 0 "--orphans with --all is a usage error"; else check 1 "--orphans with --all is a usage error"; fi
+OUT="$(run_evict --orphans --port "$BASE" 2>&1)"
+STATUS=$?
+if [ "$STATUS" -eq 2 ]; then check 0 "--orphans with --port is a usage error"; else check 1 "--orphans with --port is a usage error"; fi
+
+OUT="$(run_evict --help 2>&1)"
+assert_contains "--orphans" "$OUT" "--help documents --orphans"
+assert_contains "outside the ladder" "$OUT" "--help states that --orphans never touches the ladder"
+
+# ---------------------------------------------------------------------------
 printf '\n== state reset and empty inventory ==\n'
 
 STATE_FILE="$SB/reset.state"

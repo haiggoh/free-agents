@@ -27,12 +27,18 @@
 # is refused (exit 2). That refusal is what keeps the proxy band live sessions depend on
 # out of reach of a typo. --port may be repeated and is additive.
 #
+# --orphans runs the tier-0 sweep ONCE, outside the ladder: it evicts only unattached
+# (orphaned) servers, never one attached to a live session, so it is safe to run at any
+# time — e.g. to clean up a server a finished stateless dispatch left resident. It runs
+# tier 0 even when the ladder sits higher, and never reads or writes escalation state.
+# Same effect as --tier 0; it cannot be combined with --tier, --all or --port (exit 2).
+#
 # SUPPORTS MACOS (Apple Silicon MLX) AND LINUX/WSL (CUDA)
 # Uses /proc on Linux for reliable process inspection; uses ps on macOS.
 # Supports Rapid-MLX, vllm-mlx, oMLX (serve, omlx.cli, omlx-server), mlx_lm.server,
 # llama.cpp, and CUDA vLLM/llama-server.
 #
-# Usage: la-evict.sh [--status] [--dry-run] [--tier N] [--port N]... [--all] [--allow-unknown] [--reset]
+# Usage: la-evict.sh [--status] [--dry-run] [--orphans | --tier N] [--port N]... [--all] [--allow-unknown] [--reset]
 #        [--help]   (--reset clears the saved escalation state and exits, evicting nothing)
 #
 # Exit: 0 done · 1 internal failure · 2 usage · 3 tier 1 held back an attached server
@@ -74,7 +80,7 @@ usage() {
 BARE_RUN=1; [ $# -gt 0 ] && BARE_RUN=0
 
 DRY_RUN=0; STATUS_ONLY=0; FORCE_TIER=""; KILL_ALL=0; ALLOW_UNKNOWN=0
-PORTS=""; PORT_MODE=0; DO_RESET=0
+PORTS=""; PORT_MODE=0; DO_RESET=0; ORPHANS=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --status)        STATUS_ONLY=1 ;;
@@ -88,6 +94,7 @@ while [ $# -gt 0 ]; do
             esac
             FORCE_TIER="$_want"
             ;;
+        --orphans)       ORPHANS=1 ;;
         --all)           KILL_ALL=1 ;;
         --allow-unknown) ALLOW_UNKNOWN=1 ;;
         --port)
@@ -107,6 +114,16 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+# --orphans IS tier 0; combining it with another target selector would make one of the
+# two silently lose. Refuse instead, before any state is read or written.
+if [ "$ORPHANS" = 1 ]; then
+    if [ -n "$FORCE_TIER" ] || [ "$KILL_ALL" = 1 ] || [ "$PORT_MODE" = 1 ]; then
+        printf 'la-evict.sh: --orphans is the tier-0 sweep: it cannot be combined with --tier, --all or --port\n' >&2
+        usage; exit 2
+    fi
+    FORCE_TIER=0
+fi
 
 # --port names a known target, so it is meaningless to combine it with the ladder's
 # own controls. Refusing beats silently picking one interpretation.
