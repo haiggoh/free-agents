@@ -1441,9 +1441,10 @@ class LocalScreen(Screen):
                    section="hidden"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp"), labels=("DISABLED", "ENABLED")),
-            Action("y", f"Auto-sync local registry with the disk (no prompts): "
+            setting("y", f"Auto-sync local registry with the disk (no prompts): "
                         f"{'ON' if s.memguard.get('registry_auto_sync') else 'OFF'}",
-                   self._toggle_registry_auto_sync),
+                    (False, True), lambda: bool(s.memguard.get("registry_auto_sync")),
+                    self._put_registry_auto_sync, labels=("OFF", "ON")),
         ]
         # Add "Launch last model" if we have a saved last model
         last_local = s.last_launched_model.get("local_session") if s.last_launched_model else None
@@ -1459,13 +1460,13 @@ class LocalScreen(Screen):
         check_action_table(acts)
         return acts
 
-    def _toggle_registry_auto_sync(self):
-        """The Local screen's auto-sync row (0.43.0): same store key the guard screen used,
-        persisted through the on_memguard_saved callback the Picker wires to sms.save_memguard."""
-        v = not self.settings.memguard.get("registry_auto_sync")
-        self.settings.memguard["registry_auto_sync"] = v
+    def _put_registry_auto_sync(self, v):
+        """The Local screen's auto-sync row (0.43.0; a cycle stepper since 0.55.6): same store
+        key the guard screen used, persisted through the on_memguard_saved callback the Picker
+        wires to sms.save_memguard. Sets the value it receives (direction-aware stepping)."""
+        self.settings.memguard["registry_auto_sync"] = bool(v)
         if self.settings.on_memguard_saved:
-            self.settings.on_memguard_saved({"registry_auto_sync": v})
+            self.settings.on_memguard_saved({"registry_auto_sync": bool(v)})
 
     def _launch_last(self, lane: str):
         """Launch the last used model for the given lane."""
@@ -3298,10 +3299,11 @@ class LowkeyScreen(Screen):
             self.accordion.open_group = None
         self.set_models(list(self.models.values()))
 
-    def _toggle_remote_filters(self):
-        """D3 opt-in: apply the Remote screen's filters to lowkey's API list. Persisted like the
-        other lowkey settings (on_lowkey_filters_saved -> sms.save_lowkey_filters)."""
-        self._remote_filters = not self._remote_filters
+    def _put_remote_filters(self, v):
+        """D3 opt-in (a cycle stepper since 0.55.6): apply the Remote screen's filters to
+        lowkey's API list. Sets the value it receives; persisted like the other lowkey
+        settings (on_lowkey_filters_saved -> sms.save_lowkey_filters)."""
+        self._remote_filters = bool(v)
         s = self.settings
         s.lowkey_remote_filters = self._remote_filters
         if s.on_lowkey_filters_saved:
@@ -3380,6 +3382,14 @@ class LowkeyScreen(Screen):
         if s.on_effort_saved:
             s.on_effort_saved("lowkey", s.lowkey_effort)
 
+    def _set_lowkey_effort(self, v):
+        """Direction-aware effort put (0.55.6): the stepper hands us the value to set; the
+        persist path is the one _cycle_effort has always used (on_effort_saved)."""
+        s = self.settings
+        s.lowkey_effort = v
+        if s.on_effort_saved:
+            s.on_effort_saved("lowkey", v)
+
     def _cycle_temperature(self):
         s = self.settings
         s.lowkey_temperature = _next(TEMPERATURES, s.lowkey_temperature)
@@ -3442,18 +3452,19 @@ class LowkeyScreen(Screen):
             setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
                     (None, False), lambda: s.lowkey_thinking, self._set_thinking,
                     labels=("ON", "OFF"), section="model"),
-            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.lowkey_effort} (sent as reasoning_effort)",
-                    effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(),
-                    labels=tuple(f"{c} (sent as reasoning_effort)" for c in effort_choices("lowkey")),
+            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {_effort_label(s.lowkey_effort)}",
+                    effort_choices("lowkey"), lambda: s.lowkey_effort, self._set_lowkey_effort,
+                    labels=tuple(_effort_label(c) for c in effort_choices("lowkey")),
                     section="model"),
             setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or 'not set'}",
                     TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(),
                     labels=tuple("not set" if t == "" else t for t in TEMPERATURES),
                     section="model"),
             # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
-            Action("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "
+            setting("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "
                         f"{'ON' if self._remote_filters else 'OFF'}",
-                   self._toggle_remote_filters, section="model"),
+                    (False, True), lambda: self._remote_filters, self._put_remote_filters,
+                    labels=("OFF", "ON"), section="model"),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
