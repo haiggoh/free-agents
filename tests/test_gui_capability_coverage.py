@@ -115,20 +115,21 @@ class CapabilityCoverage(unittest.TestCase):
 
     def test_render_plan_never_calls_run(self):
         # pin the contract directly: wrap every action's run() in a raiser and build the
-        # whole matrix — render_plan must not touch it
+        # whole matrix — render_plan must not touch it. actions() returns FRESH objects per
+        # call (verified), so pin the instance's method to the wrapped list, otherwise the
+        # raiser would wrap stale objects and the test would pass vacuously.
         for _t, scr in full_matrix():
             acts = scr.actions()
-            real = [a.run for a in acts]
             for a in acts:
                 def boom(_a=a):
                     raise AssertionError(f"render_plan called run() of {_a.key!r}")
                 a.run = boom
+            scr.actions = lambda: acts          # render_plan re-calls screen.actions()
             try:
                 with self.subTest(screen=type(scr).__name__):
                     adapter.render_plan(scr)
             finally:
-                for a, r in zip(acts, real):
-                    a.run = r
+                del scr.actions                 # restore the class method on the instance
 
     def test_gui_render_rows_never_calls_run(self):
         # structural guard for the GUI binding: no .run() call may live inside render_rows
