@@ -1,3 +1,39 @@
+## [0.55.4] — 2026-11-07
+
+### Changed — cycle-glyph polish, hover and toast fixes (user feedback round)
+
+- Slim ❮ ❯ cycle glyphs replace ◀ ▶ (user: reads native to the terminal). One definition in
+  `emoji_constants` (`CYCLE_LEFT`/`CYCLE_RIGHT`) — the render, the click hit test and the
+  hover hit test all read it, never a re-typed literal.
+- Values are CENTERED between the glyphs, in a PER-ROW cell sized to the row's own widest
+  choice label: an ON/OFF toggle now fits "OFF" plus one space each side (0.55.2 padded every
+  row to the widest value anywhere, so toggles rendered far too wide). ❯ still never moves
+  while a row cycles — asserted on the temperature row (`<provider default>` vs `0.0`).
+  `setting()` rows now carry their choice labels (`labels=`), so the render sizes cells from
+  the same mapping the label f-string uses instead of a global max.
+- Mouse hover is visible in EVERY menu again: 0.55.2 removed the actions-row hover entirely
+  (arrow-only, that round's request), which read as "no hover reaction at all" outside the
+  screens whose rows live in the rows list (API keys setup — the one menu that still
+  responded). The generic soft-blue hover covers #actions again; hovering a glyph still adds
+  a glyph-only reverse highlight, now in the TUI's native soft-blue family (was
+  bright_yellow).
+- Glyph hit tests use DISPLAY columns (`rich.cells.cell_len`), not character indexes —
+  emoji prefixes (👀 🔌) are one character but two columns, which put the old math a column
+  off the drawn glyph on those rows.
+- The copy toast is ONE line (one border pipe — Textual's default padding made it a 3-line
+  block) and sits 3 rows above the bottom edge so it never overlaps the remote info box.
+  First delivery-level toast test (the mounted widget itself): the pilot disables
+  notifications by default, so `PilotCase.run_picker` gained a `notifications=True` opt-in.
+- Backend-manager upgrade toggles (0.55.3) render as the new narrow ❮ ON/OFF ❯ rows and
+  persist through them (toggle tested against a temp state file; the user's real
+  `backend-upgrades.json` is never touched).
+- Gate coverage: `test_cycle_indicators_0555.py` (added 0.55.1) was in NO gate — the main
+  suite deselects `load_sensitive` and the picker pre-flight list didn't name it. Both cycle
+  test files are in `.rtc/pre-flight.sh`'s picker gate now (11 tests). The offload-nudge
+  tests scrub the machine's registered route keys from the process env: settings.json env
+  applies to every session, so a saved `FA_ROUTE_AGENT` leaked into the paid/free-default
+  expectations and failed 2 tests on any machine with a non-default route.
+
 ## [0.55.3] — 2026-11-06
 
 ### Changed — backend-upgrade launch prompt (user 2026-11-06)

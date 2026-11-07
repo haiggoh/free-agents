@@ -36,6 +36,7 @@ import cloud_session_env as cse  # noqa: E402
 import session_picker_model as m  # noqa: E402
 
 try:
+    from rich.cells import cell_len
     from rich.text import Text
     from textual.app import App, ComposeResult
     from textual.binding import Binding
@@ -572,6 +573,15 @@ class ConfirmPanel(ModalScreen):
             self.dismiss(None)
 
 
+def _glyph_cols(text):
+    """Display columns of the cycle glyphs (emoji_constants.CYCLE_LEFT/RIGHT) within a cycle
+    row's label. The hit test must run on DISPLAY widths (rich.cell_len), not character
+    indexes: a wide emoji prefix is one character but two columns, which puts the hit test
+    a column off the drawn glyph."""
+    return (cell_len(text[:text.index(ec.CYCLE_LEFT)]),
+            cell_len(text[:text.rindex(ec.CYCLE_RIGHT)]))
+
+
 class HoverOptionList(OptionList):
     """OptionList that reports which row the mouse is over, so the info box can follow the
     pointer as well as the keyboard highlight. Textual tracks hover only for styling."""
@@ -590,8 +600,10 @@ class HoverOptionList(OptionList):
             self._update_arrow_hover(event)
 
     def _update_arrow_hover(self, event):
-        """Hover over a ◀/▶ glyph highlights only that glyph (0.55.2): recompute the hovered
-        glyph and re-render if it changed. The row itself never highlights (CSS override)."""
+        """Hover over a cycle glyph highlights only that glyph (0.55.2): recompute the hovered
+        glyph and re-render if it changed. The row itself keeps the native soft-blue hover
+        (0.55.4); the glyph adds a reverse highlight on top. Glyph columns are DISPLAY
+        columns (see _glyph_cols)."""
         app = self.app
         hover = None
         idx = self._mouse_hovering_over
@@ -602,11 +614,12 @@ class HoverOptionList(OptionList):
                 oid = opt.id
             except Exception:
                 text, oid = "", None
-            if oid and "◀" in text and "▶" in text:
+            if oid and ec.CYCLE_LEFT in text and ec.CYCLE_RIGHT in text:
                 col = event.screen_x - self.scrollable_content_region.x
-                if abs(col - text.index("◀")) <= 1:
+                lcol, rcol = _glyph_cols(text)
+                if abs(col - lcol) <= 1:
                     hover = (oid, -1)
-                elif abs(col - text.rindex("▶")) <= 1:
+                elif abs(col - rcol) <= 1:
                     hover = (oid, +1)
         if getattr(app, "_arrow_hover", None) != hover:
             app._arrow_hover = hover
@@ -634,16 +647,18 @@ class HoverOptionList(OptionList):
                 text = str(self.get_option_at_index(idx).prompt)
             except Exception:
                 text = ""
-            if "◀" in text and "▶" in text:
+            if ec.CYCLE_LEFT in text and ec.CYCLE_RIGHT in text:
                 # Click x is screen-relative: compare against the content region's
                 # absolute screen x (list has padding 0 1, no border). The spaces around
-                # each glyph count as part of the arrow (user 2026-11-06: bigger hit target).
+                # each glyph count as part of the arrow (user 2026-11-06: bigger hit target);
+                # glyph positions are DISPLAY columns (user 2026-11-07, see _glyph_cols).
                 col = event.screen_x - self.scrollable_content_region.x
-                if abs(col - text.index("◀")) <= 1:
+                lcol, rcol = _glyph_cols(text)
+                if abs(col - lcol) <= 1:
                     self.app._click_indicator(idx, -1)
                     event.stop()
                     return
-                if abs(col - text.rindex("▶")) <= 1:
+                if abs(col - rcol) <= 1:
                     self.app._click_indicator(idx, +1)
                     event.stop()
                     return
@@ -791,6 +806,11 @@ class Picker(App):
     /* 0.54.0 copy indicator: the information toast is BLUE (the toast's own class is
        `Toast.-information` — textual/widgets/_toast.py). */
     Toast.-information, Toast.-information .toast--title { color: #4da3ff; border-left: outer #4da3ff; }
+    /* 0.55.4 (user 2026-11-07): the copy indicator is ONE line — Textual's default padding
+       (1 1) made it a 3-line block with three stacked border pipes — and the rack sits 3
+       rows above the bottom edge so it never overlaps the remote info box. */
+    Toast { padding: 0 1; }
+    ToastRack { margin-bottom: 3; }
     OptionList { background: ansi_default; color: ansi_default; border: none; }
     OptionList:focus { background: ansi_default; color: ansi_default; border: none; }
     /* Highlight and hover never paint a block: soft-blue text (ANSI bright-blue, which every
@@ -799,12 +819,11 @@ class Picker(App):
     OptionList > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: none; }
     OptionList:focus > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: bold; }
     OptionList > .option-list--option-hover { background: ansi_default; color: ansi_bright_blue; }
-    /* 0.55.2 (user 2026-11-06): hovering an arrow must highlight ONLY the arrow, never the
-       whole actions row — so the actions list gets no row-hover recolor at all; the ◀/▶
-       glyphs are permanently accent-styled and get a reverse highlight while hovered
-       (re-rendered per glyph by HoverOptionList._on_mouse_move). The rows list keeps the
-       soft-blue hover (the info box follows the pointer there). */
-    #actions > .option-list--option-hover { background: ansi_default; color: ansi_default; }
+    /* 0.55.4 (user 2026-11-07): mouse hover must be visible in EVERY menu — 0.55.2 removed
+       the actions-row hover entirely (arrow-only), which read as "no hover reaction at all"
+       outside the screens whose rows live in the #rows list (API keys setup). The generic
+       soft-blue rule above covers #actions again; hovering a ❮/❯ glyph still adds a
+       glyph-only reverse highlight on top (HoverOptionList._on_mouse_move). */
     /* Every text input (the live filter, the inline prompts): a SYMMETRIC rounded frame.
        Textual's default `tall` border draws barbs on the left that the right side has not
        (user 2026-10-22), so inputs looked lopsided; `round` matches the info box's frame. */
@@ -1601,9 +1620,10 @@ class Picker(App):
         rendered, self._collapsed_actions = m.rendered_actions(sm)
         collapsed = bool(self._collapsed_actions)
         # Cycle-indicator placement (user 2026-11-06, nicegui parity): arrows flank the VALUE,
-        # not the whole row — "KEY) name: ◀ value ▶". The value is padded to one fixed width
-        # so the ▶ never jumps when a cycled value changes width (lesson from the nicegui
-        # ON/OFF chip min-width fix).
+        # not the whole row — "KEY) name: ❮ value ❯". 0.55.4 (user): the value is CENTERED in
+        # a per-row column sized to the row's own widest choice label, so an ON/OFF toggle
+        # stays narrow while ❯ still never jumps when a cycled value changes width (lesson
+        # from the nicegui ON/OFF chip min-width fix).
         def _plain(a):
             return a.label.plain if isinstance(a.label, Text) else str(a.label)
 
@@ -1635,8 +1655,6 @@ class Picker(App):
         cycle_rows = [a for a in rendered
                       if a.step is not None and a not in (m.SETTINGS_GROUP, m.MODEL_GROUP)]
         cycle_vals = {id(a): _split_value(a) for a in cycle_rows}
-        cycle_w = max((len(v.plain if isinstance(v, Text) else str(v)) for _, v in cycle_vals.values()),
-                      default=0)
         # A nav-ONLY actions pane on a screen WITH rows (API keys setup) renders BELOW the rows,
         # so Back is the last row on screen like every other submenu (user 2026-10-31: it used
         # to sit at the very top because the pane is mounted above #rows). Nav-only screens
@@ -1693,20 +1711,37 @@ class Picker(App):
                 head, val = cycle_vals[id(a)]
                 oid = f"a:{len(self.action_ids)-1}"
                 hover = getattr(self, "_arrow_hover", None)
-                left_style = "bold reverse bright_yellow" if hover == (oid, -1) else "bold bright_yellow"
-                right_style = "bold reverse bright_yellow" if hover == (oid, +1) else "bold bright_yellow"
+                # 0.55.4 (user): the glyph highlight joins the TUI's native soft-blue family —
+                # bright_yellow read as foreign next to the soft-blue hover/highlight rules
+                # every other row uses. rich color names here (the spans go through rich's
+                # parser, not Textual CSS): bright_blue quantizes to ANSI bright blue under
+                # the app's ansi_color driver, like the old bright_yellow did.
+                left_style = "bold reverse bright_blue" if hover == (oid, -1) else "bold bright_blue"
+                right_style = "bold reverse bright_blue" if hover == (oid, +1) else "bold bright_blue"
                 if isinstance(head, Text):
                     prompt += head
                 else:
                     prompt.append(str(head))
-                prompt.append("◀ ", style=left_style)    # accent: arrows are the buttons
                 val_plain = val.plain if isinstance(val, Text) else str(val)
+                # 0.55.4 (user): the value cell is only as wide as the row's OWN widest choice
+                # label (an ON/OFF toggle fits "OFF" plus one space each side) — 0.55.2 padded
+                # every row to the widest value anywhere. The value sits centered between the
+                # glyphs; one space is guaranteed on each side. Rows without choice metadata
+                # (theme/lane rows) self-pad in the model, so their width stays stable too.
+                if a.labels:
+                    row_w = max(cell_len(x) for x in a.labels)
+                elif a.choices:
+                    row_w = max(cell_len(str(c)) for c in a.choices)
+                else:
+                    row_w = cell_len(val_plain)
+                pad = max(0, row_w - cell_len(val_plain))
+                lead, trail = pad // 2, pad - pad // 2
+                prompt.append(f"{ec.CYCLE_LEFT} " + " " * lead, style=left_style)    # accent: arrows are the buttons
                 if isinstance(val, Text):
                     prompt += val
-                    prompt.append(" " * max(0, cycle_w - len(val_plain)))        # fixed ▶ column
                 else:
-                    prompt.append(val_plain + " " * max(0, cycle_w - len(val_plain)))
-                prompt.append("▶", style=right_style)
+                    prompt.append(val_plain)
+                prompt.append(" " * trail + f" {ec.CYCLE_RIGHT}", style=right_style)
             elif isinstance(a.label, Text):
                 prompt += a.label            # rich Text + Text keeps the spans
             else:

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """tests/test_cycle_indicators_0555.py — cycle-indicator plan (2026-11-04 user request):
 
-Every cycleable action row in the csl Textual picker shows ◀ … ▶ indicators; clicking ◀
-behaves exactly like the Left key, ▶ like Right, and clicking the row label like Enter
-(for most rows Enter == step +1 == Right; the theme hue rows split it: Enter/click = ±20°,
-arrows/indicators = ∓5° — model already carries that split, the TUI routing must honor it).
+Every cycleable action row in the csl Textual picker shows ❮ … ❯ indicators (0.55.4: slim
+brackets, centered values, per-row columns); clicking ❮ behaves exactly like the Left key,
+❯ like Right, and clicking the row label like Enter (for most rows Enter == step +1 ==
+Right; the theme hue rows split it: Enter/click = ±20°, arrows/indicators = ∓5° — model
+already carries that split, the TUI routing must honor it).
 
 Run: ~/.local/share/free-agents/picker-venv/bin/python -m pytest tests/test_cycle_indicators_0555.py
 """
@@ -33,9 +34,11 @@ def _action_option(h, key):
 
 async def click_at_text(h, key, needle):
     """Real mouse click on the first occurrence of `needle` inside action row `key`'s label.
-    The #actions list has padding 0 1 and no border, so widget x = 1 + text column."""
+    The #actions list has padding 0 1 and no border, so widget x = 1 + DISPLAY column
+    (0.55.4: display widths via rich.cell_len — emoji prefixes are one char, two cols)."""
+    from rich.cells import cell_len
     opt_i, text = _action_option(h, key)
-    col = 1 + text.index(needle)
+    col = 1 + cell_len(text[:text.index(needle)])
     await h.pilot.click("#actions", offset=(col, opt_i))
     await h.pilot.pause(0.3)
 
@@ -63,17 +66,17 @@ class CycleIndicators(PilotCase):
                              if ol.get_option_at_index(j).id == oid)
                 text = str(ol.get_option_at_index(opt_i).prompt)
                 if a.step is not None:
-                    self.assertIn("◀", text, f"cycle row {a.key} missing ◀: {text!r}")
-                    self.assertIn("▶", text, f"cycle row {a.key} missing ▶: {text!r}")
+                    self.assertIn("❮", text, f"cycle row {a.key} missing ❮: {text!r}")
+                    self.assertIn("❯", text, f"cycle row {a.key} missing ❯: {text!r}")
                     # arrows flank the VALUE, not the whole row (user 2026-11-06, nicegui parity):
-                    # ◀ comes after the last ': ' and ▶ after the value
+                    # ❮ comes after the last ': ' and ❯ after the value
                     if ": " in text:
-                        self.assertGreater(text.index("◀"), text.rindex(": "),
-                                           f"◀ must sit before the value, not the row: {text!r}")
-                    self.assertLess(text.index("◀"), text.rindex("▶"))
+                        self.assertGreater(text.index("❮"), text.rindex(": "),
+                                           f"❮ must sit before the value, not the row: {text!r}")
+                    self.assertLess(text.index("❮"), text.rindex("❯"))
                 else:
-                    self.assertNotIn("◀", text, f"non-cycle row {a.key} gained ◀: {text!r}")
-                    self.assertNotIn("▶", text, f"non-cycle row {a.key} gained ▶: {text!r}")
+                    self.assertNotIn("❮", text, f"non-cycle row {a.key} gained ❮: {text!r}")
+                    self.assertNotIn("❯", text, f"non-cycle row {a.key} gained ❯: {text!r}")
         self.run_picker(s, start="local")
 
     def test_indicator_clicks_step_like_arrow_keys(self):
@@ -82,35 +85,36 @@ class CycleIndicators(PilotCase):
             await h.wait_screen("LocalScreen")
             await h.expand_settings()
             label0 = row_label(h, "e")               # Effort row
-            await click_at_text(h, "e", "▶")
+            await click_at_text(h, "e", "❯")
             label1 = row_label(h, "e")
-            self.assertNotEqual(label0, label1, "clicking ▶ must step forward")
-            await h.press("left")                    # left arrow == ◀
-            self.assertEqual(row_label(h, "e"), label0, "▶ then Left must return to the start value")
-            await click_at_text(h, "e", "◀")
+            self.assertNotEqual(label0, label1, "clicking ❯ must step forward")
+            await h.press("left")                    # left arrow == ❮
+            self.assertEqual(row_label(h, "e"), label0, "❯ then Left must return to the start value")
+            await click_at_text(h, "e", "❮")
             label2 = row_label(h, "e")
-            self.assertNotEqual(label0, label2, "clicking ◀ must step back")
-            await h.press("right")                   # right arrow == ▶
-            self.assertEqual(row_label(h, "e"), label0, "◀ then Right must return to the start value")
+            self.assertNotEqual(label0, label2, "clicking ❮ must step back")
+            await h.press("right")                   # right arrow == ❯
+            self.assertEqual(row_label(h, "e"), label0, "❮ then Right must return to the start value")
             # the spaces around the glyph are part of the arrow (user 2026-11-06): clicking
-            # the space just left of ◀ must step back too
+            # the space just left of ❮ must step back too
+            from rich.cells import cell_len
             from textual.widgets import OptionList
             ol = h.app.query_one("#actions", OptionList)
             idx = next(i for i, a in enumerate(h.app.action_ids) if a.key == "e")
             opt_i = next(j for j in range(ol.option_count)
                          if ol.get_option_at_index(j).id == f"a:{idx}")
             text = str(ol.get_option_at_index(opt_i).prompt)
-            space_col = 1 + text.index("◀") - 1
+            space_col = 1 + cell_len(text[:text.index("❮")]) - 1
             await h.pilot.click("#actions", offset=(space_col, opt_i))
             await h.pilot.pause(0.3)
-            self.assertNotEqual(row_label(h, "e"), label0, "clicking the space before ◀ must step back")
+            self.assertNotEqual(row_label(h, "e"), label0, "clicking the space before ❮ must step back")
             await h.press("right")
             self.assertEqual(row_label(h, "e"), label0)
-            # ▶ stays at a fixed column while the value changes width (no jumping)
-            await click_at_text(h, "e", "▶")
+            # ❯ stays at a fixed column while the value changes width (no jumping)
+            await click_at_text(h, "e", "❯")
             text_after = row_label(h, "e")
-            self.assertEqual(text.rindex("▶"), text_after.rindex("▶"),
-                             "▶ column must not move when the value width changes")
+            self.assertEqual(text.rindex("❯"), text_after.rindex("❯"),
+                             "❯ column must not move when the value width changes")
         self.run_picker(s, start="local")
 
     def test_arrow_hover_highlights_only_the_glyph(self):
@@ -125,11 +129,12 @@ class CycleIndicators(PilotCase):
                          if ol.get_option_at_index(j).id == f"a:{idx}")
             oid = ol.get_option_at_index(opt_i).id
             text = str(ol.get_option_at_index(opt_i).prompt)
-            # hover the ◀ glyph (incl. its surrounding space): hover state tracks the glyph
-            await h.pilot.hover("#actions", offset=(1 + text.index("◀"), opt_i))
+            # hover the ❮ glyph (incl. its surrounding space): hover state tracks the glyph
+            from rich.cells import cell_len
+            await h.pilot.hover("#actions", offset=(1 + cell_len(text[:text.index("❮")]), opt_i))
             await h.pilot.pause(0.4)
             self.assertEqual(getattr(app, "_arrow_hover", None), (oid, -1),
-                             "hovering ◀ must mark only that glyph")
+                             "hovering ❮ must mark only that glyph")
             # hover the middle of the row label: no glyph hover
             await h.pilot.hover("#actions", offset=(1 + text.index("Effort") + 2, opt_i))
             await h.pilot.pause(0.4)
@@ -160,10 +165,10 @@ class CycleIndicators(PilotCase):
                 self.assertAlmostEqual(deg(), target % 360, delta=1, msg=what)
             await h.press("right")                   # arrow key = +5
             expect(d0 + 5, "Right arrow must step +5°")
-            await click_at_text(h, "y", "▶")         # ▶ indicator = Right = +5
-            expect(d0 + 10, "clicking ▶ must step +5° like Right")
-            await click_at_text(h, "y", "◀")         # ◀ indicator = Left = −5
-            expect(d0 + 5, "clicking ◀ must step −5° like Left")
+            await click_at_text(h, "y", "❯")         # ❯ indicator = Right = +5
+            expect(d0 + 10, "clicking ❯ must step +5° like Right")
+            await click_at_text(h, "y", "❮")         # ❮ indicator = Left = −5
+            expect(d0 + 5, "clicking ❮ must step −5° like Left")
             await click_at_text(h, "y", "Hue")       # row label click = Enter = +20
             expect(d0 + 25, "clicking the row label must act like Enter (+20°)")
             await h.press("enter")                   # Enter on the hue row = +20 too

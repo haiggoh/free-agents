@@ -81,6 +81,12 @@ class Action:
     # Settings rows (toggle / multi-choice): step(+1|-1). Enter, click and Right call +1, Left
     # calls -1. None = a plain action (navigation, launch, tool) that only Enter/click runs.
     step: Callable[[int], object] | None = None
+    # 0.55.4: the row's cycle metadata, for the per-row value column. `choices` is the raw
+    # value set; `labels` the DISPLAY strings parallel to it (ON, not True). Empty tuples for
+    # rows without them — the render then falls back to the current value's own width (safe
+    # for rows whose label already self-pads, like the theme/lane rows).
+    choices: tuple = ()
+    labels: tuple = ()
 
 
 # The collapsed group rows in the lane pickers (user 2026-10-29/30): while folded, the
@@ -94,15 +100,18 @@ MODEL_GROUP = Action("0", "Model", lambda: None, section="model")
 
 
 def setting(key: str, label: str, choices, get: Callable[[], object], put: Callable[[object], object],
-            enabled: bool = True, section: str = "settings") -> Action:
-    """A row whose value cycles through `choices` in either direction (wraps)."""
+            enabled: bool = True, section: str = "settings", labels=None) -> Action:
+    """A row whose value cycles through `choices` in either direction (wraps). `labels` is the
+    display string per choice, same order (0.55.4: sizes the row's value column — pass it
+    whenever the display differs from str(choice), e.g. ON for True)."""
     def step(d: int):
         try:
             i = list(choices).index(get())
         except ValueError:
             i = -1 if d > 0 else 0
         put(list(choices)[(i + d) % len(choices)])
-    return Action(key, label, lambda: step(1), enabled=enabled, section=section, step=step)
+    return Action(key, label, lambda: step(1), enabled=enabled, section=section, step=step,
+                  choices=tuple(choices), labels=tuple(labels) if labels is not None else ())
 
 
 def check_action_table(actions) -> None:
@@ -144,7 +153,8 @@ def thinking_row(s: Settings, key: str = "j", section: str = "model") -> Action:
             s.on_thinking_saved(s.thinking_session)
 
     return setting(key, f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {label()}", (None, False),
-                   lambda: s.thinking_session, put, section=section)
+                   lambda: s.thinking_session, put, section=section,
+                   labels=("ON (default)", "OFF"))
 
 
 # --- data --------------------------------------------------------------------------------
@@ -982,26 +992,28 @@ def _toggle(s, attr):
 def _common_toggles(s: Settings, include_watcher: bool):
     acts = [
         setting("a", f"{ec.EMOJI_AUTO_MODE_STR} Auto-mode: {AUTO_MODE_LABELS[s.auto_mode]}",
-                (0, 1, 2), lambda: s.auto_mode, lambda v: setattr(s, "auto_mode", v)),
+                (0, 1, 2), lambda: s.auto_mode, lambda v: setattr(s, "auto_mode", v),
+                labels=tuple(AUTO_MODE_LABELS[c] for c in (0, 1, 2))),
     ]
     # Classifier source only relevant when auto_mode == 1 (classifier), not blind-trust or off
     if s.auto_mode == 1:
         acts.append(setting("z", f"Classifier: {CLASSIFIER_SOURCE_LABELS[s.classifier_source]}",
-                (0, 1, 2), lambda: s.classifier_source, lambda v: setattr(s, "classifier_source", v)))
+                (0, 1, 2), lambda: s.classifier_source, lambda v: setattr(s, "classifier_source", v),
+                labels=tuple(CLASSIFIER_SOURCE_LABELS[c] for c in (0, 1, 2))))
     acts += [
         # Label says what it actually blocks (user 2026-10-30): LA_TELEMETRY=0 exports
         # CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 — stock Claude Code reporting off.
-        setting("t", f"{ec.gap(ec.EMOJI_TELEMETRY_ON_STR)}optional Anthropic Telemetry calls: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry")),
+        setting("t", f"{ec.gap(ec.EMOJI_TELEMETRY_ON_STR)}optional Anthropic Telemetry calls: {'ON' if s.telemetry else 'OFF'}", *_toggle(s, "telemetry"), labels=("OFF", "ON")),
         setting("p", f"{ec.gap(ec.EMOJI_STOP_HOOK_STR)}Queued-prompt hook: {'ON' if s.stop_hook else 'OFF'}",
-                *_toggle(s, "stop_hook")),
+                *_toggle(s, "stop_hook"), labels=("OFF", "ON")),
         # Key 'd': 'g' is the dynamic Go-launch key and 'h' belongs to the remote filter
         # submenu (FilterSubmenuTests) — keep this row off both.
         setting("d", f"{ec.gap(ec.EMOJI_BLOCK_STR)}Always block Github releases in \"blind-trust\" mode: {'ON' if s.deny_gh_release else 'OFF'}",
-                *_toggle(s, "deny_gh_release")),
+                *_toggle(s, "deny_gh_release"), labels=("OFF", "ON")),
     ]
     if include_watcher:
         acts.append(setting("w", f"{ec.EMOJI_WATCHER_STR} Watcher: {'ON' if s.watcher else 'OFF'}",
-                            *_toggle(s, "watcher")))
+                            *_toggle(s, "watcher"), labels=("OFF", "ON")))
     return acts
 
 
@@ -1404,7 +1416,9 @@ class LocalScreen(Screen):
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.local_effort}", effort_choices("local_session"),
                     lambda: s.local_effort, lambda v: self._set_effort(v), section="model"),
             setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.local_temperature or '<provider default>'}",
-                    TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v), section="model"),
+                    TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v),
+                    labels=tuple("<provider default>" if t == "" else t for t in TEMPERATURES),
+                    section="model"),
             thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
@@ -1412,7 +1426,7 @@ class LocalScreen(Screen):
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR}  Remote free API sessions", lambda: Nav("remote", self.owner),
                    section="hidden"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
-                    *_toggle(s, "enable_mcp")),
+                    *_toggle(s, "enable_mcp"), labels=("DISABLED", "ENABLED")),
             Action("y", f"Auto-sync local registry with the disk (no prompts): "
                         f"{'ON' if s.memguard.get('registry_auto_sync') else 'OFF'}",
                    self._toggle_registry_auto_sync),
@@ -1981,7 +1995,7 @@ class RemoteScreen(Screen):
             setattr(s, attr, v)
             self._regroup()
         return setting(key, f"{label}: {'SHOWN' if getattr(s, attr) else 'HIDDEN'}", (False, True),
-                       lambda: getattr(s, attr), put)
+                       lambda: getattr(s, attr), put, labels=("HIDDEN", "SHOWN"))
 
     def _toggle_choose_model(self):
         """Toggle the model list visibility."""
@@ -1997,9 +2011,13 @@ class RemoteScreen(Screen):
         s = self.settings
         acts = [
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {_effort_label(s.remote_effort)}",
-                    effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v), section="model"),
+                    effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v),
+                    labels=tuple(_effort_label(c) for c in effort_choices("remote_api_session")),
+                    section="model"),
             setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.remote_temperature or '<provider default>'}",
-                    TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v), section="model"),
+                    TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v),
+                    labels=tuple("<provider default>" if t == "" else t for t in TEMPERATURES),
+                    section="model"),
             thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into a group
             # No "find model" action row (user, 2026-10-21): the filter box at the top of
@@ -2009,7 +2027,7 @@ class RemoteScreen(Screen):
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
             Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
-                    *_toggle(s, "enable_mcp")),
+                    *_toggle(s, "enable_mcp"), labels=("DISABLED", "ENABLED")),
         ]
         # Add "Launch last model" if we have a saved last model
         last_remote = s.last_launched_model.get("remote_api_session") if s.last_launched_model else None
@@ -2479,12 +2497,14 @@ class ThemeConfigScreen(Screen):
             setting("r", self._lane_label("remote"), presets,
                     lambda: self.remote_theme["theme"]["accent_color"],
                     lambda v: self._set_accent("remote", v)),
-            Action("y", f"Hue local: {self._hue_deg('local')}°",     # ◀ ▶ render around the value now
+            Action("y", f"Hue local: {self._hue_deg('local')}°",     # ❮ ❯ render around the value now
                    lambda: self._shift_hue("local", 20),
-                   step=lambda d: self._shift_hue("local", 5 * d)),
+                   step=lambda d: self._shift_hue("local", 5 * d),
+                   labels=tuple(f"{d}°" for d in range(0, 360, 5))),
             Action("u", f"Hue remote: {self._hue_deg('remote')}°",
                    lambda: self._shift_hue("remote", 20),
-                   step=lambda d: self._shift_hue("remote", 5 * d)),
+                   step=lambda d: self._shift_hue("remote", 5 * d),
+                   labels=tuple(f"{d}°" for d in range(0, 360, 5))),
             Action("d", "Restore defaults", lambda: self._restore_defaults()),
         ]
         acts += self.nav_actions()
@@ -2755,7 +2775,8 @@ class VersionsScreen(Screen):
         if self.op == "install" and self.backend == "rapid-mlx":
             acts.append(setting("p", f"Promote pins after install: {'ON' if self.promote_after_install else 'OFF'}",
                                 (True, False), lambda: self.promote_after_install,
-                                lambda v: setattr(self, "promote_after_install", v)))
+                                lambda v: setattr(self, "promote_after_install", v),
+                                labels=("ON", "OFF")))
         acts.append(Action("b", f"{ec.EMOJI_BACK_STR}  Back to Backend manager", lambda: BACK, section="nav"))
         check_action_table(acts)
         return acts
@@ -2846,9 +2867,9 @@ def _upgrade_pref_rows():
     auto = lambda: _bu_pref("auto_install", False)     # noqa: E731
     return [
         setting("n", f"Notify about backend upgrades at launch: {'ON' if notify() else 'OFF'}",
-                (False, True), notify, lambda v: _set_bu_pref("notify", v)),
+                (False, True), notify, lambda v: _set_bu_pref("notify", v), labels=("OFF", "ON")),
         setting("a", f"Install backend upgrades automatically in the background: {'ON' if auto() else 'OFF'}",
-                (False, True), auto, lambda v: _set_bu_pref("auto_install", v)),
+                (False, True), auto, lambda v: _set_bu_pref("auto_install", v), labels=("OFF", "ON")),
     ]
 
 
@@ -3395,11 +3416,16 @@ class LowkeyScreen(Screen):
                            lambda: Nav("prompt:session"), section="main"))
         acts += [
             setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
-                    (None, False), lambda: s.lowkey_thinking, self._set_thinking, section="model"),
+                    (None, False), lambda: s.lowkey_thinking, self._set_thinking,
+                    labels=("ON (default)", "OFF"), section="model"),
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.lowkey_effort} (sent as reasoning_effort)",
-                    effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(), section="model"),
+                    effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(),
+                    labels=tuple(f"{c} (sent as reasoning_effort)" for c in effort_choices("lowkey")),
+                    section="model"),
             setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or '<provider default>'}",
-                    TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(), section="model"),
+                    TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(),
+                    labels=tuple("<provider default>" if t == "" else t for t in TEMPERATURES),
+                    section="model"),
             # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
             Action("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "
                         f"{'ON' if self._remote_filters else 'OFF'}",

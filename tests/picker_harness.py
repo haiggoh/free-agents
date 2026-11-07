@@ -65,9 +65,12 @@ def inventory_stub(text):
 
 def _norm(s: str) -> str:
     """0.55.2: cycle rows render "name: ◀ value ▶" — normalize so old "name: value" needles
-    still match: drop the glyphs and the one padding space they bring. Other spacing
-    (e.g. "0.16.1  (installed)") is preserved."""
-    return s.replace("◀ ", "").replace(" ▶", "").replace("◀", "").replace("▶", "")
+    still match: drop the glyphs and the padding they bring (0.55.4: slim ❮ ❯ with centered
+    values, so the value's lead pad sits between the colon and the value — a `: ` followed by
+    more spaces collapses to ": "). Other spacing (e.g. "0.16.1  (installed)") is preserved."""
+    for left, right in (("❮", "❯"), ("◀", "▶")):
+        s = s.replace(f"{left} ", "").replace(f" {right}", "").replace(left, "").replace(right, "")
+    return re.sub(r":\s{2,}", ": ", s)
 
 
 class _StubbedEnv(unittest.TestCase):
@@ -151,9 +154,11 @@ class PilotCase(_StubbedEnv):
             else:
                 os.environ[k] = v
 
-    def run_picker(self, scenario, start="home", **flags):
+    def run_picker(self, scenario, start="home", notifications=False, **flags):
         """Run `await scenario(app, pilot, h)` inside a picker started at `start`. Children run
-        with the real suspend() disabled (no terminal to hand over) but are still executed."""
+        with the real suspend() disabled (no terminal to hand over) but are still executed.
+        notifications=True mounts Textual's toast rack (run_test disables notifications by
+        default — 0.55.4's toast-geometry test is the first that needs the real widget)."""
         import argparse
         args = argparse.Namespace(screen=start, include_trials=False, exclude_trials=False,
                                   local_capable_shown=False)
@@ -171,7 +176,7 @@ class PilotCase(_StubbedEnv):
         async def main():
             app = self.sp.Picker(start, args)
             app.suspend = contextlib.nullcontext
-            async with app.run_test(size=(120, 50)) as pilot:
+            async with app.run_test(size=(120, 50), notifications=notifications) as pilot:
                 h = PilotHelper(self, app, pilot)
                 await h.settle()
                 await scenario(app, pilot, h)
