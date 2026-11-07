@@ -138,8 +138,8 @@ class CapabilityCoverage(unittest.TestCase):
         src = (Path(__file__).resolve().parents[1] / "bin" / "fa_gui" / "app.py").read_text()
         tree = ast.parse(src)
         renders = [n for n in ast.walk(tree)
-                   if isinstance(n, ast.FunctionDef) and n.name == "render_rows"]
-        self.assertTrue(renders, "render_rows not found in app.py")
+                   if isinstance(n, ast.FunctionDef) and "render" in n.name]
+        self.assertTrue(renders, "no render* functions found in app.py")
         for fn in renders:
             for node in ast.walk(fn):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \

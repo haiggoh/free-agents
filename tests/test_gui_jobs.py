@@ -23,21 +23,25 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_slower_first_load_loses_to_newer_generation(self):
+        # Continuation plan Phase 2: identical concurrent loads are COALESCED — one fn run,
+        # both callers get the same result (the kind-generation loser case only remains for
+        # a load that started after another for the same kind already finished uncached).
         async def run():
             ldr = Loader()
+            calls = []
             def slow():
+                calls.append(1)
                 time.sleep(0.2)
                 return "slow"
-            def fast():
-                return "fast"
             t1 = asyncio.ensure_future(ldr.load("remote", slow))
             await asyncio.sleep(0.02)
-            t2 = asyncio.ensure_future(ldr.load("remote", fast))
+            t2 = asyncio.ensure_future(ldr.load("remote", slow))
             r1, r2 = await asyncio.gather(t1, t2)
-            return r1, r2
-        r1, r2 = asyncio.run(run())
-        self.assertIs(r1, STALE, "the slower first load must come back Stale")
-        self.assertEqual(r2, "fast")
+            return r1, r2, calls
+        r1, r2, calls = asyncio.run(run())
+        self.assertEqual(len(calls), 1, "concurrent same-kind loads must coalesce into one run")
+        self.assertEqual(r1, "slow")
+        self.assertEqual(r2, "slow", "the coalesced caller gets the same result, not Stale")
 
     def test_leave_page_makes_inflight_result_stale(self):
         async def run():
@@ -50,6 +54,36 @@ class LoaderTests(unittest.TestCase):
             ldr.leave_page()          # user navigated away mid-load
             return await t
         self.assertIs(asyncio.run(run()), STALE)
+
+    def test_leave_page_is_per_client(self):
+        # Phase 2: one browser client navigating away must NOT stale another client's load
+        async def run():
+            ldr = Loader()
+            def slow():
+                time.sleep(0.2)
+                return "late"
+            ta = asyncio.ensure_future(ldr.load("local", slow, client="A"))
+            tb = asyncio.ensure_future(ldr.load("remote", slow, client="B"))
+            await asyncio.sleep(0.02)
+            ldr.leave_page(client="A")      # client A navigated away mid-load
+            return await asyncio.gather(ta, tb)
+        ra, rb = asyncio.run(run())
+        self.assertIs(ra, STALE, "client A left the page: its result is stale")
+        self.assertEqual(rb, "late", "client B is unaffected by client A's navigation")
+
+    def test_client_load_survives_legacy_global_leave_page(self):
+        # legacy no-arg leave_page() bumps only the client-less generation, keeping the
+        # old single-client contract intact
+        async def run():
+            ldr = Loader()
+            def slow():
+                time.sleep(0.2)
+                return "late"
+            t = asyncio.ensure_future(ldr.load("local", slow, client="A"))
+            await asyncio.sleep(0.02)
+            ldr.leave_page()                # legacy global bump — must NOT touch client A
+            return await t
+        self.assertEqual(asyncio.run(run()), "late")
 
 
 if __name__ == "__main__":
