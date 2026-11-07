@@ -71,6 +71,82 @@ class CapabilityCoverage(unittest.TestCase):
                         self.assertIn(kinds[0], ("select", "toggle"),
                                       f"typed row {sid} must be select/toggle, got {kinds[0]}")
 
+    def test_nav_actions_carry_nav_target_matching_their_nav(self):
+        # Phase 1 (continuation plan): the GUI must learn a nav row's target from METADATA,
+        # never by calling run() at render time. Every nav-section action must carry
+        # nav_target, and it must agree with the Nav its run() returns (tests may call run;
+        # render may not).
+        for target, scr in full_matrix():
+            for a in scr.actions():
+                if a.section not in adapter.NAV_SECTIONS:
+                    continue
+                sid = semantic_id(scr, a)
+                with self.subTest(target=target, action=sid):
+                    self.assertTrue(getattr(a, "nav_target", ""),
+                                    f"nav action {sid} has no nav_target metadata")
+                    res = a.run()
+                    self.assertIsInstance(res, m.Nav, f"nav action {sid} run() must return a Nav")
+                    self.assertEqual(a.nav_target, res.target,
+                                     f"nav_target {a.nav_target!r} != run() target {res.target!r}")
+
+    def test_nav_controls_expose_target(self):
+        for target, scr in full_matrix():
+            plan = {c.action_id: c for c in adapter.render_plan(scr)}
+            for a in scr.actions():
+                if a.section == "hidden" or a.section not in adapter.NAV_SECTIONS:
+                    continue
+                sid = semantic_id(scr, a)
+                with self.subTest(target=target, action=sid):
+                    c = plan[sid]
+                    self.assertEqual(c.kind, "nav")
+                    self.assertEqual(getattr(c, "target", ""), a.nav_target,
+                                     "nav RenderedControl must expose the metadata target")
+
+    def test_render_plan_refuses_nav_action_without_target(self):
+        # drift barrier: a nav-section action missing nav_target must fail loudly here,
+        # not silently fall back to calling run() at render time in the GUI
+        class FakeScreen(m.Screen):
+            def __init__(self):
+                super().__init__(m.Settings())
+            def actions(self):
+                return [m.Action("x", "X", lambda: m.Nav("x"), section="nav")]  # no nav_target
+        with self.assertRaises(ValueError):
+            adapter.render_plan(FakeScreen())
+
+    def test_render_plan_never_calls_run(self):
+        # pin the contract directly: wrap every action's run() in a raiser and build the
+        # whole matrix — render_plan must not touch it
+        for _t, scr in full_matrix():
+            acts = scr.actions()
+            real = [a.run for a in acts]
+            for a in acts:
+                def boom(_a=a):
+                    raise AssertionError(f"render_plan called run() of {_a.key!r}")
+                a.run = boom
+            try:
+                with self.subTest(screen=type(scr).__name__):
+                    adapter.render_plan(scr)
+            finally:
+                for a, r in zip(acts, real):
+                    a.run = r
+
+    def test_gui_render_rows_never_calls_run(self):
+        # structural guard for the GUI binding: no .run() call may live inside render_rows
+        # (run() at render time is the 2026-11-05 auto-sync mutation class). Click handlers
+        # live in separate functions (_run_action), so an AST walk of render_rows is exact.
+        import ast
+        src = (Path(__file__).resolve().parents[1] / "bin" / "fa_gui" / "app.py").read_text()
+        tree = ast.parse(src)
+        renders = [n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "render_rows"]
+        self.assertTrue(renders, "render_rows not found in app.py")
+        for fn in renders:
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                        and node.func.attr == "run":
+                    self.fail(f"render_rows calls .run() at line {node.lineno} — "
+                              f"render must use metadata, never run()")
+
 
 if __name__ == "__main__":
     unittest.main()

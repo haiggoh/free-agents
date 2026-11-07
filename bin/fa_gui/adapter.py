@@ -31,6 +31,8 @@ class RenderedControl:
     label: str
     enabled: bool = True
     group: str = ""         # "model" | "settings" for kind=="group" header rows
+    target: str = ""        # kind=="nav" only: the route, from Action.nav_target metadata —
+                            # NEVER learned by calling run() at render time (continuation Phase 1)
 
 
 # Lane screens fold their model/settings rows under two collapsible headers, exactly like
@@ -87,8 +89,14 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
                                 and set(a.choices) <= {False, True}) else "select"
         elif a.section in NAV_SECTIONS:
             kind = "nav"
+            if not a.nav_target:
+                # drift barrier: a nav row without metadata would force the GUI to call run()
+                # at render time — fail here instead (continuation plan Phase 1)
+                raise ValueError(f"nav action {sid} has no nav_target metadata; "
+                                 f"set it where the Action is built")
         else:
             kind = "button"
         out.append(RenderedControl(action_id=sid, kind=kind, label=a.label, enabled=a.enabled,
-                                   group=member_group.get(id(a), "")))
+                                   group=member_group.get(id(a), ""),
+                                   target=a.nav_target if kind == "nav" else ""))
     return out

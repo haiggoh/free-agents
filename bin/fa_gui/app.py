@@ -273,13 +273,12 @@ def build() -> None:
                         # csl parity: clicking the action item itself == Enter/click == ▶ (+1)
                         name_lbl.on("click", lambda a=action, v=val: _cycle(a, v, +1))
                         val.on("click", lambda a=action, v=val: _cycle(a, v, +1))
-            elif c.kind == "nav" and action is not None and action.run is not None:
-                # nav-section rows only RETURN a Nav, so calling run() here is side-effect-free.
-                # Mutating "button" rows must NEVER run at render time (auto-sync bug 2026-11-05).
-                res = action.run()
-                # tool panels that have a real GUI screen get mapped to it (lowkey, download)
-                target = {"tool:lowkey": "lowkey", "tool:download": "download"}.get(res.target, res.target)
-                target = "home" if target == "home" else target
+            elif c.kind == "nav":
+                # Continuation plan Phase 1: the route comes from RenderedControl.target
+                # (Action.nav_target metadata) — run() is NEVER called at render time
+                # (the auto-sync mutation of 2026-11-05 must not recur via a nav row).
+                # Tool panels that have a real GUI screen get mapped to it (lowkey, download)
+                target = {"tool:lowkey": "lowkey", "tool:download": "download"}.get(c.target, c.target)
                 # ui.link for real SPA navigation; .menu-item CSS overrides the link look
                 row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
                 row.props["data-target"] = target

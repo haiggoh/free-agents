@@ -90,6 +90,9 @@ class Action:
     name: str = ""
     choice_label: Callable[[object], str] | None = None
     id: str = ""
+    # Continuation plan Phase 1: nav-section rows expose their target as METADATA so adapters
+    # learn the route WITHOUT calling run() at render time. Empty on non-nav actions.
+    nav_target: str = ""
 
 
 # The collapsed group rows in the lane pickers (user 2026-10-29/30): while folded, the
@@ -970,11 +973,11 @@ class Screen:
     def nav_actions(self):
         acts = []
         if self.owner == SUB:
-            acts.append(Action("b", self.back_label, lambda: BACK, section="nav"))
+            acts.append(Action("b", self.back_label, lambda: BACK, section="nav", nav_target="back"))
         elif self.owner == HOME_OWNED:
-            acts.append(Action("b", f"{ec.EMOJI_HOME_STR} Back to Home", lambda: Nav("home", HOME_OWNED), section="nav"))
+            acts.append(Action("b", f"{ec.EMOJI_HOME_STR} Back to Home", lambda: Nav("home", HOME_OWNED), section="nav", nav_target="home"))
         else:
-            acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
+            acts.append(Action("q", "Quit", lambda: QUIT, section="nav", nav_target="quit"))
         return acts
 
     def actions(self):
@@ -1043,19 +1046,19 @@ def _tool_actions(backend: bool = True, local_session: bool = False, home: bool 
     # Home screen (home=True) shows only API keys and Backend manager, no NVIDIA rate limiter.
     acts = [
         Action("v", f"{ec.EMOJI_TOOLS_STR} Backend manager (Rapid-MLX, vllm-mlx, oMLX, llama.cpp, LiteLLM)",
-               lambda: Nav("runtime_manager"), section=sec("v")),
+               lambda: Nav("runtime_manager"), section=sec("v"), nav_target="runtime_manager"),
     ]
     if local_session:
         # It protects LOCAL sessions only, so only the Local screen offers it — not Remote, and not
         # Home either, where it read as a global setting (user 2026-10-23).
         acts.append(Action("u", f"{ec.gap(ec.EMOJI_MEMORY_GUARD_STR)}{OOM_PROTECTION_NAME}", lambda: Nav("memguard"),
-                           section=sec("u")))
+                           section=sec("u"), nav_target="memguard"))
     if not local_session:
         # 0.53.1: carry the owner so api keys opened from the csl home is HOME_OWNED (gets the
         # trailing Back-to-Home row); a bare Nav("api_keys") defaulted to DIRECT_ROOT (Quit).
-        acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys", owner), section=sec("k")))
+        acts.insert(0, Action("k", f"{ec.EMOJI_KEY_STR} API keys — install / set up", lambda: Nav("api_keys", owner), section=sec("k"), nav_target="api_keys"))
         if not home:
-            acts.append(Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section=sec("n")))
+            acts.append(Action("n", f"{ec.EMOJI_NVIDIA_RATE_LIMITER_STR} NVIDIA rate limiter", lambda: Nav("rate_limiter"), section=sec("n"), nav_target="rate_limiter"))
     return acts if backend else [a for a in acts if a.key != "v"]
 
 
@@ -1185,7 +1188,7 @@ class AboutScreen(Screen):
         return out
 
     def actions(self):
-        return [Action("b", f"{ec.EMOJI_HOME_STR} Back to home", lambda: Nav("home", HOME_OWNED), section="nav")]
+        return [Action("b", f"{ec.EMOJI_HOME_STR} Back to home", lambda: Nav("home", HOME_OWNED), section="nav", nav_target="home")]
 
 
 class HomeScreen(Screen):
@@ -1233,22 +1236,22 @@ class HomeScreen(Screen):
         # About; Quit. The renderer drops a blank row on every section change.
         acts = [
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR} Local sessions ({self._format_count(self.local_count, '?')} on disk)",
-                   lambda: Nav("local", HOME_OWNED), section="lanes"),
+                   lambda: Nav("local", HOME_OWNED), section="lanes", nav_target="local"),
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR} Remote free API sessions ({self._format_count(self.catalog_total, '?')} listed)",
-                   lambda: Nav("remote", HOME_OWNED), section="lanes"),
-            Action("o", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Lowkey — model evaluation chat", lambda: Nav("tool:lowkey"), section="lanes"),
+                   lambda: Nav("remote", HOME_OWNED), section="lanes", nav_target="remote"),
+            Action("o", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Lowkey — model evaluation chat", lambda: Nav("tool:lowkey"), section="lanes", nav_target="tool:lowkey"),
         ]
         tools = _tool_actions(home=True, owner=self.owner)          # [k API keys, v Backend manager]
         acts.append(tools[0])                     # API keys first …
-        acts.append(Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools"))  # … download directly after
+        acts.append(Action("d", f"{ec.EMOJI_DOWNLOAD_STR} Download local models", lambda: Nav("tool:download"), section="tools", nav_target="tool:download"))  # … download directly after
         acts.append(tools[1])                     # Backend manager (blank line after it)
-        acts.append(Action("c", f"{ec.gap(ec.EMOJI_CLOUD_CONFIG_STR)}Cloud session configuration…", lambda: Nav("cloud_config", HOME_OWNED), section="tools"))  # ☁️ only — 🔧 is the backend manager's, adjacent now (user 2026-10-30)
+        acts.append(Action("c", f"{ec.gap(ec.EMOJI_CLOUD_CONFIG_STR)}Cloud session configuration…", lambda: Nav("cloud_config", HOME_OWNED), section="tools", nav_target="cloud_config"))  # ☁️ only — 🔧 is the backend manager's, adjacent now (user 2026-10-30)
         # Theme last before About (user 2026-10-30).
         # Key i for About, not a: a is the lanes' Auto-mode key, and Home never reuses a lane key.
-        acts.append(Action("h", f"{ec.EMOJI_THEME_STR} Theme colors", lambda: Nav("theme_config", HOME_OWNED), section="appearance"))
-        acts.append(Action("i", f"{ec.gap(ec.EMOJI_INFO_STR)}About — version and paths", lambda: Nav("about", HOME_OWNED), section="appearance"))
+        acts.append(Action("h", f"{ec.EMOJI_THEME_STR} Theme colors", lambda: Nav("theme_config", HOME_OWNED), section="appearance", nav_target="theme_config"))
+        acts.append(Action("i", f"{ec.gap(ec.EMOJI_INFO_STR)}About — version and paths", lambda: Nav("about", HOME_OWNED), section="appearance", nav_target="about"))
         # Settings like NVIDIA rate limiter, auto-mode, prompt hook, watcher are in the lanes
-        acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
+        acts.append(Action("q", "Quit", lambda: QUIT, section="nav", nav_target="quit"))
         check_action_table(acts)
         return acts
 
@@ -1429,9 +1432,9 @@ class LocalScreen(Screen):
             thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
-                   lambda: Nav("remote", self.owner), section="nav"),   # grouped with Back/Quit at the end (user 2026-10-30)
+                   lambda: Nav("remote", self.owner), section="nav", nav_target="remote"),   # grouped with Back/Quit at the end (user 2026-10-30)
             Action("r", f"{ec.SESSION_EMOJI_FREE_API_STR}  Remote free API sessions", lambda: Nav("remote", self.owner),
-                   section="hidden"),
+                   section="hidden", nav_target="remote"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp")),
             setting("y", f"Auto-sync local registry with the disk (no prompts): "
@@ -2030,9 +2033,9 @@ class RemoteScreen(Screen):
             # No "find model" action row (user, 2026-10-21): the filter box at the top of
             # the open model list IS the search — typing there filters live from the first
             # character, so a separate menu entry would only duplicate it.
-            Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="nav"),   # grouped with Back/Quit at the end (user 2026-10-30)
-            Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
-            Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings"),
+            Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="nav", nav_target="local"),   # grouped with Back/Quit at the end (user 2026-10-30)
+            Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden", nav_target="local"),
+            Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings", nav_target="remote_filters"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp")),
         ]
@@ -2193,7 +2196,7 @@ class RemoteFiltersScreen(Screen):
             Action("o", f"{ec.EMOJI_OLD_MODELS_STR}  Old models (over the age cutoff): "
                         f"{'SHOWN' if s.show_old else 'HIDDEN'}",
                    lambda: self._toggle("show_old")),
-            Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
+            Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools", nav_target="tool:report"),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
@@ -2586,8 +2589,8 @@ class RateLimiterScreen(Screen):
                    lambda: self._cycle("backoff_multiplier", self.MULTIPLIER_STEPS, 2.0)),
             Action("z", f"429 max retries: {self.value('max_retries', 5)}",
                    lambda: self._cycle("max_retries", self.RETRY_STEPS, 5)),
-            Action("i", "Show live limiter status", lambda: Nav("tool:rl-status"), section="tools"),
-            Action("x", "Reset shared limiter state file", lambda: Nav("tool:rl-reset"), section="tools"),
+            Action("i", "Show live limiter status", lambda: Nav("tool:rl-status"), section="tools", nav_target="tool:rl-status"),
+            Action("x", "Reset shared limiter state file", lambda: Nav("tool:rl-reset"), section="tools", nav_target="tool:rl-reset"),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
@@ -2810,7 +2813,7 @@ class VersionsScreen(Screen):
             acts.append(setting("p", f"Promote pins after install: {'ON' if self.promote_after_install else 'OFF'}",
                                 (True, False), lambda: self.promote_after_install,
                                 lambda v: setattr(self, "promote_after_install", v)))
-        acts.append(Action("b", f"{ec.EMOJI_BACK_STR}  Back to Backend manager", lambda: BACK, section="nav"))
+        acts.append(Action("b", f"{ec.EMOJI_BACK_STR}  Back to Backend manager", lambda: BACK, section="nav", nav_target="back"))
         check_action_table(acts)
         return acts
 
@@ -2838,9 +2841,9 @@ def runtime_actions(screen) -> list:
         screen.settings.runtime_backend = b
     pick = lambda op: (lambda: Nav(f"runtime_versions:{op}", screen.owner))   # noqa: E731
     acts = [
-        Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", pick("install"), section="tools"),
-        Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", pick("validate"), section="tools"),
-        Action("f", f"{ec.EMOJI_INFO_STR}  Show info for an installed version", pick("info"), section="tools"),
+        Action("i", f"{ec.EMOJI_INSTALL_STR} Install a release (choose from the list)", pick("install"), section="tools", nav_target="runtime_versions:install"),
+        Action("t", f"{ec.EMOJI_VALIDATE_STR} Validate an installed version", pick("validate"), section="tools", nav_target="runtime_versions:validate"),
+        Action("f", f"{ec.EMOJI_INFO_STR}  Show info for an installed version", pick("info"), section="tools", nav_target="runtime_versions:info"),
     ]
     ops = BACKEND_VERSION_OPS.get(b, ())
     for key, op, label in (("s", "snapshot", "Snapshot an installed version"),
@@ -2848,9 +2851,10 @@ def runtime_actions(screen) -> list:
                            ("x", "remove", "Remove an installed version"),
                            ("e", "repair", "Repair an installed version (rebuild in place)")):
         if op in ops:
-            acts.append(Action(key, f"{ec.gap(VERSION_OP_EMOJI[op])}{label}", pick(op), section="tools"))
+            acts.append(Action(key, f"{ec.gap(VERSION_OP_EMOJI[op])}{label}", pick(op), section="tools",
+                               nav_target=f"runtime_versions:{op}"))
     acts.append(Action("l", f"{ec.EMOJI_LAUNCHD_STR} Launchd update checks", lambda: Nav("runtime_launchd", screen.owner),
-                       section="tools"))
+                       section="tools", nav_target="runtime_launchd"))
     acts += screen.nav_actions()
     check_action_table(acts)
     return acts
@@ -3071,9 +3075,9 @@ class APIKeysScreen(Screen):
         # No static actions - all actions are via accordion items
         # Add Back at bottom (matching other menus - Back to Home for HOME_OWNED, BACK for SUB)
         if self.owner == HOME_OWNED:
-            acts = [Action("b", f"{ec.EMOJI_HOME_STR} Back to Home", lambda: Nav("home", HOME_OWNED), section="nav")]
+            acts = [Action("b", f"{ec.EMOJI_HOME_STR} Back to Home", lambda: Nav("home", HOME_OWNED), section="nav", nav_target="home")]
         else:
-            acts = [Action("b", f"{ec.EMOJI_HOME_STR} Back", lambda: BACK, section="nav")]
+            acts = [Action("b", f"{ec.EMOJI_HOME_STR} Back", lambda: BACK, section="nav", nav_target="back")]
         check_action_table(acts)
         return acts
 
@@ -3191,15 +3195,16 @@ class LaunchdScreen(Screen):
 
     def actions(self):
         acts = [
-            Action("s", f"{ec.EMOJI_LAUNCHD_STATUS_STR} Status", lambda: Nav("tool:rt-launchd-status"), section="tools"),
+            Action("s", f"{ec.EMOJI_LAUNCHD_STATUS_STR} Status", lambda: Nav("tool:rt-launchd-status"), section="tools", nav_target="tool:rt-launchd-status"),
             Action("o", f"{ec.EMOJI_LAUNCHD_RUN_ONCE_STR}  Run the update check once now",
-                   lambda: Nav("tool:rt-launchd-run-once"), section="tools"),
+                   lambda: Nav("tool:rt-launchd-run-once"), section="tools", nav_target="tool:rt-launchd-run-once"),
             Action("i", f"{ec.EMOJI_LAUNCHD_INSTALL_STR} Install the weekly check (LaunchAgent)",
-                   lambda: Nav("prompt:rt-launchd-install"), section="tools"),
+                   lambda: Nav("prompt:rt-launchd-install"), section="tools", nav_target="prompt:rt-launchd-install"),
             Action("u", f"{ec.EMOJI_LAUNCHD_UNINSTALL_STR} Uninstall the weekly check",
-                   lambda: Nav("prompt:rt-launchd-uninstall"), section="tools"),
+                   lambda: Nav("prompt:rt-launchd-uninstall"), section="tools", nav_target="prompt:rt-launchd-uninstall"),
             Action("b", f"{ec.EMOJI_BACK_STR}  Back to Backend manager",
-                   lambda: BACK if self.owner == SUB else Nav("runtime", self.owner), section="nav"),
+                   lambda: BACK if self.owner == SUB else Nav("runtime", self.owner), section="nav",
+                   nav_target=("back" if self.owner == SUB else "runtime")),
         ]
         check_action_table(acts)
         return acts
@@ -3396,7 +3401,7 @@ class LowkeyScreen(Screen):
             acts.append(Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch last: {model_names.readable(last)} (lowkey)",
                                self._launch_last, section="launch"))
         acts.append(Action("s", f"{ec.gap(ec.LK_EMOJI_SESSION_STR)}Set session name: {self.session_name or '(ephemeral)'}",
-                           lambda: Nav("prompt:session"), section="main"))
+                           lambda: Nav("prompt:session"), section="main", nav_target="prompt:session"))
         acts += [
             setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
                     (None, False), lambda: s.lowkey_thinking, self._set_thinking, section="model"),
@@ -3578,7 +3583,7 @@ class DownloadScreen(Screen):
 
     def actions(self):
         acts = [Action("c", f"Review queue and confirm ({len(self.queue)} queued)",
-                       lambda: Nav("prompt:download-review"), enabled=bool(self.queue)),
+                       lambda: Nav("prompt:download-review"), enabled=bool(self.queue), nav_target="prompt:download-review"),
                 Action("x", "Clear queue", lambda: self.queue.clear())]
         acts += self.nav_actions()
         check_action_table(acts)
