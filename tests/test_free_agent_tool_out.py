@@ -14,6 +14,7 @@ The fake counts its hits, which proves the argument guards exit BEFORE any dispa
 Usage: python3 tests/test_free_agent_tool_out.py [-v]   (also runs under pytest)
 """
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -21,6 +22,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -119,8 +121,8 @@ class CliTests(unittest.TestCase):
         })
         self.env = e
 
-    def run_tool(self, *args, stdin=""):
-        return subprocess.run([sys.executable, str(TOOL), *args], env=self.env, cwd=ROOT,
+    def run_tool(self, *args, stdin="", env=None):
+        return subprocess.run([sys.executable, str(TOOL), *args], env=env or self.env, cwd=ROOT,
                               input=stdin, capture_output=True, text=True, timeout=120)
 
     def test_success_writes_the_full_envelope_equal_to_stdout(self):
@@ -204,6 +206,44 @@ class CliTests(unittest.TestCase):
         self.assertIn("envelope", r.stdout.lower())
         self.assertEqual(self.fake.hits, 0)
 
+    def test_out_value_that_looks_like_a_flag_exits_2_without_dispatch(self):
+        # review finding: --out --list used to be taken as a FILENAME "--list" and dispatched
+        r = self.run_tool("--out", "--list", stdin=json.dumps({"prompt": "hi"}))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("usage", r.stderr.lower())
+        self.assertEqual(self.fake.hits, 0)
+        self.assertFalse((ROOT / "--list").exists(), "no file literally named --list may appear")
+
+    def test_invalid_stdin_json_writes_no_file_and_dispatches_nothing(self):
+        out = Path(self.tmp.name) / "envelope.json"
+        r = self.run_tool("--out", str(out), stdin="this is not json")
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse(out.exists(), "a stdin parse error happens before run(): no file")
+        self.assertEqual(self.fake.hits, 0)
+
+    def test_out_into_a_readonly_directory_fails_the_write_with_exit_1(self):
+        ro = Path(self.tmp.name) / "ro"
+        ro.mkdir()
+        ro.chmod(0o555)
+        self.addCleanup(ro.chmod, 0o755)                      # so the tmp dir can be cleaned up
+        target = ro / "e.json"
+        r = self.run_tool("--out", str(target), stdin=json.dumps({"prompt": "hi"}))
+        self.assertEqual(r.returncode, 1, "the dispatch ran but the write failed: exit 1")
+        self.assertIn(str(target), r.stderr)
+        self.assertEqual(self.fake.hits, 1, "the directory existed, so the dispatch was attempted")
+        self.assertEqual(list(ro.glob("*.tmp.*")), [], "the tmp file is cleaned up")
+        self.assertFalse(target.exists())
+
+    def test_out_expands_a_tilde_against_HOME(self):
+        home = Path(self.tmp.name) / "home"
+        home.mkdir()
+        r = self.run_tool("--out", "~/envelope.json", stdin=json.dumps({"prompt": "hi"}),
+                          env=dict(self.env, HOME=str(home)))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        written = home / "envelope.json"
+        self.assertTrue(written.is_file())
+        self.assertEqual(json.loads(written.read_text())["model_used"], "stub1")
+
 
 class ParseArgsTests(unittest.TestCase):
     """The CLI parser is pure: (out_path, mode, err) — no stdin read, no dispatch."""
@@ -218,6 +258,10 @@ class ParseArgsTests(unittest.TestCase):
         res = fat.parse_args(["--out"])
         self.assertIsNone(res[0])
         self.assertIn("usage", res[2].lower())
+
+    def test_out_value_that_looks_like_a_flag_is_refused(self):
+        for v in ("--list", "--help", "-h", "--out"):
+            self.assertIsNotNone(fat.parse_args(["--out", v])[2], v)
 
     def test_unknown_argument_is_an_error(self):
         self.assertIn("unknown argument", fat.parse_args(["--bogus"])[2])
@@ -266,6 +310,47 @@ class WriteEnvelopeTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 fat.write_envelope(str(adir), "x")
             self.assertEqual(list(Path(d).glob("*.tmp.*")), [], "the tmp file is cleaned up")
+
+
+class RunByRoleTests(unittest.TestCase):
+    """The legacy FA_DISPATCH_ROUTING=role path also persists with --out (review findings 2/3):
+    success writes the envelope it prints, an exception writes the error object."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = Path(self.tmp.name) / "e.json"
+
+    def _run_role(self, explode=False):
+        real = (fat.select_model, fat.get_model_endpoint, fat.execute_api_dispatch)
+        fat.select_model = lambda role: "stub-alias"
+        fat.get_model_endpoint = lambda alias: ("api", "spoof", "nvidia", "stub-model")
+
+        def boom(*a):
+            raise RuntimeError("dispatch exploded")
+
+        fat.execute_api_dispatch = boom if explode else (lambda *a: "ROLE ANSWER")
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                code = fat.run_by_role({"prompt": "hi"}, out_path=str(self.out))
+        finally:
+            fat.select_model, fat.get_model_endpoint, fat.execute_api_dispatch = real
+        return code, out.getvalue(), err.getvalue()
+
+    def test_role_path_success_writes_the_envelope_it_prints(self):
+        code, out, _err = self._run_role()
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["content"], "ROLE ANSWER")
+        self.assertEqual(json.loads(self.out.read_text()), json.loads(out))
+
+    def test_role_path_error_writes_the_error_object(self):
+        code, out, err = self._run_role(explode=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "", "stdout unchanged on failure")
+        self.assertIn("dispatch exploded", err)
+        obj = json.loads(self.out.read_text())
+        self.assertIn("dispatch exploded", obj["error"])
 
 
 if __name__ == "__main__":

@@ -39,7 +39,8 @@ that must drive tools belongs in a free SESSION (remote-session.sh / csl), not h
 attempts, …), not bare `content` — always persist results with `--out` so the model and attempt
 history are never lost. The write is atomic (tmp file + rename in the same directory, fsynced);
 a FILE in a missing directory exits 2 BEFORE anything is dispatched; a failed write exits 1 and
-names FILE on stderr. --out cannot be combined with --list/--help.
+names FILE on stderr. --out cannot be combined with --list/--help, and a FILE value that
+starts with "-" is refused (exit 2) rather than taken as a flag.
 
 Environment:
   FA_DISPATCH_PREFS            preference file (default config/dispatch-preferences.local.json if
@@ -780,7 +781,9 @@ def parse_args(args):
         elif a == "--out":
             if mode is not None:
                 return None, None, f"--out cannot be combined with {mode!r}\n{USAGE}"
-            if i + 1 >= len(args):
+            # A value that looks like a flag is a missing value, not a filename: accepting it
+            # would dispatch and then write an envelope to a file literally named "--list".
+            if i + 1 >= len(args) or args[i + 1].startswith("-"):
                 return None, None, f"--out requires a FILE value\n{USAGE}"
             out_path = args[i + 1]
             i += 1
