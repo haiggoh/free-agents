@@ -384,6 +384,29 @@ class GuiPlaywrightTests(unittest.TestCase):
         p.close()
 
 
+    def test_two_clients_have_independent_state(self):
+        # Continuation plan Phase 2: per-client state (toggle/launch hooks, fold state) must
+        # not leak across browser clients. p2 navigates LAST, so under the old module-global
+        # `shared` dict p2's toggle_list closure won and p1's Choose-model click toggled p2's
+        # list instead of p1's — p1's .lane-list stayed display:none.
+        p1 = self.page()
+        p1.goto(self.app.base + "/local")
+        p1.wait_for_selector('.action-row:has-text("Choose model")', timeout=180000)
+        p2 = self.page()
+        p2.goto(self.app.base + "/remote")
+        p2.wait_for_selector('.action-row:has-text("Choose model")', timeout=180000)
+        p1.locator('.action-row:has-text("Choose model")').first.click()
+        p1.wait_for_timeout(700)
+        style1 = (p1.locator(".lane-list").get_attribute("style") or "").replace(" ", "")
+        self.assertNotIn("display:none", style1,
+                         "client 1's own Choose-model click must reveal ITS list")
+        style2 = (p2.locator(".lane-list").get_attribute("style") or "").replace(" ", "")
+        self.assertIn("display:none", style2,
+                      "client 2's list must stay hidden — untouched by client 1's click")
+        p1.close()
+        p2.close()
+
+
 class GuiStaleTests(unittest.TestCase):
     def test_stale_inventory_after_navigation_not_applied(self):
         app = GuiApp(REMOTE_INV, fake_delay="3")
