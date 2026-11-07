@@ -49,3 +49,23 @@ is labels-only. Tasks 5–10 deliver clickable typed controls, hover/info, async
 
 ## Progress
 - (successor: append here)
+- 2026-11-07 (session 59b0e622, Mistral Large 4, free lane) — continuation-plan Phase 0 reconcile
+  (`~/.claude/plans/Execution plan — Free Agents NiceGUI continuation_ …md`): worktree
+  `~/ClaudeWorkspace/.wt/fa-nicegui` clean at `d560acd` = origin/feat/nicegui-frontend; branch is
+  12 ahead / 35 behind origin/main (merge-base `0a5b60b`; main now includes v0.55.6 shipped
+  2026-11-07 — reconcile later, NO merge now). GUI venv `~/.local/share/free-agents/gui-venv`:
+  Python 3.12.16, nicegui 3.19.0, pywebview 6.2.1, playwright 1.64.1, pytest 9.2.0 (probed via
+  importlib.metadata, not assumed). Baseline on HEAD: core suites `pytest -q -p no:cacheprovider
+  tests/test_picker_core.py tests/test_action_typed_settings.py tests/test_session_picker_model.py`
+  → 112 passed / 2 skipped; GUI-venv suites (test_gui_env, _browser, _launcher, _jobs,
+  _capability_coverage, _playwright) → 55 passed / 147 subtests in 99.71s — after restoring the
+  MISSING playwright chromium-headless-shell cache (`gui-venv/bin/python -m playwright install
+  chromium-headless-shell`; before that 13 setup ERRORs, env-only fix, no code change).
+  `GUI_PENDING` is empty (capability coverage green). Genuine remaining work found by reconcile:
+  (P1) nav rows still call `action.run()` at RENDER time (app.py:279 via adapter `NAV_SECTIONS`) —
+  replace with metadata nav target; (P2) module-global `shared` dict (app.py:89) and a single global
+  `Loader()` (app.py:88) — per-client route/collapse/search state and coalesced same-kind loads are
+  missing, no two-client tests exist; (P3–P8 per plan) accordion/cycle component consolidation,
+  appearance settings store, modern emoji tiles, Mac translucency/vibrancy, Linux, dark last.
+  Next action: Phase 1 remainder (nav metadata, no render-time run()), then Phase 2 (per-client
+  state + loader coalescing) — TDD per standing rules.
