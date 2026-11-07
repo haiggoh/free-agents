@@ -307,12 +307,12 @@ CYCLE_HOVER_CSS = "ansi_" + CYCLE_HOVER
 # end to end. OFF = hollow knob on a thin track at the left, ON = filled knob on a heavy
 # track at the right (the M3 pill: grey track off, solid track on). Box-drawing, not em
 # dashes — em dashes gap between cells and their width is font-dependent.
-KNOB_CELLS = 4
+KNOB_CELLS = 3          # user 2026-11-07: one character shorter than the first 4-cell cut
 KNOB_OFF = "○"
 KNOB_ON = "●"
 KNOB_TRACK_OFF = "─"
-KNOB_TRACK_ON = "━"
-KNOB_FRAME_S = 0.06      # 3 moves × 60 ms ≈ the nicegui .18s slide
+KNOB_TRACK_ON = "─"     # user 2026-11-07: the track stays thin when ON (no heavy ━)
+KNOB_FRAME_S = 0.09      # 2 moves × 90 ms ≈ the nicegui .18s slide
 # The value words that put the knob at the ON end (first word of the value: "ON (default)" counts).
 KNOB_ON_WORDS = ("ON", "ENABLED", "SHOWN")
 
