@@ -130,7 +130,7 @@ class PickerLaunch(PilotCase):
             await h.expand_settings()              # 0.47.2: settings rows live under the folded group
             await h.wait_text("Effort: max")
             await h.press("e")                       # max -> provider default
-            await h.wait_text("Effort: Provider default")
+            await h.wait_text("Effort: not set")
             self.assertEqual(self.saved_state()["effort"]["remote_api_session"], "provider_default")
             await h.press("c")
             await h.wait_text("NVIDIA A")              # rows show the display name; id is the alias

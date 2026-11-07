@@ -1628,10 +1628,18 @@ class Picker(App):
             return a.label.plain if isinstance(a.label, Text) else str(a.label)
 
         def _split_value(a):
-            """(head, value) for a cycle row: head ends at the last ': ' (or the typed name);
-            value is the choice label when the row is typed, else the text after the colon."""
+            """(head, value) for a cycle row: an explicit Action.head wins (0.55.5 — the
+            classifier's values contain ": " themselves, so the last-colon guess would
+            mangle them); otherwise head ends at the last ': ' (or the typed name); value is
+            the choice label when the row is typed, else the text after the colon."""
             lbl = a.label
             plain = lbl.plain if isinstance(lbl, Text) else str(lbl)
+            explicit_head = getattr(a, "head", None)
+            if explicit_head:
+                i = len(explicit_head)
+                if isinstance(lbl, Text):
+                    return lbl[:i], lbl[i:]
+                return plain[:i], plain[i:]
             choice_label = getattr(a, "choice_label", None)
             value_fn = getattr(a, "value", None)
             if choice_label is not None and value_fn is not None:
@@ -1711,23 +1719,28 @@ class Picker(App):
                 head, val = cycle_vals[id(a)]
                 oid = f"a:{len(self.action_ids)-1}"
                 hover = getattr(self, "_arrow_hover", None)
-                # 0.55.4 (user): the glyph highlight joins the TUI's native soft-blue family —
-                # bright_yellow read as foreign next to the soft-blue hover/highlight rules
-                # every other row uses. rich color names here (the spans go through rich's
-                # parser, not Textual CSS): bright_blue quantizes to ANSI bright blue under
-                # the app's ansi_color driver, like the old bright_yellow did.
-                left_style = "bold reverse bright_blue" if hover == (oid, -1) else "bold bright_blue"
-                right_style = "bold reverse bright_blue" if hover == (oid, +1) else "bold bright_blue"
+                # 0.55.5 (user): the glyphs are PLAIN text by default — the same terminal
+                # default colour as every other character in the row, no bold — and turn
+                # light blue on hover, colour only (never a reverse/background block). rich
+                # color names here (the spans go through rich's parser, not Textual CSS):
+                # bright_blue quantizes to ANSI bright blue under the app's ansi_color
+                # driver, matching the soft-blue hover family.
+                left_style = "bright_blue" if hover == (oid, -1) else None
+                right_style = "bright_blue" if hover == (oid, +1) else None
                 if isinstance(head, Text):
                     prompt += head
                 else:
                     prompt.append(str(head))
+                if getattr(a, "value_prefix", None) is not None:   # 0.55.5: outside the glyphs
+                    if isinstance(a.value_prefix, Text):
+                        prompt += a.value_prefix
+                    else:
+                        prompt.append(str(a.value_prefix))
                 val_plain = val.plain if isinstance(val, Text) else str(val)
                 # 0.55.4 (user): the value cell is only as wide as the row's OWN widest choice
                 # label (an ON/OFF toggle fits "OFF" plus one space each side) — 0.55.2 padded
                 # every row to the widest value anywhere. The value sits centered between the
-                # glyphs; one space is guaranteed on each side. Rows without choice metadata
-                # (theme/lane rows) self-pad in the model, so their width stays stable too.
+                # glyphs; one space is guaranteed on each side.
                 if a.labels:
                     row_w = max(cell_len(x) for x in a.labels)
                 elif a.choices:
@@ -1735,13 +1748,24 @@ class Picker(App):
                 else:
                     row_w = cell_len(val_plain)
                 pad = max(0, row_w - cell_len(val_plain))
-                lead, trail = pad // 2, pad - pad // 2
+                # 0.55.5 (user): TWO nudges, one space each, never stacked. (1) Odd padding
+                # goes in FRONT of the value, not behind — plain centering left "ON" hugging
+                # ❮ in a 3-wide cell while "OFF" filled it; the extra space now leads, so a
+                # short value sits less off-center. (2) A trailing "°" reads left-heavy —
+                # hue values get one extra leading space to balance the thin sign.
+                lead = pad // 2 + (1 if val_plain.endswith("°") else pad % 2)
+                trail = max(0, pad - lead)
                 prompt.append(f"{ec.CYCLE_LEFT} " + " " * lead, style=left_style)    # accent: arrows are the buttons
                 if isinstance(val, Text):
                     prompt += val
                 else:
                     prompt.append(val_plain)
                 prompt.append(" " * trail + f" {ec.CYCLE_RIGHT}", style=right_style)
+                if getattr(a, "value_suffix", None) is not None:   # 0.55.5: outside the glyphs
+                    if isinstance(a.value_suffix, Text):
+                        prompt += a.value_suffix
+                    else:
+                        prompt.append(str(a.value_suffix))
             elif isinstance(a.label, Text):
                 prompt += a.label            # rich Text + Text keeps the spans
             else:

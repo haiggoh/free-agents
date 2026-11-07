@@ -87,6 +87,14 @@ class Action:
     # for rows whose label already self-pads, like the theme/lane rows).
     choices: tuple = ()
     labels: tuple = ()
+    # 0.55.5: `head` is the explicit split point where the value begins (the classifier's
+    # values contain ": " themselves, so the render's last-colon guess mangles them).
+    # `value_prefix`/`value_suffix` are rich parts rendered OUTSIDE the cycle glyphs (the
+    # theme accent rows: swatch, #hex and the border/shell slices — only the colour name
+    # sits between the glyphs, user 2026-11-07).
+    head: str | None = None
+    value_prefix: object | None = None
+    value_suffix: object | None = None
 
 
 # The collapsed group rows in the lane pickers (user 2026-10-29/30): while folded, the
@@ -100,10 +108,13 @@ MODEL_GROUP = Action("0", "Model", lambda: None, section="model")
 
 
 def setting(key: str, label: str, choices, get: Callable[[], object], put: Callable[[object], object],
-            enabled: bool = True, section: str = "settings", labels=None) -> Action:
+            enabled: bool = True, section: str = "settings", labels=None, head=None,
+            value_prefix=None, value_suffix=None) -> Action:
     """A row whose value cycles through `choices` in either direction (wraps). `labels` is the
     display string per choice, same order (0.55.4: sizes the row's value column — pass it
-    whenever the display differs from str(choice), e.g. ON for True)."""
+    whenever the display differs from str(choice), e.g. ON for True). `head` pins where the
+    value starts inside the label; `value_prefix`/`value_suffix` are rich parts the render
+    places outside the cycle glyphs (0.55.5)."""
     def step(d: int):
         try:
             i = list(choices).index(get())
@@ -111,7 +122,8 @@ def setting(key: str, label: str, choices, get: Callable[[], object], put: Calla
             i = -1 if d > 0 else 0
         put(list(choices)[(i + d) % len(choices)])
     return Action(key, label, lambda: step(1), enabled=enabled, section=section, step=step,
-                  choices=tuple(choices), labels=tuple(labels) if labels is not None else ())
+                  choices=tuple(choices), labels=tuple(labels) if labels is not None else (),
+                  head=head, value_prefix=value_prefix, value_suffix=value_suffix)
 
 
 def check_action_table(actions) -> None:
@@ -141,11 +153,12 @@ def thinking_constraint(provider: str, model_id: str, choice: bool | None) -> st
 
 
 def thinking_row(s: Settings, key: str = "j", section: str = "model") -> Action:
-    """The thinking toggle row: ON (default) ↔ OFF. The row stores only the two states that
-    differ behaviorally — None and True both launch with thinking ON — so cycling back from
-    OFF returns to the launch default rather than to a second, indistinguishable ON."""
+    """The thinking toggle row: ON ↔ OFF. The row stores only the two states that differ
+    behaviorally — None and True both launch with thinking ON and (0.55.5 user) read the
+    same, plain "ON" — so cycling back from OFF returns to the launch default rather than
+    to a second, indistinguishable ON."""
     def label():
-        return "ON (default)" if s.thinking_session is None else "ON" if s.thinking_session else "OFF"
+        return "OFF" if s.thinking_session is False else "ON"
 
     def put(v):
         s.thinking_session = v
@@ -154,7 +167,7 @@ def thinking_row(s: Settings, key: str = "j", section: str = "model") -> Action:
 
     return setting(key, f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {label()}", (None, False),
                    lambda: s.thinking_session, put, section=section,
-                   labels=("ON (default)", "OFF"))
+                   labels=("ON", "OFF"))
 
 
 # --- data --------------------------------------------------------------------------------
@@ -801,7 +814,7 @@ def _next(choices, current):
 
 
 def _effort_label(value: str) -> str:
-    return "Provider default" if value == sms.PROVIDER_DEFAULT else value
+    return "not set" if value == sms.PROVIDER_DEFAULT else value
 
 
 # --- accordion ---------------------------------------------------------------------------
@@ -999,7 +1012,8 @@ def _common_toggles(s: Settings, include_watcher: bool):
     if s.auto_mode == 1:
         acts.append(setting("z", f"Classifier: {CLASSIFIER_SOURCE_LABELS[s.classifier_source]}",
                 (0, 1, 2), lambda: s.classifier_source, lambda v: setattr(s, "classifier_source", v),
-                labels=tuple(CLASSIFIER_SOURCE_LABELS[c] for c in (0, 1, 2))))
+                labels=tuple(CLASSIFIER_SOURCE_LABELS[c] for c in (0, 1, 2)),
+                head="Classifier: "))   # the values contain ": " — split at the FIRST colon
     acts += [
         # Label says what it actually blocks (user 2026-10-30): LA_TELEMETRY=0 exports
         # CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 — stock Claude Code reporting off.
@@ -1415,9 +1429,9 @@ class LocalScreen(Screen):
         acts = [
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.local_effort}", effort_choices("local_session"),
                     lambda: s.local_effort, lambda v: self._set_effort(v), section="model"),
-            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.local_temperature or '<provider default>'}",
+            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.local_temperature or 'not set'}",
                     TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v),
-                    labels=tuple("<provider default>" if t == "" else t for t in TEMPERATURES),
+                    labels=tuple("not set" if t == "" else t for t in TEMPERATURES),
                     section="model"),
             thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
@@ -2014,9 +2028,9 @@ class RemoteScreen(Screen):
                     effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v),
                     labels=tuple(_effort_label(c) for c in effort_choices("remote_api_session")),
                     section="model"),
-            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.remote_temperature or '<provider default>'}",
+            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.remote_temperature or 'not set'}",
                     TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v),
-                    labels=tuple("<provider default>" if t == "" else t for t in TEMPERATURES),
+                    labels=tuple("not set" if t == "" else t for t in TEMPERATURES),
                     section="model"),
             thinking_row(s),   # section="model" by default now
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into a group
@@ -2401,32 +2415,38 @@ class ThemeConfigScreen(Screen):
         self.remote_theme = json.loads(self._theme_path("remote-theme.json").read_text())
 
     def _lane_label(self, which: str):
-        """Row label per user 2026-10-15: the color name spelled out (accessibility), the
-        hex rendered in the colour it names, and a swatch block that holds a FIXED column —
-        the name field is padded to the palette's widest name so cycling never shifts it —
-        plus a thin slice in the derived border colour, previewing accent + border together.
+        """Row label per user 2026-10-15, restructured 0.55.5 (user): the label carries the
+        lane word and the colour NAME only — the name is what sits between the cycle glyphs;
+        the #hex, swatch block and border/shell slices moved OUTSIDE them (_lane_suffix).
         The lane word is padded ("Local" vs "Remote" differ by one cell) so BOTH rows' hex,
-        swatch and slice share a column (user 2026-10-15)."""
+        swatch and slice share a column (user 2026-10-15); the glyph cell's fixed name width
+        (the palette's widest name, via the row's labels) keeps that alignment."""
         theme = self.local_theme if which == "local" else self.remote_theme
         emoji = ec.SESSION_EMOJI_LOCAL_STR if which == "local" else ec.SESSION_EMOJI_FREE_API_STR
         accent = theme["theme"]["accent_color"]
         name = dict(THEME_PRESETS).get(accent.upper(), "custom")
-        width = max(len(n) for _, n in THEME_PRESETS)
         lane_pad = " " * (len("Remote") - len(which.capitalize()))
+        if RICH_AVAILABLE:
+            return Text.assemble(f"{emoji} {which.capitalize()}:{lane_pad} ", (name, "bold"))
+        return f"{emoji} {which.capitalize()}:{lane_pad} {name}"
+
+    def _lane_suffix(self, which: str):
+        """The parts of an accent row that render OUTSIDE the cycle glyphs (0.55.5 user): the
+        #hex in the colour it names, the swatch block, and the thin border/shell slices
+        previewing accent + border together (0.50.0: shell-mode slice)."""
+        theme = self.local_theme if which == "local" else self.remote_theme
+        accent = theme["theme"]["accent_color"]
         border = theme["theme"].get("border_color", "")
         if RICH_AVAILABLE:
             return Text.assemble(
-                f"{emoji} {which.capitalize()}:{lane_pad} ",
-                (f"{name:<{width}}", "bold"),
                 " ",
                 (accent, accent),
                 "  ",
                 Text("    ", style=f"on {accent}"),
                 Text(" ", style=f"on {border}"),
-                Text(" ", style=f"on {tc.shell_mode_color(accent)}"),   # 0.50.0: shell-mode slice
+                Text(" ", style=f"on {tc.shell_mode_color(accent)}"),
             )
-        return (f"{emoji} {which.capitalize()}:{lane_pad} {name:<{width}} {accent} + border {border}"
-                f" + shell {tc.shell_mode_color(accent)}")
+        return f" {accent} + border {border} + shell {tc.shell_mode_color(accent)}"
 
     def _set_accent(self, which: str, color: str):
         """setting() put: store the accent, re-derive the border, persist."""
@@ -2493,10 +2513,14 @@ class ThemeConfigScreen(Screen):
         acts = [
             setting("l", self._lane_label("local"), presets,
                     lambda: self.local_theme["theme"]["accent_color"],
-                    lambda v: self._set_accent("local", v)),
+                    lambda v: self._set_accent("local", v),
+                    labels=[n for _, n in THEME_PRESETS],
+                    value_suffix=self._lane_suffix("local")),
             setting("r", self._lane_label("remote"), presets,
                     lambda: self.remote_theme["theme"]["accent_color"],
-                    lambda v: self._set_accent("remote", v)),
+                    lambda v: self._set_accent("remote", v),
+                    labels=[n for _, n in THEME_PRESETS],
+                    value_suffix=self._lane_suffix("remote")),
             Action("y", f"Hue local: {self._hue_deg('local')}°",     # ❮ ❯ render around the value now
                    lambda: self._shift_hue("local", 20),
                    step=lambda d: self._shift_hue("local", 5 * d),
@@ -3386,7 +3410,7 @@ class LowkeyScreen(Screen):
 
     def _thinking_label(self):
         v = self.settings.lowkey_thinking
-        return "ON (default)" if v is None else ("ON" if v else "OFF")
+        return "OFF" if v is False else "ON"
 
     def actions(self):
         s = self.settings
@@ -3417,14 +3441,14 @@ class LowkeyScreen(Screen):
         acts += [
             setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
                     (None, False), lambda: s.lowkey_thinking, self._set_thinking,
-                    labels=("ON (default)", "OFF"), section="model"),
+                    labels=("ON", "OFF"), section="model"),
             setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.lowkey_effort} (sent as reasoning_effort)",
                     effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(),
                     labels=tuple(f"{c} (sent as reasoning_effort)" for c in effort_choices("lowkey")),
                     section="model"),
-            setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or '<provider default>'}",
+            setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or 'not set'}",
                     TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(),
-                    labels=tuple("<provider default>" if t == "" else t for t in TEMPERATURES),
+                    labels=tuple("not set" if t == "" else t for t in TEMPERATURES),
                     section="model"),
             # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
             Action("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "

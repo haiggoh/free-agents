@@ -96,12 +96,12 @@ class CycleGlyphs(PilotCase):
             await h.expand_settings()
             from textual.widgets import OptionList
             ol = h.app.query_one("#actions", OptionList)
-            # Temperature: '<provider default>' (17) vs '0.0' (3) — the strongest widths.
+            # Temperature: 'not set' (7) vs '0.0' (3) — the widest label in the row's own set.
             idx = next(i for i, a in enumerate(app.action_ids) if a.key == "o")
             ol.highlighted = next(j for j in range(ol.option_count)
                                   if ol.get_option_at_index(j).id == f"a:{idx}")
             t0 = _action_option(h, "o")[1]
-            self.assertEqual(len(_between(t0)), len("<provider default>") + 2, t0)
+            self.assertEqual(len(_between(t0)), len("not set") + 2, t0)
             await h.press("right")
             t1 = _action_option(h, "o")[1]
             self.assertNotEqual(t0, t1, "right must step the temperature row")

@@ -1,3 +1,27 @@
+## [0.55.5] — 2026-11-07
+
+### Changed — menu wording, glyph styling and value-cell polish (user feedback round)
+
+- "`<provider default>`" / "Provider default" read **"not set"** for temperature (all three
+  lanes) and effort (remote lane, where the sentinel is a choice) everywhere the menu shows
+  them; the display comes from the same strings the value cell sizes itself against.
+- Thinking rows read plain **"ON"** — no more "ON (default)" (the None and True states were
+  always behaviourally identical), shrinking the cell to ON/OFF width.
+- The **Classifier row** wraps EVERYTHING after its first colon in the cycle glyphs: its
+  values contain ": " themselves ("Auto: local on local, remote on remote"), which the old
+  last-colon split mangled. Rows can now pin the split point explicitly (`Action.head`).
+- Cycle glyphs are **plain text by default** (terminal default colour, no bold) and turn
+  light blue on hover — colour only, never a reverse/background block.
+- Hue values get **one extra leading space** to balance the trailing "°".
+- Theme accent rows: **only the colour name sits between the glyphs** — the #hex, swatch
+  block and border/shell slices render outside them (`Action.value_prefix/value_suffix`),
+  still column-aligned across both lane rows.
+- Odd padding now goes in **front** of the value, not behind: "ON" (2 chars in a 3-wide
+  cell) gets the extra leading space instead of hugging ❮ while "OFF" filled the cell.
+
+Tests: 6 new in `tests/test_menu_polish_0555.py` (red-first); the 0554/0555 suites and the
+PTY/model tests updated for the new wording (17 cycle/menu tests, picker gate, main suite).
+
 ## [0.55.4] — 2026-11-07
 
 ### Changed — cycle-glyph polish, hover and toast fixes (user feedback round)

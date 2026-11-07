@@ -1202,13 +1202,19 @@ class ThemeHueShiftTests(unittest.TestCase):
             scr, _ = self._screen(tmp)
             accent = scr.local_theme["theme"]["accent_color"]
             shell = tc.shell_mode_color(accent)
+            # 0.55.5: the swatch/slice moved OUT of the label into the value_suffix — only
+            # the colour name sits between the cycle glyphs (user 2026-11-07)
+            suffix = scr._lane_suffix("local")
             label = scr._lane_label("local")
-            if hasattr(label, "spans"):                       # rich path: style spans
-                styles = [str(s.style) for s in label.spans]
+            plain_label = label.plain if hasattr(label, "plain") else str(label)
+            self.assertNotIn(shell, plain_label,
+                             "the shell slice must not be back inside the label")
+            if hasattr(suffix, "spans"):                      # rich path: style spans
+                styles = [str(s.style) for s in suffix.spans]
                 self.assertTrue(any(shell in st for st in styles),
                                 f"no swatch span in shell-mode colour {shell}: {styles}")
             else:                                               # plain fallback: hex in text
-                self.assertIn(shell, label)
+                self.assertIn(shell, suffix)
 
 
 if __name__ == "__main__":
@@ -1291,7 +1297,7 @@ class ThinkingToggleTests(unittest.TestCase):
 
     def test_label_reflects_state(self):
         s = m.Settings()
-        self.assertIn("ON (default)", self.row(m.LocalScreen(s, local_models(), owner=m.DIRECT_ROOT)).label)
+        self.assertIn("Thinking: ON", self.row(m.LocalScreen(s, local_models(), owner=m.DIRECT_ROOT)).label)
         s.thinking_session = True
         self.assertIn("ON", self.row(m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)).label)
         self.assertNotIn("default", self.row(m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)).label)
