@@ -2192,23 +2192,28 @@ class RemoteFiltersScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            Action("h", f"{ec.EMOJI_TRIALS_STR}  Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
-                   lambda: self._toggle("include_trials")),
-            Action("f", f"{ec.EMOJI_LOCAL_CAPABLE_STR}  Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
-                   lambda: self._toggle("local_capable_shown")),
-            Action("u", f"{ec.EMOJI_BROKEN_MODELS_STR}  Unworking models: {'SHOWN' if s.show_broken else 'HIDDEN'}",
-                   lambda: self._toggle("show_broken")),
-            Action("o", f"{ec.EMOJI_OLD_MODELS_STR}  Old models (over the age cutoff): "
+            setting("h", f"{ec.EMOJI_TRIALS_STR}  Limited trials: {'SHOWN' if s.include_trials else 'HIDDEN'}",
+                    (False, True), lambda: s.include_trials, lambda v: self._put_filter("include_trials", v),
+                    labels=("HIDDEN", "SHOWN")),
+            setting("f", f"{ec.EMOJI_LOCAL_CAPABLE_STR}  Locally-runnable models: {'SHOWN' if s.local_capable_shown else 'HIDDEN'}",
+                    (False, True), lambda: s.local_capable_shown, lambda v: self._put_filter("local_capable_shown", v),
+                    labels=("HIDDEN", "SHOWN")),
+            setting("u", f"{ec.EMOJI_BROKEN_MODELS_STR}  Unworking models: {'SHOWN' if s.show_broken else 'HIDDEN'}",
+                    (False, True), lambda: s.show_broken, lambda v: self._put_filter("show_broken", v),
+                    labels=("HIDDEN", "SHOWN")),
+            setting("o", f"{ec.EMOJI_OLD_MODELS_STR}  Old models (over the age cutoff): "
                         f"{'SHOWN' if s.show_old else 'HIDDEN'}",
-                   lambda: self._toggle("show_old")),
+                    (False, True), lambda: s.show_old, lambda v: self._put_filter("show_old", v),
+                    labels=("HIDDEN", "SHOWN")),
             Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
         ]
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
 
-    def _toggle(self, attr):
-        setattr(self.settings, attr, not getattr(self.settings, attr))
+    def _put_filter(self, attr, v):
+        """Direction-aware filter put (0.55.6): the stepper hands us the value to set."""
+        setattr(self.settings, attr, bool(v))
         # Regroup the remote screen if it's loaded (lazy loading means we can't directly access it)
         # The change will take effect when remote screen is next opened
         self._regroup_remote_if_loaded()
@@ -2252,17 +2257,26 @@ class CloudConfigScreen(Screen):
             label = (f"custom ({s.security_review_custom})" if s.security_review == -1
                      else cse.SECURITY_REVIEW_LABELS[s.security_review])
             acts.append(Action("s", f"Security Review (all cloud sessions): {label}",
-                               lambda: self._cycle_security_review()))
+                               lambda: self._cycle_security_review(),
+                               step=lambda d: self._cycle_security_review(d),
+                               labels=tuple(cse.SECURITY_REVIEW_LABELS[k]
+                                            for k in cse.security_review_order())))
         bypass_reason = cse.bypass_blocked_by_policy()
         acts += [
             Action("x", f"{ec.EMOJI_SHIELD_STR}  Agent dispatch (paid sessions): "
                         f"{cse.ROUTE_LABELS[s.routes.get('agent', 'free-first')]}",
-                   lambda: self._cycle_route("agent")),
-            Action("p", f"{ec.EMOJI_AUTO_MODE_STR}  Bypass Permissions (blind-trust): {'ON' if s.cloud_bypass_permissions else 'OFF'}"
-                        f"  {NOT_GATEWAY_NOTE}",
-                   lambda: self._toggle("cloud_bypass_permissions")),
+                   lambda: self._cycle_route("agent"),
+                   step=lambda d: self._cycle_route("agent", d),
+                   labels=tuple(cse.ROUTE_LABELS[k] for k in cse.ROUTE_MODES)),
+            setting("p", f"{ec.EMOJI_AUTO_MODE_STR}  Bypass Permissions (blind-trust): "
+                        f"{'ON' if s.cloud_bypass_permissions else 'OFF'}",
+                    (False, True), lambda: s.cloud_bypass_permissions,
+                    lambda v: setattr(s, "cloud_bypass_permissions", bool(v)),
+                    labels=("OFF", "ON"), value_suffix=NOT_GATEWAY_NOTE),
             Action("d", self._bypass_default_label(bypass_reason),
-                   self._cycle_default_mode, enabled=bypass_reason is None),
+                   lambda: self._cycle_default_mode(),
+                   step=lambda d: self._cycle_default_mode(d),
+                   labels=("auto", "bypassPermissions"), enabled=bypass_reason is None),
             Action("e", "Check whether auto mode's safety checks are free here "
                         "(sends one small request)", self._run_probe),
         ]
@@ -2270,15 +2284,13 @@ class CloudConfigScreen(Screen):
         check_action_table(acts)
         return acts
 
-    def _toggle(self, attr):
-        setattr(self.settings, attr, not getattr(self.settings, attr))
-
-    def _cycle_route(self, path: str):
-        """Cycle the path's routing mode through free-first -> free-only -> paid and persist."""
+    def _cycle_route(self, path: str, d: int = 1):
+        """Cycle the path's routing mode through free-first -> free-only -> paid and persist.
+        d=+1 (Enter/click/Right) steps forward, d=-1 (Left) backward (0.55.6)."""
         s = self.settings
         order = list(cse.ROUTE_MODES)
         current = s.routes.get(path, "free-first")
-        s.routes[path] = order[(order.index(current) + 1) % len(order)] if current in order else "free-only"
+        s.routes[path] = order[(order.index(current) + d) % len(order)] if current in order else "free-only"
         if s.on_cloud_saved:
             s.on_cloud_saved({"route": (path, s.routes[path])})
 
@@ -2293,12 +2305,12 @@ class CloudConfigScreen(Screen):
         # Release 2 registers the cloud profile; in Release 1 this reads a fixture store value.
         return bool(getattr(self.settings, "cloud_profile_default_mode", None))
 
-    def _cycle_default_mode(self):
+    def _cycle_default_mode(self, d: int = 1):
         if cse.bypass_blocked_by_policy():
             return                      # csl never works around a managed policy (spec A2)
         order = ["auto", "bypassPermissions"]
         cur = self.settings.default_mode or cse.default_mode() or "auto"
-        nxt = order[(order.index(cur) + 1) % len(order)]
+        nxt = order[(order.index(cur) + d) % len(order)]
         self.settings.default_mode = nxt
         cse.save_default_mode(nxt)
         if self.settings.on_cloud_saved:
@@ -2347,9 +2359,15 @@ class CloudConfigScreen(Screen):
             + extra
         )
 
-    def _cycle_security_review(self):
+    def _cycle_security_review(self, d: int = 1):
+        """Direction-aware cycle (0.55.6) through the same ring next_state walks."""
         s = self.settings
-        s.security_review = cse.next_state(s.security_review)
+        order = cse.security_review_order()
+        cur = s.security_review
+        if cur in order:
+            s.security_review = order[(order.index(cur) + d) % len(order)]
+        else:                            # e.g. the custom (-1) value set elsewhere
+            s.security_review = order[0]
         s.security_review_custom = None
         if s.on_cloud_saved:
             s.on_cloud_saved({"security_review": s.security_review})

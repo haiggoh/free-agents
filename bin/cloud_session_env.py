@@ -137,9 +137,16 @@ def clear_stale_override() -> list:
     return present
 
 
+def security_review_order() -> list:
+    """The security-review cycle ring (0.55.6: extracted so the picker row can derive its
+    labels from the same order the cycle walks): default -> cheaper -> off, skipping
+    'cheaper' where its id would be wrong."""
+    return [0, 1, 2] if not third_party_provider() else [0, 2]
+
+
 def next_state(current: int) -> int:
     """Cycle default -> cheaper -> off -> default, skipping 'cheaper' where its id would be wrong."""
-    order = [0, 1, 2] if not third_party_provider() else [0, 2]
+    order = security_review_order()
     if current not in order:
         return 0
     return order[(order.index(current) + 1) % len(order)]
