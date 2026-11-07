@@ -288,6 +288,12 @@ def gap(emoji: str) -> str:
 CYCLE_LEFT = "❮"
 CYCLE_RIGHT = "❯"
 
+# The cycle-glyph hover colour, in both forms a consumer needs (0.55.6): the rich style
+# name for per-span styles, and the Textual CSS token derived from it — never typed
+# separately, so a colour change updates the spans and every CSS rule from here.
+CYCLE_HOVER = "bright_blue"
+CYCLE_HOVER_CSS = "ansi_" + CYCLE_HOVER
+
 
 if __name__ == "__main__":
     # CLI surface (standing rule: --help prints usage, unknown args fail loudly — a probe

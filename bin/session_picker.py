@@ -816,9 +816,9 @@ class Picker(App):
     /* Highlight and hover never paint a block: soft-blue text (ANSI bright-blue, which every
        light/dark terminal theme tunes to be readable) on the terminal's own background. */
     OptionList { background-tint: ansi_default 0%; }
-    OptionList > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: none; }
-    OptionList:focus > .option-list--option-highlighted { background: ansi_default; color: ansi_bright_blue; text-style: bold; }
-    OptionList > .option-list--option-hover { background: ansi_default; color: ansi_bright_blue; }
+    OptionList > .option-list--option-highlighted { background: ansi_default; color: @CYCLE_HOVER@; text-style: none; }
+    OptionList:focus > .option-list--option-highlighted { background: ansi_default; color: @CYCLE_HOVER@; text-style: bold; }
+    OptionList > .option-list--option-hover { background: ansi_default; color: @CYCLE_HOVER@; }
     /* 0.55.4 (user 2026-11-07): mouse hover must be visible in EVERY menu — 0.55.2 removed
        the actions-row hover entirely (arrow-only), which read as "no hover reaction at all"
        outside the screens whose rows live in the #rows list (API keys setup). The generic
@@ -829,7 +829,7 @@ class Picker(App):
        (user 2026-10-22), so inputs looked lopsided; `round` matches the info box's frame. */
     Input { background: ansi_default; color: ansi_default; border: round ansi_bright_black; }
     Static { background: ansi_default; color: ansi_default; }
-    """
+    """.replace("@CYCLE_HOVER@", ec.CYCLE_HOVER_CSS)
     # Ctrl+C copies the mouse selection when there is one and quits otherwise; Cmd+C (super+c,
     # where the terminal forwards it) always copies. Title/subheadline/status are selectable
     # Static text, and the terminal's own selection (Option-drag in Terminal.app) still works.
@@ -1721,12 +1721,12 @@ class Picker(App):
                 hover = getattr(self, "_arrow_hover", None)
                 # 0.55.5 (user): the glyphs are PLAIN text by default — the same terminal
                 # default colour as every other character in the row, no bold — and turn
-                # light blue on hover, colour only (never a reverse/background block). rich
-                # color names here (the spans go through rich's parser, not Textual CSS):
-                # bright_blue quantizes to ANSI bright blue under the app's ansi_color
-                # driver, matching the soft-blue hover family.
-                left_style = "bright_blue" if hover == (oid, -1) else None
-                right_style = "bright_blue" if hover == (oid, +1) else None
+                # light blue on hover, colour only (never a reverse/background block). The
+                # colour comes from ec.CYCLE_HOVER (rich style names here — the spans go
+                # through rich's parser, not Textual CSS), quantized to its ANSI family
+                # under the app's ansi_color driver.
+                left_style = ec.CYCLE_HOVER if hover == (oid, -1) else None
+                right_style = ec.CYCLE_HOVER if hover == (oid, +1) else None
                 if isinstance(head, Text):
                     prompt += head
                 else:
