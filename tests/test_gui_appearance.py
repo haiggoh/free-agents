@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""tests/test_gui_appearance.py — continuation-plan Phase 4: the GUI-only appearance store.
+
+The semantic store (session_menu_state) refuses unknown sections, so GUI appearance lives in
+its OWN validated file (never duplicating semantic preferences, never loosening schema
+protection). Contract: defaults when absent, load never writes, strict validators reject
+bad values BEFORE any write, field-level atomic merge that preserves unknown keys, and a
+future-schema file is warned about and left untouched.
+
+Usage: python3 tests/test_gui_appearance.py [-v]   (also runs under pytest; no GUI venv needed)
+"""
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
+from fa_gui import appearance as ap  # noqa: E402
+
+
+class StoreTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "gui-appearance.json"
+
+    def test_absent_file_loads_defaults_without_writing(self):
+        doc = ap.load(self.path)
+        self.assertEqual(doc, ap.DEFAULTS)
+        self.assertFalse(self.path.exists(), "load must never write")
+
+    def test_round_trip_and_unknown_keys_preserved(self):
+        ap.save(self.path, {"presentation": "modern", "future_key": {"x": 1}})
+        doc = ap.load(self.path)
+        self.assertEqual(doc["presentation"], "modern")
+        self.assertEqual(doc["future_key"], {"x": 1}, "unknown keys survive a field-level save")
+        self.assertEqual(doc["background_opacity_pct"], 100, "untouched fields keep defaults")
+        self.assertEqual(list(Path(self.tmp.name).glob("*.tmp*")), [], "atomic save leaves no tmp")
+
+    def test_opacity_bounds_and_types(self):
+        for bad in (49, 101, 50.5, True, "80", None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    ap.save(self.path, {"background_opacity_pct": bad})
+        self.assertFalse(self.path.exists(), "a rejected write must not create the file")
+        for good in (50, 75, 100):
+            ap.save(self.path, {"background_opacity_pct": good})
+            self.assertEqual(ap.load(self.path)["background_opacity_pct"], good)
+
+    def test_presentation_and_bool_validators(self):
+        for bad in ("Modern", "dark", 1, None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    ap.save(self.path, {"presentation": bad})
+        for bad in ("yes", 0, None, 1.5):
+            with self.subTest(flag=bad):
+                with self.assertRaises(ValueError):
+                    ap.save(self.path, {"background_translucent": bad})
+                with self.assertRaises(ValueError):
+                    ap.save(self.path, {"background_blur_requested": bad})
+                with self.assertRaises(ValueError):
+                    ap.save(self.path, {"dark_mode": bad})
+        self.assertFalse(self.path.exists())
+
+    def test_nan_and_nonfinite_rejected(self):
+        # NaN is rejected at PARSE time on load (warn + defaults, file untouched — the store's
+        # unreadable/invalid policy); on SAVE the validator rejects it before any write.
+        raw = '{"schema_version": 1, "background_opacity_pct": NaN}'
+        self.path.write_text(raw)
+        with self.assertWarns(UserWarning):
+            doc = ap.load(self.path)
+        self.assertEqual(doc["background_opacity_pct"], 100)
+        self.assertEqual(self.path.read_text(), raw, "an invalid file is left untouched")
+        with self.assertRaises(ValueError):
+            ap.save(self.path, {"background_opacity_pct": float("nan")})
+
+    def test_future_schema_warns_and_loads_defaults_untouched(self):
+        raw = '{"schema_version": 99, "presentation": "modern"}'
+        self.path.write_text(raw)
+        with self.assertWarns(UserWarning):
+            doc = ap.load(self.path)
+        self.assertEqual(doc, ap.DEFAULTS, "future schema -> defaults, not the file's values")
+        self.assertEqual(self.path.read_text(), raw, "file untouched")
+
+    def test_env_override_path(self):
+        d = Path(self.tmp.name) / "envdir"
+        d.mkdir()
+        p = ap.store_path({"LA_GUI_APPEARANCE_FILE": str(d / "a.json")})
+        self.assertEqual(p, d / "a.json")
+        with self.assertRaises(RuntimeError):
+            ap.store_path({"LA_GUI_APPEARANCE_FILE": str(d / "nope" / "a.json")})
+
+    def test_defaults_shape_matches_plan(self):
+        # plan section 4: presentation compatibility|modern, translucency bool, opacity 50..100,
+        # blur request bool, dark last (initial false/light)
+        self.assertEqual(ap.DEFAULTS["presentation"], "compatibility")
+        self.assertIs(ap.DEFAULTS["background_translucent"], False)
+        self.assertEqual(ap.DEFAULTS["background_opacity_pct"], 100)
+        self.assertIs(ap.DEFAULTS["background_blur_requested"], False)
+        self.assertIs(ap.DEFAULTS["dark_mode"], False)
+        self.assertEqual(ap.SCHEMA_VERSION, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
