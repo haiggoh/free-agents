@@ -406,6 +406,36 @@ class GuiPlaywrightTests(unittest.TestCase):
         p1.close()
         p2.close()
 
+    def test_cycle_row_keyboard_focus_scoped(self):
+        # Continuation plan Phase 3: ArrowRight/ArrowLeft step the FOCUSED cycle row,
+        # Enter activates (+1, same as click); while the search input is focused, arrow
+        # keys must not step any row.
+        p = self.page()
+        p.click('.nav-row[data-target="remote"]')
+        p.wait_for_selector(".gui-search input", timeout=240000)
+        self.open_groups(p)
+        row = p.locator(".cycle-row").first
+        row.wait_for(state="visible", timeout=240000)
+        val = row.locator(".cycle-value")
+        before = val.inner_text()
+        row.focus()                                   # rows must be focusable (tabindex)
+        p.keyboard.press("ArrowRight")
+        p.wait_for_timeout(700)
+        self.assertNotEqual(val.inner_text(), before, "ArrowRight on the focused row steps +1")
+        p.keyboard.press("ArrowLeft")
+        p.wait_for_timeout(700)
+        self.assertEqual(val.inner_text(), before, "ArrowLeft steps back -1")
+        p.keyboard.press("Enter")
+        p.wait_for_timeout(700)
+        v_after_enter = val.inner_text()
+        self.assertNotEqual(v_after_enter, before, "Enter activates (+1 like click)")
+        p.click(".gui-search input")                  # focus moves into the search input
+        p.keyboard.press("ArrowRight")
+        p.wait_for_timeout(700)
+        self.assertEqual(val.inner_text(), v_after_enter,
+                         "arrows while typing in the search input must not step the row")
+        p.close()
+
 
 class GuiStaleTests(unittest.TestCase):
     def test_stale_inventory_after_navigation_not_applied(self):
