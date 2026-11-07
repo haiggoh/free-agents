@@ -83,6 +83,18 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(doc, ap.DEFAULTS, "future schema -> defaults, not the file's values")
         self.assertEqual(self.path.read_text(), raw, "file untouched")
 
+    def test_invalid_known_key_warns_and_defaults_untouched(self):
+        # review finding 1.2/5.1: a VALID-schema file with a bad known-key value (or a bool
+        # schema_version, which is an int in Python) must warn + default, never crash load
+        for raw in ('{"schema_version": true, "dark_mode": "yes"}',
+                    '{"schema_version": 1, "background_opacity_pct": 500}'):
+            with self.subTest(raw=raw):
+                self.path.write_text(raw)
+                with self.assertWarns(UserWarning):
+                    doc = ap.load(self.path)
+                self.assertEqual(doc, ap.DEFAULTS)
+                self.assertEqual(self.path.read_text(), raw, "invalid file left byte-identical")
+
     def test_env_override_path(self):
         d = Path(self.tmp.name) / "envdir"
         d.mkdir()
