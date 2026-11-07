@@ -303,6 +303,17 @@ CYCLE_RIGHT = "❯"
 CYCLE_HOVER = "bright_blue"
 CYCLE_HOVER_CSS = "ansi_" + CYCLE_HOVER
 
+# Binary-toggle knob (nicegui switch parity): a KNOB_CELLS-wide track with the knob sliding
+# end to end. OFF = hollow knob on a thin track at the left, ON = filled knob on a heavy
+# track at the right (the M3 pill: grey track off, solid track on). Box-drawing, not em
+# dashes — em dashes gap between cells and their width is font-dependent.
+KNOB_CELLS = 4
+KNOB_OFF = "○"
+KNOB_ON = "●"
+KNOB_TRACK_OFF = "─"
+KNOB_TRACK_ON = "━"
+KNOB_FRAME_S = 0.06      # 3 moves × 60 ms ≈ the nicegui .18s slide
+
 
 if __name__ == "__main__":
     # CLI surface (standing rule: --help prints usage, unknown args fail loudly — a probe

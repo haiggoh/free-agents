@@ -698,6 +698,24 @@ def _glyph_cols(text):
             cell_len(text[:text.rindex(ec.CYCLE_RIGHT)]))
 
 
+def _is_binary(action) -> bool:
+    """Same rule as the nicegui adapter (fa_gui/app.py): exactly two choices, both boolean-ish."""
+    choices = list(action.choices or ())
+    return len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
+
+
+def _knob_text(pos: int) -> Text:
+    """One frame of the toggle knob: the knob at column `pos` (0 = OFF end, KNOB_CELLS-1 = ON
+    end) on a KNOB_CELLS-wide track. The far half reads as ON: filled knob, heavy track,
+    plain colour; the near half as OFF: hollow knob, thin track, dim."""
+    on_side = pos >= ec.KNOB_CELLS // 2
+    track = ec.KNOB_TRACK_ON if on_side else ec.KNOB_TRACK_OFF
+    knob = ec.KNOB_ON if on_side else ec.KNOB_OFF
+    cells = [track] * ec.KNOB_CELLS
+    cells[pos] = knob
+    return Text("".join(cells), style=None if on_side else "dim")
+
+
 class HoverOptionList(OptionList):
     """OptionList that reports which row the mouse is over, so the info box can follow the
     pointer as well as the keyboard highlight. Textual tracks hover only for styling."""
@@ -1906,7 +1924,28 @@ class Picker(App):
             # label and flattens every style — the 0.35.0 swatch/hex-colour bug
             # (user 2026-10-15; the f-string predates the theme work entirely).
             prompt = Text(f"  {a.key.upper()}) ")
-            if a.step is not None:           # cycle row: arrows flank the VALUE (nicegui parity)
+            if a.step is not None and _is_binary(a):
+                # binary toggle (nicegui parity): "<name>: ON  ━━━●" — fixed-width value chip,
+                # then a sliding knob, no ❮ ❯ (a click anywhere on the row toggles it)
+                head, val = cycle_vals[id(a)]
+                val_plain = val.plain if isinstance(val, Text) else str(val)
+                on = val_plain.strip().upper().startswith("ON")
+                if isinstance(head, Text):
+                    prompt += head
+                else:
+                    prompt.append(str(head))
+                if getattr(a, "value_prefix", None) is not None:
+                    prompt += a.value_prefix if isinstance(a.value_prefix, Text) else Text(str(a.value_prefix))
+                chip_w = max([3, cell_len(val_plain)] + [cell_len(x) for x in a.labels])
+                if isinstance(val, Text):
+                    prompt += val
+                else:
+                    prompt.append(val_plain)
+                prompt.append(" " * (chip_w - cell_len(val_plain) + 1))
+                prompt += _knob_text(self._knob_pos((type(sm).__name__, a.key), on))
+                if getattr(a, "value_suffix", None) is not None:
+                    prompt += a.value_suffix if isinstance(a.value_suffix, Text) else Text(str(a.value_suffix))
+            elif a.step is not None:         # cycle row: arrows flank the VALUE (nicegui parity)
                 head, val = cycle_vals[id(a)]
                 oid = f"a:{len(self.action_ids)-1}"
                 hover = getattr(self, "_arrow_hover", None)
@@ -2140,6 +2179,44 @@ class Picker(App):
             return
         action.step(direction)
         self._rerender_keep_action(action_index)
+
+    def _knob_pos(self, kkey, on: bool) -> int:
+        """Where to draw a binary row's knob on THIS render. The render is the choke point every
+        route passes (click, Enter, ←/→, hotkey), so the slide starts here: when a row's value
+        differs from the one last drawn, the knob starts at the old end and _knob_tick walks it
+        to the new one. Keyed by (screen class, hotkey) — option ids repeat across screens."""
+        if not hasattr(self, "_knob_last"):
+            self._knob_last, self._knob_anim, self._knob_timer = {}, {}, None
+        target = ec.KNOB_CELLS - 1 if on else 0
+        last = self._knob_last.get(kkey)
+        self._knob_last[kkey] = on
+        anim = self._knob_anim.get(kkey)
+        if anim is not None:
+            anim[1] = target                  # flipped again mid-slide: head for the new end
+            return anim[0]
+        if last is None or last == on:
+            return target
+        start = 0 if on else ec.KNOB_CELLS - 1
+        self._knob_anim[kkey] = [start, target]
+        if self._knob_timer is None:
+            self._knob_timer = self.set_interval(ec.KNOB_FRAME_S, self._knob_tick)
+        return start
+
+    def _knob_tick(self) -> None:
+        for kkey, anim in list(self._knob_anim.items()):
+            if anim[0] == anim[1]:
+                del self._knob_anim[kkey]
+            else:
+                anim[0] += 1 if anim[1] > anim[0] else -1
+        if not self._knob_anim and self._knob_timer is not None:
+            self._knob_timer.stop()
+            self._knob_timer = None
+        # redraw the frame; the option count is unchanged, so the highlight index stays valid
+        actions_list = self.query_one("#actions", OptionList)
+        hl = actions_list.highlighted
+        self.render_model()
+        if hl is not None and hl < actions_list.option_count:
+            actions_list.highlighted = hl
 
     def _rerender_keep_action(self, action_index: int):
         """Redraw with the highlight left on the same action row (settings change in place)."""
