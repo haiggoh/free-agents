@@ -31,7 +31,17 @@ def build() -> None:
     from fa_gui.adapter import render_plan
     from fa_gui.jobs import STALE, Loader
 
-    ui.add_head_html("""<style>
+    ui.add_head_html("""<script>
+      // Phase 3: Enter/Space/arrows on a focused .cycle-row must not also scroll the page
+      // or double-fire — swallow them at capture time when the target is inside a cycle row.
+      document.addEventListener('keydown', function(e){
+        var t = e.target;
+        var r = t && t.closest ? t.closest('.cycle-row') : null;
+        if (r && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'ArrowRight'))
+          e.preventDefault();
+      }, true);
+    </script>
+    <style>
       html, body { -webkit-font-smoothing: antialiased !important; text-rendering: optimizeLegibility !important;
                    font-family: -apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI', Roboto, sans-serif !important;
                    margin: 0 !important; padding: 0 !important; }   /* lane shell is 100vh — no page scroll */
@@ -265,7 +275,7 @@ def build() -> None:
                 else:
                     # csl order: <name>: < value >  — arrow between end of item and the state
                     name = (action.name or action.label.split(":")[0]) if action else c.label
-                    with ui.row().classes("cycle-row items-center gap-1 w-full"):
+                    with ui.row().classes("cycle-row items-center gap-1 w-full") as crow:
                         name_lbl = ui.label(f"{name}:").classes("cycle-name row-action")
                         left = ui.label("<").classes("cycle-arrow cycle-left")
                         val_html = _label_value_html(action) if action is not None else None
@@ -282,6 +292,11 @@ def build() -> None:
                         # csl parity: clicking the action item itself == Enter/click == ▶ (+1)
                         name_lbl.on("click", lambda a=action, v=val: _cycle(a, v, +1, st))
                         val.on("click", lambda a=action, v=val: _cycle(a, v, +1, st))
+                    # Phase 3 keyboard contract: the row is focusable; while IT is focused,
+                    # ArrowLeft/Right step and Enter/Space activate (+1 like click). Keys in
+                    # the search input never reach here (the handler is on the row only).
+                    crow.props('tabindex="0"')
+                    crow.on("keydown", lambda e, a=action, v=val: _cycle_key(e, a, v, st))
             elif c.kind == "nav":
                 # Continuation plan Phase 1: the route comes from RenderedControl.target
                 # (Action.nav_target metadata) — run() is NEVER called at render time
@@ -310,6 +325,17 @@ def build() -> None:
         # "Go launch" returns a LaunchRequest — run it exactly like a model-row click
         if isinstance(res, m.LaunchRequest) and st.get("launch_req"):
             st["launch_req"](res)
+
+    def _cycle_key(e, action, val, st: dict) -> None:
+        """Phase 3: keyboard on a FOCUSED cycle row — Left steps -1, Right/Enter/Space
+        activate +1 (same as a click; the model's own docstring: Enter/click/Right = +1,
+        Left = -1). Attached to the row element only, so keys typed into the search input
+        or any other field never reach it."""
+        key = (e.args or {}).get("key")
+        if key == "ArrowLeft":
+            _cycle(action, val, -1, st)
+        elif key in ("ArrowRight", "Enter", " "):
+            _cycle(action, val, +1, st)
 
     def _cycle(action, val, d: int, st: dict) -> None:
         if action.step:
