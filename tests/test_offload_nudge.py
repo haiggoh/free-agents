@@ -14,8 +14,15 @@ from pathlib import Path
 HOOK = Path(__file__).resolve().parent.parent / "hooks" / "offload-nudge.py"
 
 
+ROUTE_KEYS = ("FA_ROUTE_AGENT", "FA_ROUTE_WORKFLOW", "FA_REPLACE_AGENTS")
+
+
 def nudge(base_url, **extra):
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_BASE_URL"}
+    # Scrub the machine's registered route state from the PROCESS env too: settings.json env
+    # is applied to every session's environment, so a saved FA_ROUTE_AGENT would win over the
+    # tests' defaults even with HOME isolated (route() merges registered state over the env).
+    env = {k: v for k, v in os.environ.items()
+           if k != "ANTHROPIC_BASE_URL" and k not in ROUTE_KEYS}
     if base_url is not None:
         env["ANTHROPIC_BASE_URL"] = base_url
     env.update(extra)
@@ -67,7 +74,8 @@ class RouteModeNudges(unittest.TestCase):
 
     def nudge_with(self, **env):
         import tempfile
-        e = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_BASE_URL"}
+        e = {k: v for k, v in os.environ.items()
+             if k != "ANTHROPIC_BASE_URL" and k not in ROUTE_KEYS}
         e.update(ANTHROPIC_BASE_URL="https://gateway.example.com", CLAUDE_PLUGIN_ROOT="/plug",
                  HOME=tempfile.mkdtemp(prefix="nudge-home-"), **env)
         r = subprocess.run([sys.executable, str(HOOK)], capture_output=True, text=True, env=e,
