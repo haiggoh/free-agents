@@ -313,6 +313,8 @@ KNOB_ON = "●"
 KNOB_TRACK_OFF = "─"
 KNOB_TRACK_ON = "━"
 KNOB_FRAME_S = 0.06      # 3 moves × 60 ms ≈ the nicegui .18s slide
+# The value words that put the knob at the ON end (first word of the value: "ON (default)" counts).
+KNOB_ON_WORDS = ("ON", "ENABLED", "SHOWN")
 
 
 if __name__ == "__main__":

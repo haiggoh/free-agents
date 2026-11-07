@@ -54,6 +54,10 @@ class ToggleKnob(PilotCase):
                 tail, pos = _knob(text)
                 on = ": ON" in text
                 self.assertEqual(pos, 3 if on else 0, f"row {key} knob at the wrong end: {text!r}")
+            # ENABLED/DISABLED rows: the knob follows the value word, not just "ON"
+            mcp = _row(h, "m")[1]
+            self.assertEqual(_knob(mcp)[1], 3 if ": ENABLED" in mcp else 0,
+                             f"MCP row knob disagrees with its value: {mcp!r}")
             # a multi-choice row keeps the cycle glyphs
             self.assertIn("❮", _row(h, "e")[1])
         self.run_picker(s, start="local")

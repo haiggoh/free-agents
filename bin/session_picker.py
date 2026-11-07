@@ -1929,7 +1929,8 @@ class Picker(App):
                 # then a sliding knob, no ❮ ❯ (a click anywhere on the row toggles it)
                 head, val = cycle_vals[id(a)]
                 val_plain = val.plain if isinstance(val, Text) else str(val)
-                on = val_plain.strip().upper().startswith("ON")
+                words = val_plain.split()
+                on = bool(words) and words[0].upper() in ec.KNOB_ON_WORDS
                 if isinstance(head, Text):
                     prompt += head
                 else:
