@@ -76,10 +76,16 @@ def build() -> None:
       /* the action item itself is the control (csl parity): hover like a link, click = toggle / ▶ */
       .row-action { cursor: pointer; }
       .row-action:hover { color: #0b57d0 !important; }
-      /* Phase 5 modern presentation: large emoji tiles; same handlers/targets as menu rows */
+      /* Phase 5 modern presentation: large emoji tile CARDS (user 2026-11-08: bare bigger
+         rows were not the tiles idea) — visible card surface + border + hover, same
+         handlers/targets as menu rows */
       .tile { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-              border-radius: 10px; font-size: 1.12rem; }
+              border-radius: 10px; font-size: 1.12rem;
+              background: rgba(0, 0, 0, 0.045) !important; border: 1px solid rgba(0, 0, 0, 0.09) !important; }
+      .tile:hover { background: rgba(11, 87, 208, 0.10) !important; border-color: rgba(11, 87, 208, 0.35) !important; }
       .tile .tile-emoji { font-size: 1.7rem; line-height: 1; }
+      body:has(.dark-shell) .tile { background: rgba(255, 255, 255, 0.07) !important; border-color: rgba(255, 255, 255, 0.14) !important; }
+      body:has(.dark-shell) .tile:hover { background: rgba(138, 180, 248, 0.14) !important; border-color: rgba(138, 180, 248, 0.4) !important; }
       /* lane pages: fixed-height shell — the model list scrolls internally, the infobox
          stays pinned to the bottom instead of being overlapped (user 2026-11-05).
          EMERGENCY ONLY: if the list area would shrink below ~4 rows (groups expanded +
@@ -495,11 +501,14 @@ def build() -> None:
 
                     crow.on("keydown", _key)
 
-            def _appearance_switch(key: str, label: str):
+            def _appearance_switch(key: str, label: str, launch_only: bool = False):
                 with ui.row().classes("cycle-row items-center gap-2 w-full appearance-row") as crow:
                     crow.props["data-key"] = key
                     ui.label(f"{label}:").classes("cycle-name row-action")
                     val = ui.label("ON" if doc[key] else "OFF").classes("cycle-value cycle-value-bin row-action")
+                    if launch_only:
+                        # window args are read once at startup — honest label, no fake live toggle
+                        ui.label("(next launch)").classes("launch-hint text-xs opacity-50")
 
                     def _set(e, k=key, v=val):
                         ap.save(store, {k: bool(e.value)})
@@ -508,9 +517,9 @@ def build() -> None:
                     ui.checkbox("", value=bool(doc[key]), on_change=_set).classes("switch")
 
             _appearance_cycle("presentation", "Presentation", list(ap.PRESENTATIONS))
-            _appearance_switch("background_translucent", "Translucent background")
+            _appearance_switch("background_translucent", "Translucent background", launch_only=True)
             _appearance_cycle("background_opacity_pct", "Opacity %", list(range(50, 101, 5)), clamp=True)
-            _appearance_switch("background_blur_requested", "Request native blur")
+            _appearance_switch("background_blur_requested", "Request native blur", launch_only=True)
 
     @ui.page("/")
     @ui.page("/home")

@@ -557,6 +557,44 @@ class GuiPlaywrightTests(unittest.TestCase):
                          "classifier row must disappear when auto-mode leaves classifier")
         p.close()
 
+    def test_modern_tiles_look_like_cards_not_just_bigger_rows(self):
+        # User report 2026-11-08: modern mode rendered wider rows, not tiles — the .tile had
+        # no card surface. A tile must have a visible card background and a bigger emoji than
+        # the row text (computed styles, not screenshots).
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+        defaults = json.dumps({"schema_version": 1, "presentation": "compatibility"})
+        try:
+            app_file.write_text(json.dumps({"schema_version": 1, "presentation": "modern"}))
+            p = self.page()
+            tile = p.locator(".tile").first
+            tile.wait_for(state="visible", timeout=180000)
+            tile_bg = tile.evaluate("e => getComputedStyle(e).backgroundColor")
+            self.assertNotEqual(tile_bg, "rgba(0, 0, 0, 0)", "tile must have a card background")
+            emoji_size = tile.locator(".tile-emoji").evaluate(
+                "e => parseFloat(getComputedStyle(e).fontSize)")
+            row_size = tile.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+            self.assertGreater(emoji_size, row_size, "tile emoji must be larger than the row text")
+            self.assertTrue(tile.locator(".tile-emoji").inner_text().strip(),
+                            "tile-emoji span must actually contain the emoji")
+            p.close()
+        finally:
+            app_file.write_text(defaults)
+
+    def test_appearance_section_marks_launch_only_keys(self):
+        # User report 2026-11-08: translucency toggled in-menu stayed opaque — window args are
+        # read at startup, so the UI must say so on the launch-only keys.
+        p = self.page()
+        p.goto(self.app.base + "/theme_config")
+        p.wait_for_selector('.appearance-row[data-key="background_translucent"]', timeout=180000)
+        hint = p.locator('.appearance-row[data-key="background_translucent"] .launch-hint')
+        self.assertGreater(hint.count(), 0, "translucency row must carry a next-launch hint")
+        self.assertIn("launch", hint.first.inner_text().lower())
+        blur_hint = p.locator('.appearance-row[data-key="background_blur_requested"] .launch-hint')
+        self.assertGreater(blur_hint.count(), 0)
+        # presentation is CSS-live per page — no hint
+        self.assertEqual(p.locator('.appearance-row[data-key="presentation"] .launch-hint').count(), 0)
+        p.close()
+
     def test_dark_mode_tokens_differ_from_light(self):
         # Phase 8: dark_mode=true applies dark semantic tokens (body bg/text, menu-item,
         # hover, arrows, tint tinted dark). Computed styles must DIFFER from light mode —
