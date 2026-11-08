@@ -523,6 +523,38 @@ class GuiPlaywrightTests(unittest.TestCase):
         finally:
             app_file.write_text(defaults)   # never leak presentation into other tests
 
+    def test_translucent_tint_layer_css_alpha(self):
+        # Phase 6 (browser-mode part): translucent on -> exactly one tint layer (body::before)
+        # at the stored opacity; root surfaces transparent; foreground untouched. Native
+        # blur/vibrancy is NOT TESTED here — it needs real OS observation (see QUALIFICATION).
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+        defaults = json.dumps({"schema_version": 1, "presentation": "compatibility"})
+        try:
+            for pct, alpha in ((50, 0.5), (75, 0.75), (100, 1.0)):
+                with self.subTest(pct=pct):
+                    app_file.write_text(json.dumps({"schema_version": 1, "presentation": "compatibility",
+                                                    "background_translucent": True,
+                                                    "background_opacity_pct": pct}))
+                    p = self.page()
+                    p.wait_for_selector("#tint-layer", timeout=180000)
+                    bg = p.locator("#tint-layer").evaluate(
+                        "e => getComputedStyle(e).backgroundColor")
+                    expected = f"rgba(255, 255, 255, {alpha})" if alpha < 1 else "rgb(255, 255, 255)"
+                    self.assertEqual(bg, expected,
+                                     f"one tint layer at opacity {pct}%, got {bg}")
+                    html_bg = p.evaluate("getComputedStyle(document.documentElement).backgroundColor")
+                    self.assertEqual(html_bg, "rgba(0, 0, 0, 0)", "root must be transparent")
+                    p.close()
+            # translucent off -> no tint layer at all
+            app_file.write_text(defaults)
+            p = self.page()
+            p.wait_for_selector(".nav-row", timeout=180000)
+            self.assertEqual(p.locator("#tint-layer").count(), 0,
+                             "no tint layer when translucency is off")
+            p.close()
+        finally:
+            app_file.write_text(defaults)
+
 
 class GuiStaleTests(unittest.TestCase):
     def test_stale_inventory_after_navigation_not_applied(self):

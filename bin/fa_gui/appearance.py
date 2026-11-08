@@ -104,6 +104,20 @@ def load(path: Path) -> dict:
     return doc
 
 
+def native_window_args(env=None) -> dict:
+    """Phase 6: window args for pywebview's Cocoa backend (installed source supports
+    window.transparent and window.vibrancy = NSVisualEffectView behind-window). Returned ONLY
+    for native mode — main.py never passes them to ui.run in browser mode, so no browser
+    session implies a physical desktop blur. Empty dict = fully opaque default window."""
+    doc = load(store_path(env))
+    args: dict = {}
+    if doc["background_translucent"]:
+        args["transparent"] = True
+    if doc["background_blur_requested"]:
+        args["vibrancy"] = True
+    return args
+
+
 def save(path: Path, patch: dict) -> dict:
     """Validate the patch FIRST (nothing is written on a bad value), then field-level merge
     into the current file atomically (tmp + os.replace in the same directory), preserving
