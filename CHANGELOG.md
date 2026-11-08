@@ -1,3 +1,27 @@
+## [0.55.7] — 2026-11-08
+
+### Changed — the cycle-glyph design on every setting surface (user feedback round)
+
+- Every setting row that toggles or cycles a value now renders as `KEY) name: ❮ value ❯`:
+  Local's "Auto-sync local registry with the disk", the RAM-usage (OOM) protection submenu,
+  the Cloud Session Configuration submenu, the Remote Filter Settings rows, the NVIDIA Rate
+  Limiter rows, and Lowkey's rows.
+- One source of truth for the design: the glyphs stay in `emoji_constants` (CYCLE_LEFT/
+  RIGHT) and the hover colour joins them (CYCLE_HOVER / derived CYCLE_HOVER_CSS) — the
+  picker's CSS and spans read the constants, no typed literals; a future colour or glyph
+  change updates every surface at once.
+- Lowkey's effort row reads like the other lanes ("Effort: not set" style) — the "(sent as
+  reasoning_effort)" suffix is gone from the value.
+- Theme menu: the two accent rows and two hue rows share ONE centered value column (heads
+  and cell width aligned), so all four rows read as a single centered column.
+- Left steps BACKWARD on every converted row (cloud routing, rate limiter, RAM guard
+  thresholds, lowkey temperature), and the RAM guard's soft<hard pair can never be broken
+  by a step in either direction. Disabled rows (guard OFF, smooth_bucket-only capacity,
+  policy-blocked default mode) stay inert.
+
+Follow-up: when `feat/nicegui-frontend` merges, its CSS must read the same `ec.CYCLE_*`
+constants (NiceGUI is not on main; out of scope here).
+
 ## [0.55.6] — 2026-11-07
 
 ### Added — `la-evict.sh --orphans`: the tier-0 orphan sweep, outside the ladder
@@ -26,6 +50,7 @@
   real finding (flag-like `--out` value taken as a filename) plus coverage gaps are fixed.
   `skills/offload/SKILL.md` now says: persist results with `--out FILE` (full envelope), never
   save `content` alone.
+
 
 ## [0.55.5] — 2026-11-07
 
