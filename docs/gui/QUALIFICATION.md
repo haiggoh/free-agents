@@ -109,3 +109,20 @@ Reproduced in browser mode and fixed (`c22585f`):
   in-menu cannot change a live window. The theme screen now labels
   translucency/blur rows "(next launch)". VERIFIED IN CODE ONLY — the visual
   translucent window still needs the user's real Mac after a relaunch.
+
+## 2026-11-08 — user confirmed translucency works; Metro tile redesign (`94ae655`)
+
+User verified the translucent window on the real Mac after relaunch. Redesign
+per user spec (Windows-8 Metro): modern mode now renders a responsive
+auto-fill CSS grid — session lanes 2x2 tiles, other actions 1x1, emoji large
+and ABOVE the label, label wraps in the tile; compatibility mode unchanged
+(no grid). Opacity default is capability-dependent per user ruling: 80% when
+native blur is active, 95% when unavailable (50 was unreadable without blur);
+explicit saved value wins. Blur request defaults ON when translucency is
+enabled (explicit prior choice respected) and applies next launch.
+Verified: playwright metro-grid test (display:grid, >1 column, span 2 on the
+lane tile, emoji above text, overflow-wrap anywhere, no grid in compat),
+blur-default test, resolve_opacity unit tests; M13 (grid class removed) red.
+GUI-venv 76/266, playwright 26/26, unit 11/15. STILL USER-VERIFIED ONLY:
+whether vibrancy blur is visibly present on the real Mac (NSVisualEffectView
+path is wired; no numeric material is set — pywebview exposes none).
