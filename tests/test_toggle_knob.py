@@ -154,9 +154,23 @@ class ToggleKnob(PilotCase):
         self.assertEqual(moved, sorted(moved), "rows must never move the knob backwards")
         for m_, size, state, colour, ticks in seq:
             self.assertIn(size, ec.KNOB_SIZES)
-            self.assertGreaterEqual(ticks, 1)
+            # user 2026-11-08: a 1-tick (16 ms) frame did not show reliably on screen
+            self.assertGreaterEqual(ticks, 2, f"every frame must last >= 2 ticks: {(m_, size, ticks)}")
             if m_ < END:
                 self.assertEqual(state, "old", "in flight the knob keeps its OLD state")
+            if state == "new":
+                self.assertEqual(size, "full", "the state changes only once the knob is full size")
+        # user 2026-11-08: ONE size switch only (small while moving and arriving, then full)
+        sizes = [r[1] for r in seq]
+        switches = sum(1 for a, b in zip(sizes, sizes[1:]) if a != b)
+        self.assertEqual(switches, 1, f"the knob may change size exactly once: {sizes}")
+        # grow FIRST (full size, still old), THEN change state — with the cyan, on that frame
+        first_new = next(i for i, r in enumerate(seq) if r[2] == "new")
+        self.assertGreater(first_new, 0)
+        self.assertEqual(seq[first_new - 1][1:3], ("full", "old"),
+                         f"the knob must reach full size in its OLD state before changing: {seq}")
+        self.assertEqual(seq[first_new][3], "bright_cyan",
+                         f"the state change itself must flash the cyan: {seq[first_new]}")
         flashes = [r for r in seq if r[3]]
         self.assertEqual(flashes[0][3], "bright_cyan")          # the subheadline cyan
         for r in flashes:

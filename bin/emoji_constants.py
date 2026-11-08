@@ -317,22 +317,23 @@ KNOB_TRACK_ON = "─"     # user 2026-11-07: the track stays thin when ON (no he
 # 60 Hz and the built-in 120 Hz ProMotion display. A 3-cell track has only 3 positions, so the
 # extra frames carry SIZE and COLOUR stages, not positions — and easing is the frame COUNTS.
 KNOB_TICK_S = 1 / 60
-# Glyph per size, as (hollow = OFF look, filled = ON look); all single-width circles.
+# Glyph per size, as (hollow = OFF look, filled = ON look); single-width circles. (A third,
+# tiny size ∘/· was tried 2026-11-08 and dropped: it did not read on screen — user.)
 KNOB_SIZES = {
-    "tiny":  ("∘", "·"),
     "small": ("◦", "•"),
     "full":  (KNOB_OFF, KNOB_ON),
 }
 # Rows: (cells moved from the start end, size, which state it SHOWS, knob colour or None, ticks).
-# In flight the knob keeps its OLD state (user 2026-11-07); it shows the NEW state only on landing,
-# where it flashes the subheadline cyan (#policy = ansi_bright_cyan) then plain cyan — each held
-# 2 ticks = 33 ms, because half that was not noticeable (user 2026-11-08). After the last row the
-# knob rests at full size in its normal colour. Total here: 8 ticks ≈ 133 ms.
+# User 2026-11-08: one size switch only — the knob travels small, ARRIVES small, grows to full
+# size still in its OLD state, and only then turns into the NEW state (fills in / hollows out)
+# with the subheadline cyan (#policy = ansi_bright_cyan), then plain cyan. Every frame is held
+# 2 ticks = 33 ms: a 1-tick frame (16 ms) did not show reliably. After the last row the knob
+# rests at full size in its normal colour. Total here: 10 ticks ≈ 167 ms.
 KNOB_SEQUENCE = (
-    (0, "small", "old", None,          1),   # lift-off: shrinks where it stands
-    (1, "tiny",  "old", None,          1),   # fastest point: smallest
-    (1, "small", "old", None,          2),   # slowing (ease-out): grows back, held longer
-    (2, "full",  "new", "bright_cyan", 2),   # lands: the new state, flashing
+    (1, "small", "old", None,          2),   # middle, small
+    (2, "small", "old", None,          2),   # arrives, still small
+    (2, "full",  "old", None,          2),   # grows to full size, still the old state
+    (2, "full",  "new", "bright_cyan", 2),   # fills in / hollows out: the new state, flashing
     (2, "full",  "new", "cyan",        2),   # fade step
 )
 # The value words that put the knob at the ON end (first word of the value: "ON (default)" counts).
