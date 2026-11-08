@@ -619,6 +619,37 @@ class GuiPlaywrightTests(unittest.TestCase):
         finally:
             app_file.write_text(defaults)
 
+    def test_dealt_direction_tokens_applied(self):
+        # Direction "achromatic-ledger" (seed 666057615): ground #f8f8f8, surface #ffffff,
+        # ink #141414, one hue #1d5fbf, gap 12, radius-card 8, body 14px, no rest shadows.
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+        defaults = json.dumps({"schema_version": 1, "presentation": "modern"})
+        try:
+            app_file.write_text(defaults)
+            p = self.page()
+            p.wait_for_selector(".tile-grid", timeout=180000)
+            self.assertEqual(p.evaluate("getComputedStyle(document.body).backgroundColor"),
+                             "rgb(248, 248, 248)", "ground token")
+            self.assertEqual(p.evaluate("getComputedStyle(document.body).fontSize"), "14px")
+            tile = p.locator(".tile").first
+            self.assertEqual(tile.evaluate("e => getComputedStyle(e).backgroundColor"),
+                             "rgb(255, 255, 255)", "surface token on tiles")
+            self.assertEqual(tile.evaluate("e => getComputedStyle(e).borderRadius"), "8px")
+            grid = p.locator(".tile-grid").first
+            self.assertEqual(grid.evaluate("e => getComputedStyle(e).gap"), "12px")
+            row = p.locator(".menu-item").first
+            row.hover()
+            p.wait_for_timeout(300)
+            self.assertEqual(row.evaluate("e => getComputedStyle(e).color"),
+                             "rgb(29, 95, 191)", "the one hue #1d5fbf on hover")
+            knob_shadow = tile.evaluate(
+                "e => getComputedStyle(e.querySelector('.switch') || e, '::after').boxShadow") \
+                if tile.locator(".switch").count() else "none"
+            self.assertIn(knob_shadow, ("none", ""), "no shadows at rest")
+            p.close()
+        finally:
+            app_file.write_text(json.dumps({"schema_version": 1, "presentation": "compatibility"}))
+
     def test_translucency_toggle_defaults_blur_on(self):
         # user 2026-11-08: enabling translucency defaults the blur request ON (unless the
         # user already chose explicitly); both apply on next launch.
@@ -688,8 +719,8 @@ class GuiPlaywrightTests(unittest.TestCase):
             light = probe({"schema_version": 1, "presentation": "compatibility"})
             dark = probe({"schema_version": 1, "presentation": "compatibility", "dark_mode": True})
             self.assertNotEqual(light, dark, "dark mode must change computed styles")
-            self.assertEqual(dark[0], "rgb(18, 18, 18)", "dark body background token")
-            self.assertEqual(dark[1], "rgb(232, 232, 232)", "dark menu text token")
+            self.assertEqual(dark[0], "rgb(20, 20, 20)", "dark ground #141414 (dealt ink swapped)")
+            self.assertEqual(dark[1], "rgb(248, 248, 248)", "dark text = dealt ground #f8f8f8")
             # translucent + dark: the tint layer tints DARK, not white
             app_file.write_text(json.dumps({"schema_version": 1, "dark_mode": True,
                                             "background_translucent": True,
@@ -697,7 +728,7 @@ class GuiPlaywrightTests(unittest.TestCase):
             p = self.page()
             p.wait_for_selector("#tint-layer", timeout=180000)
             bg = p.locator("#tint-layer").evaluate("e => getComputedStyle(e).backgroundColor")
-            self.assertEqual(bg, "rgba(18, 18, 18, 0.5)", "dark tint layer")
+            self.assertEqual(bg, "rgba(20, 20, 20, 0.5)", "dark tint layer tints the dark ground")
             p.close()
         finally:
             app_file.write_text(defaults)

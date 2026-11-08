@@ -42,15 +42,18 @@ def build() -> None:
       }, true);
     </script>
     <style>
+      /* Tokens from the dealt app direction "achromatic-ledger" (seed 666057615, shell open-plane):
+         ground #f8f8f8, surface #ffffff, ink #141414, one hue #1d5fbf, gap 12, radius 8/6, body 14px */
       html, body { -webkit-font-smoothing: antialiased !important; text-rendering: optimizeLegibility !important;
                    font-family: -apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI', Roboto, sans-serif !important;
-                   margin: 0 !important; padding: 0 !important; }   /* lane shell is 100vh — no page scroll */
-      .menu-item { color: #000 !important; text-decoration: none !important; background: none !important;
+                   margin: 0 !important; padding: 0 !important;
+                   background: #f8f8f8 !important; color: #141414 !important; font-size: 14px !important; }
+      .menu-item { color: #141414 !important; text-decoration: none !important; background: none !important;
                    border: none !important; box-shadow: none !important; padding: 1px 5px; line-height: 1.3; cursor: pointer; }
-      .menu-item:hover { color: #0b57d0 !important; }   /* M3-ish blue, not the default link blue */
-      .cycle-arrow { color: #000 !important; background: none !important; border: none !important;
+      .menu-item:hover { color: #1d5fbf !important; }   /* the one hue, on hover/links only */
+      .cycle-arrow { color: #141414 !important; background: none !important; border: none !important;
                      box-shadow: none !important; padding: 0 3px; cursor: pointer; font-weight: bold; }
-      .cycle-arrow:hover { color: #0b57d0 !important; }
+      .cycle-arrow:hover { color: #1d5fbf !important; }
       /* Quasar checkbox wrapper styled as the M3 pill switch. Quasar keeps state on the
          WRAPPER (aria-checked + q-checkbox__inner--truthy), not the hidden native input,
          so the visuals key off [aria-checked="true"] and Quasar's own box is hidden. */
@@ -58,8 +61,8 @@ def build() -> None:
                 cursor: pointer; margin: 0; padding: 0; flex: 0 0 auto;
                 transition: background-color .18s cubic-bezier(.4,0,.2,1); }
       .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
-                border-radius: 50%; background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,.4) !important;
-                transition: left .18s cubic-bezier(.4,0,.2,1); pointer-events: none; }
+                border-radius: 50%; background: #fff !important;
+                transition: left .18s cubic-bezier(.4,0,.2,1); pointer-events: none; }   /* no shadow at rest (direction rule) */
       .switch[aria-checked="true"] { background: #000; }
       .switch[aria-checked="true"]::after { left: 18px; }
       .switch .q-checkbox__inner { display: none !important; }
@@ -75,21 +78,21 @@ def build() -> None:
       .cycle-value-bin { display: inline-block; min-width: 3ch; }
       /* the action item itself is the control (csl parity): hover like a link, click = toggle / ▶ */
       .row-action { cursor: pointer; }
-      .row-action:hover { color: #0b57d0 !important; }
+      .row-action:hover { color: #1d5fbf !important; }
       /* Phase 5 modern presentation (user 2026-11-08): Metro grid — columns+rows, lanes 2x2 /
          rest 1x1, emoji above wrapping label, card surface; same handlers/targets as rows */
       .tile-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-                   gap: 10px; width: 100%; margin-bottom: 8px; }
+                   gap: 12px; width: 100%; margin-bottom: 8px; }   /* one gap value: --gap 12 */
       .tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-              padding: 10px 12px; border-radius: 10px; font-size: 1.0rem; text-align: left;
-              background: rgba(0, 0, 0, 0.045) !important; border: 1px solid rgba(0, 0, 0, 0.09) !important; }
+              padding: 12px; border-radius: 8px; font-size: 0.875rem; text-align: left;   /* surface card, --radius-card 8, body 14px */
+              background: #ffffff !important; border: 1px solid rgba(20, 20, 20, 0.08) !important; }
       .tile-lg { grid-column: span 2; grid-row: span 2; }
       .tile .tile-label { overflow-wrap: anywhere; line-height: 1.2; }
       .tile .tile-emoji { font-size: 2.2rem; line-height: 1; }
       .tile-lg .tile-emoji { font-size: 3.2rem; }
-      .tile:hover { background: rgba(11, 87, 208, 0.10) !important; border-color: rgba(11, 87, 208, 0.35) !important; }
-      body:has(.dark-shell) .tile { background: rgba(255, 255, 255, 0.07) !important; border-color: rgba(255, 255, 255, 0.14) !important; }
-      body:has(.dark-shell) .tile:hover { background: rgba(138, 180, 248, 0.14) !important; border-color: rgba(138, 180, 248, 0.4) !important; }
+      .tile:hover { background: #e9e9e9 !important; border-color: #e9e9e9 !important; }   /* neutral hover pill, not a tint */
+      body:has(.dark-shell) .tile { background: #1f1f1f !important; border-color: rgba(255, 255, 255, 0.14) !important; }
+      body:has(.dark-shell) .tile:hover { background: #2a2a2a !important; border-color: #2a2a2a !important; }
       /* lane pages: fixed-height shell — the model list scrolls internally, the infobox
          stays pinned to the bottom instead of being overlapped (user 2026-11-05).
          EMERGENCY ONLY: if the list area would shrink below ~4 rows (groups expanded +
@@ -120,12 +123,12 @@ def build() -> None:
       body:has(#tint-layer) .nicegui-content { background: transparent !important; }
       #tint-layer { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
       /* Phase 8 dark tokens (applied only while a .dark-shell page is shown) */
-      body:has(.dark-shell) { background: #121212 !important; color: #e8e8e8 !important; }
-      body:has(.dark-shell) .menu-item { color: #e8e8e8 !important; }
-      body:has(.dark-shell) .menu-item:hover, body:has(.dark-shell) .row-action:hover { color: #8ab4f8 !important; }
-      body:has(.dark-shell) .cycle-arrow { color: #e8e8e8 !important; }
-      body:has(.dark-shell) .cycle-arrow:hover { color: #8ab4f8 !important; }
-      body:has(.dark-shell) .cycle-name, body:has(.dark-shell) .cycle-value { color: #e8e8e8 !important; }
+      body:has(.dark-shell) { background: #141414 !important; color: #f8f8f8 !important; }
+      body:has(.dark-shell) .menu-item { color: #f8f8f8 !important; }
+      body:has(.dark-shell) .menu-item:hover, body:has(.dark-shell) .row-action:hover { color: #7ea6e0 !important; }
+      body:has(.dark-shell) .cycle-arrow { color: #f8f8f8 !important; }
+      body:has(.dark-shell) .cycle-arrow:hover { color: #7ea6e0 !important; }
+      body:has(.dark-shell) .cycle-name, body:has(.dark-shell) .cycle-value { color: #f8f8f8 !important; }
     </style>""", shared=True)
 
     loader = Loader()
