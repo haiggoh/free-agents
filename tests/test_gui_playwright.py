@@ -580,6 +580,78 @@ class GuiPlaywrightTests(unittest.TestCase):
         finally:
             app_file.write_text(defaults)
 
+    def test_modern_metro_grid_layout(self):
+        # User 2026-11-08: Windows-8-Metro tiles — columns+rows grid (not a vertical list),
+        # lanes 2x2 / rest 1x1, emoji larger and ABOVE the wrapping label. Compat mode: no grid.
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+        defaults = json.dumps({"schema_version": 1, "presentation": "compatibility"})
+        try:
+            app_file.write_text(json.dumps({"schema_version": 1, "presentation": "modern"}))
+            p = self.page()
+            grid = p.locator(".tile-grid")
+            grid.first.wait_for(state="visible", timeout=180000)
+            self.assertEqual(grid.first.evaluate("e => getComputedStyle(e).display"), "grid")
+            cols = len(grid.first.evaluate(
+                "e => getComputedStyle(e).gridTemplateColumns.split(' ').filter(Boolean)"))
+            self.assertGreater(cols, 1, "tiles must form columns, not a single-column list")
+            lane = p.locator('.tile-lg[data-target="remote"]')
+            self.assertGreater(lane.count(), 0, "the Remote lane must be a 2x2 tile")
+            self.assertIn("span 2", lane.first.evaluate("e => getComputedStyle(e).gridColumn"))
+            small = p.locator('.tile:not(.tile-lg)')
+            self.assertGreater(small.count(), 0, "non-lane rows stay 1x1 tiles")
+            tile = p.locator(".tile").first
+            emoji_top = tile.locator(".tile-emoji").evaluate("e => e.getBoundingClientRect().top")
+            label_top = tile.locator(".tile-label").evaluate("e => e.getBoundingClientRect().top")
+            self.assertLess(emoji_top, label_top, "emoji must sit ABOVE the action text")
+            emoji_size = tile.locator(".tile-emoji").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+            label_size = tile.locator(".tile-label").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+            self.assertGreater(emoji_size, label_size, "emoji must be larger than the text")
+            self.assertEqual(tile.locator(".tile-label").evaluate(
+                "e => getComputedStyle(e).overflowWrap"), "anywhere", "label must wrap in the tile")
+            p.close()
+            # compatibility mode stays a plain list — no grid at all
+            app_file.write_text(defaults)
+            p2 = self.page()
+            p2.wait_for_selector(".nav-row", timeout=180000)
+            self.assertEqual(p2.locator(".tile-grid").count(), 0)
+            self.assertEqual(p2.locator(".tile").count(), 0)
+            p2.close()
+        finally:
+            app_file.write_text(defaults)
+
+    def test_translucency_toggle_defaults_blur_on(self):
+        # user 2026-11-08: enabling translucency defaults the blur request ON (unless the
+        # user already chose explicitly); both apply on next launch.
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+        defaults = json.dumps({"schema_version": 1, "presentation": "compatibility"})
+        try:
+            app_file.write_text(defaults)   # no blur key -> default applies
+            p = self.page()
+            p.goto(self.app.base + "/theme_config")
+            p.wait_for_selector('.appearance-row[data-key="background_translucent"] .switch',
+                                timeout=180000)
+            p.locator('.appearance-row[data-key="background_translucent"] .switch').click()
+            p.wait_for_timeout(500)
+            doc = json.loads(app_file.read_text())
+            self.assertIs(doc["background_translucent"], True)
+            self.assertIs(doc["background_blur_requested"], True,
+                          "blur request defaults ON when translucency is enabled")
+            p.close()
+            # explicit prior choice is respected
+            app_file.write_text(json.dumps({"schema_version": 1, "background_blur_requested": False}))
+            p = self.page()
+            p.goto(self.app.base + "/theme_config")
+            p.wait_for_selector('.appearance-row[data-key="background_translucent"] .switch',
+                                timeout=180000)
+            p.locator('.appearance-row[data-key="background_translucent"] .switch').click()
+            p.wait_for_timeout(500)
+            doc = json.loads(app_file.read_text())
+            self.assertIs(doc["background_blur_requested"], False,
+                          "an explicit blur choice must not be overridden")
+            p.close()
+        finally:
+            app_file.write_text(defaults)
+
     def test_appearance_section_marks_launch_only_keys(self):
         # User report 2026-11-08: translucency toggled in-menu stayed opaque — window args are
         # read at startup, so the UI must say so on the launch-only keys.

@@ -102,6 +102,7 @@ def main(argv: list[str]) -> int:
         # 2026-11-08, "unexpected keyword argument 'window_args'").
         from fa_gui.appearance import native_window_args
         app.native.window_args.update(native_window_args())
+        os.environ["LA_GUI_NATIVE"] = "1"   # app.py uses it to compute blur-active opacity
         ui.run(native=True, window_size=(1100, 950), **common)   # taller default: room for >=4 list rows (user 2026-11-05)
     return 0
 
