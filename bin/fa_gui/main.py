@@ -96,9 +96,13 @@ def main(argv: list[str]) -> int:
         print(f"free-agents-gui: serving http://{HOST}:{port}", flush=True)
         ui.run(**common)   # NO window_args in browser mode — nothing here implies desktop blur
     else:
-        # Phase 6: translucent/vibrancy come from the GUI appearance store, native mode only
+        # Phase 6: translucent/vibrancy come from the GUI appearance store, native mode only.
+        # NiceGUI 3.19 takes window args on app.native.window_args — ui.run has NO window_args
+        # kwarg (passing one crashes CustomServerConfig: measured real --native launch failure
+        # 2026-11-08, "unexpected keyword argument 'window_args'").
         from fa_gui.appearance import native_window_args
-        ui.run(native=True, window_size=(1100, 950), window_args=native_window_args(), **common)   # taller default: room for >=4 list rows (user 2026-11-05)
+        app.native.window_args.update(native_window_args())
+        ui.run(native=True, window_size=(1100, 950), **common)   # taller default: room for >=4 list rows (user 2026-11-05)
     return 0
 
 
