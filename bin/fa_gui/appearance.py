@@ -24,10 +24,24 @@ SCHEMA_VERSION = 1
 DEFAULTS: dict[str, Any] = {
     "presentation": "compatibility",          # "compatibility" | "modern"
     "background_translucent": False,          # white translucency opt-in (Phase 6 enables it)
-    "background_opacity_pct": 100,            # integer 50..100 (100 = solid)
+    # background_opacity_pct has NO fixed default (user ruling 2026-11-08): absent = auto —
+    # resolve_opacity() picks 80% when native blur is active, 95% when it is unavailable
+    # (50 was unreadable without blur). An explicit saved value always wins.
     "background_blur_requested": False,       # request flag only — never proof blur is active
     "dark_mode": False,                       # Phase 8, LAST; initial light
 }
+
+DEFAULT_OPACITY_BLUR_ACTIVE = 80
+DEFAULT_OPACITY_NO_BLUR = 95
+
+
+def resolve_opacity(doc: dict, blur_active: bool = False) -> int:
+    """The effective tint opacity: an explicitly saved background_opacity_pct wins; otherwise
+    the capability-dependent default (80% with active native blur, 95% without)."""
+    v = doc.get("background_opacity_pct")
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    return DEFAULT_OPACITY_BLUR_ACTIVE if blur_active else DEFAULT_OPACITY_NO_BLUR
 
 PRESENTATIONS = ("compatibility", "modern")
 _OPACITY_MIN, _OPACITY_MAX = 50, 100
@@ -59,6 +73,9 @@ def _validate(key: str, value: Any) -> None:
         if not isinstance(value, bool):
             raise ValueError(f"{key} must be a bool, got {value!r}")
     elif key == "background_opacity_pct":
+        if value is None:
+            raise ValueError("background_opacity_pct=None means auto — never save it; "
+                             "save the resolved int")
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"background_opacity_pct must be an int, got {value!r}")
         if not math.isfinite(value) or not (_OPACITY_MIN <= value <= _OPACITY_MAX):
@@ -94,7 +111,8 @@ def load(path: Path) -> dict:
     doc.update(raw)                     # unknown keys carried
     try:
         for key, value in doc.items():
-            if key in DEFAULTS or key == "schema_version":
+            # opacity is known-but-optional (auto when absent): validate it only when present
+            if key in DEFAULTS or key == "schema_version" or (key == "background_opacity_pct" and value is not None):
                 _validate(key, value)   # a known key with a bad value
     except ValueError as err:
         # review finding: an invalid KNOWN key must warn + default, not crash the GUI at load

@@ -35,14 +35,17 @@ class StoreTests(unittest.TestCase):
         doc = ap.load(self.path)
         self.assertEqual(doc["presentation"], "modern")
         self.assertEqual(doc["future_key"], {"x": 1}, "unknown keys survive a field-level save")
-        self.assertEqual(doc["background_opacity_pct"], 100, "untouched fields keep defaults")
+        self.assertNotIn("background_opacity_pct", doc,
+                         "opacity has no fixed default — absent means capability-auto")
         self.assertEqual(list(Path(self.tmp.name).glob("*.tmp*")), [], "atomic save leaves no tmp")
 
     def test_opacity_bounds_and_types(self):
-        for bad in (49, 101, 50.5, True, "80", None):
+        for bad in (49, 101, 50.5, True, "80"):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     ap.save(self.path, {"background_opacity_pct": bad})
+        with self.assertRaises(ValueError):
+            ap.save(self.path, {"background_opacity_pct": None})   # None = auto, not savable
         self.assertFalse(self.path.exists(), "a rejected write must not create the file")
         for good in (50, 75, 100):
             ap.save(self.path, {"background_opacity_pct": good})
@@ -70,7 +73,7 @@ class StoreTests(unittest.TestCase):
         self.path.write_text(raw)
         with self.assertWarns(UserWarning):
             doc = ap.load(self.path)
-        self.assertEqual(doc["background_opacity_pct"], 100)
+        self.assertNotIn("background_opacity_pct", doc)   # NaN file -> defaults, no opacity key
         self.assertEqual(self.path.read_text(), raw, "an invalid file is left untouched")
         with self.assertRaises(ValueError):
             ap.save(self.path, {"background_opacity_pct": float("nan")})
@@ -123,14 +126,27 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(ap.native_window_args(env), {})
 
     def test_defaults_shape_matches_plan(self):
-        # plan section 4: presentation compatibility|modern, translucency bool, opacity 50..100,
-        # blur request bool, dark last (initial false/light)
+        # plan section 4: presentation compatibility|modern, translucency bool, blur request
+        # bool, dark last (initial false/light). Opacity has NO fixed default — the user
+        # ruling 2026-11-08: 95% when blur is unavailable, 80% when blur is active.
         self.assertEqual(ap.DEFAULTS["presentation"], "compatibility")
         self.assertIs(ap.DEFAULTS["background_translucent"], False)
-        self.assertEqual(ap.DEFAULTS["background_opacity_pct"], 100)
+        self.assertNotIn("background_opacity_pct", ap.DEFAULTS)
         self.assertIs(ap.DEFAULTS["background_blur_requested"], False)
         self.assertIs(ap.DEFAULTS["dark_mode"], False)
         self.assertEqual(ap.SCHEMA_VERSION, 1)
+
+    def test_opacity_default_is_capability_dependent(self):
+        # user 2026-11-08: unreadable at 50 without blur -> default 95% without blur, 80% with
+        doc = ap.load(self.path)          # absent file -> defaults, no opacity key
+        self.assertNotIn("background_opacity_pct", doc)
+        self.assertEqual(ap.resolve_opacity(doc, blur_active=False), 95)
+        self.assertEqual(ap.resolve_opacity(doc, blur_active=True), 80)
+        ap.save(self.path, {"background_opacity_pct": 60})
+        doc = ap.load(self.path)
+        self.assertEqual(ap.resolve_opacity(doc, blur_active=True), 60,
+                         "an explicit saved opacity always wins over the capability default")
+        self.assertEqual(ap.resolve_opacity(doc, blur_active=False), 60)
 
 
 if __name__ == "__main__":
