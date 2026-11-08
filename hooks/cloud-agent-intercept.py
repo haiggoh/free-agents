@@ -61,7 +61,8 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str,
     from the marked block in skills/offload/SKILL.md — never a second copy here, 0.54.0)."""
     import offload_routing
     routing = offload_routing.routing_block(plugin_root)
-    free_session = f"{plugin_root}/bin/remote-session.sh <alias> -p \"<brief>\""
+    alias = offload_routing.session_alias(env or os.environ, plugin_root)
+    free_session = f"{plugin_root}/bin/remote-session.sh {alias} --effort high -p \"<brief>\""
     if tool_name == "Agent":
         prompt = tool_input.get("prompt", "")
         subagent_type = tool_input.get("subagent_type", "general-purpose")
@@ -77,15 +78,16 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str,
         while delim in payload_json:
             delim += "_"
         head = (
-            f"{_lane_mark(env or os.environ)} free-agents: replacement: run this subagent for FREE "
-            f"via Bash instead of paid Sonnet.\n"
+            f"{_lane_mark(env or os.environ)} free-agents: replacement: route this call to a FREE "
+            f"lane instead of paid Sonnet — both options are available, pick by task shape:\n"
+            f"  (a) text in / text out, or must it read files / run commands? Text-only work → a "
+            f"STATELESS dispatch (it cannot read the disk; attach what it needs as \"files\"):\n"
             f"  python3 \"{free_tool}\" <<'{delim}'\n{payload_json}\n{delim}\n"
             f"Returns JSON: {{\"content\": \"...\", \"model_used\": \"...\", \"route\": \"...\"}}.\n"
             f"Before running it, tell the user which model it goes to (`python3 \"{free_tool}\" --list` "
             f"shows the preference order); free models are not equal.\n"
-            f"It is a STATELESS dispatch: the model cannot read files or run commands. Add the files "
-            f"it needs as \"files\": [paths] (their contents are attached). Work that must drive tools "
-            f"belongs in a free session, not here: {free_session}\n"
+            f"  (b) must read files / run commands → a headless free SESSION in the background: "
+            f"{free_session}\n"
             f"Independent tasks may be launched as several parallel Bash calls.\n"
             f"Original description: {description}\n"
         )
@@ -104,9 +106,12 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str,
         )
     else:
         tail = (
-            "Free-first lane: after this session's free attempts are honestly exhausted "
-            "(the dispatch result then says \"paid_fallback_allowed\": true), ONE native call "
-            "is let through automatically. Force the mode with "
+            "Free-first lane: when this task's OWN free route is exhausted (the dispatch result "
+            "says \"paid_fallback_allowed\": true) AND you state a reason (security-critical, "
+            "final check of the free result), ONE native call is let through (the "
+            "honest-exhaustion mark) — exhaustion alone never permits paid, and a failed "
+            "dispatch chain is not by itself a reason: try the OTHER free route first when the "
+            "task shape allows it. Force the mode with "
             "`bin/cloud_session_env.py set route agent paid`.\n"
         )
     return head + tail + "\n--- routing (from the offload skill) ---\n" + routing + "\n"

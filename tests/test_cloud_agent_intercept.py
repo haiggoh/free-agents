@@ -9,6 +9,7 @@ on a corrupt settings layer, and the Agent matcher in hooks.json. Config dir, ma
 and plugin root are temp paths; the user's real ~/.claude is never read for a verdict."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -192,6 +193,92 @@ class SelfTestHermeticTests(unittest.TestCase):
                                capture_output=True, text=True, env=env, timeout=30)
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertNotIn("FAIL", r.stdout)
+
+
+class RoutingMessage(unittest.TestCase):
+    """Task 2 (plan 2026-11-08-…-route-watcher): the deny message routes by task SHAPE, offers
+    BOTH free routes as ready-to-run commands (dispatch heredoc + headless free session with a
+    roster-resolved alias, never hardcoded), never implies exhaustion alone permits paid, and
+    the routing block it appends is byte-for-byte the offload skill's marked section."""
+
+    ROUTING_MARKER = "--- routing (from the offload skill) ---"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        t = Path(self.tmp.name)
+        self.cfg = t / "cfg"
+        self.cfg.mkdir()
+        self.marks = t / "marks"
+        self.marks.mkdir()
+        self.root = t / "plugin"
+        (self.root / "bin").mkdir(parents=True)
+        (self.root / "bin" / "free-agent-tool.py").write_text("print('{\"content\":\"ok\"}')\n")
+        sk = self.root / "skills" / "offload"
+        sk.mkdir(parents=True)
+        shutil.copy(ROOT / "skills" / "offload" / "SKILL.md", sk / "SKILL.md")
+
+    def deny_reason(self, **env):
+        e = {k: v for k, v in os.environ.items()
+             if k not in ("ANTHROPIC_BASE_URL", "FA_REPLACE_AGENTS", "FA_ROUTE_AGENT",
+                          "FA_ROUTE_WORKFLOW", "FA_FALLBACK_MARK_DIR", "CLAUDE_CONFIG_DIR",
+                          "FA_ROUTE_SESSION_ALIAS")}
+        e.update(CLAUDE_CONFIG_DIR=str(self.cfg), FA_FALLBACK_MARK_DIR=str(self.marks),
+                 CLAUDE_PLUGIN_ROOT=str(self.root), ANTHROPIC_BASE_URL="https://gw.example", **env)
+        payload = {"tool_name": "Agent",
+                   "tool_input": {"prompt": "probe", "description": "d"},
+                   "session_id": "sess-rm"}
+        r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload),
+                           capture_output=True, text=True, env=e, timeout=10)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        return out["permissionDecisionReason"]
+
+    def routing_block_of(self, reason):
+        self.assertIn(self.ROUTING_MARKER, reason)
+        return reason.split(self.ROUTING_MARKER, 1)[1]
+
+    def test_message_leads_with_shape_test(self):
+        block = self.routing_block_of(self.deny_reason())
+        numbered = [ln for ln in block.splitlines() if ln.lstrip().startswith("1.")]
+        self.assertTrue(numbered, f"no numbered routing item in block:\n{block}")
+        first = numbered[0]
+        self.assertIn("text in", first.lower())
+        self.assertIn("read files", first)
+        self.assertIn("run commands", first)
+
+    def test_message_offers_dispatch_and_headless_session_commands(self):
+        reason = self.deny_reason(FA_ROUTE_SESSION_ALIAS="test-alias-9")
+        self.assertIn("free-agent-tool.py", reason)                       # the dispatch heredoc
+        self.assertRegex(reason, r'remote-session\.sh test-alias-9 --effort \S+ -p "<brief>"')
+        reason2 = self.deny_reason(FA_ROUTE_SESSION_ALIAS="other-alias-3")  # alias not hardcoded
+        self.assertIn("remote-session.sh other-alias-3", reason2)
+        self.assertNotIn("test-alias-9", reason2)
+
+    def test_paid_requires_stated_reason_not_route_failure(self):
+        low = self.deny_reason().lower()
+        self.assertIn("stated reason", low)
+        self.assertIn("exhaustion alone never permits paid", low)
+        self.assertIn("not by itself a reason", low)
+
+    def test_routing_text_single_source(self):
+        import offload_routing
+        emitted = self.routing_block_of(self.deny_reason())
+        block = offload_routing.routing_block(str(ROOT))
+        self.assertEqual(emitted, "\n" + block + "\n",
+                         "the hook must emit the skill's marked block byte-for-byte")
+        self.assertLess(len(block), 1500, "the marked block stays under its 1,500-byte cap")
+
+    def test_first_available_alias_picks_first_keyed_row(self):
+        import offload_routing
+        sample = ("\x1b[1m📡  REMOTE cloud-API agents\x1b[0m\n\n"
+                  "  #   ALIAS      DISPLAY   TIER   KEY\n"
+                  "  1   no-key-x   Model X   free   ✗\n"
+                  "  2   keyed-y    Model Y   free   ✓ nvidia\n"
+                  "  3   keyed-z    Model Z   free   ✓ gemini\n")
+        self.assertEqual(offload_routing.first_available_alias(sample), "keyed-y")
+        self.assertEqual(offload_routing.first_available_alias("no rows here"), "")
 
 
 if __name__ == "__main__":

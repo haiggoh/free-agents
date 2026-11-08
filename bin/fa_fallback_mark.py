@@ -3,7 +3,8 @@
 
 When a dispatch's free attempts are honestly exhausted, free-agent-tool.py writes a mark for
 ITS session. The cloud-agent-intercept hook consumes it ONCE to let exactly one native paid
-call through. Marks are single-use, expire (default 15 minutes) and are keyed by session id,
+call through — one that comes with a stated reason; exhaustion alone never arms the paid
+path. Marks are single-use, expire (default 15 minutes) and are keyed by session id,
 so a second cloud session's Agent call stays redirected (review focus 1).
 
 Usage (library — the tool and the hook import it):

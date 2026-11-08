@@ -16,10 +16,14 @@ Library:
       is unreadable, returns the literal warning line (never raises) so the hooks can emit
       a loud "routing block missing" instead of silently empty guidance.
 
-Env: none. CLAUDE_PLUGIN_ROOT is the usual plugin-root hint; callers may pass the path
-explicitly (the intercept falls back to its own parents[1]).
+Env: FA_ROUTE_SESSION_ALIAS overrides the alias session_alias() picks for the hooks'
+ready-to-run `remote-session.sh` command (tests use it). CLAUDE_PLUGIN_ROOT is the usual
+plugin-root hint; callers may pass the path explicitly (the intercept falls back to its
+own parents[1]).
 """
 import argparse
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,12 +49,46 @@ def routing_block(plugin_root: str) -> str:
     return block.strip()
 
 
+_ALIAS_ROW = re.compile(r"^\s*\d+\s+(\S+)\s+.*✓")
+
+
+def first_available_alias(list_output: str) -> str:
+    """The first `remote-session.sh --list` row whose KEY column shows ✓ (key present), '' when
+    none does. ANSI colour codes are stripped first — the roster header is bold on a terminal."""
+    clean = re.sub(r"\x1b\[[0-9;]*m", "", list_output)
+    for line in clean.splitlines():
+        m = _ALIAS_ROW.match(line)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def session_alias(env, plugin_root: str) -> str:
+    """The alias for the hooks' ready-to-run free-session command — never a hardcoded name:
+    FA_ROUTE_SESSION_ALIAS wins (tests), else the roster's first available (keyed) entry via
+    `remote-session.sh --list`, else the literal '<alias>' placeholder. Never raises."""
+    env = env or {}
+    ov = env.get("FA_ROUTE_SESSION_ALIAS")
+    if ov:
+        return ov
+    try:
+        r = subprocess.run(["bash", str(Path(plugin_root) / "bin" / "remote-session.sh"), "--list"],
+                           capture_output=True, text=True, timeout=10)
+        alias = first_available_alias(r.stdout)
+        if alias:
+            return alias
+    except Exception:
+        pass
+    return "<alias>"
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="offload_routing.py",
         description="Read the marked routing block (fa:routing:begin/end) from "
                     "skills/offload/SKILL.md — the single source the hooks emit verbatim.",
-        epilog="Env: none. Library use: routing_block(plugin_root).")
+        epilog="Env: FA_ROUTE_SESSION_ALIAS (session_alias override). Library use: "
+               "routing_block(plugin_root), session_alias(env, plugin_root).")
     ap.add_argument("--print", action="store_true", help="print the routing block and exit")
     ap.add_argument("--plugin-root", default=None,
                     help="plugin root to read (default: CLAUDE_PLUGIN_ROOT or this repo)")

@@ -42,22 +42,22 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
      NAMES here (rosters rot — point to `bin/free-agent-tool.py --list`). -->
 ## Default routing on a PAID session — decide the route BEFORE the call
 
-1. **Shape test first.** Self-contained text work (review, analysis, extraction, drafting, a
-   cross-check) → a STATELESS dispatch: `python3 bin/free-agent-tool.py` with
-   `{"prompt": ..., "files": [paths]}` (a dispatch cannot read the disk; `--list` shows the
-   preference order). Work that must read files or run commands → a free SESSION, headless in
-   the background: `remote-session.sh <alias> -p "<brief>"` (args after the alias pass through to `claude`). A HANDOVER is always INTERACTIVE
-   in its own Terminal window (free-session-handover).
+1. **Shape test first: text in / text out, or must it read files / run commands?**
+   Text-only → a STATELESS dispatch: `python3 bin/free-agent-tool.py` with
+   `{"prompt": ..., "files": [paths]}` (cannot read the disk; `--list` = preference order).
+   Must read files / run commands → headless free SESSION: `remote-session.sh <alias> --effort
+   <lvl> -p "<brief>"` (resolve `<alias>`: first keyed row of `remote-session.sh --list`). A
+   HANDOVER is always INTERACTIVE in its own Terminal window (free-session-handover).
 2. **Announce the model and route to the user BEFORE offloading** (the tool prints the model it
    tried on stderr; the result JSON carries `model_used`/`route` — repeat them in your reply).
    Brief delegates with the `brief-the-delegate` skill; session system prompts:
    `config/local-agent-system-prompt.txt`, `config/remote-agent-system-prompt.txt`.
 3. **Parallel fan-out** (`superpowers:dispatching-parallel-agents`): independent pieces =
    several parallel Bash calls (dispatches), or several free sessions.
-4. **A paid subagent** only with a stated reason (security-critical, final check of the
-   free result, a free lane failing now) — and only once free attempts are honestly
-   exhausted (result says `"paid_fallback_allowed": true`): then ONE native call is let
-   through (the honest-exhaustion mark).
+4. **A paid subagent only with a stated reason** (security-critical, final check of the free
+   result), and only once the task's OWN free route is exhausted (`"paid_fallback_allowed": true`):
+   exhaustion alone never permits paid; the mark lets the ONE stated-reason call through. A
+   failed dispatch chain is not by itself a reason — try the OTHER free route first.
 <!-- fa:routing:end -->
 
 ## Decide at decomposition — annotate every step before reading any input

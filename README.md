@@ -287,11 +287,15 @@ that hangs times out after `LA_SUBAGENT_POOL_TIMEOUT` (120 s) and is retried on 
 **Cloud replacement.** The `hooks/cloud-agent-intercept.py` PreToolUse hook routes the native
 `Agent` tool per the session's mode (0.43.0; the legacy `FA_REPLACE_AGENTS=1|0` maps onto it):
 
-- **Free first** (default): `Agent` is denied with a ready-to-run command for
-  `bin/free-agent-tool.py` (role routing through `council-router.sh`; the prompt goes through a
-  quoted heredoc, so no quote in it can break the command). After the session's free attempts are
-  honestly exhausted — the dispatch result reports `"paid_fallback_allowed": true` — **one** native
-  paid call is let through automatically (the fallback mark; session-scoped, single-use, expires).
+- **Free first** (default): `Agent` is denied with ready-to-run free commands, chosen by task
+  shape: a `bin/free-agent-tool.py` dispatch heredoc for text-only work (role routing through
+  `council-router.sh`; the prompt goes through a quoted heredoc, so no quote in it can break the
+  command), or `remote-session.sh <alias> --effort high -p "<brief>"` — alias resolved from the
+  roster's first keyed entry — for work that must read files or run commands. Only when the
+  task's OWN free route is exhausted — the dispatch result reports
+  `"paid_fallback_allowed": true` — **and** a reason is stated, **one** native paid call is let
+  through (the fallback mark; session-scoped, single-use, expires). Exhaustion alone never
+  permits paid.
 - **Free only**: every `Agent` call is denied and the hook never falls back to paid.
 - **Paid**: the hook stays out; the native Agent runs as usual.
 
