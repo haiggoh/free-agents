@@ -312,17 +312,29 @@ KNOB_OFF = "○"
 KNOB_ON = "●"
 KNOB_TRACK_OFF = "─"
 KNOB_TRACK_ON = "─"     # user 2026-11-07: the track stays thin when ON (no heavy ━)
-KNOB_FRAME_S = 2 / 60     # user 2026-11-08: faster; ≈33 ms = exactly 2 refreshes at 60 Hz (30 ms would alternate 1 and 2)
-# In flight (user 2026-11-07): the knob keeps its OLD state, drawn small, so the state change
-# lands on arrival. Set these equal to KNOB_OFF / KNOB_ON to turn the size change off.
-KNOB_OFF_MOVING = "◦"
-KNOB_ON_MOVING = "•"
-# Arrival flash on the knob only (a span colour beats the row's hover blue). User 2026-11-07:
-# white was too much and too long — use the subheadline's cyan (#policy is ansi_bright_cyan),
-# one frame per step (2026-11-08; half a frame was not noticeable), with one in-between step
-# fading toward the row colour. Each entry is a rich colour; () = no flash.
-KNOB_FLASH_STEPS = ("bright_cyan", "cyan")
-KNOB_FLASH_STEP_S = KNOB_FRAME_S   # user 2026-11-08: a FULL frame per step — half a frame was not noticeable
+# The toggle animation as ONE frame table (user 2026-11-08), played at KNOB_TICK_S per tick.
+# 1/60 s = Textual's own screen-update cap (constants.MAX_FPS) and on the refresh grid at both
+# 60 Hz and the built-in 120 Hz ProMotion display. A 3-cell track has only 3 positions, so the
+# extra frames carry SIZE and COLOUR stages, not positions — and easing is the frame COUNTS.
+KNOB_TICK_S = 1 / 60
+# Glyph per size, as (hollow = OFF look, filled = ON look); all single-width circles.
+KNOB_SIZES = {
+    "tiny":  ("∘", "·"),
+    "small": ("◦", "•"),
+    "full":  (KNOB_OFF, KNOB_ON),
+}
+# Rows: (cells moved from the start end, size, which state it SHOWS, knob colour or None, ticks).
+# In flight the knob keeps its OLD state (user 2026-11-07); it shows the NEW state only on landing,
+# where it flashes the subheadline cyan (#policy = ansi_bright_cyan) then plain cyan — each held
+# 2 ticks = 33 ms, because half that was not noticeable (user 2026-11-08). After the last row the
+# knob rests at full size in its normal colour. Total here: 8 ticks ≈ 133 ms.
+KNOB_SEQUENCE = (
+    (0, "small", "old", None,          1),   # lift-off: shrinks where it stands
+    (1, "tiny",  "old", None,          1),   # fastest point: smallest
+    (1, "small", "old", None,          2),   # slowing (ease-out): grows back, held longer
+    (2, "full",  "new", "bright_cyan", 2),   # lands: the new state, flashing
+    (2, "full",  "new", "cyan",        2),   # fade step
+)
 # The value words that put the knob at the ON end (first word of the value: "ON (default)" counts).
 KNOB_ON_WORDS = ("ON", "ENABLED", "SHOWN")
 

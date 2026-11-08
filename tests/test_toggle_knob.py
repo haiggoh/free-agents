@@ -33,7 +33,7 @@ N = ec.KNOB_CELLS
 END = N - 1
 
 
-KNOBS = ec.KNOB_OFF + ec.KNOB_ON + ec.KNOB_OFF_MOVING + ec.KNOB_ON_MOVING
+KNOBS = "".join(g for pair in ec.KNOB_SIZES.values() for g in pair)
 TRACK = set(KNOBS + ec.KNOB_TRACK_OFF + ec.KNOB_TRACK_ON)
 
 
@@ -141,65 +141,80 @@ class ToggleKnob(PilotCase):
         self.run_picker(s, start="local")
 
 
-    def test_knob_keeps_its_state_in_flight(self):
-        """User 2026-11-07: the knob keeps its OLD state (hollow+dim from OFF, filled from ON)
-        while travelling, drawn small; it becomes the new state only on arrival, where the
-        flash steps show in order. Frames are recorded from inside the render (_record_toggle);
-        test_flash_sequence additionally pins the flash timing with recorded timers."""
+    def test_table_is_well_formed(self):
+        """The frame table (user 2026-11-08) is the single source: 1/60 s ticks (Textual's
+        MAX_FPS cap, on the 60 and 120 Hz grids), ends on the far end in the NEW state, keeps
+        the OLD state in flight, moves only forward, and the landing flash is the #policy cyan
+        held a full 33 ms (2 ticks) — half that was not noticeable."""
+        self.assertAlmostEqual(ec.KNOB_TICK_S, 1 / 60)
+        seq = ec.KNOB_SEQUENCE
+        self.assertEqual(seq[-1][0], END, "the table must end at the far end")
+        self.assertEqual(seq[-1][2], "new")
+        moved = [r[0] for r in seq]
+        self.assertEqual(moved, sorted(moved), "rows must never move the knob backwards")
+        for m_, size, state, colour, ticks in seq:
+            self.assertIn(size, ec.KNOB_SIZES)
+            self.assertGreaterEqual(ticks, 1)
+            if m_ < END:
+                self.assertEqual(state, "old", "in flight the knob keeps its OLD state")
+        flashes = [r for r in seq if r[3]]
+        self.assertEqual(flashes[0][3], "bright_cyan")          # the subheadline cyan
+        for r in flashes:
+            self.assertGreaterEqual(r[4] * ec.KNOB_TICK_S, 2 / 60 - 1e-9, f"flash too short: {r}")
+
+    @staticmethod
+    def _expected(on: bool):
+        """Per tick, the (pos, filled, size, colour) the table prescribes, then the rest frame."""
+        start = 0 if on else END
+        d = 1 if on else -1
+        out = []
+        for m_, size, state, colour, ticks in ec.KNOB_SEQUENCE:
+            out += [(start + d * m_, on if state == "new" else not on, size, colour)] * ticks
+        return out + [((END if on else 0), on, "full", None)]
+
+    def test_sequence_plays_every_table_row(self):
+        """Timer replaced by a recorder: each tick advances exactly one tick of the table, in
+        both directions, and every table row is shown for exactly its tick count."""
         async def s(app, pilot, h):
             await self._open()(h)
-            for _ in range(2):                         # OFF→ON, then ON→OFF
-                start_on = _knob(_row(h, "t")[1])[1] == END
-                frames = await _record_toggle(h, pilot, "t")   # (plain tail, knob styles)
-                arrive = next(i for i, (t, _) in enumerate(frames)
-                              if (ec.KNOB_OFF if start_on else ec.KNOB_ON) in t)
-                flashes = [c for _, st in frames[arrive:] for c in ec.KNOB_FLASH_STEPS if c in st]
-                self.assertEqual(flashes, list(ec.KNOB_FLASH_STEPS),
-                                 f"every flash step must be drawn, in order: {frames}")
-                in_flight = frames[1:arrive]           # frames[0] = the row before the press
-                self.assertTrue(in_flight, f"no in-flight frame: {frames}")
-                moving = ec.KNOB_ON_MOVING if start_on else ec.KNOB_OFF_MOVING
-                for t, _ in in_flight:
-                    self.assertIn(moving, t, f"in flight the knob must keep its old state, small: {frames}")
-                rest = frames[-1]
-                self.assertFalse(any(c in st for st in rest[1] for c in ec.KNOB_FLASH_STEPS),
-                                 f"the flash must end: {frames}")
-                self.assertIn(ec.KNOB_OFF if start_on else ec.KNOB_ON, rest[0], frames)
+            self.assertIn("#policy { color: ansi_bright_cyan;", app.CSS)   # cyan source agrees
+            intervals = []
+            app.set_interval = lambda delay, cb: (intervals.append(delay) or
+                                                  type("T", (), {"stop": lambda self: None})())
+            for on in (True, False):
+                k = ("SeqProbe", "z")
+                app._knob_frame(k, not on)               # at rest in the old state
+                seen = [app._knob_frame(k, on)]          # value flipped: row 0, tick 1
+                while k in app._knob_anim:
+                    app._knob_tick()
+                    seen.append(app._knob_frame(k, on))
+                self.assertEqual(seen, self._expected(on), f"on={on}")
+                self.assertTrue(all(abs(x - ec.KNOB_TICK_S) < 1e-12 for x in intervals), intervals)
+            # only the knob carries the flash colour, never the track
+            t = self.sp._knob_text(END, True, "full", "bright_cyan")
+            flashed = [t.plain[sp.start:sp.end] for sp in t.spans if str(sp.style) == "bright_cyan"]
+            self.assertEqual(flashed, [ec.KNOB_ON], t.spans)
         self.run_picker(s, start="local")
 
-    def test_flash_sequence(self):
-        """User 2026-11-07: on arrival the knob alone steps through KNOB_FLASH_STEPS (subheadline
-        cyan, then an in-between), each held KNOB_FLASH_STEP_S = one full frame, then rests.
-        Timers are recorded instead of run, so every step is observed deterministically."""
+    def test_live_frames_follow_the_table(self):
+        """Real timers, frames recorded from INSIDE the render: the drawn sequence (consecutive
+        duplicates merged) is exactly the table's, so no row is skipped or reordered."""
         async def s(app, pilot, h):
             await self._open()(h)
-            self.assertEqual(ec.KNOB_FLASH_STEP_S, ec.KNOB_FRAME_S)
-            self.assertAlmostEqual(ec.KNOB_FRAME_S, 2 / 60)   # 2 refreshes at 60 Hz
-            self.assertEqual(ec.KNOB_FLASH_STEPS[0], "bright_cyan")   # the #policy subheadline cyan
-            self.assertIn("#policy { color: ansi_bright_cyan;", app.CSS)
-            timers = []
-            app.set_timer = lambda delay, cb: timers.append((delay, cb))
-            app.set_interval = lambda delay, cb: type("T", (), {"stop": lambda self: None})()
-            k = ("FlashProbe", "z")
-            app._knob_frame(k, False)                   # first sight: at rest, OFF
-            app._knob_frame(k, True)                    # value flipped: slide starts
-            for _ in range(ec.KNOB_CELLS - 1):
-                app._knob_tick()                        # walk to the ON end
-            seen = [app._knob_frame(k, True)]
-            while timers:
-                delay, cb = timers.pop(0)
-                self.assertEqual(delay, ec.KNOB_FLASH_STEP_S)
-                cb()
-                seen.append(app._knob_frame(k, True))
-            flashes = [f[3] for f in seen]
-            self.assertEqual(flashes, list(ec.KNOB_FLASH_STEPS) + [None],
-                             f"flash steps then rest, in order: {seen}")
-            for pos, filled, moving, _ in seen:
-                self.assertEqual((pos, filled, moving), (END, True, False), seen)
-            # only the knob carries the flash colour, never the track
-            t = self.sp._knob_text(END, True, False, ec.KNOB_FLASH_STEPS[0])
-            flashed = [t.plain[sp.start:sp.end] for sp in t.spans if str(sp.style) == ec.KNOB_FLASH_STEPS[0]]
-            self.assertEqual(flashed, [ec.KNOB_ON], t.spans)
+            for _ in range(2):                           # OFF→ON, then ON→OFF
+                on = _knob(_row(h, "t")[1])[1] != END    # the state we are switching TO
+                frames = await _record_toggle(h, pilot, "t")
+                want = []
+                for pos, filled, size, colour in self._expected(on):
+                    f = (self.sp._knob_text(pos, filled, size, colour).plain, colour)
+                    if not want or want[-1] != f:
+                        want.append(f)
+                got = []
+                for tail, styles in frames[1:]:          # frames[0] = the row before the press
+                    colour = next((c for c in ("bright_cyan", "cyan") if c in styles), None)
+                    if not got or got[-1] != (tail, colour):
+                        got.append((tail, colour))
+                self.assertEqual(got, want, f"drawn frames differ from the table (on={on})")
         self.run_picker(s, start="local")
 
 
