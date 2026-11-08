@@ -94,3 +94,18 @@ never as a `ui.run` kwarg. Regression test `tests/test_gui_main_args.py` (GUI ve
 the fix serves past config (no TypeError; headless box can't open the window itself — that part
 remains NOT TESTED here). Lesson recorded: the native branch needs a launch-level test, not
 just browser-mode playwright.
+
+## 2026-11-08 — user relaunch report: tiles looked like bigger rows; translucency stayed opaque
+
+Reproduced in browser mode and fixed (`c22585f`):
+- Modern presentation DID render .tile elements, but `.menu-item`'s
+  `background: none !important` beat the tile's background, so tiles had no
+  card surface and read as "larger wider rows". Tile rules now carry matching
+  `!important` (light + dark); computed-style test proves card bg + emoji
+  larger than text + non-empty emoji span. Playwright 24/24.
+- Translucency: the native chain (app.native.window_args -> cocoa
+  setOpaque_(False) + drawsTransparentBackground -> root-transparent CSS +
+  #tint-layer) is correct, but window args are read ONCE at startup — toggling
+  in-menu cannot change a live window. The theme screen now labels
+  translucency/blur rows "(next launch)". VERIFIED IN CODE ONLY — the visual
+  translucent window still needs the user's real Mac after a relaunch.
