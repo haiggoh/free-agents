@@ -76,6 +76,10 @@ def build() -> None:
       /* the action item itself is the control (csl parity): hover like a link, click = toggle / ▶ */
       .row-action { cursor: pointer; }
       .row-action:hover { color: #0b57d0 !important; }
+      /* Phase 5 modern presentation: large emoji tiles; same handlers/targets as menu rows */
+      .tile { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+              border-radius: 10px; font-size: 1.12rem; }
+      .tile .tile-emoji { font-size: 1.7rem; line-height: 1; }
       /* lane pages: fixed-height shell — the model list scrolls internally, the infobox
          stays pinned to the bottom instead of being overlapped (user 2026-11-05).
          EMERGENCY ONLY: if the list area would shrink below ~4 rows (groups expanded +
@@ -157,6 +161,28 @@ def build() -> None:
 
     def _binary_label(action) -> str:
         return "ON" if _binary_on(action) else "OFF"
+
+    def _modern() -> bool:
+        """Phase 5: presentation=modern in the GUI appearance store renders tiles instead of
+        menu rows. Read per render (cheap, tmp-file backed); any store error -> compatibility."""
+        try:
+            from fa_gui import appearance as ap
+            return ap.load(ap.store_path())["presentation"] == "modern"
+        except Exception:
+            return False
+
+    def _tile_label(parent, text):
+        """Split a leading emoji off a plain label into a large .tile-emoji span."""
+        import html as _html
+        parts = str(text).split(" ", 1)
+        head, rest = parts[0], (parts[1] if len(parts) > 1 else "")
+        if head and any(ord(ch) >= 0x2000 for ch in head):
+            with parent:
+                ui.html(f'<span class="tile-emoji">{_html.escape(head)}</span> '
+                        f'<span>{_html.escape(rest)}</span>')
+        else:
+            with parent:
+                ui.label(str(text))
 
     def _binary_target(action, on: bool):
         # the choice whose on-ness matches the request — e.g. thinking (None, False): ON -> None
@@ -305,12 +331,21 @@ def build() -> None:
                 # (the auto-sync mutation of 2026-11-05 must not recur via a nav row).
                 # Tool panels that have a real GUI screen get mapped to it (lowkey, download)
                 target = {"tool:lowkey": "lowkey", "tool:download": "download"}.get(c.target, c.target)
-                # ui.link for real SPA navigation; .menu-item CSS overrides the link look
-                row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
+                # ui.link for real SPA navigation; .menu-item CSS overrides the link look.
+                # Phase 5: modern presentation renders the same link as a large emoji tile.
+                if _modern():
+                    row = ui.link("", f"/{target}").classes("tile menu-item action-row nav-row")
+                    _tile_label(row, c.label)
+                else:
+                    row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
                 row.props["data-target"] = target
             else:
                 lbl = action.label if action is not None else None
-                if lbl is not None and hasattr(lbl, "spans") and hasattr(lbl, "plain"):
+                if _modern() and not (lbl is not None and hasattr(lbl, "spans")):
+                    # Phase 5: plain action rows render as large emoji tiles in modern mode
+                    row = ui.row().classes("tile menu-item action-row")
+                    _tile_label(row, c.label)
+                elif lbl is not None and hasattr(lbl, "spans") and hasattr(lbl, "plain"):
                     # rich label (theme swatch rows): keep the span colors as HTML
                     row = ui.html(_rich_html(lbl)).classes("menu-item action-row")
                 else:
