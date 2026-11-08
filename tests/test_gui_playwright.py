@@ -67,6 +67,7 @@ class GuiApp:
             "FAKE_DELAY": fake_delay,
             "STUB_LOG": str(t / "stub.log"),
             "FA_GUI_LAUNCH_STUB": str(self.launch_stub),
+            "LA_GUI_APPEARANCE_FILE": str(t / "gui-appearance.json"),
             "LA_HARDWARE": "mlx",
             # nicegui's pytest plugin redirects ui.run to NICEGUI_SCREEN_TEST_PORT when the
             # var is present — point it at our port so the child serves where we poll.
@@ -434,6 +435,53 @@ class GuiPlaywrightTests(unittest.TestCase):
         p.wait_for_timeout(700)
         self.assertEqual(val.inner_text(), v_after_enter,
                          "arrows while typing in the search input must not step the row")
+        p.close()
+
+    def test_theme_screen_gui_appearance_section(self):
+        # Phase 4 UI: the theme screen carries a GUI-only appearance section bound to the
+        # appearance store — presentation cycle, translucency switch, opacity cycle (50..100,
+        # clamped), blur-request switch. Persists across reload; never touches the semantic
+        # session-menu store.
+        p = self.page()
+        p.goto(self.app.base + "/theme_config")
+        p.wait_for_selector('.appearance-row[data-key="presentation"]', timeout=180000)
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+
+        pres = p.locator('.appearance-row[data-key="presentation"]')
+        pval = pres.locator(".cycle-value")
+        self.assertEqual(pval.inner_text(), "compatibility")
+        pres.locator(".cycle-right").click()
+        p.wait_for_timeout(500)
+        self.assertEqual(pval.inner_text(), "modern")
+        doc = json.loads(app_file.read_text())
+        self.assertEqual(doc["presentation"], "modern", "cycle persists to the appearance store")
+
+        sw = p.locator('.appearance-row[data-key="background_translucent"] .switch')
+        sw.click()
+        p.wait_for_timeout(500)
+        doc = json.loads(app_file.read_text())
+        self.assertIs(doc["background_translucent"], True)
+
+        op = p.locator('.appearance-row[data-key="background_opacity_pct"]')
+        for _ in range(12):                            # click left well past the 50 floor
+            op.locator(".cycle-left").click()
+            p.wait_for_timeout(120)
+        doc = json.loads(app_file.read_text())
+        self.assertEqual(doc["background_opacity_pct"], 50, "opacity clamps at the 50 floor")
+        op.locator(".cycle-right").click()
+        p.wait_for_timeout(300)
+        self.assertEqual(json.loads(app_file.read_text())["background_opacity_pct"], 55)
+
+        # semantic store untouched by all of the above
+        self.assertFalse((Path(self.app.cfg) / "session-menu.local.json").exists()
+                         and "presentation" in json.loads(
+                             (Path(self.app.cfg) / "session-menu.local.json").read_text()),
+                         "appearance must never land in the semantic store")
+        # reload: values persist
+        p.goto(self.app.base + "/theme_config")
+        p.wait_for_selector('.appearance-row[data-key="presentation"]', timeout=180000)
+        self.assertEqual(p.locator('.appearance-row[data-key="presentation"] .cycle-value').inner_text(),
+                         "modern", "presentation persists across reload")
         p.close()
 
 
