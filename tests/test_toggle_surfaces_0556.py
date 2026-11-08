@@ -358,3 +358,72 @@ class RenderProof(PilotCase):
             await h.wait_screen("ThemeConfigScreen")
             self._assert_rows_have_glyphs(h, ("l", "r", "y", "u"))
         self.run_picker(s)
+
+
+class ReviewFixPass(PilotCase):
+    """Final-review fixes: the user-visible routes the model-level tests didn't cover
+    (review F-5/F-14/F-16/F-17/F-8)."""
+
+    def seed(self):
+        import shutil
+        for name in ("local-theme.json", "remote-theme.json"):
+            shutil.copy(ROOT / "config" / name, self.themes / name)
+
+    def test_hotkey_letter_steps_the_row(self):
+        # F-5/F-17: pressing the row's LETTER (the hotkey path: key -> run -> step(+1))
+        # advances a converted row — the route the user actually presses.
+        async def s(app, pilot, h):
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
+            await h.expand_settings()
+            before = bool(app.screen_model.settings.memguard.get("registry_auto_sync"))
+            await h.press("y")                    # the auto-sync row's letter
+            await h.pilot.pause(0.3)
+            after = bool(app.screen_model.settings.memguard.get("registry_auto_sync"))
+            self.assertEqual(after, not before, "the letter hotkey must step the row")
+        self.run_picker(s, start="local")
+
+    def test_disabled_row_letter_is_inert(self):
+        # F-14: with the guard OFF, pressing a disabled row's letter changes nothing
+        # (the UI refuses; the render dims the row).
+        async def s(app, pilot, h):
+            app.screen_model.settings.memguard["enabled"] = False
+            await h.press("l")
+            await h.wait_screen("LocalScreen")
+            await h.press("u")
+            await h.wait_screen("MemoryGuardScreen")
+            before = dict(app.screen_model.settings.memguard)
+            await h.press("t")                    # disabled row's hotkey
+            await h.press("s")
+            await h.pilot.pause(0.3)
+            self.assertEqual(dict(app.screen_model.settings.memguard), before,
+                             "a disabled row's hotkey must not mutate the guard config")
+        self.run_picker(s, start="local")
+
+    def test_lane_suffix_renders_after_the_glyphs(self):
+        # F-8: the accent row's #hex (value_suffix) is user-visible text after ❯.
+        async def s(app, pilot, h):
+            self.seed()
+            await h.press("h")
+            await h.wait_screen("ThemeConfigScreen")
+            text = _action_option(h, "l")[1]
+            self.assertIn("#", text[text.rindex("❯"):],
+                          f"the hex suffix must render after the glyphs: {text!r}")
+        self.run_picker(s)
+
+    def test_lowkey_steppers_persist_through_callbacks(self):
+        # F-16: the lowkey effort and filter steppers fire the same save callbacks the
+        # old toggles did (the file path, not just the in-memory attribute).
+        s = m.Settings()
+        efforts, filters = [], []
+        s.on_effort_saved = lambda lane, v: efforts.append((lane, v))
+        s.on_lowkey_filters_saved = lambda k, v: filters.append((k, v))
+        scr = m.LowkeyScreen(s, [], api_agents=[])
+        eff_row = by_key(scr.actions(), "e")
+        eff_row.step(+1)
+        self.assertTrue(efforts, "on_effort_saved must fire on the stepper path")
+        self.assertEqual(efforts[-1][0], "lowkey")
+        f_row = by_key(scr.actions(), "f")
+        f_row.step(+1)
+        self.assertIn(("remote_filters", bool(s.lowkey_remote_filters)), filters,
+                      "on_lowkey_filters_saved must fire on the stepper path")
