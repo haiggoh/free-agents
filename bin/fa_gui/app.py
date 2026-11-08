@@ -86,18 +86,25 @@ def build() -> None:
          truly square; Lowkey is 2x1 wide. Emoji is its own centered line, peeking out of the
          tile's top edge; everything larger. csl sky-blue hover, cyan focus ring. */
       .tile-grid { display: grid !important; grid-template-columns: repeat(auto-fill, 150px);
-                   grid-auto-rows: 150px; gap: 12px; width: 100%; margin-bottom: 8px; padding-top: 2.2rem; }
+                   grid-auto-rows: 150px; gap: 12px; width: 100%; margin-bottom: 8px; }
       .tile { display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-              gap: 2px; padding: 16px 12px 12px; border-radius: 16px; font-size: 1rem; text-align: center;
+              gap: 6px; padding: 16px 12px 14px; border-radius: 16px; font-size: 1.0625rem; text-align: center;   /* label 17px, toward the bottom (user 2026-11-08) */
               background: #ffffff !important; border: 1px solid rgba(20, 20, 20, 0.10) !important;
-              position: relative; overflow: visible; }
+              position: relative; }
+      /* emoji vertically AND horizontally centered in the tile, independent of the text
+         (user 2026-11-08); on small tiles it nudges UP slightly so it never overlaps the
+         bottom label nor touches the top border */
+      .tile .tile-emoji { position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%); }
+      .tile-lg .tile-emoji { top: 50%; }
+      .tile .tile-label { margin-top: auto; padding-top: 4px; }
       .tile-lg { grid-column: span 2; grid-row: span 2; }       /* Local / Remote: square 2x2 */
       .tile-wide { grid-column: span 2; grid-row: span 1; }     /* Lowkey: wide 2x1, NOT the biggest */
       .tile .tile-label { overflow-wrap: anywhere; line-height: 1.25; }
-      /* emoji peeks out of the tile's TOP edge (user 2026-11-08): absolute, centered, overflowing */
-      .tile .tile-emoji { font-size: 3rem; line-height: 1; position: absolute; top: -1.15em;
-                          left: 50%; transform: translateX(-50%); }
-      .tile-lg .tile-emoji, .tile-wide .tile-emoji { font-size: 4.5rem; top: -1.3em; }
+      /* emoji centered INSIDE the tile on its own line above the label (user 2026-11-08:
+         the peeking-outside-top version was NOT what they meant) */
+      .tile .tile-emoji { font-size: 3.25rem; line-height: 1; }            /* 1x1 slightly smaller */
+      .tile-wide .tile-emoji { font-size: 3.75rem; }                       /* 2x1 slightly smaller */
+      .tile-lg .tile-emoji { font-size: 7.5rem; }                          /* 2x2 even larger (user 2026-11-08) */
       .tile:hover { background: #f0f9ff !important; border-color: #00BFFF !important; }   /* flat sky-blue tint, no gradient */
       body:has(.dark-shell) .tile { background: #1f1f1f !important; border-color: rgba(255, 255, 255, 0.14) !important; }
       body:has(.dark-shell) .tile:hover { background: #16324a !important; border-color: #00BFFF !important; }
@@ -282,9 +289,12 @@ def build() -> None:
             # top-level, so Back/Switch can never end up hidden inside a folded group.
             # Modern mode: nav/action tiles go into the grid; cycles/switches stay list rows.
             if modern and c.kind in ("nav", "button") and grid is not None:
-                # user 2026-11-08: Local/Remote lanes = square 2x2, Lowkey = wide 2x1 (not the biggest)
-                if action is not None and action.section == "lanes":
-                    tile_cls = "tile-wide" if c.target == "tool:lowkey" else "tile-lg"
+                # user 2026-11-08: Local/Remote lanes = square 2x2; Lowkey, Backend manager and
+                # API keys = wide 2x1 (not the biggest tiles)
+                if c.target in ("tool:lowkey", "runtime_manager", "api_keys"):
+                    tile_cls = "tile-wide"
+                elif action is not None and action.section == "lanes":
+                    tile_cls = "tile-lg"
                 else:
                     tile_cls = ""
                 with grid:
@@ -396,13 +406,31 @@ def build() -> None:
                 target = {"tool:lowkey": "lowkey", "tool:download": "download"}.get(c.target, c.target)
                 # ui.link for real SPA navigation; .menu-item CSS overrides the link look.
                 # Phase 5: modern presentation renders the same link as a large emoji tile.
-                if _modern():
+                if c.target == "quit":
+                    # user 2026-11-08: Quit is an ACTION, not a page — close the window and
+                    # gently shut down the server this window launched (no placeholder page)
+                    def _quit_app():
+                        from nicegui import app as _app
+                        try:
+                            ui.run_javascript("window.close()")
+                        except Exception:
+                            pass
+                        _app.shutdown()
+                    if _modern():
+                        row = ui.row().classes("tile menu-item action-row nav-row")
+                        _tile_label(row, c.label)
+                    else:
+                        row = ui.label(c.label).classes("menu-item action-row nav-row")
+                    row.props["data-target"] = "quit"
+                    row.on("click", _quit_app)
+                elif _modern():
                     row = ui.link("", f"/{target}").classes(
                         "tile menu-item action-row nav-row" + (f" {tile_cls}" if tile_cls else ""))
                     _tile_label(row, c.label)
+                    row.props["data-target"] = target
                 else:
                     row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
-                row.props["data-target"] = target
+                    row.props["data-target"] = target
             else:
                 lbl = action.label if action is not None else None
                 if _modern() and not (lbl is not None and hasattr(lbl, "spans")):
@@ -488,15 +516,20 @@ def build() -> None:
             # native blur, 95% without (50 was unreadable); an explicit saved value wins
             _blur_active = (_doc["background_blur_requested"]
                             and os.environ.get("LA_GUI_NATIVE") == "1")
-            _alpha = _ap.resolve_opacity(_doc, blur_active=_blur_active) / 100
+            _pct = _ap.resolve_opacity(_doc, blur_active=_blur_active)
+            # blur darkens the backdrop — compensate so more translucent never looks darker
+            _alpha = _ap.tint_alpha(_pct, blur_active=_blur_active)
             ui.element("div").props('id="tint-layer"').style(
-                f"background: rgba({_tint}, {_alpha:.2f})")
+                f"background: rgba({_tint}, {_alpha:.3f})")
         outer = ("w-full max-w-3xl mx-auto p-4 gap-1" + (" lane-shell" if lane else "")
                  + (" dark-shell" if _dark else ""))   # tighter overall spacing (user 2026-11-05)
         with ui.column().classes(outer):
-            ui.label(title).props('id="title"').classes("text-2xl font-bold")
+            # user 2026-11-08: title 28px / subtitle 17px (ratio ~1.6 golden), subtitle matches
+            # the menu action-item size, and one empty title-height row of space after them
+            ui.label(title).props('id="title"').classes("text-[28px] font-bold")
             if subtitle:
-                ui.label(subtitle).classes("text-sm opacity-70").props('id="subtitle"')
+                ui.label(subtitle).classes("text-[17px] opacity-70").props('id="subtitle"')
+            ui.element("div").classes("title-spacer").style("height: 28px")   # empty spacer row, title-height
             return ui.column().classes("w-full gap-1" + (" lane-body" if lane else ""))
 
     def render_appearance(body, st: dict) -> None:

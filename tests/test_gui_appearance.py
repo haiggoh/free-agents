@@ -106,6 +106,19 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             ap.store_path({"LA_GUI_APPEARANCE_FILE": str(d / "nope" / "a.json")})
 
+    def test_tint_alpha_never_darkens_with_blur(self):
+        # user 2026-11-08: with blur on, 50% translucency must feel as bright as 85% without
+        # blur -> blur active adds +35 points of effective brightness
+        self.assertEqual(ap.tint_alpha(95, blur_active=False), 0.95)
+        self.assertEqual(ap.tint_alpha(50, blur_active=False), 0.5)
+        self.assertEqual(ap.tint_alpha(50, blur_active=True), 0.85,
+                         "50% with blur = 85% effective, matching 85% without blur in brightness")
+        self.assertEqual(ap.tint_alpha(85, blur_active=True), 1.0, "capped at opaque")
+        # monotonic in opacity, and blur compensation only raises
+        self.assertLess(ap.tint_alpha(60, True), ap.tint_alpha(90, True))
+        for pct in (50, 60, 70, 80, 90, 100):
+            self.assertGreaterEqual(ap.tint_alpha(pct, True), ap.tint_alpha(pct, False))
+
     def test_native_window_args_mapping(self):
         # Phase 6: translucent -> transparent window; blur requested -> vibrancy (built-in
         # NSVisualEffectView behind-window). Browser mode never sees these (main.py only
@@ -137,11 +150,11 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(ap.SCHEMA_VERSION, 1)
 
     def test_opacity_default_is_capability_dependent(self):
-        # user 2026-11-08: unreadable at 50 without blur -> default 95% without blur, 80% with
+        # user 2026-11-08: with blur on, 50% is the default; without blur, 95%
         doc = ap.load(self.path)          # absent file -> defaults, no opacity key
         self.assertNotIn("background_opacity_pct", doc)
         self.assertEqual(ap.resolve_opacity(doc, blur_active=False), 95)
-        self.assertEqual(ap.resolve_opacity(doc, blur_active=True), 80)
+        self.assertEqual(ap.resolve_opacity(doc, blur_active=True), 50)
         ap.save(self.path, {"background_opacity_pct": 60})
         doc = ap.load(self.path)
         self.assertEqual(ap.resolve_opacity(doc, blur_active=True), 60,
