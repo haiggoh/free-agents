@@ -21,7 +21,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
 import pytest  # noqa: E402
 
-SHIM_LOG = Path("/tmp/fa0541-noop-bin/calls.log")
+# The session shim dir (conftest) when running under pytest; the manual Step-0.4 shim
+# only for direct script runs outside pytest. The delta assertions read the ACTIVE one.
+SHIM_LOG = (Path(os.environ["FA_NOTIFY_SHIM_DIR"]) / "calls.log"
+            if os.environ.get("FA_NOTIFY_SHIM_DIR")
+            else Path("/tmp/fa0541-noop-bin/calls.log"))
 # Window openers keep their osascript but MUST call the sink check first (R14).
 WINDOW_OPENERS = ("csl", "local-watch.sh", "new-local-window.sh")
 # guard-own-endpoint.py never notifies: its occurrences are LAUNCH-ROUTE DETECTION patterns
@@ -148,6 +152,19 @@ class SinkWiring(unittest.TestCase):
                                                  if k != "FA_NOTIFY_SINK"})
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertTrue(run.stdout.splitlines()[0].strip(), "the sink file must be set")
+
+    def test_sink_record_survives_quotes_and_unicode(self):
+        # the JSON record must stay parseable for hostile input (quotes, backslashes, emoji)
+        self.addCleanup(_use_sink(self.sink))
+        helper = ROOT / "bin" / "fa_notify.py"
+        run = subprocess.run([sys.executable, str(helper),
+                              'ti"tle \\ back', 'te\"xt — 😀'],
+                             capture_output=True, text=True,
+                             env={**os.environ, "FA_NOTIFY_SINK": str(self.sink)})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        rec = json.loads(self.sink.read_text().splitlines()[-1])
+        self.assertEqual(rec["title"], 'ti"tle \\ back')
+        self.assertEqual(rec["text"], 'te\"xt — 😀')
 
     def test_set_but_missing_sink_dir_fails_loudly(self):
         helper = ROOT / "bin" / "fa_notify.py"
