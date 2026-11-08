@@ -109,6 +109,13 @@ def build() -> None:
       body:has(#tint-layer) .q-page-container, body:has(#tint-layer) .q-page,
       body:has(#tint-layer) .nicegui-content { background: transparent !important; }
       #tint-layer { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+      /* Phase 8 dark tokens (applied only while a .dark-shell page is shown) */
+      body:has(.dark-shell) { background: #121212 !important; color: #e8e8e8 !important; }
+      body:has(.dark-shell) .menu-item { color: #e8e8e8 !important; }
+      body:has(.dark-shell) .menu-item:hover, body:has(.dark-shell) .row-action:hover { color: #8ab4f8 !important; }
+      body:has(.dark-shell) .cycle-arrow { color: #e8e8e8 !important; }
+      body:has(.dark-shell) .cycle-arrow:hover { color: #8ab4f8 !important; }
+      body:has(.dark-shell) .cycle-name, body:has(.dark-shell) .cycle-value { color: #e8e8e8 !important; }
     </style>""", shared=True)
 
     loader = Loader()
@@ -416,13 +423,17 @@ def build() -> None:
             val.set_text(_binary_label(action))   # ON/OFF next to the switch, in sync with it
 
     def render_shell(title: str, subtitle: str, lane: bool = False):
-        # Phase 6: the single white tint layer, live from the appearance store on every page
+        # Phase 6/8: the single tint layer, live from the appearance store on every page;
+        # dark mode tints dark and marks the shell so the dark tokens apply
         from fa_gui import appearance as _ap
         _doc = _ap.load(_ap.store_path())
+        _dark = bool(_doc["dark_mode"])
         if _doc["background_translucent"]:
+            _tint = "18, 18, 18" if _dark else "255, 255, 255"
             ui.element("div").props('id="tint-layer"').style(
-                f"background: rgba(255, 255, 255, {_doc['background_opacity_pct'] / 100:.2f})")
-        outer = "w-full max-w-3xl mx-auto p-4 gap-1" + (" lane-shell" if lane else "")   # tighter overall spacing (user 2026-11-05)
+                f"background: rgba({_tint}, {_doc['background_opacity_pct'] / 100:.2f})")
+        outer = ("w-full max-w-3xl mx-auto p-4 gap-1" + (" lane-shell" if lane else "")
+                 + (" dark-shell" if _dark else ""))   # tighter overall spacing (user 2026-11-05)
         with ui.column().classes(outer):
             ui.label(title).props('id="title"').classes("text-2xl font-bold")
             if subtitle:
