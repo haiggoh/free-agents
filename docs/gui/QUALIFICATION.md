@@ -81,3 +81,16 @@ NOT TESTED (explicitly, per plan receipt rules): native desktop blur/vibrancy vi
 (needs real OS screenshot/observation, not a terminal session); clean default Mac, Intel,
 other macOS versions; Linux (no runtime on this machine — waypoint nicegui-linux-qualification);
 MDM-restricted Macs; Homebrew bottle lifecycle.
+
+## 2026-11-08 — real native launch failure found by the user, fixed (`3cd1eb2`)
+
+The user double-clicked the applet; the window died at startup:
+`TypeError: Config.__init__() got an unexpected keyword argument 'window_args'` — the Phase 6
+change had passed `window_args=` to `ui.run()`, which NiceGUI 3.19 forwards to
+CustomServerConfig. Browser-mode tests never exercised the native branch, so it shipped broken.
+Fix: window args go on `app.native.window_args` (what `native_mode._open_window` merges),
+never as a `ui.run` kwarg. Regression test `tests/test_gui_main_args.py` (GUI venv, stubbed
+`ui.run`) pins both modes; mutation (kwarg restored) fails 2/2. Real `--native` smoke after
+the fix serves past config (no TypeError; headless box can't open the window itself — that part
+remains NOT TESTED here). Lesson recorded: the native branch needs a launch-level test, not
+just browser-mode playwright.
