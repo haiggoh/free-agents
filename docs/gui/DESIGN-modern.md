@@ -27,8 +27,16 @@ palette and the light-default), `framed-sheet` (its opaque white sheet would def
 - emoji is its own flex line, centered above the label, and **peeks out of the tile's top
   edge** (absolute, `top: -1.15em`); label wraps (`overflow-wrap: anywhere`); everything
   larger (cells 150px, emoji 3rem / 4.5rem on big tiles, label 16px)
-- translucency chain intact: white `#tint-layer` at the capability-dependent opacity
-  (80% with active native blur, 95% without), window args native-only, relaunch applies
+- translucency chain intact: white `#tint-layer`; opacity default 95% without blur, 50%
+  with blur — and with blur active the tint gets +35 brightness points (`tint_alpha`), so
+  50%-with-blur feels as bright as 85%-without; more translucent never means darker
+- emoji: absolutely centered in the tile on both axes, independent of the bottom-aligned
+  label; on small tiles it nudges up to avoid label overlap and never touches the top
+  border; sizes 3.25rem (1x1) / 3.75rem (2x1) / 7.5rem (2x2)
+- title 28px / subtitle 17px (~1.6 golden ratio, subtitle = action-item size) with one
+  28px empty spacer row after; title nowrap, fits one line with its emoji
+- Quit is a real action (window.close + app.shutdown), a tile in modern mode
+- window args native-only, relaunch applies
 
 ## Deliberate deviations from the dealt sheet (recorded per the skill's rules)
 
