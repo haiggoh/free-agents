@@ -97,8 +97,11 @@ class RouteModeNudges(unittest.TestCase):
         text = self.nudge_with()
         self.assertIn("FREE OFFLOADING IS THE DEFAULT", text)
         self.assertIn("paid_fallback_allowed", text)
-        # 0.54.0 (Task 9): the fallback sentence now comes from the skill's routing block
-        self.assertIn("one native call", text.lower())
+        # 0.54.0 (Task 9): the fallback sentence now comes from the skill's routing block;
+        # 2026-11-08 route-watcher Task 2: it is the ONE stated-reason call, exhaustion alone
+        # never permits paid
+        self.assertIn("one stated-reason call", text.lower())
+        self.assertIn("exhaustion alone never permits paid", text.lower())
 
 
 class LaneBrandingTests(unittest.TestCase):

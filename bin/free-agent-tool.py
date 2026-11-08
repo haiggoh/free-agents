@@ -13,9 +13,21 @@ Usage:
                                      # atomically to FILE: the FULL envelope (content,
                                      # model_used, display, route, family, role, attempts, …;
                                      # on total failure the error object) — never bare content
+  free-agent-tool.py --background RUN_DIR < task.json
+                                     # same ladder, resumable: writes RUN_DIR/plan.json +
+                                     # events.jsonl (one JSON per attempt) + result.json and
+                                     # prints ONE outcome line; exit 0 success · 5 every route
+                                     # failed · 6 DECISION_NEEDED (wall cap hit with attempts
+                                     # untried — the outcome line carries the resume command)
+  free-agent-tool.py --resume RUN_DIR [--extend DUR]
+                                     # continue a --background run from its first untried
+                                     # attempt, in the same deterministic order
 
 The model comes from the maintainer's PREFERENCE ORDER (config/dispatch-preferences.json): the
-first available entry runs, and a failed dispatch falls over to the next. Remote entries need
+first available entry runs, and a failed dispatch falls over to the next. An entry may list
+"alternates" — the same model on another keyed provider — tried before the next entry when the
+primary 429s or times out (untested alternates are skipped unless FA_DISPATCH_INCLUDE_UNTESTED=1).
+Remote entries need
 ~/.api_keys/<provider>; local entries need their weights on disk. Every attempt is ANNOUNCED on
 stderr (model + route), and the JSON result names the model, its route and every attempt.
 
@@ -45,13 +57,19 @@ starts with "-" is refused (exit 2) rather than taken as a flag.
 Environment:
   FA_DISPATCH_PREFS            preference file (default config/dispatch-preferences.local.json if
                                present, else config/dispatch-preferences.json)
-  FA_DISPATCH_INCLUDE_UNTESTED 1 = also try entries marked smoke_tested=false
+  FA_DISPATCH_INCLUDE_UNTESTED 1 = also try entries/alternates marked smoke_tested=false
+  FA_DISPATCH_WALL_S           wall-clock cap for the whole ladder, seconds (default 3600)
+  FA_DISPATCH_ATTEMPT_TIMEOUT_S  per-attempt budget, seconds (default 900; an entry's own
+                               "timeout" still wins when shorter)
+  FA_DISPATCH_STALL_S          socket-silence budget per attempt, seconds (default 300);
+                               any of the three set-but-invalid aborts naming the variable (exit 2)
   FA_DISPATCH_ROUTING=role     legacy: pick by role through council-router.sh instead
   LA_API_KEYS_DIR              credential directory (default ~/.api_keys)
 """
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -590,17 +608,19 @@ def attach_files(prompt: str, files) -> str:
 
 
 # Honest-exhaustion policy (cloud-screen plan Task 4): only sent-and-failed requests count;
-# the values are tunable in config/dispatch-preferences.json under "paid_fallback".
-DEFAULT_PAID_FALLBACK = {"min_real_attempts": 3, "min_providers": 2,
-                         "retry_after_max_s": 30, "wall_clock_cap_s": 600,
-                         # Per-attempt budget (waypoint free-agents-dispatch-a, 2026-11-03): the cap
-                         # used to gate only the START of an attempt, so one stalled preference ran
-                         # 300s per silent read or 1800s in total and failover never got past it.
-                         # An attempt now gets what is left of the cap, at most attempt_max_s (so the
-                         # first preference cannot spend the whole cap alone) and at least
-                         # min_attempt_s (so a late attempt still gets a fair window), and gives
-                         # up after attempt_stall_s of silence (a streaming answer is never cut).
-                         "attempt_stall_s": 120, "attempt_max_s": 300, "min_attempt_s": 180}
+# the values are tunable in config/dispatch-preferences.json under "paid_fallback" and by the
+# FA_DISPATCH_WALL_S / FA_DISPATCH_ATTEMPT_TIMEOUT_S / FA_DISPATCH_STALL_S env overrides.
+# Plan 2026-11-08 route-watcher Task 3: generous defaults — on 2026-11-08 four remote
+# preferences all failed under the shared NVIDIA 40 RPM while the old 600s wall cap still had
+# untried local entries left.
+DEFAULT_PAID_FALLBACK: dict[str, float] = {"min_real_attempts": 3, "min_providers": 2,
+                         "retry_after_max_s": 30, "wall_clock_cap_s": 3600,
+                         # Per-attempt budget: an attempt gets what is left of the wall cap, at
+                         # most attempt_max_s and at least min_attempt_s (a late attempt still
+                         # gets a fair window), and gives up after attempt_stall_s of silence
+                         # (a streaming answer is never cut). An entry's own "timeout" still
+                         # wins when shorter (dispatch_entry).
+                         "attempt_stall_s": 300, "attempt_max_s": 900, "min_attempt_s": 180}
 # remote-agent-dispatch.py does not surface Retry-After to its caller (verified 2026-10-24:
 # its stderr carries only error_class + HTTP status + reason), so a 429 is a real failure
 # with no retry; retry_after_max_s stays in the policy for the day the dispatch surfaces it.
@@ -619,6 +639,124 @@ def exhausted(attempts: list, available: list, policy: dict) -> bool:
     providers = {a.get("provider") for a in fails}
     return (len(fails) >= policy.get("min_real_attempts", 3)
             and len(providers) >= policy.get("min_providers", 2))
+
+
+def _env_seconds(env, name):
+    """A FA_DISPATCH_* env override in seconds. Unset -> None; set-but-invalid raises
+    ValueError NAMING the variable (a silent fallthrough would run the wrong timeouts)."""
+    raw = env.get(name)
+    if raw is None or raw == "":
+        return None
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}={raw!r} is not a number of seconds") from None
+    if not v > 0:
+        raise ValueError(f"{name}={raw!r} must be a positive number of seconds")
+    return v
+
+
+def resolve_policy(env, prefs):
+    """DEFAULT_PAID_FALLBACK <- prefs["paid_fallback"] <- FA_DISPATCH_* env overrides (env wins)."""
+    policy = dict(DEFAULT_PAID_FALLBACK, **(prefs.get("paid_fallback") or {}))
+    for name, key in (("FA_DISPATCH_WALL_S", "wall_clock_cap_s"),
+                      ("FA_DISPATCH_ATTEMPT_TIMEOUT_S", "attempt_max_s"),
+                      ("FA_DISPATCH_STALL_S", "attempt_stall_s")):
+        v = _env_seconds(env, name)
+        if v is not None:
+            policy[key] = v
+    return policy
+
+
+def build_plan(order, env):
+    """Flatten entries + usable alternates into the deterministic attempt plan: each entry,
+    then its smoke-tested alternates (same model on another KEYED provider — tried before the
+    next entry; a 429/timeout on the primary moves straight to its alternate), then the next
+    entry. Untested alternates are skipped unless FA_DISPATCH_INCLUDE_UNTESTED=1; an alternate
+    on a provider without a key is skipped (it could never run)."""
+    include_untested = env.get("FA_DISPATCH_INCLUDE_UNTESTED") == "1"
+    plan = []
+    for e in order:
+        plan.append(e)
+        if e.get("kind") != "remote":
+            continue
+        for alt in e.get("alternates") or []:
+            if not alt.get("smoke_tested") and not include_untested:
+                continue
+            if not _has_key(alt["provider"], env):
+                continue
+            plan.append({"id": f"{e['id']}@{alt['provider']}", "kind": "remote",
+                         "provider": alt["provider"], "model": alt["model"],
+                         "display": alt.get("display") or f"{e.get('display', e['id'])} @ {alt['provider']}",
+                         "max_tokens": e.get("max_tokens", 16384),
+                         "reasoning_effort": e.get("reasoning_effort"),
+                         "timeout": e.get("timeout"), "family": e.get("family"),
+                         "alternate_of": e["id"]})
+    return plan
+
+
+def execute_plan(plan, full_prompt, env, policy, *, role=None, start_index=0,
+                 elapsed_base=0.0, wall_cap_s=None, prior_attempts=None, result_extra=None,
+                 shown_role=None, shown_avoid=None, note=None, on_event=None):
+    """Run the flattened plan in order until one attempt succeeds, the wall-clock cap passes,
+    or the plan is exhausted. Returns (status, result, attempts, remaining):
+    "ok" (result set) | "failed" (every attempt failed) | "decision_needed" (cap hit with
+    `remaining` attempts untried). note(msg) gets the human stderr lines; on_event(rec) gets
+    one dict per attempt (background mode appends them to events.jsonl).
+
+    The cap is measured on time.monotonic() (tests fake fat.time wholesale); a resumed
+    --background run passes elapsed_base = wall seconds since its creation, and wall_cap_s
+    carries any --extend addition."""
+    note = note or (lambda msg: None)
+    result_extra = result_extra or {}
+    attempts = list(prior_attempts or [])
+    cap = policy["wall_clock_cap_s"] if wall_cap_s is None else wall_cap_s
+    started = time.monotonic()
+    i = start_index
+    while i < len(plan):
+        entry = plan[i]
+        elapsed = elapsed_base + (time.monotonic() - started)   # ONE clock read per attempt: gate and budget agree
+        if elapsed > cap:
+            note(f"free-agents: wall-clock cap ({cap:g}s) reached — "
+                 f"{entry['id']} and the remaining preferences are not attempted")
+            return "decision_needed", None, attempts, len(plan) - i
+        budget = max(min(cap - elapsed, policy["attempt_max_s"]),
+                     policy["min_attempt_s"])
+        resolved_thinking, think_effort, think_overridden, think_note = resolve_thinking(entry, role)
+        note(f"free-agents: offloading to {entry.get('display', entry['id'])} "
+             f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"
+             f"{', not ' + shown_avoid if shown_avoid else ''}"
+             f"{'; thinking ' + resolved_thinking if resolved_thinking == 'on' or think_overridden or think_note else ''})")
+        if think_note:
+            # Any constraint note discloses on stderr, not only overrides: a GLM OFF with no
+            # explicit effort sends reasoning_effort low, and the human watching the dispatch
+            # gets the same fact the session banner shows (review finding 6, 2026-10-25).
+            note(f"free-agents: thinking note: {think_note}")
+        rec = {"i": i, "id": entry["id"], "provider": entry.get("provider") or route_of(entry),
+               "model": entry.get("model")}
+        try:
+            text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort,
+                                  timeout_s=budget, stall_s=policy["attempt_stall_s"])
+        except DispatchFailed as err:
+            rec.update(ok=False, error=str(err))
+            attempts.append({k: rec[k] for k in ("id", "provider", "model", "ok", "error")})
+            note(f"free-agents: {entry['id']} failed ({err}) — trying the next preference")
+            if on_event:
+                on_event(rec)
+            i += 1
+            continue
+        rec.update(ok=True)
+        attempts.append({k: rec[k] for k in ("id", "provider", "model", "ok")})
+        if on_event:
+            on_event(rec)
+        result = {"content": text, "model_used": entry["id"],
+                  "display": entry.get("display", entry["id"]), "route": route_of(entry),
+                  "family": entry.get("family"), "alternate_of": entry.get("alternate_of"),
+                  "thinking": resolved_thinking, "thinking_overridden": think_overridden,
+                  "thinking_note": think_note, "attempts": attempts}
+        result.update(result_extra)
+        return "ok", result, attempts, 0
+    return "failed", None, attempts, 0
 
 
 def run(input_data, env, out_path=None) -> int:
@@ -658,52 +796,32 @@ def run(input_data, env, out_path=None) -> int:
               file=sys.stderr)
     shown_avoid = avoid if family_avoided else None
     shown_role = role if role_matched else None
-    policy = dict(DEFAULT_PAID_FALLBACK, **(prefs.get("paid_fallback") or {}))
-    started = time.monotonic()
-    attempts = []
-    for entry in order:
-        elapsed = time.monotonic() - started     # ONE clock read per attempt: gate and budget agree
-        if elapsed > policy["wall_clock_cap_s"]:
-            print(f"free-agents: wall-clock cap ({policy['wall_clock_cap_s']}s) reached — "
-                  f"{entry['id']} and the remaining preferences are not attempted", file=sys.stderr)
-            break
-        budget = max(min(policy["wall_clock_cap_s"] - elapsed, policy["attempt_max_s"]),
-                     policy["min_attempt_s"])
-        resolved_thinking, think_effort, think_overridden, think_note = resolve_thinking(entry, role)
-        print(f"free-agents: offloading to {entry.get('display', entry['id'])} "
-              f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"
-              f"{', not ' + shown_avoid if shown_avoid else ''}"
-              f"{'; thinking ' + resolved_thinking if resolved_thinking == 'on' or think_overridden or think_note else ''})", file=sys.stderr)
-        if think_note:
-            # Any constraint note discloses on stderr, not only overrides: a GLM OFF with no
-            # explicit effort sends reasoning_effort low, and the human watching the dispatch
-            # gets the same fact the session banner shows (review finding 6, 2026-10-25).
-            print(f"free-agents: thinking note: {think_note}", file=sys.stderr)
-        try:
-            text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort,
-                                  timeout_s=budget, stall_s=policy["attempt_stall_s"])
-        except DispatchFailed as err:
-            attempts.append({"id": entry["id"], "provider": entry.get("provider") or route_of(entry),
-                             "ok": False, "error": str(err)})
-            print(f"free-agents: {entry['id']} failed ({err}) — trying the next preference", file=sys.stderr)
-            continue
-        attempts.append({"id": entry["id"], "provider": entry.get("provider") or route_of(entry), "ok": True})
-        line = json.dumps({"content": text, "model_used": entry["id"],
-                           "display": entry.get("display", entry["id"]), "route": route_of(entry),
-                           "family": entry.get("family"), "role": role,
-                           # null = not requested; false = requested but could not be honoured
-                           "role_matched": role_matched if role else None,
-                           "family_avoided": family_avoided if avoid else None,
-                           "thinking": resolved_thinking,
-                           "thinking_overridden": think_overridden,
-                           "thinking_note": think_note,
-                           "attempts": attempts})
+    try:
+        policy = resolve_policy(env, prefs)
+    except ValueError as err:
+        msg = f"invalid dispatch env: {err}"
+        print(f"free-agents: {msg}", file=sys.stderr)
+        print(json.dumps({"error": msg}), file=sys.stderr)
+        return 2
+    plan = build_plan(order, env)
+    status, result, attempts, _remaining = execute_plan(
+        plan, full_prompt, env, policy, role=role,
+        result_extra={"role": role,
+                      "role_matched": role_matched if role else None,
+                      "family_avoided": family_avoided if avoid else None},
+        shown_role=shown_role, shown_avoid=shown_avoid,
+        note=lambda msg: print(msg, file=sys.stderr))
+    if status == "ok":
+        line = json.dumps(result)
         print(line)
         return 0 if _persist(out_path, line) else 1
-    allowed = exhausted(attempts, order, policy)
+    allowed = exhausted(attempts, plan, policy)
     err_obj = {"error": "every dispatch preference failed", "attempts": attempts,
                "paid_fallback_allowed": allowed}
     if allowed:
+        err_obj["paid_fallback_note"] = ("allowed only when the task's OWN free route is exhausted "
+                                         "AND the agent states a reason — exhaustion alone never "
+                                         "permits paid (2026-11-08 route-watcher, Task 2 wording)")
         sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
         if sid:
             try:
@@ -754,43 +872,75 @@ def run_by_role(input_data, out_path=None) -> int:
         return 1
 
 
-USAGE = ("usage: free-agent-tool.py [--out FILE] < task.json   |   "
-         "free-agent-tool.py --list   |   free-agent-tool.py --help")
+USAGE = ("usage: free-agent-tool.py [--out FILE] [--background RUN_DIR | --resume RUN_DIR "
+         "[--extend DUR]] < task.json   |   free-agent-tool.py --list   |   "
+         "free-agent-tool.py --help")
+
+
+class ParseResult(tuple):
+    """parse_args result: a plain 3-tuple (out_path, mode, err) — existing callers compare
+    against (None, "run", None) etc. — carrying the background/resume extras as attributes."""
+    run_dir = None
+    extend = None
+
+    def __new__(cls, out_path, mode, err, run_dir=None, extend=None):
+        self = super().__new__(cls, (out_path, mode, err))
+        self.run_dir = run_dir
+        self.extend = extend
+        return self
 
 
 def parse_args(args):
     """Parse argv (after the program name) BEFORE anything reads stdin or dispatches.
 
-    Returns (out_path, mode, err): mode is "run" | "list" | "help"; err is set when the
-    arguments are invalid (the caller prints it with the usage line and exits 2). --out takes
-    a FILE value and may be combined with nothing else but another --out (last one wins);
-    --list/--help must stand alone."""
+    Returns a ParseResult: a 3-tuple (out_path, mode, err) plus .run_dir/.extend attributes.
+    mode is "run" | "list" | "help" | "background" | "resume"; err is set when the arguments
+    are invalid (the caller prints it with the usage line and exits 2). --out takes a FILE
+    value; --background/--resume take a RUN_DIR and stand alone (no --out/--list/--help);
+    --extend takes a DURATION and only with --resume."""
     out_path = None
     mode = None
+    run_dir = None
+    extend = None
     i = 0
     while i < len(args):
         a = args[i]
         if a in ("-h", "--help"):
             if mode is not None or out_path is not None:
-                return None, None, f"{a} cannot be combined with other arguments\n{USAGE}"
+                return ParseResult(None, None, f"{a} cannot be combined with other arguments\n{USAGE}")
             mode = "help"
         elif a == "--list":
             if mode is not None or out_path is not None:
-                return None, None, f"--list cannot be combined with other arguments\n{USAGE}"
+                return ParseResult(None, None, f"--list cannot be combined with other arguments\n{USAGE}")
             mode = "list"
         elif a == "--out":
             if mode is not None:
-                return None, None, f"--out cannot be combined with {mode!r}\n{USAGE}"
+                return ParseResult(None, None, f"--out cannot be combined with {mode!r}\n{USAGE}")
             # A value that looks like a flag is a missing value, not a filename: accepting it
             # would dispatch and then write an envelope to a file literally named "--list".
             if i + 1 >= len(args) or args[i + 1].startswith("-"):
-                return None, None, f"--out requires a FILE value\n{USAGE}"
+                return ParseResult(None, None, f"--out requires a FILE value\n{USAGE}")
             out_path = args[i + 1]
             i += 1
+        elif a in ("--background", "--resume"):
+            if mode is not None or out_path is not None:
+                return ParseResult(None, None, f"{a} cannot be combined with other arguments\n{USAGE}")
+            if i + 1 >= len(args) or args[i + 1].startswith("-"):
+                return ParseResult(None, None, f"{a} requires a RUN_DIR value\n{USAGE}")
+            mode = a[2:]
+            run_dir = args[i + 1]
+            i += 1
+        elif a == "--extend":
+            if mode != "resume":
+                return ParseResult(None, None, f"--extend only makes sense with --resume\n{USAGE}")
+            if i + 1 >= len(args) or args[i + 1].startswith("-"):
+                return ParseResult(None, None, f"--extend requires a DURATION value\n{USAGE}")
+            extend = args[i + 1]
+            i += 1
         else:
-            return None, None, f"unknown argument {a!r} (see --help)\n{USAGE}"
+            return ParseResult(None, None, f"unknown argument {a!r} (see --help)\n{USAGE}")
         i += 1
-    return out_path, (mode or "run"), None
+    return ParseResult(out_path, (mode or "run"), None, run_dir=run_dir, extend=extend)
 
 
 def write_envelope(out_path: str, line: str) -> None:
@@ -827,8 +977,104 @@ def _persist(out_path, line) -> bool:
         return False
 
 
+def _parse_dur(text):
+    """'90s' / '30m' / '4h' / plain seconds -> seconds. Raises ValueError on garbage."""
+    m = re.fullmatch(r"\s*([0-9]*\.?[0-9]+)\s*([smh]?)\s*", str(text).lower())
+    if not m:
+        raise ValueError(f"{text!r} is not a duration like 90s / 30m / 4h")
+    return float(m.group(1)) * {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0}[m.group(2)]
+
+
+def run_background(input_data, env, run_dir, resume=False, extend=None):
+    """--background RUN_DIR / --resume RUN_DIR [--extend DUR] (plan 2026-11-08 route-watcher
+    Task 3): run the same deterministic ladder, write RUN_DIR/plan.json + events.jsonl (one
+    JSON per attempt, provider+model named) + result.json, and print exactly ONE outcome line.
+
+    exit 0 success · 5 every route failed · 6 DECISION_NEEDED — the wall-clock deadline passed
+    with attempts still untried; the outcome line then carries the exact
+    `free-agent-tool.py --resume RUN_DIR --extend 30m` command, and --resume continues from the
+    first untried attempt in the same order."""
+    rd = Path(run_dir)
+    plan_path, events_path, result_path = rd / "plan.json", rd / "events.jsonl", rd / "result.json"
+    try:
+        if resume:
+            doc = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan, full_prompt = doc["plan"], doc["prompt"]
+            policy, input_data, role = doc["policy"], doc.get("input") or {}, None
+            done = []
+            if events_path.exists():
+                done = [json.loads(ln) for ln in
+                        events_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            start_index = len(done)
+            elapsed_base = max(0.0, time.time() - float(doc.get("created") or time.time()))
+            wall_cap_s = policy["wall_clock_cap_s"] + (_parse_dur(extend) if extend else 0.0)
+            prior = []
+            for e in done:
+                rec = {k: e[k] for k in ("id", "provider", "model", "ok") if k in e}
+                if e.get("ok") is False:
+                    rec["error"] = e.get("error", "")
+                prior.append(rec)
+        else:
+            prompt = (input_data or {}).get("prompt", "")
+            if not prompt:
+                print(json.dumps({"error": "prompt is required"}), file=sys.stderr)
+                return 2
+            prefs = load_preferences(env)
+            policy = resolve_policy(env, prefs)
+            description = (input_data or {}).get("description", "")
+            full_prompt = attach_files(f"{description}\n\n{prompt}" if description else prompt,
+                                       (input_data or {}).get("files"))
+            role, avoid = request_role(input_data), (input_data or {}).get("avoid_family")
+            order, _role_matched, _family_avoided = degraded_candidates(
+                prefs, env, role=role, avoid_family=avoid)
+            if not order:
+                print(json.dumps({"error": "no dispatch model is available (no keys, no local "
+                                           "weights) — run free-agent-tool.py --list"}),
+                      file=sys.stderr)
+                return 2
+            plan = build_plan(order, env)
+            rd.mkdir(parents=True, exist_ok=True)
+            write_envelope(str(plan_path),
+                           json.dumps({"plan": plan, "prompt": full_prompt, "policy": policy,
+                                       "input": input_data, "created": time.time()}))
+            start_index, prior = 0, []
+            elapsed_base, wall_cap_s = 0.0, None
+    except (OSError, ValueError, KeyError) as err:
+        print(json.dumps({"error": f"background run cannot start: {err}"}), file=sys.stderr)
+        return 2
+    events_fh = open(events_path, "a", encoding="utf-8")
+
+    def on_event(rec):
+        events_fh.write(json.dumps(rec) + "\n")
+        events_fh.flush()
+
+    status, result, attempts, remaining = execute_plan(
+        plan, full_prompt, env, policy, role=role, start_index=start_index,
+        elapsed_base=elapsed_base, wall_cap_s=wall_cap_s, prior_attempts=prior,
+        note=lambda msg: print(msg, file=sys.stderr), on_event=on_event)
+    events_fh.close()
+    if status == "ok" and result is not None:
+        result["status"] = "ok"
+    elif status == "decision_needed":
+        result = {"status": "decision_needed", "remaining": remaining, "attempts": attempts,
+                  "resume": f"free-agent-tool.py --resume {rd} --extend 30m"}
+    else:
+        result = {"error": "every dispatch preference failed", "status": "failed",
+                  "attempts": attempts}
+    allowed = exhausted(attempts, plan, policy)
+    result["paid_fallback_allowed"] = allowed
+    if allowed:
+        result["paid_fallback_note"] = ("allowed only when the task's OWN free route is exhausted "
+                                        "AND the agent states a reason — exhaustion alone never "
+                                        "permits paid")
+    write_envelope(str(result_path), json.dumps(result))
+    print(json.dumps(result))
+    return {"ok": 0, "failed": 5, "decision_needed": 6}[status]
+
+
 def main():
-    out_path, mode, err = parse_args(sys.argv[1:])
+    res = parse_args(sys.argv[1:])
+    out_path, mode, err = res
     if err:
         print(f"free-agent-tool.py: {err}", file=sys.stderr)
         return 2
@@ -837,6 +1083,8 @@ def main():
         return 0
     if mode == "list":
         return list_order(os.environ)
+    if mode == "resume":
+        return run_background(None, os.environ, res.run_dir, resume=True, extend=res.extend)
     if out_path is not None:
         parent = Path(out_path).expanduser().parent
         if not parent.is_dir():
@@ -852,6 +1100,8 @@ def main():
         return 1
     if os.environ.get("FA_DISPATCH_ROUTING") == "role":
         return run_by_role(input_data, out_path=out_path)
+    if mode == "background":
+        return run_background(input_data, os.environ, res.run_dir)
     return run(input_data, os.environ, out_path=out_path)
 
 

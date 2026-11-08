@@ -47,7 +47,7 @@ class RoutingBlockTests(unittest.TestCase):
         block = offload_routing.routing_block(str(ROOT))
         self.assertNotEqual(block, offload_routing.MISSING)
         self.assertLessEqual(len(block.encode()), 1500, "routing block must stay <= 1,500 bytes")
-        for literal in ("free-agent-tool.py", "remote-session.sh <alias> -p",
+        for literal in ("free-agent-tool.py", "remote-session.sh <alias>",
                         "brief-the-delegate", "paid_fallback_allowed", "dispatching-parallel-agents",
                         "config/local-agent-system-prompt.txt",
                         "config/remote-agent-system-prompt.txt"):
@@ -97,7 +97,8 @@ class InterceptRoutingTests(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn(offload_routing.routing_block(str(ROOT)), reason)
         self.assertIn("free-agent-tool.py", reason)           # the dispatch heredoc stays
-        self.assertIn("remote-session.sh <alias> -p", reason)  # the free-SESSION route offered
+        # the free-SESSION route offered as a ready-to-run command (alias resolved, --effort set)
+        self.assertRegex(reason, r'remote-session\.sh \S+ --effort \S+ -p "<brief>"')
 
     def test_workflow_routed_per_route_workflow(self):
         payload = {"hook_event_name": "PreToolUse", "tool_name": "Workflow",
@@ -109,7 +110,7 @@ class InterceptRoutingTests(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn(offload_routing.routing_block(str(ROOT)), reason)
         self.assertNotIn("FA_AGENT_JSON", reason, "Workflow must not get the Agent-only heredoc")
-        self.assertIn("remote-session.sh <alias> -p", reason)
+        self.assertRegex(reason, r'remote-session\.sh \S+ --effort \S+ -p "<brief>"')
         # paid route -> pass through (no output, exit 0)
         r2 = run_hook(payload, ROOT, self.cfg, extra_env={"FA_ROUTE_WORKFLOW": "paid"})
         self.assertEqual(r2.returncode, 0)

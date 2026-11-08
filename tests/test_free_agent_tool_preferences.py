@@ -535,7 +535,7 @@ class Exhaustion(unittest.TestCase):
         return json.loads([ln for ln in err.splitlines() if ln.startswith("{")][-1])
 
     def test_wall_clock_cap_stops_new_attempts(self):
-        code, _out, err = self.run_main({"prompt": "hi"}, {}, monotonic=[0.0, 601.0, 602.0, 603.0])
+        code, _out, err = self.run_main({"prompt": "hi"}, {}, monotonic=[0.0, 3601.0, 3602.0, 3603.0])
         self.assertEqual(code, 1)
         res = self.last_json(err)
         self.assertEqual(len(res["attempts"]), 0, "the cap fires before any new attempt starts")
@@ -544,17 +544,17 @@ class Exhaustion(unittest.TestCase):
 
     def test_each_attempt_gets_the_remaining_budget_floored_and_failover_continues(self):
         # A stalled first preference must not eat the cap: attempt 1 gets the whole remaining
-        # budget, attempt 2 (started at 500s) gets the min_attempt_s floor, not 100s.
+        # budget, attempt 2 (started near the cap) gets the min_attempt_s floor, not the remainder.
         keys = tempfile.mkdtemp()
         for name in ("gemini", "nvidia"):
             Path(keys, name).write_text("fixture-key")
         code, _out, err = self.run_main({"prompt": "hi"}, {}, keys_dir=keys,
-                                        monotonic=[0.0, 0.0, 500.0, 650.0, 700.0])
+                                        monotonic=[0.0, 0.0, 3500.0, 3600.0, 3700.0])
         self.assertEqual(code, 1)
         self.assertGreaterEqual(len(self.dispatch_calls), 2, "failover reached the second preference")
         first, second = self.dispatch_calls[0][1], self.dispatch_calls[1][1]
         self.assertEqual(first["timeout_s"], fat.DEFAULT_PAID_FALLBACK["attempt_max_s"],
-                         "the first preference may not spend the whole 600 s cap alone")
+                         "the first preference may not spend the whole wall cap alone")
         self.assertEqual(second["timeout_s"], fat.DEFAULT_PAID_FALLBACK["min_attempt_s"])
         self.assertEqual(first["stall_s"], fat.DEFAULT_PAID_FALLBACK["attempt_stall_s"])
         self.assertIn("wall-clock cap", err)
