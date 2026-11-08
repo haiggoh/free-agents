@@ -637,11 +637,14 @@ def _run_hf_warm(ids_file: str, max_seconds: int, cache_override: str | None) ->
         globals()["_hf_get"] = counting_get
         try:
             for mid in ids:
-                if time.monotonic() - t0 > max_seconds or hits >= HF_WARM_REQUEST_CAP:
+                elapsed = time.monotonic() - t0
+                if elapsed > max_seconds or hits >= HF_WARM_REQUEST_CAP:
                     remaining.append(mid)
                     continue
+                # the per-call timeout shrinks with the remaining budget (M2 review): one
+                # slow call can overshoot the cap by at most its own timeout, never hang
                 try:
-                    total, _repo = hf_total_params(mid, timeout=8.0)
+                    total, _repo = hf_total_params(mid, timeout=max(1.0, min(8.0, max_seconds - elapsed)))
                     if total is not None:
                         sized += 1
                 except Exception as exc:
