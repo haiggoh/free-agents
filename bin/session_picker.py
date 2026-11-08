@@ -1400,7 +1400,7 @@ class Picker(App):
                 sm._refresh_keep_open()
                 self.render_model()
             elif isinstance(sm, m.LowkeyScreen) and getattr(sm, "_choose_model_visible", False):
-                sm.set_models(list(sm.models.values()))
+                sm.refresh_keep_open()             # 0.55.8 Task 3: keep the open group
                 self.render_model()
         try:
             self.call_from_thread(apply)
@@ -2226,7 +2226,7 @@ class Picker(App):
                 sm.set_api_catalogs(cats)
                 changed = True
             if changed:
-                sm.set_models(local if local is not None else list(sm.models.values()))
+                sm.refresh_keep_open(local if local is not None else None)   # 0.55.8 Task 3
         return changed
 
     def _home_catalog_total(self):

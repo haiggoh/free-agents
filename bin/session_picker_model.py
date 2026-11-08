@@ -3474,6 +3474,25 @@ class LowkeyScreen(Screen):
         self.accordion.collapse()              # nothing open until "Choose model…"
         self._models_loaded = True
 
+    def refresh_keep_open(self, models: list[LocalModel] | None = None):
+        """0.55.8 Task 3 (0541 plan Item B): the REFRESH path — rebuild exactly like
+        set_models but without the first-population collapse, then restore the selection and
+        every open level (the accordion's single open_group covers the nested provider/
+        family group via its ancestor walk, so one expand restores both levels, R16)."""
+        keep_id = self.accordion.selected_id
+        keep_open = self.accordion.open_group
+        keep_multi = (set(self.accordion.multi_open)
+                      if self.accordion.multi_open is not None else None)  # collapse() clears IN PLACE
+        keep_folded = set(self.accordion.multi_open_folded)
+        self.set_models(models if models is not None else list(self.models.values()))
+        if keep_multi is not None:
+            self.accordion.multi_open = keep_multi
+            self.accordion.multi_open_folded = keep_folded
+        if keep_id and not self.accordion.select(keep_id):
+            self.accordion.selected_id = None
+        if keep_open and keep_open in {g.id for g in self.accordion.groups} | set(self.accordion._parents):
+            self.accordion.expand(keep_open)
+
     def _cycle_effort(self):
         s = self.settings
         s.lowkey_effort = _next(effort_choices("lowkey"), s.lowkey_effort)
