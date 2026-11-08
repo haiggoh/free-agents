@@ -52,6 +52,38 @@ os.environ["LA_NVIDIA_THROTTLE_STATE"] = str(
 os.environ["LA_HF_PARAMS_CACHE"] = str(
     Path(_tempfile.mkdtemp(prefix="fa-hfparams-test-")) / "hf-params.json")
 
+# 0.55.8 Task 0 (R1, 0541 plan Item H): no test may post a real notification or open a
+# window. One shim dir with no-op osascript/terminal-notifier/afplay/say/open stubs + a
+# session FA_NOTIFY_SINK; the CONTROLLER creates them once (pytest_configure, not a worker)
+# and every xdist worker + subprocess inherits FA_NOTIFY_SHIM_DIR/FA_NOTIFY_SINK via
+# os.environ. pytest_sessionfinish fails the whole session if the shim log records anything
+# — a real-notification attempt is a test failure, not a warning.
+_NOTIFY_STUBS = ("osascript", "terminal-notifier", "afplay", "say", "open")
+
+
+def _ensure_notify_shim():
+    """Create-or-reuse the shim dir + sink; export both. Idempotent across workers."""
+    shim_dir = os.environ.get("FA_NOTIFY_SHIM_DIR") or str(
+        Path(_tempfile.mkdtemp(prefix="fa-notify-shim-")))
+    os.environ["FA_NOTIFY_SHIM_DIR"] = shim_dir
+    d = Path(shim_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    for name in _NOTIFY_STUBS:
+        stub = d / name
+        if not stub.exists():
+            stub_body = ("#!/bin/sh\n"
+                         "printf '%s\\n' \"$(date +%s) " + name +
+                         " $*\" >> \"" + str(d / "calls.log") + "\"\n"
+                         "exit 0\n")
+            stub.write_text(stub_body)
+            stub.chmod(0o755)
+    if "FA_NOTIFY_SINK" not in os.environ:
+        os.environ["FA_NOTIFY_SINK"] = str(d / "sink.jsonl")
+    path = os.environ.get("PATH", "")
+    if str(d) not in path.split(":"):
+        os.environ["PATH"] = f"{d}:{path}"
+    return d
+
 
 @pytest.fixture(autouse=True)
 def _limiter_knobs_for_load_sensitive(request, monkeypatch):
@@ -92,6 +124,19 @@ def pytest_sessionfinish(session, exitstatus):
         print(f"\nFAILED: a test changed the real {_REAL_SETTINGS} — sandbox CLAUDE_CONFIG_DIR "
               "for any test that starts the picker or writes settings")
         session.exitstatus = 1
+    shim_log = Path(os.environ.get("FA_NOTIFY_SHIM_DIR", "")) / "calls.log"
+    calls = []
+    try:
+        if shim_log.exists():
+            calls = [x for x in shim_log.read_text().splitlines() if x.strip()]
+    except OSError:
+        calls = []
+    if calls:
+        print(f"\nFAILED: {len(calls)} real notification/window attempt(s) reached the "
+              "notify shim (0.55.8 Task 0):")
+        for line in calls[:10]:
+            print(f"  {line}")
+        session.exitstatus = 1
 
 
 def pytest_report_header(config):
@@ -105,6 +150,8 @@ def pytest_configure(config):
     # processes or drive the picker PTY harness depend on shared-machine load and the
     # shared nvidia rate limiter, so they can flake one-per-run at load > 10 even with
     # load-scaled timeouts. Deselect them on a loaded box with: pytest -m "not load_sensitive"
+    if not hasattr(config, "workerinput"):
+        _ensure_notify_shim()   # R1: the CONTROLLER owns the one shim dir; workers inherit
     config.addinivalue_line(
         "markers",
         "load_sensitive: test spawns real processes / PTY harness and flakes under extreme "

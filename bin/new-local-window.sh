@@ -20,11 +20,16 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 ARGS="$*"
 # Launch in a fresh Terminal window. do script runs in its own shell, independent of this process.
-osascript >/dev/null 2>&1 <<OSA
-tell application "Terminal"
+# 0.55.8 Task 0 (R14): under FA_NOTIFY_SINK (tests) the window open is RECORDED, not opened.
+OSA='tell application "Terminal"
   activate
   do script "'$LAUNCHER' $ARGS"
-end tell
-OSA
+end tell'
+if [ -n "${FA_NOTIFY_SINK:-}" ]; then
+  here="$(cd -P "$(dirname "$0")" && pwd)"
+  python3 "$here/fa_notify.py" window "${OSA:0:120}" --caller "$0" >/dev/null 2>&1 || true
+else
+  osascript >/dev/null 2>&1 <<<"$OSA"
+fi
 echo "✓ Opened an independent Terminal window running: launch-claude-agent.sh $ARGS"
 echo "  (it survives closing this terminal / restarting a Claude Code session)"

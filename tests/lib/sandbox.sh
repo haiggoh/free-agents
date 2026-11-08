@@ -20,6 +20,11 @@
 
 LA_TEST_SANDBOX_REPO="${LA_TEST_SANDBOX_REPO:-$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
+# 0.55.8 Task 0 (R1): every sandboxed shell test inherits the notification fence — a set
+# FA_NOTIFY_SINK plus no-op osascript/terminal-notifier/afplay/say/open stubs on PATH — so a
+# notifying test is recordable and the real user never sees one.
+. "$LA_TEST_SANDBOX_REPO/tests/lib/fa-notify-sink.sh"
+
 # Config files every launcher sources unconditionally. Data files (catalogues, rosters) are
 # opt-in via extra arguments, because their presence changes what config-lib.sh derives.
 LA_TEST_SANDBOX_CONFIG_LIBS=(config-lib.sh emoji.sh)

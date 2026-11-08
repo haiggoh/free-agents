@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Tests for check-backend-updates.py."""
 
+import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -59,8 +61,13 @@ def test_check_all_backends(tmp_path):
         results = check_all_backends(["rapid-mlx"])
         assert "rapid-mlx" in results
         assert len(results["rapid-mlx"]) == 1
-        # The notification is still attempted (behaviour kept), just intercepted.
-        assert mock_run.call_args[0][0][0] == "osascript"
+        # 0.55.8 Task 0: the notification routes through fa_notify — the session sink
+        # records it and NO subprocess fires (the old raw-osascript call is gone; the
+        # per-test subprocess patch here stays only to prove that).
+        records = [json.loads(x) for x in Path(os.environ["FA_NOTIFY_SINK"]).read_text().splitlines()]
+        assert any(r.get("title") == "Backend updates available"
+                   and "0.15.2->0.15.3" in r.get("text", "") for r in records), records
+        mock_run.assert_not_called()
         assert "0.15.2->0.15.3" in (tmp_path / "backend-update-check.log").read_text()
 
 

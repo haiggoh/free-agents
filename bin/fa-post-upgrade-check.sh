@@ -47,7 +47,9 @@ notify() {
     if [ -n "${FA_NOTIFY_CMD:-}" ]; then
         "$FA_NOTIFY_CMD" >/dev/null 2>&1 || true
     else
-        osascript -e 'display notification "free-agents: a backend venv is broken — run manage-backend.py health --all" with title "free-agents backend check"' >/dev/null 2>&1 || true
+        # 0.55.8 Task 0: the helper honours FA_NOTIFY_SINK (tests) — no raw osascript here.
+        "$HERE/fa-notify.sh" "free-agents backend check" \
+            "free-agents: a backend venv is broken — run manage-backend.py health --all" >/dev/null 2>&1 || true
     fi
 }
 

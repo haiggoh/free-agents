@@ -440,11 +440,15 @@ if [ "${1:-}" = "--picker-launch" ]; then
   _apply_session_profile "$1"
   if [ "${CSL_WATCH:-0}" = "1" ]; then
     if [ "$(uname -s)" = "Darwin" ] && [ -z "${CSL_NO_WATCH_WINDOW:-}" ]; then
-      osascript >/dev/null 2>&1 <<OSA
-tell application "Terminal"
+      _osa='tell application "Terminal"
   do script "'$WATCHER' --attach $$"
-end tell
-OSA
+end tell'
+      if [ -n "${FA_NOTIFY_SINK:-}" ]; then
+        # 0.55.8 Task 0 (R14): tests record window opens instead of opening them.
+        python3 "$CSL_DIR/fa_notify.py" window "${_osa:0:120}" --caller "$0" >/dev/null 2>&1 || true
+      else
+        osascript >/dev/null 2>&1 <<<"$_osa"
+      fi
       echo "$EMOJI_WATCHER watcher window opened (following pid $$)"
     else
       echo "$EMOJI_WATCHER watcher (run in another terminal): $WATCHER --attach $$"

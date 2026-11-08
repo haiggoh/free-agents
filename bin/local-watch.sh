@@ -281,6 +281,14 @@ if [ "$MODE" = "--open" ]; then
     _off_y="${LA_WATCH_OFFSET_Y:-60}"
     _place=1
     [ "${LA_WATCH_NO_PLACE:-0}" = "1" ] && _place=0
+    # 0.55.8 Task 0 (R14): under FA_NOTIFY_SINK (tests) the window placement is RECORDED.
+    if [ -n "${FA_NOTIFY_SINK:-}" ]; then
+      here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      python3 "$here/fa_notify.py" window "watcher window placement + attach: ${_cmd:0:90}" --caller "$0" >/dev/null 2>&1 || true
+      _n=$((_n+1))
+      echo "✓ (FA_NOTIFY_SINK set) watcher window recorded instead of opened for '$_alias'"
+      continue
+    fi
     osascript >/dev/null 2>&1 <<OSA
 tell application "Terminal"
   set _prev to missing value

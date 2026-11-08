@@ -24,6 +24,15 @@ from managers import get_manager, get_manager_instance, list_managers, ManagerEr
 LOG_DIR = Path.home() / ".claude" / "logs"
 LOG_FILE = LOG_DIR / "backend-update-check.log"
 
+def _notify(text: str):
+    """The update check's one notification emit (0.55.8 Task 0): routed through fa_notify so
+    test runs can sink it (FA_NOTIFY_SINK); this used to send the notification directly and made
+    pytest runs post real macOS notifications (0541 plan Item H)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+    import fa_notify
+    fa_notify.notify("Backend updates available", text, __file__)
+
+
 def log_message(msg: str) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -70,11 +79,7 @@ def check_all_backends(backends: list[str] | None = None) -> dict[str, list[tupl
         log_message(f"OUTDATED: {details}")
         # macOS notification
         try:
-            import subprocess
-            subprocess.run([
-                "osascript", "-e",
-                f'display notification "{details} — upgrade manually via manage-backend.py" with title "Backend updates available"'
-            ], check=False)
+            _notify(f"{details} — upgrade manually via manage-backend.py")
         except Exception:
             pass
     else:

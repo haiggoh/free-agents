@@ -350,10 +350,7 @@ def act_on_actions(actions: list[dict[str, Any]], state_dir: Path, now: float) -
                 elif kind == "notify":
                     if os.environ.get("LA_MEMGUARD_NOTIFY") != "0":
                         try:
-                            text = action.get("text", "")
-                            safe_text = text.replace("\\", "\\\\").replace('"', '\\"')
-                            script = f'display notification "{safe_text}" with title "free-agents memory guard"'
-                            subprocess.run(["osascript", "-e", script], check=False)
+                            _notify(action.get("text", ""))
                         except Exception:
                             pass
     except Exception:
@@ -485,6 +482,14 @@ def do_status(state_dir: Path) -> int:
     }
     print(json.dumps(out))
     return 0
+
+
+def _notify(text: str):
+    """The guard's one notification emit (0.55.8 Task 0): routed through fa_notify so test
+    runs can sink it (FA_NOTIFY_SINK); this used to send the notification directly, which made
+    pytest runs post real macOS notifications (0541 plan Item H)."""
+    import fa_notify
+    fa_notify.notify("free-agents memory guard", text, __file__)
 
 
 def main(argv: list[str]) -> int:

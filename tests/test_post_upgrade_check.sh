@@ -7,6 +7,7 @@
 # --repair) `--backend X repair V`. These cases stub manage-backend.py via FA_MANAGE_BACKEND
 # (a PYTHON stub — the script runs it under python3) and the notification via FA_NOTIFY_CMD.
 # Nothing here touches real venvs, the live config, or launchd.
+. "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/fa-notify-sink.sh"   # 0.55.8 Task 0
 set -uo pipefail
 
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
