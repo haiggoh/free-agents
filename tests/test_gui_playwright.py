@@ -594,20 +594,36 @@ class GuiPlaywrightTests(unittest.TestCase):
             cols = len(grid.first.evaluate(
                 "e => getComputedStyle(e).gridTemplateColumns.split(' ').filter(Boolean)"))
             self.assertGreater(cols, 1, "tiles must form columns, not a single-column list")
+            # user 2026-11-08: Local/Remote lanes are SQUARE 2x2; Lowkey is wide 2x1 (not biggest)
             lane = p.locator('.tile-lg[data-target="remote"]')
             self.assertGreater(lane.count(), 0, "the Remote lane must be a 2x2 tile")
             self.assertIn("span 2", lane.first.evaluate("e => getComputedStyle(e).gridColumn"))
-            small = p.locator('.tile:not(.tile-lg)')
+            self.assertIn("span 2", lane.first.evaluate("e => getComputedStyle(e).gridRow"))
+            lane_box = lane.first.bounding_box()
+            self.assertAlmostEqual(lane_box["width"], lane_box["height"], delta=4,
+                                   msg="2x2 lane tiles must be square")
+            lowkey = p.locator('.tile-wide[data-target="lowkey"]')
+            self.assertGreater(lowkey.count(), 0, "Lowkey must be a wide 2x1 tile")
+            self.assertIn("span 2", lowkey.first.evaluate("e => getComputedStyle(e).gridColumn"))
+            self.assertNotIn("span 2", lowkey.first.evaluate("e => getComputedStyle(e).gridRow"))
+            small = p.locator('.tile:not(.tile-lg):not(.tile-wide)')
             self.assertGreater(small.count(), 0, "non-lane rows stay 1x1 tiles")
             tile = p.locator(".tile").first
-            emoji_top = tile.locator(".tile-emoji").evaluate("e => e.getBoundingClientRect().top")
-            label_top = tile.locator(".tile-label").evaluate("e => e.getBoundingClientRect().top")
+            tile_box = tile.bounding_box()
+            emoji = tile.locator(".tile-emoji")
+            label = tile.locator(".tile-label")
+            emoji_top = emoji.evaluate("e => e.getBoundingClientRect().top")
+            label_top = label.evaluate("e => e.getBoundingClientRect().top")
             self.assertLess(emoji_top, label_top, "emoji must sit ABOVE the action text")
-            emoji_size = tile.locator(".tile-emoji").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
-            label_size = tile.locator(".tile-label").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+            self.assertLess(emoji_top, tile_box["y"], "emoji must peek out of the tile's top edge")
+            emoji_cx = emoji.evaluate("e => { const r = e.getBoundingClientRect(); return r.left + r.width / 2 }")
+            self.assertAlmostEqual(emoji_cx, tile_box["x"] + tile_box["width"] / 2, delta=6,
+                                   msg="emoji must be centered above the text")
+            emoji_size = emoji.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+            label_size = label.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
             self.assertGreater(emoji_size, label_size, "emoji must be larger than the text")
-            self.assertEqual(tile.locator(".tile-label").evaluate(
-                "e => getComputedStyle(e).overflowWrap"), "anywhere", "label must wrap in the tile")
+            self.assertEqual(label.evaluate("e => getComputedStyle(e).overflowWrap"), "anywhere",
+                             "label must wrap in the tile")
             p.close()
             # compatibility mode stays a plain list — no grid at all
             app_file.write_text(defaults)
@@ -629,19 +645,20 @@ class GuiPlaywrightTests(unittest.TestCase):
             p = self.page()
             p.wait_for_selector(".tile-grid", timeout=180000)
             self.assertEqual(p.evaluate("getComputedStyle(document.body).backgroundColor"),
-                             "rgb(248, 248, 248)", "ground token")
+                             "rgb(255, 255, 255)", "clean white #FFFFFF ground (user 2026-11-08)")
             self.assertEqual(p.evaluate("getComputedStyle(document.body).fontSize"), "14px")
             tile = p.locator(".tile").first
             self.assertEqual(tile.evaluate("e => getComputedStyle(e).backgroundColor"),
                              "rgb(255, 255, 255)", "surface token on tiles")
-            self.assertEqual(tile.evaluate("e => getComputedStyle(e).borderRadius"), "8px")
+            self.assertEqual(tile.evaluate("e => getComputedStyle(e).borderRadius"), "16px",
+                             "M3-expressive radius")
             grid = p.locator(".tile-grid").first
             self.assertEqual(grid.evaluate("e => getComputedStyle(e).gap"), "12px")
             row = p.locator(".menu-item").first
             row.hover()
             p.wait_for_timeout(300)
             self.assertEqual(row.evaluate("e => getComputedStyle(e).color"),
-                             "rgb(29, 95, 191)", "the one hue #1d5fbf on hover")
+                             "rgb(0, 191, 255)", "csl sky blue #00BFFF on hover")
             knob_shadow = tile.evaluate(
                 "e => getComputedStyle(e.querySelector('.switch') || e, '::after').boxShadow") \
                 if tile.locator(".switch").count() else "none"

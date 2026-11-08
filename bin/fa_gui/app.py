@@ -47,13 +47,13 @@ def build() -> None:
       html, body { -webkit-font-smoothing: antialiased !important; text-rendering: optimizeLegibility !important;
                    font-family: -apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI', Roboto, sans-serif !important;
                    margin: 0 !important; padding: 0 !important;
-                   background: #f8f8f8 !important; color: #141414 !important; font-size: 14px !important; }
+                   background: #ffffff !important; color: #141414 !important; font-size: 14px !important; }   /* clean white FFF ground (user 2026-11-08); dark mode swaps via .dark-shell */
       .menu-item { color: #141414 !important; text-decoration: none !important; background: none !important;
                    border: none !important; box-shadow: none !important; padding: 1px 5px; line-height: 1.3; cursor: pointer; }
-      .menu-item:hover { color: #1d5fbf !important; }   /* the one hue, on hover/links only */
+      .menu-item:hover { color: #00BFFF !important; }   /* csl sky blue accent (user 2026-11-08) */
       .cycle-arrow { color: #141414 !important; background: none !important; border: none !important;
                      box-shadow: none !important; padding: 0 3px; cursor: pointer; font-weight: bold; }
-      .cycle-arrow:hover { color: #1d5fbf !important; }
+      .cycle-arrow:hover { color: #00BFFF !important; }
       /* Quasar checkbox wrapper styled as the M3 pill switch. Quasar keeps state on the
          WRAPPER (aria-checked + q-checkbox__inner--truthy), not the hidden native input,
          so the visuals key off [aria-checked="true"] and Quasar's own box is hidden. */
@@ -78,21 +78,29 @@ def build() -> None:
       .cycle-value-bin { display: inline-block; min-width: 3ch; }
       /* the action item itself is the control (csl parity): hover like a link, click = toggle / ▶ */
       .row-action { cursor: pointer; }
-      .row-action:hover { color: #1d5fbf !important; }
+      .row-action:hover { color: #00BFFF !important; }
+      .tile:focus-visible { outline: 2px solid #00FFFF !important; outline-offset: 2px; }   /* csl cyan focus ring */
       /* Phase 5 modern presentation (user 2026-11-08): Metro grid — columns+rows, lanes 2x2 /
          rest 1x1, emoji above wrapping label, card surface; same handlers/targets as rows */
-      .tile-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-                   gap: 12px; width: 100%; margin-bottom: 8px; }   /* one gap value: --gap 12 */
-      .tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-              padding: 12px; border-radius: 8px; font-size: 0.875rem; text-align: left;   /* surface card, --radius-card 8, body 14px */
-              background: #ffffff !important; border: 1px solid rgba(20, 20, 20, 0.08) !important; }
-      .tile-lg { grid-column: span 2; grid-row: span 2; }
-      .tile .tile-label { overflow-wrap: anywhere; line-height: 1.2; }
-      .tile .tile-emoji { font-size: 2.2rem; line-height: 1; }
-      .tile-lg .tile-emoji { font-size: 3.2rem; }
-      .tile:hover { background: #e9e9e9 !important; border-color: #e9e9e9 !important; }   /* neutral hover pill, not a tint */
+      /* Metro grid + M3-expressive blend (user 2026-11-08): fixed square cells so 2x2 lanes are
+         truly square; Lowkey is 2x1 wide. Emoji is its own centered line, peeking out of the
+         tile's top edge; everything larger. csl sky-blue hover, cyan focus ring. */
+      .tile-grid { display: grid !important; grid-template-columns: repeat(auto-fill, 150px);
+                   grid-auto-rows: 150px; gap: 12px; width: 100%; margin-bottom: 8px; padding-top: 2.2rem; }
+      .tile { display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+              gap: 2px; padding: 16px 12px 12px; border-radius: 16px; font-size: 1rem; text-align: center;
+              background: #ffffff !important; border: 1px solid rgba(20, 20, 20, 0.10) !important;
+              position: relative; overflow: visible; }
+      .tile-lg { grid-column: span 2; grid-row: span 2; }       /* Local / Remote: square 2x2 */
+      .tile-wide { grid-column: span 2; grid-row: span 1; }     /* Lowkey: wide 2x1, NOT the biggest */
+      .tile .tile-label { overflow-wrap: anywhere; line-height: 1.25; }
+      /* emoji peeks out of the tile's TOP edge (user 2026-11-08): absolute, centered, overflowing */
+      .tile .tile-emoji { font-size: 3rem; line-height: 1; position: absolute; top: -1.15em;
+                          left: 50%; transform: translateX(-50%); }
+      .tile-lg .tile-emoji, .tile-wide .tile-emoji { font-size: 4.5rem; top: -1.3em; }
+      .tile:hover { background: #f0f9ff !important; border-color: #00BFFF !important; }   /* flat sky-blue tint, no gradient */
       body:has(.dark-shell) .tile { background: #1f1f1f !important; border-color: rgba(255, 255, 255, 0.14) !important; }
-      body:has(.dark-shell) .tile:hover { background: #2a2a2a !important; border-color: #2a2a2a !important; }
+      body:has(.dark-shell) .tile:hover { background: #16324a !important; border-color: #00BFFF !important; }
       /* lane pages: fixed-height shell — the model list scrolls internally, the infobox
          stays pinned to the bottom instead of being overlapped (user 2026-11-05).
          EMERGENCY ONLY: if the list area would shrink below ~4 rows (groups expanded +
@@ -204,17 +212,17 @@ def build() -> None:
             return False
 
     def _tile_label(parent, text):
-        """Metro tile content: the emoji LARGE and ABOVE the label (flex column), the label
-        wrapping inside the tile width (.tile-label overflow-wrap)."""
+        """Metro tile content: the emoji and the label are SEPARATE flex items so the column
+        layout stacks them (emoji line centered above the text); the label wraps in the tile.
+        The emoji peeks out of the tile's top edge via CSS (.tile-emoji top offset)."""
         import html as _html
         parts = str(text).split(" ", 1)
         head, rest = parts[0], (parts[1] if len(parts) > 1 else "")
-        if head and any(ord(ch) >= 0x2000 for ch in head):
-            with parent:
-                ui.html(f'<span class="tile-emoji">{_html.escape(head)}</span>'
-                        f'<span class="tile-label">{_html.escape(rest)}</span>')
-        else:
-            with parent:
+        with parent:
+            if head and any(ord(ch) >= 0x2000 for ch in head):
+                ui.html(f'<span class="tile-emoji">{_html.escape(head)}</span>')
+                ui.html(f'<span class="tile-label">{_html.escape(rest)}</span>')
+            else:
                 ui.label(str(text)).classes("tile-label")
 
     def _binary_target(action, on: bool):
@@ -274,8 +282,13 @@ def build() -> None:
             # top-level, so Back/Switch can never end up hidden inside a folded group.
             # Modern mode: nav/action tiles go into the grid; cycles/switches stay list rows.
             if modern and c.kind in ("nav", "button") and grid is not None:
+                # user 2026-11-08: Local/Remote lanes = square 2x2, Lowkey = wide 2x1 (not the biggest)
+                if action is not None and action.section == "lanes":
+                    tile_cls = "tile-wide" if c.target == "tool:lowkey" else "tile-lg"
+                else:
+                    tile_cls = ""
                 with grid:
-                    _render_row(c, action, st, tile_big=(action is not None and action.section == "lanes"))
+                    _render_row(c, action, st, tile_cls=tile_cls)
                 continue
             target = boxes.get(c.group) if c.group else None
             with (target if target is not None else nullcontext()):
@@ -326,7 +339,7 @@ def build() -> None:
             j += 1
         return _rich_html(lbl[j:])
 
-    def _render_row(c, action, st: dict, tile_big: bool = False) -> None:
+    def _render_row(c, action, st: dict, tile_cls: str = "") -> None:
             if c.kind in ("select", "toggle") and action is not None and action.step is not None:
                 choices = list(action.choices) if action.choices is not None else []
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
@@ -385,7 +398,7 @@ def build() -> None:
                 # Phase 5: modern presentation renders the same link as a large emoji tile.
                 if _modern():
                     row = ui.link("", f"/{target}").classes(
-                        "tile menu-item action-row nav-row" + (" tile-lg" if tile_big else ""))
+                        "tile menu-item action-row nav-row" + (f" {tile_cls}" if tile_cls else ""))
                     _tile_label(row, c.label)
                 else:
                     row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
@@ -394,7 +407,7 @@ def build() -> None:
                 lbl = action.label if action is not None else None
                 if _modern() and not (lbl is not None and hasattr(lbl, "spans")):
                     # Phase 5: plain action rows render as Metro tiles in modern mode
-                    row = ui.row().classes("tile menu-item action-row" + (" tile-lg" if tile_big else ""))
+                    row = ui.row().classes("tile menu-item action-row" + (f" {tile_cls}" if tile_cls else ""))
                     _tile_label(row, c.label)
                 elif lbl is not None and hasattr(lbl, "spans") and hasattr(lbl, "plain"):
                     # rich label (theme swatch rows): keep the span colors as HTML

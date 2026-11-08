@@ -11,11 +11,24 @@ palette and the light-default), `framed-sheet` (its opaque white sheet would def
 
 ## Tokens applied to the GUI CSS (bin/fa_gui/app.py)
 
-- ground `#f8f8f8`, surface `#ffffff`, ink `#141414`, one hue `#1d5fbf` (hover/links only)
-- gap 12px everywhere, radius-card 8px, radius-control 6px, body 14px, title 24px
-- no shadows at rest (switch knob shadow removed); hover = neutral `#e9e9e9` surface on tiles
-- tiles: surface cards on the ground, lanes 2x2 / rest 1x1, emoji above wrapping label
-- dark mode: ground `#141414`, text `#f8f8f8` (ink/ground swapped), hover hue `#7ea6e0`
+- ground `#ffffff` (clean white, user 2026-11-08 — restored after the #f8f8f8 experiment),
+  surface `#ffffff`, ink `#141414`
+- csl accents integrated (user 2026-11-08): hover/links `#00BFFF` (csl Sky Blue), focus ring
+  `#00FFFF` (csl Cyan); tile hover = flat `#f0f9ff` sky tint with sky border (no gradients)
+- gap 12px, tile radius 16px (M3-expressive), body 14px, title 24px; no shadows at rest
+- dark mode stays a switchable option (dark_mode in the appearance store): ground `#141414`,
+  text `#f8f8f8`
+
+## Metro tile layout (user spec 2026-11-08, M3-blended)
+
+- fixed 150px square grid cells (`repeat(auto-fill, 150px)`, `grid-auto-rows: 150px`) so a
+  2x2 lane tile is exactly square (bounding-box asserted in tests)
+- Local / Remote lanes = `tile-lg` 2x2; **Lowkey = `tile-wide` 2x1** (not the biggest tile)
+- emoji is its own flex line, centered above the label, and **peeks out of the tile's top
+  edge** (absolute, `top: -1.15em`); label wraps (`overflow-wrap: anywhere`); everything
+  larger (cells 150px, emoji 3rem / 4.5rem on big tiles, label 16px)
+- translucency chain intact: white `#tint-layer` at the capability-dependent opacity
+  (80% with active native blur, 95% without), window args native-only, relaunch applies
 
 ## Deliberate deviations from the dealt sheet (recorded per the skill's rules)
 
@@ -30,7 +43,9 @@ palette and the light-default), `framed-sheet` (its opaque white sheet would def
 ## Verification
 
 `tests/test_gui_playwright.py::test_dealt_direction_tokens_applied` asserts the computed
-tokens (body ground 248,248,248; 14px; tile surface 255,255,255; radius 8px; gap 12px; hover
-rgb(29,95,191); no rest shadow). Full GUI-venv gate green. The full-page look still needs the
-user's eyes on the real window (canvas screenshots can't run here — no system Chrome; the
-playwright chromium could drive inspect.mjs if a pixel review is wanted later).
+tokens (body ground 255,255,255; 14px; tile surface white; radius 16px; gap 12px; hover
+rgb(0,191,255); no rest shadow), and `test_modern_metro_grid_layout` asserts the grid
+(columns, 2x2-square lane tiles, 2x1 Lowkey, emoji above + centered + peeking past the tile
+top, wrapping label, no grid in compat). Full GUI-venv gate green (77/266, playwright 27/27).
+The full-page look still needs the user's eyes on the real window (no system Chrome here;
+playwright's chromium could drive inspect.mjs for a pixel review later).
