@@ -1,0 +1,516 @@
+#!/usr/bin/env python3
+"""watch-until — one generic transient watcher (free-agents, plan 2026-11-08-…-route-watcher Task 1).
+
+Polls a read-only predicate with exponential backoff until it fires or a wall-clock deadline
+passes, then prints exactly one verdict line and exits. Waking a waiting agent is always
+"this background process exits" (run_in_background notification) — no per-poll wake-ups,
+no launchd/cron, nothing written outside $TMPDIR.
+
+Usage:
+    watch-until <predicate> [predicate args] [--deadline 4h] [--min-interval 10]
+                [--max-interval 120] [--on-detect "ACTION text"] [--quiet|--verbose]
+                [--self-test] [--help]
+
+Predicates (exactly one):
+    --git-tag REPO TAG              plain `git ls-remote --tags origin refs/tags/TAG` (NO ^{deref},
+                                    so lightweight AND annotated tags both match)
+    --git-refs-change REPO          any ref of origin differs from the first snapshot
+    --file-regex PATH REGEX         file exists and matches
+    --port-listen PORT              something LISTENs on 127.0.0.1:PORT
+    --pid-exit PID [--proc-start EPOCH]   process gone (or pid reused: start epoch differs)
+    --session-progress SESSION_ID (--regex R | --stall MIN) [--proxy-log PATH]
+                                    R appears in that session's transcript, OR the transcript has
+                                    not grown for MIN minutes (STALL: diagnosed from the proxy log's
+                                    last 429 / mid-stream lines)
+    --cmd 'SHELL TEST'              the test exits 0
+
+Exit codes: 0 DETECTED · 1 TIMEOUT · 2 usage · 3 CANNOT_START (first probe could not run —
+            empty/failed ls-remote, missing transcript dir; never reported as "absent") · 4 STALL.
+
+stdout: exactly one verdict line (DETECTED|TIMEOUT|STALL|CANNOT_START) + evidence (+ the
+--on-detect ACTION when detected); nothing per poll unless --verbose (then polls go to stderr).
+
+Interval: starts at --min-interval, doubles while the probe result is unchanged, caps at
+--max-interval, resets on any change. The deadline is wall-clock, not a poll count.
+Transcripts are located by globbing <projects-root>/*/<SESSION_ID>.jsonl.
+
+Env:
+    FA_WATCH_PROJECTS_DIR   transcript root (default ~/.claude/projects) — tests plant transcripts
+"""
+from __future__ import annotations
+
+import argparse
+import collections
+import os
+import re
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+EXIT_DETECTED, EXIT_TIMEOUT, EXIT_USAGE, EXIT_CANNOT_START, EXIT_STALL = 0, 1, 2, 3, 4
+
+# detected: predicate fired · stall: fired as a STALL (exit 4) · value: hashable probe snapshot
+# (drives the backoff) · evidence: human-readable verdict text · cannot_start: probe could not run
+ProbeResult = collections.namedtuple("ProbeResult",
+                                     "detected stall value evidence cannot_start")
+
+_DUR_UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0}
+
+
+def parse_duration(text, default_unit):
+    """'90' -> 90 * default_unit; '30s'/'10m'/'4h' -> seconds. Raises ValueError on garbage."""
+    s = str(text).strip().lower()
+    m = re.fullmatch(r"([0-9]*\.?[0-9]+)\s*([smh]?)", s)
+    if not m:
+        raise ValueError(f"{text!r} is not a duration like 30s / 10m / 4h")
+    return float(m.group(1)) * _DUR_UNITS[m.group(2) or default_unit]
+
+
+def run_engine(probe, *, deadline_s, min_interval, max_interval, now, sleep,
+               verbose=False, on_poll=None):
+    """Poll `probe(now) -> ProbeResult` until detection or deadline. Returns (exit_code, line).
+
+    now/sleep are injectable so tests can run the backoff on a fake clock. A first probe that
+    cannot run exits CANNOT_START (never "absent"); a mid-run probe failure keeps the last value.
+    """
+    first = probe(now())
+    if first.cannot_start:
+        return EXIT_CANNOT_START, f"CANNOT_START {first.evidence}"
+    if first.detected:
+        return (EXIT_STALL if first.stall else EXIT_DETECTED), _verdict(first)
+    value = first.value
+    interval = min_interval
+    end = now() + deadline_s
+    while now() < end:
+        sleep(interval)
+        r = probe(now())
+        if verbose and on_poll:
+            on_poll(r)
+        if r.detected:
+            return (EXIT_STALL if r.stall else EXIT_DETECTED), _verdict(r)
+        if r.cannot_start:                      # mid-run failure: keep polling, keep last value
+            r = ProbeResult(False, False, value, "probe failed mid-run; keeping last value", False)
+        if r.value != value:
+            interval = min_interval             # any change resets the backoff
+        else:
+            interval = min(interval * 2, max_interval)
+        value = r.value
+    return EXIT_TIMEOUT, f"TIMEOUT after {deadline_s:g}s (deadline reached; last probe: {value!r})"
+
+
+def _verdict(r):
+    return ("STALL " if r.stall else "DETECTED ") + r.evidence
+
+
+# ---------------------------------------------------------------- predicates
+
+def make_git_tag_probe(repo, tag):
+    def probe(_now):
+        # plain ref pattern — NO ^{deref}: that suffix only matches annotated tags and would
+        # silently never fire for lightweight ones (the old template's copy-edit bug).
+        r = subprocess.run(["git", "-C", repo, "ls-remote", "--tags", "origin",
+                            f"refs/tags/{tag}"], capture_output=True, text=True)
+        if r.returncode != 0:
+            return ProbeResult(False, False, None,
+                               f"git ls-remote failed: {(r.stderr or r.stdout).strip()[:200]}",
+                               True)
+        line = r.stdout.strip()
+        return ProbeResult(bool(line), False, line or "<absent>",
+                           f"tag {tag!r} present on origin: {line[:80]}" if line
+                           else f"tag {tag!r} absent on origin (still waiting)", False)
+    return probe
+
+
+def make_git_refs_probe(repo):
+    state = {"first": None}
+
+    def probe(_now):
+        r = subprocess.run(["git", "-C", repo, "ls-remote", "origin"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            return ProbeResult(False, False, None,
+                               f"git ls-remote failed: {(r.stderr or '').strip()[:200]}", True)
+        snap = r.stdout
+        if state["first"] is None:
+            if not snap.strip():
+                return ProbeResult(False, False, None,
+                                   "ls-remote origin returned no refs — cannot snapshot", True)
+            state["first"] = snap
+            return ProbeResult(False, False, snap, "first snapshot of origin refs taken", False)
+        detected = snap != state["first"]
+        return ProbeResult(detected, False, snap,
+                           "origin refs changed since first snapshot" if detected
+                           else "origin refs unchanged", False)
+    return probe
+
+
+def make_file_regex_probe(path, pattern):
+    rx = re.compile(pattern)
+
+    def probe(_now):
+        p = Path(path)
+        try:
+            text = p.read_text(errors="replace")
+            st = p.stat()
+        except OSError:
+            return ProbeResult(False, False, None, f"{path} not readable yet", False)
+        m = rx.search(text)
+        return ProbeResult(bool(m), False, (st.st_size, st.st_mtime),
+                           f"{path} matches {pattern!r}" if m
+                           else f"{path} present, {pattern!r} not yet matched", False)
+    return probe
+
+
+def make_port_probe(port):
+    def probe(_now):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return ProbeResult(True, False, "open", f"something LISTENs on 127.0.0.1:{port}",
+                                   False)
+        except OSError:
+            return ProbeResult(False, False, "closed", f"127.0.0.1:{port} closed", False)
+    return probe
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    # an unreaped child is a zombie: kill(0) still succeeds on it, but it is not running
+    try:
+        r = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                           capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip().startswith("Z"):
+            return False
+    except OSError:
+        pass
+    return True
+
+
+def proc_start_epoch(pid):
+    """The process's start time as epoch seconds (ps lstart is LOCAL time — compare as epochs).
+
+    ps output is locale-dependent (de_DE prints 'So.  8 Nov. ...'), so force LC_ALL=C and
+    collapse whitespace before strptime — otherwise every parse fails and reuse goes unseen."""
+    env = dict(os.environ, LC_ALL="C", LANG="C")
+    try:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                           capture_output=True, text=True, env=env)
+    except OSError:
+        return None
+    line = " ".join(r.stdout.split())
+    if r.returncode != 0 or not line:
+        return None
+    try:
+        return time.mktime(time.strptime(line, "%a %b %d %H:%M:%S %Y"))
+    except ValueError:
+        return None
+
+
+def make_pid_probe(pid, proc_start):
+    def probe(_now):
+        if not pid_alive(pid):
+            return ProbeResult(True, False, "gone", f"pid {pid} is gone", False)
+        if proc_start is not None:
+            cur = proc_start_epoch(pid)
+            if cur is not None and cur != proc_start:
+                return ProbeResult(True, False, "reused",
+                                   f"pid {pid} reused: start epoch {cur:g} != --proc-start "
+                                   f"{proc_start:g}", False)
+        return ProbeResult(False, False, "alive", f"pid {pid} alive", False)
+    return probe
+
+
+def projects_root():
+    return Path(os.environ.get("FA_WATCH_PROJECTS_DIR")
+                or (Path.home() / ".claude" / "projects"))
+
+
+def find_transcript(sid):
+    hits = sorted(projects_root().glob(f"*/{sid}.jsonl"))
+    return hits[0] if hits else None
+
+
+def make_session_probe(sid, regex=None, stall_s=None, proxy_log=None):
+    rx = re.compile(regex) if regex else None
+    state = {"last": None, "change_time": None}
+
+    def probe(now):
+        t = find_transcript(sid)
+        if t is None:
+            return ProbeResult(False, False, None,
+                               f"no transcript {sid}.jsonl under {projects_root()}", True)
+        try:
+            text = t.read_text(errors="replace")
+            st = t.stat()
+        except OSError as err:
+            return ProbeResult(False, False, None, f"cannot read transcript: {err}", True)
+        sig = (st.st_size, st.st_mtime)
+        if state["last"] is None:
+            state["last"] = sig
+            # a transcript whose mtime is already old has been idle since that mtime
+            state["change_time"] = min(now, st.st_mtime) if stall_s else now
+        elif sig != state["last"]:
+            state["last"] = sig
+            state["change_time"] = now
+        if rx is not None:
+            m = rx.search(text)
+            return ProbeResult(bool(m), False, sig,
+                               f"regex {regex!r} found in {t}" if m
+                               else f"regex {regex!r} not yet in {t}", False)
+        idle = now - (state["change_time"] or now)
+        if stall_s is not None and idle >= stall_s:
+            diag = ""
+            if proxy_log:
+                try:
+                    lines = Path(proxy_log).read_text(errors="replace").splitlines()[-50:]
+                    hits = [ln for ln in lines
+                            if re.search(r"429|throttle|mid-stream|NoneType", ln, re.I)]
+                    if hits:
+                        diag = " | proxy-log: " + " ;; ".join(h.strip()[:160] for h in hits[-2:])
+                except OSError:
+                    pass
+            return ProbeResult(True, True, sig,
+                               f"transcript {t} unchanged for {idle:.0f}s "
+                               f"(>= {stall_s:g}s){diag}", False)
+        return ProbeResult(False, False, sig, f"transcript {t} last grew {idle:.1f}s ago", False)
+    return probe
+
+
+def make_cmd_probe(shell_test):
+    def probe(_now):
+        try:
+            r = subprocess.run(["/bin/sh", "-c", shell_test], capture_output=True, text=True)
+        except OSError as err:
+            return ProbeResult(False, False, None, f"cannot run shell test: {err}", True)
+        return ProbeResult(r.returncode == 0, False, r.returncode,
+                           f"cmd exited 0: {shell_test!r}" if r.returncode == 0
+                           else f"cmd exited {r.returncode}: {shell_test!r}", False)
+    return probe
+
+
+# ---------------------------------------------------------------- self-test
+
+def _sh(args):
+    subprocess.run(args, check=True, capture_output=True, text=True)
+
+
+def self_test():
+    """Plant a positive AND a control for every predicate in a temp dir; exit non-zero if any
+    predicate cannot fire or any control fires. Proves the engine before anyone waits on it."""
+    failures = []
+
+    def check(name, cond, detail=""):
+        if not cond:
+            failures.append(f"{name}: {detail}")
+
+    with tempfile.TemporaryDirectory(prefix="watch-until-selftest-") as tmp:
+        tmp = Path(tmp)
+        remote = tmp / "r.git"
+        _sh(["git", "init", "--bare", str(remote)])
+        seed = tmp / "seed"
+        _sh(["git", "init", str(seed)])
+        (seed / "f").write_text("x")
+        _sh(["git", "-C", str(seed), "add", "f"])
+        _sh(["git", "-C", str(seed), "-c", "user.email=t@t", "-c", "user.name=t",
+             "commit", "-m", "s"])
+        _sh(["git", "-C", str(seed), "push", str(remote), "HEAD:refs/heads/main"])
+        # bare HEAD defaults to master; point it at main so the clone is not empty
+        _sh(["git", "-C", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"])
+        clone = tmp / "clone"
+        _sh(["git", "clone", str(remote), str(clone)])
+
+        _sh(["git", "-C", str(clone), "tag", "st-lw"])
+        _sh(["git", "-C", str(clone), "push", "origin", "st-lw"])
+        p = make_git_tag_probe(str(clone), "st-lw")(time.time())
+        check("git-tag lightweight fires", p.detected and not p.cannot_start, repr(p))
+        _sh(["git", "-C", str(clone), "tag", "-a", "st-ann", "-m", "m"])
+        _sh(["git", "-C", str(clone), "push", "origin", "st-ann"])
+        p = make_git_tag_probe(str(clone), "st-ann")(time.time())
+        check("git-tag annotated fires", p.detected, repr(p))
+        p = make_git_tag_probe(str(clone), "st-absent")(time.time())
+        check("git-tag absent control stays silent", not p.detected and not p.cannot_start, repr(p))
+        p = make_git_tag_probe(str(tmp / "nope"), "x")(time.time())
+        check("git-tag broken repo is cannot_start", p.cannot_start, repr(p))
+
+        pr = make_git_refs_probe(str(clone))
+        first = pr(time.time())
+        check("refs first snapshot ok", not first.cannot_start and not first.detected, repr(first))
+        (seed / "g").write_text("y")
+        _sh(["git", "-C", str(seed), "add", "g"])
+        _sh(["git", "-C", str(seed), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "c2"])
+        _sh(["git", "-C", str(seed), "push", str(remote), "HEAD:refs/heads/extra"])
+        check("refs-change fires on push", pr(time.time()).detected)
+
+        f = tmp / "f.txt"
+        f.write_text("hello needle")
+        check("file-regex fires", make_file_regex_probe(str(f), "needle")(time.time()).detected)
+        check("file-regex control silent",
+              not make_file_regex_probe(str(f), "absent")(time.time()).detected)
+
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        check("port-listen fires", make_port_probe(port)(time.time()).detected)
+        s.close()
+        check("port-listen control silent", not make_port_probe(port)(time.time()).detected)
+
+        cp = subprocess.Popen(["sleep", "0.4"])
+        pr = make_pid_probe(cp.pid, None)
+        fired = any(pr(time.time()).detected for _ in range(40) if not time.sleep(0.1))
+        cp.wait(timeout=5)
+        check("pid-exit fires when the process exits", fired)
+        alive = subprocess.Popen(["sleep", "30"])
+        try:
+            ep = proc_start_epoch(alive.pid)
+            check("proc_start_epoch readable", ep is not None)
+            p = make_pid_probe(alive.pid, (ep + 1000) if ep else 1.0)(time.time())
+            check("pid reused-by-epoch fires", p.detected, repr(p))
+            check("pid correct-epoch control silent",
+                  not make_pid_probe(alive.pid, ep)(time.time()).detected)
+        finally:
+            alive.kill()
+            alive.wait(timeout=5)
+
+        proj = tmp / "proj-s"
+        proj.mkdir()
+        sid = "selftest-sid"
+        t = proj / f"{sid}.jsonl"
+        t.write_text('{"text":"marker-abc"}\n')
+        old_env = os.environ.get("FA_WATCH_PROJECTS_DIR")
+        os.environ["FA_WATCH_PROJECTS_DIR"] = str(tmp)
+        try:
+            check("session regex fires",
+                  make_session_probe(sid, regex="marker-abc")(time.time()).detected)
+            check("session regex control silent",
+                  not make_session_probe(sid, regex="nope")(time.time()).detected)
+            old = time.time() - 90
+            os.utime(t, (old, old))
+            log = tmp / "proxy.log"
+            log.write_text("la_proxy_hooks: NVIDIA 429 — model throttle: x cools 30s (1. in a row)\n")
+            p = make_session_probe(sid, stall_s=1.0, proxy_log=str(log))(time.time())
+            check("session stall fires as STALL", p.detected and p.stall, repr(p))
+            check("stall diagnosis names the 429", "NVIDIA 429" in p.evidence, p.evidence)
+            check("missing transcript is cannot_start",
+                  make_session_probe("missing-sid", regex="x")(time.time()).cannot_start)
+        finally:
+            if old_env is None:
+                os.environ.pop("FA_WATCH_PROJECTS_DIR", None)
+            else:
+                os.environ["FA_WATCH_PROJECTS_DIR"] = old_env
+
+        check("cmd true fires", make_cmd_probe("true")(time.time()).detected)
+        check("cmd false control silent", not make_cmd_probe("false")(time.time()).detected)
+
+    if failures:
+        for f in failures:
+            print(f"SELF-TEST FAIL: {f}", file=sys.stderr)
+        print("SELF-TEST FAILED", file=sys.stderr)
+        return 1
+    print("SELF-TEST OK: every predicate fired on a planted positive and stayed silent on its control")
+    return 0
+
+
+# ---------------------------------------------------------------- CLI
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        prog="watch-until",
+        description="Poll a read-only predicate with backoff until it fires or the deadline "
+                    "passes; print one verdict line and exit. For transient waits only — "
+                    "installs nothing, writes nothing outside $TMPDIR.",
+        epilog="exit codes: 0 DETECTED · 1 TIMEOUT · 2 usage · 3 CANNOT_START · 4 STALL\n"
+               "env: FA_WATCH_PROJECTS_DIR — transcript root (default ~/.claude/projects)",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    g = p.add_mutually_exclusive_group()   # required-ness is checked in main: --self-test needs none
+    g.add_argument("--git-tag", nargs=2, metavar=("REPO", "TAG"),
+                   help="detect when origin has TAG (lightweight or annotated)")
+    g.add_argument("--git-refs-change", nargs=1, metavar="REPO",
+                   help="detect when any ref of origin differs from the first snapshot")
+    g.add_argument("--file-regex", nargs=2, metavar=("PATH", "REGEX"),
+                   help="detect when PATH exists and matches REGEX")
+    g.add_argument("--port-listen", type=int, metavar="PORT",
+                   help="detect when something LISTENs on 127.0.0.1:PORT")
+    g.add_argument("--pid-exit", type=int, metavar="PID",
+                   help="detect when PID is gone (or reused: see --proc-start)")
+    g.add_argument("--session-progress", metavar="SESSION_ID",
+                   help="detect a regex in, or a stall of, that session's transcript")
+    g.add_argument("--cmd", metavar="SHELL_TEST", help="detect when SHELL TEST exits 0")
+    p.add_argument("--deadline", default="4h", help="wall-clock cap, e.g. 30s / 10m / 4h (default 4h)")
+    p.add_argument("--min-interval", default="10", help="first poll interval in seconds (default 10)")
+    p.add_argument("--max-interval", default="120", help="backoff cap in seconds (default 120)")
+    p.add_argument("--on-detect", default=None, help="ACTION text appended to the verdict line")
+    p.add_argument("--quiet", action="store_true", help="one verdict line only (default)")
+    p.add_argument("--verbose", action="store_true", help="also print each poll to stderr")
+    p.add_argument("--self-test", action="store_true",
+                   help="plant a positive + control per predicate in a temp dir; non-zero if any "
+                        "predicate cannot fire or any control fires")
+    p.add_argument("--proc-start", type=float, default=None,
+                   help="with --pid-exit: expected start epoch; a differing one means pid reuse")
+    p.add_argument("--regex", default=None, help="with --session-progress: detect this regex")
+    p.add_argument("--stall", default=None,
+                   help="with --session-progress: MINUTES without transcript growth = STALL (exit 4)")
+    p.add_argument("--proxy-log", default=None,
+                   help="with --session-progress --stall: proxy log to diagnose the stall from")
+    return p
+
+
+def main(argv=None):
+    parser = build_parser()
+    # argparse: --help prints and exits 0 here, BEFORE any probe exists; unknown flags exit 2.
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return self_test()
+    if not any([args.git_tag, args.git_refs_change, args.file_regex,
+                args.port_listen is not None, args.pid_exit is not None,
+                args.session_progress, args.cmd]):
+        parser.error("one of the predicates (--git-tag … --cmd) is required")
+    try:
+        deadline_s = parse_duration(args.deadline, "s")
+        min_i = parse_duration(args.min_interval, "s")
+        max_i = parse_duration(args.max_interval, "s")
+        stall_s = parse_duration(args.stall, "m") if args.stall else None
+    except ValueError as err:
+        parser.error(f"invalid duration: {err}")          # exits 2 with usage
+    if not (0 < min_i <= max_i) or deadline_s <= 0:
+        parser.error("need 0 < min-interval <= max-interval and a positive deadline")
+    if args.session_progress and bool(args.regex) == bool(args.stall):
+        parser.error("--session-progress needs exactly one of --regex or --stall")
+
+    if args.git_tag:
+        probe = make_git_tag_probe(args.git_tag[0], args.git_tag[1])
+    elif args.git_refs_change:
+        probe = make_git_refs_probe(args.git_refs_change[0])
+    elif args.file_regex:
+        probe = make_file_regex_probe(args.file_regex[0], args.file_regex[1])
+    elif args.port_listen is not None:
+        probe = make_port_probe(args.port_listen)
+    elif args.pid_exit is not None:
+        probe = make_pid_probe(args.pid_exit, args.proc_start)
+    elif args.session_progress:
+        probe = make_session_probe(args.session_progress, regex=args.regex,
+                                   stall_s=stall_s, proxy_log=args.proxy_log)
+    else:
+        probe = make_cmd_probe(args.cmd)
+
+    def _on_poll(r):
+        print(f"watch-until: poll: {r.evidence}", file=sys.stderr)
+
+    code, line = run_engine(probe, deadline_s=deadline_s, min_interval=min_i,
+                            max_interval=max_i, now=time.monotonic, sleep=time.sleep,
+                            verbose=args.verbose, on_poll=_on_poll)
+    if code in (EXIT_DETECTED, EXIT_STALL) and args.on_detect:
+        line = f"{line} | action: {args.on_detect}"
+    print(line)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
