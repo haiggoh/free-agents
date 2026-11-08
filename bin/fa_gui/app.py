@@ -76,14 +76,18 @@ def build() -> None:
       /* the action item itself is the control (csl parity): hover like a link, click = toggle / ▶ */
       .row-action { cursor: pointer; }
       .row-action:hover { color: #0b57d0 !important; }
-      /* Phase 5 modern presentation: large emoji tile CARDS (user 2026-11-08: bare bigger
-         rows were not the tiles idea) — visible card surface + border + hover, same
-         handlers/targets as menu rows */
-      .tile { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-              border-radius: 10px; font-size: 1.12rem;
+      /* Phase 5 modern presentation (user 2026-11-08): Metro grid — columns+rows, lanes 2x2 /
+         rest 1x1, emoji above wrapping label, card surface; same handlers/targets as rows */
+      .tile-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                   gap: 10px; width: 100%; margin-bottom: 8px; }
+      .tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+              padding: 10px 12px; border-radius: 10px; font-size: 1.0rem; text-align: left;
               background: rgba(0, 0, 0, 0.045) !important; border: 1px solid rgba(0, 0, 0, 0.09) !important; }
+      .tile-lg { grid-column: span 2; grid-row: span 2; }
+      .tile .tile-label { overflow-wrap: anywhere; line-height: 1.2; }
+      .tile .tile-emoji { font-size: 2.2rem; line-height: 1; }
+      .tile-lg .tile-emoji { font-size: 3.2rem; }
       .tile:hover { background: rgba(11, 87, 208, 0.10) !important; border-color: rgba(11, 87, 208, 0.35) !important; }
-      .tile .tile-emoji { font-size: 1.7rem; line-height: 1; }
       body:has(.dark-shell) .tile { background: rgba(255, 255, 255, 0.07) !important; border-color: rgba(255, 255, 255, 0.14) !important; }
       body:has(.dark-shell) .tile:hover { background: rgba(138, 180, 248, 0.14) !important; border-color: rgba(138, 180, 248, 0.4) !important; }
       /* lane pages: fixed-height shell — the model list scrolls internally, the infobox
@@ -197,17 +201,18 @@ def build() -> None:
             return False
 
     def _tile_label(parent, text):
-        """Split a leading emoji off a plain label into a large .tile-emoji span."""
+        """Metro tile content: the emoji LARGE and ABOVE the label (flex column), the label
+        wrapping inside the tile width (.tile-label overflow-wrap)."""
         import html as _html
         parts = str(text).split(" ", 1)
         head, rest = parts[0], (parts[1] if len(parts) > 1 else "")
         if head and any(ord(ch) >= 0x2000 for ch in head):
             with parent:
-                ui.html(f'<span class="tile-emoji">{_html.escape(head)}</span> '
-                        f'<span>{_html.escape(rest)}</span>')
+                ui.html(f'<span class="tile-emoji">{_html.escape(head)}</span>'
+                        f'<span class="tile-label">{_html.escape(rest)}</span>')
         else:
             with parent:
-                ui.label(str(text))
+                ui.label(str(text)).classes("tile-label")
 
     def _binary_target(action, on: bool):
         # the choice whose on-ness matches the request — e.g. thinking (None, False): ON -> None
@@ -235,6 +240,14 @@ def build() -> None:
         collapsed = st.setdefault("collapsed", {"model": True, "settings": True})
         plan = render_plan(scr)
         st["action_ids"] = {c.action_id for c in plan}   # dependent-row detection in _cycle
+        # Phase 5 Metro grid (user 2026-11-08): in modern mode, nav/action rows go into a
+        # responsive tile GRID (columns+rows, lanes 2x2 / rest 1x1, emoji above wrapping label);
+        # cycle/switch rows stay as compact list rows below the grid. Compatibility mode is
+        # untouched (no grid at all).
+        modern = _modern()
+        grid = None
+        if modern:
+            grid = ui.element("div").classes("tile-grid")
         for c in plan:
             action = next((a for a in scr.actions()
                            if (a.id or f"{type(scr).__name__}.{a.key}") == c.action_id), None)
@@ -255,7 +268,12 @@ def build() -> None:
                 boxes[gid] = box
                 continue
             # rows carry their group in c.group — nav/lanes/top rows have "" and stay
-            # top-level, so Back/Switch can never end up hidden inside a folded group
+            # top-level, so Back/Switch can never end up hidden inside a folded group.
+            # Modern mode: nav/action tiles go into the grid; cycles/switches stay list rows.
+            if modern and c.kind in ("nav", "button") and grid is not None:
+                with grid:
+                    _render_row(c, action, st, tile_big=(action is not None and action.section == "lanes"))
+                continue
             target = boxes.get(c.group) if c.group else None
             with (target if target is not None else nullcontext()):
                 _render_row(c, action, st)
@@ -305,7 +323,7 @@ def build() -> None:
             j += 1
         return _rich_html(lbl[j:])
 
-    def _render_row(c, action, st: dict) -> None:
+    def _render_row(c, action, st: dict, tile_big: bool = False) -> None:
             if c.kind in ("select", "toggle") and action is not None and action.step is not None:
                 choices = list(action.choices) if action.choices is not None else []
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
@@ -363,7 +381,8 @@ def build() -> None:
                 # ui.link for real SPA navigation; .menu-item CSS overrides the link look.
                 # Phase 5: modern presentation renders the same link as a large emoji tile.
                 if _modern():
-                    row = ui.link("", f"/{target}").classes("tile menu-item action-row nav-row")
+                    row = ui.link("", f"/{target}").classes(
+                        "tile menu-item action-row nav-row" + (" tile-lg" if tile_big else ""))
                     _tile_label(row, c.label)
                 else:
                     row = ui.link(c.label, f"/{target}").classes("menu-item action-row nav-row")
@@ -371,8 +390,8 @@ def build() -> None:
             else:
                 lbl = action.label if action is not None else None
                 if _modern() and not (lbl is not None and hasattr(lbl, "spans")):
-                    # Phase 5: plain action rows render as large emoji tiles in modern mode
-                    row = ui.row().classes("tile menu-item action-row")
+                    # Phase 5: plain action rows render as Metro tiles in modern mode
+                    row = ui.row().classes("tile menu-item action-row" + (" tile-lg" if tile_big else ""))
                     _tile_label(row, c.label)
                 elif lbl is not None and hasattr(lbl, "spans") and hasattr(lbl, "plain"):
                     # rich label (theme swatch rows): keep the span colors as HTML
@@ -449,8 +468,13 @@ def build() -> None:
         _dark = bool(_doc["dark_mode"])
         if _doc["background_translucent"]:
             _tint = "18, 18, 18" if _dark else "255, 255, 255"
+            # user 2026-11-08: opacity default is capability-dependent — 80% with active
+            # native blur, 95% without (50 was unreadable); an explicit saved value wins
+            _blur_active = (_doc["background_blur_requested"]
+                            and os.environ.get("LA_GUI_NATIVE") == "1")
+            _alpha = _ap.resolve_opacity(_doc, blur_active=_blur_active) / 100
             ui.element("div").props('id="tint-layer"').style(
-                f"background: rgba({_tint}, {_doc['background_opacity_pct'] / 100:.2f})")
+                f"background: rgba({_tint}, {_alpha:.2f})")
         outer = ("w-full max-w-3xl mx-auto p-4 gap-1" + (" lane-shell" if lane else "")
                  + (" dark-shell" if _dark else ""))   # tighter overall spacing (user 2026-11-05)
         with ui.column().classes(outer):
@@ -475,11 +499,23 @@ def build() -> None:
                     crow.props["data-key"] = key
                     ui.label(f"{label}:").classes("cycle-name row-action")
                     left = ui.label("<").classes("cycle-arrow cycle-left")
-                    val = ui.label(str(doc[key])).classes("cycle-value row-action")
+                    _init = (ap.resolve_opacity(doc, blur_active=(bool(doc["background_blur_requested"])
+                                  and os.environ.get("LA_GUI_NATIVE") == "1"))
+                             if key == "background_opacity_pct" else doc[key])
+                    val = ui.label(str(_init)).classes("cycle-value row-action")
                     right = ui.label(">").classes("cycle-arrow cycle-right")
 
                     def _step(d, k=key, v=val, ch=choices, cl=clamp):
-                        cur = ap.load(store)[k]
+                        cur_doc = ap.load(store)
+                        if k == "background_opacity_pct":
+                            # absent = capability-auto: start from the RESOLVED value so the
+                            # first arrow press saves that value +/- the step (user 2026-11-08)
+                            cur = ap.resolve_opacity(
+                                cur_doc,
+                                blur_active=(bool(cur_doc["background_blur_requested"])
+                                             and os.environ.get("LA_GUI_NATIVE") == "1"))
+                        else:
+                            cur = cur_doc.get(k)
                         if cl:
                             nxt = min(ch[-1], max(ch[0], cur + d))
                         else:
@@ -511,7 +547,17 @@ def build() -> None:
                         ui.label("(next launch)").classes("launch-hint text-xs opacity-50")
 
                     def _set(e, k=key, v=val):
-                        ap.save(store, {k: bool(e.value)})
+                        patch = {k: bool(e.value)}
+                        if k == "background_translucent" and e.value:
+                            # user 2026-11-08: blur request defaults ON with translucency,
+                            # unless the user already made an explicit choice
+                            try:
+                                raw = json.loads(store.read_text()) if store.is_file() else {}
+                            except ValueError:
+                                raw = {}
+                            if "background_blur_requested" not in raw:
+                                patch["background_blur_requested"] = True
+                        ap.save(store, patch)
                         v.set_text("ON" if e.value else "OFF")
 
                     ui.checkbox("", value=bool(doc[key]), on_change=_set).classes("switch")
