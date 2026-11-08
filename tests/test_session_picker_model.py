@@ -420,10 +420,10 @@ class GroupingTests(unittest.TestCase):
         self.assertIsInstance(filter_screen, m.Nav)
         # Apply filters on the filter screen
         filter_obj = m.RemoteFiltersScreen(s, owner=m.DIRECT_ROOT)
-        filter_obj._toggle("include_trials")      # hide trials
+        next(a for a in filter_obj.actions() if a.key == "h").step(+1)   # 0.55.6 row step flips      # hide trials
         lane._regroup()
         self.assertNotIn("cerebras", {g.id for g in lane.groups()})
-        filter_obj._toggle("local_capable_shown") # show local-capable
+        next(a for a in filter_obj.actions() if a.key == "f").step(+1)   # 0.55.6 row step flips # show local-capable
         lane._regroup()
         self.assertIn("groq", {g.id for g in lane.groups()})
 
@@ -437,10 +437,10 @@ class GroupingTests(unittest.TestCase):
         self.assertNotIn("nvidia-dead", ids())
         # Navigate to filter submenu and toggle show_broken
         filter_obj = m.RemoteFiltersScreen(lane.settings, owner=m.DIRECT_ROOT)
-        filter_obj._toggle("show_broken")
+        next(a for a in filter_obj.actions() if a.key == "u").step(+1)   # 0.55.6 row step flips
         lane._regroup()
         self.assertIn("nvidia-dead", ids())
-        filter_obj._toggle("show_broken")
+        next(a for a in filter_obj.actions() if a.key == "u").step(+1)   # 0.55.6 row step flips
         lane._regroup()
         self.assertNotIn("nvidia-dead", ids())
 
@@ -676,16 +676,18 @@ class GroupingTests(unittest.TestCase):
         # p never reaches a gateway session (audit 2026-10-08), and its label says so;
         # the state text is what precedes that note. x DOES reach every cloud session (0.27.0).
         def state(key):
-            label = actions[key].label
-            self.assertTrue(label.endswith(m.NOT_GATEWAY_NOTE), label)
-            return label[: -len(m.NOT_GATEWAY_NOTE)].rstrip()
+            # 0.55.6: the note renders AFTER the cycle glyphs (value_suffix), so the label
+            # itself is the state text.
+            self.assertNotIn(m.NOT_GATEWAY_NOTE, actions[key].label)
+            return actions[key].label
 
         # Agent routing row: reaches every cloud session, so it carries no NOT_GATEWAY note.
         self.assertIn("Agent dispatch", actions["x"].label)
         self.assertFalse(actions["x"].label.endswith(m.NOT_GATEWAY_NOTE))
 
-        # Bypass Permissions toggle
+        # Bypass Permissions toggle; its never-reaches-gateway note is in the suffix
         self.assertIn("Bypass Permissions", actions["p"].label)
+        self.assertIn(m.NOT_GATEWAY_NOTE, str(actions["p"].value_suffix))
         self.assertTrue(state("p").endswith("ON") or state("p").endswith("OFF"))
 
         # Bypass Permissions toggle actually toggles
@@ -764,7 +766,7 @@ class LaunchTests(unittest.TestCase):
         lane = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
         # Navigate to filter submenu and hide trials
         filter_obj = m.RemoteFiltersScreen(s, owner=m.DIRECT_ROOT)
-        filter_obj._toggle("include_trials")
+        next(a for a in filter_obj.actions() if a.key == "h").step(+1)   # 0.55.6 row step flips
         lane._regroup()
         self.assertFalse(lane.accordion.select("cerebras-oss"))
 

@@ -125,11 +125,11 @@ class AgeFilterTests(unittest.TestCase):
         filters = m.RemoteFiltersScreen(lane.settings, owner=m.DIRECT_ROOT)
         self.assertIn("o", {a.key for a in filters.actions()})
         self.assertNotIn(f"cat:mistral:{self.OLD}", self.ids(lane, "mistral"))
-        filters._toggle("show_old")
+        next(a for a in filters.actions() if a.key == "o").step(+1)   # 0.55.6 row step flips
         self.assertTrue(lane.settings.show_old)
         lane._regroup()
         self.assertIn(f"cat:mistral:{self.OLD}", self.ids(lane, "mistral"))
-        filters._toggle("show_old")
+        next(a for a in filters.actions() if a.key == "o").step(+1)   # 0.55.6 row step flips
         lane._regroup()
         self.assertNotIn(f"cat:mistral:{self.OLD}", self.ids(lane, "mistral"))
 

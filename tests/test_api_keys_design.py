@@ -229,21 +229,21 @@ class FilterSubmenuTests(unittest.TestCase):
     def test_filter_toggles_change_settings(self):
         """Filter toggles actually change the settings."""
         # Toggle include_trials
-        self.filters._toggle("include_trials")
+        next(a for a in self.filters.actions() if a.key == "h").step(+1)   # 0.55.6 row step flips
         self.assertFalse(self.settings.include_trials)
 
         # Toggle local_capable_shown
-        self.filters._toggle("local_capable_shown")
+        next(a for a in self.filters.actions() if a.key == "f").step(+1)   # 0.55.6 row step flips
         self.assertTrue(self.settings.local_capable_shown)
 
         # Toggle show_broken
-        self.filters._toggle("show_broken")
+        next(a for a in self.filters.actions() if a.key == "u").step(+1)   # 0.55.6 row step flips
         self.assertTrue(self.settings.show_broken)
 
     def test_filter_changes_reflect_in_remote_screen(self):
         """Filter changes in submenu affect remote screen after regroup."""
         # Hide trials in filter submenu
-        self.filters._toggle("include_trials")
+        next(a for a in self.filters.actions() if a.key == "h").step(+1)   # 0.55.6 row step flips
         self.remote._regroup()
 
         # Cerebras is trial, should be hidden now

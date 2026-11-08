@@ -185,11 +185,11 @@ class CloudScreenTests(_Sandbox):
         actions = {a.key: a for a in m.CloudConfigScreen(m.Settings(security_review_offered=True)).actions()}
         # The classifier row (y) left this screen in 0.42.0; p still cannot reach a cloud session.
         self.assertNotIn("y", actions)
-        self.assertIn(m.NOT_GATEWAY_NOTE, actions["p"].label)
+        self.assertIn(m.NOT_GATEWAY_NOTE, str(actions["p"].value_suffix))   # 0.55.6: the note renders after the glyphs
         # s (security review) and x (replace subagents, 0.27.0) live in settings.json env, so they
         # DO reach every cloud session and must not carry the note.
         for key in ("s", "x"):
-            self.assertNotIn(m.NOT_GATEWAY_NOTE, actions[key].label, key)
+            self.assertNotIn(m.NOT_GATEWAY_NOTE, str(getattr(actions[key], "value_suffix", None) or ""), key)
 
     def test_replace_agents_round_trips_through_settings_json(self):
         import tempfile

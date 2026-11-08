@@ -123,7 +123,7 @@ class ApiGroupStructureTests(unittest.TestCase):
         self.assertIn("nvidia:vendor/t", [i.id for i in nvidia.items])
         self.assertFalse(lk._remote_filters)
         # toggle ON -> exactly the Remote screen's visible set for the same roster
-        lk._toggle_remote_filters()
+        next(a for a in lk.actions() if a.key == "f").step(+1)   # 0.55.6 row step flips
         self.assertTrue(lk._remote_filters)
         self.assertTrue(s.lowkey_remote_filters)
         self.assertEqual(saved, [("remote_filters", True)])
@@ -135,7 +135,7 @@ class ApiGroupStructureTests(unittest.TestCase):
         self.assertEqual(pinned_shown, remote_visible)
         self.assertNotIn("nvidia:vendor/t", shown)
         # keyless/hidden stay absent even with filters OFF (always-on rules)
-        lk._toggle_remote_filters()
+        next(a for a in lk.actions() if a.key == "f").step(+1)   # 0.55.6 row step flips
         shown_off = {i.id for g in subgroups(api_group(lk)) for i in g.items}
         self.assertFalse(any("hiddenprov" in i for i in shown_off))
 
