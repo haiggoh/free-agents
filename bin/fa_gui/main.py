@@ -94,9 +94,11 @@ def main(argv: list[str]) -> int:
                   show_welcome_message=False)
     if args.browser:
         print(f"free-agents-gui: serving http://{HOST}:{port}", flush=True)
-        ui.run(**common)
+        ui.run(**common)   # NO window_args in browser mode — nothing here implies desktop blur
     else:
-        ui.run(native=True, window_size=(1100, 950), **common)   # taller default: room for >=4 list rows (user 2026-11-05)
+        # Phase 6: translucent/vibrancy come from the GUI appearance store, native mode only
+        from fa_gui.appearance import native_window_args
+        ui.run(native=True, window_size=(1100, 950), window_args=native_window_args(), **common)   # taller default: room for >=4 list rows (user 2026-11-05)
     return 0
 
 
