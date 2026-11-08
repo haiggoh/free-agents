@@ -148,6 +148,51 @@ def _hf_cache_path() -> pathlib.Path:
     return pathlib.Path(root) / "free-agents" / "hf-params.json"
 
 
+def _hf_api_base() -> str:
+    """0.55.8 Task 1 (0541 plan Item A): HF_API honoring LA_HF_API_BASE (tests and dogfood
+    point it at a loopback fake). A SET but invalid value raises naming the variable — an
+    explicit override must never fall through to the default silently."""
+    import os
+    base = os.environ.get("LA_HF_API_BASE")
+    if base is not None and not (base.startswith("http://127.0.0.1:") or base.startswith("https://")):
+        raise ValueError(f"LA_HF_API_BASE={base!r} must start with http://127.0.0.1: or https://")
+    return base or HF_API
+
+
+def _hf_cache_store(key: str, entry: dict) -> None:
+    """0.55.8 Task 1 (0541 plan Item A): the ONLY writer of the HF params cache. Takes an
+    exclusive flock on <cache>.lock, RE-READS the file under the lock, sets key, writes a
+    unique tmp (<cache>.<pid>.<thread>.tmp) and os.replace — concurrent warm-ups can no
+    longer lose each other's entries or collide on one fixed tmp name. A corrupt existing
+    file is treated as {} but PRESERVED as <cache>.corrupt-<ts>, never silently discarded.
+    A read-only cache costs a lookup, never a verdict."""
+    import fcntl
+    import os
+    import threading
+    cache_path = _hf_cache_path()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = cache_path.with_suffix(".lock")
+    with open(lock_path, "a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                raw = cache_path.read_text(encoding="utf-8")
+                cache = json.loads(raw) if raw.strip() else {}
+                if not isinstance(cache, dict):
+                    raise ValueError("cache is not a JSON object")
+            except FileNotFoundError:
+                cache = {}
+            except (ValueError, json.JSONDecodeError):
+                cache_path.rename(cache_path.with_name(f"{cache_path.name}.corrupt-{int(time.time())}"))
+                cache = {}
+            cache[key] = entry
+            tmp = cache_path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(cache, indent=1, sort_keys=True))
+            os.replace(tmp, cache_path)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 class HFError:
     """0.54.0: a classified HF failure — the cache rules distinguish `network` (TLS/timeout/
     DNS: must NEVER be cached as an answer) from `http` with a status (401/404 = a real
@@ -240,7 +285,7 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
     saw_transient_http = False
     saw_negative_http = False
     if "/" in model_id:
-        obj = _hf_get(f"{HF_API}/{quote(model_id, safe='/')}?expand[]=safetensors&expand[]=createdAt", timeout)
+        obj = _hf_get(f"{_hf_api_base()}/{quote(model_id, safe='/')}?expand[]=safetensors&expand[]=createdAt", timeout)
         if isinstance(obj, HFError):
             if obj.kind == "network":
                 saw_network_error = True
@@ -253,7 +298,7 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
             created = obj.get("createdAt")
     if total is None:
         tail = model_id.split("/")[-1]
-        found = _hf_get(f"{HF_API}?search={quote(tail)}&limit=50"
+        found = _hf_get(f"{_hf_api_base()}?search={quote(tail)}&limit=50"
                         f"&expand[]=safetensors&expand[]=createdAt", timeout)
         if isinstance(found, HFError):
             if found.kind == "network":
@@ -293,11 +338,15 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
         cache[key] = {"v": 2, "total": None, "repo": repo, "created": created,
                       "at": now, "neg_until": now + NEG_CACHE_TTL_S}
     if not (saw_network_error or saw_transient_http):
+        # 0.55.8 Task 1: the only write goes through the locked re-reading store.
+        entry = cache[key] if key in cache else None
+        if entry is None:
+            entry = {"v": 2, "total": total, "repo": repo, "created": created,
+                     "at": now}
+            if total is None and not (isinstance(hit, dict) and hit.get("v") == 2 and hit.get("total") is None):
+                entry["neg_until"] = now + NEG_CACHE_TTL_S
         try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = cache_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(cache, indent=1, sort_keys=True))
-            tmp.replace(cache_path)
+            _hf_cache_store(key, entry)
         except OSError:
             pass                          # a read-only cache costs a lookup, never a verdict
     return total, repo
