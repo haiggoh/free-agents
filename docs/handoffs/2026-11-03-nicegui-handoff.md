@@ -49,6 +49,7 @@ is labels-only. Tasks 5–10 deliver clickable typed controls, hover/info, async
 
 ## Progress
 - (successor: append here)
+- 2026-11-07/08 (session 59b0e622, Mistral Large 4) — continuation-plan Phases 0-8 executed and pushed (b6cf1e4..ffe496b): nav metadata, per-client state + loader coalescing, keyboard + dependent rows, appearance store + theme UI, modern tiles, translucency config, dark tokens. Final gates: non-browser 135/2, GUI-venv 69/266 (playwright 22/22). 10 mutation checks red-verified. Two cross-family review dispatches; receipts in docs/gui/QUALIFICATION.md. NOT TESTED: native blur visual, Linux, clean Mac (waypointed). Remaining: P7 Linux qualification (gated on hardware), CycleSetting component extraction (optional refactor).
 - 2026-11-07 (session 59b0e622, Mistral Large 4, free lane) — continuation-plan Phase 0 reconcile
   (`~/.claude/plans/Execution plan — Free Agents NiceGUI continuation_ …md`): worktree
   `~/ClaudeWorkspace/.wt/fa-nicegui` clean at `d560acd` = origin/feat/nicegui-frontend; branch is
