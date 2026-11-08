@@ -441,7 +441,16 @@ class GuiPlaywrightTests(unittest.TestCase):
         # Phase 4 UI: the theme screen carries a GUI-only appearance section bound to the
         # appearance store — presentation cycle, translucency switch, opacity cycle (50..100,
         # clamped), blur-request switch. Persists across reload; never touches the semantic
-        # session-menu store.
+        # session-menu store. Self-contained: pin the store to defaults first (other tests
+        # in this class flip presentation and share the one app).
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+        app_file.write_text(json.dumps({"schema_version": 1, "presentation": "compatibility"}))
+        try:
+            self._theme_appearance_checks(app_file)
+        finally:
+            app_file.write_text(json.dumps({"schema_version": 1, "presentation": "compatibility"}))
+
+    def _theme_appearance_checks(self, app_file):
         p = self.page()
         p.goto(self.app.base + "/theme_config")
         p.wait_for_selector('.appearance-row[data-key="presentation"]', timeout=180000)
@@ -488,27 +497,31 @@ class GuiPlaywrightTests(unittest.TestCase):
         # Phase 5: presentation=modern swaps menu rows for emoji tiles but keeps the SAME
         # targets/dispatch — a nav tile navigates exactly like the compat nav row.
         app_file = Path(self.app.tmp.name) / "gui-appearance.json"
-        app_file.write_text(json.dumps({"schema_version": 1, "presentation": "modern"}))
-        p = self.page()                      # home in modern mode
-        tiles = p.locator(".tile")
-        tiles.first.wait_for(state="visible", timeout=180000)
-        modern_targets = sorted(t.get_attribute("data-target") or "" for t in tiles.all())
-        p.close()
-        app_file.write_text(json.dumps({"schema_version": 1, "presentation": "compatibility"}))
-        p2 = self.page()                     # home in compat mode
-        rows = p2.locator(".nav-row")
-        rows.first.wait_for(state="visible", timeout=180000)
-        compat_targets = sorted(r.get_attribute("data-target") or "" for r in rows.all())
-        p2.close()
-        self.assertEqual(modern_targets, compat_targets,
-                         "modern tiles must expose the same nav targets as compat rows")
-        # and a tile click navigates
-        app_file.write_text(json.dumps({"schema_version": 1, "presentation": "modern"}))
-        p3 = self.page()
-        p3.locator('.tile[data-target="remote"]').first.click()
-        p3.wait_for_selector(".gui-search input", timeout=180000)
-        self.assertIn("/remote", p3.url)
-        p3.close()
+        defaults = json.dumps({"schema_version": 1, "presentation": "compatibility"})
+        try:
+            app_file.write_text(json.dumps({"schema_version": 1, "presentation": "modern"}))
+            p = self.page()                  # home in modern mode
+            tiles = p.locator(".tile")
+            tiles.first.wait_for(state="visible", timeout=180000)
+            modern_targets = sorted(t.get_attribute("data-target") or "" for t in tiles.all())
+            p.close()
+            app_file.write_text(defaults)
+            p2 = self.page()                 # home in compat mode
+            rows = p2.locator(".nav-row")
+            rows.first.wait_for(state="visible", timeout=180000)
+            compat_targets = sorted(r.get_attribute("data-target") or "" for r in rows.all())
+            p2.close()
+            self.assertEqual(modern_targets, compat_targets,
+                             "modern tiles must expose the same nav targets as compat rows")
+            # and a tile click navigates
+            app_file.write_text(json.dumps({"schema_version": 1, "presentation": "modern"}))
+            p3 = self.page()
+            p3.locator('.tile[data-target="remote"]').first.click()
+            p3.wait_for_selector(".gui-search input", timeout=180000)
+            self.assertIn("/remote", p3.url)
+            p3.close()
+        finally:
+            app_file.write_text(defaults)   # never leak presentation into other tests
 
 
 class GuiStaleTests(unittest.TestCase):
