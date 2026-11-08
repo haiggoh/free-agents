@@ -470,7 +470,7 @@ def build() -> None:
         _doc = _ap.load(_ap.store_path())
         _dark = bool(_doc["dark_mode"])
         if _doc["background_translucent"]:
-            _tint = "18, 18, 18" if _dark else "255, 255, 255"
+            _tint = "20, 20, 20" if _dark else "255, 255, 255"   # dark tint = dealt ink #141414
             # user 2026-11-08: opacity default is capability-dependent — 80% with active
             # native blur, 95% without (50 was unreadable); an explicit saved value wins
             _blur_active = (_doc["background_blur_requested"]
