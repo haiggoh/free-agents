@@ -595,6 +595,20 @@ def model_display_label(model_alias: str) -> str:
     return label or model_alias
 
 
+def api_display_label(provider: str, model_id: str) -> str:
+    """0.55.8 Task 4 (0541 plan Item C): the API assistant's label is the model's READABLE
+    name — the same source the picker rows use (model_names.readable) — never the local-alias
+    shortener, which truncated 'mistralai/mistral-large-4-1t-a52b' to 'mistralai'. No model
+    id (roster-only provider) labels with the provider name."""
+    if model_id:
+        try:
+            import model_names
+            return model_names.readable(model_id)
+        except Exception:
+            return model_id
+    return provider
+
+
 def history_char_count(history: list) -> int:
     """Return a conservative character count for retained raw messages."""
     return sum(len(turn.get("content", "")) for turn in history)
@@ -1010,7 +1024,7 @@ def main():
     # local default alias (that is why an API launch used to show/ resume as "qwen").
     if API_PROVIDER:
         session_model = f"{API_PROVIDER}:{API_MODEL}"
-        assistant_label = model_display_label(API_MODEL or API_PROVIDER)
+        assistant_label = api_display_label(API_PROVIDER, API_MODEL)
     else:
         session_model = args.model
         assistant_label = model_display_label(args.model)
