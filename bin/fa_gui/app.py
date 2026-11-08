@@ -219,6 +219,7 @@ def build() -> None:
             with body:
                 render_rows(scr2, st)
         st["rerender"] = _rerender
+        st["nav"] = nav
 
     def render_rows(scr, st: dict) -> None:
         # csl parity (m.rendered_actions): lane screens fold model/settings rows under two
@@ -226,7 +227,9 @@ def build() -> None:
         # both folded by default. The GUI keeps the rows in the DOM and folds with display:none.
         boxes: dict = {}
         collapsed = st.setdefault("collapsed", {"model": True, "settings": True})
-        for c in render_plan(scr):
+        plan = render_plan(scr)
+        st["action_ids"] = {c.action_id for c in plan}   # dependent-row detection in _cycle
+        for c in plan:
             action = next((a for a in scr.actions()
                            if (a.id or f"{type(scr).__name__}.{a.key}") == c.action_id), None)
             if c.kind == "group":
@@ -323,6 +326,7 @@ def build() -> None:
                     # csl order: <name>: < value >  — arrow between end of item and the state
                     name = (action.name or action.label.split(":")[0]) if action else c.label
                     with ui.row().classes("cycle-row items-center gap-1 w-full") as crow:
+                        crow.props["data-action"] = c.action_id   # stable row identity across rerenders
                         name_lbl = ui.label(f"{name}:").classes("cycle-name row-action")
                         left = ui.label("<").classes("cycle-arrow cycle-left")
                         val_html = _label_value_html(action) if action is not None else None
@@ -396,11 +400,20 @@ def build() -> None:
     def _cycle(action, val, d: int, st: dict) -> None:
         if action.step:
             action.step(d)
-        if action is not None and getattr(action, "value", None) is None and st.get("rerender"):
-            # untyped stepper: its label embeds the value and is stale after the step —
-            # rebuild the page's rows from a fresh screen so the label (and dependents) update
-            st["rerender"]()
-            return
+        nav = st.get("nav")
+        if st.get("rerender") and nav is not None:
+            # Rebuild ONLY when the fresh screen's RENDERED control set differs — dependent
+            # rows (Classifier exists only while auto_mode == classifier) require the rebuild,
+            # while a pure value cycle updates the label in place (keeps focus, no flicker).
+            # Compare render_plan-to-render_plan: the plan synthesizes group rows and drops
+            # hidden/pending ones, so raw actions() would ALWAYS differ (rerender every key).
+            fresh_scr = pc.build_screen(nav, get_settings(), loader.cache).screen
+            fresh_ids = {c.action_id for c in render_plan(fresh_scr)}
+            if fresh_ids != st.get("action_ids"):
+                st["rerender"]()
+                return
+        # in-place label update (also covers untyped steppers whose label embeds the value
+        # only when no rerender is wired; with rerender wired, a changed id set rebuilds)
         html = _label_value_html(action) if action is not None else None
         if html is not None and not hasattr(val, "set_text"):
             val.clear()                       # rich value: rebuild the swatch HTML

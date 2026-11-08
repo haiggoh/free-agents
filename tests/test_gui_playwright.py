@@ -523,6 +523,40 @@ class GuiPlaywrightTests(unittest.TestCase):
         finally:
             app_file.write_text(defaults)   # never leak presentation into other tests
 
+    def test_dependent_row_appears_after_typed_cycle(self):
+        # Phase 3 remainder: the Classifier row exists in the model ONLY while auto_mode == 1,
+        # so stepping Auto-mode to "classifier" must re-render the screen (csl parity) and
+        # the row must appear — and disappear again when stepping back.
+        p = self.page()
+        p.goto(self.app.base + "/remote")
+        p.wait_for_selector(".gui-search input", timeout=240000)
+        self.open_groups(p)
+        def auto_row():
+            # rerender rebuilds the rows — re-query by the STABLE data-action id every time,
+            # never by text (text matching can latch onto a different row after a rebuild)
+            return p.locator('.cycle-row[data-action="RemoteScreen.a"]').first
+        def classifier_count():
+            return p.locator('.cycle-row', has_text="Classifier:").count()
+        auto_row().wait_for(state="visible", timeout=240000)
+        self.assertEqual(classifier_count(), 0,
+                         "classifier row hidden while auto-mode is not 'classifier'")
+        for _ in range(3):
+            auto_row().locator(".cycle-right").click()
+            p.wait_for_timeout(700)
+            if classifier_count() > 0:
+                break
+        self.assertGreater(classifier_count(), 0,
+                           "classifier row must appear after auto-mode steps to classifier")
+        # step back: row disappears again
+        for _ in range(3):
+            auto_row().locator(".cycle-left").click()
+            p.wait_for_timeout(700)
+            if classifier_count() == 0:
+                break
+        self.assertEqual(classifier_count(), 0,
+                         "classifier row must disappear when auto-mode leaves classifier")
+        p.close()
+
     def test_dark_mode_tokens_differ_from_light(self):
         # Phase 8: dark_mode=true applies dark semantic tokens (body bg/text, menu-item,
         # hover, arrows, tint tinted dark). Computed styles must DIFFER from light mode —
