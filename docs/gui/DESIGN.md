@@ -23,3 +23,12 @@ Critique notes (why A over B):
 Environment note (2026-11-04): NiceGUI's first import + bind takes minutes on this loaded
 shared box — `shoot.py` polls the port instead of a fixed sleep; a bare `ui.run(...)` without
 `reload=False, show_welcome_message=False, host=127.0.0.1` hangs silently in a headless shell.
+
+Accordion/fold policy (continuation plan Phase 3, recorded 2026-11-08): lane screens fold
+their two groups (Model settings, Advanced) INDEPENDENTLY — sibling groups do not mutually
+exclude (multi-open is allowed, matching the Textual accordion's per-group behavior on the
+current branch); nav rows always render last and are never folded; model-list provider headers
+inside the (hidden-until-chosen) list are a separate per-provider open set. GUI fold state is
+per-client (keyed by websocket client id) and persists per tab across navigations. The GUI
+keeps folded rows in the DOM and folds with display:none, unlike csl which omits them from its
+list — the DOM approach is what lets search/highlight see them.
