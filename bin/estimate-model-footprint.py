@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import sys
@@ -154,9 +155,12 @@ def _hf_api_base() -> str:
     explicit override must never fall through to the default silently."""
     import os
     base = os.environ.get("LA_HF_API_BASE")
-    if base is not None and not (base.startswith("http://127.0.0.1:") or base.startswith("https://")):
-        raise ValueError(f"LA_HF_API_BASE={base!r} must start with http://127.0.0.1: or https://")
-    return base or HF_API
+    if base is not None:
+        if not (base.startswith("http://127.0.0.1:") or base.startswith("https://")):
+            raise ValueError(f"LA_HF_API_BASE={base!r} must start with http://127.0.0.1: or https://")
+        # the override replaces the ORIGIN; the /api/models path stays (same shape as HF_API)
+        return base.rstrip("/") + "/api/models"
+    return HF_API
 
 
 def _hf_cache_store(key: str, entry: dict) -> None:
@@ -598,6 +602,62 @@ def apply_to_policy(path: str, updates: list, *, dry_run: bool = False) -> dict:
     return result
 
 
+HF_WARM_REQUEST_CAP = 200      # a finisher never hammers HF (0541 plan, bounded-orphan rule)
+
+
+def _run_hf_warm(ids_file: str, max_seconds: int, cache_override: str | None) -> int:
+    """0.55.8 Task 2 (0541 plan Item A): the detached warm finisher. Bounded by ONE lock
+    (a second instance prints 'already warming' and exits 0), a hard time cap and a
+    200-request cap; the picker hands it its RESOLVED cache path as --hf-cache AND as
+    LA_HF_PARAMS_CACHE (R6). Writes a one-line JSON outcome to <cache dir>/hf-warm-last.json
+    (R7) so the next picker open can surface a failure."""
+    import fcntl
+    cache_path = pathlib.Path(cache_override) if cache_override else _hf_cache_path()
+    if cache_override:
+        os.environ["LA_HF_PARAMS_CACHE"] = str(cache_path)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    ids = json.loads(pathlib.Path(ids_file).read_text(encoding="utf-8"))
+    lock_path = cache_path.with_suffix(".warm.lock")
+    with open(lock_path, "a+b") as lf:
+        try:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("already warming")
+            return 0
+        t0 = time.monotonic()
+        hits = 0
+        sized = 0
+        err = None
+        remaining = []
+        orig_get = _hf_get
+        def counting_get(url, timeout):
+            nonlocal hits
+            hits += 1
+            return orig_get(url, timeout)
+        globals()["_hf_get"] = counting_get
+        try:
+            for mid in ids:
+                if time.monotonic() - t0 > max_seconds or hits >= HF_WARM_REQUEST_CAP:
+                    remaining.append(mid)
+                    continue
+                try:
+                    total, _repo = hf_total_params(mid, timeout=8.0)
+                    if total is not None:
+                        sized += 1
+                except Exception as exc:
+                    err = f"{type(exc).__name__}: {exc}"
+                on_disk = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+                if mid not in on_disk:
+                    remaining.append(mid)
+        finally:
+            globals()["_hf_get"] = orig_get
+        outcome = {"sized": sized, "remaining": remaining, "requests": hits,
+                   "error": err, "at": time.time()}
+        (cache_path.parent / "hf-warm-last.json").write_text(json.dumps(outcome))
+        print(json.dumps(outcome))
+        return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Estimate a remote model's local RAM footprint from its id, and flag "
@@ -630,7 +690,22 @@ def main() -> int:
                              "(backs it up first; needs --roster and --policy)")
     parser.add_argument("--apply-dry-run", action="store_true",
                         help="show exactly what --apply would change, without writing")
+    # 0.55.8 Task 2 (0541 plan Item A): the detached warm finisher mode. Args are parsed
+    # BEFORE anything runs; an unknown flag exits 2 via argparse; --help documents them.
+    parser.add_argument("--hf-warm", metavar="IDS_JSON",
+                        help="finisher mode: warm the HF cache for the ids in IDS_JSON "
+                             "(a JSON list) and exit; one lock (<cache>.warm.lock), capped "
+                             "by --max-seconds and 200 requests, outcome to "
+                             "<cache dir>/hf-warm-last.json")
+    parser.add_argument("--max-seconds", type=int, default=120,
+                        help="finisher time cap in seconds (default 120)")
+    parser.add_argument("--hf-cache", metavar="PATH",
+                        help="finisher: write to this cache file (also exported as "
+                             "LA_HF_PARAMS_CACHE); default: the resolved cache path")
     args = parser.parse_args()
+
+    if args.hf_warm:
+        return _run_hf_warm(args.hf_warm, args.max_seconds, args.hf_cache)
 
     if args.model_id and not args.roster:
         result = estimate(args.model_id, args.quant, args.budget_gb, args.kv_overhead_gb,

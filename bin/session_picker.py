@@ -20,10 +20,12 @@ Invoked through the bin/session-picker wrapper (never by typing a python path):
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -314,24 +316,138 @@ def catalog_model_old(provider, model_id):
     return _memoized_verdict("old", model_id, compute)
 
 
-def _warm_hf_cache(model_ids):
-    """Fill the HF cache (parameter count + createdAt date) for catalog ids (loader thread).
+def _warm_order(provider: str, ids: list) -> list:
+    """0.55.8 Task 2 (0541 plan Item A): unsized ids first — ids whose name states no
+    parameter count go to the front; catalog order is kept within each half."""
+    unsized, sized = [], []
+    for mid in ids:
+        try:
+            if model_param_count(provider, mid) is None:
+                unsized.append(mid)
+            else:
+                sized.append(mid)
+        except Exception:
+            unsized.append(mid)
+    return unsized + sized
 
-    Every id is warmed up to the per-provider cap: the age filter needs a date for sized
-    ids too, not only for the ones that state no count. Fresh entries answer from the
-    cache and cost no network."""
+
+def _hf_warm_workers() -> int:
+    """LA_PICKER_HF_WARM_WORKERS, int 1-8, default 4. A SET but invalid value shows one error
+    status line and falls back to serial — never a silent default."""
+    raw = os.environ.get("LA_PICKER_HF_WARM_WORKERS", "4")
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 0
+    if not 1 <= n <= 8:
+        print(f"session-picker: LA_PICKER_HF_WARM_WORKERS={raw!r} invalid (want int 1-8); "
+              "warming serially", file=sys.stderr)
+        return 1
+    return n
+
+
+def _warm_hf_cache(provider, model_ids, stop=None):
+    """Fill the HF cache (parameter count + createdAt date) for catalog ids.
+
+    0.55.8 Task 2 (0541 plan Item A): unsized ids first (_warm_order), a bounded worker
+    pool (HF_WARM_WORKERS), and the ids NOT yet attempted when `stop` is set are RETURNED
+    so the exit hand-off can spawn the finisher for them (R2/R5)."""
     try:
         fp = _footprint()
     except Exception:
-        return
-    for mid in model_ids:
-        fp.hf_total_params(mid, timeout=4.0)
+        return list(model_ids)
+    ids = _warm_order(provider, list(model_ids))
+    attempted = set()
+    lock = threading.Lock()
+    if stop is None:
+        stop = threading.Event()
+
+    def work(mid):
+        with lock:
+            attempted.add(mid)
+        if stop.is_set():
+            return
+        try:
+            fp.hf_total_params(mid, timeout=4.0)
+        except Exception:
+            pass
         # A verdict computed while the cache was still cold (fail-open) must not outlive
-        # the warm-up: the first paint often hydrates DISK rows before the fetch lands
-        # (review finding 1, 2026-10-28).
-        _VERDICT_MEMO.pop(("old", mid), None)
-        _VERDICT_MEMO.pop(("cap", mid), None)
-        _VERDICT_MEMO.pop(("params", mid), None)
+        # the warm-up (review finding 1, 2026-10-28).
+        for k in ("old", "cap", "params"):
+            _VERDICT_MEMO.pop((k, mid), None)
+
+    workers = min(_hf_warm_workers(), max(1, len(ids)))
+    if workers <= 1:
+        for mid in ids:
+            if stop.is_set():
+                break
+            work(mid)
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(work, mid) for mid in ids]
+            for f in futures:
+                if stop.is_set():
+                    break
+                try:
+                    f.result(timeout=0.1)
+                except Exception:
+                    pass
+    return [mid for mid in ids if mid not in attempted]
+
+
+def warm_status_line():
+    """R7: the last finisher's outcome file, as ONE status line — only when it failed or
+    left ids unsized (a clean outcome stays silent)."""
+    try:
+        fp = _footprint()
+        p = Path(fp._hf_cache_path()).parent / "hf-warm-last.json"
+        if not p.exists():
+            return None
+        out = json.loads(p.read_text())
+        remaining = out.get("remaining") or []
+        if out.get("error") or remaining:
+            tail = f" ({out['error']})" if out.get("error") else ""
+            return (f"  HF size warm-up unfinished: {len(remaining)} id(s) handed to the "
+                    f"background finisher{tail}")
+    except Exception:
+        return None
+    return None
+
+
+def _spawn_warm_finisher(remaining) -> bool:
+    """0.55.8 Task 2 (0541 plan Item A, R2/R6): hand the unattempted ids to a bounded
+    DETACHED finisher (own session — survives the picker's exit). Writes the id list to
+    <cache dir>/hf-warm-pending.json and starts
+    [sys.executable, estimate-model-footprint.py, --hf-warm, <file>, --max-seconds, 120,
+     --hf-cache, <the picker's RESOLVED cache path>] with the same path in its env,
+    stdout/stderr to <cache dir>/hf-warm.log. Returns False when warm-up is disabled
+    (LA_PICKER_HF_LOOKUP=0) or nothing remains."""
+    import subprocess
+    if os.environ.get("LA_PICKER_HF_LOOKUP", "1") == "0" or not remaining:
+        return False
+    try:
+        fp = _footprint()
+        cache_path = Path(fp._hf_cache_path()).resolve()
+    except Exception:
+        return False
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    pending = cache_path.parent / "hf-warm-pending.json"
+    pending.write_text(json.dumps(list(remaining)))
+    log = open(cache_path.parent / "hf-warm.log", "ab")
+    try:
+        subprocess.Popen(
+            [sys.executable, str(BIN / "estimate-model-footprint.py"),
+             "--hf-warm", str(pending), "--max-seconds", "120",
+             "--hf-cache", str(cache_path)],
+            start_new_session=True, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=log,
+            env={**os.environ, "LA_HF_PARAMS_CACHE": str(cache_path)})
+        return True
+    except Exception:
+        return False
+    finally:
+        log.close()
 
 
 def load_remote_catalog(kind):
@@ -837,6 +953,9 @@ class Picker(App):
                 Binding("super+c", "copy_selection", "Copy", show=False, priority=True)]
 
     def __init__(self, start: str, flags: argparse.Namespace):
+        self._warm_pending = set()          # 0.55.8 Task 2: catalog ids a warm thread was given
+        self._warm_run_start = time.time()  # entries older than this are not "fresh" (R5)
+        self._warm_finisher_started = False # R2: the hand-off runs at most once
         # Through the constructor, never a class attribute: Textual 3.7.1's App.__init__ does
         # `self.driver_class = driver_class or self.get_driver_class()`, which overwrote the
         # class attribute 786d487 set, so Apple Terminal still got LinuxDriver (stray `p`).
@@ -1072,6 +1191,44 @@ class Picker(App):
             self._bg_threads.append(t)
             t.start()
 
+    def _handoff_warm_finisher(self):
+        """0.55.8 Task 2 (R2/R5): ONE idempotent hand-off, registered for the quit action,
+        atexit, SIGHUP and SIGTERM. Stops the warm pool, then hands every tracked catalog id
+        with NO cache entry to the detached finisher (R5: re-derived from the cache, so
+        in-flight writes that landed count as done). Never joins a network call (R4)."""
+        if self._warm_finisher_started:
+            return
+        self._warm_finisher_started = True
+        if os.environ.get("LA_PICKER_HF_LOOKUP", "1") == "0":
+            return                               # warm-up disabled: spawn nothing
+        try:
+            if self._bg_stop is not None:
+                self._bg_stop.set()
+            deadline = time.monotonic() + 0.8      # R4: the hand-off never waits on network
+            for t in getattr(self, "_bg_threads", []):
+                if t.is_alive():
+                    try:
+                        t.join(timeout=max(0.0, deadline - time.monotonic()))
+                    except Exception:
+                        pass
+            try:
+                fp = _footprint()
+                cache_path = Path(fp._hf_cache_path())
+                on_disk = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+            except Exception:
+                on_disk = {}
+            remaining = [mid for mid in self._warm_pending if mid.lower() not in on_disk]
+            _spawn_warm_finisher(remaining)
+        except Exception:
+            pass
+
+    def _maybe_warm_status(self):
+        """R7: one status line when the last finisher outcome was a failure or left ids."""
+        note = warm_status_line()
+        if note:
+            self.state_notices.append(note)
+            self.render_model()
+
     def stop_background(self, timeout: float = 5.0):
         """0.53.0: signal and join the daemon background threads (About stats, hw detect,
         prefetch, catalog warm-up). Call after run_test() exits, BEFORE any temp-dir cleanup —
@@ -1219,15 +1376,18 @@ class Picker(App):
                 and os.environ.get("LA_PICKER_HF_LOOKUP", "1") != "0"):
             ids = [c.model_id for c in data][:HF_WARM_LIMIT]
             import threading
-            t = threading.Thread(target=self._warm_catalog_bg, args=(ids,), daemon=True)
+            prov = kind.split(":", 1)[1] if kind.startswith("rcat:") else "remote"
+            t = threading.Thread(target=self._warm_catalog_bg, args=(prov, ids), daemon=True)
             self._bg_threads.append(t)      # 0.53.0: tracked for stop_background()
             t.start()
 
-    def _warm_catalog_bg(self, model_ids):
-        """HF size/age warm-up for a landed catalog, in the background (0.50.8). Re-renders
-        when it finishes so the parameter sizes paint in — without having delayed the rows."""
+    def _warm_catalog_bg(self, provider, model_ids):
+        """HF size/age warm-up for a landed catalog, in the background (0.50.8; 0.55.8 Task 2:
+        unsized first, bounded pool, and the ids are tracked in _warm_pending so the exit
+        hand-off can finish what this run did not attempt). Re-renders when it finishes."""
+        self._warm_pending.update(model_ids)
         try:
-            _warm_hf_cache(model_ids)
+            _warm_hf_cache(provider, model_ids, stop=self._bg_stop)
         except Exception:
             return
 
@@ -2006,7 +2166,7 @@ class Picker(App):
                         self._warmed_providers.add(prov)
                         import threading
                         ids = [c.model_id for c in rows][:HF_WARM_LIMIT]
-                        t = threading.Thread(target=self._warm_catalog_bg, args=(ids,), daemon=True)
+                        t = threading.Thread(target=self._warm_catalog_bg, args=(prov, ids), daemon=True)
                         self._bg_threads.append(t)
                         t.start()
                 changed = True
@@ -2880,6 +3040,7 @@ class Picker(App):
         self.action_quit_now()
 
     def action_quit_now(self):
+        self._handoff_warm_finisher()       # 0.55.8 Task 2 R2: hand off before exiting
         self.exit(130)
 
     # 0.54.0 copy-on-select: ONE app-level handler — a COMPLETED drag selection (mouse up
@@ -2932,7 +3093,19 @@ def main(argv):
               file=sys.stderr)
         return 2
     start = "rate_limiter" if args.screen == "rate-limiter" else args.screen
-    rc = Picker(start, args).run()
+    app = Picker(start, args)
+    # 0.55.8 Task 2 (R2): every exit route hands the unfinished warm-up to the finisher —
+    # quit key, window close (SIGHUP), SIGTERM, and plain atexit — idempotently.
+    import atexit as _atexit
+    import signal as _signal
+    _atexit.register(app._handoff_warm_finisher)
+    def _handoff_signal(signum, frame):
+        app._handoff_warm_finisher()
+        _signal.signal(signum, _signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    _signal.signal(_signal.SIGHUP, _handoff_signal)
+    _signal.signal(_signal.SIGTERM, _handoff_signal)
+    rc = app.run()
     return rc or 0
 
 

@@ -179,8 +179,8 @@ class WarmupTriggerTests(PilotCase):
         self.addCleanup(self._restore_lookup)
         self.warm_calls = []
         orig = sp._warm_hf_cache
-        def spy(ids):
-            self.warm_calls.append(list(ids))
+        def spy(*args, **kwargs):             # 0.55.8: _warm_hf_cache(provider, ids, stop=...)
+            self.warm_calls.append(list(args[1]))   # ids are the SECOND positional
         sp._warm_hf_cache = spy
         self.addCleanup(setattr, sp, "_warm_hf_cache", orig)
 
@@ -337,8 +337,8 @@ class RenderedSizesTests(PilotCase):
         import threading
         self.warm_done = threading.Event()
         orig_warm = sp._warm_hf_cache
-        def spy_warm(ids):
-            orig_warm(ids)
+        def spy_warm(*args, **kwargs):        # 0.55.8: passthrough the new signature
+            orig_warm(*args, **kwargs)
             self.warm_done.set()
         sp._warm_hf_cache = spy_warm
         self.addCleanup(setattr, sp, "_warm_hf_cache", orig_warm)
