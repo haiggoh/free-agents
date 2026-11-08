@@ -99,6 +99,18 @@ def build() -> None:
     </style>""",
  shared=True)
 
+    # Phase 6: translucent white background — exactly ONE tint layer (#tint-layer div, styled
+    # per page from the appearance store so the slider is CSS-live); roots go transparent only
+    # while the layer exists (body:has(#tint-layer)). The window itself is made transparent via
+    # native window_args in main.py (native mode only). Foreground never gets a global opacity.
+    ui.add_head_html("""<style>
+      html:has(#tint-layer), body:has(#tint-layer),
+      body:has(#tint-layer) #app, body:has(#tint-layer) .q-layout,
+      body:has(#tint-layer) .q-page-container, body:has(#tint-layer) .q-page,
+      body:has(#tint-layer) .nicegui-content { background: transparent !important; }
+      #tint-layer { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+    </style>""", shared=True)
+
     loader = Loader()
     # Process-global, shared INTENTIONALLY: the settings object + its savers (field-level
     # locked merge is the cross-frontend write path) and the loader's inventory cache.
@@ -404,6 +416,12 @@ def build() -> None:
             val.set_text(_binary_label(action))   # ON/OFF next to the switch, in sync with it
 
     def render_shell(title: str, subtitle: str, lane: bool = False):
+        # Phase 6: the single white tint layer, live from the appearance store on every page
+        from fa_gui import appearance as _ap
+        _doc = _ap.load(_ap.store_path())
+        if _doc["background_translucent"]:
+            ui.element("div").props('id="tint-layer"').style(
+                f"background: rgba(255, 255, 255, {_doc['background_opacity_pct'] / 100:.2f})")
         outer = "w-full max-w-3xl mx-auto p-4 gap-1" + (" lane-shell" if lane else "")   # tighter overall spacing (user 2026-11-05)
         with ui.column().classes(outer):
             ui.label(title).props('id="title"').classes("text-2xl font-bold")

@@ -103,6 +103,25 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             ap.store_path({"LA_GUI_APPEARANCE_FILE": str(d / "nope" / "a.json")})
 
+    def test_native_window_args_mapping(self):
+        # Phase 6: translucent -> transparent window; blur requested -> vibrancy (built-in
+        # NSVisualEffectView behind-window). Browser mode never sees these (main.py only
+        # passes them to ui.run in native mode). Defaults -> no args at all.
+        d = Path(self.tmp.name)
+        f = d / "a.json"
+        env = {"LA_GUI_APPEARANCE_FILE": str(f)}
+        self.assertEqual(ap.native_window_args(env), {})
+        ap.save(f, {"background_translucent": True})
+        self.assertEqual(ap.native_window_args(env), {"transparent": True})
+        ap.save(f, {"background_blur_requested": True})
+        self.assertEqual(ap.native_window_args(env),
+                         {"transparent": True, "vibrancy": True})
+        ap.save(f, {"background_translucent": False})
+        self.assertEqual(ap.native_window_args(env), {"vibrancy": True},
+                         "blur request without translucency still maps to vibrancy")
+        ap.save(f, {"background_blur_requested": False})
+        self.assertEqual(ap.native_window_args(env), {})
+
     def test_defaults_shape_matches_plan(self):
         # plan section 4: presentation compatibility|modern, translucency bool, opacity 50..100,
         # blur request bool, dark last (initial false/light)
