@@ -484,6 +484,32 @@ class GuiPlaywrightTests(unittest.TestCase):
                          "modern", "presentation persists across reload")
         p.close()
 
+    def test_modern_presentation_renders_tiles_with_same_nav(self):
+        # Phase 5: presentation=modern swaps menu rows for emoji tiles but keeps the SAME
+        # targets/dispatch — a nav tile navigates exactly like the compat nav row.
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+        app_file.write_text(json.dumps({"schema_version": 1, "presentation": "modern"}))
+        p = self.page()                      # home in modern mode
+        tiles = p.locator(".tile")
+        tiles.first.wait_for(state="visible", timeout=180000)
+        modern_targets = sorted(t.get_attribute("data-target") or "" for t in tiles.all())
+        p.close()
+        app_file.write_text(json.dumps({"schema_version": 1, "presentation": "compatibility"}))
+        p2 = self.page()                     # home in compat mode
+        rows = p2.locator(".nav-row")
+        rows.first.wait_for(state="visible", timeout=180000)
+        compat_targets = sorted(r.get_attribute("data-target") or "" for r in rows.all())
+        p2.close()
+        self.assertEqual(modern_targets, compat_targets,
+                         "modern tiles must expose the same nav targets as compat rows")
+        # and a tile click navigates
+        app_file.write_text(json.dumps({"schema_version": 1, "presentation": "modern"}))
+        p3 = self.page()
+        p3.locator('.tile[data-target="remote"]').first.click()
+        p3.wait_for_selector(".gui-search input", timeout=180000)
+        self.assertIn("/remote", p3.url)
+        p3.close()
+
 
 class GuiStaleTests(unittest.TestCase):
     def test_stale_inventory_after_navigation_not_applied(self):
