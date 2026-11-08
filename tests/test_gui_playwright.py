@@ -523,6 +523,41 @@ class GuiPlaywrightTests(unittest.TestCase):
         finally:
             app_file.write_text(defaults)   # never leak presentation into other tests
 
+    def test_dark_mode_tokens_differ_from_light(self):
+        # Phase 8: dark_mode=true applies dark semantic tokens (body bg/text, menu-item,
+        # hover, arrows, tint tinted dark). Computed styles must DIFFER from light mode —
+        # matching values would mean the toggle did nothing (same-hash screenshot trap).
+        app_file = Path(self.app.tmp.name) / "gui-appearance.json"
+        defaults = json.dumps({"schema_version": 1, "presentation": "compatibility"})
+
+        def probe(doc):
+            app_file.write_text(json.dumps(doc))
+            p = self.page()
+            p.wait_for_selector(".nav-row", timeout=180000)
+            body_bg = p.evaluate("getComputedStyle(document.body).backgroundColor")
+            item_color = p.locator(".nav-row").first.evaluate(
+                "e => getComputedStyle(e).color")
+            p.close()
+            return body_bg, item_color
+
+        try:
+            light = probe({"schema_version": 1, "presentation": "compatibility"})
+            dark = probe({"schema_version": 1, "presentation": "compatibility", "dark_mode": True})
+            self.assertNotEqual(light, dark, "dark mode must change computed styles")
+            self.assertEqual(dark[0], "rgb(18, 18, 18)", "dark body background token")
+            self.assertEqual(dark[1], "rgb(232, 232, 232)", "dark menu text token")
+            # translucent + dark: the tint layer tints DARK, not white
+            app_file.write_text(json.dumps({"schema_version": 1, "dark_mode": True,
+                                            "background_translucent": True,
+                                            "background_opacity_pct": 50}))
+            p = self.page()
+            p.wait_for_selector("#tint-layer", timeout=180000)
+            bg = p.locator("#tint-layer").evaluate("e => getComputedStyle(e).backgroundColor")
+            self.assertEqual(bg, "rgba(18, 18, 18, 0.5)", "dark tint layer")
+            p.close()
+        finally:
+            app_file.write_text(defaults)
+
     def test_translucent_tint_layer_css_alpha(self):
         # Phase 6 (browser-mode part): translucent on -> exactly one tint layer (body::before)
         # at the stored opacity; root surfaces transparent; foreground untouched. Native
