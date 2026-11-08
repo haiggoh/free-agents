@@ -606,21 +606,45 @@ class GuiPlaywrightTests(unittest.TestCase):
             self.assertGreater(lowkey.count(), 0, "Lowkey must be a wide 2x1 tile")
             self.assertIn("span 2", lowkey.first.evaluate("e => getComputedStyle(e).gridColumn"))
             self.assertNotIn("span 2", lowkey.first.evaluate("e => getComputedStyle(e).gridRow"))
+            # user 2026-11-08: Backend manager and API keys are 2x1 wide too
+            for tgt in ("runtime_manager", "api_keys"):
+                wide = p.locator(f'.tile-wide[data-target="{tgt}"]')
+                self.assertGreater(wide.count(), 0, f"{tgt} must be a wide 2x1 tile")
+                self.assertIn("span 2", wide.first.evaluate("e => getComputedStyle(e).gridColumn"))
+                self.assertNotIn("span 2", wide.first.evaluate("e => getComputedStyle(e).gridRow"))
+            # 2x2 emoji even larger
+            big_emoji = lane.locator(".tile-emoji").evaluate(
+                "e => parseFloat(getComputedStyle(e).fontSize)")
+            self.assertGreaterEqual(big_emoji, 88, "2x2 tile emojis must be very large (>= 5.5rem)")
             small = p.locator('.tile:not(.tile-lg):not(.tile-wide)')
             self.assertGreater(small.count(), 0, "non-lane rows stay 1x1 tiles")
             tile = p.locator(".tile").first
             tile_box = tile.bounding_box()
             emoji = tile.locator(".tile-emoji")
             label = tile.locator(".tile-label")
-            emoji_top = emoji.evaluate("e => e.getBoundingClientRect().top")
-            label_top = label.evaluate("e => e.getBoundingClientRect().top")
+            emoji_box = emoji.bounding_box()
+            label_box = label.bounding_box()
+            emoji_top = emoji_box["y"]
+            label_top = label_box["y"]
             self.assertLess(emoji_top, label_top, "emoji must sit ABOVE the action text")
-            self.assertLess(emoji_top, tile_box["y"], "emoji must peek out of the tile's top edge")
-            emoji_cx = emoji.evaluate("e => { const r = e.getBoundingClientRect(); return r.left + r.width / 2 }")
-            self.assertAlmostEqual(emoji_cx, tile_box["x"] + tile_box["width"] / 2, delta=6,
-                                   msg="emoji must be centered above the text")
+            self.assertGreaterEqual(emoji_top, tile_box["y"],
+                                    "emoji must be INSIDE the tile — not peeking outside")
+            # vertically centered in the tile (independently of the bottom-aligned text),
+            # but on small tiles nudged UP so it never overlaps the label or the top border
+            emoji_cx = emoji_box["x"] + emoji_box["width"] / 2
+            emoji_cy = emoji_box["y"] + emoji_box["height"] / 2
+            tile_cx = tile_box["x"] + tile_box["width"] / 2
+            tile_cy = tile_box["y"] + tile_box["height"] / 2
+            self.assertAlmostEqual(emoji_cx, tile_cx, delta=6, msg="emoji centered horizontally")
+            self.assertLessEqual(abs(emoji_cy - tile_cy), tile_box["height"] * 0.12,
+                                 "emoji vertically centered in the tile (small tiles nudge up)")
+            self.assertLessEqual(emoji_box["y"] + emoji_box["height"], label_top + 2,
+                                 "emoji must not overlap the bottom label")
+            self.assertGreaterEqual(emoji_box["y"], tile_box["y"],
+                                     "emoji must not touch the tile's top border")
             emoji_size = emoji.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
             label_size = label.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+            self.assertGreaterEqual(emoji_size, 52, "emojis must be large (>= 3.25rem)")
             self.assertGreater(emoji_size, label_size, "emoji must be larger than the text")
             self.assertEqual(label.evaluate("e => getComputedStyle(e).overflowWrap"), "anywhere",
                              "label must wrap in the tile")
@@ -666,6 +690,26 @@ class GuiPlaywrightTests(unittest.TestCase):
             p.close()
         finally:
             app_file.write_text(json.dumps({"schema_version": 1, "presentation": "compatibility"}))
+
+    def test_title_subtitle_scale_and_spacer(self):
+        # user 2026-11-08: title/subtitle a few px larger, ratio ~1.6 (golden), subtitle the
+        # size of the menu action items, and one empty title-height row of space after them
+        p = self.page()
+        p.wait_for_selector("#title", timeout=180000)
+        title_fs = p.locator("#title").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+        sub_fs = p.locator("#subtitle").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
+        self.assertEqual(title_fs, 28)
+        self.assertEqual(sub_fs, 17)
+        self.assertAlmostEqual(title_fs / sub_fs, 1.6, delta=0.06, msg="golden ratio ~1.6")
+        # the spacer row: .title-spacer, one empty row the same height as the title
+        spacer_h = p.evaluate(
+            "() => parseFloat(getComputedStyle(document.querySelector('.title-spacer')).height)")
+        self.assertEqual(spacer_h, 28, "one empty row the same height as the title after subtitle")
+        # title fits one line, emojis included
+        title = p.locator("#title")
+        self.assertLessEqual(title.evaluate("e => e.scrollWidth"), title.evaluate("e => e.clientWidth") + 1,
+                             "main title must fit one line including its emoji")
+        p.close()
 
     def test_translucency_toggle_defaults_blur_on(self):
         # user 2026-11-08: enabling translucency defaults the blur request ON (unless the
@@ -892,6 +936,31 @@ class GuiEmptyTests(unittest.TestCase):
                 p.wait_for_selector(".gui-search input", timeout=180000)
                 p.locator(".action-row", has_text="Choose model").first.click()   # open the (empty) list
                 p.wait_for_selector(".empty-state", timeout=180000)             # class, not id
+                browser.close()
+        finally:
+            app.stop()
+
+
+class GuiQuitTests(unittest.TestCase):
+    def test_quit_action_shuts_down_the_app(self):
+        # user 2026-11-08: Quit is an action, not a placeholder page — clicking it closes the
+        # window and shuts down the server this window launched. Own app instance: quitting
+        # kills it, so it must not share GuiPlaywrightTests' app.
+        app = GuiApp(REMOTE_INV)
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch()
+                p = browser.new_page()
+                p.goto(app.base + "/")
+                p.wait_for_selector('.nav-row[data-target="quit"], .action-row:has-text("Quit")',
+                                    timeout=180000)
+                p.locator('.nav-row[data-target="quit"], .action-row:has-text("Quit")').first.click()
+                deadline = time.time() + 20
+                while time.time() < deadline and app.proc.poll() is None:
+                    time.sleep(0.5)
+                self.assertIsNotNone(app.proc.poll(),
+                                     "clicking Quit must shut down the GUI server process")
                 browser.close()
         finally:
             app.stop()

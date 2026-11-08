@@ -31,17 +31,29 @@ DEFAULTS: dict[str, Any] = {
     "dark_mode": False,                       # Phase 8, LAST; initial light
 }
 
-DEFAULT_OPACITY_BLUR_ACTIVE = 80
+DEFAULT_OPACITY_BLUR_ACTIVE = 50     # user 2026-11-08: with blur on, 50% is the default...
 DEFAULT_OPACITY_NO_BLUR = 95
+BLUR_BRIGHTNESS_BOOST = 0.35         # ...but must FEEL as bright as 85% without blur
 
 
 def resolve_opacity(doc: dict, blur_active: bool = False) -> int:
-    """The effective tint opacity: an explicitly saved background_opacity_pct wins; otherwise
-    the capability-dependent default (80% with active native blur, 95% without)."""
+    """The requested tint opacity: an explicitly saved background_opacity_pct wins; otherwise
+    the capability-dependent default (50% with active native blur, 95% without)."""
     v = doc.get("background_opacity_pct")
     if isinstance(v, int) and not isinstance(v, bool):
         return v
     return DEFAULT_OPACITY_BLUR_ACTIVE if blur_active else DEFAULT_OPACITY_NO_BLUR
+
+
+def tint_alpha(opacity_pct: int, blur_active: bool = False) -> float:
+    """The tint layer's EFFECTIVE alpha. Vibrancy darkens the backdrop behind the window, so a
+    plain alpha looks darker the more translucent you go. Compensate (user 2026-11-08):
+    with blur active, add +35 points of brightness — so 50% with blur feels as bright as
+    85% without — and more translucent never means darker."""
+    a = min(100, max(50, opacity_pct)) / 100
+    if blur_active:
+        a = min(1.0, a + BLUR_BRIGHTNESS_BOOST)
+    return round(a, 3)
 
 PRESENTATIONS = ("compatibility", "modern")
 _OPACITY_MIN, _OPACITY_MAX = 50, 100
