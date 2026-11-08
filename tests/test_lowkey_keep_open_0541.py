@@ -73,18 +73,25 @@ class LowkeyKeepOpen(PilotCase):
                 self.assertTrue(acc.is_open(family.id), "the nested family group must stay open")
 
     def test_open_group_survives_sync_with_search(self):
-        # Review Focus 3: a provider group open AND a search filter active
+        # Review Focus 3: a search filter active with MULTIPLE matching groups — collapse()
+        # clears multi_open in place, so the refresh must restore it or the extra groups close.
         async def s(app, pilot, h):
             sm = self._open_choose_model(app)
             acc = sm.accordion
-            sm.search = "local"                             # the live filter text
-            acc.multi_open = {g.id for g in acc.groups}     # search mode: all groups open
-            sm.refresh_keep_open()
+            sm.api_catalogs = {"nvidia": [m.CatalogModel("org/x")],
+                               "gemini": [m.CatalogModel("gemini/y")]}
+            sm.search = "o"                                 # matches BOTH the api and local groups
+            sm.refresh_keep_open()                          # first rebuild under the search
+            acc.multi_open = {g.id for g in acc.groups if g.items}
+            sm.refresh_keep_open()                          # the refresh under test
             app.render_model()
             await pilot.pause(0.3)
-            self.assertEqual(sm.search, "local", "the filter must survive the refresh")
-            self.assertTrue(all(acc.is_open(g.id) for g in acc.groups if g.items),
-                            "search-mode multi-open must survive the refresh")
+            self.assertEqual(sm.search, "o", "the filter must survive the refresh")
+            open_now = {g.id for g in acc.groups if g.items and acc.is_open(g.id)}
+            self.assertEqual(open_now, {g.id for g in acc.groups if g.items},
+                             f"open={open_now} want={ {g.id for g in acc.groups if g.items} } "
+                             f"multi={acc.multi_open} folded={acc.multi_open_folded} "
+                             f"sel={acc.selected_id} og={acc.open_group}")
         self.run_picker(s, start="lowkey")
 
     def test_unchanged_sync_reports_unchanged(self):
