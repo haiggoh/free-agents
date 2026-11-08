@@ -376,6 +376,65 @@ def build() -> None:
                 ui.label(subtitle).classes("text-sm opacity-70").props('id="subtitle"')
             return ui.column().classes("w-full gap-1" + (" lane-body" if lane else ""))
 
+    def render_appearance(body, st: dict) -> None:
+        """Phase 4 UI: a GUI-only appearance section on the theme screen, bound to the
+        fa_gui.appearance store (never to core Actions — it stays out of render_plan).
+        Rows reuse the .cycle-row / .switch classes so styling and keyboard behavior match."""
+        from fa_gui import appearance as ap
+        store = ap.store_path()
+        doc = ap.load(store)
+        with body:
+            ui.label("🖼 GUI appearance").classes("menu-item group-header").props('data-group="gui_appearance"')
+
+            def _appearance_cycle(key: str, label: str, choices, clamp: bool = False):
+                step = 5 if clamp else 1
+                with ui.row().classes("cycle-row items-center gap-1 w-full appearance-row") as crow:
+                    crow.props["data-key"] = key
+                    ui.label(f"{label}:").classes("cycle-name row-action")
+                    left = ui.label("<").classes("cycle-arrow cycle-left")
+                    val = ui.label(str(doc[key])).classes("cycle-value row-action")
+                    right = ui.label(">").classes("cycle-arrow cycle-right")
+
+                    def _step(d, k=key, v=val, ch=choices, cl=clamp):
+                        cur = ap.load(store)[k]
+                        if cl:
+                            nxt = min(ch[-1], max(ch[0], cur + d))
+                        else:
+                            i = ch.index(cur) if cur in ch else 0
+                            nxt = ch[(i + d) % len(ch)]
+                        ap.save(store, {k: nxt})
+                        v.set_text(str(nxt))
+
+                    left.on("click", lambda e=None: _step(-step))
+                    right.on("click", lambda e=None: _step(+step))
+                    crow.props('tabindex="0"')
+
+                    def _key(e, s=step):
+                        k = (e.args or {}).get("key")
+                        if k == "ArrowLeft":
+                            _step(-s)
+                        elif k in ("ArrowRight", "Enter", " "):
+                            _step(+s)
+
+                    crow.on("keydown", _key)
+
+            def _appearance_switch(key: str, label: str):
+                with ui.row().classes("cycle-row items-center gap-2 w-full appearance-row") as crow:
+                    crow.props["data-key"] = key
+                    ui.label(f"{label}:").classes("cycle-name row-action")
+                    val = ui.label("ON" if doc[key] else "OFF").classes("cycle-value cycle-value-bin row-action")
+
+                    def _set(e, k=key, v=val):
+                        ap.save(store, {k: bool(e.value)})
+                        v.set_text("ON" if e.value else "OFF")
+
+                    ui.checkbox("", value=bool(doc[key]), on_change=_set).classes("switch")
+
+            _appearance_cycle("presentation", "Presentation", list(ap.PRESENTATIONS))
+            _appearance_switch("background_translucent", "Translucent background")
+            _appearance_cycle("background_opacity_pct", "Opacity %", list(range(50, 101, 5)), clamp=True)
+            _appearance_switch("background_blur_requested", "Request native blur")
+
     @ui.page("/")
     @ui.page("/home")
     async def home(client):
@@ -515,4 +574,6 @@ def build() -> None:
         body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
             render_rows(scr, st)
+        if full_path == "theme_config":
+            render_appearance(body, st)         # Phase 4: GUI-only appearance section
         wire_rerender(body, m.Nav(full_path, m.HOME_OWNED), st)
