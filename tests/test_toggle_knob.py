@@ -171,9 +171,12 @@ class ToggleKnob(PilotCase):
         self.assertGreater(first_new, 1)
         self.assertEqual(seq[first_new - 1][1:4], ("full", "filled", "dim"),
                          f"a dim filled frame must precede the cyan: {seq}")
-        # grow FIRST (full size, still old), THEN the dim fill, THEN the new state
-        self.assertEqual(seq[first_new - 2][1:3], ("full", "old"),
-                         f"the knob must reach full size in its OLD state before changing: {seq}")
+        # user 2026-11-09: no full-size OLD frame — the knob arrives small in the old state and
+        # grows straight into the dim fill (that frame replaced the full-size hollow one)
+        self.assertEqual(seq[first_new - 2][1:3], ("small", "old"),
+                         f"the dim fill must come straight after the small old-state arrival: {seq}")
+        self.assertNotIn(("full", "old"), [r[1:3] for r in seq],
+                         f"no full-size frame in the old state any more: {seq}")
         flashes = [r for r in seq if r[3] in ("bright_cyan", "cyan")]
         self.assertEqual(flashes[0][3], "bright_cyan")          # the subheadline cyan
         for r in flashes:

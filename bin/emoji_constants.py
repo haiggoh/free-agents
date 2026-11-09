@@ -331,18 +331,17 @@ KNOB_SIZES = {
 # Rows: (cells moved from the start end, size, what it SHOWS, knob colour or None, ticks).
 # SHOWS: "old" / "new" = the state before / after the toggle; "filled" = a filled knob whichever
 # way it is going (session_picker._knob_shows_filled is the one place that resolves this).
-# User 2026-11-08: one size switch only — the knob travels small, ARRIVES small, grows to full
-# size still in its OLD state, and only then turns into the NEW state with the subheadline cyan
-# (#policy = ansi_bright_cyan), then plain cyan. User 2026-11-09: between the full-size old
-# state and the cyan, a DIM FILLED frame — the fill arrives dim before it lights up (switching
-# ON: hollow → dim filled → cyan filled; switching OFF: filled → dim filled → cyan hollow).
-# Every frame is held 2 ticks = 33 ms: a 1-tick frame (16 ms) did not show reliably. After the
-# last row the knob rests at full size in its normal colour. Total here: 12 ticks = 200 ms.
+# User 2026-11-08: one size switch only — the knob travels small and ARRIVES small in its OLD
+# state. User 2026-11-09: it then grows to full size as a DIM FILLED frame (this replaced the
+# full-size old-state frame, to keep the total length), and only then shows the NEW state with
+# the subheadline cyan (#policy = ansi_bright_cyan), then plain cyan. Switching ON: ◦ → dim ● →
+# cyan ●; switching OFF: • → dim ● → cyan ○. Every frame is held 2 ticks = 33 ms: a 1-tick
+# frame (16 ms) did not show reliably. After the last row the knob rests at full size in its
+# normal colour. Total here: 10 ticks ≈ 167 ms.
 KNOB_SEQUENCE = (
     (1, "small", "old",    None,          2),   # middle, small
     (2, "small", "old",    None,          2),   # arrives, still small
-    (2, "full",  "old",    None,          2),   # grows to full size, still the old state
-    (2, "full",  "filled", "dim",         2),   # the fill, dim (in-between)
+    (2, "full",  "filled", "dim",         2),   # grows AND fills, dim (in-between)
     (2, "full",  "new",    "bright_cyan", 2),   # the new state, flashing
     (2, "full",  "new",    "cyan",        2),   # fade step
 )
