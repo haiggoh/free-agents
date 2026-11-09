@@ -94,6 +94,40 @@ class LowkeyKeepOpen(PilotCase):
                              f"sel={acc.selected_id} og={acc.open_group}")
         self.run_picker(s, start="lowkey")
 
+    def test_reorder_preserves_selection_by_id(self):
+        # M3 F6: a rebuild that INSERTS a model (changing ordering) must not move the
+        # selection — selection is by stable item id, not row position.
+        async def s(app, pilot, h):
+            sm = self._open_choose_model(app)
+            acc = sm.accordion
+            api_group = next(g for g in acc.groups if g.id == "api")
+            prov_group = next(i for i in api_group.items if isinstance(i, m.Group))
+            target = prov_group.items[0]
+            acc.expand(prov_group.id)
+            acc.select(target.id)
+            new_catalog = {"nvidia": [m.CatalogModel("zzz-new-model")] +
+                           [m.CatalogModel(i.id) for i in prov_group.items]}
+            sm.api_catalogs = new_catalog
+            app._sync_screen_from_cache(sm)
+            self.assertEqual(acc.selected_id, target.id,
+                             "the selection must follow the id, not the new position")
+        self.run_picker(s, start="lowkey")
+
+    def test_folded_state_restored_after_refresh(self):
+        # M3 F1: multi_open_folded is restored alongside multi_open (a folded group stays folded).
+        async def s(app, pilot, h):
+            sm = self._open_choose_model(app)
+            acc = sm.accordion
+            sm.search = "o"
+            sm.refresh_keep_open()
+            folded_before = {"api"} if any(g.id == "api" for g in acc.groups) else set()
+            acc.multi_open = {g.id for g in acc.groups if g.items} - folded_before
+            acc.multi_open_folded = set(folded_before)
+            sm.refresh_keep_open()
+            self.assertEqual(acc.multi_open_folded, folded_before,
+                             "the folded set must survive the refresh")
+        self.run_picker(s, start="lowkey")
+
     def test_unchanged_sync_reports_unchanged(self):
         async def s(app, pilot, h):
             sm = self._open_choose_model(app)

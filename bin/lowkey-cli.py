@@ -256,6 +256,8 @@ class DelayedSpinner:
         self._printed = False
 
     def __enter__(self):
+        if self._thread is not None:
+            return self                     # already spinning (double enter: no second thread)
         if self.interactive:
             self._thread = threading.Thread(target=self._spin, daemon=True)
             self._thread.start()
