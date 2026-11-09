@@ -8,6 +8,7 @@
 
 ### Changed
 - Intercept message leads with the task-shape test and offers both ready-to-run free routes (dispatch heredoc + roster-resolved `remote-session.sh <alias> --effort high -p "<brief>"`); paid requires a stated reason AND an exhausted own route — exhaustion alone never permits paid. Routing text stays single-sourced in the offload skill's marked block.
+- Dispatch roles are now a suggestion, not a hard requirement (user 2026-11-09): entries listing the requested role run first, every other available entry follows as fallback — any model can fill another role when it needs to.
 
 ### Fixed
 - `handover-verify.sh` compares process start times as epoch seconds (registry startedAt millis authoritative; procStart is UTC, ps lstart local) — no more false "pid recycled" under CET.

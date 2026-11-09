@@ -32,8 +32,9 @@ Remote entries need
 stderr (model + route), and the JSON result names the model, its route and every attempt.
 
 Council routing: each entry lists the roles it is strong at and its model family. A "role" (or a
-subagent_type such as code-reviewer -> validator) keeps only entries with that role, still in
-preference order. "avoid_family" skips the family that did the work: an adversarial review from a
+subagent_type such as code-reviewer -> validator) is a SUGGESTION, not a hard requirement
+(2026-11-09): entries listing that role run first, then every other available entry as
+fallback. "avoid_family" skips the family that did the work: an adversarial review from a
 different family often finds what a stronger same-family model misses. Both are preferences: when
 nothing on this machine satisfies them, the dispatch runs on what is available, prints a
 recommendation to add another model, and the result says so ("family_avoided"/"role_matched": false).
@@ -520,29 +521,35 @@ def request_role(input_data):
 
 
 def candidates(prefs, env, local_ok=None, role=None, avoid_family=None) -> list:
-    """Available entries in preference order. A role keeps only entries that list it (an entry
-    with no roles serves every role); avoid_family skips one model family, so a review comes from
-    a different family than the work it checks."""
-    out = []
+    """Available entries in preference order. A role is a SUGGESTION, not a hard requirement
+    (user 2026-11-09: the lines are blurred — any model can fill another role when it needs
+    to): entries listing the role come first, every other available entry follows as fallback.
+    An entry with no roles serves every role. avoid_family skips one model family, so a review
+    comes from a different family than the work it checks."""
+    matching, rest = [], []
     for e in prefs.get("order", []):
-        if role and e.get("roles") and role not in e["roles"]:
-            continue
         if avoid_family and e.get("family") == avoid_family:
             continue
-        if not availability(e, env, local_ok):
-            out.append(e)
-    return out
+        if availability(e, env, local_ok):      # non-empty reason = not available now
+            continue
+        if not role or not e.get("roles") or role in e["roles"]:
+            matching.append(e)
+        else:
+            rest.append(e)
+    return matching + rest
 
 
 def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None):
-    """candidates(), relaxing the filters when they would leave nothing: role and avoid_family
-    are PREFERENCES, so a machine with one model family still gets an answer (user 2026-10-23).
-    avoid_family gives way first (a same-family review is weaker, not wrong), then role.
-    Returns (order, role_matched, family_avoided); an empty order means nothing is set up."""
-    for r, a in ((role, avoid_family), (role, None), (None, avoid_family), (None, None)):
-        order = candidates(prefs, env, local_ok=local_ok, role=r, avoid_family=a)
+    """candidates() with avoid_family relaxed when it would leave nothing (user 2026-10-23).
+    Role is already soft inside candidates() (matching entries first, the rest after), so it
+    never has to give way. Returns (order, role_honoured, family_avoided); an empty order means
+    nothing is set up. role_honoured = some available entry actually lists the role."""
+    for a in (avoid_family, None):
+        order = candidates(prefs, env, local_ok=local_ok, role=role, avoid_family=a)
         if order:
-            return order, (r == role), (a == avoid_family)
+            honoured = bool(role) and any((not e.get("roles")) or role in e["roles"]
+                                          for e in order)
+            return order, honoured, (a == avoid_family)
     return [], False, False
 
 

@@ -98,7 +98,9 @@ watch the distribution, not each step.
 
 Dispatches take `"role"` (operator/reasoner/validator/utility) and `"avoid_family"` (a roster
 family from `bin/free-agent-tool.py --list` — e.g. `zhipu` for GLM; unknown names are refused
-loudly). For an adversarial review, family diversity beats same-family strength. When nothing on
+loudly). Roles are a SUGGESTION (2026-11-09): role-listing entries run first, any other available
+model can fill the role as fallback — the lines are blurred. For an adversarial review,
+family diversity beats same-family strength. When nothing on
 the machine matches, the result says `"family_avoided": false` / `"role_matched": false` plus a
 recommendation to add a model — pass that on rather than treating the review as cross-family.
 

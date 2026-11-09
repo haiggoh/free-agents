@@ -117,12 +117,14 @@ class CouncilTests(Base):
         return [e["id"] for e in fat.candidates(prefs(self.A, self.B, self.C), self.env,
                                                 local_ok=lambda a: True, **req)]
 
-    def test_role_keeps_only_entries_that_list_it_in_order(self):
-        self.assertEqual(self.ids(role="validator"), ["r1", "r2"])
-        self.assertEqual(self.ids(role="operator"), ["r1", "l1"])
+    def test_role_is_a_soft_preference_matching_entries_first(self):
+        # 2026-11-09: roles are a suggestion, not a hard requirement — entries listing the role
+        # run first, every other available entry follows as fallback (blurred lines)
+        self.assertEqual(self.ids(role="validator"), ["r1", "r2", "l1"])
+        self.assertEqual(self.ids(role="operator"), ["r1", "l1", "r2"])
 
     def test_avoid_family_skips_that_family(self):
-        self.assertEqual(self.ids(role="validator", avoid_family="google"), ["r2"])
+        self.assertEqual(self.ids(role="validator", avoid_family="google"), ["r2", "l1"])
 
     def test_entries_without_roles_serve_every_role(self):
         self.key("gemini")
