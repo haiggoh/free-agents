@@ -609,10 +609,11 @@ class MemoryGuardSettings(PilotCase):
         async def s(app, pilot, h):
             await h.press("l")
             await h.wait_screen("LocalScreen")
-            await h.press("y")                                  # auto-sync OFF -> ON (hotkey works folded, 0.47.2)
             await h.expand_settings()
+            await h.press("y")                                  # auto-sync OFF -> ON (0.47.2)
             await h.wait_text("Auto-sync local registry with the disk (no prompts): ON")
-            self.assertEqual(self.saved_state()["memguard"], {"registry_auto_sync": True})
+            # 0.55.8 Task 8 (R20): the setting lives in its own local_registry section now.
+            self.assertEqual(self.saved_state()["local_registry"], {"auto_sync": True})
         self.run_picker(s, start="home")
         # A fresh picker reads it back.
         async def again(app, pilot, h):

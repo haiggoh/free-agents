@@ -681,6 +681,8 @@ class Settings:
     # choose-model list; persisted via on_hidden_providers_saved. Keys stay on disk.
     hidden_providers: list = field(default_factory=list)
     memguard: dict = field(default_factory=lambda: dict(sms.DEFAULT_MEMGUARD))
+    # 0.55.8 Task 8 (0541 plan Item G): the auto-sync setting lives HERE now, not in memguard.
+    local_registry: dict = field(default_factory=lambda: {"auto_sync": False})
     runtime_backend: str = "rapid-mlx"   # backend manager selection; in-memory only
     # Classifier source for auto mode (0=NVIDIA API w/ fallback, 1=local default classifier always, 2=Auto)
     classifier_source: int = 2
@@ -704,8 +706,9 @@ class Settings:
     security_review_offered: bool = False
     # Called with {"security_review": n} or {"route": (path, mode)} when the user changes it; persists it.
     on_cloud_saved: Callable[[dict], object] | None = None
-    # Called with {"registry_auto_sync": v} when the Local screen's auto-sync row toggles; persists it.
-    on_memguard_saved: Callable[[dict], object] | None = None
+    # 0.55.8 Task 8: the auto-sync row persists through its OWN callback now (the setting
+    # moved to the local_registry section; it was never a memory-guard setting).
+    on_local_registry_saved: Callable[[dict], object] | None = None
     # Called with (lane, value) when the user CONFIRMS an effort change; persists it.
     on_effort_saved: Callable[[str, str], object] | None = None
     on_hidden_providers_saved: Callable[[list], object] | None = None
@@ -1449,8 +1452,8 @@ class LocalScreen(Screen):
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp"), labels=("DISABLED", "ENABLED")),
             setting("y", f"{ec.gap(ec.EMOJI_REGISTRY_SYNC_STR)}Auto-sync local registry with the disk (no prompts): "
-                        f"{'ON' if s.memguard.get('registry_auto_sync') else 'OFF'}",
-                    (False, True), lambda: bool(s.memguard.get("registry_auto_sync")),
+                        f"{'ON' if s.local_registry.get('auto_sync') else 'OFF'}",
+                    (False, True), lambda: bool(s.local_registry.get("auto_sync")),
                     self._put_registry_auto_sync, labels=("OFF", "ON")),
         ]
         # Add "Launch last model" if we have a saved last model
@@ -1471,9 +1474,9 @@ class LocalScreen(Screen):
         """The Local screen's auto-sync row (0.43.0; a cycle stepper since 0.55.6): same store
         key the guard screen used, persisted through the on_memguard_saved callback the Picker
         wires to sms.save_memguard. Sets the value it receives (direction-aware stepping)."""
-        self.settings.memguard["registry_auto_sync"] = bool(v)
-        if self.settings.on_memguard_saved:
-            self.settings.on_memguard_saved({"registry_auto_sync": bool(v)})
+        self.settings.local_registry["auto_sync"] = bool(v)
+        if self.settings.on_local_registry_saved:
+            self.settings.on_local_registry_saved({"auto_sync": bool(v)})
 
     def _launch_last(self, lane: str):
         """Launch the last used model for the given lane."""

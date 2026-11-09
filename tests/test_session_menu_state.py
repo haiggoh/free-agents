@@ -270,12 +270,15 @@ class StateTests(unittest.TestCase):
         st = sms.load(self.cfg)
         self.assertEqual(st.memguard, sms.DEFAULT_MEMGUARD)
         self.assertFalse(self.file.exists())                       # load never writes
-        self.assertIsNone(sms.save_memguard(self.cfg, {"soft_pct": 80, "registry_auto_sync": True}))
+        self.assertIsNone(sms.save_memguard(self.cfg, {"soft_pct": 80}))
+        self.assertIsNone(sms.save_local_registry(self.cfg, {"auto_sync": True}))
         st = sms.load(self.cfg)
-        self.assertEqual((st.memguard["soft_pct"], st.memguard["registry_auto_sync"]), (80, True))
+        self.assertEqual(st.memguard["soft_pct"], 80)
+        self.assertEqual(st.local_registry["auto_sync"], True)
         self.assertEqual(st.memguard["hard_pct"], 93)               # untouched keys keep defaults
         doc = json.loads(self.file.read_text())
-        self.assertEqual(doc["memguard"], {"soft_pct": 80, "registry_auto_sync": True})  # only what was set
+        self.assertEqual(doc["memguard"], {"soft_pct": 80})  # only what was set
+        self.assertEqual(doc["local_registry"], {"auto_sync": True})
         env = sms.memguard_env(st)
         self.assertEqual((env["LA_MEMGUARD_SOFT_PCT"], env["LA_REGISTRY_AUTO_SYNC"], env["LA_MEMGUARD"]),
                          ("80", "1", "1"))
@@ -487,8 +490,7 @@ class StateTests(unittest.TestCase):
                                     "effort": {"local_session": "low"},
                                     "memguard": {"enabled": True, "tmux": True, "soft_pct": 85,
                                                  "hard_pct": 93, "quiet_s": 3,
-                                                 "auto_continue": True,
-                                                 "registry_auto_sync": False, "kv_dtype": {}}}))
+                                                 "auto_continue": True, "kv_dtype": {}}}))
         state = sms.load(self.cfg)
         self.assertEqual(state.warnings, [])
         self.assertIsNone(state.thinking_session)
@@ -501,7 +503,7 @@ class StateTests(unittest.TestCase):
         doc = json.loads(self.file.read_text())
         # 0.54.0: schema 9 (lowkey_filters section); the invariant the test guards is that a
         # NEW key ships under a NEW schema number so older readers refuse loudly.
-        self.assertEqual(doc["schema_version"], 9)
+        self.assertEqual(doc["schema_version"], 10)   # 0.55.8 Task 8: the schema bumped
         self.assertIn(8, sms.READABLE_SCHEMAS)          # schema-8 files still load
         # Simulate the OLD reader: schemas 1..8 only. It must refuse LOUDLY, not load.
         with mock.patch.object(sms, "READABLE_SCHEMAS", (1, 2, 3, 4, 5, 6, 7, 8)):

@@ -1016,7 +1016,7 @@ class Picker(App):
             security_review_offered=cloud["plugin_active"],
             routes={p: cse.route(p) for p in cse.ROUTE_PATHS},
             on_cloud_saved=self._save_cloud,
-            on_memguard_saved=self._save_mg,
+            on_local_registry_saved=self._save_lr,
             # "Go last": restored from the store; written when a launch request is made.
             last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
                                  **state.last_launched},
@@ -1101,6 +1101,15 @@ class Picker(App):
         try:
             warning = sms.save_memguard(self._config_dir(), values)
         except ValueError as exc:              # the screen never offers one; never crash on it
+            warning = f"{exc}; not saved"
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
+
+    def _save_lr(self, values):
+        """0.55.8 Task 8: the local_registry section's save path (same warning flow)."""
+        try:
+            warning = sms.save_local_registry(self._config_dir(), values)
+        except ValueError as exc:
             warning = f"{exc}; not saved"
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
@@ -1353,7 +1362,7 @@ class Picker(App):
                 data, err = load_remote_catalog(kind), None
             else:
                 data, err = globals()[self.LOADERS[kind]](), None
-                if kind == "local" and self.settings.memguard.get("registry_auto_sync"):
+                if kind == "local" and self.settings.local_registry.get("auto_sync"):
                     note = auto_sync_registry(data)
                     if note:
                         data = load_local_models()         # the registry changed: read it again

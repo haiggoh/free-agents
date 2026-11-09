@@ -101,7 +101,7 @@ class HFCacheWriter(unittest.TestCase):
     def test_hf_api_base_override_and_loud_failure(self):
         os.environ["LA_HF_API_BASE"] = "http://127.0.0.1:9999"
         self.addCleanup(os.environ.pop, "LA_HF_API_BASE", None)
-        self.assertEqual(emf._hf_api_base(), "http://127.0.0.1:9999")
+        self.assertEqual(emf._hf_api_base(), "http://127.0.0.1:9999/api/models")  # origin override keeps /api/models
         os.environ["LA_HF_API_BASE"] = "ftp://x"
         with self.assertRaises(ValueError) as cm:
             emf._hf_api_base()

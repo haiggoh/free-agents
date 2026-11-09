@@ -41,10 +41,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 9
-READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+SCHEMA_VERSION = 10
+READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature",
-            "intercept_agents", "memguard", "thinking", "hidden_providers", "lowkey_filters")
+            "intercept_agents", "memguard", "thinking", "hidden_providers", "lowkey_filters",
+            "local_registry")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown",
@@ -97,8 +98,11 @@ _RL_WHOLE = ("rpm", "bucket_capacity", "max_retries")
 #                       every model on the backend default. Per-model, so never in memguard-env:
 #                       read it with `kv-get`.
 DEFAULT_MEMGUARD = {"enabled": True, "tmux": True, "soft_pct": 85, "hard_pct": 93, "quiet_s": 3,
-                    "auto_continue": True, "registry_auto_sync": False, "kv_dtype": {}}
-_MG_BOOL = ("enabled", "tmux", "auto_continue", "registry_auto_sync")
+                    "auto_continue": True, "kv_dtype": {}}
+_MG_BOOL = ("enabled", "tmux", "auto_continue")
+# 0.55.8 Task 8 (0541 plan Item G): registry_auto_sync gets its OWN section — it was never a
+# memory-guard setting and a memguard save should not carry it.
+DEFAULT_LOCAL_REGISTRY = {"auto_sync": False}
 _MG_NUMERIC = {"soft_pct": (50, 98), "hard_pct": (51, 99), "quiet_s": (0, 60)}
 KV_CHOICES = ("auto", "int8", "int4")
 
@@ -149,6 +153,7 @@ class State:
     # able to mutate) the module-level default.
     memguard: dict = field(default_factory=lambda: {**DEFAULT_MEMGUARD,
                                                     "kv_dtype": dict(DEFAULT_MEMGUARD["kv_dtype"])})
+    local_registry: dict = field(default_factory=lambda: dict(DEFAULT_LOCAL_REGISTRY))
     # None = the launch default (thinking ON for session launches); True/False = remembered choice.
     thinking_session: bool | None = None
     # 0.50.0 (api-keys-provider-hide-toggle): providers hidden from the choose-model
@@ -238,7 +243,7 @@ def _unsafe_dir(config_dir: Path) -> str | None:
     return None
 
 
-def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list]:
+def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list, dict]:
     """Return (effort, rate_limiter, last_launched, temperature, intercept_agents, memguard,
     thinking) or raise ValueError with a short reason."""
     if len(raw) > MAX_BYTES:
@@ -264,9 +269,22 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list]:
         raise ValueError("hidden_providers needs schema_version 8")
     if doc["schema_version"] < 9 and "lowkey_filters" in doc:
         raise ValueError("lowkey_filters needs schema_version 9")
+    if doc["schema_version"] < 10 and "local_registry" in doc:
+        raise ValueError("local_registry needs schema_version 10")
     memguard = doc.get("memguard", {})
     if not isinstance(memguard, dict):
         raise ValueError("preference sections must be JSON objects")
+    # 0.55.8 Task 8: the migrated key is stripped from memguard BEFORE validation (at the
+    # current schema it is not a memguard setting at all); its value seeds local_registry
+    # when that section is absent. An EXPLICIT local_registry always wins (R19) and the
+    # stale memguard copy is ignored — the next save drops it from the file.
+    local_registry = doc.get("local_registry", {})
+    if not isinstance(local_registry, dict):
+        raise ValueError("preference sections must be JSON objects")
+    if isinstance(memguard, dict) and "registry_auto_sync" in memguard:
+        if not local_registry:
+            local_registry = {"auto_sync": bool(memguard["registry_auto_sync"])}
+        memguard.pop("registry_auto_sync", None)
     _validate_memguard(memguard)
     thinking = doc.get("thinking", {})
     _validate_thinking(thinking)
@@ -301,10 +319,10 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list]:
     # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
     for lane, tier in tiers.items():
         last[f"{lane}:tier"] = tier
-    return effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters
+    return effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry
 
 
-def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict, dict, list] | None:
+def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict, dict, list, dict] | None:
     """None when absent; raises ValueError when present but unusable."""
     try:
         st = os.lstat(path)
@@ -333,7 +351,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.warnings.append(f"{exc}; using built-in defaults and leaving the file untouched")
         return state
     if found:
-        effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters = found
+        effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
@@ -343,6 +361,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.memguard.update(memguard)
         state.thinking_session = thinking.get("session")
         state.hidden_providers = list(hidden)
+        state.local_registry.update(local_registry)
         state.lowkey_filters.update(lowkey_filters)
     return state
 
@@ -447,7 +466,7 @@ def _write(config_dir: Path, doc: dict) -> None:
 
 
 def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking=None,
-         hidden_providers=None, lowkey_filters=None) -> dict:
+         hidden_providers=None, lowkey_filters=None, local_registry=None) -> dict:
     doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
            "last_launched": {k: v for k, v in last.items() if ":" not in k},
            "temperature": temperature,
@@ -463,11 +482,16 @@ def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinkin
         doc["hidden_providers"] = list(hidden_providers)
     if lowkey_filters:
         doc["lowkey_filters"] = dict(lowkey_filters)
+    # 0.55.8 Task 8: the memguard section never carries registry_auto_sync again — the key
+    # lives in local_registry (an old on-disk copy is dropped by this very write, R19).
+    if local_registry:
+        doc["local_registry"] = dict(local_registry)
     return doc
 
 
 def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinking=None,
-            mutate_hidden=None, mutate_lowkey_filters=None) -> str | None:
+            mutate_hidden=None, mutate_lowkey_filters=None,
+            mutate_local_registry=None) -> str | None:
     """Apply `mutate(effort, limiter, last_launched, temperature)` (or one of the section hooks)
     under the lock. Returns a warning or None.
 
@@ -479,23 +503,38 @@ def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinkin
         return f"{reason}; the choice applies to this run only"
     try:
         with _locked(config_dir):
+            # Review Focus 5: the 0.54.0 reader REJECTS a schema-10 file entirely (recorded:
+            # "unsupported schema_version 10", no data loss — it never writes). Back up the
+            # pre-migration file ONCE so a downgrade user can restore their settings by hand.
+            prefs = config_dir / PREFS_NAME
+            try:
+                if prefs.exists():
+                    on_disk = json.loads(prefs.read_text())
+                    if (on_disk.get("schema_version") == 9
+                            and "registry_auto_sync" in on_disk.get("memguard", {})
+                            and not Path(str(prefs) + ".v9.bak").exists()):
+                        Path(str(prefs) + ".v9.bak").write_text(prefs.read_text())
+            except (OSError, ValueError):
+                pass
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters = found
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry = found
             else:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters = \
-                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, [], {}
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry = \
+                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, [], {}, {}
             if mutate_hidden is not None:
                 mutate_hidden(hidden)
             elif mutate_lowkey_filters is not None:
                 mutate_lowkey_filters(lowkey_filters)
+            elif mutate_local_registry is not None:
+                mutate_local_registry(local_registry)
             elif mutate_thinking is not None:
                 mutate_thinking(thinking)
             elif mutate_memguard is not None:
                 mutate_memguard(memguard)
             else:
                 mutate(effort, limiter, last, temperature)
-            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters)
+            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry)
             _write(config_dir, doc)
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
@@ -542,6 +581,18 @@ def save_memguard(config_dir: Path | str, values: dict) -> str | None:
     return _update(config_dir, None, mutate_memguard=mutate)
 
 
+def save_local_registry(config_dir: Path | str, values: dict) -> str | None:
+    """0.55.8 Task 8: persist local_registry settings (auto_sync); a None value drops the
+    key back to its default."""
+    def mutate(lr):
+        for key, value in values.items():
+            if value is None:
+                lr.pop(key, None)
+            else:
+                lr[key] = value
+    return _update(config_dir, None, mutate_local_registry=mutate)
+
+
 def memguard_env(state: State) -> dict:
     """The LA_MEMGUARD_* names the launchers and the watchdog read, from the saved settings."""
     mg = state.memguard
@@ -551,7 +602,7 @@ def memguard_env(state: State) -> dict:
             "LA_MEMGUARD_HARD_PCT": str(mg["hard_pct"]),
             "LA_MEMGUARD_QUIET_S": str(mg["quiet_s"]),
             "LA_MEMGUARD_AUTO_CONTINUE": "1" if mg["auto_continue"] else "0",
-            "LA_REGISTRY_AUTO_SYNC": "1" if mg["registry_auto_sync"] else "0"}
+            "LA_REGISTRY_AUTO_SYNC": "1" if state.local_registry.get("auto_sync") else "0"}
 
 
 def save_last_launched(config_dir: Path | str, lane: str, alias: str,
@@ -633,10 +684,10 @@ def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, _, memguard, thinking, hidden, lowkey_filters = found
+                effort, limiter, last, temperature, _, memguard, thinking, hidden, lowkey_filters, local_registry = found
             else:
-                effort, limiter, last, temperature, memguard, thinking, hidden, lowkey_filters = {}, {}, {}, {}, {}, {}, [], {}
-            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden, lowkey_filters))
+                effort, limiter, last, temperature, memguard, thinking, hidden, lowkey_filters, local_registry = {}, {}, {}, {}, {}, {}, [], {}, {}
+            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden, lowkey_filters, local_registry))
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
     except OSError as exc:

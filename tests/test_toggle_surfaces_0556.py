@@ -47,17 +47,17 @@ class LocalAndLowkeyRows(PilotCase):
     def test_local_autosync_is_a_toggle(self):
         s = m.Settings()
         calls = []
-        s.on_memguard_saved = lambda d: calls.append(d)
+        s.on_local_registry_saved = lambda d: calls.append(d)   # 0.55.8 Task 8
         scr = m.LocalScreen(s, [], owner=m.HOME_OWNED)
         row = by_key(scr.actions(), "y")
         assert_stepper(self, row, 2)
         self.assertEqual(tuple(row.labels), ("OFF", "ON"))
-        before = bool(s.memguard.get("registry_auto_sync"))
+        before = bool(s.local_registry.get("auto_sync"))
         row.step(+1)
-        self.assertEqual(bool(s.memguard.get("registry_auto_sync")), not before,
+        self.assertEqual(bool(s.local_registry.get("auto_sync")), not before,
                          "step(+1) must flip the store key")
-        self.assertEqual(calls, [{"registry_auto_sync": not before}],
-                         "the on_memguard_saved callback must persist the flip")
+        self.assertEqual(calls, [{"auto_sync": not before}],
+                         "the on_local_registry_saved callback must persist the flip")
 
     def test_lowkey_effort_uses_short_phrasing(self):
         scr = m.LowkeyScreen(m.Settings(), [], api_agents=[])
@@ -376,10 +376,10 @@ class ReviewFixPass(PilotCase):
             await h.press("l")
             await h.wait_screen("LocalScreen")
             await h.expand_settings()
-            before = bool(app.screen_model.settings.memguard.get("registry_auto_sync"))
+            before = bool(app.screen_model.settings.local_registry.get("auto_sync"))
             await h.press("y")                    # the auto-sync row's letter
             await h.pilot.pause(0.3)
-            after = bool(app.screen_model.settings.memguard.get("registry_auto_sync"))
+            after = bool(app.screen_model.settings.local_registry.get("auto_sync"))
             self.assertEqual(after, not before, "the letter hotkey must step the row")
         self.run_picker(s, start="local")
 

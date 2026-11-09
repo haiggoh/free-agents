@@ -394,11 +394,18 @@ class RegistryAutoSync(PilotCase):
     def _prefs(self, values):
         sys.path.insert(0, str(ROOT / "bin"))
         import session_menu_state as sms
-        sms.save_memguard(self.cfg, values)
+        # 0.55.8 Task 8 (R20): local_registry keys go through save_local_registry; the old
+        # memguard key is accepted on READ (migrated) but no longer a writable memguard key.
+        if any(k in values for k in ("auto_sync", "registry_auto_sync")):
+            v = values.get("auto_sync", values.get("registry_auto_sync"))
+            sms.save_local_registry(self.cfg, {"auto_sync": bool(v)})
+            values = {k: v for k, v in values.items() if k not in ("auto_sync", "registry_auto_sync")}
+        if values:
+            sms.save_memguard(self.cfg, values)
 
     def test_on_syncs_without_asking_and_says_what_it_did(self):
         self._stub()
-        self._prefs({"registry_auto_sync": True})
+        self._prefs({"registry_auto_sync": True})   # 0.55.8: migrate-on-read accepts the old key
 
         async def s(app, pilot, h):
             await h.wait_for(lambda: len(self.launches()) >= 2, "register + unregister calls")

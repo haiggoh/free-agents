@@ -186,12 +186,12 @@ class MemoryGuardScreenTests(unittest.TestCase):
     def test_auto_sync_is_a_local_screen_setting_not_an_oom_one(self):
         s = m.Settings()
         saved = []
-        s.on_memguard_saved = saved.append
+        s.on_local_registry_saved = saved.append   # 0.55.8 Task 8 (R20): its own callback
         local = {a.key: a for a in m.LocalScreen(s, []).actions()}
         self.assertIn("Auto-sync local registry with the disk", local["y"].label)
         local["y"].run()
-        self.assertEqual(saved[-1], {"registry_auto_sync": True})
-        self.assertTrue(s.memguard["registry_auto_sync"])
+        self.assertEqual(saved[-1], {"auto_sync": True})
+        self.assertTrue(s.local_registry["auto_sync"])
 
     def test_entry_on_local_only(self):
         # Local sessions only, so Home no longer lists it (0.42.0, user 2026-10-23).
