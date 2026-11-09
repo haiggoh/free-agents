@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PASS=0; FAIL=0
 check() { if [ "$1" = "$2" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: $3 (got '$1', want '$2')"; fi; }
 
-attach() { env -i HOME="$HOME" PATH=/usr/bin:/bin "$@" bash "$ROOT/bin/la-mod-attach.sh"; }
+attach() { env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$HOME" PATH=/usr/bin:/bin "$@" bash "$ROOT/bin/la-mod-attach.sh"; }
 MOD="$(cd -P "$ROOT/mods/session-identity" && pwd)"
 
 check "$(attach LA_MOD_CLAUDE_VERSION=2.1.296)" "" "no session kind (gateway) never attaches"

@@ -33,7 +33,7 @@ def notify(title: str, text: str, caller: str | None = None) -> None:
     """Send (or sink) one notification. Never raises on osascript failure — delivery is
     best-effort, exactly like the raw callers it replaces; only a BROKEN FA_NOTIFY_SINK
     override raises."""
-    sink = os.environ.get("FA_NOTIFY_SINK")
+    sink = os.environ.get("FA_NOTIFY_SINK") or None   # an EMPTY sink is unset (env -i passthrough)
     if sink is not None:
         parent = Path(sink).parent
         if not parent.is_dir():

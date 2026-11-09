@@ -34,7 +34,7 @@ for b in "$(command -v bash)" /opt/homebrew/bin/bash /usr/local/bin/bash; do
   [ -x "$b" ] && "$b" -c '[ "${BASH_VERSINFO[0]}" -ge 4 ]' 2>/dev/null && { BASH4="$b"; break; }
 done
 [ -n "$BASH4" ] || { echo "SKIP: needs bash 4+ (brew install bash)"; exit 0; }
-route() { env -i PATH="/usr/bin:/bin" HOME="$SB/home" "$@" \
+route() { env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" PATH="/usr/bin:/bin" HOME="$SB/home" "$@" \
             "$BASH4" "$SB/repo/bin/council-router.sh" --role reasoner 2>/dev/null; }
 
 out="$(route LA_API_KEYS_DIR="$SB/keys")"

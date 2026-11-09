@@ -2,6 +2,8 @@
 # tests/test_backend_check_launcher.sh — the weekly launchd job is PORTABLE and actually works.
 #
 # Usage: bash tests/test_backend_check_launcher.sh
+# 0.55.8 Task 0 (R10): fence direct runs too — the launcher's env -i children inherit it.
+. "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/fa-notify-sink.sh"
 #
 # Task 11: `manage-backend.py launchd install` writes a STABLE launcher into the live-config
 # tree (never the installing copy) and points the plist at it. At RUN time the launcher puts
@@ -36,7 +38,7 @@ STUB
 chmod +x "$SB/fakebin/brew"
 
 # --- run `launchd install` in the sandbox (no launchctl) ---
-env -i HOME="$H" LA_LIVE_CONFIG_DIR="$LIVE" FA_LAUNCHD_NO_LOAD=1 PATH=/usr/bin:/bin \
+env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$H" LA_LIVE_CONFIG_DIR="$LIVE" FA_LAUNCHD_NO_LOAD=1 PATH=/usr/bin:/bin \
     python3 "$REPO/install/manage-backend.py" launchd install >"$SB/install.out" 2>&1
 rc=$?
 expect_rc 0 $rc "launchd install exits"
@@ -68,19 +70,19 @@ for v in 0.9.0 0.10.0; do
     mkdir -p "$d/.claude-plugin"
     printf '{"name":"free-agents","version":"%s"}\n' "$v" > "$d/.claude-plugin/plugin.json"
 done
-root="$(env -i HOME="$H" FA_BREW="$SB/fakebin/brew" PATH=/usr/bin:/bin bash "$LAUNCHER" --print-root 2>/dev/null)"
+root="$(env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$H" FA_BREW="$SB/fakebin/brew" PATH=/usr/bin:/bin bash "$LAUNCHER" --print-root 2>/dev/null)"
 rc=$?
 expect_rc 0 $rc "launcher --print-root exits"
 has "/free-agents/0.10.0" "$root" "resolves newest cache version by sort -V (0.10.0 over 0.9.0): $root"
 
 # --- FA_ROOT set but invalid -> exit 1 naming it ---
-out="$(env -i HOME="$H" FA_BREW="$SB/fakebin/brew" FA_ROOT="$SB/nope" PATH=/usr/bin:/bin bash "$LAUNCHER" --print-root 2>&1)"
+out="$(env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$H" FA_BREW="$SB/fakebin/brew" FA_ROOT="$SB/nope" PATH=/usr/bin:/bin bash "$LAUNCHER" --print-root 2>&1)"
 rc=$?
 expect_rc 1 $rc "FA_ROOT invalid exits"
 has "FA_ROOT=$SB/nope" "$out" "FA_ROOT failure names the variable and value"
 
 # --- FA_BREW set but not executable -> exit 1 naming it ---
-out="$(env -i HOME="$H" FA_BREW="$SB/no-brew" PATH=/usr/bin:/bin bash "$LAUNCHER" --print-root 2>&1)"
+out="$(env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$H" FA_BREW="$SB/no-brew" PATH=/usr/bin:/bin bash "$LAUNCHER" --print-root 2>&1)"
 rc=$?
 expect_rc 1 $rc "FA_BREW invalid exits"
 has "FA_BREW=$SB/no-brew" "$out" "FA_BREW failure names the variable and value"
@@ -91,10 +93,10 @@ mkdir -p "$FR/.claude-plugin" "$FR/scripts" "$FR/bin"
 printf '{"name":"free-agents"}\n' > "$FR/.claude-plugin/plugin.json"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$FR/scripts/check-backend-updates.sh"
 printf '#!/usr/bin/env bash\nexit "${FAKE_PUC_RC:-0}"\n' > "$FR/bin/fa-post-upgrade-check.sh"
-env -i HOME="$H" FA_BREW="$SB/fakebin/brew" FA_ROOT="$FR" PATH=/usr/bin:/bin bash "$LAUNCHER" >/dev/null 2>&1
+env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$H" FA_BREW="$SB/fakebin/brew" FA_ROOT="$FR" PATH=/usr/bin:/bin bash "$LAUNCHER" >/dev/null 2>&1
 rc=$?
 expect_rc 0 $rc "full run, both checks green"
-env -i HOME="$H" FA_BREW="$SB/fakebin/brew" FA_ROOT="$FR" FAKE_PUC_RC=1 PATH=/usr/bin:/bin bash "$LAUNCHER" >/dev/null 2>&1
+env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$H" FA_BREW="$SB/fakebin/brew" FA_ROOT="$FR" FAKE_PUC_RC=1 PATH=/usr/bin:/bin bash "$LAUNCHER" >/dev/null 2>&1
 rc=$?
 expect_rc 1 $rc "full run, post-upgrade check broken -> launcher exit 1"
 

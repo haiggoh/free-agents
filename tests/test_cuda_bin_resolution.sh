@@ -45,7 +45,7 @@ mkvenv 0.10.0 healthy
 
 resolve() { # -> prints LA_CUDA_BIN after la_load_config, in the sandbox (same bash as this test:
              # config-lib uses declare -A, which /bin/bash 3.2 lacks)
-  env -i HOME="$H" PATH=/usr/bin:/bin:/usr/local/bin LA_USER_STATE_DIR="$STATE" "$@" \
+  env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$H" PATH=/usr/bin:/bin:/usr/local/bin LA_USER_STATE_DIR="$STATE" "$@" \
     "$BASH" -c '. "$1/config/config-lib.sh"; la_load_config >/dev/null 2>&1; printf %s "${LA_CUDA_BIN:-}"' _ "$SB"
 }
 
@@ -63,7 +63,7 @@ has "/cuda-vllm-0.9.0/bin/vllm" "$out" "live-config pin wins over discovery: $ou
 out="$(resolve LA_CUDA_BIN="$CB/cuda-vllm-0.10.0/bin/vllm")"
 has "/cuda-vllm-0.10.0/bin/vllm" "$out" "env LA_CUDA_BIN wins over live-config pin: $out"
 # 3b. set-but-broken env value aborts loudly instead of silently using the pin
-out="$(env -i HOME="$H" PATH=/usr/bin:/bin LA_USER_STATE_DIR="$STATE" LA_CUDA_BIN=/nonexistent \
+out="$(env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$H" PATH=/usr/bin:/bin LA_USER_STATE_DIR="$STATE" LA_CUDA_BIN=/nonexistent \
   "$BASH" -c '. "$1/config/config-lib.sh"; la_load_config 2>&1; printf "rc=%s" "$?"' _ "$SB")"
 has "cannot run" "$out" "set-but-broken LA_CUDA_BIN aborts naming it: $out"
 has "rc=1" "$out" "...and la_load_config exits 1"
