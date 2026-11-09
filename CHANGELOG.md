@@ -13,6 +13,52 @@
 ### Fixed
 - `handover-verify.sh` compares process start times as epoch seconds (registry startedAt millis authoritative; procStart is UTC, ps lstart local) — no more false "pid recycled" under CET.
 
+## [0.56.1] — unreleased
+
+### Fixed — the 0541 fix-release round (plan 2026-11-05-free-agents-0541-fix-release.md)
+
+- **No test run posts a real notification or opens a window** (Task 0): one notify
+  helper (`bin/fa_notify.py` + `bin/fa-notify.sh`) honors `FA_NOTIFY_SINK`; the pytest
+  session exports a sink + a shim PATH and FAILS the session if the shim log records
+  any call (R1); shell tests inherit the fence via `tests/lib/fa-notify-sink.sh`.
+  `tests/test_no_real_notifications_0541.py` 9/9.
+- **The HF param warm-up finishes** (Task 2): unsized ids first, a bounded worker pool
+  (`LA_PICKER_HF_WARM_WORKERS`, invalid = one loud line + serial), and a bounded
+  DETACHED finisher (`estimate-model-footprint.py --hf-warm`) handed the unattempted
+  ids on every exit route (quit/atexit/SIGHUP/SIGTERM), lock-guarded, 200-request and
+  time caps, outcome JSON surfacing one status line on failure. One locked re-reading
+  cache writer (`_hf_cache_store`) so concurrent warm-ups never lose entries; corrupt
+  cache preserved as `.corrupt-*`. `tests/test_hf_warm_completes_0541.py` 12/12,
+  `tests/test_hf_cache_writer_0541.py` 4/4.
+- **Lowkey keeps the open group + highlight across refreshes** (Task 3), including the
+  search multi-open state (`refresh_keep_open`). `tests/test_lowkey_keep_open_0541.py` 7/7.
+- **Lowkey API sessions are labelled with the model's readable name** (Task 4) —
+  `api_display_label` = `model_names.readable`, one source with the picker.
+  `tests/test_lowkey_api_label_0541.py` 4/4.
+- **A spinner appears when a reply takes > 0.5 s** on BOTH the API and local paths
+  (Task 5, one `DelayedSpinner`, cleared before the next line).
+  `tests/test_lowkey_spinner_0541.py` 5/5.
+- **"not set"** for unset effort/temperature was delivered by v0.55.5 (Task 6).
+- **Every Local action row starts with an emoji** except Choose model (Task 7, by
+  design — it stands out as the most important row; the waypoint mark is reserved for
+  the waypoints plugin); lowkey's combined Choose model row drops the redundant
+  leading emoji and the overlapping ellipsis. `tests/test_local_action_emoji_0541.py`.
+- **Settings schema 10**: `registry_auto_sync` lives in its own `local_registry`
+  section — migrated without loss on read, never carried by memguard saves, an
+  explicit section wins over a stale key (R19), and the first migrating save leaves a
+  `.v9.bak` (the 0.54.0 reader rejects schema 10 — recorded). `tests/
+  test_registry_section_migration_0541.py` 7/7.
+
+### Corrected
+
+0.54.0 stated "85 NVIDIA ids -> 82 sized"; that held only for the probe's online temp
+cache — user caches stayed around 75 until this release's finisher (Task 2).
+
+### Not done
+
+Task 9 (D2/D4 gesture and identity carry-overs) — gated on the still-open user
+decisions D2/D4.
+
 ## [0.55.7] — 2026-11-08
 
 ### Changed — the cycle-glyph design on every setting surface (user feedback round)
