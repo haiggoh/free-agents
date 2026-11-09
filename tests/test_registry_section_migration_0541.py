@@ -60,6 +60,16 @@ class RegistryMigration(unittest.TestCase):
         self.assertIs(doc["local_registry"]["auto_sync"], False)
         self.assertNotIn("registry_auto_sync", doc.get("memguard", {}))
 
+    def test_explicit_false_round_trips(self):
+        # M4 minor: an explicit False must persist as False (not fall back to default/absent)
+        cfg = _cfg()
+        sms.save_local_registry(cfg, {"auto_sync": True})
+        sms.save_local_registry(cfg, {"auto_sync": False})
+        st = sms.load(cfg)
+        self.assertIs(st.local_registry.get("auto_sync"), False)
+        doc = json.loads((cfg / sms.PREFS_NAME).read_text())
+        self.assertIs(doc["local_registry"]["auto_sync"], False, doc)
+
     def test_export_reads_new_key(self):
         cfg = _cfg()
         st = sms.load(cfg)
