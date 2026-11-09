@@ -111,13 +111,16 @@ class StoreTests(unittest.TestCase):
         # blur -> blur active adds +35 points of effective brightness
         self.assertEqual(ap.tint_alpha(95, blur_active=False), 0.95)
         self.assertEqual(ap.tint_alpha(50, blur_active=False), 0.5)
-        self.assertEqual(ap.tint_alpha(50, blur_active=True), 0.85,
-                         "50% with blur = 85% effective, matching 85% without blur in brightness")
-        self.assertEqual(ap.tint_alpha(85, blur_active=True), 1.0, "capped at opaque")
-        # monotonic in opacity, and blur compensation only raises
+        self.assertEqual(ap.tint_alpha(100, blur_active=False), 1.0)
+        self.assertEqual(ap.tint_alpha(50, blur_active=True), 0.05,
+                         "with blur ON the tint starts near 0 — the vibrancy material is the surface")
+        # the slider must still respond with blur on (user 2026-11-09), never exceeding +0.30
+        self.assertEqual(ap.tint_alpha(100, blur_active=True), 0.35)
         self.assertLess(ap.tint_alpha(60, True), ap.tint_alpha(90, True))
+        # without blur: the requested opacity applies unchanged; with blur never darker
+        self.assertLess(ap.tint_alpha(60, False), ap.tint_alpha(90, False))
         for pct in (50, 60, 70, 80, 90, 100):
-            self.assertGreaterEqual(ap.tint_alpha(pct, True), ap.tint_alpha(pct, False))
+            self.assertLessEqual(ap.tint_alpha(pct, True), ap.tint_alpha(pct, False))
 
     def test_native_window_args_mapping(self):
         # Phase 6: translucent -> transparent window; blur requested -> vibrancy (built-in
