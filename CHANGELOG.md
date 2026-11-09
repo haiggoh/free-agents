@@ -1,18 +1,3 @@
-## [0.56.0] — 2026-11-09 — route-by-shape intercept, resilient dispatch, watch-until, epoch-safe handover-verify (plan 2026-11-08-free-agents-routing-fallback-watcher)
-
-### Added
-- `bin/watch-until`: one generic transient watcher (git-tag/refs-change/file-regex/port/pid-exit/session-progress/cmd), doubling backoff capped with reset, exit 0/1/2/3/4, one verdict line, `--self-test` with planted positives + controls and a mutated-predicate discriminant.
-- Dispatch fallback: entries may carry `alternates` (same model on another keyed provider, catalog-verified ids) tried before the next entry; 429/timeout moves immediately, no retry storm; attempt logs name provider+model; `--background RUN_DIR` / `--resume RUN_DIR [--extend DUR]` write plan.json + events.jsonl + result.json and exit 0/5/6 (DECISION_NEEDED prints the resume command). One alternate live-smoked (openrouter `mistralai/mistral-large-4-0`).
-- Timeout tiers `snappy|balanced|patient` (FA_DISPATCH_TIMEOUT_TIER, cycled via csl → Cloud Session Configuration key t, infobox pros/cons) on top of generous defaults (wall 3600s / attempt 900s / stall 300s, FA_DISPATCH_* env overrides, invalid aborts naming the var). Dynamic: NVIDIA-lane attempts get the patient timeout only while the rate limiter state shows an active 429 cooldown; non-rate-limited providers keep the tier's values.
-- Offload/handover skills: arm `watch-until` (run_in_background) for started/still-alive waits; two VISIBLE reports for background offloads (launch description carries model @ provider effort; completion reported in plain text, exit code 0 = success). The milestone-QC lesson (red-first, real fixtures, outcome assertions, mutation-must-go-RED, "does the test test the requirement itself or only a surface appearance of it") is now in the free-session system prompt and handover notes.
-
-### Changed
-- Intercept message leads with the task-shape test and offers both ready-to-run free routes (dispatch heredoc + roster-resolved `remote-session.sh <alias> --effort high -p "<brief>"`); paid requires a stated reason AND an exhausted own route — exhaustion alone never permits paid. Routing text stays single-sourced in the offload skill's marked block.
-- Dispatch roles are now a suggestion, not a hard requirement (user 2026-11-09): entries listing the requested role run first, every other available entry follows as fallback — any model can fill another role when it needs to.
-
-### Fixed
-- `handover-verify.sh` compares process start times as epoch seconds (registry startedAt millis authoritative; procStart is UTC, ps lstart local) — no more false "pid recycled" under CET.
-
 ## [0.56.1] — unreleased
 
 ### Fixed — the 0541 fix-release round (plan 2026-11-05-free-agents-0541-fix-release.md)
@@ -58,6 +43,21 @@ cache — user caches stayed around 75 until this release's finisher (Task 2).
 
 Task 9 (D2/D4 gesture and identity carry-overs) — gated on the still-open user
 decisions D2/D4.
+
+## [0.56.0] — 2026-11-09 — route-by-shape intercept, resilient dispatch, watch-until, epoch-safe handover-verify (plan 2026-11-08-free-agents-routing-fallback-watcher)
+
+### Added
+- `bin/watch-until`: one generic transient watcher (git-tag/refs-change/file-regex/port/pid-exit/session-progress/cmd), doubling backoff capped with reset, exit 0/1/2/3/4, one verdict line, `--self-test` with planted positives + controls and a mutated-predicate discriminant.
+- Dispatch fallback: entries may carry `alternates` (same model on another keyed provider, catalog-verified ids) tried before the next entry; 429/timeout moves immediately, no retry storm; attempt logs name provider+model; `--background RUN_DIR` / `--resume RUN_DIR [--extend DUR]` write plan.json + events.jsonl + result.json and exit 0/5/6 (DECISION_NEEDED prints the resume command). One alternate live-smoked (openrouter `mistralai/mistral-large-4-0`).
+- Timeout tiers `snappy|balanced|patient` (FA_DISPATCH_TIMEOUT_TIER, cycled via csl → Cloud Session Configuration key t, infobox pros/cons) on top of generous defaults (wall 3600s / attempt 900s / stall 300s, FA_DISPATCH_* env overrides, invalid aborts naming the var). Dynamic: NVIDIA-lane attempts get the patient timeout only while the rate limiter state shows an active 429 cooldown; non-rate-limited providers keep the tier's values.
+- Offload/handover skills: arm `watch-until` (run_in_background) for started/still-alive waits; two VISIBLE reports for background offloads (launch description carries model @ provider effort; completion reported in plain text, exit code 0 = success). The milestone-QC lesson (red-first, real fixtures, outcome assertions, mutation-must-go-RED, "does the test test the requirement itself or only a surface appearance of it") is now in the free-session system prompt and handover notes.
+
+### Changed
+- Intercept message leads with the task-shape test and offers both ready-to-run free routes (dispatch heredoc + roster-resolved `remote-session.sh <alias> --effort high -p "<brief>"`); paid requires a stated reason AND an exhausted own route — exhaustion alone never permits paid. Routing text stays single-sourced in the offload skill's marked block.
+- Dispatch roles are now a suggestion, not a hard requirement (user 2026-11-09): entries listing the requested role run first, every other available entry follows as fallback — any model can fill another role when it needs to.
+
+### Fixed
+- `handover-verify.sh` compares process start times as epoch seconds (registry startedAt millis authoritative; procStart is UTC, ps lstart local) — no more false "pid recycled" under CET.
 
 ## [0.55.7] — 2026-11-08
 
