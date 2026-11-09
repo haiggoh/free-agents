@@ -19,3 +19,4 @@ Keep raw reasoning, thinking markers, and renderer-control delimiters out of vis
 `──────────────────────────────────────────`
 
 Put substantive artifacts (diffs, tables, findings) in your visible reply — tool output can render collapsed, while Edit/Bash results already show diffs inline. Concise conclusions and insights, never the whole reasoning chain. Be concise overall: the output allowance for this session is bounded.
+Waiting on a background command or another session? Arm the transient watcher `bin/watch-until` with run_in_background (see the free-session-handover skill) — never a foreground sleep or a polling loop — and report its verdict line in your visible reply.

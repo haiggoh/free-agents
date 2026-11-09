@@ -60,18 +60,24 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
    failed dispatch chain is not by itself a reason — try the OTHER free route first.
 <!-- fa:routing:end -->
 
-## Reporting background offloads to the user — two visible reports, never thinking-only
+## Reporting background offloads — two visible reports, never thinking-only
 
-When you send work to a free lane in the background (`run_in_background`), the completion
-notification shows only the Bash `description` and the exit code. So:
-1. At launch, put the resolved model in the description — `free dispatch: <task> — <model> @
-   <provider> (effort <lvl>)`, or for a session `free session: <task> — <alias> (effort <lvl>)`.
-   Resolve via `remote-session.sh --list` / `free-agent-tool.py --list`; never guess ids.
-2. In your VISIBLE reply (not only in thinking), say what you launched.
-3. When the background command returns, report the outcome in one visible line: model, provider,
-   effort, `exit code 0` = success, and where the result lives (`--out FILE` envelope, or
-   RUN_DIR/result.json for a `--background` dispatch run). Non-zero: say what failed and what
-   you did about it.
+A background (`run_in_background`) completion notice shows only the Bash `description` and
+the exit code, so: (1) at launch put the resolved model in the description —
+`free dispatch: <task> — <model> @ <provider> (effort <lvl>)` (`remote-session.sh --list` /
+`free-agent-tool.py --list` resolve them; never guess ids); (2) say what you launched in your
+VISIBLE reply, not only in thinking; (3) when it returns, report in one visible line: model,
+provider, effort, `exit code 0` = success, where the result lives (`--out FILE`, or
+RUN_DIR/result.json for `--background`); non-zero: what failed and what you did.
+
+## Waiting on a background offload — arm the watcher, never poll
+
+`watch-until --session-progress <session-id> --regex '<handoff path>' --deadline 15m` for
+"started", then `watch-until --session-progress <session-id> --stall 20 --proxy-log
+"$TMPDIR/local-agents-remote/proxy-<port>.log" --deadline 8h` for "still alive" — both with
+`run_in_background`; never a foreground `sleep`, never a polling loop. A STALL verdict names
+the proxy-log cause (e.g. "NVIDIA 429") — propose `remote-session.sh --swap-model <port>
+<alias>`; do not swap unasked. Report the verdict line visibly when it exits (section above).
 
 ## Decide at decomposition — annotate every step before reading any input
 
