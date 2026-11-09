@@ -995,6 +995,7 @@ class Picker(App):
             thinking_session=state.thinking_session,
             rate_limiter=dict(state.rate_limiter),
             memguard=dict(state.memguard),
+            local_registry=dict(state.local_registry),   # 0.55.8 Task 8: the migrated section
             auto_mode=int(os.environ.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
             telemetry=os.environ.get("CSL_TELEMETRY", "0") == "1",
             stop_hook=os.environ.get("CSL_STOP_HOOK", "0") == "1",   # OFF by default (0.22.3)
