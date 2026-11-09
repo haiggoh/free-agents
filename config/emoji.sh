@@ -11,6 +11,7 @@
 # Session kind emojis — one per session_kind value
 # These are the canonical mappings used by la-session-identity.sh
 SESSION_EMOJI_LOCAL="🦾"
+EMOJI_REGISTRY_SYNC="🔄"
 SESSION_EMOJI_FREE_API="📡"     # was 🌐 (globe) — changed to satellite dish
 SESSION_EMOJI_CLOUD="☁️"        # cloud/gateway sessions
 SESSION_EMOJI_REMOTE_API="📡"   # alias for free_api
