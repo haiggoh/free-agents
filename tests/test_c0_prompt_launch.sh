@@ -141,22 +141,39 @@ fi
 echo "== C0b: handover-verify proves the first prompt ARRIVED, not that a port listens =="
 SD="$T/sessions"; PD="$T/projects/-Users-test-fake-cwd"
 mkdir -p "$SD" "$PD"
-printf '{"pid": 424242, "sessionId": "sid-fresh", "startedAt": 1}\n' > "$SD/424242.json"
+# Realistic registry entry (2026-11-08 Task 4): a LIVE pid, startedAt as epoch MILLIS and
+# procStart as the UTC string the harness writes (ps lstart prints LOCAL — string-comparing
+# them was the recycled false-positive; handover-verify now compares epoch seconds).
+sleep 60 & STUBPID=$!
+STUBREG="$(python3 - "$STUBPID" <<'PY'
+import json, os, subprocess, sys, time
+pid = sys.argv[1]
+r = subprocess.run(["ps", "-o", "lstart=", "-p", pid], capture_output=True, text=True,
+                   env={**os.environ, "LC_ALL": "C"})
+epoch = time.mktime(time.strptime(" ".join(r.stdout.split()), "%a %b %d %H:%M:%S %Y"))  # local
+g = time.gmtime(epoch)
+utc = time.strftime("%a %b ", g) + f"{g.tm_mday:2d} " + time.strftime("%H:%M:%S %Y", g)
+print(json.dumps({"pid": int(pid), "sessionId": "sid-fresh",
+                  "startedAt": int(epoch * 1000), "procStart": utc}))
+PY
+)"
+printf '%s\n' "$STUBREG" > "$SD/$STUBPID.json"
 # An idle stub: the registry entry exists but NO transcript ever appeared.
-"$HV" --expect 'the-handoff-path.md' --pid 424242 --timeout 1 \
+"$HV" --expect 'the-handoff-path.md' --pid "$STUBPID" --timeout 1 \
       --sessions-dir "$SD" --projects-dir "$T/projects" > "$T/hv1.txt" 2>&1
 check $? -eq 1 "an idle stub session (no transcript) => NOT_VERIFIED (exit 1)"
 /usr/bin/grep -q 'NOT_VERIFIED' "$T/hv1.txt"; check $? -eq 0 "and it says NOT_VERIFIED"
 # The transcript appears (the first prompt landed) -> VERIFIED.
 printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Read the-handoff-path.md first and follow it"}]}}\n' > "$PD/sid-fresh.jsonl"
-"$HV" --expect 'the-handoff-path.md' --pid 424242 --timeout 3 \
+"$HV" --expect 'the-handoff-path.md' --pid "$STUBPID" --timeout 3 \
       --sessions-dir "$SD" --projects-dir "$T/projects" > "$T/hv2.txt" 2>&1
 check $? -eq 0 "the transcript containing the handoff path => VERIFIED (exit 0)"
 /usr/bin/grep -q 'VERIFIED' "$T/hv2.txt" && /usr/bin/grep -q -v 'NOT_VERIFIED' "$T/hv2.txt"
 check $? -eq 0 "and it says VERIFIED"
-"$HV" --expect 'nope' --pid 424242 --timeout 1 \
+"$HV" --expect 'nope' --pid "$STUBPID" --timeout 1 \
       --sessions-dir "$SD" --projects-dir "$T/projects" > "$T/hv3.txt" 2>&1
 check $? -eq 1 "an unrelated transcript => NOT_VERIFIED"
+kill "$STUBPID" 2>/dev/null
 "$HV" --expect 'x' --pid 999999 --timeout 1 \
       --sessions-dir "$SD" --projects-dir "$T/projects" > "$T/hv4.txt" 2>&1
 check $? -eq 1 "an unknown pid (no registry entry) => NOT_VERIFIED"

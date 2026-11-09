@@ -77,16 +77,44 @@ if [[ -z "$sid" ]]; then
     # 0.50.0 F5: the registry is keyed by pid — a RECYCLED pid must not verify another
     # session's transcript. Compare the recorded procStart with the live process.
     pstart="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("procStart",""))' "$regf" 2>/dev/null || true)"
-    if [[ -n "$pstart" ]]; then
-        live="$(LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//' | tr -s ' ')"
-        if [[ -z "$live" ]]; then
-            echo "NOT_VERIFIED: pid $pid is not running (registry procStart '$pstart')"
-            exit 1
-        fi
-        if [[ "$live" != "$pstart" ]]; then
-            echo "NOT_VERIFIED: pid $pid was recycled (registry start '$pstart' != live '$live')"
-            exit 1
-        fi
+    startedat="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("startedAt",""))' "$regf" 2>/dev/null || true)"
+    if [[ -n "$pstart" || -n "$startedat" ]]; then
+        # 2026-11-08 route-watcher Task 4: compare EPOCH SECONDS, not strings — the registry's
+        # procStart is written in UTC while `ps lstart` prints LOCAL time, so a string compare
+        # reports "recycled" for the very same instant (18:44:10 vs 19:44:10 on a CET box).
+        # startedAt (epoch millis) is authoritative; procStart parsed as UTC is the fallback.
+        # ±2 s tolerance for clock read jitter.
+        check="$(python3 - "$pid" "$startedat" "$pstart" <<'PY' 2>/dev/null || true
+import os, subprocess, sys, time
+pid, startedat, pstart = sys.argv[1], sys.argv[2], sys.argv[3]
+r = subprocess.run(["ps", "-o", "lstart=", "-p", pid], capture_output=True, text=True,
+                   env={**os.environ, "LC_ALL": "C"})
+live = " ".join(r.stdout.split())
+if r.returncode != 0 or not live:
+    print("NOT_RUNNING")
+    raise SystemExit(0)
+live_epoch = time.mktime(time.strptime(live, "%a %b %d %H:%M:%S %Y"))      # lstart is LOCAL
+if startedat:
+    reg_epoch = float(startedat) / 1000.0                                 # startedAt: epoch millis
+elif pstart:
+    reg_epoch = time.timegm(time.strptime(pstart, "%a %b %d %H:%M:%S %Y")) # procStart: UTC
+else:
+    raise SystemExit(0)
+print("OK" if abs(live_epoch - reg_epoch) <= 2 else "RECYCLED")
+PY
+)"
+        case "$check" in
+            OK) ;;
+            NOT_RUNNING)
+                echo "NOT_VERIFIED: pid $pid is not running (registry procStart '$pstart')"
+                exit 1 ;;
+            RECYCLED)
+                echo "NOT_VERIFIED: pid $pid was recycled (start epochs differ by more than 2s: registry ${startedat:-$pstart})"
+                exit 1 ;;
+            *)
+                echo "NOT_VERIFIED: could not compare the start time of pid $pid"
+                exit 1 ;;
+        esac
     fi
 fi
 deadline=$(( $(date +%s) + tmo ))
