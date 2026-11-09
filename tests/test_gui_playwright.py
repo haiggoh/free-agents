@@ -655,6 +655,23 @@ class GuiPlaywrightTests(unittest.TestCase):
                 lb = text_only.locator(".tile-label").bounding_box()
                 self.assertLessEqual(abs((lb["y"] + lb["height"] / 2) - (tb["y"] + tb["height"] / 2)),
                                      6, "text-only tile must center its text vertically")
+            # small (non-2x2) tiles: emoji sits ABOVE center (the nudge-up) — a mutation to
+            # top:50% must go red here
+            small_tile = p.locator(".tile:not(.tile-lg)").first
+            sb = small_tile.bounding_box()
+            se = small_tile.locator(".tile-emoji").bounding_box()
+            self.assertLess(se["y"] + se["height"] / 2, sb["y"] + sb["height"] / 2,
+                            "small-tile emoji must sit above center (42% rule)")
+            # a wrapped (2-line) label tile: emoji must not overlap it even there
+            for t in p.locator(".tile").all():
+                lb = t.locator(".tile-label").bounding_box()
+                if lb and lb["height"] > 30:   # ~2 lines at 17px
+                    eb = t.locator(".tile-emoji").bounding_box()
+                    tb = t.bounding_box()
+                    self.assertLessEqual(eb["y"] + eb["height"], lb["y"] + 2,
+                                         "on a 2-line-label tile the emoji must not overlap the label")
+                    self.assertGreaterEqual(eb["y"], tb["y"], "never touches the top border")
+                    break
             # no two tiles overlap (grid auto-placement makes room around 2x2/2x1)
             boxes = [t.bounding_box() for t in p.locator(".tile").all()]
             for i in range(len(boxes)):
@@ -1064,6 +1081,8 @@ class GuiQuitTests(unittest.TestCase):
                     time.sleep(0.5)
                 self.assertIsNotNone(app.proc.poll(),
                                      "clicking Quit must shut down the GUI server process")
+                self.assertTrue(p.evaluate("() => window.__fa_quit === true"),
+                                "clicking Quit must request window.close() (flag set before shutdown)")
                 browser.close()
         finally:
             app.stop()
