@@ -704,6 +704,16 @@ def _is_binary(action) -> bool:
     return len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
 
 
+def _knob_shows_filled(state: str, on: bool) -> bool:
+    """Resolve a KNOB_SEQUENCE row's SHOWS column for a toggle switching TO `on`: "new" = the
+    state after the toggle, "old" = the state before it, "filled" = filled either way."""
+    if state == "filled":
+        return True
+    if state in ("new", "old"):
+        return on if state == "new" else not on
+    raise ValueError(f"KNOB_SEQUENCE: unknown SHOWS value {state!r}")
+
+
 def _knob_text(pos: int, filled: bool, size: str = "full", colour: str | None = None) -> Text:
     """One frame of the toggle knob: the knob at column `pos` (0 = OFF end, KNOB_CELLS-1 = ON
     end) on a KNOB_CELLS-wide track. `filled` is the state the knob SHOWS — ON = filled knob in
@@ -2216,7 +2226,7 @@ class Picker(App):
         if anim is None:
             return (end if on else 0), on, "full", None
         _, size, state, colour, _ = ec.KNOB_SEQUENCE[anim["row"]]
-        return self._knob_pos_of(anim), (on if state == "new" else not on), size, colour
+        return self._knob_pos_of(anim), _knob_shows_filled(state, on), size, colour
 
     @staticmethod
     def _knob_pos_of(anim) -> int:

@@ -158,32 +158,35 @@ class ToggleKnob(PilotCase):
             self.assertGreaterEqual(ticks, 2, f"every frame must last >= 2 ticks: {(m_, size, ticks)}")
             if m_ < END:
                 self.assertEqual(state, "old", "in flight the knob keeps its OLD state")
-            if state == "new":
+            if state != "old":
                 self.assertEqual(size, "full", "the state changes only once the knob is full size")
         # user 2026-11-08: ONE size switch only (small while moving and arriving, then full)
         sizes = [r[1] for r in seq]
         switches = sum(1 for a, b in zip(sizes, sizes[1:]) if a != b)
         self.assertEqual(switches, 1, f"the knob may change size exactly once: {sizes}")
-        # grow FIRST (full size, still old), THEN change state — with the cyan, on that frame
         first_new = next(i for i, r in enumerate(seq) if r[2] == "new")
-        self.assertGreater(first_new, 0)
-        self.assertEqual(seq[first_new - 1][1:3], ("full", "old"),
-                         f"the knob must reach full size in its OLD state before changing: {seq}")
         self.assertEqual(seq[first_new][3], "bright_cyan",
                          f"the state change itself must flash the cyan: {seq[first_new]}")
-        flashes = [r for r in seq if r[3]]
+        # user 2026-11-09: right before the cyan, an in-between frame FILLED with a dim colour
+        self.assertGreater(first_new, 1)
+        self.assertEqual(seq[first_new - 1][1:4], ("full", "filled", "dim"),
+                         f"a dim filled frame must precede the cyan: {seq}")
+        # grow FIRST (full size, still old), THEN the dim fill, THEN the new state
+        self.assertEqual(seq[first_new - 2][1:3], ("full", "old"),
+                         f"the knob must reach full size in its OLD state before changing: {seq}")
+        flashes = [r for r in seq if r[3] in ("bright_cyan", "cyan")]
         self.assertEqual(flashes[0][3], "bright_cyan")          # the subheadline cyan
         for r in flashes:
             self.assertGreaterEqual(r[4] * ec.KNOB_TICK_S, 2 / 60 - 1e-9, f"flash too short: {r}")
 
-    @staticmethod
-    def _expected(on: bool):
-        """Per tick, the (pos, filled, size, colour) the table prescribes, then the rest frame."""
+    def _expected(self, on: bool):
+        """Per tick, the (pos, filled, size, colour) the table prescribes, then the rest frame.
+        SHOWS is resolved by the picker's own _knob_shows_filled — one definition, not a copy."""
         start = 0 if on else END
         d = 1 if on else -1
         out = []
         for m_, size, state, colour, ticks in ec.KNOB_SEQUENCE:
-            out += [(start + d * m_, on if state == "new" else not on, size, colour)] * ticks
+            out += [(start + d * m_, self.sp._knob_shows_filled(state, on), size, colour)] * ticks
         return out + [((END if on else 0), on, "full", None)]
 
     def test_sequence_plays_every_table_row(self):
@@ -218,17 +221,26 @@ class ToggleKnob(PilotCase):
             for _ in range(2):                           # OFF→ON, then ON→OFF
                 on = _knob(_row(h, "t")[1])[1] != END    # the state we are switching TO
                 frames = await _record_toggle(h, pilot, "t")
+                # compare glyphs AND the knob's effective style (its own colour, else the
+                # track's base: dim when hollow) — so a dim filled frame is told from a plain one
                 want = []
                 for pos, filled, size, colour in self._expected(on):
-                    f = (self.sp._knob_text(pos, filled, size, colour).plain, colour)
+                    eff = colour or (None if filled else "dim")
+                    f = (self.sp._knob_text(pos, filled, size, colour).plain, eff)
                     if not want or want[-1] != f:
                         want.append(f)
                 got = []
                 for tail, styles in frames[1:]:          # frames[0] = the row before the press
-                    colour = next((c for c in ("bright_cyan", "cyan") if c in styles), None)
-                    if not got or got[-1] != (tail, colour):
-                        got.append((tail, colour))
+                    eff = styles[-1] if styles else None # the innermost span = the knob's own
+                    if not got or got[-1] != (tail, eff):
+                        got.append((tail, eff))
                 self.assertEqual(got, want, f"drawn frames differ from the table (on={on})")
+                # independent of _knob_shows_filled (which builds `want`): in BOTH directions a
+                # drawn frame is the FILLED glyph in dim, right before the cyan (user 2026-11-09)
+                i_dim = next((i for i, (t, e) in enumerate(got) if ec.KNOB_ON in t and e == "dim"), None)
+                self.assertIsNotNone(i_dim, f"no dim filled frame drawn (on={on}): {got}")
+                assert i_dim is not None                 # narrows the type for the index below
+                self.assertEqual(got[i_dim + 1][1], "bright_cyan", f"the dim fill must lead into the cyan: {got}")
         self.run_picker(s, start="local")
 
 
