@@ -47,3 +47,16 @@ Silence from a briefed implementer is normal. Check once (its transcript tail an
 `git status --porcelain`), then do useful interim work: prepare the next phase, reconcile records
 the finished phases made stale, or finish leftover docs in files the running agent will not
 touch. Never run mutation tests or full suites against the same tree concurrently.
+
+## Waiting on the successor (transient watcher, 2026-11-08 route-watcher)
+
+Arm the watcher ONCE with `run_in_background` — never a foreground `sleep`, never a polling
+loop in the conversation:
+`watch-until --session-progress <session-id> --regex '<handoff path>' --deadline 15m`
+for "started", then
+`watch-until --session-progress <session-id> --stall 20 --proxy-log "$TMPDIR/local-agents-remote/proxy-<port>.log" --deadline 8h`
+for "still alive" (a STALL verdict names the proxy-log cause, e.g. "NVIDIA 429" — then
+propose `remote-session.sh --swap-model <port> <alias>` to the user; never swap unasked).
+The watcher prints exactly one verdict line on exit (DETECTED / TIMEOUT / STALL /
+CANNOT_START); report it in your visible reply. Predicates are proven by
+`bin/watch-until --self-test` before you rely on one.

@@ -83,14 +83,8 @@ for the whole session, then continue autonomously from its Next action."*
    file's CONTENTS and the path never appeared — expecting it reported NOT_VERIFIED on a
    correct handover, 2026-10-31). A LISTEN alone proves nothing (measured: LISTEN over an idle
    session). Never print process argv, which can contain keys.
-   Arm the transient watcher for the long waits — `run_in_background`, never a foreground
-   sleep, never a polling loop in the conversation:
-   `watch-until --session-progress <session-id> --regex '<handoff path>' --deadline 15m`
-   for "started", then
-   `watch-until --session-progress <session-id> --stall 20 --proxy-log "$TMPDIR/local-agents-remote/proxy-<port>.log" --deadline 8h`
-   for "still alive". A STALL verdict whose evidence names "NVIDIA 429" means the proxy's
-   upstream is throttled — propose `remote-session.sh --swap-model <port> <alias>` to the
-   user; do not swap unasked. Report the watcher's one verdict line in your visible reply.
+   For the long wait, arm the transient watcher once via `run_in_background` (commands in
+   `references/operational-notes.md`); never a foreground sleep or a polling loop.
 4. **Then** stop the old session, by its own pid or port only. Never `remote-session.sh --stop`,
    never a blanket stop: other proxies in the band serve sessions you cannot see.
 
@@ -145,9 +139,8 @@ session afterwards to resume). Full procedure: `references/operational-notes.md`
 ## While a long sub-task runs
 
 Check once (transcript tail + `git status --porcelain`), then do interim work on other files —
-never mutation tests or full suites against the same tree concurrently. For any LONG wait,
-arm `watch-until` with `run_in_background` (see step 3 above) instead of re-checking in the
-conversation. Details: `references/operational-notes.md`.
+never mutation tests or full suites against the same tree concurrently. Details:
+`references/operational-notes.md`.
 
 ## Branding (📡🦾)
 

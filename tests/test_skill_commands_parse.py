@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "bin" / "watch-until"
 SKILLS = [ROOT / "skills" / "free-session-handover" / "SKILL.md",
+          ROOT / "skills" / "free-session-handover" / "references" / "operational-notes.md",
           ROOT / "skills" / "offload" / "SKILL.md"]
 
 
@@ -52,7 +53,9 @@ class SkillCommandsParse(unittest.TestCase):
                               f"{cmd!r}\n{r.stderr}")
 
     def test_handover_skill_documents_the_stall_swap_proposal(self):
-        raw = (ROOT / "skills" / "free-session-handover" / "SKILL.md").read_text(encoding="utf-8")
+        raw = ((ROOT / "skills" / "free-session-handover" / "SKILL.md").read_text(encoding="utf-8")
+               + (ROOT / "skills" / "free-session-handover" / "references"
+                  / "operational-notes.md").read_text(encoding="utf-8"))
         self.assertIn("--stall", raw)
         self.assertIn("--proxy-log", raw)
         self.assertIn("--swap-model", raw, "a STALL verdict must lead to proposing --swap-model")
