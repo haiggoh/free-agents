@@ -986,7 +986,8 @@ class Screen:
         elif self.owner == HOME_OWNED:
             acts.append(Action("b", f"{ec.EMOJI_HOME_STR} Back to Home", lambda: Nav("home", HOME_OWNED), section="nav"))
         else:
-            acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
+            # user 2026-11-09 (ported from the GUI): the quit entry carries the ⏻ icon
+            acts.append(Action("q", f"{ec.gap(ec.quit_label())}Quit", lambda: QUIT, section="nav"))
         return acts
 
     def actions(self):
@@ -2050,7 +2051,8 @@ class RemoteScreen(Screen):
             # character, so a separate menu entry would only duplicate it.
             Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="nav"),   # grouped with Back/Quit at the end (user 2026-10-30)
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden"),
-            Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings"),
+            # (the filter-settings row moves below — after the API keys / rate limiter tool
+            #  actions — per user 2026-11-09; see the insert after _tool_actions below)
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp"), labels=("DISABLED", "ENABLED")),
         ]
@@ -2065,6 +2067,9 @@ class RemoteScreen(Screen):
                            lambda: self._launch_last("remote_api_session"), section="launch"))
         acts += _common_toggles(s, include_watcher=False)
         acts += _tool_actions(backend=False, settings_keys=("k", "n"))  # API keys + rate limiter are settings (user 2026-10-30)
+        # user 2026-11-09 (ported from the GUI): API keys setup comes BEFORE filter settings,
+        # so filter settings lands on the second row together with the NVIDIA rate limiter
+        acts.append(Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings"))
         acts += self.nav_actions()
         check_action_table(acts)
         return acts

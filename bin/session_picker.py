@@ -2022,6 +2022,39 @@ class Picker(App):
             return
         row = self.row_ids[event.index]
         self._update_info(row[1] if row and row[0] == "item" else None, from_hover=True)
+        if event.option_list.id == "actions":
+            self._swap_quit_icon(event.index)    # user 2026-11-09: ⏻ -> ⏼ on hover
+
+    def _swap_quit_icon(self, index):
+        """Swap the hovered Quit action's icon to the hover variant (and restore the previous
+        row's). The glyphs come from emoji_constants (config/emoji.sh) — no literals here."""
+        actions_list = self.query_one("#actions", OptionList)
+        prev = getattr(self, "_quit_hover_idx", None)
+        if prev is not None:
+            self._quit_hover_idx = None
+            if prev < actions_list.option_count and getattr(self, "_quit_hover_prompt", None) is not None:
+                try:
+                    actions_list.replace_option_prompt_at_index(prev, self._quit_hover_prompt)
+                except Exception:
+                    pass
+            self._quit_hover_prompt = None
+        if index is None or index >= actions_list.option_count:
+            return
+        oid = actions_list.get_option_at_index(index).id
+        if not oid.startswith("a:"):
+            return
+        ai = int(oid[2:])
+        if ai >= len(self.action_ids) or self.action_ids[ai].key != "q":
+            return
+        opt = actions_list.get_option_at_index(index)
+        prompt = opt.prompt
+        text = prompt.plain if hasattr(prompt, "plain") else str(prompt)
+        if ec.EMOJI_QUIT_STR not in text:
+            return
+        self._quit_hover_idx = index
+        self._quit_hover_prompt = prompt
+        actions_list.replace_option_prompt_at_index(
+            index, Text(text.replace(ec.EMOJI_QUIT_STR, ec.EMOJI_QUIT_HOVER_STR)))
 
     # --- keys ------------------------------------------------------------------------------
     def _highlighted(self):

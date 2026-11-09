@@ -271,6 +271,13 @@ LK_EMOJI_MORE_STR = _EMOJIS.get("LK_EMOJI_MORE", "🔧")
 LK_EMOJI_TOGGLE_ON_STR = _EMOJIS.get("LK_EMOJI_TOGGLE_ON", "✅")
 LK_EMOJI_TOGGLE_OFF_STR = _EMOJIS.get("LK_EMOJI_TOGGLE_OFF", "🚫")
 LK_EMOJI_BACK_STR = _EMOJIS.get("LK_EMOJI_BACK", "🏠")
+EMOJI_QUIT_STR = _EMOJIS.get("EMOJI_QUIT", "⏻")          # quit entry icon at rest (user 2026-11-09)
+EMOJI_QUIT_HOVER_STR = _EMOJIS.get("EMOJI_QUIT_HOVER", "⏼")  # swapped in on hover
+
+
+def quit_label(hovered: bool = False) -> str:
+    """The quit entry's icon: ⏻ at rest, ⏼ on hover (user 2026-11-09, ported from the GUI)."""
+    return EMOJI_QUIT_HOVER_STR if hovered else EMOJI_QUIT_STR
 
 
 def gap(emoji: str) -> str:

@@ -126,3 +126,6 @@ session_emoji_for() {
     *)          printf '%s' "$SESSION_EMOJI_UNKNOWN" ;;
   esac
 }
+
+EMOJI_QUIT="⏻"
+EMOJI_QUIT_HOVER="⏼"
