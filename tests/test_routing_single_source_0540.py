@@ -79,6 +79,23 @@ class RoutingBlockTests(unittest.TestCase):
             self.assertIn("routing block missing", offload_routing.MISSING)
 
 
+class OffloadReportingDocs(unittest.TestCase):
+    """2026-11-08 route-watcher user ask 2: the two VISIBLE reports for background offloads are
+    a contract, so the skill text pinning them is test-guarded (milestone QC found the section
+    was documentation-only; deleting it used to leave the suite green)."""
+
+    def test_offload_skill_pins_the_two_visible_reports(self):
+        raw = (ROOT / "skills" / "offload" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Reporting background offloads", raw)
+        self.assertIn("run_in_background", raw)
+        # launch report: the Bash description carries the resolved model/provider/effort
+        self.assertIn("<model> @", raw)
+        self.assertIn("(effort <lvl>)", raw)
+        # completion report: visible text, and the exit-code convention spelled out
+        self.assertIn("VISIBLE", raw)
+        self.assertIn("exit code 0", raw)
+
+
 class InterceptRoutingTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="fa-routing-0540-")
