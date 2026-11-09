@@ -95,6 +95,17 @@ class OffloadReportingDocs(unittest.TestCase):
         self.assertIn("VISIBLE", raw)
         self.assertIn("exit code 0", raw)
 
+    def test_remote_system_prompt_pins_the_qc_lesson(self):
+        # 2026-11-08 route-watcher: green-for-the-wrong-reason is the top free-lane failure;
+        # the free sessions' own system prompt must carry the red-first / mutation-RED rule
+        raw = (ROOT / "config" / "remote-agent-system-prompt.txt").read_text(encoding="utf-8")
+        self.assertIn("watched FAILING first", raw)
+        self.assertIn("turn the test RED", raw)
+        notes = (ROOT / "skills" / "free-session-handover" / "references"
+                 / "operational-notes.md").read_text(encoding="utf-8")
+        self.assertIn("QC before claiming done", notes)
+        self.assertIn("OPTIONAL", notes)
+
 
 class InterceptRoutingTests(unittest.TestCase):
     def setUp(self):

@@ -28,7 +28,7 @@
    "display": "Mistral Large 4 (Le Chonk, NVIDIA)",
    "alternates": [
     {"provider": "mistral", "model": "mistral-large-4-0", "smoke_tested": false},
-    {"provider": "openrouter", "model": "mistralai/mistral-large-4-0", "smoke_tested": false},
+    {"provider": "openrouter", "model": "mistralai/mistral-large-4-0", "smoke_tested": true},
     {"provider": "kilo", "model": "mistralai/mistral-large-4-0", "smoke_tested": false}
    ],
    "reasoning_effort": "high",

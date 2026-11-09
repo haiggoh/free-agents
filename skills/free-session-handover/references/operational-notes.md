@@ -60,3 +60,17 @@ propose `remote-session.sh --swap-model <port> <alias>` to the user; never swap 
 The watcher prints exactly one verdict line on exit (DETECTED / TIMEOUT / STALL /
 CANNOT_START); report it in your visible reply. Predicates are proven by
 `bin/watch-until --self-test` before you rely on one.
+
+## QC before claiming done (milestone-QC playbook, 2026-11-08)
+
+A green test proves nothing by itself — the common free-lane failure (mistral, step 5,
+nemotron especially) is claiming implemented/fixed while the test was green for the wrong
+reason. Before claiming done: (1) watch the test FAIL first (red), then pass (green); (2) the
+fixture must contain the real shape the requirement is about (the edge value, the failing
+upstream, the second item); (3) assert the OUTCOME, not a proxy (mock called / exit 0 / no
+exception); (4) apply the known-bad mutation in a temp copy — the test must go RED — then
+restore (git diff empty). The out-of-family /offload review at milestones is OPTIONAL; these
+four checks are not. And ask of every test: does it test the requirement itself, or only a
+surface appearance of it — could the whole suite pass with the requirement unmet? If yes,
+name the smallest code mutation that breaks the requirement yet stays green, and strengthen
+the test until that mutation goes red.

@@ -83,8 +83,9 @@ for the whole session, then continue autonomously from its Next action."*
    file's CONTENTS and the path never appeared — expecting it reported NOT_VERIFIED on a
    correct handover, 2026-10-31). A LISTEN alone proves nothing (measured: LISTEN over an idle
    session). Never print process argv, which can contain keys.
-   For the long wait, arm the transient watcher once via `run_in_background` (commands in
-   `references/operational-notes.md`); never a foreground sleep or a polling loop.
+   For the long wait, arm the transient watcher once via `run_in_background` (commands and
+   the QC-before-claiming-done rules in `references/operational-notes.md`); never a
+   foreground sleep or a polling loop.
 4. **Then** stop the old session, by its own pid or port only. Never `remote-session.sh --stop`,
    never a blanket stop: other proxies in the band serve sessions you cannot see.
 
