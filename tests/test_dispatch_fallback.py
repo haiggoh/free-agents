@@ -242,3 +242,62 @@ def test_parse_args_background_modes_keep_the_3_tuple_contract():
     assert fat.parse_args(["--background"])[2] is not None          # missing value -> usage error
     assert fat.parse_args(["--extend", "30m"])[2] is not None       # --extend without --resume
     assert fat.parse_args(["--resume", "/tmp/r", "--list"])[2] is not None  # no combining with --list
+
+
+def _prefs_nv_gg():
+    prefs = base_prefs()
+    prefs["order"] = [
+        {"id": "NV", "kind": "remote", "provider": "nvidia", "model": "m-nv",
+         "display": "NV", "smoke_tested": True, "family": "f1", "roles": ["validator"]},
+        {"id": "GG", "kind": "remote", "provider": "gemini", "model": "m-gg",
+         "display": "GG", "smoke_tested": True, "family": "f2", "roles": ["validator"]},
+    ]
+    return prefs
+
+
+def test_tier_snappy_shortens_timeouts_and_env_still_wins(monkeypatch, tmp_path):
+    env = make_env(tmp_path, base_prefs(), FA_DISPATCH_TIMEOUT_TIER="snappy")
+    stub = Stub(monkeypatch, {("p1", "m1"): [("ok", "ok")]})
+    rc, _out, _err = run_capture({"prompt": "x"}, env)
+    assert rc == 0
+    assert stub.calls[0]["timeout_s"] == 120 and stub.calls[0]["stall_s"] == 60, \
+        "snappy tier: attempt 120s / stall 60s"
+
+    env2 = make_env(tmp_path, base_prefs(), FA_DISPATCH_TIMEOUT_TIER="snappy",
+                    FA_DISPATCH_ATTEMPT_TIMEOUT_S="42")
+    stub2 = Stub(monkeypatch, {("p1", "m1"): [("ok", "ok")]})
+    rc2, _out2, _ = run_capture({"prompt": "x"}, env2)
+    assert rc2 == 0
+    assert stub2.calls[0]["timeout_s"] == 42, "the explicit FA_DISPATCH_* env wins over the tier"
+
+
+def test_invalid_tier_aborts_naming_var(monkeypatch, tmp_path):
+    env = make_env(tmp_path, base_prefs(), FA_DISPATCH_TIMEOUT_TIER="turbo")
+    Stub(monkeypatch, {("p1", "m1"): [("ok", "never")]})
+    rc, _out, err = run_capture({"prompt": "x"}, env)
+    assert rc == 2
+    assert "FA_DISPATCH_TIMEOUT_TIER" in err
+
+
+def test_rate_limited_lane_gets_patient_timeout_only_under_detected_load(monkeypatch, tmp_path):
+    state = tmp_path / "throttle.json"
+    state.write_text(json.dumps({"cooldown_until": time.time() + 600, "consecutive_429s": 1}))
+    env = make_env(tmp_path, _prefs_nv_gg(), providers=("nvidia", "gemini"),
+                   LA_NVIDIA_THROTTLE_STATE=str(state))
+    stub = Stub(monkeypatch, {("nvidia", "m-nv"): [("fail", "429")], ("gemini", "m-gg"): [("ok", "gg")]})
+    rc, _out, _ = run_capture({"prompt": "x"}, env)
+    assert rc == 0
+    nv, gg = stub.calls
+    assert (nv["provider"], nv["timeout_s"], nv["stall_s"]) == ("nvidia", 1800, 600), \
+        "nvidia attempt auto-gets the patient timeout while the cooldown is active"
+    assert (gg["provider"], gg["timeout_s"], gg["stall_s"]) == ("gemini", 900, 300), \
+        "non-rate-limited provider keeps the tier's own tighter values (no rate limit to wait out)"
+
+    # control: cooldown expired -> the nvidia attempt gets the balanced value too
+    state.write_text(json.dumps({"cooldown_until": time.time() - 10, "consecutive_429s": 0}))
+    env2 = make_env(tmp_path, _prefs_nv_gg(), providers=("nvidia", "gemini"),
+                    LA_NVIDIA_THROTTLE_STATE=str(state))
+    stub2 = Stub(monkeypatch, {("nvidia", "m-nv"): [("ok", "ok")]})
+    rc2, _out2, _ = run_capture({"prompt": "x"}, env2)
+    assert rc2 == 0
+    assert stub2.calls[0]["timeout_s"] == 900 and stub2.calls[0]["stall_s"] == 300

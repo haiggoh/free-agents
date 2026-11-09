@@ -60,6 +60,19 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
    failed dispatch chain is not by itself a reason — try the OTHER free route first.
 <!-- fa:routing:end -->
 
+## Reporting background offloads to the user — two visible reports, never thinking-only
+
+When you send work to a free lane in the background (`run_in_background`), the completion
+notification shows only the Bash `description` and the exit code. So:
+1. At launch, put the resolved model in the description — `free dispatch: <task> — <model> @
+   <provider> (effort <lvl>)`, or for a session `free session: <task> — <alias> (effort <lvl>)`.
+   Resolve via `remote-session.sh --list` / `free-agent-tool.py --list`; never guess ids.
+2. In your VISIBLE reply (not only in thinking), say what you launched.
+3. When the background command returns, report the outcome in one visible line: model, provider,
+   effort, `exit code 0` = success, and where the result lives (`--out FILE` envelope, or
+   RUN_DIR/result.json for a `--background` dispatch run). Non-zero: say what failed and what
+   you did about it.
+
 ## Decide at decomposition — annotate every step before reading any input
 
 Annotate each plan step `local:<role>` (free local model, default `operator`), `remote:<provider>`

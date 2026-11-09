@@ -220,6 +220,48 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TimeoutTiers(_Sandbox):
+    """Dispatch timeout tiers (2026-11-08 route-watcher, user ask): FA_DISPATCH_TIMEOUT_TIER in
+    settings.json env, cycled by csl -> Cloud Session Configuration (key t), read by
+    bin/free-agent-tool.py."""
+
+    def test_default_is_balanced_and_read_writes_nothing(self):
+        self.assertEqual(cse.timeout_tier(), "balanced")
+        self.assertFalse(self.settings.exists())
+
+    def test_round_trip_preserves_other_keys_and_rejects_unknown(self):
+        self.write_settings({"env": {"KEEP": "1"}, "theme": "t"})
+        cse.save_timeout_tier("patient")
+        self.assertEqual(cse.timeout_tier(), "patient")
+        doc = json.loads(self.settings.read_text())
+        self.assertEqual(doc["env"], {"KEEP": "1", "FA_DISPATCH_TIMEOUT_TIER": "patient"})
+        self.assertEqual(doc["theme"], "t")
+        with self.assertRaises(ValueError):
+            cse.save_timeout_tier("turbo")
+        self.assertEqual(cse.timeout_tier(), "patient", "a rejected value writes nothing")
+
+    def test_cloud_screen_tier_row_cycles_and_saves(self):
+        saved = []
+        s = m.Settings(on_cloud_saved=lambda d: saved.append(dict(d)))
+        actions = {a.key: a for a in m.CloudConfigScreen(s).actions()}
+        self.assertIn("t", actions)
+        self.assertIn("Balanced", actions["t"].label)
+        actions["t"].run()                                   # balanced -> patient
+        self.assertEqual(cse.timeout_tier(), "patient")
+        self.assertEqual(saved[-1], {"timeout_tier": "patient"})
+        label = {a.key: a for a in m.CloudConfigScreen(s).actions()}["t"].label
+        self.assertIn("Patient", label)
+        actions2 = {a.key: a for a in m.CloudConfigScreen(s).actions()}
+        actions2["t"].step(-1)                               # patient -> balanced (Left)
+        self.assertEqual(cse.timeout_tier(), "balanced")
+        # the infobox explains what the tiers weigh, with pros/cons from the config
+        info = m.CloudConfigScreen(s).info_text(None)
+        self.assertIn("Dispatch timeout tiers", info)
+        self.assertIn("pro:", info)
+        self.assertIn("con:", info)
+        self.assertIn("patient timeout", str(info).lower())
+
+
 class RouteModes(_Sandbox):
     """Per-path routing modes (0.43.0, cloud-screen plan Task 3): agent and workflow each route
     free-first (default), free-only or paid, stored in settings.json env. The legacy

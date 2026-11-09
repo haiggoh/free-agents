@@ -196,6 +196,17 @@
    }
   ]
  },
+ "timeout_tiers": {
+  "snappy": {"wall_clock_cap_s": 900, "attempt_max_s": 120, "attempt_stall_s": 60,
+             "pro": "quick answers while you work attended; a slow free lane falls back to paid Sonnet fast",
+             "con": "more paid spend under load"},
+  "balanced": {"wall_clock_cap_s": 3600, "attempt_max_s": 900, "attempt_stall_s": 300,
+               "pro": "default; free first with a fair per-attempt window",
+               "con": "a badly throttled lane can still eat the wall cap before the paid fallback arms"},
+  "patient": {"wall_clock_cap_s": 7200, "attempt_max_s": 1800, "attempt_stall_s": 600,
+              "pro": "keeps offloads free even under heavy parallel load on the rate-limited NVIDIA lane",
+              "con": "waits up to 2h before the paid fallback arms"}
+ },
  "paid_fallback": {
   "min_real_attempts": 3,
   "min_providers": 2,

@@ -232,6 +232,34 @@ def save_route(path: str, mode: str) -> Path:
     return _write_env(owned, {ROUTE_ENV[path]: mode})
 
 
+# --- dispatch timeout tiers (2026-11-08 route-watcher, user ask) ---------------------------
+# The response-time tier for bin/free-agent-tool.py dispatches, cycled in
+# csl -> Cloud Session Configuration (key t). Stored in settings.json env so every session sees it.
+TIMEOUT_TIER_ENV_KEY = "FA_DISPATCH_TIMEOUT_TIER"
+TIMEOUT_TIERS = ("snappy", "balanced", "patient")
+TIMEOUT_TIER_LABELS = {
+    "snappy": "Snappy — short waits, faster paid fallback",
+    "balanced": "Balanced — default",
+    "patient": "Patient — long waits, keeps offloads free under load",
+}
+
+
+def timeout_tier(env: dict | None = None) -> str:
+    """The active dispatch timeout tier: settings.json env merged over `env` (the registered
+    state is authoritative over a hook's process env); default "balanced"."""
+    merged = dict(env or {})
+    merged.update(_env(_read_json(settings_path())))
+    v = merged.get(TIMEOUT_TIER_ENV_KEY)
+    return str(v) if v in TIMEOUT_TIERS else "balanced"
+
+
+def save_timeout_tier(tier: str) -> Path:
+    """Persist the tier; raises ValueError and writes nothing on an unknown tier."""
+    if tier not in TIMEOUT_TIERS:
+        raise ValueError(f"unknown timeout tier: {tier!r} (allowed: {', '.join(TIMEOUT_TIERS)})")
+    return _write_env((TIMEOUT_TIER_ENV_KEY,), {TIMEOUT_TIER_ENV_KEY: tier})
+
+
 def _atomic_write(real: Path, body: str, mode: int) -> None:
     real.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".settings.", suffix=".tmp", dir=real.parent)
@@ -313,13 +341,20 @@ def main(argv=None) -> int:
         epilog="Env: CLAUDE_CONFIG_DIR selects the Claude Code config dir (default ~/.claude).")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("show", help="print plugin status, the current mode and the env keys behind it")
-    s = sub.add_parser("set", help="set security_review {0,1,2} or replace_agents {0,1,unset} or route <path> <mode>")
-    s.add_argument("key", choices=["security_review", "replace_agents", "route"])
-    s.add_argument("value", choices=["0", "1", "2", "unset", "agent", "workflow"])
+    s = sub.add_parser("set", help="set security_review {0,1,2} or replace_agents {0,1,unset} or "
+                                   "route <path> <mode> or timeout_tier <tier>")
+    s.add_argument("key", choices=["security_review", "replace_agents", "route", "timeout_tier"])
+    s.add_argument("value", choices=["0", "1", "2", "unset", "agent", "workflow",
+                                     "snappy", "balanced", "patient"])
     s.add_argument("extra", nargs="?", default=None,
                    help="route mode (with `set route <path>`): free-first, free-only or paid")
     a = p.parse_args(argv)
-    if a.cmd == "set" and a.key == "route":
+    if a.cmd == "set" and a.key == "timeout_tier":
+        try:
+            print(f"updated {save_timeout_tier(a.value)}")
+        except ValueError as exc:
+            p.error(str(exc))
+    elif a.cmd == "set" and a.key == "route":
         if a.extra not in ROUTE_MODES:
             p.error(f"route takes a path (agent, workflow) and a mode ({', '.join(ROUTE_MODES)})")
         print(f"updated {save_route(a.value, a.extra)}")
@@ -346,6 +381,7 @@ def main(argv=None) -> int:
     print(f"replace_agents = {REPLACE_AGENTS_LABELS[replace_agents()]}")
     for path in ROUTE_PATHS:
         print(f"route[{path}] = {route(path)}")
+    print(f"timeout_tier = {timeout_tier()}")
     return 0
 
 

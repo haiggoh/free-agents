@@ -63,6 +63,10 @@ Environment:
                                "timeout" still wins when shorter)
   FA_DISPATCH_STALL_S          socket-silence budget per attempt, seconds (default 300);
                                any of the three set-but-invalid aborts naming the variable (exit 2)
+  FA_DISPATCH_TIMEOUT_TIER     snappy | balanced (default) | patient — the response-time tier
+                               (csl -> Cloud Session Configuration, key t); a rate-limited lane
+                               (nvidia) auto-gets the patient timeout while LA_NVIDIA_THROTTLE_STATE
+                               shows an active 429 cooldown; other providers keep the tier's values
   FA_DISPATCH_ROUTING=role     legacy: pick by role through council-router.sh instead
   LA_API_KEYS_DIR              credential directory (default ~/.api_keys)
 """
@@ -621,6 +625,32 @@ DEFAULT_PAID_FALLBACK: dict[str, float] = {"min_real_attempts": 3, "min_provider
                          # (a streaming answer is never cut). An entry's own "timeout" still
                          # wins when shorter (dispatch_entry).
                          "attempt_stall_s": 300, "attempt_max_s": 900, "min_attempt_s": 180}
+
+# --- dispatch timeout tiers (2026-11-08 route-watcher; csl -> Cloud Session Configuration, key t)
+# The active tier (FA_DISPATCH_TIMEOUT_TIER, default "balanced") sets the ladder timeouts.
+# RATE_LIMITED_PROVIDERS get the "patient" values per attempt whenever the shared rate limiter
+# is in an active 429 cooldown; non-rate-limited providers (gemini, ...) always use the active
+# tier's values — they have no rate limit to wait out.
+RATE_LIMITED_PROVIDERS = {"nvidia"}
+DEFAULT_TIMEOUT_TIERS = {
+    "snappy":   {"wall_clock_cap_s": 900,  "attempt_max_s": 120,  "attempt_stall_s": 60},
+    "balanced": {"wall_clock_cap_s": 3600, "attempt_max_s": 900,  "attempt_stall_s": 300},
+    "patient":  {"wall_clock_cap_s": 7200, "attempt_max_s": 1800, "attempt_stall_s": 600},
+}
+
+
+def nvidia_load_detected(env) -> bool:
+    """True when the shared NVIDIA rate limiter is in an active 429 cooldown right now (or has
+    consecutive 429s). Read-only peek at the limiter state file (LA_NVIDIA_THROTTLE_STATE);
+    never raises, never writes."""
+    p = Path(env.get("LA_NVIDIA_THROTTLE_STATE")
+             or (Path.home() / ".claude" / "free-agents" / ".nvidia_throttle_state"))
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (float(doc.get("cooldown_until") or 0) > time.time()
+            or int(doc.get("consecutive_429s") or 0) > 0)
 # remote-agent-dispatch.py does not surface Retry-After to its caller (verified 2026-10-24:
 # its stderr carries only error_class + HTTP status + reason), so a 429 is a real failure
 # with no retry; retry_after_max_s stays in the policy for the day the dispatch surfaces it.
@@ -657,14 +687,27 @@ def _env_seconds(env, name):
 
 
 def resolve_policy(env, prefs):
-    """DEFAULT_PAID_FALLBACK <- prefs["paid_fallback"] <- FA_DISPATCH_* env overrides (env wins)."""
-    policy = dict(DEFAULT_PAID_FALLBACK, **(prefs.get("paid_fallback") or {}))
+    """DEFAULT_PAID_FALLBACK <- prefs["paid_fallback"] <- the active timeout tier
+    (FA_DISPATCH_TIMEOUT_TIER; a non-balanced tier overrides the three timeout keys)
+    <- FA_DISPATCH_* env overrides (env wins)."""
+    policy: dict = dict(DEFAULT_PAID_FALLBACK, **(prefs.get("paid_fallback") or {}))
+    tiers = prefs.get("timeout_tiers") or DEFAULT_TIMEOUT_TIERS
+    tier = env.get("FA_DISPATCH_TIMEOUT_TIER") or "balanced"
+    if tier not in tiers:
+        raise ValueError(f"FA_DISPATCH_TIMEOUT_TIER={tier!r} is not a known tier "
+                         f"(known: {', '.join(sorted(tiers))})")
+    if tier != "balanced":
+        for k in ("wall_clock_cap_s", "attempt_max_s", "attempt_stall_s"):
+            if k in tiers[tier]:
+                policy[k] = tiers[tier][k]
     for name, key in (("FA_DISPATCH_WALL_S", "wall_clock_cap_s"),
                       ("FA_DISPATCH_ATTEMPT_TIMEOUT_S", "attempt_max_s"),
                       ("FA_DISPATCH_STALL_S", "attempt_stall_s")):
         v = _env_seconds(env, name)
         if v is not None:
             policy[key] = v
+    policy["_tier"] = tier
+    policy["_tiers"] = tiers
     return policy
 
 
@@ -720,7 +763,18 @@ def execute_plan(plan, full_prompt, env, policy, *, role=None, start_index=0,
             note(f"free-agents: wall-clock cap ({cap:g}s) reached — "
                  f"{entry['id']} and the remaining preferences are not attempted")
             return "decision_needed", None, attempts, len(plan) - i
-        budget = max(min(cap - elapsed, policy["attempt_max_s"]),
+        attempt_cap = policy["attempt_max_s"]
+        attempt_stall = policy["attempt_stall_s"]
+        if entry.get("provider") in RATE_LIMITED_PROVIDERS and nvidia_load_detected(env):
+            patient = (policy.get("_tiers") or DEFAULT_TIMEOUT_TIERS).get("patient") or {}
+            p_cap, p_stall = patient.get("attempt_max_s"), patient.get("attempt_stall_s")
+            if p_cap is not None:
+                attempt_cap = max(attempt_cap, float(p_cap))
+            if p_stall is not None:
+                attempt_stall = max(attempt_stall, float(p_stall))
+            note(f"free-agents: rate limiter in an active cooldown — {entry['id']} gets the "
+                 f"patient timeout (budget {attempt_cap:g}s, stall {attempt_stall:g}s)")
+        budget = max(min(cap - elapsed, attempt_cap),
                      policy["min_attempt_s"])
         resolved_thinking, think_effort, think_overridden, think_note = resolve_thinking(entry, role)
         note(f"free-agents: offloading to {entry.get('display', entry['id'])} "
@@ -736,7 +790,7 @@ def execute_plan(plan, full_prompt, env, policy, *, role=None, start_index=0,
                "model": entry.get("model")}
         try:
             text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort,
-                                  timeout_s=budget, stall_s=policy["attempt_stall_s"])
+                                  timeout_s=budget, stall_s=attempt_stall)
         except DispatchFailed as err:
             rec.update(ok=False, error=str(err))
             attempts.append({k: rec[k] for k in ("id", "provider", "model", "ok", "error")})

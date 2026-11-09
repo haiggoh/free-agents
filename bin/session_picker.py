@@ -956,6 +956,8 @@ class Picker(App):
             if "route" in values:
                 path, mode = values["route"]
                 cse.save_route(path, mode)
+            if "timeout_tier" in values:
+                cse.save_timeout_tier(values["timeout_tier"])
             if "security_review" in values:
                 cse.save(values["security_review"])
         except (OSError, ValueError) as exc:

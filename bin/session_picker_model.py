@@ -2249,6 +2249,11 @@ class CloudConfigScreen(Screen):
     - Bypass Permissions: blind-trust for free-API remote sessions (the gateway launcher hardcodes it)
     The Classifier Source row left this screen in 0.42.0 (user 2026-10-23): it only reaches free
     sessions and stays on the lane screens; a working cloud reroute would earn a row back.
+
+    - Dispatch timeout tier: FA_DISPATCH_TIMEOUT_TIER, read by bin/free-agent-tool.py — snappy /
+      balanced (default) / patient, cycled with key t; the infobox below lists each tier's
+      pros/cons plus the dynamic rule (rate-limited lanes get patient timeouts while the limiter
+      is in a cooldown).
     """
     title = f"{ec.EMOJI_CLOUD_CONFIG_STR}  {ec.EMOJI_TOOLS_STR} Cloud Session Configuration"
 
@@ -2275,6 +2280,11 @@ class CloudConfigScreen(Screen):
                    lambda: self._cycle_route("agent"),
                    step=lambda d: self._cycle_route("agent", d),
                    labels=tuple(cse.ROUTE_LABELS[k] for k in cse.ROUTE_MODES)),
+            Action("t", f"Dispatch timeout tier (free-agent-tool.py): "
+                        f"{cse.TIMEOUT_TIER_LABELS[cse.timeout_tier()]}",
+                   lambda: self._cycle_timeout_tier(),
+                   step=lambda d: self._cycle_timeout_tier(d),
+                   labels=tuple(cse.TIMEOUT_TIER_LABELS[k] for k in cse.TIMEOUT_TIERS)),
             setting("p", f"{ec.EMOJI_AUTO_MODE_STR}  Bypass Permissions (blind-trust): "
                         f"{'ON' if s.cloud_bypass_permissions else 'OFF'}",
                     (False, True), lambda: s.cloud_bypass_permissions,
@@ -2300,6 +2310,39 @@ class CloudConfigScreen(Screen):
         s.routes[path] = order[(order.index(current) + d) % len(order)] if current in order else "free-only"
         if s.on_cloud_saved:
             s.on_cloud_saved({"route": (path, s.routes[path])})
+
+    def _cycle_timeout_tier(self, d: int = 1):
+        """Cycle the dispatch timeout tier snappy -> balanced -> patient (key t) and persist."""
+        order = list(cse.TIMEOUT_TIERS)
+        current = cse.timeout_tier()
+        nxt = order[(order.index(current) + d) % len(order)] if current in order else "balanced"
+        cse.save_timeout_tier(nxt)
+        if self.settings.on_cloud_saved:
+            self.settings.on_cloud_saved({"timeout_tier": nxt})
+
+    def _timeout_tier_help(self) -> str:
+        """The tier pros/cons for the infobox, derived from config/dispatch-preferences.json
+        (one source — never a hand-copied copy of the values)."""
+        try:
+            cfg = json.loads((Path(__file__).resolve().parent.parent / "config"
+                              / "dispatch-preferences.json").read_text(encoding="utf-8"))
+            tiers = cfg.get("timeout_tiers") or {}
+        except (OSError, ValueError):
+            tiers = {}
+        lines = ["", "Dispatch timeout tiers (key t — what free-agent-tool.py offloads wait for):"]
+        for name in cse.TIMEOUT_TIERS:
+            t = tiers.get(name) or {}
+            vals = (f"wall {t.get('wall_clock_cap_s', '?') // 60:g}m / attempt "
+                    f"{t.get('attempt_max_s', '?') // 60:g}m / stall {t.get('attempt_stall_s', '?')}s")
+            lines.append(f"· {cse.TIMEOUT_TIER_LABELS[name]} ({vals})")
+            if t.get("pro"):
+                lines.append(f"    pro: {t['pro']}")
+            if t.get("con"):
+                lines.append(f"    con: {t['con']}")
+        lines.append("Dynamic: while the NVIDIA rate limiter is in an active 429 cooldown, NVIDIA "
+                     "attempts automatically get the patient timeout; non-rate-limited providers "
+                     "(e.g. Google) always use the tier's own tighter values — no rate limit to wait out.")
+        return "\n".join(lines)
 
     def _bypass_default_label(self, reason: str | None) -> str:
         if reason:
@@ -2358,12 +2401,12 @@ class CloudConfigScreen(Screen):
             "How the Agent tool is routed on cloud sessions:\n"
             "· Free first, paid as last resort — every Agent call is redirected to a free model; "
             "after this session's free attempts are honestly exhausted "
-            "(\"paid_fallback_allowed\": true in the dispatch result), ONE native paid call is "
-            "let through automatically.\n"
+            "(\"paid_fallback_allowed\": true in the dispatch result) AND a reason is stated, ONE "
+            "native paid call is let through (exhaustion alone never permits paid).\n"
             "· Free only — every Agent call is redirected and the hook never falls back to paid.\n"
             "· Paid (free-agents stays out) — the native Agent tool runs paid subagents as usual; "
             "free models only when you ask."
-            + extra
+            + extra + self._timeout_tier_help()
         )
 
     def _cycle_security_review(self, d: int = 1):
