@@ -21,7 +21,13 @@ from picker_harness import PilotCase, ROOT  # noqa: E402
 import pytest  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "bin"))
-import session_picker as sp  # noqa: E402
+try:
+    import textual  # noqa: F401
+except ImportError:
+    textual = None
+sp = None
+if textual is not None:
+    import session_picker as sp  # noqa: E402
 
 
 def _load_emf():
