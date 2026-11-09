@@ -97,6 +97,7 @@ def build() -> None:
       .tile .tile-emoji { position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%); }
       .tile-lg .tile-emoji { top: 50%; }
       .tile .tile-label { display: block; }
+      .tile:not(:has(.tile-emoji)) { justify-content: center; }   /* text-only tiles: text vertically centered (user 2026-11-09) */
       .tile .tile-label { overflow-wrap: anywhere; line-height: 1.25; }
       .tile-lg { grid-column: span 2; grid-row: span 2; }       /* Local / Remote / Go launch: square 2x2 */
       .tile-wide { grid-column: span 2; grid-row: span 1; }     /* Lowkey / backend mgr / API keys / memguard / cloud opts: 2x1 */

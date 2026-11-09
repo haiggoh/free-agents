@@ -648,6 +648,13 @@ class GuiPlaywrightTests(unittest.TestCase):
             label_size = label.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
             self.assertGreaterEqual(emoji_size, 52, "emojis must be large (>= 3.25rem)")
             self.assertGreater(emoji_size, label_size, "emoji must be larger than the text")
+            # text-only tiles (no emoji) center their text vertically (user 2026-11-09)
+            text_only = p.locator(".tile:not(:has(.tile-emoji))").first
+            if text_only.count():
+                tb = text_only.bounding_box()
+                lb = text_only.locator(".tile-label").bounding_box()
+                self.assertLessEqual(abs((lb["y"] + lb["height"] / 2) - (tb["y"] + tb["height"] / 2)),
+                                     6, "text-only tile must center its text vertically")
             # no two tiles overlap (grid auto-placement makes room around 2x2/2x1)
             boxes = [t.bounding_box() for t in p.locator(".tile").all()]
             for i in range(len(boxes)):
