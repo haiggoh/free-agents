@@ -30,6 +30,7 @@ import argparse
 import json
 import subprocess
 import tempfile
+import threading
 import time
 import re
 import urllib.request
@@ -234,6 +235,60 @@ def read_files_context(file_paths: list, max_file_chars: int = 48000) -> str:
     return ""
 
 
+class DelayedSpinner:
+    """0.55.8 Task 5 (0541 plan Item D): ONE delayed 'working' indicator for BOTH dispatch
+    paths. A background thread prints \r\033[2K<frame> <label> is working… <n>s to `stream`
+    every 0.2 s — but ONLY after `delay` seconds with no output, so a fast reply shows
+    nothing. stop()/__exit__ clear the line if anything was printed and join the thread.
+    Non-interactive (stream not a TTY) prints nothing."""
+
+    FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+    def __init__(self, label: str, delay: float = 0.5, interactive: bool | None = None,
+                 stream=None):
+        self.label = label
+        self.delay = delay
+        self.stream = stream if stream is not None else sys.stderr
+        self.interactive = (self.stream.isatty() if interactive is None
+                            else interactive)
+        self._stop = threading.Event()
+        self._thread = None
+        self._printed = False
+
+    def __enter__(self):
+        if self.interactive:
+            self._thread = threading.Thread(target=self._spin, daemon=True)
+            self._thread.start()
+        return self
+
+    def _spin(self):
+        t0 = time.monotonic()
+        if self._stop.wait(self.delay):
+            return                              # a fast reply: nothing is ever printed
+        i = 0
+        while not self._stop.is_set():
+            n = int(time.monotonic() - t0)
+            frame = self.FRAMES[i % len(self.FRAMES)]
+            self.stream.write(f"\r\033[2K{frame} {self.label} is working… {n}s")
+            self.stream.flush()
+            self._printed = True
+            i += 1
+            self._stop.wait(0.2)
+
+    def stop(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+        if self._printed:
+            self.stream.write("\r\033[2K")
+            self.stream.flush()
+        self._printed = False
+
+    def __exit__(self, *exc):
+        self.stop()
+        return False
+
+
 def run_librarian_with_progress(cmd: list) -> int:
     """Run librarian-dispatch using compact, verbose, or quiet presentation."""
     if PROGRESS_MODE == "verbose":
@@ -249,40 +304,22 @@ def run_librarian_with_progress(cmd: list) -> int:
     # Compact mode suppresses raw transport diagnostics while preserving a
     # visible indication that local inference is active. Diagnostics remain
     # available by rerunning with --progress verbose.
-    started = time.monotonic()
     interactive = sys.stderr.isatty()
-    frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    frame_index = 0
-    last_second = -1
 
     if not interactive:
         print(f"[*] {PROGRESS_LABEL} is working…", file=sys.stderr)
 
+    started = time.monotonic()
     try:
-        while True:
-            return_code = process.poll()
-            elapsed = int(time.monotonic() - started)
-
-            if return_code is not None:
-                break
-
-            if interactive and elapsed != last_second:
-                frame = frames[frame_index % len(frames)]
-                print(
-                    f"\r\033[2K{frame} {PROGRESS_LABEL} is working… {elapsed}s",
-                    end="",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                frame_index += 1
-                last_second = elapsed
-
-            time.sleep(0.2)
+        # 0.55.8 Task 5: the frame loop IS the shared DelayedSpinner now (same frames, same
+        # text, 0.5 s delay) — one indicator class for the local AND the API path.
+        with DelayedSpinner(PROGRESS_LABEL, interactive=interactive):
+            return_code = process.wait()
     except KeyboardInterrupt:
         process.terminate()
         try:
@@ -291,8 +328,7 @@ def run_librarian_with_progress(cmd: list) -> int:
             process.kill()
             process.wait()
 
-        if interactive:
-            print("\r\033[2K", end="", file=sys.stderr, flush=True)
+        print("\r\033[2K", end="", file=sys.stderr, flush=True)
         print(
             f"[!] {PROGRESS_LABEL} generation interrupted.",
             file=sys.stderr,
@@ -345,7 +381,7 @@ def dispatch_messages_api(
         body["reasoning_effort"] = REASONING_EFFORT
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path = os.path.join(tmpdir, "output.txt")
-        with open(out_path, "w", encoding="utf-8") as out_fd:
+        with DelayedSpinner(f"{provider_id} {model_id}"), open(out_path, "w", encoding="utf-8") as out_fd:
             result = remote_http.stream_chat(provider, body, tmpdir, out_fd, timeout=600)
         # 0.54.0: stream_chat never raises — it reports failure in Result. Discarding the
         # result turned every 429/TLS/limiter failure into an empty reply with no reason.
