@@ -49,7 +49,8 @@ def build() -> None:
                    margin: 0 !important; padding: 0 !important;
                    background: #ffffff !important; color: #141414 !important; font-size: 14px !important; }   /* clean white FFF ground (user 2026-11-08); dark mode swaps via .dark-shell */
       .menu-item { color: #141414 !important; text-decoration: none !important; background: none !important;
-                   border: none !important; box-shadow: none !important; padding: 1px 5px; line-height: 1.3; cursor: pointer; }
+                   border: none !important; box-shadow: none !important; padding: 1px 5px; line-height: 1.3; cursor: pointer;
+                   font-size: 17px !important; }   /* non-tile text menu items match tile text size (user 2026-11-09) */
       .menu-item:hover { color: #00BFFF !important; }   /* csl sky blue accent (user 2026-11-08) */
       .cycle-arrow { color: #141414 !important; background: none !important; border: none !important;
                      box-shadow: none !important; padding: 0 3px; cursor: pointer; font-weight: bold; }
@@ -82,32 +83,35 @@ def build() -> None:
       .tile:focus-visible { outline: 2px solid #00FFFF !important; outline-offset: 2px; }   /* csl cyan focus ring */
       /* Phase 5 modern presentation (user 2026-11-08): Metro grid — columns+rows, lanes 2x2 /
          rest 1x1, emoji above wrapping label, card surface; same handlers/targets as rows */
-      /* Metro grid + M3-expressive blend (user 2026-11-08): fixed square cells so 2x2 lanes are
-         truly square; Lowkey is 2x1 wide. Emoji is its own centered line, peeking out of the
-         tile's top edge; everything larger. csl sky-blue hover, cyan focus ring. */
+      /* Metro grid + M3-expressive blend (user rulings 2026-11-08/09): fixed 150px square
+         cells; grid auto-placement reflows neighbours around 2x2/2x1 spans by itself.
+         csl sky-blue hover, cyan focus ring. */
       .tile-grid { display: grid !important; grid-template-columns: repeat(auto-fill, 150px);
                    grid-auto-rows: 150px; gap: 12px; width: 100%; margin-bottom: 8px; }
-      .tile { display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-              gap: 6px; padding: 16px 12px 14px; border-radius: 16px; font-size: 1.0625rem; text-align: center;   /* label 17px, toward the bottom (user 2026-11-08) */
-              background: #ffffff !important; border: 1px solid rgba(20, 20, 20, 0.10) !important;
-              position: relative; }
-      /* emoji vertically AND horizontally centered in the tile, independent of the text
-         (user 2026-11-08); on small tiles it nudges UP slightly so it never overlaps the
-         bottom label nor touches the top border */
+      .tile { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+              padding: 16px 12px 14px; border-radius: 16px; font-size: 1.0625rem; text-align: center;   /* label 17px, centered horizontally, bottom-aligned (user 2026-11-09) */
+              background: #ffffff !important; border: 1px solid rgba(20, 20, 20, 0.10) !important; }
+      /* emoji centered inside the tile (both axes), independent of the bottom label; on
+         non-2x2 tiles it sits slightly above center so a wrapped 2-line label never overlaps
+         it and it never touches the top border (user 2026-11-09) */
       .tile .tile-emoji { position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%); }
       .tile-lg .tile-emoji { top: 50%; }
-      .tile .tile-label { margin-top: auto; padding-top: 4px; }
-      .tile-lg { grid-column: span 2; grid-row: span 2; }       /* Local / Remote: square 2x2 */
-      .tile-wide { grid-column: span 2; grid-row: span 1; }     /* Lowkey: wide 2x1, NOT the biggest */
+      .tile .tile-label { display: block; }
       .tile .tile-label { overflow-wrap: anywhere; line-height: 1.25; }
-      /* emoji centered INSIDE the tile on its own line above the label (user 2026-11-08:
-         the peeking-outside-top version was NOT what they meant) */
-      .tile .tile-emoji { font-size: 3.25rem; line-height: 1; }            /* 1x1 slightly smaller */
-      .tile-wide .tile-emoji { font-size: 3.75rem; }                       /* 2x1 slightly smaller */
-      .tile-lg .tile-emoji { font-size: 7.5rem; }                          /* 2x2 even larger (user 2026-11-08) */
-      .tile:hover { background: #f0f9ff !important; border-color: #00BFFF !important; }   /* flat sky-blue tint, no gradient */
+      .tile-lg { grid-column: span 2; grid-row: span 2; }       /* Local / Remote / Go launch: square 2x2 */
+      .tile-wide { grid-column: span 2; grid-row: span 1; }     /* Lowkey / backend mgr / API keys / memguard / cloud opts: 2x1 */
+      .tile .tile-emoji { font-size: 3.25rem; line-height: 1; }            /* 1x1 */
+      .tile-wide .tile-emoji { font-size: 3.75rem; }                       /* 2x1 */
+      .tile-lg .tile-emoji { font-size: 7.5rem; }                          /* 2x2 */
+      .tile:hover { background: #f0f9ff !important; border-color: #00BFFF !important; }   /* flat sky tint, no gradient */
       body:has(.dark-shell) .tile { background: #1f1f1f !important; border-color: rgba(255, 255, 255, 0.14) !important; }
       body:has(.dark-shell) .tile:hover { background: #16324a !important; border-color: #00BFFF !important; }
+      .menu-item { font-size: 1.0625rem; }   /* non-tile text menu items match tile text (17px, user 2026-11-09) */
+      /* quit icon swaps ⏻ -> ⏼ on hover (user 2026-11-09) */
+      .tile-quit .icon-on { display: inline !important; }
+      .tile-quit .icon-off { display: none !important; }
+      .tile-quit:hover .icon-on { display: none !important; }
+      .tile-quit:hover .icon-off { display: inline !important; }
       /* lane pages: fixed-height shell — the model list scrolls internally, the infobox
          stays pinned to the bottom instead of being overlapped (user 2026-11-05).
          EMERGENCY ONLY: if the list area would shrink below ~4 rows (groups expanded +
@@ -218,15 +222,19 @@ def build() -> None:
         except Exception:
             return False
 
-    def _tile_label(parent, text):
-        """Metro tile content: the emoji and the label are SEPARATE flex items so the column
-        layout stacks them (emoji line centered above the text); the label wraps in the tile.
-        The emoji peeks out of the tile's top edge via CSS (.tile-emoji top offset)."""
+    def _tile_label(parent, text, quit_icons: bool = False):
+        """Metro tile content: emoji and label wrapped in ONE centered .tile-inner group —
+        emoji above the text; a 2-line label grows the group and the emoji rides higher
+        automatically (user 2026-11-09). quit_icons swaps ⏻/⏼ on hover."""
         import html as _html
         parts = str(text).split(" ", 1)
         head, rest = parts[0], (parts[1] if len(parts) > 1 else "")
         with parent:
-            if head and any(ord(ch) >= 0x2000 for ch in head):
+            if quit_icons:
+                ui.html('<span class="tile-emoji icon-on">⏻</span>'
+                        '<span class="tile-emoji icon-off">⏼</span>')
+                ui.html(f'<span class="tile-label">{_html.escape(rest or str(text))}</span>')
+            elif head and any(ord(ch) >= 0x2000 for ch in head):
                 ui.html(f'<span class="tile-emoji">{_html.escape(head)}</span>')
                 ui.html(f'<span class="tile-label">{_html.escape(rest)}</span>')
             else:
@@ -250,6 +258,12 @@ def build() -> None:
         st["rerender"] = _rerender
         st["nav"] = nav
 
+    # Tile size policy lives in fa_gui/tiles.py (unit-tested); imported here for rendering.
+    from fa_gui.tiles import tile_cls as _tile_cls_raw
+
+    def _tile_cls(scr, c, action):
+        return _tile_cls_raw(type(scr).__name__, c, action)
+
     def render_rows(scr, st: dict) -> None:
         # csl parity (m.rendered_actions): lane screens fold model/settings rows under two
         # collapsible headers — "🔩 Model settings" / "🛠️ Advanced", triangle before the name,
@@ -263,9 +277,53 @@ def build() -> None:
         # cycle/switch rows stay as compact list rows below the grid. Compatibility mode is
         # untouched (no grid at all).
         modern = _modern()
-        grid = None
         if modern:
+            # Two passes (user 2026-11-09): tiles into the grid first; every other row
+            # (cycles, switches, group headers, choose-model) as text rows AFTER the tiles.
+            # Grid auto-placement reflows neighbours around 2x2/2x1 spans by itself.
             grid = ui.element("div").classes("tile-grid")
+            tiles, rows = [], []
+            for c in plan:
+                action = next((a for a in scr.actions()
+                               if (a.id or f"{type(scr).__name__}.{a.key}") == c.action_id), None)
+                cls = _tile_cls(scr, c, action) if c.kind in ("nav", "button") else None
+                if cls is not None:
+                    tiles.append((c, action, cls))
+                else:
+                    rows.append((c, action))
+            # user 2026-11-09: API keys goes before filter settings (filter row is a button
+            # without a nav target on the remote picker — match it by label too)
+            tiles.sort(key=lambda t: 1 if (t[0].target == "remote_filters"
+                                           or "Filter settings" in str(t[0].label or "")) else 0)  # stable
+            for c, action, cls in tiles:
+                with grid:
+                    _render_row(c, action, st, tile_cls=cls)
+            # text rows after the tiles; group headers keep the harmonica fold (user 2026-11-09:
+            # collapsing of model options / advanced options must still work in modern mode)
+            boxes = {}
+            for c, action in rows:
+                if c.kind == "group":
+                    gid = c.group
+                    is_collapsed = collapsed.get(gid, True)
+                    emoji = "🔩" if gid == "model" else "🛠️"
+                    hdr = ui.label(f"{emoji} {'▸' if is_collapsed else '▾'} {c.label}").classes(
+                        "menu-item group-header row-action")
+                    hdr.props["data-group"] = gid
+                    box = ui.column().classes("w-full gap-1")
+                    box.props["style"] = "display:none" if is_collapsed else ""
+
+                    def _toggle_group(g=gid, h=hdr, b=box, e=emoji, lbl=c.label):
+                        collapsed[g] = not collapsed.get(g, True)
+                        h.set_text(f"{e} {'▸' if collapsed[g] else '▾'} {lbl}")
+                        b.props["style"] = "display:none" if collapsed[g] else ""
+                    hdr.on("click", _toggle_group)
+                    boxes[gid] = box
+                    continue
+                target = boxes.get(c.group) if c.group else None
+                with (target if target is not None else nullcontext()):
+                    _render_row(c, action, st, tile_cls=None)
+            return
+        grid = None
         for c in plan:
             action = next((a for a in scr.actions()
                            if (a.id or f"{type(scr).__name__}.{a.key}") == c.action_id), None)
@@ -287,19 +345,6 @@ def build() -> None:
                 continue
             # rows carry their group in c.group — nav/lanes/top rows have "" and stay
             # top-level, so Back/Switch can never end up hidden inside a folded group.
-            # Modern mode: nav/action tiles go into the grid; cycles/switches stay list rows.
-            if modern and c.kind in ("nav", "button") and grid is not None:
-                # user 2026-11-08: Local/Remote lanes = square 2x2; Lowkey, Backend manager and
-                # API keys = wide 2x1 (not the biggest tiles)
-                if c.target in ("tool:lowkey", "runtime_manager", "api_keys"):
-                    tile_cls = "tile-wide"
-                elif action is not None and action.section == "lanes":
-                    tile_cls = "tile-lg"
-                else:
-                    tile_cls = ""
-                with grid:
-                    _render_row(c, action, st, tile_cls=tile_cls)
-                continue
             target = boxes.get(c.group) if c.group else None
             with (target if target is not None else nullcontext()):
                 _render_row(c, action, st)
@@ -349,7 +394,9 @@ def build() -> None:
             j += 1
         return _rich_html(lbl[j:])
 
-    def _render_row(c, action, st: dict, tile_cls: str = "") -> None:
+    def _render_row(c, action, st: dict, tile_cls: str | None = "") -> None:
+            # a row is a tile ONLY in modern mode AND when the policy gave it a class (None = text row)
+            use_tile = _modern() and tile_cls is not None and c.kind in ("nav", "button")
             if c.kind in ("select", "toggle") and action is not None and action.step is not None:
                 choices = list(action.choices) if action.choices is not None else []
                 binary = len(choices) == 2 and set(choices) <= {False, True, 0, 1, None}
@@ -416,14 +463,14 @@ def build() -> None:
                         except Exception:
                             pass
                         _app.shutdown()
-                    if _modern():
-                        row = ui.row().classes("tile menu-item action-row nav-row")
-                        _tile_label(row, c.label)
+                    if use_tile:
+                        row = ui.row().classes("tile tile-quit menu-item action-row nav-row")
+                        _tile_label(row, c.label, quit_icons=True)
                     else:
                         row = ui.label(c.label).classes("menu-item action-row nav-row")
                     row.props["data-target"] = "quit"
                     row.on("click", _quit_app)
-                elif _modern():
+                elif use_tile:
                     row = ui.link("", f"/{target}").classes(
                         "tile menu-item action-row nav-row" + (f" {tile_cls}" if tile_cls else ""))
                     _tile_label(row, c.label)
@@ -433,10 +480,15 @@ def build() -> None:
                     row.props["data-target"] = target
             else:
                 lbl = action.label if action is not None else None
-                if _modern() and not (lbl is not None and hasattr(lbl, "spans")):
-                    # Phase 5: plain action rows render as Metro tiles in modern mode
+                if use_tile:
+                    # Phase 5: action rows render as Metro tiles in modern mode; rich labels
+                    # (e.g. Go launch with styled model name) go in as the tile label
                     row = ui.row().classes("tile menu-item action-row" + (f" {tile_cls}" if tile_cls else ""))
-                    _tile_label(row, c.label)
+                    if lbl is not None and hasattr(lbl, "spans"):
+                        with row:
+                            ui.html(_rich_html(lbl)).classes("tile-label")
+                    else:
+                        _tile_label(row, c.label)
                 elif lbl is not None and hasattr(lbl, "spans") and hasattr(lbl, "plain"):
                     # rich label (theme swatch rows): keep the span colors as HTML
                     row = ui.html(_rich_html(lbl)).classes("menu-item action-row")
@@ -526,10 +578,12 @@ def build() -> None:
         with ui.column().classes(outer):
             # user 2026-11-08: title 28px / subtitle 17px (ratio ~1.6 golden), subtitle matches
             # the menu action-item size, and one empty title-height row of space after them
-            ui.label(title).props('id="title"').classes("text-[28px] font-bold")
+            # title 26px + tight tracking so it fits ONE line incl. its two emoji even in a
+            # narrow window (user 2026-11-09: at 28px it was one character too long)
+            ui.label(title).props('id="title"').classes("text-[26px] font-bold tracking-[-0.02em]")
             if subtitle:
                 ui.label(subtitle).classes("text-[17px] opacity-70").props('id="subtitle"')
-            ui.element("div").classes("title-spacer").style("height: 28px")   # empty spacer row, title-height
+            ui.element("div").classes("title-spacer").style("height: 26px")   # empty spacer row, title-height
             return ui.column().classes("w-full gap-1" + (" lane-body" if lane else ""))
 
     def render_appearance(body, st: dict) -> None:
