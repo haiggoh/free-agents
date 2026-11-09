@@ -1448,7 +1448,7 @@ class LocalScreen(Screen):
                    section="hidden"),
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp"), labels=("DISABLED", "ENABLED")),
-            setting("y", f"Auto-sync local registry with the disk (no prompts): "
+            setting("y", f"{ec.gap(ec.EMOJI_REGISTRY_SYNC_STR)}Auto-sync local registry with the disk (no prompts): "
                         f"{'ON' if s.memguard.get('registry_auto_sync') else 'OFF'}",
                     (False, True), lambda: bool(s.memguard.get("registry_auto_sync")),
                     self._put_registry_auto_sync, labels=("OFF", "ON")),
@@ -3556,9 +3556,11 @@ class LowkeyScreen(Screen):
         acts = [
             # 0.52.0 (user): ONE "Choose model 📡 🦾" row opens the combined list (api group +
             # "Local models" wrapper) — the separate "Choose API model…" row is gone (it was a
-            # no-op unless the local list had been opened first).
-            Action("c", f"{ec.gap(ec.LK_EMOJI_MODEL_STR)}Choose model {ec.SESSION_EMOJI_FREE_API_STR} {ec.SESSION_EMOJI_LOCAL_STR}"
-                        + (" (shown)" if self._choose_model_visible else "…"),
+            # no-op unless the local list had been opened first). 0.55.8 (user): the LEADING
+            # model emoji is redundant with the trailing lane pair and is dropped, and the
+            # ellipsis is dropped too (it overlapped the trailing emojis).
+            Action("c", f"Choose model {ec.SESSION_EMOJI_FREE_API_STR} {ec.SESSION_EMOJI_LOCAL_STR}"
+                        + (" (shown)" if self._choose_model_visible else ""),
                    self._toggle_choose_model, section="models"),
         ]
         acts += [

@@ -282,6 +282,8 @@ def gap(emoji: str) -> str:
     return emoji + ("  " if narrow else " ")
 
 
+EMOJI_REGISTRY_SYNC_STR = _EMOJIS.get("EMOJI_REGISTRY_SYNC", "🔄")
+
 # Cycle-row glyphs (0.55.4, user 2026-11-07): slim angle brackets read native to the
 # terminal next to the old ◀ ▶ triangles. One definition — the render, the click hit
 # test and the hover hit test all read these, never a re-typed literal.
