@@ -310,8 +310,13 @@ CYCLE_HOVER_CSS = "ansi_" + CYCLE_HOVER
 KNOB_CELLS = 3          # user 2026-11-07: one character shorter than the first 4-cell cut
 KNOB_OFF = "○"
 KNOB_ON = "●"
-KNOB_TRACK_OFF = "─"
-KNOB_TRACK_ON = "─"     # user 2026-11-07: the track stays thin when ON (no heavy ━)
+# Track glyph (user 2026-11-09): the em dash, not box-drawing ─. Measured in SF Mono Terminal 12
+# (CoreText ink boxes): ─ sits 2.0 px below the cell centre, — sits 1.0 px below — the same
+# 1.9 px thickness, edge to edge (seamless) — while ○/● sit at -0.1 px and ◦/• at -1.0 px. So the
+# dash is exactly centred on the in-flight knob and 0.9 px under the resting one; no seamless
+# line glyph in that font sits higher. — is East-Asian-ambiguous width, like the circles already.
+KNOB_TRACK_OFF = "—"
+KNOB_TRACK_ON = "—"     # user 2026-11-07: the track stays thin when ON (no heavy ━)
 # The toggle animation as ONE frame table (user 2026-11-08), played at KNOB_TICK_S per tick.
 # 1/60 s = Textual's own screen-update cap (constants.MAX_FPS) and on the refresh grid at both
 # 60 Hz and the built-in 120 Hz ProMotion display. A 3-cell track has only 3 positions, so the
