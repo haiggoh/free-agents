@@ -460,7 +460,9 @@ def build() -> None:
                     def _quit_app():
                         from nicegui import app as _app
                         try:
-                            ui.run_javascript("window.close()")
+                            # flag first so a test can prove the close was requested even
+                            # when window.close() is a no-op on a non-script-opened tab
+                            ui.run_javascript("window.__fa_quit = true; window.close()")
                         except Exception:
                             pass
                         _app.shutdown()
