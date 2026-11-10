@@ -1,4 +1,4 @@
-## [0.56.1] — unreleased
+## [0.56.1] — unreleased  (includes the dispatch null-timeout hotfix)
 
 ### Fixed — the 0541 fix-release round (plan 2026-11-05-free-agents-0541-fix-release.md)
 
@@ -33,6 +33,9 @@
   explicit section wins over a stale key (R19), and the first migrating save leaves a
   `.v9.bak` (the 0.54.0 reader rejects schema 10 — recorded). `tests/
   test_registry_section_migration_0541.py` 7/7.
+- **Dispatch no longer crashes on a roster entry with an explicit null timeout**
+  (waypoint free-agent-tool-py-dispatch-2, seen live on v0.56.0): the entry now
+  dispatches like one without a timeout. `tests/test_dispatch_none_timeout_0562.py` 3/3.
 
 ### Corrected
 
