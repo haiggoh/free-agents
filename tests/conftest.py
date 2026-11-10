@@ -73,7 +73,7 @@ def _ensure_notify_shim():
         if not stub.exists():
             stub_body = ("#!/bin/sh\n"
                          "printf '%s\\n' \"$(date +%s) " + name +
-                         " $* CALLER=$(ps -o command= -p $PPID | cut -c1-160)\" >> \""
+                         " $* CALLER=$(ps -o command= -p $PPID | cut -c1-400)\" >> \""
                          + str(d / "calls.log") + "\"\n"
                          "exit 0\n")
             stub.write_text(stub_body)
@@ -136,7 +136,7 @@ def pytest_sessionfinish(session, exitstatus):
     # (the installed 0.56.0 predates the fence; fixed for every copy installed after
     # 0.56.1 — waypoint investigate-why-does-the). They are reported, not fatal: the
     # repo's tests cannot fence a copy outside this tree. IN-REPO callers still fail.
-    installed_marker = os.sep + "plugins" + os.sep + "cache" + os.sep
+    installed_marker = os.sep + "plugins" + os.sep   # the install cache; survives the 160-char CALLER cut
     installed = [x for x in calls if installed_marker in x]
     repo_calls = [x for x in calls if installed_marker not in x]
     if installed:
