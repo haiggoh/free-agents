@@ -24,7 +24,11 @@
   `emoji_constants` — no literals). Tests: `tests/test_csl_tui_port_0109.py`,
   `tests/test_quit_icon_hover_0562.py`.
 - The remote picker's menu puts API keys before Filter settings.
-
+- Fixed a hover-path crash (branch-only, found via PTY gate): the custom
+  `HoverOptionList.Hovered` message now carries `option_list`, which the quit-icon swap reads
+  (`event.option_list.id`) — without it the app died on the first mouse move over a list and
+  right-click copy saw PTY EIO. `RightClickPty::test_right_click_on_a_row_reaches_pbcopy`
+  was red on the branch / green on main; green again after the fix.
 ## [0.56.1] — unreleased  (includes the dispatch null-timeout hotfix)
 
 ### Fixed — the 0541 fix-release round (plan 2026-11-05-free-agents-0541-fix-release.md)

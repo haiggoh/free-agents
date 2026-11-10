@@ -703,15 +703,16 @@ class HoverOptionList(OptionList):
     pointer as well as the keyboard highlight. Textual tracks hover only for styling."""
 
     class Hovered(Message):
-        def __init__(self, index: int | None):
+        def __init__(self, index: int | None, option_list: "HoverOptionList | None" = None):
             super().__init__()
             self.index = index
+            self.option_list = option_list   # 0.56.2: the quit-icon hover swap reads event.option_list.id
 
     def _on_mouse_move(self, event):
         before = self._mouse_hovering_over
         super()._on_mouse_move(event)
         if self._mouse_hovering_over != before:
-            self.post_message(self.Hovered(self._mouse_hovering_over))
+            self.post_message(self.Hovered(self._mouse_hovering_over, self))
         if self.id == "actions":
             self._update_arrow_hover(event)
 
@@ -743,7 +744,7 @@ class HoverOptionList(OptionList):
 
     def _on_leave(self, event):
         super()._on_leave(event)
-        self.post_message(self.Hovered(None))
+        self.post_message(self.Hovered(None, self))
 
     def _on_mouse_down(self, event):
         self._drag_start = (event.x, event.y)
@@ -2022,7 +2023,8 @@ class Picker(App):
             return
         row = self.row_ids[event.index]
         self._update_info(row[1] if row and row[0] == "item" else None, from_hover=True)
-        if event.option_list.id == "actions":
+        olist = getattr(event, "option_list", None)   # synthetic Hovered(index) has no list
+        if olist is not None and olist.id == "actions":
             self._swap_quit_icon(event.index)    # user 2026-11-09: ⏻ -> ⏼ on hover
 
     def _swap_quit_icon(self, index):
