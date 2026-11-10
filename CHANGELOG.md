@@ -17,6 +17,14 @@
   (independent QC dispatch, GLM 5.3 Flash; each proposed mutation proven RED).
   Commits 4e81028, 97d9805.
 
+### Changed — csl TUI polish (branch fix/csl-tui-quit-icon-apikeys-order, user 2026-11-09, ported from the GUI)
+
+- The quit entry carries the power icon: ⏻ at rest, ⏼ on hover (hover swaps the glyph on
+  the actions row and restores the previous one; both glyphs live in `config/emoji.sh` via
+  `emoji_constants` — no literals). Tests: `tests/test_csl_tui_port_0109.py`,
+  `tests/test_quit_icon_hover_0562.py`.
+- The remote picker's menu puts API keys before Filter settings.
+
 ## [0.56.1] — unreleased  (includes the dispatch null-timeout hotfix)
 
 ### Fixed — the 0541 fix-release round (plan 2026-11-05-free-agents-0541-fix-release.md)
