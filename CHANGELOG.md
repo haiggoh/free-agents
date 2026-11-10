@@ -1,3 +1,22 @@
+## [0.56.2] — 2026-11-11
+
+### Changed — UserPromptSubmit hook timeout raised for shared-machine load
+
+- `hooks/session-title-prefix.py` UserPromptSubmit timeout 5s -> 30s (hooks/hooks.json).
+  Measured 2026-11-10 under load avg ~80 with 14 concurrent sessions: the hook took 5.2s
+  cold / 0.8s warm, so the 5s budget killed it on every prompt during load bursts (seen as
+  "timed out after 5s" popping up in several sessions at once). A longer timeout costs
+  nothing when the hook is fast.
+
+### Changed — step-5 model claim reworded (user 2026-11-10)
+
+- `config/remote-model-notes.json` + `config/dispatch-preferences.json`: the
+  `nvidia-step5-preview` note no longer says "one of the best models on NVIDIA" — it now
+  reads "Currently the fastest model on NVIDIA: median turn 23 s. 1M context." plus the
+  preview caveat. Tests pin the FULL rendered infobox text and the preferences claim
+  (independent QC dispatch, GLM 5.3 Flash; each proposed mutation proven RED).
+  Commits 4e81028, 97d9805.
+
 ## [0.56.1] — unreleased  (includes the dispatch null-timeout hotfix)
 
 ### Fixed — the 0541 fix-release round (plan 2026-11-05-free-agents-0541-fix-release.md)
