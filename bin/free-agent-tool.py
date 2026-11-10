@@ -581,7 +581,10 @@ def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED,
             cmd += ["--reasoning-effort", str(effort)]
         if stall_s:
             cmd += ["--timeout", f"{stall_s:g}"]
-        limit = entry.get("timeout", 1800)
+        # 0.56.2 fix (waypoint free-agent-tool-py-dispatch-2): an entry whose timeout is
+        # EXPLICITLY null must behave like an absent one — `get(key, default)` returns the
+        # stored None, and min(None, ...) crashed the whole dispatch before any request.
+        limit = entry.get("timeout") or 1800
         if timeout_s is not None:
             limit = min(limit, timeout_s)
         try:
