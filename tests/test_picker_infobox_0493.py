@@ -56,8 +56,28 @@ class InfoboxDedupeTests(unittest.TestCase):
                       f"new phrasing must render in the infobox:\n{text}")
         self.assertIn("still tends to get stuck on difficult problems", text,
                       f"preview caveat must render in the infobox:\n{text}")
+        # QC 2026-11-10 (out-of-family reviewer): pin the FULL note body, not just the
+        # headline phrases — otherwise "23 s"->"30 s" or a dropped clause stays green.
+        full_body = ("Currently the fastest model on NVIDIA: median turn 23 s. 1M context. "
+                     "Preview version still tends to get stuck on difficult problems - given "
+                     "well-prepared plans it can plow through hundreds of turns autonomously "
+                     "for hours on end.")
+        self.assertIn(full_body, text,
+                      f"the FULL reworded note must render, not only its headline phrases:\n{text}")
         self.assertNotIn("one of the best", text.lower(),
                          f"old phrasing must be gone from the infobox:\n{text}")
+
+    def test_step5_dispatch_preferences_note_reworded(self):
+        # QC 2026-11-10: the same claim lives in config/dispatch-preferences.json
+        # (order[] entry id=nvidia-step5-preview) and was DECLARED-ONLY (no test read it).
+        # Mutation: reverting that note to "one of the best models available on NVIDIA"
+        # turns this test RED.
+        import json as _json
+        prefs = _json.loads((ROOT / "config" / "dispatch-preferences.json").read_text())
+        entry = next(e for e in prefs["order"] if e.get("id") == "nvidia-step5-preview")
+        note = entry["note"]
+        self.assertIn("currently the fastest model on NVIDIA", note, note)
+        self.assertNotIn("one of the best", note.lower(), note)
 
 
 if __name__ == "__main__":
