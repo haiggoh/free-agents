@@ -73,7 +73,8 @@ def _ensure_notify_shim():
         if not stub.exists():
             stub_body = ("#!/bin/sh\n"
                          "printf '%s\\n' \"$(date +%s) " + name +
-                         " $*\" >> \"" + str(d / "calls.log") + "\"\n"
+                         " $* CALLER=$(ps -o command= -p $PPID | cut -c1-160)\" >> \""
+                         + str(d / "calls.log") + "\"\n"
                          "exit 0\n")
             stub.write_text(stub_body)
             stub.chmod(0o755)
