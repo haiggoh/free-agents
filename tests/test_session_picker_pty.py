@@ -27,7 +27,8 @@ class PickerNavigation(PilotCase):
         async def s(app, pilot, h):
             acts = h.labels("actions")
             self.assertIn("Claude Code Free-Agents: Session Launcher", h.title())
-            self.assertTrue(any("Q) Quit" in a for a in acts), acts)
+            # 0.56.2: the Quit row carries the ⏻ icon — rendered "Q) ⏻ Quit", not "Q) Quit"
+            self.assertTrue(any("Q)" in a and "Quit" in a and "⏻" in a for a in acts), acts)
             self.assertFalse(any("Back to" in a for a in acts), acts)
             await h.wait_text("Local sessions (12 on disk)")
             await h.press("q")

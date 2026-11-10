@@ -2018,14 +2018,16 @@ class Picker(App):
         info.display = True
 
     def on_hover_option_list_hovered(self, event):
+        # 0.56.2: the actions-pane swap must run BEFORE the row_ids guard — row_ids covers
+        # #rows only (empty on Home), so an actions index would otherwise always bail out.
+        olist = getattr(event, "option_list", None)   # synthetic Hovered(index) has no list
+        if olist is not None and olist.id == "actions":
+            self._swap_quit_icon(event.index)    # user 2026-11-09: ⏻ -> ⏼ on hover
         if event.index is None or event.index >= len(self.row_ids):
             self._update_info()                  # pointer left: fall back to the highlight
             return
         row = self.row_ids[event.index]
         self._update_info(row[1] if row and row[0] == "item" else None, from_hover=True)
-        olist = getattr(event, "option_list", None)   # synthetic Hovered(index) has no list
-        if olist is not None and olist.id == "actions":
-            self._swap_quit_icon(event.index)    # user 2026-11-09: ⏻ -> ⏼ on hover
 
     def _swap_quit_icon(self, index):
         """Swap the hovered Quit action's icon to the hover variant (and restore the previous

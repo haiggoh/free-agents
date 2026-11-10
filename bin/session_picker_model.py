@@ -1264,7 +1264,7 @@ class HomeScreen(Screen):
         acts.append(Action("h", f"{ec.EMOJI_THEME_STR} Theme colors", lambda: Nav("theme_config", HOME_OWNED), section="appearance"))
         acts.append(Action("i", f"{ec.gap(ec.EMOJI_INFO_STR)}About — version and paths", lambda: Nav("about", HOME_OWNED), section="appearance"))
         # Settings like NVIDIA rate limiter, auto-mode, prompt hook, watcher are in the lanes
-        acts.append(Action("q", "Quit", lambda: QUIT, section="nav"))
+        acts.append(Action("q", f"{ec.gap(ec.quit_label())}Quit", lambda: QUIT, section="nav"))  # user 2026-11-09: ⏻ icon (GUI port)
         check_action_table(acts)
         return acts
 

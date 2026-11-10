@@ -49,5 +49,18 @@ class QuitIconTests(unittest.TestCase):
         self.assertNotIn(ec.EMOJI_QUIT_STR, ec.quit_label(hovered=True))
 
 
+class QuitIconConfigTests(unittest.TestCase):
+    def test_quit_glyphs_are_sourced_from_emoji_sh(self):
+        # QC 2026-11-10 (out-of-family review): deleting the EMOJI_QUIT* lines from
+        # config/emoji.sh must turn THIS test red — otherwise the code-literal fallback
+        # in emoji_constants keeps the suite green while the config is ignored.
+        self.assertIsNotNone(ec._EMOJIS.get("EMOJI_QUIT"),
+                             "config/emoji.sh must define EMOJI_QUIT")
+        self.assertIsNotNone(ec._EMOJIS.get("EMOJI_QUIT_HOVER"),
+                             "config/emoji.sh must define EMOJI_QUIT_HOVER")
+        self.assertEqual(ec._EMOJIS["EMOJI_QUIT"], ec.EMOJI_QUIT_STR)
+        self.assertEqual(ec._EMOJIS["EMOJI_QUIT_HOVER"], ec.EMOJI_QUIT_HOVER_STR)
+
+
 if __name__ == "__main__":
     unittest.main()
