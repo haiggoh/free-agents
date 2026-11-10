@@ -44,6 +44,21 @@ class InfoboxDedupeTests(unittest.TestCase):
         self.assertIn(rest[:40], text, "the note's content after the stripped name must survive")
         self.assertEqual(text.count("StepFun Step 5 Preview"), 1)
 
+    def test_step5_infobox_phrasing_is_fastest_not_best(self):
+        # user 2026-11-10: step 5 infobox reworded (config/remote-model-notes.json) to
+        # "Currently the fastest model on NVIDIA: ..." plus the preview-stuck caveat,
+        # replacing "one of the best models on NVIDIA". Mutation: reverting the note
+        # makes this fail (old phrase / missing caveat rendered again).
+        agent = m.RemoteAgent("nvidia-step5-preview", "nvidia", "StepFun Step 5 Preview",
+                              "unknown", model_id="stepfun-ai/step-5-preview")
+        text = self._screen(agent).info_text("nvidia-step5-preview")
+        self.assertIn("Currently the fastest model on NVIDIA", text,
+                      f"new phrasing must render in the infobox:\n{text}")
+        self.assertIn("still tends to get stuck on difficult problems", text,
+                      f"preview caveat must render in the infobox:\n{text}")
+        self.assertNotIn("one of the best", text.lower(),
+                         f"old phrasing must be gone from the infobox:\n{text}")
+
 
 if __name__ == "__main__":
     if "--help" in sys.argv or "-h" in sys.argv:

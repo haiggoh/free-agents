@@ -106,7 +106,7 @@
     "reasoner",
     "validator"
    ],
-   "note": "Session-proven 2026-10-24: 18 h / 589 turns / zero API errors on the NVIDIA free lane (shipped cost-tracker 0.16.0-0.18.0); median turn 23 s. User 2026-10-24: one of the best models available on NVIDIA."
+   "note": "Session-proven 2026-10-24: 18 h / 589 turns / zero API errors on the NVIDIA free lane (shipped cost-tracker 0.16.0-0.18.0); median turn 23 s. User 2026-10-24: currently the fastest model on NVIDIA."
   },
   {
    "id": "nvidia-nemotron-3-ultra",
