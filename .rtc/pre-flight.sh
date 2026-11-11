@@ -62,7 +62,13 @@ run_gate() {  # run_gate <name> <interpreter> <space-separated test files>
     echo "✖ $name gate: none of its test files exist — the gate would cover nothing" >&2; return 1
   fi
   d=$(mktemp -d)
-  if "$py" -m pytest -q "${t[@]}" -p no:cacheprovider --timeout=900 --timeout-method=thread </dev/null >"$d/out" 2>&1; then
+  # 0.56.6 L1: per-test timeout with stack dumps, but ONLY where the venv has pytest-timeout
+  # (the picker venv pins it; the pipx litellm venv may not) — an unsupported flag errors out.
+  local -a to=()
+  if "$py" -m pytest --help 2>/dev/null | grep -q -- '--timeout=TIMEOUT'; then
+    to=(--timeout=900 --timeout-method=thread)
+  fi
+  if "$py" -m pytest -q "${t[@]}" -p no:cacheprovider "${to[@]}" </dev/null >"$d/out" 2>&1; then
     echo "  $name: $(grep -E 'passed|failed|no tests ran' "$d/out" | tail -1)"
     rm -rf "$d"; return 0
   fi
