@@ -2436,6 +2436,10 @@ else
     claude_cmd=(claude --model "$SPOOF_PRIMARY" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --append-system-prompt "$AGENT_PROMPT")
 fi
 claude_cmd+=(--permission-mode "$PERMISSION_MODE")
+# 0.56.8 (handover into a NEW worktree stalled silently on the folder-trust dialog, user
+# 2026-11-10): --trust-workspace is Claude Code's own non-interactive pre-accept — no
+# hand-edit of ~/.claude.json. A handover launch is an explicit act of trust in the target dir.
+claude_cmd+=(--trust-workspace)
 [ -n "${LA_MOD_DIR:-}" ] && claude_cmd+=(--plugin-dir "$LA_MOD_DIR")
 
 # Handle settings merge: if both blind-trust and per-session settings exist, merge them.

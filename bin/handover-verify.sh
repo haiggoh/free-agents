@@ -132,6 +132,8 @@ while :; do
     done
     [[ $(date +%s) -lt $deadline ]] || {
         echo "NOT_VERIFIED: no transcript for session $sid containing the expected text within ${tmo}s"
+        echo "  hint: if NO session registered at all, the launched window is probably sitting at the"
+        echo "  workspace trust dialog — relaunch with --trust-workspace (remote-session.sh adds it since 0.56.8)"
         exit 1
     }
     sleep 1

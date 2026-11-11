@@ -1,3 +1,13 @@
+## [0.56.8] — unreleased
+
+### Fixed — handover into a new worktree stalls on the folder-trust dialog (user 2026-11-10)
+- `bin/remote-session.sh` passes `--trust-workspace` (Claude Code's own non-interactive
+  pre-accept — no `~/.claude.json` hand-edit) so a handover launch into a fresh worktree
+  starts instead of sitting silently at the trust prompt. Pinned via the recorded claude
+  argv in tests/test_remote_session.py.
+- `bin/handover-verify.sh` timeout now names the cause: "no session registered — check for a
+  trust prompt; relaunch with --trust-workspace". Test: tests/test_handover_verify.py.
+
 ## [0.56.7] — unreleased
 
 ### Changed — test hardening L2 (hermetic env) + permanent free-session rule in the SessionStart nudge

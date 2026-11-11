@@ -1202,6 +1202,9 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         self.assertIn('--permission-mode', argv)
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions',
 'blind-trust must use bypassPermissions (0 classifier calls, measured)')
+        # 0.56.8: a handover into a NEW worktree must not stall on the folder-trust dialog —
+        # --trust-workspace is Claude Code's own non-interactive pre-accept (no ~/.claude.json edit)
+        self.assertIn('--trust-workspace', argv, 'remote launches must pre-accept workspace trust')
 
         argv = launched_argv('-a', '-a', 'gemini-flash')
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits',

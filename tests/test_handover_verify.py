@@ -82,6 +82,19 @@ class HandoverVerifyEpoch(unittest.TestCase):
                                  f"VERIFY, got: {r.stdout}{r.stderr}")
                 self.assertIn("VERIFIED", r.stdout)
 
+    def test_timeout_hint_names_the_trust_prompt(self):
+        # 0.56.8: a handover launched into a fresh worktree sat at the folder-trust dialog while
+        # handover-verify reported a bare timeout — the hint must name the actual cause.
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "--expect", "never-written-needle", "--session-id", "sess-nope",
+             "--timeout", "1", "--sessions-dir", str(self.sdir),
+             "--projects-dir", str(self.pdir.parent)],
+            capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"}, timeout=30)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("NOT_VERIFIED", r.stdout)
+        self.assertIn("trust", r.stdout.lower())
+        self.assertIn("--trust-workspace", r.stdout)
+
     def test_genuinely_different_start_reports_recycled(self):
         live = live_start_epoch(self.proc.pid)
         self._registry(live + 5)                          # 5 s off > 2 s tolerance
