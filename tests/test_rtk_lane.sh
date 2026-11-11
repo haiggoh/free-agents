@@ -7,6 +7,7 @@ set -uo pipefail
 
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
+. "$(cd "$(dirname "$0")/.." && pwd)/tests/lib/hermetic_env.sh"   # hermetic_env helper (L2)
 SHIM_DIR="$ROOT/bin/rtk-lane-shim"
 SETUP="$ROOT/install/setup-rtk-excludes.sh"
 PASS=0; FAIL=0
@@ -52,7 +53,7 @@ block="$(awk '/rtk OFF for free-API sessions/{f=1} f&&/^fi$/{print; exit} f' "$R
 # OUTCOME, not text: run the block itself and read the environment it leaves behind.
 # shellcheck disable=SC2016  # the probe expands inside the child shell, on purpose
 PROBE='printf "%s|%s" "${LA_RTK_HOOK:-}" "${PATH%%:*}"'
-run_block() { env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" PATH="$BASE" "$@" SCRIPT_DIR="$ROOT/bin" bash -c "$block
+run_block() { hermetic_env PATH="$BASE" "$@" SCRIPT_DIR="$ROOT/bin" bash -c "$block
 $PROBE"; }
 check "free_api: LA_RTK_HOOK=off and the shim first on PATH" "$(run_block LA_SESSION_KIND=free_api)" "off|$SHIM_DIR"
 check "local/cloud sessions are untouched" "$(run_block LA_SESSION_KIND=local)" "|/usr/bin"

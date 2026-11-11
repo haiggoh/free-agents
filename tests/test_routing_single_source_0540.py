@@ -23,20 +23,19 @@ sys.path.insert(0, str(ROOT / "hooks"))
 import offload_routing  # noqa: E402
 import fa_fallback_mark as fm  # noqa: E402
 
-ENV_LINE = ("env -i PATH=\"$PATH\" HOME=\"$HOME\" ANTHROPIC_BASE_URL=https://gateway.invalid "
-            "CLAUDE_CONFIG_DIR=\"{cfg}\" FA_ROUTE_AGENT=free-first FA_ROUTE_WORKFLOW=free-first "
-            "CLAUDE_PLUGIN_ROOT=\"{root}\" python3 hooks/cloud-agent-intercept.py")
+sys.path.insert(0, str(ROOT / "tests" / "lib"))
+from hermetic_env import hermetic_env  # noqa: E402   (L2: one clean-env helper)
 
 
 def run_hook(payload, root, cfg, extra_env=None):
-    env = dict(os.environ)
-    env.update({"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
-                "ANTHROPIC_BASE_URL": "https://gateway.invalid", "CLAUDE_CONFIG_DIR": cfg,
-                "FA_ROUTE_AGENT": "free-first", "FA_ROUTE_WORKFLOW": "free-first",
-                "CLAUDE_PLUGIN_ROOT": str(root)})
+    # 0.56.7 (L2): hermetic_env instead of dict(os.environ) — the old copy inherited every
+    # LA_* (incl. LA_ROUTE_AGENT, scrubbed by hand below) and the real fence vars.
+    env = hermetic_env({
+        "ANTHROPIC_BASE_URL": "https://gateway.invalid", "CLAUDE_CONFIG_DIR": cfg,
+        "FA_ROUTE_AGENT": "free-first", "FA_ROUTE_WORKFLOW": "free-first",
+        "CLAUDE_PLUGIN_ROOT": str(root)})
     if extra_env:
         env.update(extra_env)
-    env.pop("LA_ROUTE_AGENT", None)
     return subprocess.run([sys.executable, str(ROOT / "hooks" / "cloud-agent-intercept.py")],
                           input=json.dumps(payload), capture_output=True, text=True,
                           env=env, cwd=ROOT, timeout=30)

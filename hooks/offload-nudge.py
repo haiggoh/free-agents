@@ -108,7 +108,8 @@ def free_nudge(root: str) -> str:
     tool = f"{root}/bin/free-agent-tool.py" if root else "the plugin's bin/free-agent-tool.py"
     return (
         f"{lane_mark()} free-agents: this session already runs on FREE inference, so offloading saves no money "
-        "here; do not delegate to cut cost. A dispatch still pays off for QUALITY: an adversarial "
+        "here; do not delegate to cut cost. A FREE session has NO time or budget limit — only quality "
+        "matters, so take the time the work needs (user 2026-11-11). A dispatch still pays off for QUALITY: an adversarial "
         "review or an independent cross-check from a DIFFERENT model family often finds what this "
         "session's own model misses. For that, run a stateless dispatch: "
         f"`python3 {tool}` with {{\"prompt\": ..., \"files\": [paths], \"role\": \"validator\", "

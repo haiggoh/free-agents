@@ -59,6 +59,8 @@ class NudgeTests(unittest.TestCase):
             for word in ("saves no money", "DIFFERENT model family", "cross-check", '"avoid_family"',
                          '"files"', "/plug/bin/free-agent-tool.py", "Announce"):
                 self.assertIn(word, text, word)
+            # user 2026-11-11, permanent for free sessions: no time/budget limit, quality only
+            self.assertIn("NO time or budget limit", text, base)
             self.assertNotIn("}}", text)
 
 

@@ -6,11 +6,12 @@
 set -euo pipefail
 case "${1:-}" in -h|--help) sed -n '2,5p' "$0" | sed 's/^# //'; exit 0 ;; "") ;; *) echo "usage: $0 [--help]" >&2; exit 2 ;; esac
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$(cd "$(dirname "$0")/.." && pwd)/tests/lib/hermetic_env.sh"   # hermetic_env helper (L2)
 pass=0 fail=0
 ok() { pass=$((pass+1)); echo "  PASS: $1"; }
 bad() { fail=$((fail+1)); echo "  FAIL: $1"; }
 SB=$(mktemp -d); trap 'rm -rf "$SB"' EXIT
-deny=$(env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$SB" PATH="$PATH" bash -c 'source "$1/config/config-lib.sh" >/dev/null 2>&1; la_apply_defaults >/dev/null 2>&1 || true; printf %s "${LA_DENY_TOOLS-UNSET}"' _ "$ROOT")
+deny=$(hermetic_env HOME="$SB" PATH="$PATH" bash -c 'source "$1/config/config-lib.sh" >/dev/null 2>&1; la_apply_defaults >/dev/null 2>&1 || true; printf %s "${LA_DENY_TOOLS-UNSET}"' _ "$ROOT")
 [ "$deny" = UNSET ] && deny=$(sed -n 's/.*: "\${LA_DENY_TOOLS:=\(.*\)}"/\1/p' "$ROOT/config/config-lib.sh")
 case ",$deny," in *,Agent,*|*,Workflow,*) bad "default LA_DENY_TOOLS still withholds Agent/Workflow: $deny" ;; *) ok "default LA_DENY_TOOLS keeps Agent + Workflow" ;; esac
 case ",$deny," in *,DesignSync,*) ok "the lean-prompt denials remain (DesignSync etc.)" ;; *) bad "lean-prompt denials lost: $deny" ;; esac

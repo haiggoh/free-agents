@@ -4,7 +4,7 @@ skill's marked block (single source), so a skill edit can never drift from the n
 
 Only the free-first and free-only variants changed: each is now its one-line mode sentence +
 routing_block(). The paid variant and the free-lane council nudge keep their exact text.
-All hook tests run as SUBPROCESSES under `env -i` (hook tests never inherit the session env).
+All hook tests run as SUBPROCESSES under hermetic_env (hook tests never inherit the session env).
 """
 import json
 import os
@@ -22,11 +22,15 @@ import offload_routing  # noqa: E402
 HOOK = ROOT / "hooks" / "offload-nudge.py"
 
 
+sys.path.insert(0, str(ROOT / "tests" / "lib"))
+from hermetic_env import hermetic_env  # noqa: E402   (L2: one clean-env helper)
+
+
 def run_nudge(extra_env=None, cfg=None):
     cfg = cfg or tempfile.mkdtemp(prefix="fa-nudge-cfg-")
-    env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
-           "ANTHROPIC_BASE_URL": "https://gateway.invalid",
-           "CLAUDE_CONFIG_DIR": cfg, "CLAUDE_PLUGIN_ROOT": str(ROOT)}
+    # 0.56.7 (L2): hermetic_env — hook tests never inherit the session env
+    env = hermetic_env({"ANTHROPIC_BASE_URL": "https://gateway.invalid",
+                        "CLAUDE_CONFIG_DIR": cfg, "CLAUDE_PLUGIN_ROOT": str(ROOT)})
     env.update(extra_env or {})
     r = subprocess.run([sys.executable, str(HOOK)], capture_output=True, text=True,
                        env=env, cwd=ROOT, timeout=30)

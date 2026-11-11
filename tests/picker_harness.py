@@ -353,6 +353,16 @@ class PTYCase(_StubbedEnv):
         except ChildProcessError:
             pass
 
+    def wait_until(self, pred, secs=10, what="condition"):
+        """Condition-based wait (0.56.7 L2): pump the pty until pred() is true, else fail with
+        the screen tail. Replaces fixed pump(N) sleeps on the flaky terminal paths."""
+        end = time.time() + secs * loadscale.current_scale()
+        while time.time() < end:
+            if pred():
+                return
+            self.pump(0.1)
+        self.fail(f"never saw {what} within {secs}s; screen tail: {self.screen()[-400:]}")
+
     def pump(self, secs=0.4):
         end = time.time() + secs
         while time.time() < end:

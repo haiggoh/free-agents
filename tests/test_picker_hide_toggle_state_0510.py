@@ -483,7 +483,8 @@ class RightClickPty(PTYCase):
         self.send("\x1b[<32;10;16M")        # move over the first model row (any-event mode 1003)
         self.send("\x1b[<2;10;16M")         # right button down (SGR button 2 -> button 3)
         self.send("\x1b[<2;10;16m")         # right button up
-        self.pump(1.0)
+        self.wait_until(lambda: pbrec.exists() and pbrec.read_text().strip(),
+                        10, "pbcopy recorder got the row text")   # 0.56.7 L2: condition, not a fixed sleep
         got = pbrec.read_text().strip() if pbrec.exists() else ""
         self.assertIn("NVIDIA A", got,
                       f"right-click on a model row must copy that row via pbcopy; got {got!r}; "

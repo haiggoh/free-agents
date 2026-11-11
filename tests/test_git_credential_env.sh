@@ -12,6 +12,7 @@
 
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+. "$(cd "$(dirname "$0")/.." && pwd)/tests/lib/hermetic_env.sh"   # hermetic_env helper (L2)
 HELPER="$ROOT/bin/la-git-credential-env.sh"
 PASS=0; FAIL=0
 
@@ -41,7 +42,7 @@ CFG
 
 # fill <env assignments...> — run `git credential fill` for github.com in an isolated env
 fill() {
-    printf 'protocol=https\nhost=github.com\n\n' | env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$TMP" PATH="$TMP/bin:/usr/bin:/bin" \
+    printf 'protocol=https\nhost=github.com\n\n' | hermetic_env HOME="$TMP" PATH="$TMP/bin:/usr/bin:/bin" \
         GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 "$@" git credential fill 2>/dev/null \
         | sed -n 's/^password=//p'
 }
@@ -55,7 +56,7 @@ check "$(fill GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_V
     "old reset-only override reproduces the bug (no credential)"
 
 # The fix: what sourcing the helper exports.
-eval "$(env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$TMP" PATH="$TMP/bin:/usr/bin:/bin" LA_GH_BIN="$TMP/bin/gh" bash -c \
+eval "$(hermetic_env HOME="$TMP" PATH="$TMP/bin:/usr/bin:/bin" LA_GH_BIN="$TMP/bin/gh" bash -c \
     '. "$1"; for v in ${!GIT_CONFIG_@}; do printf "export %s=%q\n" "$v" "${!v}"; done' _ "$HELPER")"
 check "$GIT_CONFIG_COUNT" "3" "helper exports three overrides"
 check "$GIT_CONFIG_KEY_0=$GIT_CONFIG_VALUE_0" "credential.helper=" "override 0 resets the bare helper"
@@ -67,7 +68,7 @@ check "$(fill GIT_CONFIG_COUNT="$GIT_CONFIG_COUNT" \
     "FAKE-TEST-TOKEN" "with the fix, git still gets the github.com credential"
 
 # Non-github hosts get NO helper (that reset is what silences the 100001 store failure).
-other=$(printf 'protocol=http\nhost=localhost:4141\n\n' | env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$TMP" PATH="$TMP/bin:/usr/bin:/bin" \
+other=$(printf 'protocol=http\nhost=localhost:4141\n\n' | hermetic_env HOME="$TMP" PATH="$TMP/bin:/usr/bin:/bin" \
     GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT="$GIT_CONFIG_COUNT" \
     GIT_CONFIG_KEY_0="$GIT_CONFIG_KEY_0" GIT_CONFIG_VALUE_0="$GIT_CONFIG_VALUE_0" \
     GIT_CONFIG_KEY_1="$GIT_CONFIG_KEY_1" GIT_CONFIG_VALUE_1="$GIT_CONFIG_VALUE_1" \
@@ -76,7 +77,7 @@ other=$(printf 'protocol=http\nhost=localhost:4141\n\n' | env -i FA_NOTIFY_SINK=
 check "$other" "" "non-github hosts resolve to an empty helper (100001 stays silenced)"
 
 # No gh available: falls back to reset-only, warns, still exports a consistent count.
-out=$(env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" HOME="$TMP" PATH="/usr/bin:/bin" LA_GH_FALLBACK=/nonexistent/gh bash -c '. "$1" 2>&1; echo "COUNT=$GIT_CONFIG_COUNT"' _ "$HELPER")
+out=$(hermetic_env HOME="$TMP" PATH="/usr/bin:/bin" LA_GH_FALLBACK=/nonexistent/gh bash -c '. "$1" 2>&1; echo "COUNT=$GIT_CONFIG_COUNT"' _ "$HELPER")
 check "$(printf '%s' "$out" | grep -c 'gh not found')" "1" "missing gh prints a warning"
 check "$(printf '%s' "$out" | sed -n 's/^COUNT=//p')" "1" "missing gh exports only the reset"
 

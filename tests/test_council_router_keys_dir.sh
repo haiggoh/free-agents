@@ -15,6 +15,7 @@ check() { if [ "$2" = "$3" ]; then PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1";
           else FAIL=$((FAIL + 1)); printf 'FAIL  %s -- expected [%s] got [%s]\n' "$1" "$3" "$2"; fi; }
 
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
+. "$(cd "$(dirname "$0")/.." && pwd)/tests/lib/hermetic_env.sh"   # hermetic_env helper (L2)
 mkdir -p "$SB/repo/bin" "$SB/repo/config" "$SB/home/.models/LocalModel" "$SB/keys" "$SB/home/.api_keys"
 cp "$REPO/bin/council-router.sh" "$SB/repo/bin/"
 cp "$REPO/config/config-lib.sh" "$SB/repo/config/"
@@ -34,7 +35,7 @@ for b in "$(command -v bash)" /opt/homebrew/bin/bash /usr/local/bin/bash; do
   [ -x "$b" ] && "$b" -c '[ "${BASH_VERSINFO[0]}" -ge 4 ]' 2>/dev/null && { BASH4="$b"; break; }
 done
 [ -n "$BASH4" ] || { echo "SKIP: needs bash 4+ (brew install bash)"; exit 0; }
-route() { env -i FA_NOTIFY_SINK="${FA_NOTIFY_SINK:-}" PATH="/usr/bin:/bin" HOME="$SB/home" "$@" \
+route() { hermetic_env PATH="/usr/bin:/bin" HOME="$SB/home" "$@" \
             "$BASH4" "$SB/repo/bin/council-router.sh" --role reasoner 2>/dev/null; }
 
 out="$(route LA_API_KEYS_DIR="$SB/keys")"

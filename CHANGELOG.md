@@ -1,3 +1,19 @@
+## [0.56.7] — unreleased
+
+### Changed — test hardening L2 (hermetic env) + permanent free-session rule in the SessionStart nudge
+- `tests/lib/hermetic_env.sh` / `hermetic_env.py` are the ONE clean-env helper for tests;
+  all 19 bare `env -i` call sites converted. The helper always passes through the conftest
+  fence vars (LA_NVIDIA_THROTTLE_STATE, LA_HF_PARAMS_CACHE, LA_QUOTA_LEDGER_DIR,
+  FA_NOTIFY_SINK, FA_NOTIFY_SHIM_DIR) — previously an `env -i` child re-resolved the REAL
+  machine-wide NVIDIA limiter bucket instead of the per-session tmp file. Structural test
+  `tests/test_hermetic_env.py` fails on any new bare `env -i` and proves fence passthrough
+  + no parent-var leakage.
+- PTY waits: `PTYCase.wait_until(pred)` replaces the fixed `pump(1.0)` in the right-click
+  pbcopy test (condition-based, load-scaled, fails with the screen tail).
+- SessionStart offload nudge on a FREE session now states permanently (user 2026-11-11):
+  "A FREE session has NO time or budget limit — only quality matters, so take the time the
+  work needs." Pinned in tests/test_offload_nudge.py.
+
 ## [0.56.6] — unreleased
 
 ### Changed — csl picker: one subheadline-cyan constant; L1 gate timeout
