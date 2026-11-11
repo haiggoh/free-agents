@@ -1,3 +1,13 @@
+## [0.56.4] — unreleased
+
+### Changed — csl: binary toggles render as an animated sliding knob (nicegui switch parity, user design 2026-11-09)
+- Two-choice ON/OFF rows show a fixed-width value chip followed by a KNOB_CELLS-wide knob
+  track that slides ●/○ end to end on toggle (one frame table `ec.KNOB_SEQUENCE` at
+  1/60 s ticks, ~167 ms, cyan arrival flash); no ❮❯ on toggle rows — a click anywhere on
+  the row toggles it. All glyphs from `config/emoji.sh` via `emoji_constants` (single
+  source). Tests: `tests/test_toggle_knob.py`; the glyph-pinning suites now branch on the
+  render rule itself (`assert_glyphs_for` imports `session_picker._is_binary`).
+
 ## [0.56.3] — unreleased
 
 ### Fixed — tooling (2026-11-11 autopilot round)
