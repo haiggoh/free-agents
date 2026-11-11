@@ -13,3 +13,6 @@ typing-extensions==4.16.0
 # 0.53.1: OS trust store injection for the HF parameter-size warm-up on TLS-inspecting
 # networks (same pin as the litellm venv's shim uses); injected guarded in session_picker.py.
 truststore==0.10.5
+# 0.56.6 (L1 test hardening): per-test timeout with thread stack dumps in the picker gate
+# (same pin as the pipx pytest venv); enabled via --timeout in .rtc/pre-flight.sh.
+pytest-timeout==2.4.0

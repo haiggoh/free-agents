@@ -328,13 +328,20 @@ KNOB_SIZES = {
     "small": ("◦", "•"),
     "full":  (KNOB_OFF, KNOB_ON),
 }
+# The subheadline/policy cyan in both forms a consumer needs (0.56.6, user single-source):
+# the rich style name for span/frame colours, and the Textual CSS token derived from it —
+# never typed separately, so a colour change updates the CSS rule, the policy styles and
+# the knob flash from here.
+SUBHEADLINE_CYAN = "bright_cyan"
+SUBHEADLINE_CYAN_CSS = "ansi_" + SUBHEADLINE_CYAN
+
 # Rows: (cells moved from the start end, size, what it SHOWS, knob colour or None, ticks).
 # SHOWS: "old" / "new" = the state before / after the toggle; "filled" = a filled knob whichever
 # way it is going (session_picker._knob_shows_filled is the one place that resolves this).
 # User 2026-11-08: one size switch only — the knob travels small and ARRIVES small in its OLD
 # state. User 2026-11-09: it then grows to full size as a DIM FILLED frame (this replaced the
 # full-size old-state frame, to keep the total length), and only then shows the NEW state with
-# the subheadline cyan (#policy = ansi_bright_cyan), then plain cyan. Switching ON: ◦ → dim ● →
+# the subheadline cyan (SUBHEADLINE_CYAN), then plain cyan. Switching ON: ◦ → dim ● →
 # cyan ●; switching OFF: • → dim ● → cyan ○. Every frame is held 2 ticks = 33 ms: a 1-tick
 # frame (16 ms) did not show reliably. After the last row the knob rests at full size in its
 # normal colour. Total here: 10 ticks ≈ 167 ms.
@@ -342,7 +349,7 @@ KNOB_SEQUENCE = (
     (1, "small", "old",    None,          2),   # middle, small
     (2, "small", "old",    None,          2),   # arrives, still small
     (2, "full",  "filled", "dim",         2),   # grows AND fills, dim (in-between)
-    (2, "full",  "new",    "bright_cyan", 2),   # the new state, flashing
+    (2, "full",  "new",    SUBHEADLINE_CYAN, 2),   # the new state, flashing (subheadline cyan)
     (2, "full",  "new",    "cyan",        2),   # fade step
 )
 # The value words that put the knob at the ON end (first word of the value: "ON (default)" counts).

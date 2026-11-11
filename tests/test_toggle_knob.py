@@ -165,8 +165,8 @@ class ToggleKnob(PilotCase):
         switches = sum(1 for a, b in zip(sizes, sizes[1:]) if a != b)
         self.assertEqual(switches, 1, f"the knob may change size exactly once: {sizes}")
         first_new = next(i for i, r in enumerate(seq) if r[2] == "new")
-        self.assertEqual(seq[first_new][3], "bright_cyan",
-                         f"the state change itself must flash the cyan: {seq[first_new]}")
+        self.assertEqual(seq[first_new][3], ec.SUBHEADLINE_CYAN,
+                         f"the state change itself must flash the subheadline cyan: {seq[first_new]}")
         # user 2026-11-09: right before the cyan, an in-between frame FILLED with a dim colour
         self.assertGreater(first_new, 1)
         self.assertEqual(seq[first_new - 1][1:4], ("full", "filled", "dim"),
@@ -177,8 +177,8 @@ class ToggleKnob(PilotCase):
                          f"the dim fill must come straight after the small old-state arrival: {seq}")
         self.assertNotIn(("full", "old"), [r[1:3] for r in seq],
                          f"no full-size frame in the old state any more: {seq}")
-        flashes = [r for r in seq if r[3] in ("bright_cyan", "cyan")]
-        self.assertEqual(flashes[0][3], "bright_cyan")          # the subheadline cyan
+        flashes = [r for r in seq if r[3] in (ec.SUBHEADLINE_CYAN, "cyan")]
+        self.assertEqual(flashes[0][3], ec.SUBHEADLINE_CYAN)     # the subheadline cyan
         for r in flashes:
             self.assertGreaterEqual(r[4] * ec.KNOB_TICK_S, 2 / 60 - 1e-9, f"flash too short: {r}")
 
@@ -197,7 +197,7 @@ class ToggleKnob(PilotCase):
         both directions, and every table row is shown for exactly its tick count."""
         async def s(app, pilot, h):
             await self._open()(h)
-            self.assertIn("#policy { color: ansi_bright_cyan;", app.CSS)   # cyan source agrees
+            self.assertIn("#policy { color: " + ec.SUBHEADLINE_CYAN_CSS + ";", app.CSS)   # cyan single source
             intervals = []
             app.set_interval = lambda delay, cb: (intervals.append(delay) or
                                                   type("T", (), {"stop": lambda self: None})())
@@ -211,8 +211,8 @@ class ToggleKnob(PilotCase):
                 self.assertEqual(seen, self._expected(on), f"on={on}")
                 self.assertTrue(all(abs(x - ec.KNOB_TICK_S) < 1e-12 for x in intervals), intervals)
             # only the knob carries the flash colour, never the track
-            t = self.sp._knob_text(END, True, "full", "bright_cyan")
-            flashed = [t.plain[sp.start:sp.end] for sp in t.spans if str(sp.style) == "bright_cyan"]
+            t = self.sp._knob_text(END, True, "full", ec.SUBHEADLINE_CYAN)
+            flashed = [t.plain[sp.start:sp.end] for sp in t.spans if str(sp.style) == ec.SUBHEADLINE_CYAN]
             self.assertEqual(flashed, [ec.KNOB_ON], t.spans)
         self.run_picker(s, start="local")
 

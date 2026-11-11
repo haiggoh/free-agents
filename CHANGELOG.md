@@ -1,3 +1,14 @@
+## [0.56.6] — unreleased
+
+### Changed — csl picker: one subheadline-cyan constant; L1 gate timeout
+- `ec.SUBHEADLINE_CYAN` / `ec.SUBHEADLINE_CYAN_CSS` are the single definition of the
+  subheadline cyan (rich style + CSS token); `#policy` CSS, the runtime policy style and the
+  knob flash frame all read it — no literal `ansi_bright_cyan`/`bright_cyan` left in the
+  picker sources (source-scan test in `tests/test_0566_cyan_timeout.py`).
+- L1 test hardening: both gates (rtc-ship `test_cmd`, `.rtc/pre-flight.sh`) run with
+  `--timeout=900 --timeout-method=thread` (stack dump on timeout), and the picker venv pins
+  `pytest-timeout==2.4.0` in `install/session-picker-requirements.txt`.
+
 ## [0.56.5] — unreleased
 
 ### Fixed — csl picker, user-reported in 0.56.4 testing (2026-11-11)

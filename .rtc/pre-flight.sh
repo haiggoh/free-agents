@@ -62,7 +62,7 @@ run_gate() {  # run_gate <name> <interpreter> <space-separated test files>
     echo "✖ $name gate: none of its test files exist — the gate would cover nothing" >&2; return 1
   fi
   d=$(mktemp -d)
-  if "$py" -m pytest -q "${t[@]}" -p no:cacheprovider </dev/null >"$d/out" 2>&1; then
+  if "$py" -m pytest -q "${t[@]}" -p no:cacheprovider --timeout=900 --timeout-method=thread </dev/null >"$d/out" 2>&1; then
     echo "  $name: $(grep -E 'passed|failed|no tests ran' "$d/out" | tail -1)"
     rm -rf "$d"; return 0
   fi

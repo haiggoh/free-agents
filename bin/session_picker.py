@@ -926,7 +926,7 @@ class Picker(App):
     CSS = """
     Screen { layout: vertical; background: ansi_default; color: ansi_default; }
     #title { text-style: bold; padding: 0 1; }
-    #policy { color: ansi_bright_cyan; padding: 0 1 1 1; }  /* subheadline = identity line (cyan since 0.47.7); blank line after it (user 2026-10-30) */
+    #policy { color: @SUBHEADLINE_CYAN@; padding: 0 1 1 1; }  /* subheadline = identity line (cyan since 0.47.7); blank line after it (user 2026-10-30) */
     #version { color: ansi_black; text-style: italic; padding: 1 0; }  /* version footer: flush at the very bottom (blank line only BEFORE it), dimmer+italic than the status line so neither over-emphasizes (user 2026-10-30) */
     #actions { height: auto; padding: 0 1; }
     #rows { height: 1fr; display: none; margin-top: 1; }   /* a blank line before the model list */
@@ -977,7 +977,7 @@ class Picker(App):
        (user 2026-10-22), so inputs looked lopsided; `round` matches the info box's frame. */
     Input { background: ansi_default; color: ansi_default; border: round ansi_bright_black; }
     Static { background: ansi_default; color: ansi_default; }
-    """.replace("@CYCLE_HOVER@", ec.CYCLE_HOVER_CSS)
+    """.replace("@CYCLE_HOVER@", ec.CYCLE_HOVER_CSS).replace("@SUBHEADLINE_CYAN@", ec.SUBHEADLINE_CYAN_CSS)
     # Ctrl+C copies the mouse selection when there is one and quits otherwise; Cmd+C (super+c,
     # where the terminal forwards it) always copies. Title/subheadline/status are selectable
     # Static text, and the terminal's own selection (Option-drag in Terminal.app) still works.
@@ -1537,7 +1537,7 @@ class Picker(App):
         pol.update(text)
         # About uses a styled multi-line readout in the default color, not the cyan
         # subheadline (user 2026-10-30); every other screen keeps the cyan identity line.
-        pol.styles.color = "ansi_default" if isinstance(self.screen_model, m.AboutScreen) else "ansi_bright_cyan"
+        pol.styles.color = "ansi_default" if isinstance(self.screen_model, m.AboutScreen) else ec.SUBHEADLINE_CYAN_CSS
 
     def _startup_policy(self):
         # The label rides the subtitle's FIRST line; the version footer is a separate widget.
