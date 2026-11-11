@@ -801,9 +801,11 @@ class LaunchTests(unittest.TestCase):
         self.assertNotIn("LA_TEMPERATURE", req.env)
         self.assertEqual(req.argv[1:3], ["gemma-4-26b", "high"])
 
-    def test_effort_cycle_lists_provider_default_only_for_remote(self):
-        self.assertIn("provider_default", m.effort_choices("remote_api_session"))
-        self.assertNotIn("provider_default", m.effort_choices("local_session"))
+    def test_effort_template_is_identical_on_all_lanes(self):
+        # 0.56.5 (user): one template — "not set" (provider_default) and max on every lane
+        for lane in ("local_session", "remote_api_session", "lowkey"):
+            self.assertIn("provider_default", m.effort_choices(lane), lane)
+            self.assertIn("max", m.effort_choices(lane), lane)
 
 
 class LowkeyTests(unittest.TestCase):
@@ -817,15 +819,18 @@ class LowkeyTests(unittest.TestCase):
         direct = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
         self.assertIn("q", {a.key for a in direct.actions()})
 
-    def test_effort_cycle_never_offers_max(self):
+    def test_effort_cycle_offers_max_and_not_set(self):
+        # 0.56.5 (user): lowkey effort is the shared template — max and "not set" included,
+        # the old rapid-only set (none/minimal) is gone.
         s = m.Settings()
         lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
         seen = set()
-        for _ in range(10):
+        for _ in range(len(m.effort_choices("lowkey")) + 1):
             lk.handle_key("e")
             seen.add(s.lowkey_effort)
-        self.assertNotIn("max", seen)
-        self.assertIn("none", seen)
+        self.assertIn("max", seen)
+        self.assertIn("provider_default", seen)
+        self.assertNotIn("none", seen)
 
     def test_convo_argv_carries_model_effort_and_session(self):
         # 0.48.0: row Enter/click only SELECTS (activate_selected -> None); the explicit
@@ -880,7 +885,7 @@ class LowkeyTests(unittest.TestCase):
         lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
         acts = [a for a in lk.actions() if a.section != "nav"]
         # 0.54.0 (D3): the "f" opt-in Remote-filters toggle joins the model settings group
-        self.assertEqual([a.key for a in acts], ["c", "m", "p", "g", "s", "j", "e", "t", "f"])
+        self.assertEqual([a.key for a in acts], ["c", "m", "p", "g", "s", "e", "o", "j", "f"])  # 0.56.5: shared e/o/j template order
         self.assertNotIn("settings", {a.section for a in lk.actions()},
                          "the advanced group is dropped entirely in 0.50.0")
 
@@ -904,7 +909,8 @@ class APIKeysHideToggleTests(unittest.TestCase):
         self.assertIn(target, s.hidden_providers)
         self.assertEqual(saved, [[target]])
         grp = next(g for g in keys_screen.accordion.groups if g.id == target)
-        self.assertIn("hidden", grp.label.lower())
+        self.assertNotIn("hidden", grp.label.lower(),
+                         "0.56.5 user: the keys list must not change when a provider is hidden")
         remote = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
         self.assertNotIn(target, [g.id for g in remote.accordion.groups])
         # Show again restores the provider in the remote list

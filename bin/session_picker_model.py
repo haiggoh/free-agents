@@ -152,22 +152,43 @@ def thinking_constraint(provider: str, model_id: str, choice: bool | None) -> st
     return None
 
 
-def thinking_row(s: Settings, key: str = "j", section: str = "model") -> Action:
+def thinking_row(s: Settings, key: str = "j", section: str = "model", get=None, put=None) -> Action:
     """The thinking toggle row: ON ↔ OFF. The row stores only the two states that differ
     behaviorally — None and True both launch with thinking ON and (0.55.5 user) read the
     same, plain "ON" — so cycling back from OFF returns to the launch default rather than
-    to a second, indistinguishable ON."""
-    def label():
-        return "OFF" if s.thinking_session is False else "ON"
+    to a second, indistinguishable ON. 0.56.5: get/put default to the shared
+    thinking_session; lowkey passes its own lowkey_thinking pair (per-lane remembered value)."""
+    if get is None:
+        def get():
+            return s.thinking_session
+    if put is None:
+        def put(v):
+            s.thinking_session = v
+            if s.on_thinking_saved:
+                s.on_thinking_saved(s.thinking_session)
 
-    def put(v):
-        s.thinking_session = v
-        if s.on_thinking_saved:
-            s.on_thinking_saved(s.thinking_session)
+    def label():
+        return "OFF" if get() is False else "ON"
 
     return setting(key, f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {label()}", (None, False),
-                   lambda: s.thinking_session, put, section=section,
-                   labels=("ON", "OFF"))
+                   get, put, section=section, labels=("ON", "OFF"))
+
+
+def model_settings_rows(s: Settings, *, effort_get, effort_set, temp_get, temp_set,
+                        think_get=None, think_set=None) -> list:
+    """0.56.5 (user 2026-11-11): ONE template for the model-settings rows on every lane —
+    same order (Effort, Temperature, Thinking), same hotkeys (e/o/j), same values
+    (sms.EFFORT_TEMPLATE, TEMPERATURES, ON/OFF). Only the remembered value is per-lane,
+    via the lane's own get/set callbacks."""
+    return [
+        setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {_effort_label(effort_get())}",
+                sms.EFFORT_TEMPLATE, effort_get, effort_set,
+                labels=tuple(_effort_label(c) for c in sms.EFFORT_TEMPLATE), section="model"),
+        setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {temp_get() or 'not set'}",
+                TEMPERATURES, temp_get, temp_set,
+                labels=tuple("not set" if t == "" else t for t in TEMPERATURES), section="model"),
+        thinking_row(s, get=think_get, put=think_set),
+    ]
 
 
 # --- data --------------------------------------------------------------------------------
@@ -1438,13 +1459,8 @@ class LocalScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.local_effort}", effort_choices("local_session"),
-                    lambda: s.local_effort, lambda v: self._set_effort(v), section="model"),
-            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.local_temperature or 'not set'}",
-                    TEMPERATURES, lambda: s.local_temperature, lambda v: self._set_local_temp(v),
-                    labels=tuple("not set" if t == "" else t for t in TEMPERATURES),
-                    section="model"),
-            thinking_row(s),   # section="model" by default now
+            *model_settings_rows(s, effort_get=lambda: s.local_effort, effort_set=self._set_effort,
+                                 temp_get=lambda: s.local_temperature, temp_set=self._set_local_temp),
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into Settings
             Action("s", f"{ec.SESSION_EMOJI_FREE_API_STR}  Switch to Remote free API sessions",
                    lambda: Nav("remote", self.owner), section="nav"),   # grouped with Back/Quit at the end (user 2026-10-30)
@@ -1546,7 +1562,9 @@ class LocalScreen(Screen):
         env["LA_THINKING_OVERRIDE"] = "false" if s.thinking_session is False else "true"
         # Use profile_id for the launcher if available, else alias
         launch_alias = mdl.profile_id if mdl.profile_id else mdl.alias
-        argv = ["local", launch_alias, s.local_effort]
+        # 0.56.5: "not set" (provider_default) on a local lane = the launcher's own default,
+        # so the effort arg is omitted entirely (csl <alias> [effort]).
+        argv = ["local", launch_alias] + ([] if s.local_effort == sms.PROVIDER_DEFAULT else [s.local_effort])
         # Through the ENVIRONMENT, like every other toggle: csl --picker-launch execs the launcher
         # with "<alias> <effort>", and the launcher reads options only before the alias, so a
         # trailing --temperature would be silently dropped. Hotswap passes it to Rapid as
@@ -2036,15 +2054,8 @@ class RemoteScreen(Screen):
     def actions(self):
         s = self.settings
         acts = [
-            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {_effort_label(s.remote_effort)}",
-                    effort_choices("remote_api_session"), lambda: s.remote_effort, lambda v: self._set_effort(v),
-                    labels=tuple(_effort_label(c) for c in effort_choices("remote_api_session")),
-                    section="model"),
-            setting("o", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.remote_temperature or 'not set'}",
-                    TEMPERATURES, lambda: s.remote_temperature, lambda v: self._set_remote_temp(v),
-                    labels=tuple("not set" if t == "" else t for t in TEMPERATURES),
-                    section="model"),
-            thinking_row(s),   # section="model" by default now
+            *model_settings_rows(s, effort_get=lambda: s.remote_effort, effort_set=self._set_effort,
+                                 temp_get=lambda: s.remote_temperature, temp_set=self._set_remote_temp),
             Action("c", self._choose_model_label(), self._toggle_choose_model, section="models"),  # top-level, never folded into a group
             # No "find model" action row (user, 2026-10-21): the filter box at the top of
             # the open model list IS the search — typing there filters live from the first
@@ -3142,30 +3153,8 @@ class APIKeysScreen(Screen):
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT):
         super().__init__(settings, owner)
-        # Build accordion with providers as groups
-        groups = []
-        for i, (slug, name, _shortcut, _url, key_files) in enumerate(self.PROVIDERS):
-            status = self._get_provider_status(slug, key_files)
-            label = f"{name}: {status}"
-            # Visual separator AFTER NVIDIA (before Google): a Group with no items
-            # and an empty label renders as a blank row. Placed at index 1 (after NVIDIA).
-            if i == 1:
-                groups.append(Group("__sep__", "", []))
-            # Each provider group has three items: Open page, Add key, Hide/Show in the
-            # choose-model list (0.50.0 api-keys-provider-hide-toggle).
-            groups.append(Group(
-                slug,
-                label,
-                [
-                    Item(f"open:{slug}", f"Open {name} signup page"),
-                    Item(f"add:{slug}", f"Add {name} key"),
-                    Item(*self._hide_item(slug)),
-                ]
-            ))
-        self.accordion.set_groups(groups)
-        # Default expand NVIDIA (first group)
-        if groups:
-            self.accordion.open_group = groups[0].id
+        self._show_all_providers = True   # initial view lists ALL providers (as before 0.56.5)
+        self._rebuild_groups()   # builds providers + separator + more + blank rows + Back row
 
     # 0.54.0 (D1): NO _with_home_row / hidden re-sectioning here — Back is the last item of the
     # actions pane like every other screen (the nav-only pane renders below the provider
@@ -3181,8 +3170,8 @@ class APIKeysScreen(Screen):
         warning = self.ACCOUNT_WARNINGS.get(slug)
         if warning:
             status = f"{status}  {warning}"
-        if is_provider_hidden(self.settings, slug):
-            status += "  · hidden from model list"
+        # 0.56.5 (user): the keys list must NOT change when a provider is hidden from the
+        # model list — the Hide/Show item inside the provider's group states the toggle.
         return status
 
     def _hide_item(self, slug: str) -> tuple:
@@ -3583,19 +3572,14 @@ class LowkeyScreen(Screen):
                                self._launch_last, section="launch"))
         acts.append(Action("s", f"{ec.gap(ec.LK_EMOJI_SESSION_STR)}Set session name: {self.session_name or '(ephemeral)'}",
                            lambda: Nav("prompt:session"), section="main"))
+        # 0.56.5 (user): the same model-settings template as local/remote — order e/o/j,
+        # same values; lowkey keeps its own remembered lowkey_* values via its setters.
+        acts += model_settings_rows(
+            s, effort_get=lambda: s.lowkey_effort, effort_set=self._set_lowkey_effort,
+            temp_get=lambda: s.lowkey_temperature, temp_set=self._set_lowkey_temperature,
+            think_get=lambda: s.lowkey_thinking, think_set=self._set_thinking)
+        # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
         acts += [
-            setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
-                    (None, False), lambda: s.lowkey_thinking, self._set_thinking,
-                    labels=("ON", "OFF"), section="model"),
-            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {_effort_label(s.lowkey_effort)}",
-                    effort_choices("lowkey"), lambda: s.lowkey_effort, self._set_lowkey_effort,
-                    labels=tuple(_effort_label(c) for c in effort_choices("lowkey")),
-                    section="model"),
-            setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {s.lowkey_temperature or 'not set'}",
-                    TEMPERATURES, lambda: s.lowkey_temperature, self._set_lowkey_temperature,
-                    labels=tuple("not set" if t == "" else t for t in TEMPERATURES),
-                    section="model"),
-            # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
             setting("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "
                         f"{'ON' if self._remote_filters else 'OFF'}",
                     (False, True), lambda: self._remote_filters, self._put_remote_filters,

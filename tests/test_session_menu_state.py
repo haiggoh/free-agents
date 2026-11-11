@@ -53,11 +53,11 @@ class StateTests(unittest.TestCase):
     def test_each_lane_saves_independently_and_survives_restart(self):
         # Fails if save_effort rewrites the whole effort map from defaults.
         sms.save_effort(self.cfg, "local_session", "low")
-        sms.save_effort(self.cfg, "lowkey", "minimal")
+        sms.save_effort(self.cfg, "lowkey", "low")
         state = sms.load(self.cfg)
         self.assertEqual(state.effort["local_session"], "low")
         self.assertEqual(state.effort["remote_api_session"], "max")
-        self.assertEqual(state.effort["lowkey"], "minimal")
+        self.assertEqual(state.effort["lowkey"], "low")
         doc = json.loads(self.file.read_text())
         self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)
 
@@ -94,15 +94,14 @@ class StateTests(unittest.TestCase):
         self.assertEqual(sms.effort_arg("remote_api_session", "high"), "high")
 
     def test_lane_allowlists(self):
-        # Fails if lowkey accepts `max` (Rapid-MLX rejects it with HTTP 400) or a local
-        # session accepts provider_default (it has no provider).
-        with self.assertRaises(ValueError):
-            sms.save_effort(self.cfg, "lowkey", "max")
-        with self.assertRaises(ValueError):
-            sms.save_effort(self.cfg, "local_session", "provider_default")
+        # 0.56.5 (user): ONE template on every lane — max and provider_default are valid
+        # everywhere now; only an unknown lane is refused, and a refused save creates no file.
         with self.assertRaises(ValueError):
             sms.save_effort(self.cfg, "no_such_lane", "high")
         self.assertFalse(self.file.exists())
+        for lane in ("local_session", "remote_api_session", "lowkey"):
+            sms.save_effort(self.cfg, lane, "max")
+            sms.save_effort(self.cfg, lane, "provider_default")
 
     # --- corruption / versions / unsafe paths ----------------------------------
     def _assert_warns_and_keeps(self, raw):
@@ -228,7 +227,7 @@ class StateTests(unittest.TestCase):
         barrier = ctx.Barrier(3)
         seqs = {"local_session": ["low", "medium", "xhigh"] * 5,
                 "remote_api_session": ["high", "provider_default", "low"] * 5,
-                "lowkey": ["none", "medium", "high"] * 5}
+                "lowkey": ["low", "medium", "high"] * 5}
         procs = [ctx.Process(target=_writer, args=(self.cfg, lane, vals, barrier))
                  for lane, vals in seqs.items()]
         for p in procs:
@@ -400,12 +399,14 @@ class StateTests(unittest.TestCase):
         raw = json.dumps(v1).encode()
         self.file.write_bytes(raw)
         state = sms.load(self.cfg)                       # load alone: no rewrite
+        self.assertEqual(state.effort["lowkey"], "low")  # 0.56.5: legacy 'minimal' migrates in memory
         self.assertEqual((state.warnings, state.last_launched), ([], {}))
-        self.assertEqual(self.file.read_bytes(), raw)
+        self.assertEqual(self.file.read_bytes(), raw)     # ...and the file is untouched
         self.assertIsNone(sms.save_last_launched(self.cfg, "local_session", "qwen-3.8-operator"))
         doc = json.loads(self.file.read_text())
         self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)
-        self.assertEqual(doc["effort"], v1["effort"])
+        self.assertEqual(doc["effort"]["lowkey"], "low")  # confirmed write persists the migrated value
+        self.assertEqual(doc["effort"]["local_session"], "low")
         self.assertEqual(doc["rate_limiter"], v1["rate_limiter"])
         self.assertEqual(doc["last_launched"], {"local_session": "qwen-3.8-operator"})
 

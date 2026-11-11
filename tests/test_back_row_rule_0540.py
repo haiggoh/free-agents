@@ -143,10 +143,12 @@ class BackRowRuleTests(PilotCase):
 
         self.run_picker(scenario, start="home")
 
-    def test_back_below_accordion_on_backend_and_api_keys(self):
+    def test_back_below_accordion_on_backend_manager(self):
+        # 0.56.5 (user): APIKeysScreen no longer uses the actions pane — Back is the last
+        # accordion row there with two blank rows above it (covered in test_0564_user_issues.py).
         async def scenario(app, pilot, h):
             from textual.widgets import OptionList
-            for cls_name in ("RuntimeManagerScreen", "APIKeysScreen"):
+            for cls_name in ("RuntimeManagerScreen",):
                 cls = getattr(m, cls_name)
                 screen = cls(self._settings, **_SCREEN_EXTRAS[cls_name])
                 app.screen_model = screen

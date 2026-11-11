@@ -55,16 +55,13 @@ LOCK_NAME = "session-menu.local.lock"
 MAX_BYTES = 16 * 1024
 
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-# Rapid-MLX validates reasoning_effort against this closed set (api/models.py
-# _VALID_REASONING_EFFORTS) and answers HTTP 400 to anything else, so `max` is NOT offered.
-LOWKEY_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
 PROVIDER_DEFAULT = "provider_default"
+# 0.56.5 (user 2026-11-11): ONE effort template for every lane — local, remote and lowkey
+# offer the same values in the same order ("not set" = provider default). Only the
+# REMEMBERED value (DEFAULT_EFFORT / the saved per-lane effort) differs per lane.
+EFFORT_TEMPLATE = CLAUDE_EFFORTS + (PROVIDER_DEFAULT,)
 
-ALLOWED_EFFORT = {
-    "local_session": CLAUDE_EFFORTS,
-    "remote_api_session": CLAUDE_EFFORTS + (PROVIDER_DEFAULT,),
-    "lowkey": LOWKEY_EFFORTS,
-}
+ALLOWED_EFFORT = {lane: EFFORT_TEMPLATE for lane in ("local_session", "remote_api_session", "lowkey")}
 DEFAULT_EFFORT = {"local_session": "high", "remote_api_session": "max", "lowkey": "xhigh"}
 
 # Temperature settings: same presets as main's bash menu (0.21.7). "" = leave it to the provider.
@@ -301,6 +298,12 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list, d
     intercept_agents = doc.get("intercept_agents", DEFAULT_INTERCEPT_AGENTS)
     if not all(isinstance(x, dict) for x in (effort, limiter, last, temperature)):
         raise ValueError("preference sections must be JSON objects")
+    # 0.56.5: legacy lowkey effort values from the removed rapid-only set (LOWKEY_EFFORTS:
+    # none/minimal) migrate to the nearest template value instead of failing the whole file.
+    _LEGACY_LOWKEY_EFFORT = {"none": "low", "minimal": "low"}
+    for lane, value in list(effort.items()):
+        if lane == "lowkey" and value in _LEGACY_LOWKEY_EFFORT:
+            effort[lane] = _LEGACY_LOWKEY_EFFORT[value]
     for lane, value in effort.items():
         _validate_effort(lane, value)
     _validate_rate_limiter(limiter)

@@ -845,6 +845,12 @@ class NavPanePosition(PilotCase):
             acts = h.labels("actions")
             self.assertTrue(acts and all("Back" in a for a in acts),
                             f"the api-keys actions pane is nav-only: {acts}")
+            # 0.56.5 (user): compact-rows — the pane follows the accordion after two blank
+            # rows (#gap height 2), it is NOT pinned to the window bottom
+            layout = app.query_one("#layout")
+            self.assertTrue(layout.has_class("compact-rows"),
+                            "APIKeysScreen must use the compact-rows layout like the backend manager")
+            self.assertEqual(layout.query_one("#gap").styles.height.value, 2)
         self.run_picker(s)
 
     def test_lane_screens_keep_actions_pane_on_top(self):

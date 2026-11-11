@@ -36,7 +36,7 @@ class APIKeysDesignTests(unittest.TestCase):
         """Provider list has NVIDIA first, then alphabetical."""
         api_keys = m.APIKeysScreen(self.settings)
         # Filter out separator group
-        actual_order = [g.id for g in api_keys.groups() if g.id != "__sep__"]
+        actual_order = [g.id for g in api_keys.groups() if not g.id.startswith("__")]
         self.assertEqual(actual_order, EXPECTED_PROVIDER_ORDER)
 
     def test_accordion_has_every_wizard_provider_each_with_2_items(self):
@@ -54,8 +54,8 @@ class APIKeysDesignTests(unittest.TestCase):
         """Each group has 3 items since 0.50.0: 'open:<slug>', 'add:<slug>', hide/show toggle."""
         api_keys = m.APIKeysScreen(self.settings)
         for group in api_keys.groups():
-            # Skip separator group
-            if group.id == "__sep__":
+            # Skip structural rows (separator, blanks, back row)
+            if group.id.startswith("__"):
                 continue
             self.assertEqual(len(group.items), 3)
             self.assertTrue(group.items[0].id.startswith("open:"))
@@ -104,8 +104,8 @@ class APIKeysDesignTests(unittest.TestCase):
         # For now just verify the structure
         api_keys = m.APIKeysScreen(self.settings)
         for group in api_keys.groups():
-            # Skip separator group
-            if group.id == "__sep__":
+            # Skip structural rows (separator, blanks, back row)
+            if group.id.startswith("__"):
                 continue
             # Provider names are displayed as-is from PROVIDERS (e.g., "NVIDIA" not "nvidia")
             self.assertIn(": ", group.label)
@@ -131,7 +131,7 @@ class APIKeysDesignTests(unittest.TestCase):
         api_keys = m.APIKeysScreen(self.settings)
         keys = {a.key for a in api_keys.actions()}
         # Should only have nav (q/b) and the provider keys
-        provider_keys = {g.id[0] for g in api_keys.groups()}  # First letter of each slug
+        provider_keys = {g.id[0] for g in api_keys.groups() if not g.id.startswith("__")}  # First letter of each slug
         # Note: This is approximate since we use first letter
         self.assertNotIn("a", keys, "Generic 'Add API key' action should be removed")
 

@@ -1735,7 +1735,12 @@ class Picker(App):
         self.query_one("#layout", Vertical).set_class(not show_models, "no-rows")
         # 0.51.0 (user 2026-11-03): on the backend manager the chooser hugs its rows and the
         # menu items follow after exactly two blank rows — not pinned to the window bottom.
-        self.query_one("#layout", Vertical).set_class(isinstance(sm, m.RuntimeManagerScreen), "compact-rows")
+        # 0.56.5 (user): API keys gets the same compact-rows layout as the backend manager —
+        # Back follows the provider accordion after exactly two blank rows, not window-bottom.
+        # 0.56.5 (user): API keys gets the same compact-rows layout as the backend manager —
+        # Back follows the provider accordion after exactly two blank rows, not window-bottom.
+        self.query_one("#layout", Vertical).set_class(
+            isinstance(sm, (m.RuntimeManagerScreen, m.APIKeysScreen)), "compact-rows")
         # 0.51.0 (user): on the remote model list, one less empty line before the first provider.
         rows.styles.margin_top = 0 if isinstance(sm, m.RemoteScreen) else 1
         # No input box unless a prompt is actually pending (user 2026-10-30: About and
@@ -1773,10 +1778,11 @@ class Picker(App):
         if show_models and has_groups:
             for kind, obj in sm.accordion.rows():
                 if kind == "group":
-                    # Separator groups (id == "__sep__"): render as blank disabled row, but
-                    # keep row_ids aligned by appending None so UI index matches row_ids index.
-                    if obj.id == "__sep__":
-                        rows.add_option(Option("", id="sep", disabled=True))
+                    # Separator/blank groups (id "__…" with an empty label): render as blank
+                    # disabled row, but keep row_ids aligned by appending None so UI index
+                    # matches row_ids index. (0.56.5 adds __sp1__/__sp2__ spacing rows.)
+                    if not obj.label and obj.id.startswith("__"):
+                        rows.add_option(Option("", id=f"sep:{obj.id}", disabled=True))   # unique per blank row
                         self.row_ids.append(None)
                         continue
                     if getattr(obj, "style", ""):         # an action header, not a fold

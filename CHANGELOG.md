@@ -1,3 +1,21 @@
+## [0.56.5] — unreleased
+
+### Fixed — csl picker, user-reported in 0.56.4 testing (2026-11-11)
+- API keys setup list no longer reacts to the hide-provider toggle: every provider stays
+  listed and the row label carries no "hidden" annotation (the per-provider Hide/Show item
+  still states the toggle).
+- API keys setup uses the backend manager's compact-rows layout: the Back row follows the
+  provider accordion after exactly two blank rows instead of being pinned to the window
+  bottom (PTY-asserted: `#layout.compact-rows`, `#gap` height 2; mutation-proven red).
+- Lowkey effort no longer offers the rapid-only set (none/minimal) and now includes max and
+  "not set": one `EFFORT_TEMPLATE` (CLAUDE_EFFORTS + provider_default) is the allowlist for
+  ALL lanes; legacy saved lowkey values (none/minimal) migrate to "low" at load instead of
+  failing the whole prefs file.
+- Effort/Temperature/Thinking rows are built from ONE template (`model_settings_rows`):
+  same order (e/o/j), same values on local, remote and lowkey; remembered values stay
+  per-lane via each lane's own get/set. Local launch with "not set" omits the effort arg
+  (launcher default). Tests: `tests/test_0564_user_issues.py` + updated pinning tests.
+
 ## [0.56.4] — unreleased
 
 ### Changed — csl: binary toggles render as an animated sliding knob (nicegui switch parity, user design 2026-11-09)

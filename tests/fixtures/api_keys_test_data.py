@@ -236,8 +236,8 @@ def validate_accordion_structure(api_keys_screen) -> List[str]:
     errors = []
     groups = api_keys_screen.groups()
 
-    # Filter out the separator group (__sep__ has no items)
-    provider_groups = [g for g in groups if g.id != "__sep__"]
+    # Filter out the structural rows (__sep__ separator, __sp1__/__sp2__ blanks, __back__ row)
+    provider_groups = [g for g in groups if not g.id.startswith("__")]
 
     # One group per provider the key wizard knows (the separator is filtered out above).
     if len(provider_groups) != len(EXPECTED_PROVIDER_ORDER):
