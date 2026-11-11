@@ -82,10 +82,13 @@ if [[ -z "$sid" ]]; then
         # 2026-11-08 route-watcher Task 4: compare EPOCH SECONDS, not strings — the registry's
         # procStart is written in UTC while `ps lstart` prints LOCAL time, so a string compare
         # reports "recycled" for the very same instant (18:44:10 vs 19:44:10 on a CET box).
-        # startedAt (epoch millis) is authoritative; procStart parsed as UTC is the fallback.
-        # ±2 s tolerance for clock read jitter.
+        # 2026-11-11: procStart (the PROCESS start, UTC) is now PRIMARY — it matches ps lstart
+        # across timezones with the tight ±2 s window. startedAt (epoch millis) is the
+        # REGISTRATION time and can lag the process start past the folder-trust dialog
+        # (measured 2026-11-10: false "recycled" on a correct handover), so as a fallback it
+        # gets a wide 300 s window only.
         check="$(python3 - "$pid" "$startedat" "$pstart" <<'PY' 2>/dev/null || true
-import os, subprocess, sys, time
+import calendar, os, subprocess, sys, time
 pid, startedat, pstart = sys.argv[1], sys.argv[2], sys.argv[3]
 r = subprocess.run(["ps", "-o", "lstart=", "-p", pid], capture_output=True, text=True,
                    env={**os.environ, "LC_ALL": "C"})
@@ -94,13 +97,15 @@ if r.returncode != 0 or not live:
     print("NOT_RUNNING")
     raise SystemExit(0)
 live_epoch = time.mktime(time.strptime(live, "%a %b %d %H:%M:%S %Y"))      # lstart is LOCAL
-if startedat:
-    reg_epoch = float(startedat) / 1000.0                                 # startedAt: epoch millis
-elif pstart:
-    reg_epoch = time.timegm(time.strptime(pstart, "%a %b %d %H:%M:%S %Y")) # procStart: UTC
+if pstart:
+    reg_epoch = calendar.timegm(time.strptime(pstart, "%a %b %d %H:%M:%S %Y")) # procStart: process start, UTC (time.timegm does not exist — 2026-11-11)
+    tol = 2
+elif startedat:
+    reg_epoch = float(startedat) / 1000.0                                 # startedAt: registration time, epoch millis
+    tol = 300
 else:
     raise SystemExit(0)
-print("OK" if abs(live_epoch - reg_epoch) <= 2 else "RECYCLED")
+print("OK" if abs(live_epoch - reg_epoch) <= tol else "RECYCLED")
 PY
 )"
         case "$check" in

@@ -1,3 +1,19 @@
+## [0.56.3] — unreleased
+
+### Fixed — tooling (2026-11-11 autopilot round)
+- `bin/handover-verify.sh --pid`: the recycled-pid guard now prefers `procStart` (process
+  start, UTC) with the tight ±2 s window and treats `startedAt` (registration time — can lag
+  the process start past the folder-trust dialog) as a wide-300 s fallback. Fixes the
+  2026-11-10 false "pid was recycled" on a correct handover. Also repairs the previously dead
+  procStart branch (`time.timegm` does not exist → `calendar.timegm`). New tests: 60 s
+  registration lag VERIFYs, 400 s offset still reports recycled, under TZ=Europe/Berlin and
+  TZ=UTC — `tests/test_handover_verify.py` 4/4 + subtests (mutation-proven: old
+  startedAt-first order turns the lag test red).
+- `bin/free-agent-tool.py` prints a final stderr line `free-agents: ANSWERED BY <display>
+  [<route>]` on success and `free-agents: NO ANSWER — <per-lane causes>` on total failure
+  (obs 0088/0092). Verified live: `ANSWERED BY Gemini 3.8 Flash [remote gemini · stateless
+  dispatch]`.
+
 ## [0.56.2] — 2026-11-11
 
 ### Changed — UserPromptSubmit hook timeout raised for shared-machine load

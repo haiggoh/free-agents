@@ -878,6 +878,8 @@ def run(input_data, env, out_path=None) -> int:
     if status == "ok":
         line = json.dumps(result)
         print(line)
+        print(f"free-agents: ANSWERED BY {result.get('display') or result.get('model_used') or '?'}"
+              f" [{result.get('route', '?')}]", file=sys.stderr)   # user 2026-11-06 (obs 0088/0092)
         return 0 if _persist(out_path, line) else 1
     allowed = exhausted(attempts, plan, policy)
     err_obj = {"error": "every dispatch preference failed", "attempts": attempts,
@@ -894,6 +896,10 @@ def run(input_data, env, out_path=None) -> int:
                 print(f"free-agents: could not write the paid-fallback mark ({err})", file=sys.stderr)
     line = json.dumps(err_obj)
     print(line, file=sys.stderr)
+    reasons = "; ".join(f"{a.get('provider', '?')}/{a.get('id') or a.get('model', '?')}: "
+                        f"{str(a.get('error', 'failed'))[:100]}"
+                        for a in attempts if not a.get("ok")) or "no attempts recorded"
+    print(f"free-agents: NO ANSWER — {reasons[:500]}", file=sys.stderr)   # per-lane causes, obs 0092
     _persist(out_path, line)      # exit stays 1 either way; a failed write is named, never silent
     return 1
 

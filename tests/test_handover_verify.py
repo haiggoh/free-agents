@@ -92,6 +92,32 @@ class HandoverVerifyEpoch(unittest.TestCase):
                 self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
                 self.assertIn("recycled", r.stdout)
 
+    def test_startedat_registration_lag_is_not_recycled(self):
+        # 2026-11-10 false positive: with no procStart, startedAt (REGISTRATION time, after
+        # the folder-trust dialog) lagged the process start by ~1 min and was compared at ±2 s.
+        # It now gets the wide 300 s fallback window.
+        live = live_start_epoch(self.proc.pid)
+        doc = {"pid": self.proc.pid, "sessionId": "sess-hv-1",
+               "startedAt": int((live + 60) * 1000)}      # registration lagged 60 s, no procStart
+        (self.sdir / f"{self.proc.pid}.json").write_text(json.dumps(doc))
+        (self.pdir / "sess-hv-1.jsonl").write_text('{"text":"see handoff.md"}\n')
+        for tz in ("Europe/Berlin", "UTC"):
+            with self.subTest(tz=tz):
+                r = self._run(tz)
+                self.assertEqual(r.returncode, 0,
+                                 f"TZ={tz}: a 60 s registration lag must VERIFY, got: {r.stdout}{r.stderr}")
+                self.assertIn("VERIFIED", r.stdout)
+
+    def test_startedat_far_off_still_reports_recycled(self):
+        live = live_start_epoch(self.proc.pid)
+        doc = {"pid": self.proc.pid, "sessionId": "sess-hv-1",
+               "startedAt": int((live + 400) * 1000)}     # beyond the 300 s registration window
+        (self.sdir / f"{self.proc.pid}.json").write_text(json.dumps(doc))
+        (self.pdir / "sess-hv-1.jsonl").write_text('{"text":"see handoff.md"}\n')
+        r = self._run("Europe/Berlin")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("recycled", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
