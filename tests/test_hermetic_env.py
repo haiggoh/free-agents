@@ -66,7 +66,7 @@ class HelperContractTests(unittest.TestCase):
         os.environ.pop("LA_HF_PARAMS_CACHE", None)   # empty must be OMITTED, not passed empty
         try:
             r = subprocess.run(
-                ["sh", "-c",
+                ["bash", "-c",
                  f'source "{ROOT}/tests/lib/hermetic_env.sh"; '
                  'hermetic_env printenv LA_HF_PARAMS_CACHE; hermetic_env printenv FA_HERMETIC_PROBE_SECRET; true'],
                 env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
