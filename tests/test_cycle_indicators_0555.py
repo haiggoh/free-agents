@@ -66,14 +66,8 @@ class CycleIndicators(PilotCase):
                              if ol.get_option_at_index(j).id == oid)
                 text = str(ol.get_option_at_index(opt_i).prompt)
                 if a.step is not None:
-                    self.assertIn("❮", text, f"cycle row {a.key} missing ❮: {text!r}")
-                    self.assertIn("❯", text, f"cycle row {a.key} missing ❯: {text!r}")
-                    # arrows flank the VALUE, not the whole row (user 2026-11-06, nicegui parity):
-                    # ❮ comes after the last ': ' and ❯ after the value
-                    if ": " in text:
-                        self.assertGreater(text.index("❮"), text.rindex(": "),
-                                           f"❮ must sit before the value, not the row: {text!r}")
-                    self.assertLess(text.index("❮"), text.rindex("❯"))
+                    from picker_harness import assert_glyphs_for
+                    assert_glyphs_for(self, text, a)   # knob for binary toggles, ❮…❯ otherwise
                 else:
                     self.assertNotIn("❮", text, f"non-cycle row {a.key} gained ❮: {text!r}")
                     self.assertNotIn("❯", text, f"non-cycle row {a.key} gained ❯: {text!r}")

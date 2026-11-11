@@ -297,6 +297,33 @@ class PilotHelper:
             await self.press("enter")
 
 
+def action_by_key(app, key):
+    """The Action for a shortcut key on the current screen."""
+    return next(a for a in app.action_ids if a.key == key)
+
+
+def assert_glyphs_for(case, text, a):
+    """Knob branch (0.56.x): a binary two-choice row renders the sliding knob (●/○ on its
+    track) with NO ❮❯; other cycle rows keep ❮…❯ around the value; plain rows have neither.
+    Imports the render rule itself (session_picker._is_binary) — never a re-typed copy."""
+    from session_picker import _is_binary
+    if a.step is None:
+        case.assertNotIn("❮", text, f"plain row {a.key} gained ❮: {text!r}")
+        case.assertNotIn("❯", text, f"plain row {a.key} gained ❯: {text!r}")
+    elif _is_binary(a):
+        case.assertTrue("●" in text or "○" in text,
+                        f"knob row {a.key} missing knob glyph: {text!r}")
+        case.assertNotIn("❮", text, f"binary toggle {a.key} must not render ❮: {text!r}")
+        case.assertNotIn("❯", text, f"binary toggle {a.key} must not render ❯: {text!r}")
+    else:
+        case.assertIn("❮", text, f"cycle row {a.key} missing ❮: {text!r}")
+        case.assertIn("❯", text, f"cycle row {a.key} missing ❯: {text!r}")
+        if ": " in text:
+            case.assertGreater(text.index("❮"), text.rindex(": "),
+                               f"❮ must sit before the value, not the row: {text!r}")
+        case.assertLess(text.index("❮"), text.rindex("❯"), text)
+
+
 @unittest.skipUnless(VENV_PY.exists(), "picker venv missing: run install/setup-session-picker.sh")
 class PTYCase(_StubbedEnv):
     """The real binary in a pseudo-terminal, for terminal-edge behaviour only."""

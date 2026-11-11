@@ -79,10 +79,11 @@ class DisplayStrings(PilotCase):
             await h.press("l")
             await h.wait_screen("LocalScreen")
             await h.expand_settings()
+            from picker_harness import action_by_key, assert_glyphs_for
             think = str(_action_option(h, "j")[1])
-            self.assertEqual(_between(think).strip(), "ON", think)
+            self.assertIn("ON", think, think)
             self.assertNotIn("(default)", think, think)
-            self.assertEqual(len(_between(think)), 3 + 2, think)
+            assert_glyphs_for(self, think, action_by_key(h.app, "j"))   # knob, no ❮❯
             # cycling still reaches OFF and back
             from textual.widgets import OptionList
             ol = h.app.query_one("#actions", OptionList)
@@ -90,13 +91,13 @@ class DisplayStrings(PilotCase):
             ol.highlighted = next(j for j in range(ol.option_count)
                                   if ol.get_option_at_index(j).id == f"a:{idx}")
             await h.press("right")
-            self.assertEqual(_between(str(_action_option(h, "j")[1])).strip(), "OFF")
+            after = str(_action_option(h, "j")[1])
+            self.assertIn("OFF", after, after)
+            assert_glyphs_for(self, after, action_by_key(h.app, "j"))
             await h.press("left")
-            back = _between(str(_action_option(h, "j")[1]))
-            self.assertEqual(back.strip(), "ON")
-            # odd padding leads: "ON" (2 chars in a 3-wide cell) gets the extra space in
-            # FRONT, not behind (user 2026-11-07 — plain centering read left-biased)
-            self.assertEqual(back, "  ON ", back)
+            back = str(_action_option(h, "j")[1])
+            self.assertIn("ON", back, back)
+            assert_glyphs_for(self, back, action_by_key(h.app, "j"))
         self.run_picker(s, start="local")
 
 
@@ -129,7 +130,7 @@ class GlyphStyling(PilotCase):
             from rich.cells import cell_len
             from textual.widgets import OptionList
             ol = h.app.query_one("#actions", OptionList)
-            opt_i, prompt = _action_option(h, "w")            # Watcher row (emoji prefix)
+            opt_i, prompt = _action_option(h, "e")            # Effort row (⚙️ emoji prefix; w is a knob toggle now)
             oid = ol.get_option_at_index(opt_i).id
             plain = prompt.plain
             # default: NO colour, NO bold — plain text like the rest of the row
@@ -142,7 +143,7 @@ class GlyphStyling(PilotCase):
             await h.pilot.hover("#actions", offset=(col, opt_i))
             await h.pilot.pause(0.4)
             self.assertEqual(getattr(app, "_arrow_hover", None), (oid, +1))
-            prompt2 = _action_option(h, "w")[1]
+            prompt2 = _action_option(h, "e")[1]
             style2 = _glyph_span_style(prompt2, "❯")
             self.assertIn("bright_blue", style2, f"hover style: {style2!r}")
             self.assertNotIn("reverse", style2, f"hover style: {style2!r}")

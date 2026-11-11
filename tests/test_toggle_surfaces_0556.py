@@ -282,10 +282,10 @@ class ThemeColumnAlignment(PilotCase):
             await h.wait_screen("LocalScreen")
             await h.expand_settings()
             widths = {}
-            for key in ("t", "m"):
+            for key in ("e", "o"):   # non-binary cycle rows; toggles render the knob now
                 text = str(_action_option(h, key)[1])
                 widths[key] = text.rindex("❯") - text.index("❮") - 1
-            self.assertNotEqual(widths["t"], widths["m"],
+            self.assertNotEqual(widths["e"], widths["o"],
                                 "other screens keep the 0.55.4 per-row widths")
         self.run_picker(s, start="local")
 
@@ -313,10 +313,10 @@ class RenderProof(PilotCase):
         await h.pilot.pause(0.3)
 
     def _assert_rows_have_glyphs(self, h, keys):
+        from picker_harness import action_by_key, assert_glyphs_for
         for key in keys:
             text = _action_option(h, key)[1]
-            self.assertIn("❮", text, f"row {key} renders bare: {text!r}")
-            self.assertIn("❯", text, f"row {key} renders bare: {text!r}")
+            assert_glyphs_for(self, text, action_by_key(h.app, key))   # knob for toggles, ❮❯ otherwise
 
     def test_every_setting_row_renders_glyphs(self):
         async def s(app, pilot, h):

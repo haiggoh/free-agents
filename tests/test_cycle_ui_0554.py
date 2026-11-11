@@ -60,7 +60,7 @@ class CycleGlyphs(PilotCase):
             await h.press("l")
             await h.wait_screen("LocalScreen")
             await h.expand_settings()
-            for key in ("e", "o", "j", "t", "p", "d", "w", "m"):
+            for key in ("e", "o"):      # non-binary cycle rows keep ❮…❯ (j is a knob toggle)
                 text = _action_option(h, key)[1]
                 self.assertIn("❮", text, f"row {key} lost its left glyph: {text!r}")
                 self.assertIn("❯", text, f"row {key} lost its right glyph: {text!r}")
@@ -71,6 +71,9 @@ class CycleGlyphs(PilotCase):
                 self.assertGreaterEqual(right, 1, f"row {key}: no space right of the value: {text!r}")
                 self.assertLessEqual(right, left + 1,
                                      f"row {key}: value not centered between the glyphs: {text!r}")
+            from picker_harness import action_by_key, assert_glyphs_for
+            for key in ("j", "t", "p", "d", "w", "m"):   # binary toggles render the knob, no ❮❯
+                assert_glyphs_for(self, _action_option(h, key)[1], action_by_key(h.app, key))
         self.run_picker(s, start="local")
 
     def test_toggle_cells_sized_to_their_own_values_not_the_global_max(self):
@@ -78,15 +81,17 @@ class CycleGlyphs(PilotCase):
             await h.press("l")
             await h.wait_screen("LocalScreen")
             await h.expand_settings()
-            # Plain ON/OFF toggles: the cell fits "OFF" (3 chars) + one space each side —
-            # under 0.55.2's global cycle_w it was as wide as the widest value anywhere.
-            for key in ("t", "p", "d", "w"):
+            # 0.56.x knob: the ❮❯ cell is gone — the value chip is followed by the
+            # KNOB_CELLS-wide knob track (plus the knob glyph itself).
+            from rich.cells import cell_len
+            import emoji_constants as ec
+            from picker_harness import action_by_key, assert_glyphs_for
+            for key in ("t", "p", "d", "w", "m"):
                 text = _action_option(h, key)[1]
-                self.assertEqual(len(_between(text)), 3 + 2,
-                                 f"toggle row {key} cell not ON/OFF-sized: {text!r}")
-            # ENABLED/DISABLED sizes to its own widest label, still not the global max.
-            mcp = _action_option(h, "m")[1]
-            self.assertEqual(len(_between(mcp)), len("DISABLED") + 2, mcp)
+                assert_glyphs_for(self, text, action_by_key(h.app, key))
+                tail = text[-ec.KNOB_CELLS:]
+                self.assertEqual(cell_len(tail), ec.KNOB_CELLS, f"knob track width wrong: {text!r}")
+                self.assertTrue("●" in tail or "○" in tail, f"knob glyph missing: {text!r}")
         self.run_picker(s, start="local")
 
     def test_value_column_fixed_within_row_while_cycling(self):
@@ -146,7 +151,7 @@ class HoverBehaviour(PilotCase):
             from rich.cells import cell_len
             from textual.widgets import OptionList
             ol = h.app.query_one("#actions", OptionList)
-            idx = next(i for i, a in enumerate(app.action_ids) if a.key == "w")
+            idx = next(i for i, a in enumerate(app.action_ids) if a.key == "e")   # non-binary row (w is a knob toggle now)
             opt_i = next(j for j in range(ol.option_count)
                          if ol.get_option_at_index(j).id == f"a:{idx}")
             oid = ol.get_option_at_index(opt_i).id
@@ -156,7 +161,7 @@ class HoverBehaviour(PilotCase):
             await h.pilot.pause(0.4)
             self.assertEqual(getattr(app, "_arrow_hover", None), (oid, +1),
                              "hovering the ❯ glyph at its DISPLAY column must mark it")
-            await h.pilot.hover("#actions", offset=(1 + text.index("Watcher") + 2, opt_i))
+            await h.pilot.hover("#actions", offset=(1 + text.index("Effort") + 2, opt_i))
             await h.pilot.pause(0.4)
             self.assertIsNone(getattr(app, "_arrow_hover", None),
                               "hovering the row label must not highlight any glyph")
@@ -198,13 +203,13 @@ class BackendUpgradeToggles(PilotCase):
         async def s(app, pilot, h):
             await h.press("v")
             await h.wait_screen("RuntimeManagerScreen")
+            from picker_harness import action_by_key, assert_glyphs_for
             n_text = _action_option(h, "n")[1]
             self.assertIn("Notify about backend upgrades at launch", n_text)
-            self.assertIn("❮", n_text)
-            self.assertEqual(len(_between(n_text)), 3 + 2, n_text)
+            assert_glyphs_for(self, n_text, action_by_key(h.app, "n"))
             a_text = _action_option(h, "a")[1]
             self.assertIn("Install backend upgrades automatically in the background", a_text)
-            self.assertEqual(len(_between(a_text)), 3 + 2, a_text)
+            assert_glyphs_for(self, a_text, action_by_key(h.app, "a"))
             # Pressing the row's shortcut steps it (Enter/click == +1 for setting rows).
             await h.press("n")
             await h.pilot.pause(0.3)
@@ -212,7 +217,7 @@ class BackendUpgradeToggles(PilotCase):
             self.assertIs(state.get("notify"), False, f"toggle 'n' must persist notify=off: {state}")
             n_after = _action_option(h, "n")[1]
             self.assertIn("OFF", n_after, f"row must re-render OFF: {n_after!r}")
-            self.assertEqual(len(_between(n_after)), 3 + 2, n_after)
+            assert_glyphs_for(self, n_after, action_by_key(h.app, "n"))
         self.run_picker(s)
 
 
