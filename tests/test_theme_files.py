@@ -43,6 +43,9 @@ def test_both_theme_files_tint_the_mascot_and_spare_semantic_colours():
         t = json.loads(run(script, "--emit-theme-file"))
         assert t["base"] == "dark"
         assert t["overrides"]["clawd_body"] == accent(data)
+        # 0.56.11 (user): clawd_background must match too — unset, the mascot's interior line
+        # renders grey = a dark line through the mascot on the dark welcome screen
+        assert t["overrides"]["clawd_background"] == accent(data)
         assert t["overrides"]["claude"] == accent(data)
         for semantic in ("error", "warning", "success"):
             assert semantic not in t["overrides"]

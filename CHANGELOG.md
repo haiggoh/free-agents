@@ -1,3 +1,12 @@
+## [0.56.11] — unreleased
+
+### Fixed — welcome-screen mascot had a dark line through it on the local lane (user 2026-11-12)
+- The theme generators set `clawd_body` but not `clawd_background`; the latter defaults to a grey
+  (`userMessageBackground`), so the Clawd mascot's interior line rendered as a dark horizontal
+  line on the dark welcome screen. Both `generate-local-settings.py` and
+  `generate-remote-settings.py` now set `clawd_background` to the accent as well; pinned in
+  `tests/test_theme_files.py`.
+
 ## [0.56.10] — unreleased
 
 ### Changed — the gate stall window now exceeds every per-test timeout, so a wedge names its cause (rtc 1.4.0 self-recovery)

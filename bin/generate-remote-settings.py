@@ -134,6 +134,9 @@ def build_theme_file(config_dir):
             # The welcome-screen mascot. Without it the theme file a main-line launch rewrites
             # dropped the green mascot that the identity branch had written (0.34.5).
             "clawd_body": accent,
+            # 0.56.11: clawd_background too — unset, it defaults to a grey and the mascot's
+            # interior line shows as a dark line through it on the dark welcome screen
+            "clawd_background": accent,
         },
     }
 
