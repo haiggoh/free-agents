@@ -2439,7 +2439,15 @@ claude_cmd+=(--permission-mode "$PERMISSION_MODE")
 # 0.56.8 (handover into a NEW worktree stalled silently on the folder-trust dialog, user
 # 2026-11-10): --trust-workspace is Claude Code's own non-interactive pre-accept — no
 # hand-edit of ~/.claude.json. A handover launch is an explicit act of trust in the target dir.
-claude_cmd+=(--trust-workspace)
+# 0.56.12: pass it ONLY when the installed CLI's --help lists it. Claude Code 2.1.322 rejects it
+# ("error: unknown option '--trust-workspace'") and exits at once, so the unconditional form
+# killed EVERY launch (2026-11-12). Captured into a variable, not piped into grep -q: under
+# pipefail an early grep exit SIGPIPEs claude and the pipeline reads as "not found".
+_claude_help=$(claude --help 2>/dev/null || true)
+case "$_claude_help" in
+    *--trust-workspace*) claude_cmd+=(--trust-workspace) ;;
+esac
+unset _claude_help
 [ -n "${LA_MOD_DIR:-}" ] && claude_cmd+=(--plugin-dir "$LA_MOD_DIR")
 
 # Handle settings merge: if both blind-trust and per-session settings exist, merge them.

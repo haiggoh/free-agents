@@ -93,7 +93,10 @@ class HandoverVerifyEpoch(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("NOT_VERIFIED", r.stdout)
         self.assertIn("trust", r.stdout.lower())
-        self.assertIn("--trust-workspace", r.stdout)
+        # 0.56.12: the old hint told the user to "relaunch with --trust-workspace", a flag Claude
+        # Code 2.1.322 rejects; the hint must name the second real cause instead.
+        self.assertIn("exited at startup", r.stdout)
+        self.assertNotIn("relaunch with --trust-workspace", r.stdout)
 
     def test_genuinely_different_start_reports_recycled(self):
         live = live_start_epoch(self.proc.pid)

@@ -1159,10 +1159,19 @@ with socketserver.TCPServer(('', port), HealthHandler) as httpd:
         self.env['CLAUDE_ARGV'] = str(self.root / 'claude-argv')
         self.stub('claude', """#!/usr/bin/env python3
 import json,os,sys
+# Models the REAL CLI's option check: Claude Code 2.1.322 rejects an option its --help does
+# not list ("error: unknown option") and exits at once (2026-11-12: every launch died).
+# FAKE_CLAUDE_HAS_TRUST_FLAG=1 simulates a CLI that does list --trust-workspace.
+has_trust = os.environ.get('FAKE_CLAUDE_HAS_TRUST_FLAG') == '1'
 if '--help' in sys.argv:
-    print('Fixture Claude; CLAUDE_ARGV captures argv.'); sys.exit(0)
+    print('Fixture Claude; CLAUDE_ARGV captures argv.')
+    if has_trust:
+        print('  --trust-workspace   pre-accept the workspace trust dialog')
+    sys.exit(0)
 if '--version' in sys.argv:
     print('2.1.286'); sys.exit(0)
+if '--trust-workspace' in sys.argv and not has_trust:
+    print("error: unknown option '--trust-workspace'", file=sys.stderr); sys.exit(1)
 # This is the actual launch - append to file (not overwrite) to capture last call
 with open(os.environ['CLAUDE_ARGV'], 'a') as f:
     f.write(json.dumps(sys.argv[1:]) + '\\n')
@@ -1202,9 +1211,15 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         self.assertIn('--permission-mode', argv)
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions',
 'blind-trust must use bypassPermissions (0 classifier calls, measured)')
-        # 0.56.8: a handover into a NEW worktree must not stall on the folder-trust dialog —
-        # --trust-workspace is Claude Code's own non-interactive pre-accept (no ~/.claude.json edit)
-        self.assertIn('--trust-workspace', argv, 'remote launches must pre-accept workspace trust')
+        # 0.56.12: --trust-workspace is passed ONLY when the installed CLI lists it. 0.56.8 passed
+        # it unconditionally; Claude Code 2.1.322 rejects it and every launch died at startup.
+        self.assertNotIn('--trust-workspace', argv,
+                         'a CLI whose --help lacks --trust-workspace must never receive it')
+        self.env['FAKE_CLAUDE_HAS_TRUST_FLAG'] = '1'
+        argv = launched_argv('gemini-flash')
+        self.assertIn('--trust-workspace', argv,
+                      'a CLI that lists --trust-workspace must get it (new-worktree handovers)')
+        del self.env['FAKE_CLAUDE_HAS_TRUST_FLAG']
 
         argv = launched_argv('-a', '-a', 'gemini-flash')
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits',
