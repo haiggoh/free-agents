@@ -1,3 +1,11 @@
+## [0.56.9] — unreleased
+
+### Fixed — pin the per-tool route env vars (verified live 2026-11-12)
+- `FA_ROUTE_WORKFLOW` / `FA_ROUTE_AGENT` steer Agent vs Workflow independently: the
+  PreToolUse intercept passes the full process env to `cse.route`, so the env overrides are
+  honored per tool (live-proven: paid → pass-through, free-only → deny naming
+  `route[workflow]`). Pinned in `tests/test_routing_single_source_0540.py`.
+
 ## [0.56.8] — unreleased
 
 ### Fixed — handover into a new worktree stalls on the folder-trust dialog (user 2026-11-10)
@@ -7,7 +15,6 @@
   argv in tests/test_remote_session.py.
 - `bin/handover-verify.sh` timeout now names the cause: "no session registered — check for a
   trust prompt; relaunch with --trust-workspace". Test: tests/test_handover_verify.py.
-
 ## [0.56.7] — unreleased
 
 ### Changed — test hardening L2 (hermetic env) + permanent free-session rule in the SessionStart nudge
