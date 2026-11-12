@@ -1,3 +1,15 @@
+## [0.57.0] — unreleased
+
+### Bundled release (user 2026-11-12: bundle the queued fix/feature commits into one release)
+- Gate perf + flake fixes (from the 0.56.15 line): digits PTY test waits for the catalog load
+  (was the recurring ship-blocker), la-evict sleep scale knob, hotkey every-screen monolith
+  split per screen, per-xdist-worker fence files.
+- Task 9 (D2/D4 answered 2026-11-12): clipboard fallback + info-box copy-on-select pinned by
+  delivery-level tests.
+- Lowkey menu: per-mode action items (💬/🎯), Go-launch-last first with the remembered mode.
+- Dispatch: auto-generated local fallback list from the csl registry (roles included), used
+  after the curated list; opt-in "local sessions: only local agents" toggle.
+
 ## [0.56.13] — unreleased
 
 ### Fixed — a load-sensitive timing flake in the watch-until CLI contract test
