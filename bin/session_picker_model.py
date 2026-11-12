@@ -1496,6 +1496,13 @@ class LocalScreen(Screen):
         if self.settings.on_local_registry_saved:
             self.settings.on_local_registry_saved({"auto_sync": bool(v)})
 
+    def _put_agents_local_only(self, v):
+        """0.56.14 (user, opt-in): 'no remote API agents in local sessions' — stored in the
+        local_registry section (free-form dict, no schema bump) via on_local_registry_saved."""
+        self.settings.local_registry["agents_local_only"] = bool(v)
+        if self.settings.on_local_registry_saved:
+            self.settings.on_local_registry_saved({"agents_local_only": bool(v)})
+
     def _launch_last(self, lane: str):
         """Launch the last used model for the given lane."""
         last_model = self.settings.last_launched_model.get(lane)
@@ -2316,6 +2323,11 @@ class CloudConfigScreen(Screen):
                    labels=("auto", "bypassPermissions"), enabled=bypass_reason is None),
             Action("e", "Check whether auto mode's safety checks are free here "
                         "(sends one small request)", self._run_probe),
+            # 0.56.14 (user, opt-in): in LOCAL sessions, Agent/Workflow use only local models.
+            setting("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions: ONLY local agents (opt-in): "
+                        f"{'ON' if s.local_registry.get('agents_local_only') else 'OFF'}",
+                    (False, True), lambda: bool(s.local_registry.get("agents_local_only")),
+                    self._put_agents_local_only, labels=("OFF", "ON"), section="settings"),
         ]
         acts += self.nav_actions()
         check_action_table(acts)

@@ -500,6 +500,71 @@ def _has_key(provider: str, env) -> bool:
     return p.is_file() and p.stat().st_size > 0
 
 
+def local_registry_roles(env) -> dict:
+    """alias -> set(roles) from the LIVE csl config (config.local.sh, else the shipped
+    example; LA_CONFIG_SOURCE overrides). 0.56.14 (user): the source for the
+    auto-generated local dispatch list — roles from la_register's roles column and
+    la_role bindings. Pure text parse, never sources the config."""
+    import re
+    cfg = env.get("LA_CONFIG_SOURCE")
+    path = Path(cfg) if cfg else (REPO_ROOT / "config" / "config.local.sh")
+    if not path.exists():
+        path = REPO_ROOT / "config" / "config.example.sh"
+    roles: dict = {}
+    if not path.exists():
+        return roles
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("la_register "):
+            parts = line.split()
+            if len(parts) > 1 and parts[1]:
+                r = parts[9] if len(parts) > 9 else ""
+                r = r.removeprefix("roles=")          # the field is roles=a,b
+                roles.setdefault(parts[1], set())
+                roles[parts[1]].update(x for x in re.split(r"[,\s]+", r) if x)
+        elif line.startswith("la_role "):
+            parts = line.split()
+            if len(parts) >= 3 and parts[2]:
+                roles.setdefault(parts[2], set()).add(parts[1])
+    return roles
+
+
+def local_fallback_entries(env, role=None) -> list:
+    """kind:local dispatch entries generated from the csl registry, appended AFTER the
+    curated preference order (0.56.14, user): fallback once the known dispatch list is
+    exhausted; usable from remote sessions too. Only on-disk aliases become entries
+    (availability() double-checks)."""
+    out = []
+    for alias, roles in local_registry_roles(env).items():
+        if not local_on_disk(alias):
+            continue
+        out.append({"id": f"local-{alias}", "kind": "local", "alias": alias,
+                    "display": f"{alias} (local)", "family": "local",
+                    "roles": sorted(roles), "smoke_tested": True,
+                    "note": "csl-registered local model (auto-generated fallback)"})
+    return out
+
+
+def _local_agents_only(env) -> bool:
+    """The opt-in setting (0.56.14, user): 'no remote API agents in local sessions' —
+    stored as local_registry['agents_local_only'] in the session settings."""
+    try:
+        import session_menu_state as sms
+        cfg = env.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+        return bool(sms.load(Path(cfg)).local_registry.get("agents_local_only"))
+    except Exception:
+        return False
+
+
+def _is_local_session(env) -> bool:
+    from urllib.parse import urlparse
+    try:
+        return (urlparse(env.get("ANTHROPIC_BASE_URL", "")).hostname or "") in (
+            "localhost", "127.0.0.1", "::1", "0.0.0.0")
+    except ValueError:
+        return False
+
+
 def availability(entry, env, local_ok=None) -> str:
     """'' when the entry can run now, else the reason it is skipped."""
     if not entry.get("smoke_tested", True) and env.get("FA_DISPATCH_INCLUDE_UNTESTED") != "1":
@@ -536,7 +601,20 @@ def candidates(prefs, env, local_ok=None, role=None, avoid_family=None) -> list:
             matching.append(e)
         else:
             rest.append(e)
-    return matching + rest
+    # 0.56.14 (user): the auto-generated LOCAL list rides at the END of the order — a
+    # fallback for after the curated dispatch preferences are exhausted (remote sessions too)
+    seen = {e.get("id") for e in matching + rest}
+    for e in local_fallback_entries(env, role):
+        if e["id"] in seen:
+            continue
+        seen.add(e["id"])
+        (matching if (not role or not e.get("roles") or role in e["roles"]) else rest).append(e)
+    order = matching + rest
+    # 0.56.14 (user, opt-in): in a LOCAL session with 'agents_local_only' set, remote
+    # entries are dropped here — every caller (run, --list, the intercept's dispatch) sees it
+    if _local_agents_only(env) and _is_local_session(env):
+        order = [e for e in order if e.get("kind") == "local"]
+    return order
 
 
 def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None):
@@ -846,6 +924,7 @@ def run(input_data, env, out_path=None) -> int:
               file=sys.stderr)
         return 1
     order, role_matched, family_avoided = degraded_candidates(prefs, env, role=role, avoid_family=avoid)
+    # (the 0.56.14 opt-in 'agents_local_only' filter lives in candidates(), so every caller gets it)
     if not order:
         print(json.dumps({"error": "no dispatch model is available (no keys, no local weights) — "
                                    "run free-agent-tool.py --list"}), file=sys.stderr)
