@@ -148,7 +148,7 @@ class CatalogAccordionTests(unittest.TestCase):
 
     def test_launch_catalog_row_uses_remote_model_and_is_remembered(self):
         remembered = []
-        lane = self.screen(on_last_launched=lambda lane_, alias, tier: remembered.append(alias))
+        lane = self.screen(on_last_launched=lambda lane_, alias, tier, mode=None: remembered.append(alias))  # 0.56.13: 4-arg callback
         lane.accordion.expand("mistral")
         lane.catalog_kind_needed()
         lane.set_catalog("mistral", cat("codestral-latest"), None)
