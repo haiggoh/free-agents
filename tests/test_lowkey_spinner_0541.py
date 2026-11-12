@@ -123,10 +123,41 @@ class SpinnerPTY(unittest.TestCase):
                          "one wrap per dispatch path (local + API)")
 
 
+# 0.56.12: the "fast" case asserts "no frame for a reply faster than the 0.5 s spinner delay".
+# On a loaded box (load avg ~6, 2026-11-12 ship gate) the 0.05 s fake reply plus process and
+# HTTP overhead exceeded 0.5 s, so the precondition — not the contract — failed. A sample now
+# counts only when the driver's measured dispatch time is below FAST_MAX_S (margin under 0.5);
+# a non-fast sample is retried, and if none is fast the case fails loudly (never skips).
+FAST_MAX_S = 0.45
+FAST_ATTEMPTS = 5
+
+
+def _elapsed(out: str):
+    for line in out.splitlines():
+        if line.startswith("ELAPSED "):
+            try:
+                return float(line.split()[1])
+            except (IndexError, ValueError):
+                return None
+    return None
+
+
 def _pty_main(case: str):
     delay, status = {"slow": ("1.2", "200"), "fast": ("0.05", "200"),
                      "error": ("0.9", "500")}[case]
     rc, out = _run_pty(delay, status)
+    if case == "fast":
+        samples = []
+        for _ in range(FAST_ATTEMPTS):
+            el = _elapsed(out)
+            samples.append(el)
+            if rc == 0 and el is not None and el < FAST_MAX_S:
+                break
+            rc, out = _run_pty(delay, status)
+        else:
+            print(f"PRECONDITION-UNMET no dispatch under {FAST_MAX_S}s in "
+                  f"{FAST_ATTEMPTS} attempts: {samples}")
+            return
     cleared = out.replace("\r\x1b[2K", "\x1b[2K[-]")
     print(f"HAS-FRAME {'is working…' in out}")
     print(f"CLEARED-BEFORE-ERROR {'\x1b[2K[-]' in cleared}")

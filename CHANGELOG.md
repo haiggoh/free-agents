@@ -14,6 +14,14 @@
 - `handover-verify.sh`'s no-session hint no longer says "relaunch with --trust-workspace"; it names
   both real causes (a waiting trust dialog, or claude exiting at startup with an `error:` line).
 
+### Fixed — the spinner PTY "fast reply" gate test failed on a loaded machine (2026-11-12 ship gate)
+- `test_fast_api_reply_shows_no_spinner` asserted "no frame" for a 0.05 s fake reply, but under
+  load (avg ~6) process + HTTP overhead pushed the whole dispatch past the 0.5 s spinner delay
+  (measured 1.156 s), so the PRECONDITION failed, not the contract. The driver now prints the
+  measured dispatch time; a sample counts only below 0.45 s, a slower one is retried (5 tries),
+  and if none is fast the test fails with `PRECONDITION-UNMET` — never a skip. Mutation-checked:
+  a zero spinner delay still fails it.
+
 ## [0.56.11] — unreleased
 
 ### Fixed — welcome-screen mascot had a dark line through it on the local lane (user 2026-11-12)

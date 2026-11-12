@@ -61,7 +61,13 @@ spec = importlib.util.spec_from_file_location(
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 open(os.environ["FA_SPIN_TMP"] + "/driver-marks.txt", "a").write("D4 dispatching\n")
+import time as _time  # noqa: E402
+_t0 = _time.monotonic()
 out = mod.dispatch_messages_api("nvidia", "test/model",
                                 [{"role": "user", "content": "hi"}], 16)
+# 0.56.12: the WHOLE dispatch wall time (the spinner lives inside it, so this bounds the
+# spinner's window from above) — lets the "fast" PTY case check its own precondition.
+_elapsed = _time.monotonic() - _t0
 open(os.environ["FA_SPIN_TMP"] + "/driver-marks.txt", "a").write("D5 dispatched\n")
 print(f"RESULT-LEN {len(out)}", flush=True)
+print(f"ELAPSED {_elapsed:.3f}", flush=True)
