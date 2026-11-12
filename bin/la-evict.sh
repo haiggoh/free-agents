@@ -59,7 +59,9 @@ STATE_FILE="${LA_EVICT_STATE:-$HOME/.claude/logs/la-evict.state}"
 LOG_DIR="${LA_EVICT_LOG_DIR:-$HOME/.claude/logs}"
 WINDOW_S="${LA_EVICT_WINDOW:-600}"      # repeat inside this window escalates
 YOUNG_S="${LA_EVICT_YOUNG:-120}"        # "just launched" — prime suspect
-TERM_WAIT="${LA_EVICT_TERM_WAIT:-8}"    # seconds to wait for SIGTERM before SIGKILL
+TERM_WAIT="${LA_EVICT_TERM_WAIT:-8}"
+SLEEP_SCALE="${LA_EVICT_SLEEP_SCALE:-1}"   # 0.56.15: tests set 0.05, scales the fixed sleeps below
+_sleep() { sleep "$(LC_ALL=C awk -v s="$1" -v k="$SLEEP_SCALE" 'BEGIN{printf "%.3f", s*k}')"; }    # seconds to wait for SIGTERM before SIGKILL
 
 # HARD EXCLUSION — NOT CONFIGURABLE. These are the LiteLLM proxy ports that live
 # Claude Code sessions are served through on this machine. No env override widens
@@ -457,12 +459,12 @@ evict_one() {
     waited=0
     while [ "$waited" -lt "$TERM_WAIT" ]; do
         kill -0 "$pid" 2>/dev/null || break
-        sleep 1; waited=$((waited + 1))
+        _sleep 1; waited=$((waited + 1))
     done
     if kill -0 "$pid" 2>/dev/null; then
         echo "    SIGTERM ignored after ${TERM_WAIT}s — sending SIGKILL"
         kill -9 "$pid" 2>/dev/null
-        sleep 1
+        _sleep 1
     fi
     if kill -0 "$pid" 2>/dev/null; then
         echo "    ⚠️  pid $pid still alive"
@@ -493,7 +495,7 @@ fi
 # Recount from the live system: only a port that was listening before and is not
 # listening now counts as freed, so a refusal or a failed kill is never reported as
 # a success.
-sleep 1
+_sleep 1
 still_up=0; freed=0
 for port in $(seq "$PORT_START" "$PORT_MAX") $EXTRA_PORTS; do
     in_proxy_band "$port" && continue

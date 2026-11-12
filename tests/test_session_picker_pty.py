@@ -753,6 +753,9 @@ class RemoteLiveFilter(PilotCase):
             await h.wait_text("NVIDIA A")
             await h.press("7", "z", "9", "q")        # digits filter too, not just letters
             self.assertEqual(app.query_one("#search", Input).value, "7z9q")
+            # 0.56.15: typing eagerly loads every provider's catalog (session_picker_model:1277);
+            # wait for that to finish instead of racing the loader (failed 3/4 gate runs 2026-10-24)
+            await h.wait_for(lambda: not getattr(app, "_loading", set()), "catalogs loaded", secs=20)
             rows = h.labels("rows")
             self.assertTrue(any("No model matches" in r for r in rows), rows)
             self.assertTrue(any("Edit the live filter" in r for r in rows), rows)

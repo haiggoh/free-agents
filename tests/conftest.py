@@ -47,10 +47,15 @@ os.environ["FA_QUOTA_LEDGER_DIR"] = _tempfile.mkdtemp(prefix="fa-quota-test-")
 # the same reason. FORCED, not setdefault (an inherited override may point at the real file);
 # subprocesses inherit both. The tripwires in pytest_configure fail any in-process write that
 # still resolves to the real files.
+# 0.56.15 (perf): per-xdist-worker fence files — one shared throttle state made every
+# worker's limiter flock serialize the whole gate (measured: -n 12 on the picker PTY file
+# took the same wall time as serial). The worker id (PYTEST_XDIST_WORKER, "gw0"..) makes
+# each worker's state file distinct; the tripwires still catch any real-path write.
+_worker = os.environ.get("PYTEST_XDIST_WORKER", "")
 os.environ["LA_NVIDIA_THROTTLE_STATE"] = str(
-    Path(_tempfile.mkdtemp(prefix="fa-throttle-test-")) / "throttle.json")
+    Path(_tempfile.mkdtemp(prefix="fa-throttle-test-")) / f"throttle{_worker}.json")
 os.environ["LA_HF_PARAMS_CACHE"] = str(
-    Path(_tempfile.mkdtemp(prefix="fa-hfparams-test-")) / "hf-params.json")
+    Path(_tempfile.mkdtemp(prefix="fa-hfparams-test-")) / f"hf-params{_worker}.json")
 
 # 0.55.8 Task 0 (R1, 0541 plan Item H): no test may post a real notification or open a
 # window. One shim dir with no-op osascript/terminal-notifier/afplay/say/open stubs + a

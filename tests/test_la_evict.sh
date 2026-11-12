@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+export LA_EVICT_SLEEP_SCALE="${LA_EVICT_SLEEP_SCALE:-0.05}"   # 0.56.15: fast tests
+export LA_EVICT_TERM_WAIT="${LA_EVICT_TERM_WAIT:-1}"
+tsleep() { sleep "$(LC_ALL=C awk -v s="$1" -v k="$LA_EVICT_SLEEP_SCALE" 'BEGIN{printf "%.3f", s*k}')"; }
 # Framework-free integration tests for bin/la-evict.sh.
 #
 # Uses controlled listener processes on dynamically selected high ports.
@@ -68,7 +71,7 @@ wait_for_stopped() {
             wait "$pid" 2>/dev/null || true
             return 0
         }
-        sleep 0.1
+        tsleep 0.1
         attempt=$((attempt + 1))
     done
 
@@ -113,7 +116,7 @@ if [[ "${LA_EVICT_RETRY:-}" != "1" ]]; then
         owner="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
         if [[ -n "$owner" ]] && kill -0 "$owner" 2>/dev/null; then
             printf 'another la-evict run is active (pid %s); waiting for it\n' "$owner" >&2
-            while [[ -d "$LOCKDIR" ]]; do sleep 2; done
+            while [[ -d "$LOCKDIR" ]]; do tsleep 2; done
         else
             rm -rf "$LOCKDIR" 2>/dev/null      # stale lock: owner is gone
             mkdir "$LOCKDIR" 2>/dev/null || true
@@ -156,7 +159,7 @@ cleanup() {
         kill -TERM "$pid" 2>/dev/null || true
     done
 
-    sleep 0.2
+    tsleep 0.2
 
     for pid in "${PIDS[@]:-}"; do
         kill -KILL "$pid" 2>/dev/null || true
@@ -254,7 +257,7 @@ wait_for_listener() {
             return 1
         fi
 
-        sleep 0.1
+        tsleep 0.1
         attempt=$((attempt + 1))
     done
 
@@ -926,7 +929,7 @@ sleep 2
 
 OUT="$(run_evict)"
 assert_stopped "$NB_A" "the bare tier-0 run swept the orphan"
-sleep 1
+tsleep 1
 
 start_server vllm-mlx "$BASE"
 NB_B="$LAST_PID"

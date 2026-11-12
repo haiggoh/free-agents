@@ -52,6 +52,20 @@
   measured dispatch time; a sample counts only below 0.45 s, a slower one is retried (5 tries),
   and if none is fast the test fails with `PRECONDITION-UNMET` — never a skip. Mutation-checked:
   a zero spinner delay still fails it.
+## [0.56.15] — unreleased
+
+### Fixed — gate slowdowns and a recurring ship-blocking flake (measured with --durations, user 2026-11-12)
+- `test_digits_filter_too_and_nomatch_points_at_the_box` raced the lazy catalog load (rows
+  still showed "loading…" when asserted — failed standalone on main and in 3/4 gate runs):
+  now waits for `_loading` to drain before asserting. Deterministic.
+- `la-evict` fixed sleeps scaled by `LA_EVICT_SLEEP_SCALE` (tests use 0.05; ranking-separator
+  waits stay real): suite 403 s → ~340 s, 135/135 green.
+- `test_hotkey_shift_0540`'s every-screen sweep (~11 min serial monolith) split into one test
+  per screen class so a parallel runner can spread it.
+- conftest fence files are now per-xdist-worker (`PYTEST_XDIST_WORKER` in the name) so a
+  shared throttle-state flock can't serialize parallel workers.
+- Measured and REVERTED: `-n 12` inside the picker venv gate did not shorten its wall time
+  (977 s vs 724 s serial) — the venv gates stay serial.
 
 ## [0.56.11] — unreleased
 

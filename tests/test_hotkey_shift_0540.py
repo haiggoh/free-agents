@@ -63,12 +63,18 @@ class ShiftLetterTests(PilotCase):
         for name in ("local-theme.json", "remote-theme.json"):
             shutil.copy(ROOT / "config" / name, Path(self.env["LA_THEME_CONFIG_DIR"]) / name)
 
+    # 0.56.15 (perf): the every-screen sweep was ONE test (~11 min serial — it rebuilt the
+    # picker per screen inside one method, so xdist could not spread it). One method per
+    # screen class: xdist distributes them, and the gate's floor drops to the slowest screen.
     def test_shift_letter_runs_same_action_on_every_screen(self):
-        subclasses = _screen_subclasses()
+        subclasses = [c for c in _screen_subclasses() if c is not m.HomeScreen]
         self.assertGreater(len(subclasses), 5)
+        for cls in subclasses:
+            self._check_screen(cls)
 
+    def _check_screen(self, cls):
         async def scenario(app, pilot, h):
-            from textual.widgets import OptionList
+            from session_picker import ConfirmPanel as _CP
             dispatched = []
             orig_dispatch = app.dispatch
             def spy(result, keep=None):
@@ -76,10 +82,7 @@ class ShiftLetterTests(PilotCase):
                 return orig_dispatch(result, keep)
             app.dispatch = spy
             try:
-                from session_picker import ConfirmPanel as _CP
-
                 async def clean():
-                    # pop any panel a previous action pushed and close any open prompt
                     while isinstance(app.screen, _CP):
                         app.pop_screen()
                     if getattr(app, "pending_prompt", None):
@@ -88,35 +91,43 @@ class ShiftLetterTests(PilotCase):
                     app.pending_prompt = None
                     app.query_one("#actions").focus()
                     await pilot.pause()
-                    await pilot.pause(0.3)      # let an async panel push land before we pop it
+                    await pilot.pause(0.3)
 
-                for cls in subclasses:
-                    if cls is m.HomeScreen:
-                        continue          # root: Quit on 'q', no Back
-                    for act in _letter_actions(cls(self._settings, owner=m.SUB,
-                                                   **_SCREEN_EXTRAS.get(cls.__name__, {}))):
-                        # lowercase press on a fresh screen
-                        app.screen_model = cls(self._settings, owner=m.SUB,
-                                               **_SCREEN_EXTRAS.get(cls.__name__, {}))
-                        app.render_model()
-                        await clean()
-                        before = len(dispatched)
-                        await h.press(act.key)
-                        lower = dispatched[before:]
-                        # uppercase press on a FRESH screen (toggle actions mutate state)
-                        app.screen_model = cls(self._settings, owner=m.SUB,
-                                               **_SCREEN_EXTRAS.get(cls.__name__, {}))
-                        app.render_model()
-                        await clean()
-                        before = len(dispatched)
-                        await h.press(act.key.upper())
-                        upper = dispatched[before:]
-                        self.assertEqual(lower, upper,
-                                         f"{cls.__name__} key {act.key!r}: lower={lower} upper={upper}")
+                for act in _letter_actions(cls(self._settings, owner=m.SUB,
+                                               **_SCREEN_EXTRAS.get(cls.__name__, {}))):
+                    app.screen_model = cls(self._settings, owner=m.SUB,
+                                           **_SCREEN_EXTRAS.get(cls.__name__, {}))
+                    app.render_model()
+                    await clean()
+                    before = len(dispatched)
+                    await h.press(act.key)
+                    lower = dispatched[before:]
+                    app.screen_model = cls(self._settings, owner=m.SUB,
+                                           **_SCREEN_EXTRAS.get(cls.__name__, {}))
+                    app.render_model()
+                    await clean()
+                    before = len(dispatched)
+                    await h.press(act.key.upper())
+                    upper = dispatched[before:]
+                    self.assertEqual(lower, upper,
+                                     f"{cls.__name__} key {act.key!r}: lower={lower} upper={upper}")
             finally:
                 app.dispatch = orig_dispatch
-
         self.run_picker(scenario, start="home")
+
+
+def _make_per_screen_test(cls):
+    def test(self):
+        self._check_screen(cls)
+    test.__name__ = f"test_shift_letter_on_{cls.__name__}"
+    test.__doc__ = f"shift+letter on {cls.__name__} dispatches like the letter (0.56.15 per-screen split)"
+    return test
+
+
+for _cls in _screen_subclasses():
+    if _cls is m.HomeScreen:
+        continue          # root: Quit on 'q', no Back
+    setattr(ShiftLetterTests, f"test_shift_letter_on_{_cls.__name__}", _make_per_screen_test(_cls))
 
     def test_uppercase_still_types_into_search(self):
         async def scenario(app, pilot, h):
