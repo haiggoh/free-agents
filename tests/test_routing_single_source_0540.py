@@ -69,6 +69,28 @@ class RoutingBlockTests(unittest.TestCase):
         self.assertIn("Default routing on a PAID session", inside)
         self.assertNotIn("Default routing on a PAID session", outside)
 
+    def test_fa_route_env_honored_per_tool(self):
+        # 0.56.9: the hook passes the FULL process env to cse.route, so FA_ROUTE_WORKFLOW
+        # steers Workflow calls independently of FA_ROUTE_AGENT (verified live 2026-11-12;
+        # the older waypoint claiming "no consumer reads FA_ROUTE_WORKFLOW" was stale).
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "cloud_agent_intercept", ROOT / "hooks" / "cloud-agent-intercept.py")  # dashed filename
+        cai = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cai)
+        payload = {"tool_name": "Workflow", "tool_input": {"prompt": "x"},
+                   "session_id": "s1", "tool_use_id": "t1"}
+        cloud = {"ANTHROPIC_BASE_URL": "https://gateway.example.com",
+                 "FA_ROUTE_AGENT": "free-first", "FA_ROUTE_WORKFLOW": "paid",
+                 "CLAUDE_CONFIG_DIR": tempfile.mkdtemp(prefix="fa-route-")}
+        self.assertIsNone(cai.decide(payload, dict(cloud)),
+                          "FA_ROUTE_WORKFLOW=paid must pass a Workflow call through")
+        cloud["FA_ROUTE_WORKFLOW"] = "free-only"
+        out = cai.decide(payload, dict(cloud))
+        self.assertIsNotNone(out, "FA_ROUTE_WORKFLOW=free-only must deny a Workflow call")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("route[workflow]", out["hookSpecificOutput"]["permissionDecisionReason"])
+
     def test_missing_markers_emit_loud_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
