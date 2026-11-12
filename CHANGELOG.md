@@ -1,3 +1,16 @@
+## [0.56.13] — unreleased
+
+### Fixed — a load-sensitive timing flake in the watch-until CLI contract test
+- `tests/test_watch_until.py::CliContract::test_help_never_polls` asserted `--help` returns in
+  under 1.0 s wall-clock, but that bound measures interpreter startup + subprocess spawn, which
+  under xdist load ("bringing up nodes", load avg ~5) measured 2.84 s — the F3 flake hunt on
+  2026-11-12 failed this test 2 of 3 runs. The "never polls" property is structural (argparse
+  exits at parse time, before any poll loop; a polling run would instead hit the 40 s
+  subprocess timeout and error out). Bound raised to 10 s with the rationale in a comment.
+  Discriminant: threshold 0.0 fails the test; 10 s passes 3/3 runs.
+- `test_loadscale.py` marker-collection flake from the same hunt: NOT reproduced in 3/3 runs
+  (10 passed each) — recorded as not-reproduced, no change made.
+
 ## [0.56.12] — unreleased
 
 ### Fixed — every free remote launch died at startup: `--trust-workspace` is a `claude ultrareview` option, not a top-level one (2026-11-12)

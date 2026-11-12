@@ -303,7 +303,11 @@ class CliContract(unittest.TestCase):
     def test_help_never_polls(self):
         t0 = time.monotonic()
         r = run_watch(["--help"])
-        self.assertLess(time.monotonic() - t0, 1.0, "--help returns in under a second")
+        # 10 s, not 1 s: the bound guards "--help never enters the poll loop" (a polling run
+        # would hit run_watch's 40 s timeout, not return slowly). What it measures here is
+        # interpreter startup + spawn, which under xdist load ("bringing up nodes", load avg
+        # ~5) measured 2.84 s on 2026-11-12 — a 1 s bound flaked 2/3 runs (F3 hunt).
+        self.assertLess(time.monotonic() - t0, 10.0, "--help returns promptly without polling")
         self.assertEqual(r.returncode, 0)
         self.assertIn("watch-until", r.stdout)
         self.assertIn("--git-tag", r.stdout)
