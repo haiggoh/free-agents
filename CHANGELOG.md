@@ -1,10 +1,12 @@
 ## [0.56.12] — unreleased
 
-### Fixed — every free remote launch died at startup: `--trust-workspace` is not a Claude Code 2.1.322 option (2026-11-12)
-- 0.56.8 appended `--trust-workspace` to every `claude` launch unconditionally. Claude Code 2.1.322
-  rejects it (`error: unknown option '--trust-workspace'`) and exits at once; csl then stops the
-  proxy, so each window showed the banner, the error and a prompt — no session. The test fixture's
-  fake `claude` accepted any argv, so the suite stayed green.
+### Fixed — every free remote launch died at startup: `--trust-workspace` is a `claude ultrareview` option, not a top-level one (2026-11-12)
+- 0.56.8 appended `--trust-workspace` to every interactive `claude` launch. In Claude Code 2.1.322
+  that flag exists only on the `ultrareview` subcommand ("trust the current folder for this run
+  only… for scripts and CI"); top-level `claude` rejects it (`error: unknown option
+  '--trust-workspace'`) and exits at once; csl then stops the proxy, so each window showed the
+  banner, the error and a prompt — no session. Nothing was deprecated: the flag was applied to the
+  wrong command, and the test fixture's fake `claude` accepted any argv, so the suite stayed green.
 - `remote-session.sh` now passes the flag only when the installed CLI's `--help` lists it (captured
   into a variable — a `| grep -q` pipeline under pipefail can SIGPIPE claude and read as absent).
 - The fake `claude` in `tests/test_remote_session.py` now rejects an option its `--help` does not

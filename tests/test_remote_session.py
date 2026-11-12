@@ -1167,6 +1167,9 @@ if '--help' in sys.argv:
     print('Fixture Claude; CLAUDE_ARGV captures argv.')
     if has_trust:
         print('  --trust-workspace   pre-accept the workspace trust dialog')
+    if os.environ.get('FAKE_CLAUDE_TRUST_MENTION_ONLY') == '1':
+        # 2.1.322 shape: the flag belongs to a SUBCOMMAND; a mention is not a top-level option
+        print('  ultrareview         review a PR (see: claude ultrareview --trust-workspace)')
     sys.exit(0)
 if '--version' in sys.argv:
     print('2.1.286'); sys.exit(0)
@@ -1220,6 +1223,11 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
         self.assertIn('--trust-workspace', argv,
                       'a CLI that lists --trust-workspace must get it (new-worktree handovers)')
         del self.env['FAKE_CLAUDE_HAS_TRUST_FLAG']
+        self.env['FAKE_CLAUDE_TRUST_MENTION_ONLY'] = '1'
+        argv = launched_argv('gemini-flash')
+        self.assertNotIn('--trust-workspace', argv,
+                         'a help text that merely MENTIONS the flag (subcommand) must not enable it')
+        del self.env['FAKE_CLAUDE_TRUST_MENTION_ONLY']
 
         argv = launched_argv('-a', '-a', 'gemini-flash')
         self.assertEqual(argv[argv.index('--permission-mode') + 1], 'acceptEdits',

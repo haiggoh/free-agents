@@ -2439,14 +2439,17 @@ claude_cmd+=(--permission-mode "$PERMISSION_MODE")
 # 0.56.8 (handover into a NEW worktree stalled silently on the folder-trust dialog, user
 # 2026-11-10): --trust-workspace is Claude Code's own non-interactive pre-accept — no
 # hand-edit of ~/.claude.json. A handover launch is an explicit act of trust in the target dir.
-# 0.56.12: pass it ONLY when the installed CLI's --help lists it. Claude Code 2.1.322 rejects it
-# ("error: unknown option '--trust-workspace'") and exits at once, so the unconditional form
-# killed EVERY launch (2026-11-12). Captured into a variable, not piped into grep -q: under
-# pipefail an early grep exit SIGPIPEs claude and the pipeline reads as "not found".
+# 0.56.12: pass it ONLY when the installed CLI's top-level --help lists it. In Claude Code 2.1.322
+# it is an `ultrareview`-subcommand option only; top-level claude rejects it ("error: unknown
+# option '--trust-workspace'") and exits at once, so the unconditional form killed EVERY launch
+# (2026-11-12). Captured into a variable, not piped into grep -q: under
+# pipefail an early grep exit SIGPIPEs claude and the pipeline reads as "not found". Matched as
+# an OPTION LINE (indented, flag first) — a mere mention, e.g. in a subcommand's description,
+# must not count.
 _claude_help=$(claude --help 2>/dev/null || true)
-case "$_claude_help" in
-    *--trust-workspace*) claude_cmd+=(--trust-workspace) ;;
-esac
+if grep -qE '^[[:space:]]+--trust-workspace([[:space:],]|$)' <<<"$_claude_help"; then
+    claude_cmd+=(--trust-workspace)
+fi
 unset _claude_help
 [ -n "${LA_MOD_DIR:-}" ] && claude_cmd+=(--plugin-dir "$LA_MOD_DIR")
 
