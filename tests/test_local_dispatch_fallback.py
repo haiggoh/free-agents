@@ -45,7 +45,7 @@ class FallbackOrderTests(unittest.TestCase):
             env["LA_CONFIG_SOURCE"] = str(p)
             with mock.patch.object(fat, "local_on_disk", lambda a: a == "gemma-4-26b"), \
                  mock.patch.object(fat, "_has_key", lambda prov, e: True):
-                order = fat.candidates(prefs, env, role="validator")
+                order = fat.candidates(prefs, env, role="validator", local_fallback=True)
         ids = [e["id"] for e in order]
         self.assertEqual(ids[0], "gemini-3.8-flash", "curated list first")
         self.assertIn("local-gemma-4-26b", ids)
@@ -74,11 +74,11 @@ class FallbackOrderTests(unittest.TestCase):
             env_remote["LA_CONFIG_SOURCE"] = str(fixture)
             with mock.patch.object(fat, "local_on_disk", lambda a: True), \
                  mock.patch.object(fat, "_local_agents_only", lambda e: True):
-                kinds = [e["kind"] for e in fat.candidates(prefs, env_local)]
+                kinds = [e["kind"] for e in fat.candidates(prefs, env_local, local_fallback=True)]
                 self.assertTrue(kinds and all(k == "local" for k in kinds),
                                 f"local session + opt-in: only local entries, got {kinds}")
-                self.assertIn("local-x", [e["id"] for e in fat.candidates(prefs, env_local)])
-                kinds = [e["kind"] for e in fat.candidates(prefs, env_remote)]
+                self.assertIn("local-x", [e["id"] for e in fat.candidates(prefs, env_local, local_fallback=True)])
+                kinds = [e["kind"] for e in fat.candidates(prefs, env_remote, local_fallback=True)]
                 self.assertEqual(kinds[0], "remote")
                 self.assertTrue(all(k == "local" for k in kinds[1:]),
                                 f"remote session: curated first, local fallback after: {kinds}")

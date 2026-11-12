@@ -1496,13 +1496,6 @@ class LocalScreen(Screen):
         if self.settings.on_local_registry_saved:
             self.settings.on_local_registry_saved({"auto_sync": bool(v)})
 
-    def _put_agents_local_only(self, v):
-        """0.56.14 (user, opt-in): 'no remote API agents in local sessions' — stored in the
-        local_registry section (free-form dict, no schema bump) via on_local_registry_saved."""
-        self.settings.local_registry["agents_local_only"] = bool(v)
-        if self.settings.on_local_registry_saved:
-            self.settings.on_local_registry_saved({"agents_local_only": bool(v)})
-
     def _launch_last(self, lane: str):
         """Launch the last used model for the given lane."""
         last_model = self.settings.last_launched_model.get(lane)
@@ -2342,6 +2335,13 @@ class CloudConfigScreen(Screen):
         s.routes[path] = order[(order.index(current) + d) % len(order)] if current in order else "free-only"
         if s.on_cloud_saved:
             s.on_cloud_saved({"route": (path, s.routes[path])})
+
+    def _put_agents_local_only(self, v):
+        """0.56.14 (user, opt-in): 'no remote API agents in local sessions' — stored in the
+        local_registry section (free-form dict, no schema bump) via on_local_registry_saved."""
+        self.settings.local_registry["agents_local_only"] = bool(v)
+        if self.settings.on_local_registry_saved:
+            self.settings.on_local_registry_saved({"agents_local_only": bool(v)})
 
     def _cycle_timeout_tier(self, d: int = 1):
         """Cycle the dispatch timeout tier snappy -> balanced -> patient (key t) and persist."""

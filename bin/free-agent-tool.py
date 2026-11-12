@@ -585,7 +585,7 @@ def request_role(input_data):
     return None if st == "general-purpose" else ROLE_MAP.get(st)
 
 
-def candidates(prefs, env, local_ok=None, role=None, avoid_family=None) -> list:
+def candidates(prefs, env, local_ok=None, role=None, avoid_family=None, local_fallback=False) -> list:
     """Available entries in preference order. A role is a SUGGESTION, not a hard requirement
     (user 2026-11-09: the lines are blurred — any model can fill another role when it needs
     to): entries listing the role come first, every other available entry follows as fallback.
@@ -602,13 +602,16 @@ def candidates(prefs, env, local_ok=None, role=None, avoid_family=None) -> list:
         else:
             rest.append(e)
     # 0.56.14 (user): the auto-generated LOCAL list rides at the END of the order — a
-    # fallback for after the curated dispatch preferences are exhausted (remote sessions too)
-    seen = {e.get("id") for e in matching + rest}
-    for e in local_fallback_entries(env, role):
-        if e["id"] in seen:
-            continue
-        seen.add(e["id"])
-        (matching if (not role or not e.get("roles") or role in e["roles"]) else rest).append(e)
+    # fallback for after the curated dispatch preferences are exhausted (remote sessions too).
+    # Opt-in via local_fallback=True (run() passes it): unit tests calling candidates()
+    # without it see only the curated order, so real machine aliases never leak into them.
+    if local_fallback:
+        seen = {e.get("id") for e in matching + rest}
+        for e in local_fallback_entries(env, role):
+            if e["id"] in seen:
+                continue
+            seen.add(e["id"])
+            (matching if (not role or not e.get("roles") or role in e["roles"]) else rest).append(e)
     order = matching + rest
     # 0.56.14 (user, opt-in): in a LOCAL session with 'agents_local_only' set, remote
     # entries are dropped here — every caller (run, --list, the intercept's dispatch) sees it
@@ -617,13 +620,14 @@ def candidates(prefs, env, local_ok=None, role=None, avoid_family=None) -> list:
     return order
 
 
-def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None):
+def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None, local_fallback=False):
     """candidates() with avoid_family relaxed when it would leave nothing (user 2026-10-23).
     Role is already soft inside candidates() (matching entries first, the rest after), so it
     never has to give way. Returns (order, role_honoured, family_avoided); an empty order means
     nothing is set up. role_honoured = some available entry actually lists the role."""
     for a in (avoid_family, None):
-        order = candidates(prefs, env, local_ok=local_ok, role=role, avoid_family=a)
+        order = candidates(prefs, env, local_ok=local_ok, role=role, avoid_family=a,
+                           local_fallback=local_fallback)
         if order:
             honoured = bool(role) and any((not e.get("roles")) or role in e["roles"]
                                           for e in order)
@@ -923,7 +927,11 @@ def run(input_data, env, out_path=None) -> int:
                                    "nothing, so the family you meant to avoid is what runs"}),
               file=sys.stderr)
         return 1
-    order, role_matched, family_avoided = degraded_candidates(prefs, env, role=role, avoid_family=avoid)
+    order, role_matched, family_avoided = degraded_candidates(
+        prefs, env, role=role, avoid_family=avoid,
+        # 0.56.14: the local fallback list only when a real live config is named — unit
+        # tests (no LA_CONFIG_SOURCE) must not see this machine's registered aliases
+        local_fallback=bool(env.get("LA_CONFIG_SOURCE")))
     # (the 0.56.14 opt-in 'agents_local_only' filter lives in candidates(), so every caller gets it)
     if not order:
         print(json.dumps({"error": "no dispatch model is available (no keys, no local weights) — "
