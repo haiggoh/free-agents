@@ -315,6 +315,13 @@ class CliContract(unittest.TestCase):
         r2 = run_watch(["--help", "--git-tag", "/nonexistent-xyz", "v"])
         self.assertEqual(r2.returncode, 0, r2.stderr)
 
+    def test_help_carries_examples(self):
+        r = run_watch(["--help"])
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("examples:", r.stdout.lower())
+        self.assertIn("watch-until --git-tag", r.stdout)
+        self.assertIn("--deadline", r.stdout)
+
     def test_unknown_flag_exit2(self):
         r = run_watch(["--bogus-flag"])
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)

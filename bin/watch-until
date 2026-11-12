@@ -427,7 +427,17 @@ def build_parser():
                     "passes; print one verdict line and exit. For transient waits only — "
                     "installs nothing, writes nothing outside $TMPDIR.",
         epilog="exit codes: 0 DETECTED · 1 TIMEOUT · 2 usage · 3 CANNOT_START · 4 STALL\n"
-               "env: FA_WATCH_PROJECTS_DIR — transcript root (default ~/.claude/projects)",
+               "env: FA_WATCH_PROJECTS_DIR — transcript root (default ~/.claude/projects)\n"
+               "\n"
+               "examples:\n"
+               "  # one-shot: wait for a tag to be pushed, then exit\n"
+               "  watch-until --git-tag . v1.4.1 --deadline 30m\n"
+               "\n"
+               "  # early failure signal on a long run: fire the moment the log gains ✖/STALLED\n"
+               "  watch-until --cmd \"grep -aqE '✖|STALLED' /tmp/ship.log\" --deadline 60m\n"
+               "\n"
+               "  # always bounded: --deadline caps every run; the harness/run_in_background\n"
+               "  # notification is the wake-up, never a per-poll loop",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     g = p.add_mutually_exclusive_group()   # required-ness is checked in main: --self-test needs none
     g.add_argument("--git-tag", nargs=2, metavar=("REPO", "TAG"),

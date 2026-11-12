@@ -10,6 +10,9 @@
   Discriminant: threshold 0.0 fails the test; 10 s passes 3/3 runs.
 - `test_loadscale.py` marker-collection flake from the same hunt: NOT reproduced in 3/3 runs
   (10 passed each) — recorded as not-reproduced, no change made.
+- `watch-until --help` now ends with an `examples:` block (one-shot tag wait, early-failure
+  watcher on a long run's log via `--cmd`, the always-bounded reminder) — user decision
+  2026-11-12. Pinned by `test_help_carries_examples` (red on the old binary, green after).
 
 ## [0.56.12] — unreleased
 
