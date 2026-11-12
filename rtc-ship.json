@@ -14,6 +14,8 @@
 
   "refresh_plugin": "free-agents",
   "test_workers": 12,
+  "stall_seconds": 1200,
+  "_comment_stall": "rtc 1.4.0 gate self-recovery: the stall window must exceed the largest per-test --timeout (900) by enough for the pytest-timeout stack dump to print before the watchdog kills the gate. Measured 2026-11-12 (--durations=20 on the main gate): T_slow = 286.65s (test_la_evict.sh); T = max(300, 3x T_slow) rounded up to 60 = 900; S = T + 300 = 1200. Pinned by tests/test_gate_timeout_below_stall.py (every --timeout=N must satisfy N + 120 <= stall_seconds).",
 
   "_comment_tests": "test_cmd replaces the pytest default for the MAIN suite so a loaded shared box's gate deselects the marked modules (waypoint gate-runs-on-a-loaded-shared): the load_sensitive marker is registered in tests/conftest.py and the PTY/litellm/venv modules carry it, so the gate runs -m 'not load_sensitive' instead of flaking at load > 10. pytest resolves like rtc-ship's default (pipx binary first, then PATH); workers stay 12. The two extra venv gates still run from .rtc/pre-flight.sh.",
   "test_cmd": "pyt=\"$HOME/.local/bin/pytest\"; [ -x \"$pyt\" ] || pyt=pytest; \"$pyt\" -q tests -p no:cacheprovider -n 12 -m 'not load_sensitive' --timeout=900 --timeout-method=thread",

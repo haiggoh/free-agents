@@ -1,3 +1,19 @@
+## [0.56.10] — unreleased
+
+### Changed — the gate stall window now exceeds every per-test timeout, so a wedge names its cause (rtc 1.4.0 self-recovery)
+- `rtc-ship.json` declares `"stall_seconds": 1200` (was unset → 600 s default). The main gate's
+  and the pre-flight venv gates' `--timeout=900` stay unchanged, but the watchdog window now
+  exceeds them by 300 s: when a pytest gate wedges, pytest-timeout's stack dump fires first and
+  lands in `<log>.stall` under `-- per-test timeout dump --`, and rtc-ship 1.4.0 retries the
+  stalled gate once automatically (recovered runs print `⚠ … STALLED once — passed on retry`
+  and keep `.attempt1`/`.attempt1.stall`).
+- Chosen from measurement (2026-11-12, `--durations=20` on the main gate): slowest legitimate
+  test T_slow = 286.65 s (`test_la_evict.sh`); T = max(300, 3 × T_slow) rounded up to 60 = 900;
+  S = T + 300 = 1200 (the plan's abort threshold). Pinned by
+  `tests/test_gate_timeout_below_stall.py`: every `--timeout=N` in `test_cmd` and
+  `.rtc/pre-flight.sh` must satisfy N + 120 ≤ stall_seconds — RED on the old 900/600 config,
+  mutation-checked.
+
 ## [0.56.9] — unreleased
 
 ### Fixed — pin the per-tool route env vars (verified live 2026-11-12)
