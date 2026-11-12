@@ -1054,6 +1054,7 @@ class Picker(App):
             last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
                                  **state.last_launched},
             last_launched_tier=dict(state.last_launched_tier),
+            last_launched_mode=dict(state.last_launched_mode),
             on_last_launched=self._save_last_launched,
             catalog_local_capable=catalog_local_capable,
             model_param_count=model_param_count,
@@ -1117,9 +1118,9 @@ class Picker(App):
             if warning not in self.state_warnings:
                 self.state_warnings.append(warning)
 
-    def _save_last_launched(self, lane, alias, tier):
+    def _save_last_launched(self, lane, alias, tier, mode=None):
         try:
-            warning = sms.save_last_launched(self._config_dir(), lane, alias, tier)
+            warning = sms.save_last_launched(self._config_dir(), lane, alias, tier, mode)
         except ValueError as exc:          # an alias the store refuses: never block the launch
             warning = f"{exc}; Go last not remembered"
         if warning and warning not in self.state_warnings:

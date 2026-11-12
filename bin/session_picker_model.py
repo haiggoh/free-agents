@@ -748,10 +748,11 @@ class Settings:
         "remote_api_session": None,
         "lowkey": None,
     })
+    last_launched_mode: dict = field(default_factory=dict)   # 0.56.13: "<lane>:mode" keys from the store (lowkey convo/oneshot)
     # Remote tier of the last-launched alias (lets Go-last add --include-trials with no inventory).
     last_launched_tier: dict = field(default_factory=dict)
     # Called with (lane, alias, tier|None) when a launch request is made; persists it.
-    on_last_launched: Callable[[str, str, str | None], object] | None = None
+    on_last_launched: Callable[[str, str, str | None, str | None], object] | None = None
     # (provider, model id) -> True when a live-catalog row is local-capable (hidden by the filter).
     catalog_local_capable: Callable[[str, str], bool] | None = None
     # (provider, model id) -> parameter count in billions for the per-provider size sort, or
@@ -1548,7 +1549,7 @@ class LocalScreen(Screen):
         if s.last_launched_model is not None:
             s.last_launched_model["local_session"] = mdl.alias
         if s.on_last_launched:
-            s.on_last_launched("local_session", mdl.alias, None)
+            s.on_last_launched("local_session", mdl.alias, None, None)   # 0.56.13: 4-arg callback (mode is lowkey-only)
         env = {"LA_AUTO_MODE": "0" if s.auto_mode == 2 else "1",
                "LA_BLIND_AUTO": "1" if s.auto_mode == 0 else "0",
                "LA_TELEMETRY": "1" if s.telemetry else "0",
@@ -2140,7 +2141,7 @@ class RemoteScreen(Screen):
             s.last_launched_model["remote_api_session"] = remembered
         s.last_launched_tier["remote_api_session"] = tier
         if s.on_last_launched:
-            s.on_last_launched("remote_api_session", remembered, tier)
+            s.on_last_launched("remote_api_session", remembered, tier, None)   # 0.56.13: 4-arg callback
         argv = ["remote"] + ["-a"] * s.auto_mode
         if s.telemetry:
             argv.append("-t")
@@ -3352,7 +3353,8 @@ class LowkeyScreen(Screen):
                  owner: str = DIRECT_ROOT, api_agents: "list | None" = None):
         super().__init__(settings, owner)
         self.session_name = ""
-        self.mode = "convo"                    # convo | oneshot (toggle, user 2026-10-30)
+        # convo | oneshot; remembered across sessions from the last launch (user 2026-11-12)
+        self.mode = (settings.last_launched_mode or {}).get("lowkey") or "convo"
         self._choose_model_visible = False     # local model list is NOT open by default
         self._models_loaded = False
         # 0.50.0 item 8 (lowkey-any-model-api): the API chooser is REAL — a second accordion
@@ -3524,9 +3526,6 @@ class LowkeyScreen(Screen):
         if s.on_thinking_saved:
             s.on_thinking_saved(v)
 
-    def _toggle_mode(self):
-        self.mode = "oneshot" if self.mode == "convo" else "convo"
-
     def _toggle_choose_model(self):
         self._choose_model_visible = not self._choose_model_visible
 
@@ -3560,16 +3559,22 @@ class LowkeyScreen(Screen):
                         + (" (shown)" if self._choose_model_visible else ""),
                    self._toggle_choose_model, section="models"),
         ]
-        acts += [
-            Action("m", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Mode: {'Convo' if self.mode == 'convo' else 'One-shot'}",
-                   self._toggle_mode, section="main"),
-            Action("p", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}{'Start convo' if self.mode == 'convo' else 'Start one-shot'}",
-                   self._start, section="launch"),
-        ]
+        # 0.56.13 (user): each mode is its OWN action item (reusing the mode emojis); the
+        # rocket stays only on Go-launch-last, which sits BEFORE Choose model and shows
+        # whether the last launch was a convo or a one-shot (the more recent one wins).
         last = s.last_launched_model.get("lowkey") if s.last_launched_model else None
+        last_mode = (s.last_launched_mode or {}).get("lowkey")
         if last:
-            acts.append(Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch last: {model_names.readable(last)} (lowkey)",
-                               self._launch_last, section="launch"))
+            mode_tag = f" ({'convo' if last_mode == 'convo' else 'one-shot'})" if last_mode else ""
+            acts.insert(0, Action("g", f"{ec.gap(ec.EMOJI_GO_LAUNCH_STR)}Go launch last: "
+                                       f"{model_names.readable(last)}{mode_tag}",
+                                  self._launch_last, section="launch"))
+        acts += [
+            Action("p", f"{ec.gap(ec.LK_EMOJI_CONVO_STR)}Start convo",
+                   lambda: self._start("convo"), section="launch"),
+            Action("m", f"{ec.gap(ec.LK_EMOJI_ONESHOT_STR)}Start one-shot",
+                   lambda: self._start("oneshot"), section="launch"),
+        ]
         acts.append(Action("s", f"{ec.gap(ec.LK_EMOJI_SESSION_STR)}Set session name: {self.session_name or '(ephemeral)'}",
                            lambda: Nav("prompt:session"), section="main"))
         # 0.56.5 (user): the same model-settings template as local/remote — order e/o/j,
@@ -3616,7 +3621,7 @@ class LowkeyScreen(Screen):
         if s.last_launched_model is not None:
             s.last_launched_model["lowkey"] = key
         if s.on_last_launched:
-            s.on_last_launched("lowkey", key, None)
+            s.on_last_launched("lowkey", key, None, self.mode)   # 0.56.13: mode rides along
 
     def _env(self):
         v = self.settings.lowkey_thinking
@@ -3626,7 +3631,9 @@ class LowkeyScreen(Screen):
         last = self.settings.last_launched_model.get("lowkey")
         if not last:
             return None
-        argv = ["lowkey", "--convo"]
+        # 0.56.13: relaunch in the remembered mode (convo vs one-shot), not always --convo
+        mode = (self.settings.last_launched_mode or {}).get("lowkey") or "convo"
+        argv = ["lowkey", "--convo"] if mode == "convo" else ["lowkey"]
         if ":" in last:
             # 0.54.0: an API launch is stored as provider:model — rebuild --provider/--api-model
             # (a bare --model <provider:model> relaunched a nonsense local alias before).
@@ -3643,10 +3650,11 @@ class LowkeyScreen(Screen):
             argv += ["--session", self.session_name]
         return LaunchRequest("lowkey", argv, self._env(), last)
 
-    def _start(self):
-        # Mode decides what "p" does: convo launches the selected model; one-shot asks
-        # for the prompt first (prompt:oneshot).
-        if self.mode == "convo":
+    def _start(self, mode: str):
+        # 0.56.13 (user): each mode is its own action item; the mode is remembered with the
+        # launch (last_launched_mode), so Go-launch-last can show which one it was.
+        self.mode = mode
+        if mode == "convo":
             return self._convo()
         return Nav("prompt:oneshot")
 

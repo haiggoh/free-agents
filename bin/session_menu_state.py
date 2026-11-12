@@ -43,7 +43,7 @@ from pathlib import Path
 
 SCHEMA_VERSION = 10
 READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "temperature",
+SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "last_launched_mode", "temperature",
             "intercept_agents", "memguard", "thinking", "hidden_providers", "lowkey_filters",
             "local_registry")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
@@ -144,6 +144,7 @@ class State:
     rate_limiter: dict = field(default_factory=dict)
     last_launched: dict = field(default_factory=dict)
     last_launched_tier: dict = field(default_factory=dict)
+    last_launched_mode: dict = field(default_factory=dict)   # 0.56.13: lowkey convo/oneshot, stored as "<lane>:mode" keys inside last_launched
     temperature: dict = field(default_factory=lambda: dict(DEFAULT_TEMPERATURE))
     intercept_agents: str = DEFAULT_INTERCEPT_AGENTS
     # kv_dtype holds a mutable dict, so copy that one too — or every State would share (and be
@@ -322,6 +323,14 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list, d
     # Carried inside `last` under a reserved key so the (effort, limiter, last) shape is unchanged.
     for lane, tier in tiers.items():
         last[f"{lane}:tier"] = tier
+    # 0.56.13: same reserved-key trick for the lowkey launch mode (convo|oneshot)
+    modes = doc.get("last_launched_mode", {})
+    if not isinstance(modes, dict):
+        raise ValueError("preference sections must be JSON objects")
+    for lane, mode in modes.items():
+        if mode not in ("convo", "oneshot"):
+            raise ValueError(f"{lane} last launched mode must be convo or oneshot")
+        last[f"{lane}:mode"] = mode
     return effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry
 
 
@@ -359,6 +368,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
         state.last_launched_tier = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
+        state.last_launched_mode = {k[:-5]: v for k, v in last.items() if k.endswith(":mode")}
         state.temperature.update(temperature)
         state.intercept_agents = intercept_agents
         state.memguard.update(memguard)
@@ -477,6 +487,9 @@ def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinkin
     tiers = {k[:-5]: v for k, v in last.items() if k.endswith(":tier")}
     if tiers:
         doc["last_launched_tier"] = tiers
+    modes = {k[:-5]: v for k, v in last.items() if k.endswith(":mode")}
+    if modes:
+        doc["last_launched_mode"] = modes
     if memguard:
         doc["memguard"] = memguard
     if thinking:
@@ -609,13 +622,16 @@ def memguard_env(state: State) -> dict:
 
 
 def save_last_launched(config_dir: Path | str, lane: str, alias: str,
-                       tier: str | None = None) -> str | None:
+                       tier: str | None = None, mode: str | None = None) -> str | None:
     """Record the alias a lane last STARTED (child spawned), never a mere selection.
 
-    `tier` (remote lane) is stored beside it; None clears a stale tier from an older alias."""
+    `tier` (remote lane) and `mode` (lowkey: convo|oneshot, 0.56.13) are stored beside it as
+    "<lane>:tier" / "<lane>:mode" keys inside the last_launched section; None clears a stale one."""
     _validate_last_launched(lane, alias)
     if tier is not None and tier not in TIERS:
         raise ValueError(f"{lane} last launched tier is not valid")
+    if mode is not None and mode not in ("convo", "oneshot"):
+        raise ValueError(f"{lane} last launched mode must be convo or oneshot")
 
     def mutate(_effort, _limiter, last, _temperature):
         last[lane] = alias
@@ -623,6 +639,10 @@ def save_last_launched(config_dir: Path | str, lane: str, alias: str,
             last.pop(f"{lane}:tier", None)
         else:
             last[f"{lane}:tier"] = tier
+        if mode is None:
+            last.pop(f"{lane}:mode", None)
+        else:
+            last[f"{lane}:mode"] = mode
     return _update(config_dir, mutate)
 
 

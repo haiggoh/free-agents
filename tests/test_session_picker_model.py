@@ -548,7 +548,7 @@ class GroupingTests(unittest.TestCase):
 
     def test_launch_remembers_alias_and_tier(self):
         saved = []
-        s = m.Settings(on_last_launched=lambda lane, alias, tier: saved.append((lane, alias, tier)))
+        s = m.Settings(on_last_launched=lambda lane, alias, tier, mode=None: saved.append((lane, alias, tier)))  # 0.56.13: 4-arg callback
         lane = m.RemoteScreen(s, remote_agents(), owner=m.DIRECT_ROOT)
         lane.accordion.select("cerebras-oss")
         lane.activate_selected()
@@ -885,9 +885,51 @@ class LowkeyTests(unittest.TestCase):
         lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
         acts = [a for a in lk.actions() if a.section != "nav"]
         # 0.54.0 (D3): the "f" opt-in Remote-filters toggle joins the model settings group
-        self.assertEqual([a.key for a in acts], ["c", "m", "p", "g", "s", "e", "o", "j", "f"])  # 0.56.5: shared e/o/j template order
+        self.assertEqual([a.key for a in acts], ["g", "c", "p", "m", "s", "e", "o", "j", "f"])  # 0.56.13: Go-launch-last first, then per-mode starts
         self.assertNotIn("settings", {a.section for a in lk.actions()},
                          "the advanced group is dropped entirely in 0.50.0")
+
+
+class LowkeyModeActionTests(unittest.TestCase):
+    def test_go_launch_last_first_and_shows_last_mode(self):
+        # user 2026-11-12: Go-launch-last sits BEFORE Choose model and its label shows whether
+        # the last launch was a convo or a one-shot (the more recent one is remembered).
+        s = m.Settings()
+        s.last_launched_model = {"lowkey": "gemma-4-26b"}
+        s.last_launched_mode = {"lowkey": "oneshot"}
+        lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        acts = [a for a in lk.actions() if a.section != "nav"]
+        self.assertEqual(acts[0].key, "g")
+        self.assertIn("one-shot", str(acts[0].label), acts[0].label)
+        labels = {a.key: str(a.label) for a in acts}
+        self.assertIn("Start convo", labels["p"])
+        self.assertIn("Start one-shot", labels["m"])
+        self.assertNotIn("Mode:", " ".join(labels.values()), "the mode toggle row is gone")
+
+    def test_start_actions_set_mode_and_mode_is_remembered(self):
+        import session_menu_state as sms
+        s = m.Settings()
+        saved = []
+        s.on_last_launched = lambda lane, key, tier, mode: saved.append((lane, key, mode))
+        lk = m.LowkeyScreen(s, local_models(), owner=m.DIRECT_ROOT)
+        self.assertEqual(lk.mode, "convo")                       # default
+        r = lk._start("oneshot")
+        self.assertEqual(lk.mode, "oneshot")
+        self.assertIsInstance(r, m.Nav) and self.assertEqual(r.target, "prompt:oneshot")
+        lk._remember_launch("gemma-4-26b")
+        self.assertEqual(saved[-1], ("lowkey", "gemma-4-26b", "oneshot"))
+        # persisted via the store and restored on the next session
+        import tempfile, json as _json
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Path(td) / "s.json"
+            sms.save_last_launched(cfg, "lowkey", "gemma-4-26b", None, "oneshot")
+            st = sms.load(cfg)
+            self.assertEqual(st.last_launched_mode.get("lowkey"), "oneshot")
+            lk2 = m.LowkeyScreen(m.Settings(last_launched_mode=dict(st.last_launched_mode),
+                                            last_launched_model=dict(st.last_launched)),
+                                 local_models(), owner=m.DIRECT_ROOT)
+            self.assertEqual(lk2.mode, "oneshot", "the more recent mode is remembered")
+            self.assertIn("one-shot", str([a for a in lk2.actions() if a.key == "g"][0].label))
 
 
 class APIKeysHideToggleTests(unittest.TestCase):
