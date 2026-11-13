@@ -13,7 +13,15 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ENV = {"LAUNCH_DIR": str(ROOT / "bin"), "PATH": "/usr/bin:/bin"}
+# 0.57.1 hermetic HOME: the generators read the USER theme store
+# (~/.claude/free-agents/themes/*.json) OVER the shipped config/*.json. This machine's user
+# store renames the remote theme ("free-api-color"), so without a sandboxed HOME the
+# slug assertions read the user's rename and fail on pristine main (measured 2026-11-13).
+# Tests that exercise the user store itself pass their own HOME via env_extra.
+import atexit
+_HERMETIC_HOME = tempfile.mkdtemp(prefix="fa-theme-test-home-")
+atexit.register(lambda: __import__("shutil").rmtree(_HERMETIC_HOME, ignore_errors=True))
+ENV = {"LAUNCH_DIR": str(ROOT / "bin"), "PATH": "/usr/bin:/bin", "HOME": _HERMETIC_HOME}
 
 
 def run(script, *args, env_extra=None):

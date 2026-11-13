@@ -30,6 +30,16 @@
   deselects it on a loaded box (it still runs in full manual runs); pinned by
   `test_heavy_suites_and_modules_are_deselected_by_the_gate_marker`.
 
+### Fixed — theme tests were not hermetic: they read the user's real theme store
+- `test_theme_files.py::test_remote_session_selects_free_lime_with_prefix` and
+  `test_remote_identity_overlay.sh`'s `custom:free-lime` check failed on PRISTINE origin/main
+  (2026-11-13): the generators read `~/.claude/free-agents/themes/remote-theme.json` (the user
+  store) over the shipped `config/remote-theme.json`, and this machine's store renames the
+  remote theme to "free-api-color" — so the assertions saw the user's rename, not the shipped
+  slug. Both tests now run with a sandboxed empty `HOME`, so the shipped config is the source
+  (10/10 and PASS after; the user-store override itself stays covered by
+  `test_theme_colours_persist_in_the_user_store`, which passes its own HOME).
+
 ## [0.57.0] — unreleased
 
 ### Bundled release (user 2026-11-12: bundle the queued fix/feature commits into one release)

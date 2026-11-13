@@ -22,6 +22,14 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 
+# 0.57.1 hermetic HOME: the settings generator reads the USER theme store
+# (~/.claude/free-agents/themes/remote-theme.json) over the shipped config; this machine's
+# store renames the remote theme, which made the "custom:free-lime" check fail on pristine
+# origin/main (measured 2026-11-13). An empty HOME makes config/remote-theme.json (free-lime)
+# the source again.
+HOME=$(mktemp -d)
+trap 'rm -rf "$HOME"' EXIT
+
 check() { # check <actual> <expected> <description>
     if [ "$1" = "$2" ]; then echo "✅ PASS: $3"; PASS=$((PASS+1))
     else echo "❌ FAIL: $3"; echo "     expected: $2"; echo "     actual:   $1"; FAIL=$((FAIL+1)); fi
