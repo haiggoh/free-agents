@@ -1,3 +1,10 @@
+## [0.57.2] — unreleased
+
+### Changed — hue-neutral theme slugs (user 2026-11-13: both lanes' colours are user-editable, so a slug must not name a colour)
+- Theme slugs renamed `local-sky` → `local-color` and `free-lime` → `free-api-color` across the theme configs, both settings generators, both launchers, the identity resolver (`theme_identifier`) and the tests. `local-sky` had already drifted sky blue → fire red → yellow. (0.57.1 was taken by the concurrent backend-pin release, so this ships as 0.57.2.)
+- Launchers migrate once: a hand-edited legacy `~/.claude/themes/local-sky.json` / `free-lime.json` is copied to the new filename (the legacy file is never deleted), so a custom colour survives the rename.
+- Slug-selection tests made hermetic (empty `HOME` → shipped config decides, not the machine's user store); migration source pinned by assertions.
+
 ## [0.57.1] — unreleased
 
 ### Fixed — backend promotion could not pin any version installed since 0.50.0 (resumed session e20f0cad, shipped as 0.57.1)
@@ -45,11 +52,6 @@
   slug. Both tests now run with a sandboxed empty `HOME`, so the shipped config is the source
   (10/10 and PASS after; the user-store override itself stays covered by
   `test_theme_colours_persist_in_the_user_store`, which passes its own HOME).
-
-### Changed — hue-neutral theme slugs (user 2026-11-13: both lanes' colours are user-editable, so a slug must not name a colour)
-- Theme slugs renamed `local-sky` → `local-color` and `free-lime` → `free-api-color` across the theme configs, both settings generators, both launchers, the identity resolver (`theme_identifier`) and the tests. `local-sky` had already drifted sky blue → fire red → yellow.
-- Launchers migrate once: a hand-edited legacy `~/.claude/themes/local-sky.json` / `free-lime.json` is copied to the new filename (the legacy file is never deleted), so a custom colour survives the rename.
-- Slug-selection tests made hermetic (empty `HOME` → shipped config decides, not the machine's user store); migration source pinned by assertions.
 
 ## [0.57.0] — unreleased
 
