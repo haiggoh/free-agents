@@ -18,7 +18,10 @@
   manual/full pytest runs): shell suites `test_la_evict.sh`, `test_la_reboot.sh`,
   `test_rapid_backend.sh` (marked per-param in `test_shell_suites.py`) and the modules
   `test_la_evict_ports.py`, `test_picker_hide_toggle_state_0510.py` (module-level `pytestmark`).
-  These failed in 3 of 4 full gate runs on 2026-11-12 at loadavg 4-7. Pinned by
+  These failed in 3 of 4 full gate runs on 2026-11-12 at loadavg 4-7. Also marked: the two
+  further repeat-flakes of that night — `test_no_real_notifications_0541.py` (module; spawns a
+  nested `pytest -n 2` plus real osascript and mutates the shared shim log) and the single test
+  `test_moespresso_manager.py::test_a_4x_release_never_appears_as_installable`. Pinned by
   `test_heavy_suites_and_modules_are_deselected_by_the_gate_marker` (red before the marks,
   green after, with a planted positive control).
 

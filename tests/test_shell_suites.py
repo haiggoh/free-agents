@@ -26,7 +26,10 @@ SUITES = sorted(str(p) for p in TESTS.glob("test_*.sh"))
 # runs -m 'not load_sensitive' (rtc-ship.json test_cmd), so these MUST carry the mark to be
 # deselected there; test_heavy_suites_and_modules_are_deselected_by_the_gate_marker pins it.
 HEAVY_SUITES = ("test_la_evict.sh", "test_la_reboot.sh", "test_rapid_backend.sh")
-HEAVY_MODULES = ("test_la_evict_ports.py", "test_picker_hide_toggle_state_0510.py")
+HEAVY_MODULES = ("test_la_evict_ports.py", "test_picker_hide_toggle_state_0510.py",
+                 "test_no_real_notifications_0541.py")  # spawns nested xdist + osascript
+# single test inside an otherwise light module (module-level function, so a mark works):
+HEAVY_TESTS = ("test_moespresso_manager.py::test_a_4x_release_never_appears_as_installable",)
 
 
 _PARAMS = [
@@ -54,12 +57,14 @@ def _collect(args, *paths):
 
 
 def test_heavy_suites_and_modules_are_deselected_by_the_gate_marker():
-    heavy_ids = [f"test_shell_suite[{s}]" for s in HEAVY_SUITES] + list(HEAVY_MODULES)
-    deselected = _collect(["-m", "not load_sensitive"], "test_shell_suites.py", *HEAVY_MODULES)
+    heavy_ids = ([f"test_shell_suite[{s}]" for s in HEAVY_SUITES] + list(HEAVY_MODULES)
+                 + list(HEAVY_TESTS))
+    paths = ("test_shell_suites.py", *HEAVY_MODULES, "test_moespresso_manager.py")
+    deselected = _collect(["-m", "not load_sensitive"], *paths)
     for hid in heavy_ids:
         assert hid not in deselected, \
             f"{hid} is still collected under -m 'not load_sensitive' — the ship gate would run it"
-    everything = _collect([], "test_shell_suites.py", *HEAVY_MODULES)
+    everything = _collect([], *paths)
     for hid in heavy_ids:
         assert hid in everything, \
             f"control: {hid} must collect WITHOUT the mark, else the deselect assertion is vacuous"

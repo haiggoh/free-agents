@@ -21,6 +21,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
 import pytest  # noqa: E402
 
+# Spawns a NESTED pytest -n 2 run plus real osascript calls and mutates the shared shim log —
+# flaked in full gate runs on a loaded shared box (2026-11-12). The gate deselects
+# load_sensitive via -m 'not load_sensitive'; the fence still runs in manual/CI runs.
+pytestmark = pytest.mark.load_sensitive
+
 # The session shim dir (conftest) when running under pytest; the manual Step-0.4 shim
 # only for direct script runs outside pytest. The delta assertions read the ACTIVE one.
 SHIM_LOG = (Path(os.environ["FA_NOTIFY_SHIM_DIR"]) / "calls.log"
