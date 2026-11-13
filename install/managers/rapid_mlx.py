@@ -23,7 +23,7 @@ from typing import Any
 from . import register_manager
 from .base import BackendInfo, BackendManager, ManagerError
 from ._common import braille_spinner, venv_health
-from .base import backends_root, discovery_roots, live_config_file, repository_root
+from .base import backends_root, discovery_roots, home_relative_pin, live_config_file, repository_root
 
 PACKAGE = "rapid-mlx"
 PYPI_URL = "https://pypi.org/pypi/rapid-mlx/json"
@@ -37,6 +37,10 @@ SCHEMA = 2
 # carries a backend venv path again.
 PATH_PIN_RE = re.compile(
     r"(?P<prefix>rapid-mlx-)(?P<version>\d+\.\d+\.\d+)(?P<suffix>/bin/(?:rapid-mlx|python))"
+)
+# The value of a pin line — quoted or bare — up to the binary; keeps the quote and any trailing comment.
+PIN_VALUE_RE = re.compile(
+    r"(?P<lead>LA_RAPID_BIN=\"?)[^\"\s]*rapid-mlx-\d+\.\d+\.\d+/bin/(?:rapid-mlx|python)(?P<trail>\"?)"
 )
 RAPID_AUTO_VERSION_RE = re.compile(r"rapid-mlx (?P<version>\d+\.\d+\.\d+)")
 
@@ -243,7 +247,16 @@ print(json.dumps(out, sort_keys=True))
         if not any(PATH_PIN_RE.search(line) for line in text.splitlines()
                    if line.lstrip().startswith("LA_RAPID_BIN=")):
             return (version, (), (live,), "no_explicit_pin")
-        after = PATH_PIN_RE.sub(lambda m: m.group("prefix") + version + m.group("suffix"), text).encode("utf-8")
+        # 0.56.14: write the WHOLE path where the version is installed (XDG root or legacy
+        # ~/.venvs), not just new digits in the old directory — and only on pin lines, never in
+        # comments. Swapping digits pointed every post-0.50.0 install at a ~/.venvs path that
+        # never exists, so promotion always failed validation and rolled back.
+        pin = home_relative_pin(self.resolve_target(version) / "bin" / "rapid-mlx", self.home)
+        lines = text.splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("LA_RAPID_BIN=") and PATH_PIN_RE.search(line):
+                lines[i] = PIN_VALUE_RE.sub(lambda m: m.group("lead") + pin + m.group("trail"), line, count=1)
+        after = "".join(lines).encode("utf-8")
         changes = ((live, before, after, True, live.stat().st_mode & 0o777),) if after != before else ()
         return (version, changes, (live,), "")
 

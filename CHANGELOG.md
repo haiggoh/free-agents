@@ -1,3 +1,28 @@
+## [0.57.1] — unreleased
+
+### Fixed — backend promotion could not pin any version installed since 0.50.0 (resumed session e20f0cad, shipped as 0.57.1)
+- Promoting a Rapid-MLX version failed every time with `pin promotion failed and was rolled
+  back: promoted binary cannot run: broken: missing or not executable:
+  ~/.venvs/rapid-mlx-X/bin/rapid-mlx` (reported 2026-11-13: no promotion had succeeded since
+  1.0.0). Since 0.50.0 new venvs install under `~/.local/share/free-agents/backends`, but the
+  Rapid pin writer swapped only the version digits inside the OLD `~/.venvs/...` path, and the
+  vllm-mlx writer hardcoded `$HOME/.venvs`. The launcher-outcome validator correctly rejected
+  the non-existent path and rolled back, so the live config stayed on the last legacy venv.
+- Both writers now pin the venv where it is actually installed (`resolve_target`: XDG root
+  first, legacy `~/.venvs` still honoured), written home-relative as `"$HOME/…"` via the new
+  shared `base.home_relative_pin`. The Rapid writer now rewrites only `LA_RAPID_BIN=` pin lines,
+  never version paths quoted in comments.
+- The existing promotion tests built every venv under `~/.venvs`, so they never exercised the
+  layout every new install produces. New `tests/test_pin_promotion_xdg_root.py` covers a legacy
+  pin promoted to an XDG-root version (Rapid and vllm-mlx), the `$HOME` spelling, comment lines,
+  and a legacy-root version as the control: red on the old writers with the reported error,
+  green after.
+
+### Fixed — picker loaders render where their content goes, not in the bottom #status row
+- `wip(picker)` from the same resumed session: loading animations moved out of the fixed
+  #status row into the pane whose content is loading; pinned by
+  `tests/test_loader_where_content_goes_05614.py`.
+
 ## [0.57.0] — unreleased
 
 ### Bundled release (user 2026-11-12: bundle the queued fix/feature commits into one release)

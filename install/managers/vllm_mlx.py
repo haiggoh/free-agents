@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .base import BackendInfo, BackendManager, ManagerError
+from .base import BackendInfo, BackendManager, ManagerError, home_relative_pin
 from . import register_manager
 
 PYPI_URL = "https://pypi.org/pypi/vllm-mlx/json"
@@ -46,7 +46,8 @@ class VLLMMLXManager(BackendManager):
 
     def promote_pins(self, version: str, *, dry_run: bool = False) -> dict[str, Any]:
         """Point the vllm-mlx lane (and mlx_lm, which runs from the same venv) at this version:
-        LA_VENV="$HOME/.venvs/vllm-mlx-X/bin" in the LIVE config only. Until 0.49.0 the lane ran
+        LA_VENV="$HOME/<installed root>/vllm-mlx-X/bin" in the LIVE config only (the XDG backends
+        root since 0.50.0, or a legacy ~/.venvs install). Until 0.49.0 the lane ran
         the legacy ~/.local-llm venv and manager installs never took effect (user 2026-10-30)."""
         self.require_version(version)
         if not dry_run:
@@ -55,7 +56,10 @@ class VLLMMLXManager(BackendManager):
             # (after validate, so a dead venv still fails with the rollback error).
             self.normalize_before_pin(version)
         repo = Path(getattr(self, "_repo", None) or Path(__file__).resolve().parents[2])
-        expected = f"{self.home}/.venvs/{self.VENV_PREFIX}-{version}/bin"
+        # 0.56.14: pin the venv WHERE it is installed (XDG root since 0.50.0, or legacy ~/.venvs);
+        # a hardcoded ~/.venvs made every new install unpromotable.
+        bindir = self.resolve_target(version) / "bin"
+        expected = str(bindir)
 
         def validate() -> None:
             probe = subprocess.run(
@@ -69,7 +73,7 @@ class VLLMMLXManager(BackendManager):
             if probe.returncode != 0:
                 raise ManagerError(f"promoted vllm-mlx cannot run: {probe.stderr.strip()}")
 
-        return self.set_live_config_var("LA_VENV", f"$HOME/.venvs/{self.VENV_PREFIX}-{version}/bin",
+        return self.set_live_config_var("LA_VENV", home_relative_pin(bindir, self.home),
                                         purpose=f"promote-vllm-mlx-{version}", validate=validate, dry_run=dry_run)
 
     def version_key(self, value: str) -> tuple[int, int, int, int, str, int]:

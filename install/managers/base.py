@@ -78,6 +78,19 @@ def resolve_venv_dir(prefix: str, version: str, home: Path | None = None) -> Pat
     return None
 
 
+def home_relative_pin(path: Path, home: Path | None = None) -> str:
+    """The live-config spelling of a pinned path: "$HOME/…" when it is under home, else absolute.
+
+    0.56.14: promotion writes the path WHERE the venv is installed (resolve_target), never a
+    guessed root — the rapid writer swapped only the version digits and the vllm writer hardcoded
+    ~/.venvs, so after the 0.50.0 XDG move no new install could be promoted."""
+    home = (home or Path.home())
+    try:
+        return "$HOME/" + Path(path).relative_to(home).as_posix()
+    except ValueError:
+        return str(path)
+
+
 class BackendManager(
     VersionParsingMixin,
     VenvMixin,
