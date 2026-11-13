@@ -47,7 +47,7 @@
 #   effort                 — effort level
 #   thinking_mode          — "on" | "off" | "unknown"
 #   context_policy         — autocompaction setting or "default"
-#   theme_identifier       — "local-sky" | "free-lime" | "cloud-default" | "unknown"
+#   theme_identifier       — "local-color" | "free-api-color" | "cloud-default" | "unknown"
 
 # Load shared emoji constants (single source of truth)
 # shellcheck source=../config/emoji.sh
@@ -160,7 +160,7 @@ case "${ANTHROPIC_BASE_URL:-}" in
     session_kind="local"
     session_emoji="$SESSION_EMOJI_LOCAL"
     evidence="endpoint=localhost:8000-8010 (local MLX)"
-    theme_identifier="local-sky"
+    theme_identifier="local-color"
     # Determine provider/backing from backend
     case "${BACKEND:-}" in
       rapid) provider_display="Local (Rapid-MLX)"; spinner_profile_id="rapid-local" ;;
@@ -196,7 +196,7 @@ case "${ANTHROPIC_BASE_URL:-}" in
     else
       provider_display="Free API (unknown provider)"
     fi
-    theme_identifier="free-lime"
+    theme_identifier="free-api-color"
     spinner_profile_id="free-api"
     ;;
   https://api.anthropic.com*|*anthropic.com*|*llmgw*)

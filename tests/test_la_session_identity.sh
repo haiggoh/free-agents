@@ -100,8 +100,8 @@ if [ $result -eq 0 ]; then
     check $? "session_emoji is $SESSION_EMOJI_LOCAL for local"
 
     theme=$(get_field "$TEST_WORKDIR/identity_local.json" "theme_identifier")
-    [ "$theme" = "local-sky" ]
-    check $? "theme_identifier is 'local-sky'"
+    [ "$theme" = "local-color" ]
+    check $? "theme_identifier is 'local-color'"
 
     evidence=$(get_field "$TEST_WORKDIR/identity_local.json" "evidence")
     [[ "$evidence" == *"localhost:8000-8010"* ]]
@@ -136,8 +136,8 @@ if [ $result -eq 0 ]; then
     check $? "session_emoji is $SESSION_EMOJI_FREE_API for free API"
 
     theme=$(get_field "$TEST_WORKDIR/identity_free_api.json" "theme_identifier")
-    [ "$theme" = "free-lime" ]
-    check $? "theme_identifier is 'free-lime'"
+    [ "$theme" = "free-api-color" ]
+    check $? "theme_identifier is 'free-api-color'"
 
     actual_model=$(get_field "$TEST_WORKDIR/identity_free_api.json" "actual_model_id")
     [ "$actual_model" = "nemotron-3-ultra" ]
@@ -415,17 +415,17 @@ if [ "${CLAUDE_IS_LOCAL:-}" = "1" ]; then
     session_kind="local"
     session_emoji="Local"
     evidence="CLAUDE_IS_LOCAL=1 (MUTATED: trusts leaked flag)"
-    theme_identifier="local-sky"
+    theme_identifier="local-color"
     provider_display="Local (Rapid-MLX)"
     spinner_profile_id="rapid-local"
 else
     case "${ANTHROPIC_BASE_URL:-}" in
       http://localhost:800[0-9]|http://localhost:8010|http://127.0.0.1:800[0-9]|http://127.0.0.1:8010)
         session_kind="local"; session_emoji="Local"; evidence="endpoint=localhost"
-        theme_identifier="local-sky"; provider_display="Local (Rapid-MLX)"; spinner_profile_id="rapid-local" ;;
+        theme_identifier="local-color"; provider_display="Local (Rapid-MLX)"; spinner_profile_id="rapid-local" ;;
       http://localhost:414[1-9]|http://localhost:415[01]|http://127.0.0.1:414[1-9]|http://127.0.0.1:415[01])
         session_kind="free_api"; session_emoji="FreeAPI"; evidence="endpoint=free API"
-        theme_identifier="free-lime"; provider_display="Free API (NVIDIA)"; spinner_profile_id="free-api" ;;
+        theme_identifier="free-api-color"; provider_display="Free API (NVIDIA)"; spinner_profile_id="free-api" ;;
       https://api.anthropic.com*|*anthropic.com*|*llmgw*)
         session_kind="cloud"; session_emoji="Cloud"; evidence="endpoint=Anthropic/gateway"
         theme_identifier="cloud-default"; provider_display="Anthropic (cloud)"; spinner_profile_id="cloud" ;;
@@ -504,10 +504,10 @@ set -uo pipefail
 case "${ANTHROPIC_BASE_URL:-}" in
   http://localhost:800[0-9]|http://localhost:8010|http://127.0.0.1:800[0-9]|http://127.0.0.1:8010)
     session_kind="local"; session_emoji="Local"; evidence="endpoint=localhost"
-    theme_identifier="local-sky"; provider_display="Local (Rapid-MLX)"; spinner_profile_id="rapid-local" ;;
+    theme_identifier="local-color"; provider_display="Local (Rapid-MLX)"; spinner_profile_id="rapid-local" ;;
   http://localhost:414[1-9]|http://localhost:415[01]|http://127.0.0.1:414[1-9]|http://127.0.0.1:415[01])
     session_kind="free_api"; session_emoji="FreeAPI"; evidence="endpoint=free API"
-    theme_identifier="free-lime"; provider_display="Free API (NVIDIA)"; spinner_profile_id="free-api" ;;
+    theme_identifier="free-api-color"; provider_display="Free API (NVIDIA)"; spinner_profile_id="free-api" ;;
   https://api.anthropic.com*|*anthropic.com*|*llmgw*)
     session_kind="cloud"; session_emoji="Cloud"; evidence="endpoint=Anthropic/gateway"
     theme_identifier="cloud-default"; provider_display="Anthropic (cloud)"; spinner_profile_id="cloud" ;;

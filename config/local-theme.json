@@ -1,8 +1,8 @@
 {
-  "_comment": "Yellow theme for LOCAL MLX sessions (user taste call 2026-10-15; sky blue until 0.34.12, fire red 0.34.12-0.35.1, the slug predates the colour). Applied via per-session settings overlay — never written to user's persistent ~/.claude/settings.json.",
+  "_comment": "Yellow theme for LOCAL MLX sessions (user taste call 2026-10-15; sky blue until 0.34.12, fire red 0.34.12-0.35.1). The slug is deliberately hue-neutral (local-color): both lanes' colours are user-editable and hand-edits survive, so a slug must never name a colour. Applied via per-session settings overlay — never written to user's persistent ~/.claude/settings.json.",
   "_contract": "Theme accent color #FFD700 (yellow). Provides session-scoped identity markers for launcher to inject via --settings.",
   "theme": {
-    "name": "local-sky",
+    "name": "local-color",
     "accent_color": "#FFD700",
     "session_emoji": "🦾",
     "identity_label": "Local inference session",

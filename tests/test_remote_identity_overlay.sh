@@ -21,6 +21,8 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
+# Empty HOME for generator calls: the SHIPPED config's slug is under test, not this machine's user store
+EMPTY_HOME=$(mktemp -d); trap 'rm -rf "$EMPTY_HOME"' EXIT
 
 # 0.57.1 hermetic HOME: the settings generator reads the USER theme store
 # (~/.claude/free-agents/themes/remote-theme.json) over the shipped config; this machine's
@@ -81,7 +83,7 @@ overlay() { # overlay <port> [provider]
     local id
     id=$(ANTHROPIC_BASE_URL="http://127.0.0.1:$1" LA_REMOTE_PROVIDER="${2:-}" "$ROOT/bin/la-session-identity.sh" 2>/dev/null)
     # Explicitly unset LA_MOD_ATTACHED to test the default behavior (mod not attached)
-    LAUNCH_DIR="$ROOT/bin" LA_MOD_ATTACHED="" python3 "$ROOT/bin/generate-remote-settings.py" --identity-json "$id"
+    LAUNCH_DIR="$ROOT/bin" LA_MOD_ATTACHED="" HOME="$EMPTY_HOME" python3 "$ROOT/bin/generate-remote-settings.py" --identity-json "$id"
 }
 nv=$(overlay 4142 nvidia)
 check "$(printf '%s' "$nv" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["spinnerVerbs"]["verbs"]))')" "3" \
@@ -99,7 +101,7 @@ empty_ok=$(python3 - "$ROOT" <<'PY'
 import importlib.util, json, subprocess, sys
 root = sys.argv[1]
 ident = json.dumps({"session_kind": "free_api", "provider_display": "Free API (nonexistent)",
-                    "session_emoji": "🌐", "theme_identifier": "free-lime",
+                    "session_emoji": "🌐", "theme_identifier": "free-api-color",
                     "actual_model_id": "unknown", "spinner_profile_id": "free-api"})
 out = subprocess.run([sys.executable, f"{root}/bin/generate-remote-settings.py",
                       "--identity-json", ident], capture_output=True, text=True).stdout
@@ -123,9 +125,9 @@ check "$empty_ok" "ok" "an unresolvable provider never emits mode=replace with z
 #
 # So a remote session must carry theme=<slug>, and the overlay must NOT invent a colour: the
 # accent has to come from remote-theme.json so the data file stays the single source of truth.
-lime=$(overlay 4142 nvidia)
-check "$(printf '%s' "$lime" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("theme","MISSING"))')" \
-      "custom:free-lime" "a remote session selects the custom lime theme as custom:<slug> (a bare slug never loads)"
+rem_theme=$(overlay 4142 nvidia)
+check "$(printf '%s' "$rem_theme" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("theme","MISSING"))')" \
+      "custom:free-api-color" "a remote session selects the custom free-api-color theme as custom:<slug> (a bare slug never loads)"
 
 # The theme FILE must be installable and must carry the accent from the data file, not a
 # hardcoded literal -- assert they agree rather than asserting the colour twice.
@@ -149,7 +151,7 @@ PY2
 )
 check "$theme_ok" "ok" "--emit-theme-file writes a valid theme whose overrides use the data-file accent"
 
-# A cloud session must NOT be themed lime -- same scoping discipline as the spinner verbs.
+# A cloud session must NOT get the remote theme -- same scoping discipline as the spinner verbs.
 check "$(printf '%s' "$cloud" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("theme","none"))')" \
       "none" "a cloud session is never given the remote theme"
 

@@ -249,7 +249,7 @@ def main():
         # loadCustomThemes when the theme setting startsWith("custom:"). A bare slug is an
         # unknown built-in name and falls back silently, which is why no remote session ever
         # showed the lime accent between 0.17.7 and 0.31.0 although the file was installed.
-        theme_slug = theme.get('name') or 'free-lime'
+        theme_slug = theme.get('name') or 'free-api-color'
         settings["theme"] = "custom:" + theme_slug
         picker = model_picker_label(os.environ.get('LA_BANNER_MODEL_LABEL') or actual_model_display)
         if picker:

@@ -692,11 +692,16 @@ if [ "${LA_SESSION_KIND:-}" = "local" ] && [ -x "$LAUNCH_DIR/generate-local-sett
         LA_SETTINGS_LAYERS+=("$SETTINGS_FILE")
     fi
 
-    # THE THEME FILE the overlay's "theme":"custom:local-sky" selects. Same convention as
+    # THE THEME FILE the overlay's "theme":"custom:local-color" selects. Same convention as
     # remote-session.sh: a persistent, user-visible file in ~/.claude/themes, written only
     # when absent or changed, so a hand-edited colour survives until our content differs.
     LA_THEME_DIR="$HOME/.claude/themes"
-    LA_THEME_FILE="$LA_THEME_DIR/local-sky.json"
+    LA_THEME_FILE="$LA_THEME_DIR/local-color.json"
+    # Slug renamed local-sky -> local-color: carry a hand-edited legacy theme file over once,
+    # so a user's custom colour survives the rename (the legacy file is never deleted).
+    if [ ! -f "$LA_THEME_FILE" ] && [ -f "$LA_THEME_DIR/local-sky.json" ]; then
+        cp "$LA_THEME_DIR/local-sky.json" "$LA_THEME_FILE"
+    fi
     if mkdir -p "$LA_THEME_DIR" 2>/dev/null; then
         # shellcheck disable=SC2097,SC2098  # exports the SAME value to the child; intentional
         LA_THEME_NEW="$(fa_identity_run "generate-local-settings.py --emit-theme-file" \

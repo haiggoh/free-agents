@@ -37,10 +37,10 @@ check "$(grep -c -- '(--settings ' "$ROOT/bin/launch-claude-agent.sh" | tr -d ' 
 # merge-settings keeps blind-trust's deny list and the overlay's theme + spinner together.
 T="$(mktemp -d)"
 printf '{"permissions":{"defaultMode":"bypassPermissions","deny":["Bash(rm -rf:*)"]}}' > "$T/base.json"
-printf '{"theme":"custom:local-sky","spinnerVerbs":{"mode":"append","verbs":["Qwening"]},"permissions":{"deny":[]}}' > "$T/over.json"
+printf '{"theme":"custom:local-color","spinnerVerbs":{"mode":"append","verbs":["Qwening"]},"permissions":{"deny":[]}}' > "$T/over.json"
 merged="$(python3 "$ROOT/bin/merge-settings.py" --base "$T/base.json" --overlay "$T/over.json")"
 check "$(printf '%s' "$merged" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["theme"], d["spinnerVerbs"]["mode"], d["permissions"]["defaultMode"], len(d["permissions"]["deny"]))')" \
-      "custom:local-sky append bypassPermissions 1" "merged settings keep theme, spinner, bypass mode and the deny list"
+      "custom:local-color append bypassPermissions 1" "merged settings keep theme, spinner, bypass mode and the deny list"
 rm -f "$T/base.json" "$T/over.json"; rmdir "$T"
 
 echo

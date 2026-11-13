@@ -74,16 +74,22 @@ def test_prompt_outline_is_the_accent_desaturated_at_the_same_lightness():
         assert abs(ah - bh) < 0.02                     # same green / same blue
 
 
-def test_local_session_selects_local_sky_with_prefix():
-    s = json.loads(run("generate-local-settings.py", "--identity-json",
-                       identity("local", actual_model_id="qwen3.8-35b")))
-    assert s["theme"] == "custom:local-sky"
+def test_local_session_selects_local_color_with_prefix():
+    # empty HOME -> the SHIPPED config decides the slug, not this machine's user store
+    with tempfile.TemporaryDirectory() as tmp:
+        s = json.loads(run("generate-local-settings.py", "--identity-json",
+                           identity("local", actual_model_id="qwen3.8-35b"),
+                           env_extra={"HOME": tmp}))
+    assert s["theme"] == "custom:local-color"
 
 
-def test_remote_session_selects_free_lime_with_prefix():
-    s = json.loads(run("generate-remote-settings.py", "--identity-json",
-                       identity("free_api", provider_display="Free API (NVIDIA)")))
-    assert s["theme"] == "custom:free-lime"
+def test_remote_session_selects_free_api_color_with_prefix():
+    # empty HOME -> the SHIPPED config decides the slug, not this machine's user store
+    with tempfile.TemporaryDirectory() as tmp:
+        s = json.loads(run("generate-remote-settings.py", "--identity-json",
+                           identity("free_api", provider_display="Free API (NVIDIA)"),
+                           env_extra={"HOME": tmp}))
+    assert s["theme"] == "custom:free-api-color"
 
 
 def test_theme_colours_persist_in_the_user_store():
@@ -114,9 +120,13 @@ def test_theme_slug_matches_the_file_the_launcher_installs():
     # The launcher writes ~/.claude/themes/<slug>.json; the setting must name that same slug.
     local = json.loads((ROOT / "config" / "local-theme.json").read_text())["theme"]["name"]
     remote = json.loads((ROOT / "config" / "remote-theme.json").read_text())["theme"]["name"]
-    assert (local, remote) == ("local-sky", "free-lime")
+    assert (local, remote) == ("local-color", "free-api-color")
     launcher = (ROOT / "bin" / "launch-claude-agent.sh").read_text()
-    assert "local-sky.json" in launcher
+    assert "local-color.json" in launcher
+    assert "local-sky.json" in launcher        # legacy slug, kept as the one-time migration source
+    remote_launcher = (ROOT / "bin" / "remote-session.sh").read_text()
+    assert "free-api-color.json" in remote_launcher
+    assert "free-lime.json" in remote_launcher  # legacy slug, kept as the one-time migration source
 
 
 def test_gateway_identity_gets_no_theme_and_no_words():

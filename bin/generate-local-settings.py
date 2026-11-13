@@ -111,7 +111,7 @@ def theme_config_path(config_dir, name):
 
 
 def build_theme_file(config_dir):
-    """Custom THEME FILE for ~/.claude/themes/local-sky.json.
+    """Custom THEME FILE for ~/.claude/themes/local-color.json.
 
     Same shape and the same identity-only roles as generate-remote-settings.build_theme_file
     (see its docstring for why semantic colours stay untouched), plus clawd_body, which
@@ -160,7 +160,7 @@ def main():
     parser.add_argument('--output', help='Output file (default: stdout)')
     parser.add_argument('--launch-dir', help='Launch directory (auto-detected)')
     parser.add_argument('--emit-theme-file', action='store_true',
-                        help='Print the custom THEME FILE (for ~/.claude/themes/local-sky.json) '
+                        help='Print the custom THEME FILE (for ~/.claude/themes/local-color.json) '
                              'instead of a session settings overlay, and exit')
     parser.add_argument('--emit-model-words', action='store_true',
                         help='Print the model-punning word pool for this identity as a JSON '
@@ -229,7 +229,7 @@ def main():
         if spinner_verbs:
             settings["spinnerVerbs"] = {"mode": mode, "verbs": spinner_verbs}
         # Custom themes are selected as "custom:<slug>"; a bare slug never loads the file.
-        settings["theme"] = "custom:" + (theme.get('name') or 'local-sky')
+        settings["theme"] = "custom:" + (theme.get('name') or 'local-color')
         picker = model_picker_label(os.environ.get('LA_BANNER_MODEL_LABEL') or actual_model_display)
         if picker:
             settings["modelPicker"] = picker

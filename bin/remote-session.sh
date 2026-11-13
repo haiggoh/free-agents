@@ -2305,7 +2305,12 @@ if [ "${LA_SESSION_KIND:-}" = "free_api" ] && [ -x "$SCRIPT_DIR/generate-remote-
     # Written only when ABSENT or CHANGED, so a user who hand-edits the colour keeps their
     # edit until our content genuinely differs, and repeated launches are a no-op.
     LA_THEME_DIR="$HOME/.claude/themes"
-    LA_THEME_FILE="$LA_THEME_DIR/free-lime.json"
+    LA_THEME_FILE="$LA_THEME_DIR/free-api-color.json"
+    # Slug renamed free-lime -> free-api-color: carry a hand-edited legacy theme file over once,
+    # so a user's custom colour survives the rename (the legacy file is never deleted).
+    if [ ! -f "$LA_THEME_FILE" ] && [ -f "$LA_THEME_DIR/free-lime.json" ]; then
+        cp "$LA_THEME_DIR/free-lime.json" "$LA_THEME_FILE"
+    fi
     if mkdir -p "$LA_THEME_DIR" 2>/dev/null; then
         LA_THEME_NEW="$(fa_identity_run "generate-remote-settings.py --emit-theme-file" \
             env LAUNCH_DIR="$SCRIPT_DIR" "$SCRIPT_DIR/generate-remote-settings.py" --emit-theme-file)"
