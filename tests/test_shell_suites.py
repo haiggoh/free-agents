@@ -25,7 +25,10 @@ SUITES = sorted(str(p) for p in TESTS.glob("test_*.sh"))
 # rapid_backend, la_evict_ports lock, picker right-click-pbcopy — at loadavg 4-7). The gate
 # runs -m 'not load_sensitive' (rtc-ship.json test_cmd), so these MUST carry the mark to be
 # deselected there; test_heavy_suites_and_modules_are_deselected_by_the_gate_marker pins it.
-HEAVY_SUITES = ("test_la_evict.sh", "test_la_reboot.sh", "test_rapid_backend.sh")
+# 0.57.1: test_csl_menu.sh flaked twice in gate runs as subprocess.TimeoutExpired(600s) — the
+# suite passes standalone (75/75, ~8 min) and on pristine origin/main, so it is wall-clock under
+# the gate's 12-way parallel load, not a real failure (measured 2026-11-13 0.57.1 gate).
+HEAVY_SUITES = ("test_la_evict.sh", "test_la_reboot.sh", "test_rapid_backend.sh", "test_csl_menu.sh")
 HEAVY_MODULES = ("test_la_evict_ports.py", "test_picker_hide_toggle_state_0510.py",
                  "test_no_real_notifications_0541.py")  # spawns nested xdist + osascript
 # single test inside an otherwise light module (module-level function, so a mark works):

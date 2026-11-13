@@ -23,6 +23,13 @@
   #status row into the pane whose content is loading; pinned by
   `tests/test_loader_where_content_goes_05614.py`.
 
+### Fixed — a repeat gate flake: test_csl_menu.sh marked load_sensitive
+- The suite passed standalone (75/75) and on pristine origin/main but timed out at the
+  shell-suite wrapper's 600 s under the gate's 12-way parallel load twice on 2026-11-13;
+  it now carries the `load_sensitive` mark like the other repeat flakers, so the ship gate
+  deselects it on a loaded box (it still runs in full manual runs); pinned by
+  `test_heavy_suites_and_modules_are_deselected_by_the_gate_marker`.
+
 ## [0.57.0] — unreleased
 
 ### Bundled release (user 2026-11-12: bundle the queued fix/feature commits into one release)
