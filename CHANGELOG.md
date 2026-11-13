@@ -21,7 +21,11 @@
   These failed in 3 of 4 full gate runs on 2026-11-12 at loadavg 4-7. Also marked: the two
   further repeat-flakes of that night — `test_no_real_notifications_0541.py` (module; spawns a
   nested `pytest -n 2` plus real osascript and mutates the shared shim log) and the single test
-  `test_moespresso_manager.py::test_a_4x_release_never_appears_as_installable`. Pinned by
+  `test_moespresso_manager.py::test_a_4x_release_never_appears_as_installable`.
+  `.rtc/pre-flight.sh` now passes `-m 'not load_sensitive'` to the venv gates too — they list
+  files that CONTAIN load_sensitive tests and flaked without the filter (2026-11-12 litellm +
+  picker pre-flight failures); pinned by `test_preflight_venv_gates_also_deselect_load_sensitive`
+  (red on the old script, green after). Pinned by
   `test_heavy_suites_and_modules_are_deselected_by_the_gate_marker` (red before the marks,
   green after, with a planted positive control).
 

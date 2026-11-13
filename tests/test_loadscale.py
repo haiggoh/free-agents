@@ -103,6 +103,15 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
         self.assertIn("not load_sensitive", cmd.replace('"', "'"),
                       "rtc-ship.json test_cmd must deselect load_sensitive for a loaded gate")
 
+    def test_preflight_venv_gates_also_deselect_load_sensitive(self):
+        # Same waypoint: the venv gates (litellm/picker) run files that CONTAIN load_sensitive
+        # tests; without their own -m filter those marked tests run in the gate and flaked on
+        # the loaded shared box (2026-11-12: litellm contract + picker PTY tests failed the
+        # pre-flight gates while the main gate deselected them).
+        pf = (self.HERE.parent / ".rtc" / "pre-flight.sh").read_text()
+        self.assertIn("not load_sensitive", pf.replace('"', "'"),
+                      ".rtc/pre-flight.sh must deselect load_sensitive like the main gate")
+
     def test_memguard_late_restore_flake_is_marked(self):
         # Flaked in a loaded full-suite run 2026-11-03 (passes alone in 1.7s): marked so the
         # gate deselects exactly this test — NOT the whole module, the rest still gates.

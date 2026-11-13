@@ -68,7 +68,10 @@ run_gate() {  # run_gate <name> <interpreter> <space-separated test files>
   if "$py" -m pytest --help 2>/dev/null | grep -q -- '--timeout=TIMEOUT'; then
     to=(--timeout=900 --timeout-method=thread)
   fi
-  if "$py" -m pytest -q "${t[@]}" -p no:cacheprovider "${to[@]}" </dev/null >"$d/out" 2>&1; then
+  # Same deselection as the main gate (rtc-ship.json test_cmd): the venv gates list files that
+  # CONTAIN load_sensitive tests, and those flaked on the loaded shared box (2026-11-12) —
+  # pass -m 'not load_sensitive' here too. The marker is registered by tests/conftest.py.
+  if "$py" -m pytest -q -m 'not load_sensitive' "${t[@]}" -p no:cacheprovider "${to[@]}" </dev/null >"$d/out" 2>&1; then
     echo "  $name: $(grep -E 'passed|failed|no tests ran' "$d/out" | tail -1)"
     rm -rf "$d"; return 0
   fi
