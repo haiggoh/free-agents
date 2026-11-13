@@ -30,6 +30,12 @@
   deselects it on a loaded box (it still runs in full manual runs); pinned by
   `test_heavy_suites_and_modules_are_deselected_by_the_gate_marker`.
 
+### Fixed — another repeat gate flake: hotswap timeout test marked load_sensitive
+- `test_fa_tls_0540.py::test_hotswap_timeout_says_so_and_names_orphan_pid` failed in 2 of 3
+  gate runs on 2026-11-13 (its 1 s timeout races process spawn under 12-way load) but passes
+  standalone (8/8 full module); now marked `load_sensitive` so the ship gate deselects it on a
+  loaded box while full runs still execute it (verified: 8 passed; 7 passed, 1 deselected).
+
 ### Fixed — theme tests were not hermetic: they read the user's real theme store
 - `test_theme_files.py::test_remote_session_selects_free_lime_with_prefix` and
   `test_remote_identity_overlay.sh`'s `custom:free-lime` check failed on PRISTINE origin/main
