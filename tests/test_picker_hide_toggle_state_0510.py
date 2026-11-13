@@ -8,6 +8,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
+# PTY + pbcopy; the xdist worker crashed on this file under shared-box load (2026-11-12) —
+# the gate deselects load_sensitive via -m 'not load_sensitive'
+pytestmark = pytest.mark.load_sensitive
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from picker_harness import PTYCase, PilotCase  # noqa: E402
 

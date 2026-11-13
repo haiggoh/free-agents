@@ -12,6 +12,7 @@ suite's own output tail.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -19,11 +20,46 @@ import pytest
 TESTS = Path(__file__).resolve().parent
 SUITES = sorted(str(p) for p in TESTS.glob("test_*.sh"))
 
+# Shell suites and modules that drive real processes / ports / PTY / pbcopy and flaked
+# repeatedly in full gate runs on a loaded shared box (2026-11-12: la_evict, la_reboot,
+# rapid_backend, la_evict_ports lock, picker right-click-pbcopy — at loadavg 4-7). The gate
+# runs -m 'not load_sensitive' (rtc-ship.json test_cmd), so these MUST carry the mark to be
+# deselected there; test_heavy_suites_and_modules_are_deselected_by_the_gate_marker pins it.
+HEAVY_SUITES = ("test_la_evict.sh", "test_la_reboot.sh", "test_rapid_backend.sh")
+HEAVY_MODULES = ("test_la_evict_ports.py", "test_picker_hide_toggle_state_0510.py")
 
-@pytest.mark.parametrize("suite", SUITES, ids=lambda s: Path(s).name)
+
+_PARAMS = [
+    pytest.param(s, id=Path(s).name,
+                 marks=pytest.mark.load_sensitive if Path(s).name in HEAVY_SUITES else ())
+    for s in SUITES
+]
+
+
+@pytest.mark.parametrize("suite", _PARAMS)
 def test_shell_suite(suite: str):
     r = subprocess.run(["bash", suite], capture_output=True, text=True, timeout=600)
     assert r.returncode == 0, (
         f"{Path(suite).name} failed:\n"
         f"{r.stdout[-4000:]}\n{r.stderr[-2000:]}"
     )
+
+
+def _collect(args, *paths):
+    r = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",
+                        "-p", "no:cacheprovider", *args, *paths],
+                       capture_output=True, text=True, cwd=TESTS, timeout=180)
+    assert r.returncode == 0, r.stderr[-2000:]
+    return r.stdout
+
+
+def test_heavy_suites_and_modules_are_deselected_by_the_gate_marker():
+    heavy_ids = [f"test_shell_suite[{s}]" for s in HEAVY_SUITES] + list(HEAVY_MODULES)
+    deselected = _collect(["-m", "not load_sensitive"], "test_shell_suites.py", *HEAVY_MODULES)
+    for hid in heavy_ids:
+        assert hid not in deselected, \
+            f"{hid} is still collected under -m 'not load_sensitive' — the ship gate would run it"
+    everything = _collect([], "test_shell_suites.py", *HEAVY_MODULES)
+    for hid in heavy_ids:
+        assert hid in everything, \
+            f"control: {hid} must collect WITHOUT the mark, else the deselect assertion is vacuous"
