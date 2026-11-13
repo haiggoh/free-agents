@@ -37,14 +37,19 @@
   loaded box while full runs still execute it (verified: 8 passed; 7 passed, 1 deselected).
 
 ### Fixed — theme tests were not hermetic: they read the user's real theme store
-- `test_theme_files.py::test_remote_session_selects_free_lime_with_prefix` and
-  `test_remote_identity_overlay.sh`'s `custom:free-lime` check failed on PRISTINE origin/main
+- `test_theme_files.py::test_remote_session_selects_free_api_color_with_prefix` and
+  `test_remote_identity_overlay.sh`'s `custom:<slug>` check failed on PRISTINE origin/main
   (2026-11-13): the generators read `~/.claude/free-agents/themes/remote-theme.json` (the user
   store) over the shipped `config/remote-theme.json`, and this machine's store renames the
   remote theme to "free-api-color" — so the assertions saw the user's rename, not the shipped
   slug. Both tests now run with a sandboxed empty `HOME`, so the shipped config is the source
   (10/10 and PASS after; the user-store override itself stays covered by
   `test_theme_colours_persist_in_the_user_store`, which passes its own HOME).
+
+### Changed — hue-neutral theme slugs (user 2026-11-13: both lanes' colours are user-editable, so a slug must not name a colour)
+- Theme slugs renamed `local-sky` → `local-color` and `free-lime` → `free-api-color` across the theme configs, both settings generators, both launchers, the identity resolver (`theme_identifier`) and the tests. `local-sky` had already drifted sky blue → fire red → yellow.
+- Launchers migrate once: a hand-edited legacy `~/.claude/themes/local-sky.json` / `free-lime.json` is copied to the new filename (the legacy file is never deleted), so a custom colour survives the rename.
+- Slug-selection tests made hermetic (empty `HOME` → shipped config decides, not the machine's user store); migration source pinned by assertions.
 
 ## [0.57.0] — unreleased
 
