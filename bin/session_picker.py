@@ -1578,9 +1578,8 @@ class Picker(App):
             self._loading_frame += 1          # one shared beat, so the two labels stay in step
         if waiting:
             what = "loading versions" if waiting == "versions" else "loading models"
-            self.query_one("#status", Static).update("  " + loading_label(self._loading_frame, what))
-            # The empty-list placeholder plays the same animation while it is the only row
-            # (user 2026-10-28: a static "nothing to show yet" read as stuck).
+            # The loader animates in the list it is filling, never in the bottom #status row
+            # (0.56.14 rule, user 2026-11-13: a bottom-pinned loader is easily overlooked).
             rows = self.query_one("#rows", OptionList)
             if rows.option_count == 1 and getattr(rows.get_option_at_index(0), "id", None) == "empty":
                 rows.replace_option_prompt_at_index(
@@ -1806,14 +1805,15 @@ class Picker(App):
         # The "(nothing to show here yet)" placeholder only makes sense on model-list
         # screens (empty while loading). Plain menus (About, settings sub-screens, …)
         # get no placeholder row at all (user 2026-10-30).
-        if not self.row_ids and isinstance(sm, (m.LocalScreen, m.RemoteScreen, m.LowkeyScreen)):
-            waiting = self._waiting_for()
-            if waiting:
-                # The hourglass plays here too, not only in the status line (2026-10-28).
-                what = "loading versions" if waiting == "versions" else "loading models"
-                rows.add_option(Option(f"  {loading_label(self._loading_frame, what)}", id="empty", disabled=True))
-            else:
-                rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
+        # 0.56.14 rule (user 2026-11-13): a loader sits WHERE the content it loads will appear —
+        # so EVERY screen waiting on a list (versions, download catalog, model lists) animates
+        # here, as the list's first row, and never in the bottom-pinned #status row.
+        waiting = self._waiting_for() if not self.row_ids else None
+        if waiting:
+            what = "loading versions" if waiting == "versions" else "loading models"
+            rows.add_option(Option(f"  {loading_label(self._loading_frame, what)}", id="empty", disabled=True))
+        elif not self.row_ids and isinstance(sm, (m.LocalScreen, m.RemoteScreen, m.LowkeyScreen)):
+            rows.add_option(Option("  (nothing to show here yet)", id="empty", disabled=True))
         target = keep or (f"i:{sm.accordion.selected_id}" if sm.accordion and sm.accordion.selected_id else None)
         if target:
             for idx in range(rows.option_count):
@@ -2038,9 +2038,10 @@ class Picker(App):
             actions_list.highlighted = 0
 
         status = m.status_line(sm)   # single source of truth for the nav line on every screen
+        # While a list loads, #status keeps the nav line: the loader is drawn IN the list (above).
         waiting = self._waiting_for() if hasattr(self, "_loading") else None
         if waiting:
-            status = "  " + loading_label(self._loading_frame, "loading versions" if waiting == "versions" else "loading models")
+            pass
         elif isinstance(sm, m.VersionsScreen) and sm.load_error:
             status = ("  could not load " + ("releases" if sm.OPS[sm.op][1] == "releases"
                                             else f"installed {sm.backend} versions") + ": " + sm.load_error)
