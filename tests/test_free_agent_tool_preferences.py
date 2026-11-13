@@ -146,12 +146,12 @@ class CouncilTests(Base):
 
 
 class FailoverTests(Base):
-    def run_main(self, payload, outcomes):
+    def run_main(self, payload, outcomes, order=(R1, R2, L1)):
         """outcomes: entry id -> (ok, text). Records the order attempts were made in."""
         self.key("gemini")
         self.key("nvidia")
         p = Path(self.tmp.name) / "p.json"
-        p.write_text(json.dumps(prefs(R1, R2, L1)))
+        p.write_text(json.dumps(prefs(*order)))
         env = dict(self.env, FA_DISPATCH_PREFS=str(p))
         tried = []
 
@@ -743,3 +743,32 @@ class ThinkingPolicyTests(Base):
 
 def cmd_effort(cmd):
     return cmd[cmd.index("--reasoning-effort") + 1] if "--reasoning-effort" in cmd else None
+
+
+class AttachmentCompletenessAndLocalStopTests(FailoverTests):
+    """Phase-1 P0 (desktop-migration fleet, 2026-11-13): attachment completeness and
+    the no-remote-after-local-success ladder guarantee."""
+
+    def test_unreadable_attachment_aborts_before_any_dispatch(self):
+        code, tried, out, err = self.run_main(
+            {"prompt": "review", "files": [str(Path(self.tmp.name) / "nope.py")]},
+            {"r1": (True, "ok")})
+        self.assertEqual(code, 2)
+        self.assertEqual(tried, [], "no attempt may run with an unreadable attachment")
+        self.assertIn("nope.py", err)
+        self.assertIn("incomplete attachment", err)
+
+    def test_truncation_is_marked_not_silent(self):
+        f = Path(self.tmp.name) / "big.txt"
+        f.write_text("x" * (fat.MAX_FILE_CHARS + 5000))
+        code, tried, out, err = self.run_main({"prompt": "r", "files": [str(f)]}, {"r1": (True, "ok")})
+        self.assertEqual(code, 0)
+        self.assertIn("TRUNCATED at %d" % fat.MAX_FILE_CHARS, self.prompts[0])
+
+    def test_local_success_stops_the_ladder_no_remote_after(self):
+        code, tried, out, err = self.run_main(
+            {"prompt": "hi"},
+            {"l1": (True, "local answer"), "r1": (True, "remote"), "r2": (True, "remote2")},
+            order=(L1, R1, R2))
+        self.assertEqual(code, 0)
+        self.assertEqual(tried, ["l1"], "a local success must end the ladder — no remote attempt after")

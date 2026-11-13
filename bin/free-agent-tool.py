@@ -692,15 +692,29 @@ def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED,
     return text
 
 
-def attach_files(prompt: str, files) -> str:
+def attach_files(prompt: str, files) -> tuple[str, list[str]]:
+    """Attach file contents to the prompt. Returns (text, unreadable_paths).
+
+    An unreadable file is REPORTED, never silently replaced by a placeholder — the caller
+    aborts, because dispatching without the real content is a silent quality loss
+    (desktop-migration fleet Phase-1 finding, 2026-11-13). Truncation at MAX_FILE_CHARS
+    is marked in the FILE header, not silent."""
     parts = [prompt]
+    missing = []
     for f in files or []:
         try:
-            body = Path(f).expanduser().read_text(errors="replace")[:MAX_FILE_CHARS]
+            # Read at most MAX_FILE_CHARS+1: the cap is enforced on the READ, not by
+            # loading the whole file and slicing (a huge attachment must not spike memory).
+            with open(Path(f).expanduser(), "r", errors="replace") as fh:
+                raw = fh.read(MAX_FILE_CHARS + 1)
         except OSError as err:
-            body = f"(could not read: {err})"
-        parts.append(f"\n--- FILE: {f} ---\n{body}")
-    return "\n".join(parts)
+            missing.append(f"{f} ({err})")
+            continue
+        if len(raw) > MAX_FILE_CHARS:
+            parts.append(f"\n--- FILE: {f} (TRUNCATED at {MAX_FILE_CHARS} chars) ---\n{raw[:MAX_FILE_CHARS]}")
+        else:
+            parts.append(f"\n--- FILE: {f} ---\n{raw}")
+    return "\n".join(parts), missing
 
 
 # Honest-exhaustion policy (cloud-screen plan Task 4): only sent-and-failed requests count;
@@ -911,8 +925,13 @@ def run(input_data, env, out_path=None) -> int:
         print(json.dumps({"error": "prompt is required"}), file=sys.stderr)
         return 1
     description = input_data.get("description", "")
-    full_prompt = attach_files(f"{description}\n\n{prompt}" if description else prompt,
-                               input_data.get("files"))
+    full_prompt, missing_files = attach_files(f"{description}\n\n{prompt}" if description else prompt,
+                                              input_data.get("files"))
+    if missing_files:
+        print(json.dumps({"error": "attached files not readable: " + "; ".join(missing_files)
+                          + " — refusing to dispatch with an incomplete attachment"}),
+              file=sys.stderr)
+        return 2
     prefs = load_preferences(env)
     role, avoid = request_role(input_data), input_data.get("avoid_family")
     families = {e["family"] for e in prefs.get("order", []) if e.get("family")}
@@ -1179,8 +1198,13 @@ def run_background(input_data, env, run_dir, resume=False, extend=None):
             prefs = load_preferences(env)
             policy = resolve_policy(env, prefs)
             description = (input_data or {}).get("description", "")
-            full_prompt = attach_files(f"{description}\n\n{prompt}" if description else prompt,
-                                       (input_data or {}).get("files"))
+            full_prompt, missing_files = attach_files(f"{description}\n\n{prompt}" if description else prompt,
+                                                      (input_data or {}).get("files"))
+            if missing_files:
+                print(json.dumps({"error": "attached files not readable: " + "; ".join(missing_files)
+                                  + " — refusing to dispatch with an incomplete attachment"}),
+                      file=sys.stderr)
+                return 2
             role, avoid = request_role(input_data), (input_data or {}).get("avoid_family")
             order, _role_matched, _family_avoided = degraded_candidates(
                 prefs, env, role=role, avoid_family=avoid)

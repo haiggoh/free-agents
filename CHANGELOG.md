@@ -1,3 +1,14 @@
+## [0.57.1] — 2026-11-13 — attachment completeness (desktop-migration Phase-1 P0)
+
+- **Fixed:** `attach_files` silently embedded `(could not read: …)` for an unreadable
+  attached file and dispatched anyway — the model answered without the real content. It now
+  returns the unreadable paths and BOTH `run()` and the `--background` path abort with exit 2
+  naming every missing file before any attempt is made.
+- **Fixed:** attachment truncation at `MAX_FILE_CHARS` (100k) was silent; the FILE header now
+  carries `(TRUNCATED at 100000 chars)` so the receiver knows the attachment is partial.
+- **Pinned:** a local-route success ends the dispatch ladder — no remote attempt is made after
+  it (structural guarantee, now covered by a test with a local-first preference order).
+
 ## [0.57.0] — unreleased
 
 ### Bundled release (user 2026-11-12: bundle the queued fix/feature commits into one release)
