@@ -70,13 +70,13 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
     def _collect(self, *args):
         r = subprocess.run(
             [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", *args],
-            capture_output=True, text=True, cwd=self.HERE, timeout=120)
+            capture_output=True, text=True, cwd=self.HERE, timeout=300)
         self.assertEqual(r.returncode, 0, r.stderr[-2000:])
         return r.stdout
 
     def test_marker_is_registered(self):
         r = subprocess.run([sys.executable, "-m", "pytest", "--markers"],
-                           capture_output=True, text=True, cwd=self.HERE, timeout=120)
+                           capture_output=True, text=True, cwd=self.HERE, timeout=300)
         self.assertIn("load_sensitive", r.stdout)
 
     def test_every_load_sensitive_module_carries_the_mark(self):

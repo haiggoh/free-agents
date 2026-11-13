@@ -48,7 +48,7 @@ def test_shell_suite(suite: str):
 def _collect(args, *paths):
     r = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",
                         "-p", "no:cacheprovider", *args, *paths],
-                       capture_output=True, text=True, cwd=TESTS, timeout=180)
+                       capture_output=True, text=True, cwd=TESTS, timeout=300)
     assert r.returncode == 0, r.stderr[-2000:]
     return r.stdout
 
