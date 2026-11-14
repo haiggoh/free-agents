@@ -1,3 +1,12 @@
+## [0.57.4] — unreleased
+
+### Fixed — the Clawd mascot lost its eyes in local and free-API sessions (user 2026-11-14)
+- `clawd_background` paints the mascot's eyes, and 0.56.11 had set it to the accent, so the eyes
+  were drawn in the body colour and disappeared. Both `generate-local-settings.py` and
+  `generate-remote-settings.py` now pin it to `#000000`: stock Clawd has dark eyes on both the
+  dark and the light terminal theme (user-checked). Pinned in `tests/test_theme_files.py` and
+  `tests/test_remote_identity_overlay.sh`.
+
 ## [0.57.3] — unreleased
 
 ### Fixed — gate hardening and hygiene (waypoints fa-claude-flag-contract-test, recurring-pty-gate-flakes, fa-load-flaky-gate-tests)

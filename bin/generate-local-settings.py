@@ -124,8 +124,11 @@ def build_theme_file(config_dir):
     border = theme.get('border_color') or accent      # softer prompt outline, same as remote
     overrides = {role: accent for role in (
         "claude", "permission", "planMode", "suggestion", "thinking",
-        "clawd_body", "clawd_background")}   # 0.56.11: background too — else the mascot's
-        # interior line renders in the default grey (a dark line through it on the dark welcome screen)
+        "clawd_body")}
+    # clawd_background paints the mascot's EYES: stock Clawd has dark eyes on both the dark
+    # and the light terminal theme, so pin it black (0.57.4). 0.56.11 set it to the accent,
+    # which made the eyes the body colour — they vanished.
+    overrides["clawd_background"] = "#000000"
     # Shell mode (`!`) gets its OWN derived colour, not the accent: stock Claude Code paints
     # it magenta, and painting it with the accent made shell mode indistinguishable from
     # normal input (user 2026-10-23; the recipe is the theme colour shifted +20 deg, S/V 100%).

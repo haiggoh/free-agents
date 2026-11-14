@@ -143,8 +143,9 @@ border = json.load(open(f"{root}/config/remote-theme.json"))["theme"].get("borde
 borders = {"promptBorder", "promptBorderShimmer"}
 print("ok" if (d.get("base") and ov and "claude" in ov and "clawd_body" in ov
               and all(v == accent for k, v in ov.items()
-                      if k not in borders | {"bashBorder"})
+                      if k not in borders | {"bashBorder", "clawd_background"})
               and all(ov.get(k) == border for k in borders) and border != accent
+              and ov.get("clawd_background") == "#000000"   # 0.57.4: mascot eyes stay dark
               and ov.get("bashBorder") != accent)   # 0.43.1: shell mode's own derived colour
       else f"bad:{out[:120]}")
 PY2
