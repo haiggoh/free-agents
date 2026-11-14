@@ -129,7 +129,7 @@
 
 ### Task 6: Release
 
-- [ ] Re-grep `git grep -n '\.venvs' -- bin config install scripts ':!*.md' ':!tests'` — every remaining hit is a comment, a docstring, or `legacy_venvs_root` (record the list in the CHANGELOG entry).
-- [ ] Bump version surfaces (Global Constraints), CHANGELOG `## [0.58.0]` entry: the four readers, repair re-pin, the stale-pin fallback + warning, the launch offer.
+- [x] Re-grep `git grep -n '\.venvs' -- bin config install scripts ':!*.md' ':!tests'` — every remaining hit is a comment, a docstring, or `legacy_venvs_root` (record the list in the CHANGELOG entry).
+- [x] Bump version surfaces (Global Constraints), CHANGELOG `## [0.58.0]` entry: the four readers, repair re-pin, the stale-pin fallback + warning, the launch offer.
 - [ ] Full gate via rtc-ship (`rtc-ship.json` `test_cmd`), merge to `main`, tag, release; verify with `git ls-remote --tags origin` and `gh api repos/haiggoh/free-agents/contents/.claude-plugin/plugin.json`.
 - [ ] Dogfood through the installed copy: `install/legacy_venv_migration.py --list` lists this machine's legacy venvs (expected: rapid-mlx 0.16.1, 0.16.9, 0.16.10, 1.0.0); launch `csl` and see the offer (do NOT accept on the user's behalf).

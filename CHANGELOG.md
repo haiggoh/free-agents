@@ -1,3 +1,20 @@
+## [0.58.0] — unreleased
+
+### Fixed — every venv reader now scans both roots (user 2026-11-13/14: "any fix must apply to all users, not just me locally")
+- 0.50.0 moved venv WRITES to `$XDG_DATA_HOME/free-agents/backends` and the manager's Python already read both roots, but four readers still scanned only `~/.venvs`: `la_discover_rapid_bin` and `la_backend_repair_hint` (`config/config-lib.sh`), `la-detect-backend.py`, and the readonly inventory (`bin/local-inference-readonly-inventory.zsh`). A 0.50.0+ install was invisible to the launcher, and the repair hint called a new-root binary "not ours". All four now read the XDG root first and legacy `~/.venvs` second — the new `la_backend_roots` in config-lib mirrors `managers.base.discovery_roots` — the new root winning a version tie; managed names only (`<prefix>-<digit…>`), every candidate health-checked as before.
+- Re-grep record (`git grep -n '\.venvs' -- bin config install scripts ':!*.md' ':!tests'`): every remaining hit is a comment, a docstring, the intentional legacy line in `la_backend_roots` / `legacy_venvs_root`, the migration decline text, or the two-root regexes — no old-root-only reader remains. Hits: bin/la-detect-backend.py:135,147 · bin/local-inference-readonly-inventory.zsh:350,357 · bin/session_picker.py:1294 · bin/session_picker_model.py:3033 · config/config-lib.sh:293,299,305,313,332,333,370,372,803,809 · config/config.example.sh:29,33 · install/backend_upgrades.py:377 · install/legacy_venv_migration.py:5,9 · install/managers/base.py:54,62,64,68,73,86,256,269,297.
+
+### Fixed — a moved pinned venv keeps the lane running, with a warning
+- New `la_relocated_pin` (`config/config-lib.sh`): a non-executable pin matching `<root>/<prefix>-<ver>/…` resolves to the SAME `<prefix>-<ver>` under the OTHER root when that copy is healthy. `la_load_config` applies it to `LA_RAPID_BIN` and `LA_VENV`, printing one ⚠️ line on stderr naming the repair command (`--backend <prefix> repair <ver>`). A different version is never substituted; a valid pin is untouched and silent — the lane is never gated to force the user's hand.
+
+### Fixed — repairing a pinned legacy venv re-pins it
+- `repair_version` (`install/managers/base.py`) relocates a legacy venv into the XDG root make-before-break; it now calls `promote_pins(version)` inside the existing try — only when the live config references the relocated venv — and the result gains `"repinned"`. A failed re-pin takes the existing restore path, so the venv AND the pin end up byte-identical. "A repair never promotes" now means: never promotes an UNPINNED venv.
+
+### Added — launch-time offer migrates legacy venvs through the existing upgrade prompt (user: piggyback on the update offer, keep it modular)
+- New `install/legacy_venv_migration.py` is the offer source: one offer per managed legacy-only venv (`--list [--json]`, `--help`), running the backend manager's own `--backend <prefix> repair <ver>` (make-before-break, re-pins a live pin). `backend_upgrades.prompt()` gains `sources=(legacy_venv_migration.offers,)`; migration offers are computed live at prompt time — never stored in `pending`, never touching the network — declined per venv via the new `Upgrade.key` (`migrate:<backend>-<ver>`, existing decline keys unchanged), with their own 📦 header; `UPGRADE_NOTICE` only prints when version upgrades are pending. notify=off / `LA_BACKEND_UPGRADES=0` / non-TTY stay silent; auto-install (`--prompt --yes`) runs migrations too. A version present in BOTH roots gets no offer; unmanaged `~/.venvs/*` entries are never listed, offered or touched.
+
+Tests: `tests/test_two_root_readers_0580.py` (15), `tests/test_repair_repins_0580.py` (3), `tests/test_legacy_venv_migration_0580.py` (7); full gate per `rtc-ship.json` `test_cmd`.
+
 ## [0.57.4] — unreleased
 
 ### Fixed — the Clawd mascot lost its eyes in local and free-API sessions (user 2026-11-14)
