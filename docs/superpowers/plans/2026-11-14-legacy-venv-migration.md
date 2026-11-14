@@ -105,17 +105,17 @@
 - Produces: `Upgrade.key -> str` = `f"migrate:{backend}-{current}"` when `via == "migrate"`, else `backend` (existing decline keys unchanged).
 - Produces: `prompt(..., sources: tuple[Callable[[], list[Upgrade]], ...] = (legacy_venv_migration.offers,))`; migration offers are computed live at prompt time (never stored in `pending`, never need the network), `still_needed` is True for `via == "migrate"` while the legacy dir exists.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - `test_offers_list_only_legacy_only_managed_venvs` (Review Focus 1 + unmanaged dirs).
   - `test_prompt_offers_migration_and_runs_repair_on_yes` (stubbed `ask`/`run_live`; command ends `repair 1.0.0`).
   - `test_declined_migration_is_not_reasked_but_a_new_one_is` (Review Focus 2).
   - `test_migration_header_is_separate_from_the_upgrade_notice`: output contains `in the old location` and does NOT print `UPGRADE_NOTICE` when only migrations are pending.
   - `test_notify_off_prints_nothing` (Review Focus 5).
   - `test_module_help_runs`: `legacy_venv_migration.py --help` exits 0 and names `--list`.
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement**. Migration header copy: `📦 {n} backend venv(s) are in the old location ~/.venvs. Migrating rebuilds each in ~/.local/share/free-agents/backends and moves its pin; until then they keep working with a warning.` Question: `Migrate {backend} {ver} to the new location?  runs: … repair {ver}  [Y/n] `. Decline message: `skipped — keeps working from ~/.venvs; migrate later from the backend manager (Repair).` Auto-install mode runs migrations too (repair is make-before-break). `bin/csl` needs no change (same call).
-- [ ] **Step 4: Run** new file + `tests/test_backend_upgrades.py tests/test_update_check.py` → PASS.
-- [ ] **Step 5: Commit** `feat(launch 0.58.0): offer legacy-venv migration through the upgrade prompt`.
+- [x] **Step 2: Run** → FAIL.
+- [x] **Step 3: Implement**. Migration header copy: `📦 {n} backend venv(s) are in the old location ~/.venvs. Migrating rebuilds each in ~/.local/share/free-agents/backends and moves its pin; until then they keep working with a warning.` Question: `Migrate {backend} {ver} to the new location?  runs: … repair {ver}  [Y/n] `. Decline message: `skipped — keeps working from ~/.venvs; migrate later from the backend manager (Repair).` Auto-install mode runs migrations too (repair is make-before-break). `bin/csl` needs no change (same call).
+- [x] **Step 4: Run** new file + `tests/test_backend_upgrades.py tests/test_update_check.py` → PASS.
+- [x] **Step 5: Commit** `feat(launch 0.58.0): offer legacy-venv migration through the upgrade prompt`.
 
 ### Task 5: Remaining Python/zsh readers
 

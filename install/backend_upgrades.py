@@ -47,6 +47,8 @@ from typing import Callable
 HERE = Path(__file__).resolve().parent
 MANAGE_BACKEND = HERE / "manage-backend.py"
 
+import legacy_venv_migration  # noqa: E402  (offer source; it imports Upgrade lazily, no cycle)
+
 # Homebrew formulae kept PINNED so a blanket `brew upgrade` (the user's own, or the daily job)
 # cannot move them unchecked; their offer is the one route that moves them, and it unpins,
 # upgrades and re-pins. moespresso@3: a 3.x patch rebuilt on python@3.15 must be held back,
@@ -90,6 +92,16 @@ class Upgrade:
     latest: str
     command: list[str] = field(default_factory=list)
     via: str = ""
+
+    @property
+    def key(self) -> str:
+        """State-file identity of an offer. Migrations are per VENV, not per backend
+        (f"migrate:{backend}-{current}"), so declining one version does not silence the
+        next; every other offer keeps the backend key, so existing decline records and
+        pending entries keep working unchanged."""
+        if self.via == "migrate":
+            return f"migrate:{self.backend}-{self.current}"
+        return self.backend
 
 
 def state_path() -> Path:
@@ -217,6 +229,8 @@ def live_command(u: Upgrade) -> list[str]:
     stored argv names the interpreter and script of whichever tree ran --check, and that tree may
     be gone (measured 2026-10-26: a deleted worktree's manage-backend.py, replayed on every launch).
     State records WHAT to upgrade; WHERE the code lives is resolved at use time."""
+    if u.via == "migrate":
+        return [sys.executable, str(MANAGE_BACKEND), "--backend", u.backend, "repair", u.current]
     if u.via == "versioned venv":
         return [sys.executable, str(MANAGE_BACKEND), "--backend", u.backend, "install", u.latest]
     if u.via == "pipx-python":
@@ -270,6 +284,11 @@ def still_needed(u: Upgrade, run: Runner = _run) -> bool:
     # "Needed" means the installed version is OLDER than the offer -- not merely different. A user
     # who upgraded past the cached offer by hand (litellm 1.106.0 installed, 1.105.1 offered,
     # measured 2026-10-20) must not be asked to "upgrade" to the older release.
+    if u.via == "migrate":
+        # Still needed while the legacy dir exists (the repair relocates it on success).
+        sys.path.insert(0, str(HERE))
+        from managers.base import legacy_venvs_root
+        return (legacy_venvs_root() / f"{u.backend}-{u.current}").is_dir()
     if u.via == "pipx-python":
         py = _pipx_litellm_python(run)
         return bool(py and py > PYTHON_MAX)
@@ -298,7 +317,8 @@ UPGRADE_NOTICE = ("This update may take several minutes, you can skip it now and
 
 
 def prompt(assume_yes: bool, ask: Callable[[str], str] = input, run_live: Callable | None = None,
-           run: Runner = _run, out=sys.stdout) -> int:
+           run: Runner = _run, out=sys.stdout,
+           sources: tuple = (legacy_venv_migration.offers,)) -> int:
     data = load_state()
     if not assume_yes and not data.get("notify", True):
         return 0          # silenced in the backend manager: no prompt, no output
@@ -308,28 +328,57 @@ def prompt(assume_yes: bool, ask: Callable[[str], str] = input, run_live: Callab
     if stale:      # already at (or past) the offered release: drop the offer, do not re-ask next launch
         data["pending"] = [p for p in data.get("pending", []) if p.get("backend") not in stale]
         save_state(data)
-    if not todo:
+    # 0.58.0: legacy-venv migration offers, computed LIVE at prompt time — never stored in
+    # `pending`, never touching the network. Declined per venv via Upgrade.key, so a NEW
+    # legacy venv is still asked after an older one was declined.
+    declined = data.get("declined", {})
+    mig = []
+    for src in sources:
+        for u in src():
+            if u.via == "migrate" and declined.get(u.key) == u.current:
+                continue
+            if still_needed(u, run):
+                mig.append(u)
+    if not todo and not mig:
         return 0
     run_live = run_live or (lambda cmd: subprocess.run(cmd).returncode)
     failed = 0
-    print(f"⬆️  {len(todo)} backend upgrade(s) available.", file=out)
-    print(UPGRADE_NOTICE, file=out)
-    for u in todo:
+    if todo:
+        print(f"⬆️  {len(todo)} backend upgrade(s) available.", file=out)
+        print(UPGRADE_NOTICE, file=out)
+    if mig:
+        print(f"📦 {len(mig)} backend venv(s) are in the old location "
+              f"{legacy_venv_migration.legacy_venvs_root()}. Migrating rebuilds each in "
+              f"{legacy_venv_migration.backends_root()} and moves its pin; "
+              f"until then they keep working with a warning.", file=out)
+    for u in todo + mig:
         cmd = live_command(u)
-        q = f"Upgrade {u.backend} {u.current} -> {u.latest}?  runs: {' '.join(cmd)}  [Y/n] "
+        if u.via == "migrate":
+            q = f"Migrate {u.backend} {u.current} to the new location?  runs: {' '.join(cmd)}  [Y/n] "
+        else:
+            q = f"Upgrade {u.backend} {u.current} -> {u.latest}?  runs: {' '.join(cmd)}  [Y/n] "
         answer = "y" if assume_yes else ask(q).strip().lower()
         if answer in ("", "y", "yes"):
             print(f"→ {' '.join(cmd)}", file=out)
             rc = run_live(cmd)
             if rc == 0:
-                print(f"✅ {u.backend} upgraded to {u.latest}", file=out)
-                data["pending"] = [p for p in data.get("pending", []) if p.get("backend") != u.backend]
+                if u.via == "migrate":
+                    print(f"✅ {u.backend} {u.current} migrated to the new location", file=out)
+                else:
+                    print(f"✅ {u.backend} upgraded to {u.latest}", file=out)
+                    data["pending"] = [p for p in data.get("pending", []) if p.get("backend") != u.backend]
             else:
                 failed += 1
-                print(f"❌ {u.backend} upgrade failed (exit {rc}); it stays pending", file=out)
+                kind = "migration" if u.via == "migrate" else "upgrade"
+                print(f"❌ {u.backend} {kind} failed (exit {rc}); it stays pending", file=out)
         else:
-            data.setdefault("declined", {})[u.backend] = u.latest
-            print(f"skipped {u.backend} {u.latest} — not asked again until a newer release", file=out)
+            if u.via == "migrate":
+                data.setdefault("declined", {})[u.key] = u.current
+                print("skipped — keeps working from ~/.venvs; "
+                      "migrate later from the backend manager (Repair).", file=out)
+            else:
+                data.setdefault("declined", {})[u.backend] = u.latest
+                print(f"skipped {u.backend} {u.latest} — not asked again until a newer release", file=out)
         save_state(data)
     return 1 if failed else 0
 

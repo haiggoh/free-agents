@@ -69,7 +69,12 @@ class Upgrades(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / "state.json"
-        p = mock.patch.dict(os.environ, {"LA_BACKEND_UPGRADES_STATE": str(self.state)})
+        # 0.58.0: prompt() also reads the legacy venv root via HOME (migration offers), so
+        # the fixture must isolate HOME or the real machine's ~/.venvs leaks into offers.
+        self.home = Path(self.tmp.name) / "home"
+        self.home.mkdir()
+        p = mock.patch.dict(os.environ, {"LA_BACKEND_UPGRADES_STATE": str(self.state),
+                                         "HOME": str(self.home)})
         p.start()
         self.addCleanup(p.stop)
 
