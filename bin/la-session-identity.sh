@@ -231,6 +231,44 @@ if [ "$session_kind" = "free_api" ] && [ -n "${LA_REMOTE_MODEL:-}" ]; then
   actual_model_id="${_remote_model_clean}"
 fi
 
+# --- Human display name from the registries (0.58.2, user) -----------------
+# The banner and the statusline show actual_model_display; it reads the REGISTRY name
+# (remote: the roster's display field, e.g. "Mistral Large 4 (Le Chonk)"; local: the
+# catalog's name column) instead of "<alias> → <provider id>". The statusline runs this
+# resolver on EVERY refresh, so the lookup is awk over the generated files, never python.
+# actual_model_id stays the raw id (spinner families and other consumers key on it).
+# No registry row → the label built above stays, so an unregistered model is never blank.
+_la_registry_display() {   # <session_kind> <alias>
+  local cfg="${LA_CONFIG_DIR:-$IDENTITY_DIR/../config}" name="" f
+  [ -n "$2" ] || return 0
+  case "$1" in
+    free_api)
+      # Generated roster rows:   "alias|provider|model_id|display|tier|notes|autocompact"
+      [ -f "$cfg/remote-agents.sh" ] && name=$(awk -v a="$2" '
+        { s = $0; if (sub(/^[ \t]*"/, "", s) == 0) next
+          n = split(s, f, "|"); if (n >= 4 && f[1] == a) { print f[4]; exit } }' \
+        "$cfg/remote-agents.sh" 2>/dev/null)
+      ;;
+    local)
+      # Catalog rows: alias|"<name> — <description>"|repo|rev|dir|…  — the per-user overlay
+      # first, then the shipped catalogs; match the catalog alias (col 1) or the runtime alias
+      # (col 5); the display is the name before " — ".
+      for f in "$cfg/model-catalog.local.psv" "$cfg/model-catalog.psv" \
+               "$cfg"/model-catalog.acquisitions.*.psv; do
+        [ -f "$f" ] || continue
+        name=$(awk -F'|' -v a="$2" '
+          /^[ \t]*#/ { next }
+          NF >= 5 && ($1 == a || $5 == a) { d = $2; sub(/ — .*/, "", d); print d; exit }' \
+          "$f" 2>/dev/null)
+        [ -n "$name" ] && break
+      done
+      ;;
+  esac
+  printf '%s' "$name"
+}
+_la_display="$(_la_registry_display "$session_kind" "${MODEL_ALIAS:-}")"
+[ -n "$_la_display" ] && actual_model_display="$_la_display"
+
 # --- Determine role profile ------------------------------------------------
 role_profile="${LA_CUR_ROLES:-untagged}"
 

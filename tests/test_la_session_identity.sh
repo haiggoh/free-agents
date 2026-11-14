@@ -144,6 +144,44 @@ if [ $result -eq 0 ]; then
     check $? "actual_model_id extracts model from LiteLLM prefix"
 fi
 
+# Test 2b (0.58.2, user): banner + statusline show the REGISTRY display name, not
+# "<alias> → <provider id>". Expected values come from the SOURCE files (remote-registry.json,
+# the local catalog PSV) via python — independent of the resolver's awk over the generated roster.
+echo ""
+echo "--- Test 2b: human display names from the registries ---"
+_cfg="$TEST_DIR/../config"
+_want_remote=$(python3 -c "import json,sys; print(next(e['display'] for e in json.load(open(sys.argv[1]))['entries'] if e['alias']=='nvidia-mistral-large4'))" "$_cfg/remote-registry.json")
+ANTHROPIC_BASE_URL="http://localhost:4141" MODEL_ALIAS="nvidia-mistral-large4" \
+LA_REMOTE_PROVIDER="nvidia" LA_REMOTE_MODEL="nvidia_nim/mistralai/mistral-large-4-1t-a52b" \
+LA_SESSION_LAUNCHER="remote-session.sh" run_resolver "" "$TEST_WORKDIR/identity_display_remote.json"
+_got=$(get_field "$TEST_WORKDIR/identity_display_remote.json" "actual_model_display")
+[ -n "$_want_remote" ] && [ "$_got" = "$_want_remote" ]
+check $? "free_api display is the registry name ('$_want_remote', got '$_got')"
+_got=$(get_field "$TEST_WORKDIR/identity_display_remote.json" "actual_model_id")
+[ "$_got" = "mistralai/mistral-large-4-1t-a52b" ]
+check $? "free_api actual_model_id stays the raw provider id (got '$_got')"
+
+ANTHROPIC_BASE_URL="http://localhost:4141" MODEL_ALIAS="no-such-alias-0582" \
+LA_REMOTE_PROVIDER="nvidia" LA_REMOTE_MODEL="nvidia_nim/vendor/some-model" \
+LA_SESSION_LAUNCHER="remote-session.sh" run_resolver "" "$TEST_WORKDIR/identity_display_unknown.json"
+_got=$(get_field "$TEST_WORKDIR/identity_display_unknown.json" "actual_model_display")
+[ "$_got" = "no-such-alias-0582 → vendor/some-model" ]
+check $? "unregistered free_api alias keeps the old '<alias> → <id>' label (got '$_got')"
+
+# A TRACKED catalog row (the .local.psv overlay is per-machine and gitignored). Column 2 is
+# "<name> — <description>"; the display is the name before the dash.
+_want_local=$(python3 -c "
+import sys
+for l in open(sys.argv[1]):
+    f = l.rstrip('\n').split('|')
+    if not l.startswith('#') and len(f) > 4 and f[0] == 'kat-coder-optiq':
+        print(f[1].split(' — ')[0].strip()); break" "$_cfg/model-catalog.psv")
+ANTHROPIC_BASE_URL="http://localhost:8000" MODEL_ALIAS="kat-coder-optiq" \
+LA_SESSION_LAUNCHER="launch-claude-agent.sh" run_resolver "" "$TEST_WORKDIR/identity_display_local.json"
+_got=$(get_field "$TEST_WORKDIR/identity_display_local.json" "actual_model_display")
+[ -n "$_want_local" ] && [ "$_got" = "$_want_local" ]
+check $? "local display is the catalog name ('$_want_local', got '$_got')"
+
 # Test 3: Ordinary cloud route
 echo ""
 echo "--- Test 3: Ordinary cloud route ---"
@@ -306,8 +344,10 @@ fi
 # Test 9: Local status line uses actual model (integration check)
 echo ""
 echo "--- Test 9: Local identity includes actual model ---"
+# 0.58.2 (user): a CATALOGUED model shows its catalog name instead of "<alias> (<repo>)";
+# the repo suffix stays the fallback for a model with no catalog row.
 ANTHROPIC_BASE_URL="http://localhost:8000" \
-MODEL_ALIAS="qwen38-27b-4bit" \
+MODEL_ALIAS="no-such-local-0582" \
 BACKEND="rapid" \
 LA_CUR_EFFORT="medium" \
 LA_CUR_THINK="false" \
@@ -320,8 +360,14 @@ check $result "Resolver runs with LA_CUR_REPO"
 if [ $result -eq 0 ]; then
     actual_display=$(get_field "$TEST_WORKDIR/identity_actual_model.json" "actual_model_display")
     [[ "$actual_display" == *"Qwen/Qwen3.8-27B-4bit"* ]]
-    check $? "actual_model_display includes HF repo when LA_CUR_REPO set"
+    check $? "uncatalogued model: actual_model_display includes HF repo when LA_CUR_REPO set"
 fi
+ANTHROPIC_BASE_URL="http://localhost:8000" MODEL_ALIAS="qwen38-27b-4bit" BACKEND="rapid" \
+LA_CUR_REPO="Qwen/Qwen3.8-27B-4bit" LA_SESSION_LAUNCHER="launch-claude-agent.sh" \
+run_resolver "" "$TEST_WORKDIR/identity_actual_model2.json"
+actual_display=$(get_field "$TEST_WORKDIR/identity_actual_model2.json" "actual_model_display")
+[[ "$actual_display" != *"("* && "$actual_display" == Qwen3.8* ]]
+check $? "catalogued model: catalog name replaces '<alias> (<repo>)' (got '$actual_display')"
 
 # Test 10: Cloud status line remains unchanged
 # Note: compatibility_model_id comes from MODEL_SPOOF which is only set when MODEL_ALIAS is in registry

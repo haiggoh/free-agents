@@ -1,3 +1,20 @@
+## [0.58.2] — unreleased
+
+### Changed — the startup banner and statusline show the model's registry name (user 2026-11-14)
+- `bin/la-session-identity.sh` now sets `actual_model_display` from the registries: a free-API
+  session shows the roster's `display` (e.g. "Mistral Large 4 (Le Chonk)" instead of
+  "nvidia-mistral-large4 → mistralai/mistral-large-4-1t-a52b"), a local session the catalog's
+  name (the per-user `model-catalog.local.psv` overlay first, then the shipped catalogs; the
+  text before " — "), e.g. "Labs-Diffusion 3B 4-bit" instead of "labsdiff-3b-4bit". Both the
+  welcome banner (via `LA_BANNER_MODEL_LABEL`) and the statusline read that field; the
+  statusline half needs cost-tracker's matching release. `actual_model_id` stays the raw id.
+- A model with no registry row keeps the old label (`<alias> → <id>`, `<alias> (<repo>)`), so
+  nothing is ever blank. The lookup is awk over the generated roster and the catalogs, because
+  the statusline runs the resolver on every refresh (measured median 228 → 238 ms).
+- Tests: `tests/test_la_session_identity.sh` derives the expected names from
+  `remote-registry.json` / the catalog via python (independent of the resolver's awk); 5 of its
+  checks fail against 0.58.1's resolver.
+
 ## [0.58.1] — unreleased
 
 ### Fixed — dark line through the Clawd mascot in local sessions (user 2026-11-14)
