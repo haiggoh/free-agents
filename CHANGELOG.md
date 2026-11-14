@@ -1,3 +1,32 @@
+## [0.58.3] — unreleased
+
+### Changed — your local model catalog now has one home that every copy reads (user 2026-11-14)
+- The local overlay `model-catalog.local.psv` (your own local-model rows) lived in `<copy>/config/`:
+  a git checkout, a plugin-cache VERSION dir or a Homebrew Cellar version. Each copy therefore saw a
+  different file, and an update left it behind in the old version (`scripts/package-release.sh`
+  strips it from releases). It now lives in `~/.claude/free-agents/model-catalog.local.psv`, next to
+  the existing `themes/` store. `$LA_MODEL_CATALOG_LOCAL` points at another file (set but missing is
+  a loud error).
+- **Automatic migration, the same for everyone** (user: "no special treatment" for any machine).
+  `bin/la-catalog-overlay.sh migrate` scans this copy's `config/`, every plugin-cache version
+  (`.../cache/*/free-agents/*/config/`) and every Homebrew Cellar version
+  (`<prefix>/Cellar/free-agents/*/libexec/config/`). If they hold ONE distinct content, it moves to
+  the store and each old path becomes a symlink to it (one notice, once). Different contents, or a
+  store that differs from them: nothing changes and a notice lists every file to merge, on every run
+  until resolved. It runs from `csl` startup (checkout and Homebrew users) and from a new entry in
+  the plugin's SessionStart hooks (every plugin user, from the newly installed copy); silent and
+  idempotent when there is nothing to do.
+- **All six readers** now ask one resolver (`bin/la-catalog-overlay.sh`, or `bin/catalog_overlay.py`
+  in Python): `install/download-models.sh`, `bin/la-model-profile.py`, `bin/la-detect-backend.py`,
+  `bin/la-disk-inventory.sh`, `bin/local-inference-readonly-inventory.zsh` and
+  `bin/la-session-identity.sh`. This closes 0.58.2's gap: the statusline (installed copy) can now
+  name overlay-only local models such as "Labs-Diffusion 3B 4-bit".
+- Tests: `tests/test_catalog_overlay.py` (27; synthetic checkout, plugin-cache and Homebrew
+  layouts, conflicts, a second run, nothing to do, dry run, hook mode, a shell/Python parity
+  matrix, and a structural guard that fails if any other file names the overlay path again), green
+  under bash 5 and macOS `/bin/bash` 3.2; an identity case for a store-only model (fails on 0.58.2);
+  full suite 1567 passed. Plan: `docs/superpowers/plans/2026-11-14-catalog-overlay-user-store.md`.
+
 ## [0.58.2] — unreleased
 
 ### Changed — the startup banner and statusline show the model's registry name (user 2026-11-14)
