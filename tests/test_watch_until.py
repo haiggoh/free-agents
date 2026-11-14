@@ -27,6 +27,14 @@ from pathlib import Path
 
 import pytest
 
+# 0.57.3: the WHOLE module is load-sensitive — every failure it has produced in gate runs
+# (2026-11-13: CliContract::test_help_never_polls bound, RefsChange::test_refs_change_detects_push
+# ls-remote polling, CliContract::test_self_test_exit0 subprocess timeout) is wall-clock under
+# the gate's 12-way load, and each gate run fails a DIFFERENT one. Module-level mark, like the
+# 0.56.13 marks on test_la_evict_ports.py; the gate deselects it on a loaded box, full manual
+# runs still execute everything.
+pytestmark = pytest.mark.load_sensitive
+
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "bin" / "watch-until"
 

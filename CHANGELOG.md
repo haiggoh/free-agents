@@ -19,12 +19,12 @@
   `tests/test_lowkey_spinner_0541.py`.
 - **argv leak removed**: the `launched_argv` debug branch printed `ps aux` (full argv, keys
   included) into test output; now `ps -eo pid,comm` only.
-- **Two more repeat gate flakes marked load_sensitive** (failed 3 gate runs on 2026-11-13,
-  pass standalone at low load): `test_offload_nudge_single_source_0540.py::
-  test_no_model_names_in_routing_block` (the `--list` subprocess races shared-box load) and
-  `test_watch_until.py::RefsChange::test_refs_change_detects_push` (ls-remote polling). Both
-  deselect under the gate's `-m 'not load_sensitive'` (verified: 20 passed, 2 deselected) and
-  still run in full manual runs.
+- **More repeat gate flakes marked load_sensitive** (each failed a different gate run on
+  2026-11-13, all wall-clock under the gate's 12-way load): `test_offload_nudge_single_source_
+  0540.py::test_no_model_names_in_routing_block` and the WHOLE `test_watch_until.py` module
+  (module-level `pytestmark` — CliContract help/self-test subprocess bounds and
+  RefsChange ls-remote polling all timed out under load). All deselect under the gate's
+  `-m 'not load_sensitive'` and still run in full manual runs.
 
 ## [0.57.2] — unreleased
 
