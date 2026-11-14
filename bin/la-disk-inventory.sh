@@ -48,8 +48,12 @@ for a in "${LA_ALIASES[@]}"; do
 done
 
 # Catalogs are OPTIONAL here: this tool must still work for someone who never used the downloader.
+# 0.58.3: the local overlay comes from the per-user store (bin/la-catalog-overlay.sh), not this copy.
+# shellcheck source=la-catalog-overlay.sh
+. "$HERE/la-catalog-overlay.sh"
+_overlay="$(la_catalog_overlay_path "$HERE/../config")" || exit 2
 for cat in "$HOME/.claude/scripts/model-catalog.psv" "$HOME/.claude/scripts/image-model-catalog.psv" \
-           "$HERE/../config/model-catalog.psv" "$HERE/../config/model-catalog.local.psv"; do
+           "$HERE/../config/model-catalog.psv" ${_overlay:+"$_overlay"}; do
   [[ -r $cat ]] || continue
   while IFS='|' read -r alias _ _ _ sub _; do
     [[ -n ${alias:-} && $alias != \#* && -n ${sub:-} ]] || continue

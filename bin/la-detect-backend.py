@@ -250,7 +250,11 @@ def _catalog_runtime(folder: Path) -> str | None:
     row for the deepseek coder build has said `MoEspresso>=2.1` since 2026-09-01). Silent when the
     catalog is absent — the verdict must not depend on a file this tool does not own.
     """
-    catalog = Path(__file__).resolve().parents[1] / "config" / "model-catalog.local.psv"
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import catalog_overlay  # 0.58.3: the per-user overlay every copy reads
+    catalog = catalog_overlay.overlay_path(Path(__file__).resolve().parents[1] / "config")
+    if catalog is None:
+        return None
     try:
         for line in catalog.read_text().splitlines():
             fields = line.split("|")

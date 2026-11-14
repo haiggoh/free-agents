@@ -229,12 +229,13 @@ done
 #   1. --catalog PATH (repeatable) or $LA_MODEL_CATALOG (':'-separated) — exact
 #      files, and a missing one is a hard error.
 #   2. Otherwise every file below that exists, in order (base first, then the
-#      gitignored local overlay). Loading several is safe: identical entries fold
+#      user's local overlay). Loading several is safe: identical entries fold
 #      by identity and a genuine alias/subdir conflict still aborts.
 #        $LA_ROOT/config/model-catalog.psv
-#        $LA_ROOT/config/model-catalog.local.psv
 #        <this script's dir>/model-catalog.psv
-#        <this script's dir>/model-catalog.local.psv
+#        the local overlay, resolved ONCE by bin/la-catalog-overlay.sh (0.58.3):
+#          $LA_MODEL_CATALOG_LOCAL, else ~/.claude/free-agents/<overlay>, else the
+#          legacy copy in $LA_ROOT/config/ or <this script's dir>/ — never two of them
 load_catalog_file() {
   local file=$1 alias label repo rev sub size group status include runtime
   local -i lineno=0 loaded=0
@@ -258,11 +259,21 @@ if ((${#CATALOG_OVERRIDE[@]})); then
 elif [[ -n ${LA_MODEL_CATALOG:-} ]]; then
   IFS=':' read -r -a CATALOG_FILES <<<"$LA_MODEL_CATALOG"
 else
+  # 0.58.3: ONE overlay, from the shared resolver (per-user store first). A set-but-missing
+  # LA_MODEL_CATALOG_LOCAL aborts, like a missing --catalog file.
+  OVERLAY_FILE=""
+  if [[ -f $LA_ROOT/bin/la-catalog-overlay.sh ]]; then
+    # shellcheck source=../bin/la-catalog-overlay.sh
+    . "$LA_ROOT/bin/la-catalog-overlay.sh"
+    OVERLAY_FILE="$(la_catalog_overlay_path "$LA_ROOT/config")" || exit 1
+    [[ -n $OVERLAY_FILE ]] || OVERLAY_FILE="$(la_catalog_overlay_path "$SCRIPT_DIR")" || exit 1
+  else
+    printf 'WARNING: %s missing; the local catalog overlay is not loaded.\n' "$LA_ROOT/bin/la-catalog-overlay.sh" >&2
+  fi
   for candidate in \
     "$LA_ROOT/config/model-catalog.psv" \
-    "$LA_ROOT/config/model-catalog.local.psv" \
     "$SCRIPT_DIR/model-catalog.psv" \
-    "$SCRIPT_DIR/model-catalog.local.psv"
+    ${OVERLAY_FILE:+"$OVERLAY_FILE"}
   do
     [[ -r $candidate ]] && CATALOG_FILES+=("$candidate")
   done
@@ -270,9 +281,8 @@ else
     printf 'WARNING: no model catalog found; listing REGISTRY ENTRIES ONLY.\n' >&2
     printf 'WARNING: expected one of these data files:\n' >&2
     printf 'WARNING:   %s\n' "$LA_ROOT/config/model-catalog.psv" \
-      "$LA_ROOT/config/model-catalog.local.psv" \
       "$SCRIPT_DIR/model-catalog.psv" \
-      "$SCRIPT_DIR/model-catalog.local.psv" >&2
+      "your local overlay ($HOME/.claude/free-agents/)" >&2
   fi
 fi
 # Dedupe by REAL path before loading: the same catalog is reachable under several names once the

@@ -438,13 +438,17 @@ column -t -s $'\t' "$packages_tsv" >> "$report" 2>> "$warnings" \
 config_tsv="$output_dir/config-files.tsv"
 print -r -- $'path\ttype\tbytes\tmtime_utc\tsha256_or_status' > "$config_tsv"
 
+# 0.58.3: the local overlay is resolved by the shared helper (per-user store first). This is a
+# zsh diagnostics tool, so it RUNS the bash helper; a bad LA_MODEL_CATALOG_LOCAL is reported on
+# stderr by the helper and the inventory carries on without it.
+overlay_path="$(bash "$repo_root/bin/la-catalog-overlay.sh" path --config-dir "$repo_root/config")"
 config_candidates=(
   "$HOME/.claude/settings.json"
   "$HOME/.claude/settings.local.json"
   "$HOME/.claude/scripts/download-more-models.sh"
   "$HOME/.claude/scripts/download-more-models.zsh"
   "$repo_root/config/model-catalog.psv"
-  "$repo_root/config/model-catalog.local.psv"
+  ${overlay_path:+"$overlay_path"}
   "$repo_root/install/download-models.sh"
   "$repo_root/pyproject.toml"
 )

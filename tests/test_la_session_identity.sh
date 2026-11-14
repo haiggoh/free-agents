@@ -369,6 +369,19 @@ actual_display=$(get_field "$TEST_WORKDIR/identity_actual_model2.json" "actual_m
 [[ "$actual_display" != *"("* && "$actual_display" == Qwen3.8* ]]
 check $? "catalogued model: catalog name replaces '<alias> (<repo>)' (got '$actual_display')"
 
+# 0.58.3: a model only in the PER-USER overlay store resolves from ANY copy (the installed plugin
+# cache has no overlay of its own) — the gap 0.58.2's statusline had for overlay-only models.
+_store_home="$(mktemp -d)"
+mkdir -p "$_store_home/.claude/free-agents"
+printf '%s\n' 'zz-store-only|ZZ Store Model — test row|org/zz|main|zz-store-only-dir' \
+  > "$_store_home/.claude/free-agents/model-catalog.local.psv"
+HOME="$_store_home" ANTHROPIC_BASE_URL="http://localhost:8000" MODEL_ALIAS="zz-store-only-dir" \
+LA_SESSION_LAUNCHER="launch-claude-agent.sh" run_resolver "" "$TEST_WORKDIR/identity_store.json"
+actual_display=$(get_field "$TEST_WORKDIR/identity_store.json" "actual_model_display")
+[ "$actual_display" = "ZZ Store Model" ]
+check $? "overlay-store model resolves to its store name (got '$actual_display')"
+rm -rf "$_store_home"
+
 # Test 10: Cloud status line remains unchanged
 # Note: compatibility_model_id comes from MODEL_SPOOF which is only set when MODEL_ALIAS is in registry
 # For cloud sessions with non-registry aliases, it falls back to "unknown"

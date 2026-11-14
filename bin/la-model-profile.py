@@ -40,9 +40,14 @@ LOCAL_FILES = {
     "environment": CONFIG_DIR / "runtime-environments.local.json",
 }
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import catalog_overlay  # noqa: E402  (0.58.3: the per-user overlay, shared by every copy)
+
+_OVERLAY = catalog_overlay.overlay_path(CONFIG_DIR)   # a bad LA_MODEL_CATALOG_LOCAL raises: loud
+
 CATALOG_FILES = [
     CONFIG_DIR / "model-catalog.psv",
-    CONFIG_DIR / "model-catalog.local.psv",
+    *([_OVERLAY] if _OVERLAY else []),
     CONFIG_DIR / "model-catalog.rapid-next.psv",
     CONFIG_DIR / "model-catalog.qwen38.psv",
     CONFIG_DIR / "model-catalog.acquisitions.rapid.psv",

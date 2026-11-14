@@ -253,7 +253,15 @@ _la_registry_display() {   # <session_kind> <alias>
       # Catalog rows: alias|"<name> — <description>"|repo|rev|dir|…  — the per-user overlay
       # first, then the shipped catalogs; match the catalog alias (col 1) or the runtime alias
       # (col 5); the display is the name before " — ".
-      for f in "$cfg/model-catalog.local.psv" "$cfg/model-catalog.psv" \
+      # 0.58.3: the overlay comes from the shared resolver (per-user store first), SOURCED — no
+      # fork on the statusline path. A bad LA_MODEL_CATALOG_LOCAL prints its error on stderr and
+      # the lookup continues without the overlay: the statusline must never die.
+      local overlay=""
+      # shellcheck source=la-catalog-overlay.sh
+      if [ -f "$IDENTITY_DIR/la-catalog-overlay.sh" ] && . "$IDENTITY_DIR/la-catalog-overlay.sh"; then
+        overlay="$(la_catalog_overlay_path "$cfg")" || overlay=""
+      fi
+      for f in ${overlay:+"$overlay"} "$cfg/model-catalog.psv" \
                "$cfg"/model-catalog.acquisitions.*.psv; do
         [ -f "$f" ] || continue
         name=$(awk -F'|' -v a="$2" '

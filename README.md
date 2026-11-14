@@ -653,7 +653,7 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
   patched `config.json`, an upstream `chat_template.jinja`) for kilobytes instead of duplicating tens
   of gigabytes of weights.
 - **`config/model-catalog.psv`** — the default download list (data, not code); your private one goes
-  in `config/model-catalog.local.psv`.
+  in `~/.claude/free-agents/model-catalog.local.psv` (since 0.58.3; shared by every copy).
 - **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
 - **skills (8)** — two entry points, five that each own one phase of a delegation, and a fallback:
   - `free-agents` — drive local and remote free sessions & dispatch.
@@ -791,10 +791,15 @@ install/download-models.sh --group default            # fetch a whole group
 install/download-models.sh --all --dry-run            # resolve everything, write nothing
 ```
 
-Your own longer list belongs in `config/model-catalog.local.psv` — gitignored, and loaded *in
-addition* to the shipped defaults, so a private roster never has to fork the public one. Point at an
-arbitrary file with `--catalog FILE`, or several with `$LA_MODEL_CATALOG` (`:`-separated); either
-replaces the search entirely.
+Your own longer list belongs in `~/.claude/free-agents/model-catalog.local.psv` — outside every
+install, so the git checkout, the plugin cache and Homebrew all read the same file and an update
+never leaves it behind — and is loaded *in addition* to the shipped defaults, so a private roster
+never has to fork the public one. Since 0.58.3 an existing `config/model-catalog.local.psv` (in a
+checkout, an older plugin-cache version or an older Homebrew version) is moved there automatically
+the next time you start `csl` or a Claude session, with a symlink left at the old path; if several
+copies differ, nothing is moved and you are told which files to merge. `$LA_MODEL_CATALOG_LOCAL`
+points at a different overlay file. Point at an arbitrary catalog with `--catalog FILE`, or several
+with `$LA_MODEL_CATALOG` (`:`-separated); either replaces the search entirely.
 
 Catalog format is eleven `|`-separated fields; `--help` documents each one:
 

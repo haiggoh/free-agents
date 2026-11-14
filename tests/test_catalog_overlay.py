@@ -271,3 +271,49 @@ def test_csl_runs_the_migration_before_dispatch():
     assert i != -1, "bin/csl never runs the overlay migration"
     first_exec = src.find("exec ")
     assert first_exec == -1 or i < first_exec, "the migration must run before csl execs anything"
+
+
+# ---- Task 3: every reader goes through the resolver -------------------------------------------
+
+def test_no_reader_hardcodes_the_overlay_path():
+    """The choke point: only the two helpers may name the overlay file. A reader that builds
+    <copy>/config/model-catalog.local.psv itself is blind to the per-user store again."""
+    allowed = {ROOT / "bin" / "la-catalog-overlay.sh", ROOT / "bin" / "catalog_overlay.py"}
+    scanned, offenders = 0, []
+    for base in ("bin", "install", "config"):
+        for p in (ROOT / base).rglob("*"):
+            if not p.is_file() or p.suffix not in (".sh", ".py", ".zsh", "") or "__pycache__" in p.parts:
+                continue
+            try:
+                text = p.read_text()
+            except (UnicodeDecodeError, OSError):
+                continue
+            scanned += 1
+            if NAME in text and p not in allowed:
+                offenders.append(str(p.relative_to(ROOT)))
+    assert scanned > 50, f"scanned only {scanned} files — the scan itself is broken"
+    assert offenders == [], offenders
+
+
+def test_download_models_lists_store_overlay_once(home, tmp_path):
+    store(home).parent.mkdir(parents=True)
+    store(home).write_text("zz-store-only|ZZ Store Model — x|org/zz|main|zz-store-only-dir\n")
+    r = subprocess.run(["bash", str(ROOT / "install" / "download-models.sh"), "--list"],
+                       env=env_for(home), capture_output=True, text=True, timeout=60)
+    out = r.stdout + r.stderr
+    assert r.returncode == 0, out[-2000:]
+    assert "zz-store-only" in out
+    assert out.count(f"Catalog: {store(home)} ") == 1, out[-2000:]
+
+
+def test_model_profile_reads_store_overlay(home):
+    store(home).parent.mkdir(parents=True)
+    store(home).write_text("zz|ZZ|org/zz|main|zz\n")
+    code = ("import importlib.util, sys\n"
+            "spec = importlib.util.spec_from_file_location('mp', sys.argv[1]); m = importlib.util.module_from_spec(spec)\n"
+            "sys.path.insert(0, sys.argv[2]); spec.loader.exec_module(m)\n"
+            "print('\\n'.join(str(c) for c in m.CATALOG_FILES))\n")
+    r = subprocess.run([sys.executable, "-c", code, str(ROOT / "bin" / "la-model-profile.py"), str(ROOT / "bin")],
+                       env=env_for(home), capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert str(store(home)) in r.stdout.splitlines(), r.stdout
