@@ -1297,7 +1297,9 @@ class Picker(App):
                 t.join(timeout * scale)
                 if t.is_alive():
                     self._bg_stragglers.append(t.name)
-                    print(f"⚠ stop_background: thread {t.name!r} still alive after "
+                    # no emoji literal here: test_no_emoji_literals_in_picker_source scans
+                    # this file's CODE lines and fails on any (emojis live in config/emoji.sh)
+                    print(f"WARNING stop_background: thread {t.name!r} still alive after "
                           f"{timeout * scale:.1f}s (load {load:.1f})", file=sys.stderr)
 
     def _gather_stats_async(self):
