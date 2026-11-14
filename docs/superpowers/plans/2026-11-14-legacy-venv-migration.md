@@ -123,9 +123,9 @@
 - Modify: `bin/la-detect-backend.py:141`, `bin/local-inference-readonly-inventory.zsh:349-355`
 - Test: `tests/test_two_root_readers_0580.py` (`test_detect_backend_sees_new_root_rapid`)
 
-- [ ] **Step 1:** failing test for `la-detect-backend.py` with only a new-root rapid venv.
-- [ ] **Step 2:** run → FAIL. **Step 3:** glob both roots via `managers.base.discovery_roots` (detect) / both dirs (inventory). **Step 4:** run → PASS + `tests/test_detect_backend.py`.
-- [ ] **Step 5: Commit** `fix(detect 0.58.0): backend detection and inventory read both venv roots`.
+- [x] **Step 1:** failing test for `la-detect-backend.py` with only a new-root rapid venv.
+- [x] **Step 2:** run → FAIL. **Step 3:** glob both roots via `managers.base.discovery_roots` (detect) / both dirs (inventory). **Step 4:** run → PASS + `tests/test_detect_backend.py`.
+- [x] **Step 5: Commit** `fix(detect 0.58.0): backend detection and inventory read both venv roots`.
 
 ### Task 6: Release
 

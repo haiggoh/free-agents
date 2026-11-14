@@ -346,12 +346,14 @@ for candidate in \
   "$(command_path python3)" \
   "$(command_path python3.12)" \
   "$HOME/.rapid-mlx/bin/python" \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/free-agents/backends"/rapid-mlx-*/bin/python(N) \
   "$HOME"/.venvs/rapid-mlx-*/bin/python(N); do
   [[ -n "$candidate" && -x "$candidate" ]] || continue
   print -r -- "${candidate:A}" >> "$python_paths_file"
 done
 
 python_search_roots=(
+  "${XDG_DATA_HOME:-$HOME/.local/share}/free-agents/backends"
   "$HOME/.venvs"
   "$HOME/.virtualenvs"
   "$HOME/.local"

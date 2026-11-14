@@ -131,17 +131,27 @@ def _shebang_interpreter(binary: str | None) -> str | None:
 
 
 def _discover_rapid_bin() -> str | None:
-    """Same order as config-lib's la_discover_rapid_bin: brew, PATH, newest ~/.venvs/rapid-mlx-*."""
+    """Same order as config-lib's la_discover_rapid_bin: brew, PATH, then the newest
+    managed venv across BOTH roots (0.58.0: the XDG root first, legacy ~/.venvs second,
+    via managers.base.discovery_roots — the tie keeps the new-root copy because the sort
+    below is stable over a new-root-first input). Managed names only: rapid-mlx-<digit…>."""
     for c in ("/opt/homebrew/bin/rapid-mlx", "/usr/local/bin/rapid-mlx"):
         if os.access(c, os.X_OK):
             return c
     c = shutil.which("rapid-mlx")
     if c:
         return c
-    venvs = sorted(Path.home().glob(".venvs/rapid-mlx-*"),
-                   key=lambda p: [int(x) if x.isdigit() else x
-                                  for x in p.name.removeprefix("rapid-mlx-").replace("-", ".").split(".")],
-                   reverse=True)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "install"))
+    from managers.base import discovery_roots
+    venvs = []
+    for root in discovery_roots():  # (XDG backends root, legacy ~/.venvs) — new first
+        for v in root.glob("rapid-mlx-*"):
+            ver = v.name.removeprefix("rapid-mlx-")
+            if v.is_dir() and not v.is_symlink() and ver[:1].isdigit():
+                venvs.append(v)
+    venvs.sort(key=lambda p: [int(x) if x.isdigit() else x
+                              for x in p.name.removeprefix("rapid-mlx-").replace("-", ".").split(".")],
+               reverse=True)
     for v in venvs:
         b = v / "bin" / "rapid-mlx"
         if os.access(b, os.X_OK):

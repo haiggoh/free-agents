@@ -11,12 +11,14 @@ Tasks 1-2 share. Only managed names count: <prefix>-<X.Y.Z> for rapid-mlx /
 vllm-mlx / litellm — the user's own ~/.venvs/* entries are never listed.
 """
 
+import importlib.util
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -173,6 +175,51 @@ class RelocatedPinTest(unittest.TestCase):
         (rapid, _venv), err = self.run_load(f'LA_RAPID_BIN="{pin}"\n')
         self.assertEqual(rapid, str(pin))
         self.assertEqual(err, "")
+
+
+class DetectBackendTest(unittest.TestCase):
+    """0.58.0 Task 5: bin/la-detect-backend.py discovers rapid venvs in BOTH roots
+    (new XDG root first, legacy ~/.venvs second) via managers.base.discovery_roots."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name) / "home"
+        self.home.mkdir()
+        self.new_root = self.home / XDG_REL
+        self.legacy = self.home / ".venvs"
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("XDG_DATA_HOME", "LA_USER_STATE_DIR", "LA_RAPID_BIN",
+                            "LA_VENV", "_LA_RAPID_SYSTEM_CANDIDATES",
+                            "LA_LIVE_CONFIG_DIR", "LA_CONFIG_DIR", "_LA_LIVE_FOR")}
+        env["HOME"] = str(self.home)
+        env["PATH"] = "/usr/bin:/bin"  # no rapid-mlx on PATH; brew paths absent on CI
+        self.env = env
+        spec = importlib.util.spec_from_file_location(
+            "la_detect_backend", REPO / "bin" / "la-detect-backend.py")
+        assert spec is not None and spec.loader is not None
+        self.detect = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.detect)
+
+    def discover(self):
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            return self.detect._discover_rapid_bin()
+
+    def test_detect_backend_sees_new_root_rapid(self):
+        make_fake_venv(self.new_root, "rapid-mlx-1.0.3", "rapid-mlx")
+        self.assertEqual(self.discover(),
+                         str(self.new_root / "rapid-mlx-1.0.3" / "bin" / "rapid-mlx"))
+
+    def test_detect_backend_still_sees_legacy_root_rapid(self):
+        make_fake_venv(self.legacy, "rapid-mlx-1.0.0", "rapid-mlx")
+        self.assertEqual(self.discover(),
+                         str(self.legacy / "rapid-mlx-1.0.0" / "bin" / "rapid-mlx"))
+
+    def test_detect_backend_prefers_new_root_on_a_version_tie(self):
+        make_fake_venv(self.legacy, "rapid-mlx-1.0.3", "rapid-mlx")
+        make_fake_venv(self.new_root, "rapid-mlx-1.0.3", "rapid-mlx")
+        self.assertEqual(self.discover(),
+                         str(self.new_root / "rapid-mlx-1.0.3" / "bin" / "rapid-mlx"))
 
 
 if __name__ == "__main__":
