@@ -147,6 +147,7 @@ def stub_claude(tmp_path, rc=7):
         "#!/bin/bash\n"
         f"{{ printf 'ARGS'; printf ' [%s]' \"$@\"; echo; echo \"SID=$LA_MEMGUARD_SESSION_ID\"; "
         f"echo \"TMUX=${{TMUX:+yes}}\"; echo \"PWD=$PWD\"; "
+        f"echo \"TP=$TERM_PROGRAM TPV=$TERM_PROGRAM_VERSION\"; "
         f"ls \"$LA_MEMGUARD_STATE_DIR/sessions\"; }} >> {log}\n"
         f"exit {rc}\n")
     (bindir / "claude").chmod(0o755)
@@ -218,7 +219,11 @@ def test_wrapper_tmux_mode_on_a_real_terminal(env, tmp_path):
     """On a tty the wrapper runs claude INSIDE a private tmux session, records the injection target,
     returns claude's status, and leaves no session, socket or record behind."""
     bindir, log = stub_claude(tmp_path)
-    e = dict(env, PATH=f"{bindir}:{env['PATH']}", TERM="xterm-256color")
+    # 0.58.1: the OUTER terminal's identity must reach claude. tmux overwrites TERM_PROGRAM with
+    # "tmux" (even over new-session -e), and Claude Code picks its mascot renderer from it: in
+    # Apple Terminal it needs the classic-eyes renderer, else a dark line runs through Clawd.
+    e = dict(env, PATH=f"{bindir}:{env['PATH']}", TERM="xterm-256color",
+             TERM_PROGRAM="Apple_Terminal", TERM_PROGRAM_VERSION="455.1")
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(tmp_path)
@@ -237,6 +242,7 @@ def test_wrapper_tmux_mode_on_a_real_terminal(env, tmp_path):
     out = log.read_text()
     assert b"RC=7" in buf, buf[-2000:]
     assert "TMUX=yes" in out, out
+    assert "TP=Apple_Terminal TPV=455.1" in out, out
     assert f"PWD={tmp_path}" in out
     assert "ARGS [--model] [a b] [--flag]" in out
     assert records(env) == {}

@@ -1,3 +1,17 @@
+## [0.58.1] — unreleased
+
+### Fixed — dark line through the Clawd mascot in local sessions (user 2026-11-14)
+- Local sessions run claude inside the memory guard's private tmux server, and tmux sets
+  `TERM_PROGRAM=tmux` in the pane (even over `new-session -e`). Claude Code picks its
+  welcome-mascot renderer from the terminal name: in Apple Terminal it uses a classic-eyes
+  renderer, elsewhere one that paints the whole eye row on `clawd_background` — which in Apple
+  Terminal shows the gap between block rows as a dark horizontal line. The tmux runner
+  (`bin/la-memguard-run.sh`) now exports the outer terminal's `TERM_PROGRAM` /
+  `TERM_PROGRAM_VERSION` before starting claude (only when they are set); `TMUX` stays set, so
+  claude's tmux handling is unchanged. Free-API sessions never ran in tmux, which is why only the
+  local lane showed the line (also the real cause behind the 0.56.11 report). Pinned in
+  `tests/test_memguard_registry.py` (PTY + real tmux; red before the fix: `TP=tmux TPV=3.8`).
+
 ## [0.58.0] — unreleased
 
 ### Fixed — every venv reader now scans both roots (user 2026-11-13/14: "any fix must apply to all users, not just me locally")

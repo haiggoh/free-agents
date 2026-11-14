@@ -86,7 +86,14 @@ la_memguard_claude() {
     else
         local runner="$state/tmux/$target.run" status="$state/tmux/$target.status" a
         {
-            printf '#!/bin/bash\ncd %q || exit 1\nclaude' "$PWD"
+            printf '#!/bin/bash\ncd %q || exit 1\n' "$PWD"
+            # 0.58.1: hand claude the OUTER terminal's identity. tmux sets TERM_PROGRAM=tmux in
+            # the pane (even over new-session -e), and Claude Code picks its welcome-mascot
+            # renderer from it — in Apple Terminal the non-Apple renderer draws a dark line
+            # through Clawd. TMUX stays set, so claude's own tmux handling is unaffected.
+            [ -n "${TERM_PROGRAM:-}" ] && printf 'export TERM_PROGRAM=%q\n' "$TERM_PROGRAM"
+            [ -n "${TERM_PROGRAM_VERSION:-}" ] && printf 'export TERM_PROGRAM_VERSION=%q\n' "$TERM_PROGRAM_VERSION"
+            printf 'claude'
             for a in "$@"; do printf ' %q' "$a"; done
             printf '\necho $? > %q\n' "$status"
         } >"$runner"
