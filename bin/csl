@@ -119,6 +119,11 @@ HELP
   esac
 done
 
+# 0.58.3: move an existing local model-catalog overlay to the per-user store, from any install
+# layout (this copy, old plugin-cache or Homebrew versions). Same call as the plugin's
+# SessionStart hook; silent and idempotent when there is nothing to do; never fatal.
+"$CSL_DIR/la-catalog-overlay.sh" migrate || true
+
 if [ "${1:-}" = "roles" ]; then shift; exec "$CSL_DIR/la-roles.sh" "$@"; fi
 if [ "${1:-}" = "setup-remote" ]; then
   shift

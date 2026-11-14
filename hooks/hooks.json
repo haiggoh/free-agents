@@ -16,6 +16,11 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/transcript-identity.py\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/bin/la-catalog-overlay.sh\" migrate --hook",
+            "timeout": 5
           }
         ]
       }
