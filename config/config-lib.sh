@@ -289,12 +289,22 @@ la_backend_bin_health() {
   return 0
 }
 
+# la_backend_roots -> the venv roots scanned for managed installs, NEW root first, one
+# per line (0.58.0): the 0.50.0 XDG root and the legacy shared ~/.venvs, still READ so
+# pre-0.50.0 installs keep working. Mirrors install/managers/base.py discovery_roots();
+# every shell reader goes through this so shell and Python cannot disagree about
+# where venvs live.
+la_backend_roots() {
+  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/free-agents/backends"
+  printf '%s\n' "$HOME/.venvs"
+}
+
 # la_backend_repair_hint <binary> -> the one command that rebuilds a managed venv binary, or a
 # reinstall hint for anything the backend manager does not own.
 la_backend_repair_hint() {
   local b="${1:-}" name ver
-  name="$(printf '%s' "$b" | sed -nE 's#.*/\.venvs/(rapid-mlx|vllm-mlx|litellm)-([0-9][^/]*)/bin/.*#\1#p')"
-  ver="$(printf '%s' "$b" | sed -nE 's#.*/\.venvs/(rapid-mlx|vllm-mlx|litellm)-([0-9][^/]*)/bin/.*#\2#p')"
+  name="$(printf '%s' "$b" | sed -nE 's#.*/(\.venvs|free-agents/backends)/(rapid-mlx|vllm-mlx|litellm)-([0-9][^/]*)/bin/.*#\2#p')"
+  ver="$(printf '%s' "$b" | sed -nE 's#.*/(\.venvs|free-agents/backends)/(rapid-mlx|vllm-mlx|litellm)-([0-9][^/]*)/bin/.*#\3#p')"
   if [ -n "$name" ] && [ -n "$ver" ]; then
     echo "python3 \"${LA_ROOT:-<free-agents>}/install/manage-backend.py\" --backend $name repair $ver"
   else
@@ -322,7 +332,7 @@ la_discover_cuda_bin() {
 # pass la_backend_bin_health: a dead newest venv is skipped, never handed to a launcher.
 # _LA_RAPID_SYSTEM_CANDIDATES overrides the fixed brew paths (tests set it empty).
 la_discover_rapid_bin() {
-  local c
+  local c name root d
   for c in ${_LA_RAPID_SYSTEM_CANDIDATES-/opt/homebrew/bin/rapid-mlx /usr/local/bin/rapid-mlx}; do
     [ -x "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
   done
@@ -330,9 +340,18 @@ la_discover_rapid_bin() {
   [ -n "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
   # Newest venv by version sort, not by mtime: reinstalling an OLD version would otherwise make
   # it look newest. `sort -V` orders 0.12.18 < 0.13.2 correctly, which a lexical sort does not.
-  while IFS= read -r c; do
-    [ -x "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
-  done < <(find "$HOME"/.venvs -maxdepth 2 -name "rapid-mlx-*" -type d 2>/dev/null | sed 's|$|/bin/rapid-mlx|' | sort -V -r)
+  # Both roots, via la_backend_roots (0.58.0): sort the <prefix>-<ver> DIRNAMES — a full-path
+  # sort would hand a version tie to ~/.venvs (reverse-lexicographic), and the tie must go to
+  # the NEW root — then check the roots in la_backend_roots order per version. Managed names
+  # only (`rapid-mlx-[0-9]*`): the user's own ~/.venvs/rapid-mlx-notes is never a candidate.
+  while IFS= read -r name; do
+    while IFS= read -r root; do
+      c="$root/$name/bin/rapid-mlx"
+      [ -x "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
+    done < <(la_backend_roots)
+  done < <( { la_backend_roots | while IFS= read -r root; do
+                find "$root" -maxdepth 2 -name 'rapid-mlx-[0-9]*' -type d 2>/dev/null
+              done; } | while IFS= read -r d; do printf '%s\n' "${d##*/}"; done | sort -V -r -u)
   echo ""
   return 1
 }

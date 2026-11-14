@@ -28,6 +28,7 @@ Background, already established (do NOT re-investigate):
 - Gates: none run on this branch yet.
 - Progress log (append one line per receipt, commit it with that task's commit):
   - 2026-11-14 04:15 — plan committed (5124914); handoff written. Task 1 not started.
+  - 2026-11-14 06:24 — Task 1 complete: `la_backend_roots` + two-root discovery + repair hint across both roots (tests/test_two_root_readers_0580.py 8/8; test_shell_suites -k rapid_backend 1/1; parse-checked /bin/bash 3.2.57). Task 2 not started.
 
 ## 3. The goal, verbatim (user, 2026-11-13/14)
 

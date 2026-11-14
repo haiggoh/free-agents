@@ -43,16 +43,16 @@
 **Interfaces:**
 - Produces: `la_backend_roots` → prints the two roots, new first, one per line (used by Tasks 1-2).
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - `test_discovery_finds_a_new_root_venv`: only `backends/rapid-mlx-1.0.3` exists → `la_discover_rapid_bin` prints its `bin/rapid-mlx`.
   - `test_discovery_prefers_newest_across_roots`: legacy 1.0.0 + new 1.0.3 → prints 1.0.3.
   - `test_discovery_same_version_both_roots_prefers_new_root` (Review Focus 1).
   - `test_repair_hint_names_repair_for_a_new_root_binary`: hint for `…/backends/vllm-mlx-0.6.0/bin/vllm-mlx` contains `--backend vllm-mlx repair 0.6.0`.
   - `test_discovery_ignores_unmanaged_dirs`: `~/.venvs/rapid-mlx-foo` ignored.
-- [ ] **Step 2: Run** `~/.local/bin/pytest -q tests/test_two_root_readers_0580.py` → FAIL (discovery prints "" / hint says "reinstall").
-- [ ] **Step 3: Implement** `la_backend_roots`; discovery collects candidates from both roots, sorts by version (`sort -V -r` on the `<prefix>-<ver>` basename, new root winning ties), health-checks each; hint regex accepts `/(\.venvs|free-agents/backends)/`.
-- [ ] **Step 4: Run** the new file + `tests/test_shell_suites.py -k rapid_backend` → PASS.
-- [ ] **Step 5: Commit** `fix(launcher 0.58.0): discovery and repair hint read both venv roots`.
+- [x] **Step 2: Run** `~/.local/bin/pytest -q tests/test_two_root_readers_0580.py` → FAIL (discovery prints "" / hint says "reinstall").
+- [x] **Step 3: Implement** `la_backend_roots`; discovery collects candidates from both roots, sorts by version (`sort -V -r` on the `<prefix>-<ver>` basename, new root winning ties), health-checks each; hint regex accepts `/(\.venvs|free-agents/backends)/`.
+- [x] **Step 4: Run** the new file + `tests/test_shell_suites.py -k rapid_backend` → PASS.
+- [x] **Step 5: Commit** `fix(launcher 0.58.0): discovery and repair hint read both venv roots`.
 
 ### Task 2: Stale pin → same version from the other root, with a warning
 
