@@ -1,3 +1,25 @@
+## [0.57.3] — unreleased
+
+### Fixed — gate hardening and hygiene (waypoints fa-claude-flag-contract-test, recurring-pty-gate-flakes, fa-load-flaky-gate-tests)
+- **claude_cmd flag contract test** (`tests/test_claude_flag_contract.py`, auto-collected by
+  the rtc-ship gate): every UNGATED `--flag` that `bin/remote-session.sh` appends to
+  `claude_cmd` must be a top-level option line of the installed `claude --help` — the
+  generalisation of the 0.56.12 `--trust-workspace` fix that would have stopped 0.56.8. Flags
+  under a `--help`-grep guard (like `--trust-workspace` itself) are classified gated and only
+  reported. Extractor + help parser are pure functions pinned with a planted bogus flag
+  (mutation red); empty extraction fails; no `claude` on PATH = loud skip, never a silent pass.
+- **PTY teardown race hardened** (recurring-pty-gate-flakes): `stop_background`'s join timeout
+  now scales with the 1-minute load average (same clamp(load/2,1,8) mapping as
+  tests/loadscale) and a thread still alive after the join is reported loudly on stderr and
+  recorded on `_bg_stragglers` — never silently swallowed; `picker_harness.settle()` is
+  load-scaled like the other PTY waits (a fixed 1.5 s cut scenarios off mid-load under gate
+  load, the pass/fail-flip source).
+- **Pyright errors fixed**: `tests/test_remote_session.py` Optional `.group(1)` (now asserts
+  the match), `spec`/`spec.loader` None-guards in `tests/fixtures/spinner_driver_0541.py` and
+  `tests/test_lowkey_spinner_0541.py`.
+- **argv leak removed**: the `launched_argv` debug branch printed `ps aux` (full argv, keys
+  included) into test output; now `ps -eo pid,comm` only.
+
 ## [0.57.2] — unreleased
 
 ### Changed — hue-neutral theme slugs (user 2026-11-13: both lanes' colours are user-editable, so a slug must not name a colour)

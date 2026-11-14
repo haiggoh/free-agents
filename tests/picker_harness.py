@@ -194,13 +194,17 @@ class PilotHelper:
         self.case, self.app, self.pilot = case, app, pilot
 
     async def settle(self, secs=1.5):
-        """Let background inventory loads land (they post back via call_from_thread)."""
+        """Let background inventory loads land (they post back via call_from_thread).
+        0.57.3 (waypoint recurring-pty-gate-flakes): the settle window is load-scaled like
+        the other PTY waits — a fixed 1.5 s under gate load cut scenarios off mid-load and
+        produced the pass/fail flips on pristine main."""
+        secs *= loadscale.current_scale()
         end = time.time() + secs
         while time.time() < end:
             await self.pilot.pause(0.1)
             if not getattr(self.app, "_loading", set()):
                 break
-        await self.pilot.pause(0.2)
+        await self.pilot.pause(0.2 * loadscale.current_scale())
 
     async def press(self, *keys, gap=0.15):
         for k in keys:

@@ -58,6 +58,7 @@ os.environ["LA_REMOTE_REGISTRY_JSON"] = reg_file
 open(os.environ["FA_SPIN_TMP"] + "/driver-marks.txt", "a").write("D3 loading lowkey-cli\n")
 spec = importlib.util.spec_from_file_location(
     "lowkey_cli", os.path.join(os.environ["FA_SPIN_BIN"], "lowkey-cli.py"))
+assert spec is not None and spec.loader is not None, "lowkey-cli.py spec did not resolve"
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 open(os.environ["FA_SPIN_TMP"] + "/driver-marks.txt", "a").write("D4 dispatching\n")

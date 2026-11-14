@@ -97,6 +97,7 @@ class SpinnerPTY(unittest.TestCase):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "lowkey_cli", ROOT / "bin" / "lowkey-cli.py")
+        assert spec is not None and spec.loader is not None, "lowkey-cli.py spec did not resolve"
         lowkey = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(lowkey)
         class FakeStream:

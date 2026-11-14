@@ -1276,13 +1276,29 @@ class Picker(App):
         """0.53.0: signal and join the daemon background threads (About stats, hw detect,
         prefetch, catalog warm-up). Call after run_test() exits, BEFORE any temp-dir cleanup —
         a still-running stats thread calling call_from_thread on a closed loop is what raced
-        the TemporaryDirectory cleanup (Errno 66)."""
+        the TemporaryDirectory cleanup (Errno 66).
+        0.57.3 (waypoint recurring-pty-gate-flakes): the join timeout now scales with the
+        1-minute load average (same mapping as tests/loadscale: clamp(load/2, 1, 8)) — under
+        gate load a fixed 5 s left threads alive, and their late call_from_thread on the
+        closed loop surfaced as the teardown CancelledError flake family. A thread that STILL
+        does not finish is reported loudly on stderr and recorded on _bg_stragglers (never
+        silent): a teardown that leaves a live thread must be visible, not swallowed."""
+        try:
+            load = os.getloadavg()[0]
+            scale = max(1.0, min(8.0, load / 2.0))
+        except (OSError, AttributeError):
+            scale = 1.0
         ev = getattr(self, "_bg_stop", None)
         if ev is not None:
             ev.set()
+        self._bg_stragglers = []
         for t in getattr(self, "_bg_threads", []):
             if t.is_alive():
-                t.join(timeout)
+                t.join(timeout * scale)
+                if t.is_alive():
+                    self._bg_stragglers.append(t.name)
+                    print(f"⚠ stop_background: thread {t.name!r} still alive after "
+                          f"{timeout * scale:.1f}s (load {load:.1f})", file=sys.stderr)
 
     def _gather_stats_async(self):
         """About-screen usage stats, gathered in the background (never blocks the first

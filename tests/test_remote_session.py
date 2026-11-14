@@ -468,7 +468,9 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         if not litellm_py.exists():
             self.skipTest('no pipx litellm venv on this machine')
         text, _ = self._write_cfg(prov='zai', model='glm-5.3')
-        block = re.search(r'^litellm_settings:\n((?:[ #].*\n|\n)*)', text, re.M).group(1)
+        m = re.search(r'^litellm_settings:\n((?:[ #].*\n|\n)*)', text, re.M)
+        assert m is not None, "no litellm_settings block in the generated proxy config"
+        block = m.group(1)
         keys = re.findall(r'^  ([a-z_]+):', block, re.M)
         self.assertIn('use_chat_completions_url_for_anthropic_messages', keys, text)
         r = subprocess.run([str(litellm_py), '-c',
@@ -476,7 +478,9 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                             *keys], text=True, capture_output=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), '', 'litellm_settings keys LiteLLM does not read: ' + r.stdout)
-        router = re.search(r'^router_settings:\n((?:[ #].*\n|\n)*)', text, re.M).group(1)
+        m = re.search(r'^router_settings:\n((?:[ #].*\n|\n)*)', text, re.M)
+        assert m is not None, "no router_settings block in the generated proxy config"
+        router = m.group(1)
         rkeys = re.findall(r'^  ([a-z_]+):', router, re.M)
         self.assertIn('disable_cooldowns', rkeys, 'a cooldown hides the real upstream error')
         r = subprocess.run([str(litellm_py), '-c',
@@ -1191,10 +1195,11 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
             if not capture.exists():
                 # List files in root
                 print(f"Files in root: {list(self.root.iterdir())}")
-                # Check if litellm process is running
+                # Check if litellm process is running — NEVER `ps aux`: argv can carry
+                # keys/tokens and printing it leaks them into the transcript (2026-11-13).
                 import subprocess
-                ps_result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-                print(f"Processes: {ps_result.stdout[:2000]}")
+                ps_result = subprocess.run(['ps', '-eo', 'pid,comm'], capture_output=True, text=True)
+                print(f"Processes (pid,comm only): {ps_result.stdout[:2000]}")
                 # Check if capture file was created but is empty
                 if os.path.exists(capture):
                     print(f"Capture file exists but empty, size: {capture.stat().st_size}")

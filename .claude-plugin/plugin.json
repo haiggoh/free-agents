@@ -1,6 +1,6 @@
 {
   "name": "free-agents",
-  "version": "0.57.2",
+  "version": "0.57.3",
   "description": "📡🦾 Run Claude Code on free inference, on two lanes: free cloud APIs (NVIDIA, Gemini and more) and local MLX models on Apple Silicon. Offload bounded sub-tasks from your paid session to a free model while your capable model keeps driving, or run whole free sessions with `csl` and `csl remote`. Includes a picker for lanes and models, role-based routing, free-tier key setup and a savings ledger.",
   "author": {
     "name": "Heiko Brantsch"
