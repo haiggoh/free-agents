@@ -64,15 +64,15 @@
 - Consumes: `la_backend_roots` (Task 1).
 - Produces: `la_relocated_pin <path>` → if `<path>` is not executable AND matches `<root>/<prefix>-<ver>/<rest>` for a managed prefix, prints the same `<prefix>-<ver>/<rest>` under the OTHER root when that passes `la_backend_bin_health`; prints nothing otherwise. Exit 0 iff it printed.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - `test_moved_pin_resolves_to_same_version_in_new_root_and_warns`: live pin `$HOME/.venvs/rapid-mlx-1.0.0/bin/rapid-mlx`, venv only at `backends/rapid-mlx-1.0.0` → `LA_RAPID_BIN` = new-root path; stderr contains `moved` and `repair 1.0.0`.
   - `test_moved_pin_never_falls_back_to_another_version` (Review Focus 3).
   - `test_moved_la_venv_resolves_the_same_way` (vllm-mlx `LA_VENV=…/bin`).
   - `test_valid_pin_is_untouched_and_silent`.
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** `la_relocated_pin`; after the pin is set, `if ! [ -x "$LA_RAPID_BIN" ] && r=$(la_relocated_pin "$LA_RAPID_BIN"); then warn; LA_RAPID_BIN=$r; fi` (same for `$LA_VENV/vllm-mlx`). Warning text (one line, stderr, ⚠️): `LA_RAPID_BIN points at a moved venv; using the same version at <new>. Fix: <repair hint>` — the hint from `la_backend_repair_hint`.
-- [ ] **Step 4: Run** new file + `tests/test_live_config_promotion.py tests/test_vllm_promote.py` → PASS.
-- [ ] **Step 5: Commit** `feat(launcher 0.58.0): a moved pinned venv keeps the lane running with a warning`.
+- [x] **Step 2: Run** → FAIL.
+- [x] **Step 3: Implement** `la_relocated_pin`; after the pin is set, `if ! [ -x "$LA_RAPID_BIN" ] && r=$(la_relocated_pin "$LA_RAPID_BIN"); then warn; LA_RAPID_BIN=$r; fi` (same for `$LA_VENV/vllm-mlx`). Warning text (one line, stderr, ⚠️): `LA_RAPID_BIN points at a moved venv; using the same version at <new>. Fix: <repair hint>` — the hint from `la_backend_repair_hint`.
+- [x] **Step 4: Run** new file + `tests/test_live_config_promotion.py tests/test_vllm_promote.py` → PASS.
+- [x] **Step 5: Commit** `feat(launcher 0.58.0): a moved pinned venv keeps the lane running with a warning`.
 
 ### Task 3: Repair keeps the live pin valid
 

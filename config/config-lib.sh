@@ -299,6 +299,32 @@ la_backend_roots() {
   printf '%s\n' "$HOME/.venvs"
 }
 
+# la_relocated_pin <path> -> when <path> is a NON-EXECUTABLE managed-venv binary
+# (<root>/<prefix>-<ver>/<rest>), print the SAME <prefix>-<ver>/<rest> under the OTHER
+# root when that copy passes la_backend_bin_health. 0.58.0: migration and manual
+# reinstalls move venvs between the legacy ~/.venvs and the XDG root, which used to
+# leave an explicit pin pointing at a deleted directory and gate the whole lane.
+# A different version is NEVER substituted — the pin names a version on purpose —
+# and nothing is printed (exit 1) unless a replacement was printed; the caller warns.
+la_relocated_pin() {
+  local b="${1:-}" pair name ver rest root cand
+  [ -n "$b" ] || return 1
+  [ -x "$b" ] && return 1
+  pair="$(printf '%s' "$b" | sed -nE 's#.*/(\.venvs|free-agents/backends)/(rapid-mlx|vllm-mlx|litellm)-([0-9][^/]*)/(.+)#\2 \3 \4#p')"
+  [ -n "$pair" ] || return 1
+  name="${pair%% *}"; pair="${pair#* }"
+  ver="${pair%% *}"; rest="${pair#* }"
+  while IFS= read -r root; do
+    case "$b" in "$root"/*) continue ;; esac  # the OTHER root only
+    cand="$root/$name-$ver/$rest"
+    if [ -x "$cand" ] && la_backend_bin_health "$cand" 2>/dev/null; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done < <(la_backend_roots)
+  return 1
+}
+
 # la_backend_repair_hint <binary> -> the one command that rebuilds a managed venv binary, or a
 # reinstall hint for anything the backend manager does not own.
 la_backend_repair_hint() {
@@ -726,7 +752,7 @@ la_get_autocompaction() {
 LA_BIN_ENV_OVERRIDES="LA_RAPID_BIN LA_RAPID_AUTO_BIN LA_OMLX_BIN LA_CUDA_BIN LA_LLAMA_SERVER LA_EXL2_BIN LA_SGLANG_BIN"
 
 la_load_config() {
-  local _la_n _la_v _la_i=0 _la_snap=()
+  local _la_n _la_v _la_i=0 _la_snap=() _la_r
   for _la_n in $LA_BIN_ENV_OVERRIDES; do
     eval "_la_snap[$_la_i]=\"\${$_la_n-}\""; _la_i=$((_la_i + 1))
   done
@@ -759,6 +785,12 @@ la_load_config() {
   # Machine defaults (only set if the config file didn't).
   : "${LA_MODELS_DIR:=$HOME/.models}"
   : "${LA_VENV:=$HOME/.local-llm/bin}"
+  # 0.58.0: same moved-venv rescue for a vllm-mlx LA_VENV pin (binary: $LA_VENV/vllm-mlx).
+  if ! [ -x "$LA_VENV/vllm-mlx" ] &&
+       _la_r="$(la_relocated_pin "$LA_VENV/vllm-mlx")"; then
+    echo "⚠️  LA_VENV points at a moved venv; using the same version at $(dirname "$_la_r"). Fix: $(la_backend_repair_hint "$_la_r")" >&2
+    LA_VENV="$(dirname "$_la_r")"
+  fi
   # Rapid-MLX is the DEFAULT MLX backend (see the backend-vocabulary block above). Set this to
   # `vllm` to send every generic registration back to the incumbent in one line.
   : "${LA_DEFAULT_MLX_BACKEND:=rapid}"
@@ -773,6 +805,14 @@ la_load_config() {
   # rather than reported as the answer, and hotswap refuses to launch if none resolved.
   if [ -z "${LA_RAPID_BIN:-}" ]; then
     LA_RAPID_BIN="$(la_discover_rapid_bin)"
+  fi
+  # 0.58.0: a config pin may point at a venv that MOVED between ~/.venvs and the XDG
+  # root. The same version under the other root keeps the lane running — with a loud
+  # warning naming the real fix, because the lane is never gated to force the hand.
+  if [ -n "${LA_RAPID_BIN:-}" ] && ! [ -x "$LA_RAPID_BIN" ] &&
+       _la_r="$(la_relocated_pin "$LA_RAPID_BIN")"; then
+    echo "⚠️  LA_RAPID_BIN points at a moved venv; using the same version at $_la_r. Fix: $(la_backend_repair_hint "$_la_r")" >&2
+    LA_RAPID_BIN="$_la_r"
   fi
   # CUDA backends (0.49.0 Task 14): an explicit pin in the live config / env always wins
   # (LA_CUDA_BIN, LA_LLAMA_SERVER, LA_EXL2_BIN, LA_SGLANG_BIN); otherwise the newest HEALTHY

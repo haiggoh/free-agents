@@ -46,7 +46,8 @@ class TwoRootReadersTest(unittest.TestCase):
         self.legacy = self.home / ".venvs"
         env = {k: v for k, v in os.environ.items()
                if k not in ("XDG_DATA_HOME", "LA_USER_STATE_DIR", "LA_RAPID_BIN",
-                            "LA_VENV", "_LA_RAPID_SYSTEM_CANDIDATES")}
+                            "LA_VENV", "_LA_RAPID_SYSTEM_CANDIDATES",
+                            "LA_LIVE_CONFIG_DIR", "LA_CONFIG_DIR", "_LA_LIVE_FOR")}
         env["HOME"] = str(self.home)
         env["PATH"] = "/usr/bin:/bin"  # no rapid-mlx on PATH
         env["_LA_RAPID_SYSTEM_CANDIDATES"] = ""  # skip the fixed brew candidates
@@ -102,6 +103,76 @@ class TwoRootReadersTest(unittest.TestCase):
     def test_repair_hint_still_names_repair_for_a_legacy_binary(self):
         r = self.run_lib('la_backend_repair_hint "$HOME/.venvs/rapid-mlx-0.16.1/bin/rapid-mlx"')
         self.assertIn("--backend rapid-mlx repair 0.16.1", r.stdout)
+
+
+class RelocatedPinTest(unittest.TestCase):
+    """0.58.0 Task 2: a pin at a MOVED venv (migration or manual reinstall moved it
+    between ~/.venvs and the XDG root) resolves to the SAME version under the other
+    root with a loud warning — the lane keeps running and the user is never gated.
+    A different version is never substituted, and a valid pin is untouched+silent."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name) / "home"
+        self.home.mkdir()
+        self.new_root = self.home / XDG_REL
+        self.legacy = self.home / ".venvs"
+        live_dir = self.home / ".local" / "share" / "free-agents" / "config"
+        live_dir.mkdir(parents=True)
+        self.live = live_dir / "config.local.sh"
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("XDG_DATA_HOME", "LA_USER_STATE_DIR", "LA_RAPID_BIN",
+                            "LA_VENV", "_LA_RAPID_SYSTEM_CANDIDATES",
+                            "LA_LIVE_CONFIG_DIR", "LA_CONFIG_DIR", "_LA_LIVE_FOR")}
+        env["HOME"] = str(self.home)
+        # bash >=4 required by config-lib's pre-existing associative arrays
+        # (LA_CATALOGUE_*/LA_RETIRED; under /bin/bash 3.2 la_load_config dies at the
+        # derived-catalogue assignment with "value too great for base"). No rapid-mlx
+        # is reachable on this PATH, and every test here sets an explicit pin anyway.
+        env["PATH"] = "/opt/homebrew/bin:/usr/bin:/bin"
+        env["_LA_RAPID_SYSTEM_CANDIDATES"] = ""
+        self.env = env
+
+    def run_load(self, pin_line: str):
+        """Write the live config with one pin line, run la_load_config, return
+        ((LA_RAPID_BIN, LA_VENV), stderr) — stderr carries the loader's warnings."""
+        self.live.write_text("# live\n" + pin_line, encoding="utf-8")
+        r = subprocess.run(
+            ["bash", "-c",
+             'source config/config-lib.sh >/dev/null 2>&1; la_load_config >/dev/null; '
+             'printf "%s" "${LA_RAPID_BIN-}|${LA_VENV-}"'],
+            capture_output=True, text=True, cwd=REPO, env=self.env)
+        self.assertEqual(r.returncode, 0, f"loader failed: {r.stderr}")
+        return tuple(r.stdout.split("|")), r.stderr
+
+    def test_moved_pin_resolves_to_same_version_in_new_root_and_warns(self):
+        make_fake_venv(self.new_root, "rapid-mlx-1.0.0", "rapid-mlx")
+        (rapid, _venv), err = self.run_load('LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-1.0.0/bin/rapid-mlx"\n')
+        self.assertEqual(rapid, str(self.new_root / "rapid-mlx-1.0.0" / "bin" / "rapid-mlx"))
+        self.assertIn("moved", err)
+        self.assertIn("repair 1.0.0", err)
+
+    def test_moved_pin_never_falls_back_to_another_version(self):
+        make_fake_venv(self.new_root, "rapid-mlx-1.0.3", "rapid-mlx")
+        (rapid, _venv), err = self.run_load('LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-1.0.0/bin/rapid-mlx"\n')
+        # Only rapid-mlx-1.0.3 exists in the new root — a DIFFERENT version. The broken
+        # pin is reported as today (value unchanged), never silently replaced by 1.0.3.
+        self.assertEqual(rapid, str(self.legacy / "rapid-mlx-1.0.0" / "bin" / "rapid-mlx"))
+        self.assertNotIn("using the same version", err)
+
+    def test_moved_la_venv_resolves_the_same_way(self):
+        make_fake_venv(self.new_root, "vllm-mlx-0.6.0", "vllm-mlx")
+        (_rapid, venv), err = self.run_load('LA_VENV="$HOME/.venvs/vllm-mlx-0.6.0/bin"\n')
+        self.assertEqual(venv, str(self.new_root / "vllm-mlx-0.6.0" / "bin"))
+        self.assertIn("moved", err)
+
+    def test_valid_pin_is_untouched_and_silent(self):
+        make_fake_venv(self.new_root, "rapid-mlx-1.0.3", "rapid-mlx")
+        pin = self.new_root / "rapid-mlx-1.0.3" / "bin" / "rapid-mlx"
+        (rapid, _venv), err = self.run_load(f'LA_RAPID_BIN="{pin}"\n')
+        self.assertEqual(rapid, str(pin))
+        self.assertEqual(err, "")
 
 
 if __name__ == "__main__":
