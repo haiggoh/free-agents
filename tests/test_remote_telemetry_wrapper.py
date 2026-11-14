@@ -59,6 +59,11 @@ class TelemetryWrapperWatchdog(unittest.TestCase):
                 break
             time.sleep(1)
         self.assertEqual(alive, [], "wrapper monitor/tail survived the session (Leak B)")
+        # 0.58.1 (user): the watchdog's SIGTERM made bash print "Terminated: 15 tail -f ... |
+        # while ..." — the whole monitor loop — onto the terminal, over the csl picker.
+        printed = out.read_text()
+        self.assertNotIn("Terminated", printed, printed[-1500:])
+        self.assertNotIn("tail -f", printed, printed[-1500:])
 
     def _leaked(self) -> list[str]:
         pids: list[str] = []

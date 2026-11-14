@@ -12,6 +12,15 @@
   local lane showed the line (also the real cause behind the 0.56.11 report). Pinned in
   `tests/test_memguard_registry.py` (PTY + real tmux; red before the fix: `TP=tmux TPV=3.8`).
 
+### Fixed — leaving a free remote session printed shell code over the csl picker (user 2026-11-14)
+- After a remote session, the telemetry wrapper's watchdog kills its `tail -f | while …` token
+  monitor, and bash reported that job on stderr — `Terminated: 15 tail -f "$debug_file" … |
+  while …`, the whole loop source — straight onto the terminal, which by then shows the csl
+  picker. `bin/la-remote-telemetry-wrapper.sh` now starts the monitor with stderr on
+  `/dev/null` (it only ever writes to its log file). `tests/test_remote_telemetry_wrapper.py`
+  asserts nothing of the job report reaches the terminal (red before the fix; passes in the C
+  and German locales).
+
 ## [0.58.0] — unreleased
 
 ### Fixed — every venv reader now scans both roots (user 2026-11-13/14: "any fix must apply to all users, not just me locally")

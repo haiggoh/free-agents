@@ -172,8 +172,12 @@ if matches:
     done
 }
 
-# Start background monitor
-monitor_debug_file "$DEBUG_FILE" "$LOG_FILE" "$SESSION_ID" &
+# Start background monitor. Its stderr goes to /dev/null (0.58.1, user): when the watchdog
+# kills the tail pipeline after claude exits, bash reports the job ("Terminated: 15 tail -f
+# ... | while ..." — the whole loop source) on stderr, which is still the user's terminal and
+# by then shows the csl picker. The monitor writes only to $LOG_FILE; nothing on its stderr
+# is meant for the user.
+monitor_debug_file "$DEBUG_FILE" "$LOG_FILE" "$SESSION_ID" 2>/dev/null &
 MONITOR_PID=$!
 
 # Run claude with debug file
