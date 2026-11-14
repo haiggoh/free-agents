@@ -411,7 +411,9 @@ class BackendManager(
         and renamed would point at the wrong path): move the old venv aside, rebuild at the real
         path through install_version (an exact recreation when a receipt exists), RUN the result,
         then delete the set-aside original. Any failure deletes the half-built one and puts the
-        original back."""
+        original back. 0.58.0: when the repair RELOCATES a legacy (~/.venvs) venv into the XDG
+        root and the live config pins that venv, the pin is re-written to the new root — a
+        repair re-pins ONLY a pin it relocated; it never promotes an unpinned venv."""
         if not self.SUPPORTS_VENV_REMOVE:
             raise ManagerError(f"repair not supported for {self.BACKEND_NAME}")
         self.require_version(version)
@@ -423,6 +425,7 @@ class BackendManager(
         # the rebuild lands at build_target, the original is set aside and deleted only on success.
         build_target = backends_root(self.home) / target.name
         relocating = target != build_target
+        repinned = False
         running = self._running_references(target)
         if running:
             raise ManagerError("environment is referenced by running process(es):\n" + "\n".join(running))
@@ -437,7 +440,7 @@ class BackendManager(
             try:
                 # The CLASS method is the contract (an instance attribute may be a wrapper/stub).
                 if "skip_pin_update" in inspect.signature(type(self).install_version).parameters:
-                    kwargs["skip_pin_update"] = True        # a repair never promotes
+                    kwargs["skip_pin_update"] = True        # a repair never promotes on its own
             except (TypeError, ValueError):
                 pass
             self.install_version(version, **kwargs)          # writes to target_for = the XDG root
@@ -445,6 +448,13 @@ class BackendManager(
             if health.state != "complete":
                 raise ManagerError(f"the rebuilt venv is {health.state}: {health.reason}")
             self.validate_environment(version)
+            # 0.58.0: a relocating repair must not strand a live pin at the OLD path —
+            # re-pin ONLY when the live config references the relocated venv. Inside the
+            # try: a failed re-pin takes the restore path below (and promote_pins rolls its
+            # own write back), so venv and pin end up exactly as before.
+            if relocating and self._referenced_paths(getattr(self, "_repo", None), target):
+                self.promote_pins(version)
+                repinned = True
         except Exception as exc:
             if build_target.exists() or build_target.is_symlink():
                 shutil.rmtree(build_target, ignore_errors=True)
@@ -453,6 +463,7 @@ class BackendManager(
         shutil.rmtree(aside, ignore_errors=True)             # success: the set-aside original goes
         return {"result": "repaired", "target": str(build_target), "mode": mode,
                 "relocated_from": str(target) if relocating else None,
+                "repinned": repinned,
                 "durability": venv_durability(build_target)}
 
     def _referenced_paths(self, repo: Path | None, target: Path) -> list[str]:

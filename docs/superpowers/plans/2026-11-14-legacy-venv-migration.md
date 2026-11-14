@@ -84,14 +84,14 @@
 - Consumes: `self.promote_pins(version)` (rapid/vllm implementations), `self._referenced_paths(repo, target)`.
 - Produces: repair result gains `"repinned": bool`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - `test_repair_of_the_pinned_legacy_venv_moves_the_pin`: pin → legacy 1.0.0; repair 1.0.0 → pin = `"$HOME/.local/share/free-agents/backends/rapid-mlx-1.0.0/bin/rapid-mlx"`, `repinned` True.
   - `test_repair_of_an_unpinned_venv_leaves_the_live_config_byte_identical`.
   - `test_failed_repin_restores_venv_and_pin` (Review Focus 4: stub `promote_pins` to raise).
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement**: when `relocating` and the live config references `target`, call `promote_pins(version)` inside the existing `try`, so any failure takes the existing restore path; on restore also leave the live config as it was (promote already rolls itself back). Update the docstring ("a repair never promotes" → "a repair re-pins ONLY a pin it relocated").
-- [ ] **Step 4: Run** new file + `tests/test_backend_repair.py tests/test_backend_remove.py` → PASS.
-- [ ] **Step 5: Commit** `fix(repair 0.58.0): relocating a pinned venv re-pins it`.
+- [x] **Step 2: Run** → FAIL.
+- [x] **Step 3: Implement**: when `relocating` and the live config references `target`, call `promote_pins(version)` inside the existing `try`, so any failure takes the existing restore path; on restore also leave the live config as it was (promote already rolls itself back). Update the docstring ("a repair never promotes" → "a repair re-pins ONLY a pin it relocated").
+- [x] **Step 4: Run** new file + `tests/test_backend_repair.py tests/test_backend_remove.py` → PASS.
+- [x] **Step 5: Commit** `fix(repair 0.58.0): relocating a pinned venv re-pins it`.
 
 ### Task 4: Migration offer module + generic offer loop
 
