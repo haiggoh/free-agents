@@ -19,6 +19,7 @@
 # Prints VERIFIED (exit 0) once the transcript exists AND contains the substring;
 # NOT_VERIFIED (exit 1) when the timeout expires without that. Read-only.
 set -u
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
     cat <<'USAGE'
 handover-verify.sh — prove a launched session received its first prompt.
@@ -36,8 +37,15 @@ Usage:
   --sessions-dir D     registry directory override (tests; default ~/.claude/sessions).
   --projects-dir D     transcript root override (tests; default ~/.claude/projects).
 
+Environment:
+  FA_PRE_TRUST_TARGET  folder the handover was launched into (exported by the launcher
+                       when pre-trust failed); used for the timeout notification.
+                       Default: this script's cwd.
+
 Prints VERIFIED (exit 0) once the transcript exists AND contains the substring;
-NOT_VERIFIED (exit 1) when the timeout expires without that. Read-only.
+NOT_VERIFIED (exit 1) when the timeout expires without that. Read-only, except: at the
+first timeout with no registered session, ONE macOS notification is sent via fa_notify
+("free-agents handover waiting", naming the target folder) — the pre-trust fallback.
 USAGE
 }
 expect=""; sid=""; pid=""; tmo=60; sdir=""; pdir=""
@@ -135,6 +143,15 @@ while :; do
         echo "  hint: if NO session registered at all, the launched window is probably sitting at the"
         echo "  workspace trust dialog (accept it in that window), or claude exited at startup —"
         echo "  read the window's first 'error:' line (e.g. an unknown option from a newer CLI)"
+        # 0.59.0 fallback (pre-trust Task 4): when pre-trust could not hold for the target
+        # (home folder, failed or lost write), the window waits at the trust dialog. Notify
+        # ONCE per run via the ONE notification helper (fa_notify; FA_NOTIFY_SINK is the
+        # test fence). Target: FA_PRE_TRUST_TARGET (exported by the launcher on pre-trust
+        # failure), else this script's cwd (the launch cwd).
+        _pt_target="${FA_PRE_TRUST_TARGET:-$PWD}"
+        python3 "$SCRIPT_DIR/fa_notify.py" "free-agents handover waiting" \
+            "Claude Code is asking whether you trust $_pt_target — answer it in the new window to start the handover." \
+            --caller "$SCRIPT_DIR/handover-verify.sh" || true
         exit 1
     }
     sleep 1

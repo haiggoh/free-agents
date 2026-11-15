@@ -135,5 +135,86 @@ class HandoverVerifyEpoch(unittest.TestCase):
         self.assertIn("recycled", r.stdout)
 
 
+class HandoverVerifyFallbackNotify(unittest.TestCase):
+    """0.59.0 Task 4: when pre-trust could not hold and the verify times out with no
+    registered session, handover-verify sends ONE notification via fa_notify (the sink
+    FA_NOTIFY_SINK fences it in tests)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        t = Path(self.tmp.name)
+        self.sdir = t / "sessions"
+        self.sdir.mkdir()
+        self.pdir = t / "projects" / "proj-x"
+        self.pdir.mkdir(parents=True)
+        self.sink = t / "notify-sink.jsonl"
+        self.target = t / "handover-target"
+        self.target.mkdir()
+
+    def _run(self, extra_env=None, cwd=None, timeout=1):
+        env = {**os.environ, "LC_ALL": "C", "FA_NOTIFY_SINK": str(self.sink)}
+        env.pop("FA_PRE_TRUST_TARGET", None)
+        env.pop("FA_PRE_TRUST_RESULT", None)
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            ["bash", str(SCRIPT), "--expect", "never-written-needle", "--session-id", "sess-nope",
+             "--timeout", str(timeout), "--sessions-dir", str(self.sdir),
+             "--projects-dir", str(self.pdir.parent)],
+            capture_output=True, text=True, env=env, timeout=timeout + 20, cwd=cwd)
+
+    def _sink_lines(self):
+        if not self.sink.exists():
+            return []
+        return [json.loads(line) for line in self.sink.read_text().splitlines() if line.strip()]
+
+    def test_waiting_dialog_notifies_once(self):
+        r = self._run({"FA_PRE_TRUST_TARGET": str(self.target), "FA_PRE_TRUST_RESULT": "4"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("NOT_VERIFIED", r.stdout)
+        lines = self._sink_lines()
+        self.assertEqual(len(lines), 1, f"exactly one notification per run, got {lines}")
+        self.assertEqual(lines[0]["title"], "free-agents handover waiting")
+
+    def test_notify_text_names_the_folder(self):
+        r = self._run({"FA_PRE_TRUST_TARGET": str(self.target)})
+        self.assertEqual(r.returncode, 1)
+        lines = self._sink_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn(str(self.target), lines[0]["text"])
+        self.assertIn("trust", lines[0]["text"].lower())
+
+    def test_notify_falls_back_to_launch_cwd(self):
+        # no FA_PRE_TRUST_TARGET: the launch cwd the verifier runs in is the target
+        r = self._run(cwd=str(self.target))
+        self.assertEqual(r.returncode, 1)
+        lines = self._sink_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn(str(self.target), lines[0]["text"])
+
+    def test_registered_session_never_notifies(self):
+        # session registers and verifies -> no timeout -> no notification
+        proc = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(lambda: (proc.kill(), proc.wait()))
+        live = live_start_epoch(proc.pid)
+        doc = {"pid": proc.pid, "sessionId": "sess-ok",
+               "startedAt": int(live * 1000),
+               "procStart": time.strftime("%a %b ", time.gmtime(live)) +
+                   f"{time.gmtime(live).tm_mday:2d} " + time.strftime("%H:%M:%S %Y", time.gmtime(live))}
+        (self.sdir / f"{proc.pid}.json").write_text(json.dumps(doc))
+        (self.pdir / "sess-ok.jsonl").write_text('{"text":"see never-written-needle"}\n')
+        env = {**os.environ, "LC_ALL": "C", "FA_NOTIFY_SINK": str(self.sink),
+               "FA_PRE_TRUST_TARGET": str(self.target)}
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "--expect", "never-written-needle", "--pid", str(proc.pid),
+             "--timeout", "5", "--sessions-dir", str(self.sdir),
+             "--projects-dir", str(self.pdir.parent)],
+            capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("VERIFIED", r.stdout)
+        self.assertEqual(self._sink_lines(), [], "a verified session must never notify")
+
+
 if __name__ == "__main__":
     unittest.main()
