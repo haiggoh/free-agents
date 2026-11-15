@@ -131,11 +131,15 @@ PY
     fi
 fi
 deadline=$(( $(date +%s) + tmo ))
+seen_any=0
 while :; do
     for f in "$pdir"/*/"$sid.jsonl"; do
-        if [[ -f "$f" ]] && /usr/bin/grep -q -- "$expect" "$f" 2>/dev/null; then
-            echo "VERIFIED: $f contains the expected text"
-            exit 0
+        if [[ -f "$f" ]]; then
+            seen_any=1
+            if /usr/bin/grep -q -- "$expect" "$f" 2>/dev/null; then
+                echo "VERIFIED: $f contains the expected text"
+                exit 0
+            fi
         fi
     done
     [[ $(date +%s) -lt $deadline ]] || {
@@ -143,15 +147,22 @@ while :; do
         echo "  hint: if NO session registered at all, the launched window is probably sitting at the"
         echo "  workspace trust dialog (accept it in that window), or claude exited at startup —"
         echo "  read the window's first 'error:' line (e.g. an unknown option from a newer CLI)"
-        # 0.59.0 fallback (pre-trust Task 4): when pre-trust could not hold for the target
-        # (home folder, failed or lost write), the window waits at the trust dialog. Notify
-        # ONCE per run via the ONE notification helper (fa_notify; FA_NOTIFY_SINK is the
-        # test fence). Target: FA_PRE_TRUST_TARGET (exported by the launcher on pre-trust
-        # failure), else this script's cwd (the launch cwd).
-        _pt_target="${FA_PRE_TRUST_TARGET:-$PWD}"
-        python3 "$SCRIPT_DIR/fa_notify.py" "free-agents handover waiting" \
-            "Claude Code is asking whether you trust $_pt_target — answer it in the new window to start the handover." \
-            --caller "$SCRIPT_DIR/handover-verify.sh" || true
+        # 0.59.0 fallback (pre-trust Task 4, hardened in the Task 6 review): notify ONLY
+        # when no session registered at all (seen_any=0) — a session that is registered
+        # but slow must not trigger a trust notification. The launcher runs in the NEW
+        # window, so its exported FA_PRE_TRUST_TARGET never reaches this process: resolve
+        # the launch cwd from the launcher pid via lsof (same as local-watch.sh:141),
+        # else this script's cwd.
+        if [[ $seen_any -eq 0 ]]; then
+            _pt_target="${FA_PRE_TRUST_TARGET:-}"
+            if [[ -z "$_pt_target" && -n "$pid" ]]; then
+                _pt_target="$(lsof -p "$pid" 2>/dev/null | awk '$4=="cwd"{print $NF; exit}')"
+            fi
+            [[ -n "$_pt_target" ]] || _pt_target="$PWD"
+            python3 "$SCRIPT_DIR/fa_notify.py" "free-agents handover waiting" \
+                "Claude Code is asking whether you trust $_pt_target — answer it in the new window to start the handover." \
+                --caller "$SCRIPT_DIR/handover-verify.sh" || true
+        fi
         exit 1
     }
     sleep 1

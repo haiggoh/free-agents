@@ -10,8 +10,10 @@ honored when set.
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,6 +30,23 @@ sys.path.insert(0, str(ROOT / "tests" / "lib"))
 from hermetic_env import hermetic_env  # noqa: E402
 
 REAL_CLAUDE_JSON = os.path.realpath(os.path.expanduser("~/.claude.json"))
+
+
+def _real_guard_fingerprint():
+    """Fingerprint of what a TEST could write into the real ~/.claude.json: the
+    hasTrustDialogAccepted values of projects keys under the pytest TMPDIR. Live
+    sessions on this machine legitimately rewrite the file (numStartups etc.), so a
+    raw mtime equality flakes under -n 12 (measured 2026-11-15); they never create
+    TMPDIR-prefixed keys, so this catches exactly the test-side write."""
+    if not os.path.exists(REAL_CLAUDE_JSON):
+        return None
+    with open(REAL_CLAUDE_JSON, "rb") as f:
+        d = json.load(f)
+    tmp = os.path.realpath(os.environ.get("TMPDIR", "/tmp"))
+    proj = d.get("projects", {})
+    return tuple(sorted((k, v.get("hasTrustDialogAccepted"))
+                        for k, v in proj.items()
+                        if isinstance(v, dict) and (k.startswith(tmp) or k.startswith("/private" + tmp))))
 
 
 def run_cli(*args, extra_env=None):
@@ -64,12 +83,10 @@ def make_repo(path: Path) -> Path:
 @pytest.fixture(autouse=True)
 def speed_and_real_guard(monkeypatch):
     monkeypatch.setattr(fa_pre_trust, "VERIFY_DELAY_S", 0.0)
-    before = (os.path.exists(REAL_CLAUDE_JSON),
-              os.stat(REAL_CLAUDE_JSON).st_mtime_ns if os.path.exists(REAL_CLAUDE_JSON) else None)
+    before = _real_guard_fingerprint()
     yield
-    after = (os.path.exists(REAL_CLAUDE_JSON),
-             os.stat(REAL_CLAUDE_JSON).st_mtime_ns if os.path.exists(REAL_CLAUDE_JSON) else None)
-    assert before == after, "a test touched the real ~/.claude.json"
+    assert _real_guard_fingerprint() == before, \
+        "a test wrote a trust key into the real ~/.claude.json"
 
 
 @pytest.fixture
@@ -279,13 +296,10 @@ def test_unknown_flag_exit_2(sb):
 
 def test_real_claude_json_untouched(sb):
     plant(sb.cfg, {"projects": {}})
-    before = (os.path.exists(REAL_CLAUDE_JSON),
-              os.stat(REAL_CLAUDE_JSON).st_mtime_ns if os.path.exists(REAL_CLAUDE_JSON) else None)
+    before = _real_guard_fingerprint()
     res = fa_pre_trust.pre_trust(str(sb.target), config_path=str(sb.cfg))
     assert res.exit_code == 0
-    after = (os.path.exists(REAL_CLAUDE_JSON),
-             os.stat(REAL_CLAUDE_JSON).st_mtime_ns if os.path.exists(REAL_CLAUDE_JSON) else None)
-    assert before == after
+    assert _real_guard_fingerprint() == before
 
 
 def test_claude_config_dir_resolution(sb, monkeypatch):
@@ -297,3 +311,103 @@ def test_claude_config_dir_resolution(sb, monkeypatch):
     key = os.path.realpath(sb.target)
     assert load(cfgdir / ".claude.json")["projects"][key]["hasTrustDialogAccepted"] is True
     assert not sb.cfg.exists()  # the ~/.claude.json default was NOT used
+
+
+# ---- review fix pass (Task 6 findings, verified against the code) --------------------
+
+def test_bare_repo_worktree_never_keys_the_parent(sb):
+    make_repo(sb.tmp / "seed")
+    git(sb.tmp, "clone", "-q", "--bare", "seed", "bare.git")
+    wt = sb.tmp / "wt"
+    git(sb.tmp / "bare.git", "worktree", "add", "-q", str(wt), "HEAD")
+    keys = fa_pre_trust.resolve_keys(str(wt))
+    # a bare repo's common dir is the bare repo itself — its PARENT must not be keyed
+    assert keys == [os.path.realpath(wt)], keys
+    assert os.path.realpath(sb.tmp) not in keys
+
+
+def test_home_rooted_repo_never_keys_home(sb):
+    git(sb.home, "init", "-q")  # dotfiles-style: .git directly in HOME
+    scratch = sb.home / "scratch"
+    scratch.mkdir()
+    home_rp = os.path.realpath(sb.home)
+    keys = fa_pre_trust.resolve_keys(str(scratch))
+    assert home_rp not in keys, keys
+    plant(sb.cfg, {"projects": {}})
+    res = fa_pre_trust.pre_trust(str(scratch), config_path=str(sb.cfg))
+    assert res.exit_code == 0
+    assert home_rp not in load(sb.cfg)["projects"]
+
+
+def test_rotation_keeps_only_own_timestamped_backups(sb):
+    plant(sb.cfg, {"projects": {}})
+    keepers = []
+    for tag in ("probe-20260101T000000Z", "dogfood-20260101T000000Z"):
+        b = sb.cfg.parent / f"{sb.cfg.name}.bak.pre-trust-{tag}"
+        b.write_bytes(b"x")
+        keepers.append(b)
+    for i in range(6):
+        b = sb.cfg.parent / f"{sb.cfg.name}.bak.pre-trust-2026010{i}T000000Z"
+        b.write_bytes(b"old")
+        os.utime(b, (1000 + i, 1000 + i))
+    res = fa_pre_trust.pre_trust(str(sb.target), config_path=str(sb.cfg))
+    assert res.exit_code == 0
+    names = {b.name for b in sb.cfg.parent.glob(f"{sb.cfg.name}.bak.pre-trust-*")}
+    assert all(k.name in names for k in keepers), "probe/dogfood receipt backups must survive"
+    stamps = [n for n in names
+              if re.match(r"^.*\.bak\.pre-trust-\d{8}T\d{6}Z(-\d+)?$", n)]
+    assert len(stamps) == 5, stamps
+
+
+def test_backup_name_collision_is_suffixed_not_crash(sb):
+    plant(sb.cfg, {"projects": {}})
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    taken = sb.cfg.parent / f"{sb.cfg.name}.bak.pre-trust-{stamp}"
+    taken.write_bytes(b"taken")
+    res = fa_pre_trust.pre_trust(str(sb.target), config_path=str(sb.cfg))
+    assert res.exit_code == 0, res.reason
+    assert res.backup and os.path.isfile(res.backup)
+    assert res.backup != str(taken)
+
+
+def test_tmp_file_created_with_target_mode(sb, monkeypatch):
+    plant(sb.cfg, {"projects": {}})
+    sb.cfg.chmod(0o640)
+    seen = {}
+    real_chmod = os.chmod
+
+    def spy(path, mode):
+        # the race window is BETWEEN file creation and chmod: record the mode AT chmod time
+        seen["mode_at_chmod"] = os.stat(path).st_mode & 0o777
+        return real_chmod(path, mode)
+
+    monkeypatch.setattr(fa_pre_trust.os, "chmod", spy)
+    res = fa_pre_trust.pre_trust(str(sb.target), config_path=str(sb.cfg))
+    assert res.exit_code == 0
+    # post-fix the tmp is created via os.open(mode=...) and chmod is never called;
+    # pre-fix chmod runs on a umask-created (world-readable) tmp — that is the bug.
+    assert seen.get("mode_at_chmod") in (None, 0o640), \
+        f"tmp was world-readable before chmod: {oct(seen.get('mode_at_chmod', 0))}"
+
+
+def test_fresh_config_creates_file_and_reports_no_backup(sb, monkeypatch):
+    cfgdir = sb.tmp / "fresh"
+    cfgdir.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfgdir))
+    res = fa_pre_trust.pre_trust(str(sb.target))
+    assert res.exit_code == 0
+    assert res.backup is None, "no pre-existing file -> no backup, and the field says so"
+    key = os.path.realpath(sb.target)
+    assert load(cfgdir / ".claude.json")["projects"][key]["hasTrustDialogAccepted"] is True
+
+
+def test_symlinked_config_writes_through_and_survives(sb):
+    real = sb.tmp / "real.json"
+    plant(real, {"projects": {}})
+    link = sb.tmp / "link.json"
+    link.symlink_to(real)
+    res = fa_pre_trust.pre_trust(str(sb.target), config_path=str(link))
+    assert res.exit_code == 0
+    assert link.is_symlink(), "os.replace must not replace the symlink with a regular file"
+    key = os.path.realpath(sb.target)
+    assert load(real)["projects"][key]["hasTrustDialogAccepted"] is True

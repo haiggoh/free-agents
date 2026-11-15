@@ -42,6 +42,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -51,6 +52,10 @@ VERIFY_DELAY_S = 1.0
 BACKUP_PREFIX_SUFFIX = ".bak.pre-trust-"
 TMP_SUFFIX = ".tmp.pre-trust-"
 KEEP_BACKUPS = 5
+# rotation manages ONLY backups this helper created: <cfg>.bak.pre-trust-<UTC-stamp>[-N].
+# Receipt backups from the probe/dogfood (".bak.pre-trust-probe-…" / "-dogfood-…") must
+# survive rotation (Task 6 review finding).
+_STAMP_RE = re.compile(r"\d{8}T\d{6}Z(-\d+)?")
 
 
 @dataclass
@@ -111,8 +116,12 @@ def resolve_keys(target_dir) -> list:
     """The projects[...] keys Task 1 proved the CLI consults, realpath-spelled.
 
     [target, main-checkout (if a linked worktree), git toplevel (if different)],
-    deduped, order preserved.
+    deduped, order preserved. The main-checkout key is derived ONLY when the common
+    dir is a real <repo>/.git directory — a bare repo's common dir (e.g. ~/x/myrepo.git)
+    would key the PARENT FOLDER of many projects, silently trusting all of them
+    (Task 6 review). The home folder is never a key: its trust is never persisted.
     """
+    home = os.path.realpath(os.path.expanduser("~"))
     target = os.path.realpath(target_dir)
     keys = [target]
     common = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"], target)
@@ -120,9 +129,11 @@ def resolve_keys(target_dir) -> list:
         common = _git(["rev-parse", "--git-common-dir"], target)
         common = _abs(common, target) if common else None
     if common:
-        main = os.path.dirname(os.path.realpath(common))
-        if main not in keys:
-            keys.append(main)
+        common_rp = os.path.realpath(common)
+        if os.path.basename(common_rp) == ".git" and os.path.isdir(common_rp):
+            main = os.path.dirname(common_rp)
+            if main not in keys:
+                keys.append(main)
     top = _git(["rev-parse", "--path-format=absolute", "--show-toplevel"], target)
     if top is None:
         top = _git(["rev-parse", "--show-toplevel"], target)
@@ -131,7 +142,7 @@ def resolve_keys(target_dir) -> list:
         top = os.path.realpath(top)
         if top not in keys:
             keys.append(top)
-    return keys
+    return [k for k in keys if k != home]
 
 
 def _resolve_config_path(config_path):
@@ -145,7 +156,9 @@ def _resolve_config_path(config_path):
 
 def _rotate_backups(cfg: str) -> None:
     pattern = glob.escape(cfg) + BACKUP_PREFIX_SUFFIX + "*"
-    baks = sorted(glob.glob(pattern), key=os.path.getmtime)
+    baks = [p for p in glob.glob(pattern)
+            if _STAMP_RE.fullmatch(os.path.basename(p).split(BACKUP_PREFIX_SUFFIX, 1)[1])]
+    baks.sort(key=os.path.getmtime)
     for old in baks[:-KEEP_BACKUPS]:
         try:
             os.unlink(old)
@@ -160,6 +173,9 @@ def pre_trust(target_dir, *, config_path=None, dry_run=False) -> PreTrustResult:
     if explicit and not os.path.isfile(cfg):
         return PreTrustResult(target, [], False, False, False, None,
                               f"explicit --config not found: {config_path}", 2)
+    # Write through symlinks: os.replace on the link itself would swap the symlink for
+    # a regular file (Task 6 review). realpath is identity for a normal config.
+    cfg = os.path.realpath(cfg)
     if target == home:
         return PreTrustResult(target, [], False, False, False, None,
                               "home folder trust is never persisted", 3)
@@ -198,11 +214,25 @@ def pre_trust(target_dir, *, config_path=None, dry_run=False) -> PreTrustResult:
                               "dry run: would write the resolved keys, nothing written", 0)
 
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    backup = cfg + BACKUP_PREFIX_SUFFIX + stamp
+    backup = None
     if raw is not None:
-        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(raw)
+        try:
+            for attempt in range(1, 100):
+                cand = cfg + BACKUP_PREFIX_SUFFIX + stamp + (f"-{attempt}" if attempt > 1 else "")
+                try:
+                    fd = os.open(cand, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    continue  # same-second collision (Task 6 review): suffix, retry
+                with os.fdopen(fd, "wb") as f:
+                    f.write(raw)
+                backup = cand
+                break
+        except OSError as e:
+            return PreTrustResult(target, keys, False, False, False, None,
+                                  f"backup failed: {e.__class__.__name__}: {e}", 4)
+        if backup is None:
+            return PreTrustResult(target, keys, False, False, False, None,
+                                  "backup failed: name collision", 4)
 
     for k in keys:
         entry = projects.get(k)
@@ -213,28 +243,30 @@ def pre_trust(target_dir, *, config_path=None, dry_run=False) -> PreTrustResult:
 
     tmp = cfg + TMP_SUFFIX + stamp
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        # create with the target mode from the first byte — open()+chmod would leave a
+        # world-readable window holding OAuth data (Task 6 review)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             if indent is None:
                 json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
             else:
                 json.dump(data, f, indent=indent, ensure_ascii=False)
             if trailing_nl:
                 f.write("\n")
-        os.chmod(tmp, mode)
         os.replace(tmp, cfg)
     except OSError as e:
         try:
             os.unlink(tmp)
         except OSError:
             pass
-        return PreTrustResult(target, keys, False, False, False, os.path.basename(backup),
+        return PreTrustResult(target, keys, False, False, False, backup,
                               f"write failed: {e.__class__.__name__}: {e}", 4)
 
     time.sleep(VERIFY_DELAY_S)
     try:
         data2 = _load_config(cfg)
     except ValueError as e:
-        return PreTrustResult(target, keys, False, True, False, os.path.basename(backup),
+        return PreTrustResult(target, keys, False, True, False, backup,
                               f"config unreadable after write: {e}", 4)
     proj2 = data2.get("projects", {})
     verified = isinstance(proj2, dict) and all(
@@ -246,6 +278,9 @@ def pre_trust(target_dir, *, config_path=None, dry_run=False) -> PreTrustResult:
                               "wrote and verified", 0)
     return PreTrustResult(target, keys, False, True, False, backup,
                           "write did not hold after re-read", 4)
+
+
+# NOTE: PreTrustResult.backup is the full backup path when one was created, else None.
 
 
 def main(argv=None) -> int:
