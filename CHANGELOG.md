@@ -19,6 +19,13 @@
   host-only absence + contract note, C2 schema, zip.
 
  unreleased
+## [0.59.1] — unreleased
+
+### Fixed — `launch-local-auto-mode.sh` accepts its documented positional args again (waypoint launch-local-auto-mode-sh-cli)
+- The exec-only CLI guard rejected ANY first argument (exit 2, "unknown argument"), while its own usage line and the `launch-claude-agent.sh --auto <alias>` dispatch (`exec … "${@:2}"`) pass `<main-alias> [a|b] [effort]` through — so direct execution could never launch. Now: `-h|--help` prints usage and exits 0 without starting anything; unknown `-flags` exit 2 with usage on stderr; bare positional args fall through to the existing alias/strategy validation, which fails loudly (exit 1) on an unknown alias or bad strategy.
+- Tests: `tests/test_launch_local_auto_mode_cli.py` (5: help launches nothing, unknown flag exit 2, positional args reach the launch, unknown alias exit 1, no-arg opt-in gate unchanged); the 0.59.0 pre-trust contract test now drives the launcher by direct execution again instead of sourcing it.
+
+## [0.59.0] — unreleased
 
 ### Fixed — a handover into a never-trusted folder no longer waits at the trust dialog (user 2026-11-15; supersedes the 0.56.8 attempt, whose "Fixed" claim was corrected in 0.56.8 itself)
 - **Trust rule:** a handover launch (an interactive launch carrying a first prompt, `--prompt`/`--prompt-file`) is the user's explicit act of trust in its target folder — the launcher pre-accepts trust before claude starts, so an unattended handover cannot stall on the "Do you trust this folder?" dialog.

@@ -116,11 +116,10 @@ class PreTrustContractDynamicAutoMode(unittest.TestCase):
         self.env.pop('_LA_LIVE_FOR', None)
 
     def test_auto_mode_launch_pre_trusts_before_claude_exec(self):
-        # The launcher's exec-only CLI guard rejects positional args (pre-existing:
-        # launch-claude-agent.sh --auto passes them through), so drive it the way the
-        # guard itself supports: sourced, with the args as positional params.
-        result = subprocess.run(['bash', '-c', 's="$1"; set -- testmodel a; source "$s"', '_',
-                                 str(self.root / 'bin/launch-local-auto-mode.sh')],
+        # Direct execution with the documented positional args (0.59.1 fixed the CLI guard
+        # that rejected them — waypoint launch-local-auto-mode-sh-cli).
+        result = subprocess.run(['bash', str(self.root / 'bin/launch-local-auto-mode.sh'),
+                                 'testmodel', 'a'],
                                 env=self.env, cwd=str(self.root / 'target'),
                                 stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stderr[-2000:])

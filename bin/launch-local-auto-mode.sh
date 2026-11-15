@@ -60,13 +60,16 @@ set -uo pipefail
 # plugin-repo path.
 # --- CLI surface (standing rule: every script answers --help) --------------------------
 # Only when EXECUTED directly; when sourced, $0 is the caller and its args are not ours.
-# No-arg execution falls through and launches as before — only -h/--help and unknown
-# arguments are intercepted, so a --help probe can never start a session.
+# -h/--help prints and exits before anything runs, so a --help probe can never start a
+# session. Bare positional args (<main-alias> [a|b] [effort], also passed through by
+# launch-claude-agent.sh --auto) fall through to the alias/strategy validation below, which
+# fails loudly on bad values; only unknown -FLAGS are rejected here with usage + exit 2.
+# (0.59.1, waypoint launch-local-auto-mode-sh-cli: the old `*)` branch rejected the positional
+# args, so direct execution could never launch — exit 2 on any $1.)
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
-        -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; echo "usage: $0 [--help]"; exit 0 ;;
-        "") ;;
-        *) echo "usage: $0 [--help]  (unknown argument: $1)" >&2; exit 2 ;;
+        -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; echo "usage: $0 <main-alias> [a|b] [effort]  (or --help)"; exit 0 ;;
+        -*) echo "usage: $0 <main-alias> [a|b] [effort]  (unknown argument: $1; try --help)" >&2; exit 2 ;;
     esac
 fi
 
