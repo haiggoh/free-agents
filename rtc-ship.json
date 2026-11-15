@@ -1,24 +1,18 @@
 {
   "_comment": "How rtc-ship.sh ships free-agents (run-to-completion 0.6.8). DATA lives here; the free-agents-only COMMANDS live in .rtc/*.sh, extracted verbatim from the old ~/.claude/scripts/fa-ship.sh. Adding this file is config-only: no version bump, no release.",
-
   "tag_prefix": "v",
   "default_branch": "main",
-
   "manifest": ".claude-plugin/plugin.json",
   "changelog": "CHANGELOG.md",
   "version_file": "VERSION",
   "roadmap": "docs/ROADMAP.md",
-
-  "_comment_assets": "The release tarball and the ONE installer name. The dual .command upload was dropped 2026-10-26: it was the same bytes under a legacy name (superseded since 0.29.3) and the deep links it existed for were judged unused, so a stale install-free-agents.command link now 404s — accepted deliberately. Version-free globs are deliberate: scripts/package-release.sh reads VERSION and wipes dist/ each run, so exactly one tarball exists when these resolve. A glob that matches nothing now FAILS the ship (rtc-ship.sh 0.6.6) rather than silently publishing without it.",
+  "_comment_assets": "The release tarball and the ONE installer name. The dual .command upload was dropped 2026-10-26: it was the same bytes under a legacy name (superseded since 0.29.3) and the deep links it existed for were judged unused, so a stale install-free-agents.command link now 404s \u2014 accepted deliberately. Version-free globs are deliberate: scripts/package-release.sh reads VERSION and wipes dist/ each run, so exactly one tarball exists when these resolve. A glob that matches nothing now FAILS the ship (rtc-ship.sh 0.6.6) rather than silently publishing without it.",
   "assets": "dist/free-agents-*.tar.gz dist/install-free-agents.sh",
-
-  "refresh_plugin": "free-agents",
+  "refresh_plugin": null,
   "test_workers": 12,
   "stall_seconds": 1200,
   "_comment_stall": "rtc 1.4.0 gate self-recovery: the stall window must exceed the largest per-test --timeout (900) by enough for the pytest-timeout stack dump to print before the watchdog kills the gate. Measured 2026-11-12 (--durations=20 on the main gate): T_slow = 286.65s (test_la_evict.sh); T = max(300, 3x T_slow) rounded up to 60 = 900; S = T + 300 = 1200. Pinned by tests/test_gate_timeout_below_stall.py (every --timeout=N must satisfy N + 120 <= stall_seconds).",
-
   "_comment_tests": "test_cmd replaces the pytest default for the MAIN suite so a loaded shared box's gate deselects the marked modules (waypoint gate-runs-on-a-loaded-shared): the load_sensitive marker is registered in tests/conftest.py and the PTY/litellm/venv modules carry it, so the gate runs -m 'not load_sensitive' instead of flaking at load > 10. pytest resolves like rtc-ship's default (pipx binary first, then PATH); workers stay 12. The two extra venv gates still run from .rtc/pre-flight.sh.",
   "test_cmd": "pyt=\"$HOME/.local/bin/pytest\"; [ -x \"$pyt\" ] || pyt=pytest; \"$pyt\" -q tests -p no:cacheprovider -n 12 -m 'not load_sensitive' --timeout=900 --timeout-method=thread",
-
   "_comment_limiter_knobs": "Limiter knobs for load-sensitive/critical tests (rate_limiter.py shipped 0.50.1; wired ON BY DEFAULT in tests/conftest.py _limiter_knobs_for_load_sensitive since 0.50.4): tests marked pytest.mark.load_sensitive automatically run with LA_LIMITER_RESERVE=0.2 (reserve 20% of the bucket for priority acquisitions; normal traffic stops at 80%) and LA_LIMITER_PRIORITY=1 (this process draws from the reserve), so they don't flake when a concurrent session fills the limiter. Manual/live use: LA_LIMITER_RESERVE=0.2 in the priority process's env, or `python3 bin/rate_limiter.py set-owner <session-id> --priority [--rpm-scale 0.2]` to throttle/prioritize one live session, `... owners` to list window holders, `... probe` for external occupancy of your bucket. Details: tests/test_loadscale.py LimiterKnobDefaultTests; bin/rate_limiter.py _reserve_frac/try_acquire."
 }

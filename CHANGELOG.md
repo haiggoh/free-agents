@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.59.1] — 2026-11-15
+
+- (release notes go here)
+
 ## [0.58.0] — 2026-11-15
 
 ### Added — Wave D: committed portable GUIDANCE package (COORDINATION C1/C2)
