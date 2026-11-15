@@ -130,16 +130,55 @@ def _shebang_interpreter(binary: str | None) -> str | None:
     return parts[0]
 
 
+# System candidates for rapid-mlx, same as the shell's
+# ${_LA_RAPID_SYSTEM_CANDIDATES-/opt/homebrew/bin/rapid-mlx /usr/local/bin/rapid-mlx}
+# (config/config-lib.sh la_discover_rapid_bin). A module constant so tests can pin it.
+_SYSTEM_CANDIDATES = tuple(
+    os.environ.get("_LA_RAPID_SYSTEM_CANDIDATES", "").split()
+    or ("/opt/homebrew/bin/rapid-mlx", "/usr/local/bin/rapid-mlx"))
+
+
+def _bin_healthy(bin_path: Path) -> bool:
+    """la_backend_bin_health parity: X_OK is NOT enough — a Homebrew upgrade can leave an
+    executable binary whose #! interpreter or venv python is gone (measured 2026-10-30).
+    venv_health (install/managers/_common.py) mirrors the shell check; it takes the ENV
+    ROOT (target/bin/<name>), so a bin dir's parent is the root."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "install"))
+    from managers._common import venv_health
+    if bin_path.parent.name == "bin":
+        # env root is the bin dir's parent; venv_health then also probes root/bin/python,
+        # exactly like the shell's `dirname $bin`/python check
+        return venv_health(bin_path.parent.parent, bin_path.name).state == "complete"
+    # standalone binary outside a bin/ dir: judge on the binary and its #! line alone
+    # (venv_health's binary-install branch)
+    if not os.access(bin_path, os.X_OK):
+        return False
+    try:
+        with bin_path.open("rb") as fh:
+            first = fh.readline(4096)
+    except OSError:
+        return False
+    if first.startswith(b"#!"):
+        words = first[2:].decode("utf-8", "replace").split()
+        if words:
+            interp = Path(words[0])
+            if not (interp.exists() and os.access(interp, os.X_OK)):
+                return False
+    return True
+
+
 def _discover_rapid_bin() -> str | None:
-    """Same order as config-lib's la_discover_rapid_bin: brew, PATH, then the newest
-    managed venv across BOTH roots (0.58.0: the XDG root first, legacy ~/.venvs second,
-    via managers.base.discovery_roots — the tie keeps the new-root copy because the sort
-    below is stable over a new-root-first input). Managed names only: rapid-mlx-<digit…>."""
-    for c in ("/opt/homebrew/bin/rapid-mlx", "/usr/local/bin/rapid-mlx"):
-        if os.access(c, os.X_OK):
+    """Same order as config-lib's la_discover_rapid_bin: system candidates, PATH, then the
+    newest managed venv across BOTH roots (0.58.0: the XDG root first, legacy ~/.venvs
+    second, via managers.base.discovery_roots — the tie keeps the new-root copy because the
+    sort below is stable over a new-root-first input). Managed names only: rapid-mlx-<digit…>,
+    never *.repair-* aside dirs (0.58.4). EVERY candidate must pass the health check
+    (la_backend_bin_health parity), not just X_OK."""
+    for c in _SYSTEM_CANDIDATES:
+        if os.access(c, os.X_OK) and _bin_healthy(Path(c)):
             return c
     c = shutil.which("rapid-mlx")
-    if c:
+    if c and _bin_healthy(Path(c)):
         return c
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "install"))
     from managers.base import discovery_roots
@@ -147,14 +186,15 @@ def _discover_rapid_bin() -> str | None:
     for root in discovery_roots():  # (XDG backends root, legacy ~/.venvs) — new first
         for v in root.glob("rapid-mlx-*"):
             ver = v.name.removeprefix("rapid-mlx-")
-            if v.is_dir() and not v.is_symlink() and ver[:1].isdigit():
+            if (v.is_dir() and not v.is_symlink() and ver[:1].isdigit()
+                    and ".repair-" not in v.name):
                 venvs.append(v)
     venvs.sort(key=lambda p: [int(x) if x.isdigit() else x
                               for x in p.name.removeprefix("rapid-mlx-").replace("-", ".").split(".")],
                reverse=True)
     for v in venvs:
         b = v / "bin" / "rapid-mlx"
-        if os.access(b, os.X_OK):
+        if os.access(b, os.X_OK) and _bin_healthy(b):
             return str(b)
     return None
 
