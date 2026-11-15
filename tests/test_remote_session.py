@@ -54,7 +54,8 @@ class RemoteSessionTests(unittest.TestCase):
                     # fixture every launch path aborts before doing anything.
                     'config/emoji.sh', 'config/dispatch-preferences.json',
                     'config/broken-nvidia-models.json',
-                    'bin/session-fallbacks.py', 'bin/fa_tls.py'):   # 0.54.0: anthropic-route.py imports it
+                    'bin/session-fallbacks.py', 'bin/fa_tls.py',   # 0.54.0: anthropic-route.py imports it
+                    'bin/fa_pre_trust.py'):   # 0.59.0: pre-trust helper under test
             shutil.copy2(ROOT / rel, self.root / rel)
         source = (self.root / 'bin/remote-session.sh').read_text()
         (self.root / 'bin/library.sh').write_text(source.split('# ---- argument parsing')[0])
@@ -87,6 +88,15 @@ class RemoteSessionTests(unittest.TestCase):
                         # the stub as a complete command instead. The trust-wrapper path
                         # itself is covered by tests/test_litellm_trust_shim.py.
                         LA_LITELLM_CMD=str(self.root / 'stubs' / 'litellm'))
+        # 0.59.0 pre-trust fixture: redirect the helper's config to a temp dir so no test
+        # ever writes the real ~/.claude.json (tests/test_fa_pre_trust.py guards the
+        # default path separately).
+        cfgdir = self.root / 'cfgdir'
+        cfgdir.mkdir()
+        (cfgdir / '.claude.json').write_text('{"projects": {}}\n')
+        self.env['CLAUDE_CONFIG_DIR'] = str(cfgdir)
+        self.env['CLAUDE_TRUST_STATE'] = str(self.root / 'claude-trust-state')
+        self.cfgdir = cfgdir
         self.stub('curl', '''#!/usr/bin/env python3
 import json,os,sys
 if '--help' in sys.argv:
@@ -204,6 +214,132 @@ exit 0
         self.assertEqual(self.run_cli('--dry-run', 'gemini-3.8-flash').returncode, 1)
         self.assertFalse((self.root / 'curl-argv').exists())
         self.assertFalse((self.root / 'local-agents-remote').exists())
+
+    # ---- 0.59.0 handover pre-trust (plan Task 3) ------------------------------------
+
+    def _stub_full_launch(self):
+        """Stubs so a real launch reaches the fake claude: lsof (ports free), litellm
+        (health endpoint), claude (captures argv + the pre-trust state visible to the
+        session at exec time)."""
+        self.stub('lsof', '#!/bin/sh\nif [ "${1:-}" = --help ]; then echo "Fixture: all ports free"; exit 0; fi\nexit 1\n')
+        self.stub('litellm', '''#!/bin/sh
+exec python3 -c "
+import http.server, socketserver, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        ok = self.path == '/health/liveliness'
+        self.send_response(200 if ok else 404)
+        self.end_headers()
+        if ok: self.wfile.write(b'OK')
+    def log_message(self, *a): pass
+port = 4141
+a = sys.argv[1:]
+for i, x in enumerate(a):
+    if x == '--port' and i + 1 < len(a): port = int(a[i + 1])
+socketserver.TCPServer.allow_reuse_address = True
+with socketserver.TCPServer(('', port), H) as s: s.serve_forever()
+" litellm "$@"
+''')
+        self.env['CLAUDE_ARGV'] = str(self.root / 'claude-argv')
+        self.stub('claude', '''#!/usr/bin/env python3
+import json, os, sys
+if '--help' in sys.argv:
+    print('Fixture Claude'); sys.exit(0)
+if '--version' in sys.argv:
+    print('2.1.286'); sys.exit(0)
+with open(os.environ['CLAUDE_ARGV'], 'a') as f:
+    f.write(json.dumps(sys.argv[1:]) + "\\n")
+state = {"fallback": {k: os.environ.get(k) for k in ("FA_PRE_TRUST_RESULT", "FA_PRE_TRUST_TARGET")}, "trusted": []}
+ccd = os.environ.get("CLAUDE_CONFIG_DIR")
+cfg = os.path.join(ccd, ".claude.json") if ccd else os.path.join(os.path.expanduser("~"), ".claude.json")
+try:
+    with open(cfg) as fh:
+        d = json.load(fh)
+    state["trusted"] = sorted(k for k, v in d.get("projects", {}).items()
+                              if isinstance(v, dict) and v.get("hasTrustDialogAccepted") is True)
+except Exception as e:
+    state["error"] = e.__class__.__name__
+with open(os.environ['CLAUDE_TRUST_STATE'], 'w') as f:
+    json.dump(state, f)
+''')
+
+    def run_launch(self, *args, cwd):
+        return subprocess.run(['bash', str(self.root / 'bin/remote-session.sh'), *args],
+                              env=self.env, cwd=str(cwd), stdin=subprocess.DEVNULL,
+                              text=True, capture_output=True, timeout=180)
+
+    def _target(self):
+        target = self.root / 'target'
+        target.mkdir(exist_ok=True)
+        return target
+
+    def _trust_state(self):
+        return json.loads((self.root / 'claude-trust-state').read_text())
+
+    def test_handover_launch_pre_trusts_before_claude_starts(self):
+        self._stub_full_launch()
+        target = self._target()
+        result = self.run_launch('gemini-flash', '--prompt', 'handover prompt', cwd=target)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertTrue((self.root / 'claude-argv').exists(),
+                        'claude was never launched: ' + result.stdout[-1000:] + result.stderr[-1000:])
+        state = self._trust_state()
+        self.assertIn(os.path.realpath(str(target)), state['trusted'],
+                      'the trust key was not set before claude started')
+
+    def test_launch_without_prompt_does_not_pre_trust(self):
+        self._stub_full_launch()
+        target = self._target()
+        result = self.run_launch('gemini-flash', cwd=target)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertTrue((self.root / 'claude-argv').exists(), 'claude was never launched')
+        state = self._trust_state()
+        self.assertNotIn(os.path.realpath(str(target)), state['trusted'],
+                         'a launch without a first prompt must not pre-trust')
+
+    def test_pre_trust_opt_out(self):
+        self._stub_full_launch()
+        self.env['FA_PRE_TRUST'] = '0'
+        target = self._target()
+        result = self.run_launch('gemini-flash', '--prompt', 'hi', cwd=target)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertTrue((self.root / 'claude-argv').exists(), 'opt-out must still launch')
+        state = self._trust_state()
+        self.assertNotIn(os.path.realpath(str(target)), state['trusted'])
+
+    def test_pre_trust_failure_still_launches_and_flags_fallback(self):
+        self._stub_full_launch()
+        # unparseable config -> helper exits 4
+        (self.cfgdir / '.claude.json').write_text('{bad json')
+        target = self._target()
+        result = self.run_launch('gemini-flash', '--prompt', 'hi', cwd=target)
+        self.assertEqual(result.returncode, 0, 'a pre-trust failure must never block the launch: ' + result.stderr[-2000:])
+        self.assertIn('could not be pre-accepted', result.stderr)
+        self.assertTrue((self.root / 'claude-argv').exists(), 'launch must still happen')
+        state = self._trust_state()
+        self.assertEqual(state['fallback']['FA_PRE_TRUST_RESULT'], '4')
+        self.assertEqual(os.path.realpath(state['fallback']['FA_PRE_TRUST_TARGET'] or ''),
+                         os.path.realpath(str(target)))
+
+    def test_dry_run_reports_pre_trust_and_writes_nothing(self):
+        target = self._target()
+        cfg_before = (self.cfgdir / '.claude.json').read_bytes()
+        result = subprocess.run(['bash', str(self.root / 'bin/remote-session.sh'),
+                                 '--dry-run', 'gemini-flash', '--prompt', 'hi'],
+                                env=self.env, cwd=str(target), stdin=subprocess.DEVNULL,
+                                text=True, capture_output=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr[-1000:])
+        self.assertIn('folder trust', result.stdout)
+        self.assertIn('"wrote": false', result.stdout)
+        self.assertEqual((self.cfgdir / '.claude.json').read_bytes(), cfg_before,
+                         'dry-run must not write the config')
+        self.assertFalse((self.root / 'claude-argv').exists(), 'dry-run must not launch claude')
+
+    def test_trust_workspace_guard_unchanged(self):
+        # Spec 4: the --help-guarded --trust-workspace form stays exactly as is.
+        src = (ROOT / 'bin/remote-session.sh').read_text()
+        self.assertIn("grep -qE '^[[:space:]]+--trust-workspace([[:space:],]|$)'", src)
+        self.assertIn('claude_cmd+=(--trust-workspace)', src)
 
     def test_proxy_receives_literal_credentials(self):
         marker = self.root / 'must-not-exist'

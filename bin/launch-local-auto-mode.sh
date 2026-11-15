@@ -23,6 +23,9 @@
 #   The small model used for the classifier is chosen automatically from the SMALLEST-WEIGHT model on
 #   disk (so it doesn't need a lot of extra RAM); override with LA_AUTO_CLASSIFIER_MODEL=<alias>.
 #
+#   FA_PRE_TRUST=0  skip pre-accepting folder trust for this launch (default 1: a launch
+#   carrying a first prompt pre-trusts its folder via bin/fa_pre_trust.py)
+#
 #   Plan Phase 8 named qwen-3.6-safety, but that predates many models. The only requirement is a
 #   low-RAM one — the plan's model choice is irrelevant once we can pick from the whole disk.
 #
@@ -61,7 +64,7 @@ set -uo pipefail
 # arguments are intercepted, so a --help probe can never start a session.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
-        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; echo "usage: $0 [--help]"; exit 0 ;;
+        -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; echo "usage: $0 [--help]"; exit 0 ;;
         "") ;;
         *) echo "usage: $0 [--help]  (unknown argument: $1)" >&2; exit 2 ;;
     esac
@@ -285,6 +288,24 @@ echo "$(date '+%Y-%m-%d %H:%M:%S')  main=$MAIN_ALIAS classifier_mode=$STRATEGY c
 # turn's consequential action (the run-command) is what we watch for — a successful run through the
 # local classifier = proof; a "cannot determine the safety" block = the classifier is failing closed.
 PROMPT_0="In LOCAL auto mode, prove it is working: run this exact command with your tools:  printf 'auto-mode-ok\\n'"
+
+# 0.59.0 handover pre-trust: this launch always carries a first prompt (PROMPT_0), so it
+# is the user's explicit act of trust in the target folder — pre-accept trust via the ONE
+# sanctioned helper before claude starts. Opt out: FA_PRE_TRUST=0. A failure (exit 3/4)
+# never blocks the launch; FA_PRE_TRUST_RESULT/FA_PRE_TRUST_TARGET are exported for the
+# handover-verify fallback notification.
+if [[ "${FA_PRE_TRUST:-1}" != "0" && -n "${PROMPT_0:-}" ]] && [ -x "$LAUNCH_DIR/fa_pre_trust.py" ]; then
+    _pt_out="$("$LAUNCH_DIR/fa_pre_trust.py" "$PWD" --json 2>&1)"; _pt_rc=$?
+    if [[ $_pt_rc -eq 3 || $_pt_rc -eq 4 ]]; then
+        export FA_PRE_TRUST_RESULT="$_pt_rc"
+        export FA_PRE_TRUST_TARGET="$PWD"
+        echo "free-agents: folder trust could not be pre-accepted for $PWD ($_pt_out) — the trust dialog will appear; you will be notified" >&2
+    elif [[ $_pt_rc -ne 0 ]]; then
+        echo "free-agents: fa_pre_trust.py exited $_pt_rc: $_pt_out" >&2
+    fi
+    unset _pt_out _pt_rc
+fi
+
 claude --model "$MAIN_SPOOF" --effort "$EFFORT" --strict-mcp-config --permission-mode auto \
     --append-system-prompt "You are running in LOCAL auto mode with a local safety-classifier backend." \
     "$PROMPT_0"

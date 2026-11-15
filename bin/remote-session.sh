@@ -48,6 +48,8 @@
 #                                 the alias suffix (-thinking = on). A model constraint may
 #                                 override the choice; the banner says so when it does.
 #   LA_SUBAGENT_ROUTING=same|hybrid, LA_SUBAGENT_POOL=prov:model,…  subagent routing (see README)
+#   FA_PRE_TRUST=0              skip pre-accepting folder trust for handover launches
+#                               (default 1: a launch with a first prompt pre-trusts its folder)
 #
 # Cost: provider quota and billing apply; see the selected tier. This session
 # does not use the Anthropic gateway. Catalog checks consume no generation tokens.
@@ -2140,6 +2142,11 @@ if [[ $DRY_RUN -eq 1 ]]; then
     echo "     effort         : ${EFFORT_CHOICE:-<provider default>}"
     echo "     thinking       : $THINKING${THINKING_NOTICE:+ — $THINKING_NOTICE}"
     [[ -n "${LA_AUTO_COMPACT_WINDOW:-}" ]] && echo "     autocompact    : --autocompact $LA_AUTO_COMPACT_WINDOW"
+    # 0.59.0: a dry run with a first prompt also reports what pre-trust WOULD do (writes nothing)
+    if [[ "${FA_PRE_TRUST:-1}" != "0" && ( -n "${PROMPT_FILE:-}" || ${PROMPT_TEXT+set} ) ]] \
+       && [ -x "$REPO_ROOT/bin/fa_pre_trust.py" ]; then
+        echo "     folder trust  : $("$REPO_ROOT/bin/fa_pre_trust.py" "$PWD" --dry-run --json 2>&1 || true)"
+    fi
     echo
     exit 0
 fi
@@ -2546,6 +2553,25 @@ elif [[ -n "${PROMPT_TEXT:-}" ]]; then
 fi
 if [[ ${#PASSTHRU[@]} -gt 0 ]]; then
     claude_cmd+=("${PASSTHRU[@]}")
+fi
+
+# 0.59.0 handover pre-trust: a handover launch (an interactive launch carrying a first
+# prompt) is the user's explicit act of trust in the target folder — pre-accept trust
+# through the ONE sanctioned helper before claude starts, so an unattended handover into
+# a never-trusted folder cannot stall on the "Do you trust this folder?" dialog.
+# Opt out: FA_PRE_TRUST=0. A failure (exit 3/4) never blocks the launch; it exports
+# FA_PRE_TRUST_RESULT/FA_PRE_TRUST_TARGET so handover-verify can notify once (Task 4).
+if [[ "${FA_PRE_TRUST:-1}" != "0" && ( -n "${PROMPT_FILE:-}" || ${PROMPT_TEXT+set} ) ]] \
+   && [ -x "$REPO_ROOT/bin/fa_pre_trust.py" ]; then
+    _pt_out="$("$REPO_ROOT/bin/fa_pre_trust.py" "$PWD" --json 2>&1)"; _pt_rc=$?
+    if [[ $_pt_rc -eq 3 || $_pt_rc -eq 4 ]]; then
+        export FA_PRE_TRUST_RESULT="$_pt_rc"
+        export FA_PRE_TRUST_TARGET="$PWD"
+        echo "free-agents: folder trust could not be pre-accepted for $PWD ($_pt_out) — the trust dialog will appear; you will be notified" >&2
+    elif [[ $_pt_rc -ne 0 ]]; then
+        echo "free-agents: fa_pre_trust.py exited $_pt_rc: $_pt_out" >&2
+    fi
+    unset _pt_out _pt_rc
 fi
 
 # SESSION NAME — DO NOT set at launch. Let Claude Code auto-generate the session name
