@@ -17,3 +17,5 @@ backups/
 
 # release build output (scripts/package-release.sh)
 /dist/
+dist/
+__pycache__/

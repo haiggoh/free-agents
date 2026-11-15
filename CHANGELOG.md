@@ -1,4 +1,20 @@
-## [0.59.0] — unreleased
+# Changelog
+
+## [0.58.0] — 2026-11-15
+
+### Added — Wave D: committed portable GUIDANCE package (COORDINATION C1/C2)
+
+- New `scripts/build-portable.py` generates the committed `portable/` package: same-name
+  manifest, all 9 methodology skills, and the key-free hooks (grep-verified: no api_keys).
+  `bin/` (~126 scripts: the key-bearing dispatcher, remote proxies, launchers, host
+  managers) is deliberately HOST-ONLY and absent from the package — recorded in
+  PORTABLE-BUILD.json component notes, with the key/egress/file-consent contract required
+  before any dispatch-capable subset ships (staged, needs explicit approval).
+- Emits PORTABLE-BUILD.json (haiggoh-portable-build/1) + deterministic dist zip.
+- tests pin freshness, same-name manifest, no bin/, the byte-identical skill/hook set, the
+  host-only absence + contract note, C2 schema, zip.
+
+ unreleased
 
 ### Fixed — a handover into a never-trusted folder no longer waits at the trust dialog (user 2026-11-15; supersedes the 0.56.8 attempt, whose "Fixed" claim was corrected in 0.56.8 itself)
 - **Trust rule:** a handover launch (an interactive launch carrying a first prompt, `--prompt`/`--prompt-file`) is the user's explicit act of trust in its target folder — the launcher pre-accepts trust before claude starts, so an unattended handover cannot stall on the "Do you trust this folder?" dialog.
