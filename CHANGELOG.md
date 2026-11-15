@@ -4772,6 +4772,9 @@ Groundwork for separating downloadable artifact identity from runnable model pro
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
 # Changelog
 
+## [0.59.2] — 2026-11-15 — Wave D: portable guidance package (C1/C2)
+
+
 All notable changes to `free-agents` are documented in this file.
 
 ## [0.22.5] — 2026-10-04
