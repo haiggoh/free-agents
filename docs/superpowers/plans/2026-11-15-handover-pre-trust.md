@@ -1,6 +1,6 @@
 # Handover Pre-Trust (free-agents 0.59.0) Implementation Plan
 
-**Status:** approved
+**Status:** completed — shipped as v0.59.0 (tag 521f71268226f6acf4f8b7b1f59856c6a75d6a2c, merged to main as e437955c264abd70e6af968c51bc23e88b3b34b3; receipts in the HANDOFF §6)
 
 > **Lasting Plans:** when every task below is done, set the Status line to `completed` (this file lives in the repo, so do it in a docs commit — see Task 6).
 
