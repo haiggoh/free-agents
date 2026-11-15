@@ -1,3 +1,13 @@
+## [0.59.0] — unreleased
+
+### Fixed — a handover into a never-trusted folder no longer waits at the trust dialog (user 2026-11-15; supersedes the 0.56.8 attempt, whose "Fixed" claim was corrected in 0.56.8 itself)
+- **Trust rule:** a handover launch (an interactive launch carrying a first prompt, `--prompt`/`--prompt-file`) is the user's explicit act of trust in its target folder — the launcher pre-accepts trust before claude starts, so an unattended handover cannot stall on the "Do you trust this folder?" dialog.
+- **One sanctioned writer:** `bin/fa_pre_trust.py` writes exactly one field — `projects[<realpath>].hasTrustDialogAccepted = true` — in Claude Code's global config (`--config` > `$CLAUDE_CONFIG_DIR/.claude.json` > `~/.claude.json`), with a mode-600 backup (rotated to the 5 newest), atomic `os.replace`, and a re-read verify after 1 s. Exit codes 0/2/3/4; `--json` never prints config values; `--help` runs nothing. Nothing else in that file is ever written.
+- **Proven against the real CLI (2.1.325)**, truth table in `docs/notes/2026-11-15-trust-key-probe.md`: the lookup key is the realpath spelling only (the `/var` symlink spelling is ignored); for a linked worktree EITHER the worktree or the main-checkout key suppresses the dialog, so both are written; a subdirectory of a trusted repo inherits trust; `CLAUDE_CONFIG_DIR` is honored when set.
+- **Wired into every launch site that carries a first prompt** (`bin/remote-session.sh` incl. its `--dry-run` report, `bin/launch-local-auto-mode.sh`); opt out with `FA_PRE_TRUST=0`. The `--help`-guarded `--trust-workspace` form is unchanged (Spec 4).
+- **Fallback:** when pre-trust cannot hold (home folder — its trust is never persisted —, a failed or concurrently-lost write), the launch proceeds exactly as before and `bin/handover-verify.sh` sends ONE macOS notification ("free-agents handover waiting", naming `FA_PRE_TRUST_TARGET` else the launch cwd) at the first timeout with no registered session.
+- Tests: `tests/test_fa_pre_trust.py` (19), `tests/test_pre_trust_contract.py` (static per-site check + one dynamic run per launch site with a fake claude recording argv and config state at exec), 6 new in `tests/test_remote_session.py`, 4 new in `tests/test_handover_verify.py` under the `FA_NOTIFY_SINK` fence (the 0541 stray-notification scan stays green).
+
 ## [0.58.4] — unreleased
 
 ### Fixed — stale `.repair-` aside dirs are no longer offered for migration (found dogfooding 0.58.0)
