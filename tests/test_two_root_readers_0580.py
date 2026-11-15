@@ -230,5 +230,71 @@ class DetectBackendTest(unittest.TestCase):
                          str(self.new_root / "rapid-mlx-1.0.3" / "bin" / "rapid-mlx"))
 
 
+def make_broken_venv(root: Path, dirname: str, binname: str) -> Path:
+    """The measured broken-venv shape (2026-10-30): bin/<backend> is executable with a
+    valid shebang, but bin/python is a DEAD symlink (the Homebrew keg was deleted). Only a
+    health check that runs the interpreter catches it; X_OK alone cannot."""
+    vdir = root / dirname
+    (vdir / "bin").mkdir(parents=True)
+    (vdir / "bin" / "python").symlink_to("/nonexistent/python-gone")
+    script = vdir / "bin" / binname
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    script.chmod(0o755)
+    return vdir
+
+
+class DetectBackendHealthParityTest(unittest.TestCase):
+    """la-detect-backend.py _discover_rapid_bin must match the shell la_discover_rapid_bin:
+    EVERY candidate passes la_backend_bin_health (venv_health in python), and *.repair-*
+    aside dirs are never candidates (0.58.4 shell fix)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name) / "home"
+        self.home.mkdir()
+        self.new_root = self.home / XDG_REL
+        self.legacy = self.home / ".venvs"
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("XDG_DATA_HOME", "LA_USER_STATE_DIR", "LA_RAPID_BIN",
+                            "LA_VENV", "_LA_RAPID_SYSTEM_CANDIDATES",
+                            "LA_LIVE_CONFIG_DIR", "LA_CONFIG_DIR", "_LA_LIVE_FOR")}
+        env["HOME"] = str(self.home)
+        env["PATH"] = "/usr/bin:/bin"
+        self.env = env
+        spec = importlib.util.spec_from_file_location(
+            "la_detect_backend", REPO / "bin" / "la-detect-backend.py")
+        assert spec is not None and spec.loader is not None
+        self.detect = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.detect)
+
+    def discover(self):
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            return self.detect._discover_rapid_bin()
+
+    def test_broken_newest_venv_is_skipped_for_healthy_older(self):
+        make_broken_venv(self.new_root, "rapid-mlx-9.0.0", "rapid-mlx")
+        make_fake_venv(self.new_root, "rapid-mlx-2.0.0", "rapid-mlx")
+        self.assertEqual(self.discover(),
+                         str(self.new_root / "rapid-mlx-2.0.0" / "bin" / "rapid-mlx"))
+
+    def test_repair_aside_dir_is_never_a_candidate(self):
+        make_fake_venv(self.new_root, "rapid-mlx-0.16.10.repair-999", "rapid-mlx")
+        self.assertIsNone(self.discover())
+
+    def test_system_candidate_with_dead_interpreter_is_skipped(self):
+        cand = Path(self.home) / "cands"
+        cand.mkdir()
+        bad = cand / "rapid-mlx-bad"
+        bad.write_text("#!/nonexistent/interp\nexit 0\n")
+        bad.chmod(0o755)
+        good = cand / "rapid-mlx-good"
+        good.write_text("#!/bin/sh\nexit 0\n")
+        good.chmod(0o755)
+        with mock.patch.object(self.detect, "_SYSTEM_CANDIDATES",
+                               (str(bad), str(good))):
+            self.assertEqual(self.discover(), str(good))
+
+
 if __name__ == "__main__":
     unittest.main()
