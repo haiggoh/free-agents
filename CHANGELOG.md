@@ -1,3 +1,20 @@
+# Changelog
+
+## [0.58.0] — 2026-11-15
+
+### Added — Wave D: committed portable GUIDANCE package (COORDINATION C1/C2)
+
+- New `scripts/build-portable.py` generates the committed `portable/` package: same-name
+  manifest, all 9 methodology skills, and the key-free hooks (grep-verified: no api_keys).
+  `bin/` (~126 scripts: the key-bearing dispatcher, remote proxies, launchers, host
+  managers) is deliberately HOST-ONLY and absent from the package — recorded in
+  PORTABLE-BUILD.json component notes, with the key/egress/file-consent contract required
+  before any dispatch-capable subset ships (staged, needs explicit approval).
+- Emits PORTABLE-BUILD.json (haiggoh-portable-build/1) + deterministic dist zip.
+- tests pin freshness, same-name manifest, no bin/, the byte-identical skill/hook set, the
+  host-only absence + contract note, C2 schema, zip.
+
+ unreleased
 ## [0.59.1] — unreleased
 
 ### Fixed — `launch-local-auto-mode.sh` accepts its documented positional args again (waypoint launch-local-auto-mode-sh-cli)
