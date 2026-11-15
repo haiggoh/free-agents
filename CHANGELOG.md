@@ -1,3 +1,15 @@
+## [0.58.4] — unreleased
+
+### Fixed — stale `.repair-` aside dirs are no longer offered for migration (found dogfooding 0.58.0)
+- A killed `repair` leaves `<venv>.repair-<pid>-<ts>` behind (the rename lands, the cleanup never
+  runs). The migration-offer source accepted it as a managed version (`0.16.10.repair-…` starts
+  with a digit), so the launch prompt could offer `repair 0.16.10.repair-…` — an offer that can
+  only fail. `install/legacy_venv_migration.offers()` and the two-root shell discovery now reject
+  `*.repair-*` names. Discovery was already safe (the aside's shebang points at the renamed-away
+  path and fails `la_backend_bin_health`); the offer list is the unhealth-checked surface. Pinned
+  by `test_offers_ignore_stale_repair_aside_dirs` and `test_discovery_ignores_repair_aside_dirs`
+  (both red before the fix against this machine's real leftover aside).
+
 ## [0.58.3] — unreleased
 
 ### Changed — your local model catalog now has one home that every copy reads (user 2026-11-14)

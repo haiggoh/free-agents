@@ -54,6 +54,8 @@ def offers(home: Path | None = None) -> list:
             ver = d.name.removeprefix(f"{prefix}-")
             if not ver[:1].isdigit():
                 continue  # managed names only: <prefix>-<X.Y.Z>
+            if ".repair-" in d.name:
+                continue  # stale repair-aside dir (killed repair), never a version (0.58.1)
             if (new / d.name).is_dir():
                 continue  # present in both roots: the new root wins, no offer
             out.append(Upgrade(backend=prefix, current=ver, latest=ver, via="migrate",

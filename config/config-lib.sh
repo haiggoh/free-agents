@@ -376,7 +376,7 @@ la_discover_rapid_bin() {
       [ -x "$c" ] && la_backend_bin_health "$c" 2>/dev/null && { echo "$c"; return 0; }
     done < <(la_backend_roots)
   done < <( { la_backend_roots | while IFS= read -r root; do
-                find "$root" -maxdepth 2 -name 'rapid-mlx-[0-9]*' -type d 2>/dev/null
+                find "$root" -maxdepth 2 -name 'rapid-mlx-[0-9]*' ! -name '*.repair-*' -type d 2>/dev/null
               done; } | while IFS= read -r d; do printf '%s\n' "${d##*/}"; done | sort -V -r -u)
   echo ""
   return 1

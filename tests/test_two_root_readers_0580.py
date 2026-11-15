@@ -97,6 +97,14 @@ class TwoRootReadersTest(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "")
         self.assertEqual(r.returncode, 1)
 
+    def test_discovery_ignores_repair_aside_dirs(self):
+        """A killed repair leaves `<name>.repair-<pid>-<ts>` behind; even a HEALTHY
+        aside is never a candidate — an aside is not a version."""
+        make_fake_venv(self.legacy, "rapid-mlx-0.16.10.repair-66562-1794664402", "rapid-mlx")
+        make_fake_venv(self.new_root, "rapid-mlx-0.16.10", "rapid-mlx")
+        self.assertEqual(self.run_lib("la_discover_rapid_bin").stdout.strip(),
+                         str(self.new_root / "rapid-mlx-0.16.10" / "bin" / "rapid-mlx"))
+
     def test_repair_hint_names_repair_for_a_new_root_binary(self):
         r = self.run_lib('la_backend_repair_hint '
                          '"$HOME/.local/share/free-agents/backends/vllm-mlx-0.6.0/bin/vllm-mlx"')

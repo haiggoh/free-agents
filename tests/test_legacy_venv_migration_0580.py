@@ -76,6 +76,15 @@ class OffersTest(MigrationHome):
         self.assertEqual(u.command[-2:], ["repair", "0.6.0"])
         self.assertIn("manage-backend.py", u.command[1])
 
+    def test_offers_ignore_stale_repair_aside_dirs(self):
+        """A killed repair leaves `<name>.repair-<pid>-<ts>` behind; it is never an
+        offer — the real version beside it is."""
+        self.mkdir(self.legacy, "rapid-mlx-0.16.10")
+        self.mkdir(self.legacy, "rapid-mlx-0.16.10.repair-66562-1794664402")
+        offers = lvm.offers()
+        self.assertEqual([(u.backend, u.current) for u in offers],
+                         [("rapid-mlx", "0.16.10")])
+
 
 class PromptTest(MigrationHome):
     def setUp(self):
