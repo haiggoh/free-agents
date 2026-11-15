@@ -55,9 +55,10 @@ class PreTrustContractStatic(unittest.TestCase):
                 path = ROOT / rel
                 self.assertTrue(path.is_file(), f"{rel}: launch site missing")
                 src = path.read_text()
-                self.assertIn("fa_pre_trust.py", src, f"{rel}: no pre-trust helper call")
+                call_marker = 'fa_pre_trust.py" "$PWD"'  # the call, not a doc mention
+                self.assertIn(call_marker, src, f"{rel}: no pre-trust helper call")
                 self.assertIn("FA_PRE_TRUST", src, f"{rel}: no FA_PRE_TRUST opt-out")
-                self.assertLess(src.index("fa_pre_trust.py"), src.index(exec_marker),
+                self.assertLess(src.index(call_marker), src.index(exec_marker),
                                 f"{rel}: helper call must appear before the claude exec")
 
 
