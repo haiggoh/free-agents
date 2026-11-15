@@ -293,6 +293,14 @@ Tests: `tests/test_two_root_readers_0580.py` (15), `tests/test_repair_repins_058
 ## [0.56.8] — unreleased
 
 ### Fixed — handover into a new worktree stalls on the folder-trust dialog (user 2026-11-10)
+> **Correction (2026-11-15): this fix never worked, and the stall is NOT fixed.** `--trust-workspace`
+> exists only on `claude ultrareview`, not on top-level `claude`; the test's fake `claude` accepted
+> any argv, so the suite stayed green while every real launch crashed. 0.56.12 removed the crash by
+> passing the flag only when top-level `claude --help` lists it — on Claude Code 2.1.325 it does
+> not, so nothing pre-accepts trust and a handover into a fresh worktree waits at the dialog again
+> (reproduced 2026-11-15). Tracked as waypoint `free-agents-handover-stalls`. The original entry
+> below is kept unchanged as the historical record.
+
 - `bin/remote-session.sh` passes `--trust-workspace` (Claude Code's own non-interactive
   pre-accept — no `~/.claude.json` hand-edit) so a handover launch into a fresh worktree
   starts instead of sitting silently at the trust prompt. Pinned via the recorded claude
