@@ -1,11 +1,17 @@
-# csl ↔ NiceGUI parity inventory (2026-11-16)
+# csl ↔ NiceGUI parity inventory (2026-11-16, corrected 2026-11-16 after live probing)
 
 Measured on branch `feat/nicegui-frontend` (rebased onto main 0.59.3, commit b2e581f).
 Sources: csl screens = `class *Screen` in `bin/session_picker_model.py` + all `nav_target=`
-values; GUI pages = `@ui.page` routes in `bin/fa_gui/app.py` (`/`, `/home`, `/local`,
-`/remote`, plus the `/{full_path:path}` catch-all) + the tile→route mapping in
-`bin/fa_gui/app.py:454` (`tool:lowkey`→`lowkey`, `tool:download`→`download` — routes that
-do not exist as pages).
+values; GUI = `bin/fa_gui/app.py`.
+
+**Correction to the first draft of this file:** the `/{full_path:path}` catch-all already
+renders EVERY known nav target through the shared `picker_core.build_screen` (verified live:
+all probed routes return 200). The real gap was never empty pages — it was that only the
+`/local` and `/remote` lanes loaded their inventory data; every other screen rendered with
+an empty cache. Fixed in Task 1: the catch-all now prefetches each screen's declared
+`build.prefetch` kinds through a loader map mirroring the TUI's `LOADERS`
+(`tests/test_gui_prefetch.py`). What remains missing per screen is its interactive/write
+bits, listed below.
 
 **Legend:** ✅ real GUI page · ◐ page exists but the screen's actions are partial ·
 ❌ no page — falls into the catch-all (empty page + Back-to-Home) · the GUI's adapter maps
@@ -13,26 +19,26 @@ the nav target but no `@ui.page` exists for it.
 
 ## Screen parity table
 
-| csl screen / nav target | csl source | GUI status | Notes |
+| csl screen / nav target | csl source | GUI status (measured) | Still missing |
 |---|---|---|---|
-| home | `HomeScreen` | ✅ `/home` | tiles render; tool tiles map lowkey/download (see below) |
-| local sessions | `LocalScreen` | ◐ `/local` | model list renders (`load_local_models`); missing: download entry, #missing cleanup offer, per-model launch params (effort/temp/thinking rows exist via model group) |
-| remote sessions | `RemoteScreen` | ◐ `/remote` | API list + filters row exists in csl; GUI remote page lacks `remote_filters` screen and tool:rl-* panels |
-| lowkey | `LowkeyScreen` via `tool:lowkey` | ❌ mapped to `/lowkey`, no page | catch-all empty page |
-| download local models | `DownloadScreen` via `tool:download` | ❌ mapped to `/download`, no page | queue-then-confirm flow → `download-models.sh --select` |
-| about | `AboutScreen` | ❌ | |
-| api keys | `APIKeysScreen` | ❌ | key presence/setup, open: URLs |
-| rate limiter | `RateLimiterScreen` | ❌ | incl. tool:rl-status / tool:rl-reset |
-| memguard (OOM guard) | `MemoryGuardScreen` | ❌ | |
-| cloud session config | `CloudConfigScreen` | ❌ | routes, security review |
-| theme config | `ThemeConfigScreen` | ❌ | swatches/hue steppers exist in csl model |
-| remote filters | `RemoteFiltersScreen` | ❌ | |
-| runtime manager / backend | `RuntimeManagerScreen` | ❌ | install/upgrade/repair/validate backends, version ops (`runtime_versions:*`) |
-| runtime + launchd | `RuntimeScreen`, `LaunchdScreen` | ❌ | incl. tool:rt-launchd-* |
-| hidden-model report | `tool:report` | ❌ | |
-| prompts (session name, rt-remove, download review) | `prompt:*` | ❌ | modal prompts — GUI needs its own dialog pattern |
-| warnings | `warn:*` | ❌ | |
-| quit | — | ✅ handled in app.py (target == "quit") | |
+| home | `HomeScreen` | ✅ `/home` renders | — |
+| local sessions | `LocalScreen` | ◐ `/local` renders with data | download entry point, #missing cleanup offer |
+| remote sessions | `RemoteScreen` | ◐ `/remote` renders with data | `remote_filters` screen's controls, tool:rl-* panels |
+| lowkey | `LowkeyScreen` via `tool:lowkey` | ◐ renders via catch-all (data now prefetched) | prompt:session dialog |
+| download local models | `DownloadScreen` via `tool:download` | ◐ renders via catch-all; catalog data now prefetched (Task 1) | the queue→review→confirm WRITE flow (must call `download-models.sh --select`); prompt:download-review dialog |
+| about | `AboutScreen` | ◐ renders | — |
+| api keys | `APIKeysScreen` | ◐ renders | key add/remove write path (`setup-api-keys.py`), open: URLs |
+| rate limiter | `RateLimiterScreen` | ◐ renders | tool:rl-status / tool:rl-reset actions |
+| memguard (OOM guard) | `MemoryGuardScreen` | ◐ renders | — |
+| cloud session config | `CloudConfigScreen` | ◐ renders | route/security-review write path |
+| theme config | `ThemeConfigScreen` | ◐ renders + GUI-only appearance section (`render_appearance`) | — |
+| remote filters | `RemoteFiltersScreen` | ◐ renders | filter write path |
+| runtime manager / backend | `RuntimeManagerScreen` | ◐ renders; version data prefetched (Task 1) | install/upgrade/validate/repair WRITE actions (`runtime_versions:*` → backend-manager CLIs) |
+| runtime + launchd | `RuntimeScreen`, `LaunchdScreen` | ◐ renders | tool:rt-launchd-* actions |
+| hidden-model report | `tool:report` | ◐ renders | report generation action |
+| prompts (session name, rt-remove, download review) | `prompt:*` | ❌ | GUI dialog pattern (modal) |
+| warnings | `warn:*` | ❌ | toast/banner pattern |
+| quit | — | ✅ handled in app.py (target == "quit") | — |
 
 ## Special functionality: local model list registration & update
 

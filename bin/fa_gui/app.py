@@ -22,11 +22,25 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import session_picker_model as m
+import picker_core as pc
+
+# Cache-kind -> loader, mirroring the Textual picker's LOADERS map (session_picker.py:1371)
+# plus its versions:/rcat: prefixes, so every screen that build_screen declares a prefetch
+# kind for gets its data loaded on navigation — not just the two lanes.
+PREFETCH_LOADERS = {"local": pc.load_local_models, "remote": pc.load_remote_agents,
+                    "catalog": pc.load_catalog}
+
+
+def _loader_for(kind: str):
+    if kind.startswith("versions:"):
+        return lambda: pc.load_versions(kind)
+    if kind.startswith("rcat:"):
+        return lambda: pc.load_remote_catalog(kind)
+    return PREFETCH_LOADERS.get(kind)
 
 
 def build() -> None:
     from nicegui import ui
-    import picker_core as pc
     import session_menu_state as sms
     from fa_gui.adapter import render_plan
     from fa_gui.jobs import STALE, Loader
@@ -798,6 +812,16 @@ def build() -> None:
         scr = None
         if target not in ("quit", "back"):          # not pages — handled by the launcher
             try:
+                build = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache)
+                # prefetch the screen's declared inventory kinds (csl parity: goto() does the
+                # same via _prefetch) so the screen renders with DATA, not empty rows
+                for kind in build.prefetch:
+                    fn = _loader_for(kind)
+                    if fn is not None:
+                        await loader.load(kind, fn, client=client.id)
+                        # csl re-reads the local list after an auto-sync registry change
+                        if kind == "local" and get_settings().local_registry.get("auto_sync"):
+                            await loader.load("local", pc.load_local_models, client=client.id)
                 scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache).screen
             except Exception:
                 scr = None
