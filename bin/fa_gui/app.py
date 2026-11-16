@@ -300,7 +300,7 @@ def build() -> None:
         """Rebuild a page's rows from a FRESH screen (untyped steppers embed the value in
         their label, which is stale after a step — the csl re-renders the same way)."""
         def _rerender():
-            scr2 = pc.build_screen(nav, get_settings(), loader.cache).screen
+            scr2 = pc.build_screen(nav, get_settings(), loader.cache, savers=settings_state.get('savers')).screen
             body.clear()
             with body:
                 render_rows(scr2, st)
@@ -579,7 +579,7 @@ def build() -> None:
             # while a pure value cycle updates the label in place (keeps focus, no flicker).
             # Compare render_plan-to-render_plan: the plan synthesizes group rows and drops
             # hidden/pending ones, so raw actions() would ALWAYS differ (rerender every key).
-            fresh_scr = pc.build_screen(nav, get_settings(), loader.cache).screen
+            fresh_scr = pc.build_screen(nav, get_settings(), loader.cache, savers=settings_state.get('savers')).screen
             fresh_ids = {c.action_id for c in render_plan(fresh_scr)}
             if fresh_ids != st.get("action_ids"):
                 st["rerender"]()
@@ -730,7 +730,7 @@ def build() -> None:
         loader.leave_page(client=client.id)     # Phase 2: this client's old page is gone
         st = cstate(client)
         s = get_settings()
-        scr = pc.build_screen(m.Nav("home", m.HOME_OWNED), s, loader.cache).screen
+        scr = pc.build_screen(m.Nav("home", m.HOME_OWNED), s, loader.cache, savers=settings_state.get('savers')).screen
         body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
             render_rows(scr, st)
@@ -743,7 +743,7 @@ def build() -> None:
             await client.connected()
             loader.leave_page(client=client.id)     # Phase 2: this client's old page is gone
             st = cstate(client)
-            scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache).screen
+            scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache, savers=settings_state.get('savers')).screen
             body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "", lane=True)
             st["toggle_list"] = lambda: None     # placeholder; reassigned below before any click can fire
             with body:
@@ -846,7 +846,7 @@ def build() -> None:
         scr = None
         if target not in ("quit", "back"):          # not pages — handled by the launcher
             try:
-                build = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache)
+                build = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache, savers=settings_state.get('savers'))
                 # prefetch the screen's declared inventory kinds (csl parity: goto() does the
                 # same via _prefetch) so the screen renders with DATA, not empty rows
                 for kind in build.prefetch:
@@ -856,7 +856,7 @@ def build() -> None:
                         # csl re-reads the local list after an auto-sync registry change
                         if kind == "local" and get_settings().local_registry.get("auto_sync"):
                             await loader.load("local", pc.load_local_models, client=client.id)
-                scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache).screen
+                scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache, savers=settings_state.get('savers')).screen
             except Exception:
                 scr = None
         if target.startswith("prompt:") and scr is not None:

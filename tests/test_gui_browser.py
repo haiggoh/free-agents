@@ -132,3 +132,30 @@ def test_browser_selftest_round_trip(browser, tmp_path):
         left = srv.stop()
     assert left == [], f"orphan child processes after stop: {left}"
     assert srv.proc.returncode is not None
+
+
+def test_settings_row_click_writes_the_store(browser, tmp_path):
+    # Task 2 proof (delivery-shaped): clicking a toggle row on /rate_limiter must flip the
+    # value in the temp config dir's session-menu.local.json — the same store csl writes.
+    srv = Server()
+    try:
+        store = Path(srv.tmp.name) / "session-menu.local.json"
+        page = browser.new_page()
+        page.goto(f"{srv.url}rate_limiter")
+        row = page.locator('[data-action="RateLimiterScreen.z"]')  # "429 max retries" cycle row
+        row.wait_for(timeout=15000)
+        before = json.loads(store.read_text()) if store.exists() else {}
+        before_retries = before.get("rate_limiter", {}).get("max_retries")
+        row.locator(".cycle-right").click()  # the row's ▶ arrow runs the cycle (+1)
+        deadline = time.time() + 10
+        after = {}
+        while time.time() < deadline:
+            if store.exists():
+                after = json.loads(store.read_text())
+                if after.get("rate_limiter", {}).get("max_retries") != before_retries:
+                    break
+            time.sleep(0.1)
+        assert after.get("rate_limiter", {}).get("max_retries") != before_retries, \
+            f"store unchanged after click: {before.get('rate_limiter')} -> {after.get('rate_limiter')}"
+    finally:
+        assert srv.stop() == []
