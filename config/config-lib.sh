@@ -9,6 +9,17 @@
 #
 # Sourced by launch-claude-agent.sh, local-llm-hotswap.sh, and csl.
 
+# Bash 4+ guard (waypoint config-lib-sh-requires-bash-4): this lib uses associative arrays
+# (declare -A, lines ~173+), which are a HARD syntax error under macOS /bin/bash 3.2 — the
+# failure used to be cryptic ("declare: -A: invalid option" then an arithmetic syntax error
+# in la_register). Launchers relaunch under a modern bash themselves; when sourced directly
+# under 3.2, fail loudly and say why instead of crashing mid-load.
+if (( BASH_VERSINFO[0] < 4 )); then
+    echo "config-lib.sh: requires bash 4+ (associative arrays); this is bash ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]} — run under a modern bash (e.g. /opt/homebrew/bin/bash) or let the launcher relaunch itself" >&2
+    # shellcheck disable=SC2317  # sourced: return 1; executed as a script: exit 1
+    return 1 2>/dev/null || exit 1
+fi
+
 # Resolve the plugin root (this file is in <root>/config/).
 # Handle being sourced from bash -c or similar where BASH_SOURCE[0] may be empty/unset.
 # Respect pre-set LA_CONFIG_DIR (e.g., from tests) to allow overriding the config location.
