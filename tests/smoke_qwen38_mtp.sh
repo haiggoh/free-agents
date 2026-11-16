@@ -47,8 +47,10 @@ status="$(git status --porcelain=v1 --untracked-files=all)"
 # falls back to it (LA_FALLBACK_CONFIG=1), ending in a confusing "alias lookup failed".
 # Fail EARLY and clearly instead — before any runtime/port preflight side effect.
 source config/config-lib.sh
-la_load_config
-if (( LA_FALLBACK_CONFIG )); then
+# || true: config-lib's tail (rapid-bin discovery) returns 1 when no rapid is installed,
+# which under set -e would kill this script silently — the fallback flag below is what matters
+la_load_config || true
+if (( ${LA_FALLBACK_CONFIG:-1} )); then
     fail "no config.local.sh in this checkout (it is git-ignored) — set LA_LIVE_CONFIG_DIR to any directory containing a config.local.sh (e.g. the main checkout's config/ directory)"
 fi
 
