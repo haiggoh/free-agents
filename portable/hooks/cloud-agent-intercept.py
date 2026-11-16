@@ -62,7 +62,15 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str,
     import offload_routing
     routing = offload_routing.routing_block(plugin_root)
     alias = offload_routing.session_alias(env or os.environ, plugin_root)
-    free_session = f"{plugin_root}/bin/remote-session.sh {alias} --effort high -p \"<brief>\""
+    # 0.59.3 (waypoint free-agents-paid-session): remote-session.sh has NO headless/-p flag —
+    # it execs an interactive claude, so it cannot run from a tool shell. The free-SESSION
+    # route is the handover skill (interactive window via launch-remote-window.sh, with a
+    # first prompt), never a ready-to-run headless command.
+    free_session_route = (
+        f"invoke the free-session-handover skill for alias {alias} — it launches the session "
+        f"in its own terminal window with a first prompt (remote-session.sh {alias} "
+        f"--prompt-file <handoff.md>)"
+    )
     if tool_name == "Agent":
         prompt = tool_input.get("prompt", "")
         subagent_type = tool_input.get("subagent_type", "general-purpose")
@@ -86,8 +94,8 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str,
             f"Returns JSON: {{\"content\": \"...\", \"model_used\": \"...\", \"route\": \"...\"}}.\n"
             f"Before running it, tell the user which model it goes to (`python3 \"{free_tool}\" --list` "
             f"shows the preference order); free models are not equal.\n"
-            f"  (b) must read files / run commands → a headless free SESSION in the background: "
-            f"{free_session}\n"
+            f"  (b) must read files / run commands → a free SESSION in its OWN terminal window "
+            f"(never headless from a tool shell): {free_session_route}\n"
             f"Independent tasks may be launched as several parallel Bash calls.\n"
             f"Original description: {description}\n"
         )
@@ -96,7 +104,7 @@ def build_deny_reason(tool_input: Dict[str, Any], plugin_root: str, mode: str,
         head = (
             f"{_lane_mark(env or os.environ)} free-agents: this {tool_name} call is routed to a "
             f"free lane (route[{'workflow' if tool_name == 'Workflow' else 'agent'}]={mode}).\n"
-            f"Tool-using work belongs in a free SESSION, headless in the background: {free_session}\n"
+            f"Tool-using work belongs in a free SESSION in its own terminal window: {free_session_route}\n"
         )
     if mode == "free-only":
         tail = (

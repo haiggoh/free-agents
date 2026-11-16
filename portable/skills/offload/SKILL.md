@@ -45,9 +45,9 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
 1. **Shape test first: text in / text out, or must it read files / run commands?**
    Text-only → a STATELESS dispatch: `python3 bin/free-agent-tool.py` with
    `{"prompt": ..., "files": [paths]}` (cannot read the disk; `--list` = preference order).
-   Must read files / run commands → headless free SESSION: `remote-session.sh <alias> --effort
-   <lvl> -p "<brief>"` (resolve `<alias>`: first keyed row of `remote-session.sh --list`). A
-   HANDOVER is always INTERACTIVE in its own Terminal window (free-session-handover).
+   Must read files / run commands → a free SESSION in its own window via free-session-handover:
+   `remote-session.sh <alias> --prompt-file <handoff.md>` (no headless form — the launcher
+   execs an interactive claude). A HANDOVER is always INTERACTIVE.
 2. **Announce the model and route to the user BEFORE offloading** (the tool prints the model it
    tried on stderr; the result JSON carries `model_used`/`route` — repeat them in your reply).
    Brief delegates with the `brief-the-delegate` skill; session system prompts:
