@@ -288,8 +288,11 @@ class DetectBackendHealthParityTest(unittest.TestCase):
         bad_root = Path(self.home) / "opt" / "homebrew"
         (bad_root / "bin").mkdir(parents=True)
         bad = bad_root / "bin" / "rapid-mlx"
-        bad.write_text("#!/nonexistent/interp\nexit 0\n")
+        # valid shebang BUT a dead sibling bin/python — the venv-broken shape that only
+        # the bin/ branch (venv_health) catches; a shebang-only fallback would accept it
+        bad.write_text("#!/bin/sh\nexit 0\n")
         bad.chmod(0o755)
+        (bad_root / "bin" / "python").symlink_to("/nonexistent/python-gone")
         good_root = Path(self.home) / "usr" / "local"
         (good_root / "bin").mkdir(parents=True)
         good = good_root / "bin" / "rapid-mlx"
