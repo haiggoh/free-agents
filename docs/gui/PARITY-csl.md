@@ -25,7 +25,7 @@ the nav target but no `@ui.page` exists for it.
 | local sessions | `LocalScreen` | ◐ `/local` renders with data | download entry point, #missing cleanup offer |
 | remote sessions | `RemoteScreen` | ◐ `/remote` renders with data | `remote_filters` screen's controls, tool:rl-* panels |
 | lowkey | `LowkeyScreen` via `tool:lowkey` | ◐ renders via catch-all (data now prefetched) | prompt:session dialog |
-| download local models | `DownloadScreen` via `tool:download` | ◐ renders via catch-all; catalog data now prefetched (Task 1) | the queue→review→confirm WRITE flow (must call `download-models.sh --select`); prompt:download-review dialog |
+| download local models | `DownloadScreen` via `tool:download` | ◐ renders + catalog prefetched (29a6be1); confirm dialog wired (88a3b30) | the queue-row click wiring (entry rows → toggle_selected) — the only untested-by-browser piece left |
 | about | `AboutScreen` | ◐ renders | — |
 | api keys | `APIKeysScreen` | ◐ renders | key add/remove write path (`setup-api-keys.py`), open: URLs |
 | rate limiter | `RateLimiterScreen` | ◐ renders | tool:rl-status / tool:rl-reset actions |
