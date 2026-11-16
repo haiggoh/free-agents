@@ -50,6 +50,9 @@ class SmokeWorktreeTest(unittest.TestCase):
         (live / "config.local.sh").write_text("# no pins\n")
         r = self._run({"LA_LIVE_CONFIG_DIR": str(live)})
         self.assertNotIn("no config.local.sh", r.stderr)
+        # delivery-shaped (QC 2b): prove the script RAN PAST the config check into the
+        # preflight, not merely that the config message is absent
+        self.assertIn("FRESH-RUNTIME PREFLIGHT", r.stdout)
 
 
 if __name__ == "__main__":
