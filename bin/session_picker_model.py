@@ -27,7 +27,7 @@ import sys
 import time
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, cast
 
 # Optional rich import for color swatches in theme config
 try:
@@ -198,13 +198,15 @@ def thinking_row(s: Settings, key: str = "j", section: str = "model", get=None, 
     to a second, indistinguishable ON. 0.56.5: get/put default to the shared
     thinking_session; lowkey passes its own lowkey_thinking pair (per-lane remembered value)."""
     if get is None:
-        def get():
+        def _default_get():
             return s.thinking_session
+        get = _default_get
     if put is None:
-        def put(v):
+        def _default_put(v):
             s.thinking_session = v
             if s.on_thinking_saved:
                 s.on_thinking_saved(s.thinking_session)
+        put = _default_put
 
     def label():
         return "OFF" if get() is False else "ON"
@@ -1438,7 +1440,7 @@ class LocalScreen(Screen):
     # Registered aliases whose weights are gone from disk (csl --inventory reports them as
     # "#missing<TAB>alias<TAB>subdir"). The picker offers ONCE per session to move them to the
     # removed-models tombstone; an empty list means nothing to offer.
-    missing: list = None
+    missing: list | None = None
 
     @property
     def policy(self):
@@ -1538,7 +1540,7 @@ class LocalScreen(Screen):
             if q and q not in item.label.casefold() and q not in mdl.alias.casefold():
                 continue
             buckets.setdefault(family_for(mdl.alias, mdl.family), []).append(item)
-        for alias in self.missing:
+        for alias in self.missing or []:
             if q and q not in alias.casefold():
                 continue
             buckets.setdefault(family_for(alias), []).append(
@@ -2709,7 +2711,7 @@ class ThemeConfigScreen(Screen):
         accent = theme["theme"]["accent_color"]
         name = dict(THEME_PRESETS).get(accent.upper(), "custom")
         lane_pad = " " * (len("Remote") - len(which.capitalize()))
-        if RICH_AVAILABLE:
+        if RICH_AVAILABLE and Text is not None:
             return Text.assemble(f"{emoji} {which.capitalize()}:{lane_pad} ", (name, "bold"))
         return f"{emoji} {which.capitalize()}:{lane_pad} {name}"
 
@@ -2720,7 +2722,7 @@ class ThemeConfigScreen(Screen):
         theme = self.local_theme if which == "local" else self.remote_theme
         accent = theme["theme"]["accent_color"]
         border = theme["theme"].get("border_color", "")
-        if RICH_AVAILABLE:
+        if RICH_AVAILABLE and Text is not None:
             return Text.assemble(
                 " ",
                 (accent, accent),
@@ -2800,12 +2802,12 @@ class ThemeConfigScreen(Screen):
         acts = [
             setting("l", self._lane_label("local"), presets,
                     lambda: self.local_theme["theme"]["accent_color"],
-                    lambda v: self._set_accent("local", v),
+                    lambda v: self._set_accent("local", str(v)),
                     labels=[n for _, n in THEME_PRESETS],
                     value_suffix=self._lane_suffix("local")),
             setting("r", self._lane_label("remote"), presets,
                     lambda: self.remote_theme["theme"]["accent_color"],
-                    lambda v: self._set_accent("remote", v),
+                    lambda v: self._set_accent("remote", str(v)),
                     labels=[n for _, n in THEME_PRESETS],
                     value_suffix=self._lane_suffix("remote")),
             # Task 5: continuous steppers carry typed metadata too (choices = the 5° grid,
@@ -2816,13 +2818,13 @@ class ThemeConfigScreen(Screen):
                    lambda: self._shift_hue("local", 20),
                    step=lambda d: self._shift_hue("local", 5 * d),
                    choices=tuple(range(0, 360, 5)), value=lambda: self._hue_deg("local"),
-                   put=lambda v: self._set_hue("local", v), name="Hue local",
+                   put=lambda v: self._set_hue("local", cast(int, v)), name="Hue local",
                    labels=tuple(f"{d}°" for d in range(0, 360, 5))),
             Action("u", f"Hue remote: {self._hue_deg('remote')}°  (←/→ 5°, Enter/click 20°)",
                    lambda: self._shift_hue("remote", 20),
                    step=lambda d: self._shift_hue("remote", 5 * d),
                    choices=tuple(range(0, 360, 5)), value=lambda: self._hue_deg("remote"),
-                   put=lambda v: self._set_hue("remote", v), name="Hue remote",
+                   put=lambda v: self._set_hue("remote", cast(int, v)), name="Hue remote",
                    labels=tuple(f"{d}°" for d in range(0, 360, 5))),
             Action("d", "Restore defaults", lambda: self._restore_defaults()),
         ]
@@ -3467,7 +3469,7 @@ class APIKeysScreen(Screen):
         if prov is None:
             return "Highlight a provider to see what its account needs before a key works."
         lines = [prov.name, prov.steps]
-        note = _registry_provider_note(slug)
+        note = _registry_provider_note(slug or "")
         # Skip the note when the steps already say it (Vercel's card requirement is in both).
         if note and not ("credit card" in note.lower() and "credit card" in prov.steps.lower()):
             lines.append("Measured: " + note)
