@@ -283,17 +283,34 @@ class DetectBackendHealthParityTest(unittest.TestCase):
         self.assertIsNone(self.discover())
 
     def test_system_candidate_with_dead_interpreter_is_skipped(self):
-        cand = Path(self.home) / "cands"
-        cand.mkdir()
-        bad = cand / "rapid-mlx-bad"
+        # real candidate shape: <prefix>/bin/rapid-mlx — the bin/ parent matters, because
+        # _bin_healthy routes bin-dir paths through venv_health(root, name) (QC finding 1b)
+        bad_root = Path(self.home) / "opt" / "homebrew"
+        (bad_root / "bin").mkdir(parents=True)
+        bad = bad_root / "bin" / "rapid-mlx"
         bad.write_text("#!/nonexistent/interp\nexit 0\n")
         bad.chmod(0o755)
-        good = cand / "rapid-mlx-good"
+        good_root = Path(self.home) / "usr" / "local"
+        (good_root / "bin").mkdir(parents=True)
+        good = good_root / "bin" / "rapid-mlx"
         good.write_text("#!/bin/sh\nexit 0\n")
         good.chmod(0o755)
         with mock.patch.object(self.detect, "_SYSTEM_CANDIDATES",
                                (str(bad), str(good))):
             self.assertEqual(self.discover(), str(good))
+
+    def test_path_candidate_with_dead_interpreter_is_skipped(self):
+        # shutil.which() candidate: a broken rapid-mlx on PATH must be skipped too (QC 1c)
+        pdir = Path(self.home) / "pathbin"
+        pdir.mkdir()
+        bad = pdir / "rapid-mlx"
+        bad.write_text("#!/nonexistent/interp\nexit 0\n")
+        bad.chmod(0o755)
+        env = dict(self.env)
+        env["PATH"] = f"{pdir}:/usr/bin:/bin"
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(self.detect, "_SYSTEM_CANDIDATES", ()):
+            self.assertIsNone(self.detect._discover_rapid_bin())
 
 
 if __name__ == "__main__":

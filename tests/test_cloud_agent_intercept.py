@@ -260,6 +260,21 @@ class RoutingMessage(unittest.TestCase):
         self.assertIn("other-alias-3", reason2)
         self.assertNotIn("test-alias-9", reason2)
 
+    def test_suggested_prompt_file_flag_is_accepted_by_the_real_parser(self):
+        # QC 3b: the nudge suggests --prompt-file — prove the REAL remote-session.sh parser
+        # accepts it (and rejects the old -p), via the parser's own error messages
+        env = {"PATH": os.environ["PATH"], "HOME": self.tmp.name, "LC_ALL": "C"}
+        ok = subprocess.run(["bash", str(ROOT / "bin/remote-session.sh"), "--dry-run",
+                             "--prompt-file", "/nonexistent-handoff.md"],
+                            env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(ok.returncode, 2)
+        self.assertIn("need an alias", ok.stderr)          # flag parsed; failed later, not "unknown"
+        self.assertNotIn("unknown option", ok.stderr)
+        bad = subprocess.run(["bash", str(ROOT / "bin/remote-session.sh"), "--dry-run", "-p", "x"],
+                             env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(bad.returncode, 2)
+        self.assertIn("unknown option: -p", bad.stderr)
+
     def test_paid_requires_stated_reason_not_route_failure(self):
         low = self.deny_reason().lower()
         self.assertIn("stated reason", low)

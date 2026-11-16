@@ -29,25 +29,26 @@ class BashGuardTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.env = {"PATH": os.environ["PATH"], "HOME": self.tmp.name, "LC_ALL": "C"}
 
-    def _run(self, bash):
+    def _run(self, bash, body):
         return subprocess.run(
-            [bash, "-c", f'source "{LIB}" && echo LIB-LOADED'],
+            [bash, "-c", f'source "{LIB}"; {body}'],
             env=self.env, capture_output=True, text=True, timeout=60)
 
-    def test_bash32_fails_loudly_not_cryptically(self):
+    def test_bash32_registry_load_fails_loudly_not_cryptically(self):
         v = bash_version("/bin/bash")
         if v[0] >= 4:
             self.skipTest("/bin/bash is 4+ on this host")
-        r = self._run("/bin/bash")
-        self.assertEqual(r.returncode, 1)
+        # the guard is scoped to la_load_config: plain helpers must still work under 3.2
+        r = self._run("/bin/bash", 'la_load_config || echo LOAD-FAILED; la_backend_roots && echo ROOTS-OK')
         self.assertIn("requires bash 4+", r.stderr)
         self.assertNotIn("invalid option", r.stderr)  # no more cryptic declare error
-        self.assertNotIn("LIB-LOADED", r.stdout)
+        self.assertIn("LOAD-FAILED", r.stdout)
+        self.assertIn("ROOTS-OK", r.stdout)  # non-registry helpers unaffected under 3.2
 
     def test_modern_bash_loads(self):
-        r = self._run("bash")  # PATH bash (brew/bash5 on this repo's machines)
+        r = self._run("bash", 'la_load_config && echo LOAD-OK')  # PATH bash (brew/bash5 here)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("LIB-LOADED", r.stdout)
+        self.assertIn("LOAD-OK", r.stdout)
 
 
 if __name__ == "__main__":

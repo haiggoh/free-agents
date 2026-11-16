@@ -9,17 +9,6 @@
 #
 # Sourced by launch-claude-agent.sh, local-llm-hotswap.sh, and csl.
 
-# Bash 4+ guard (waypoint config-lib-sh-requires-bash-4): this lib uses associative arrays
-# (declare -A, lines ~173+), which are a HARD syntax error under macOS /bin/bash 3.2 — the
-# failure used to be cryptic ("declare: -A: invalid option" then an arithmetic syntax error
-# in la_register). Launchers relaunch under a modern bash themselves; when sourced directly
-# under 3.2, fail loudly and say why instead of crashing mid-load.
-if (( BASH_VERSINFO[0] < 4 )); then
-    echo "config-lib.sh: requires bash 4+ (associative arrays); this is bash ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]} — run under a modern bash (e.g. /opt/homebrew/bin/bash) or let the launcher relaunch itself" >&2
-    # shellcheck disable=SC2317  # sourced: return 1; executed as a script: exit 1
-    return 1 2>/dev/null || exit 1
-fi
-
 # Resolve the plugin root (this file is in <root>/config/).
 # Handle being sourced from bash -c or similar where BASH_SOURCE[0] may be empty/unset.
 # Respect pre-set LA_CONFIG_DIR (e.g., from tests) to allow overriding the config location.
@@ -181,6 +170,11 @@ la_parse_served_ids() {
 # --- model registry storage (populated by la_register in the config file) ----
 # Parallel arrays keyed by insertion; la_lookup fills LA_* vars for a given alias.
 LA_ALIASES=()
+# Assoc arrays need bash 4+; under macOS /bin/bash 3.2, declare -A is a hard error, so
+# guard the declarations: sourcing stays clean under 3.2 and la_load_config (below)
+# refuses loudly there — the non-registry helpers keep working under 3.2 (waypoint
+# config-lib-sh-requires-bash-4).
+if (( BASH_VERSINFO[0] >= 4 )); then
 declare -A LA_SUBDIR LA_SERVE LA_SERVE_DECLARED LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT LA_ROLES LA_REPO LA_SIZE
 declare -A LA_RAPID_SPEC_CONFIG LA_STATUS   # LA_STATUS: 12th-field status word (e.g. "experimental"), never a spec
 # Optional per-alias Claude Code auto-compaction overrides. csl applies
@@ -193,6 +187,7 @@ declare -A LA_MODEL_CONTEXT_OVERRIDE LA_MODEL_AUTOCOMPACT_OVERRIDE
 # Derived catalogue context/autocompaction (loaded from model-catalogue-derived.psv)
 # These provide the catalogue defaults per model folder.
 declare -A LA_CATALOGUE_CONTEXT LA_CATALOGUE_AUTOCOMPACT LA_CATALOGUE_EXTENDED_CONTEXT LA_CATALOGUE_EXTENDED_AUTOCOMPACT LA_CATALOGUE_ENTRY_TYPE
+fi
 
 # la_register <alias> <subdir> <serve:mlx|rapid|vllm|mlx_lm|omlx|llama_cpp|litellm|api> <tool_parser> <reasoning_parser>
 #             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb] [rapid_spec_json]
@@ -257,8 +252,10 @@ la_derive_mtp_variants() {
 # "unknown alias" is a dead end: the user typed a name that worked last week and gets no route
 # forward. Registering it here keeps the OLD name discoverable — la_retired_hint prints where it
 # went, so the unknown-alias error can say "renamed" instead of "no such thing".
+if (( BASH_VERSINFO[0] >= 4 )); then
 declare -A LA_RETIRED=()
-la_retired() { LA_RETIRED[$1]="$2"; }
+fi
+la_retired() { (( BASH_VERSINFO[0] >= 4 )) && LA_RETIRED[$1]="$2"; }
 
 # la_retired_hint <alias> -> prints a one-line redirect on stderr if <alias> was retired.
 # Returns 0 if a hint was printed, 1 if the alias is simply unknown.
@@ -763,6 +760,16 @@ la_get_autocompaction() {
 LA_BIN_ENV_OVERRIDES="LA_RAPID_BIN LA_RAPID_AUTO_BIN LA_OMLX_BIN LA_CUDA_BIN LA_LLAMA_SERVER LA_EXL2_BIN LA_SGLANG_BIN"
 
 la_load_config() {
+  # Bash 4+ guard (waypoint config-lib-sh-requires-bash-4): the registry uses associative
+  # arrays (declare -A above), a HARD syntax error under macOS /bin/bash 3.2 — the failure
+  # used to be cryptic ("declare: -A: invalid option" + an arithmetic error in la_register).
+  # Scoped HERE (not at file top) so bash-3.2 callers of the non-registry helpers
+  # (la_backend_roots, la_discover_rapid_bin, … — the shell test suites run under 3.2)
+  # keep working; only loading the model registry requires bash 4+.
+  if (( BASH_VERSINFO[0] < 4 )); then
+    echo "config-lib: la_load_config requires bash 4+ (associative-array model registry); this is bash ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]} — run under a modern bash (e.g. /opt/homebrew/bin/bash); the launchers relaunch themselves" >&2
+    return 1
+  fi
   local _la_n _la_v _la_i=0 _la_snap=() _la_r
   for _la_n in $LA_BIN_ENV_OVERRIDES; do
     eval "_la_snap[$_la_i]=\"\${$_la_n-}\""; _la_i=$((_la_i + 1))
