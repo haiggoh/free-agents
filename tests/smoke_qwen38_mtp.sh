@@ -42,6 +42,16 @@ status="$(git status --porcelain=v1 --untracked-files=all)"
 [ -z "$status" ] ||
     fail "repository is not clean: $status"
 
+# Worktree-safe config resolution (waypoint smoke-qwen38-mtp-sh-cannot): config.local.sh is
+# git-ignored, so a fresh worktree only has config.example.sh and la_load_config silently
+# falls back to it (LA_FALLBACK_CONFIG=1), ending in a confusing "alias lookup failed".
+# Fail EARLY and clearly instead — before any runtime/port preflight side effect.
+source config/config-lib.sh
+la_load_config
+if (( LA_FALLBACK_CONFIG )); then
+    fail "no config.local.sh in this checkout (it is git-ignored) — set LA_LIVE_CONFIG_DIR to any directory containing a config.local.sh (e.g. the main checkout's config/ directory)"
+fi
+
 printf '%s\n' '=== 1. FRESH-RUNTIME PREFLIGHT ==='
 
 active_runtime="$(
@@ -119,8 +129,7 @@ for port in 8000 8001 8002 8003 8004 8005 8006 8007 8008 8009 8010; do
     printf 'port=%s free=1\n' "$port"
 done
 
-source config/config-lib.sh
-la_load_config
+# config already loaded above (worktree-safe check); look up the alias
 la_lookup "$ALIAS" ||
     fail "alias lookup failed: $ALIAS"
 
