@@ -39,6 +39,40 @@ def _loader_for(kind: str):
     return PREFETCH_LOADERS.get(kind)
 
 
+def prompt_payload(target: str, scr) -> dict | None:
+    """What a prompt:* dialog shows. Testable core of the dialog layer: for
+    prompt:download-review it is the DownloadScreen's own review (aliases, total GB,
+    fits) — the same object csl's confirm prompt renders."""
+    if target == "prompt:download-review" and hasattr(scr, "review"):
+        r = scr.review()
+        return {"kind": "download-review", "aliases": list(r.aliases),
+                "total_gb": r.total_gb, "fits": r.fits}
+    if target.startswith("prompt:"):
+        return {"kind": "confirm", "prompt": target}
+    return None
+
+
+def confirm_prompt_argv(scr, target: str) -> "list[str] | None":
+    """The CLI argv a confirmed prompt:* dialog produces — the real delivery path:
+    model confirm() -> LaunchRequest -> picker_core.command_for. None when the dialog
+    is declined or the target has no confirm action."""
+    if target.startswith("prompt:") and hasattr(scr, "confirm"):
+        req = scr.confirm(True)
+        if isinstance(req, m.LaunchRequest):
+            return pc.command_for(req)
+    return None
+
+
+def _confirm_prompt(scr, target: str, st: dict, dlg) -> None:
+    """Yes-button handler: run the model's confirm(True) and dispatch the resulting
+    LaunchRequest through the page's launch hook (the FA_GUI_LAUNCH_STUB in tests)."""
+    if target.startswith("prompt:") and hasattr(scr, "confirm"):
+        req = scr.confirm(True)
+        if isinstance(req, m.LaunchRequest) and st.get("launch_req"):
+            st["launch_req"](req)
+    dlg.close()
+
+
 def build() -> None:
     from nicegui import ui
     import session_menu_state as sms
@@ -825,6 +859,24 @@ def build() -> None:
                 scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache).screen
             except Exception:
                 scr = None
+        if target.startswith("prompt:") and scr is not None:
+            # prompt:* dialogs (csl's typed confirmations): show the payload, Yes runs the
+            # model's confirm() -> LaunchRequest -> command_for, dispatched like a launch
+            from nicegui import ui as _ui
+            payload = prompt_payload(target, scr)
+            with _ui.dialog() as dlg, _ui.card().classes("w-full max-w-md"):
+                _ui.label(target).classes("text-lg font-bold")
+                if payload and payload.get("kind") == "download-review":
+                    _ui.label(f"{len(payload['aliases'])} queued, {payload['total_gb']:.1f} GB"
+                              + ("" if payload["fits"] else " — DOES NOT FIT in free space"))
+                    _ui.label(", ".join(payload["aliases"]))
+                else:
+                    _ui.label("Confirm?")
+                with _ui.row():
+                    _ui.button("Yes", on_click=lambda: _confirm_prompt(scr, target, st, dlg))
+                    _ui.button("No", on_click=dlg.close)
+            dlg.open()
+            return
         if scr is None:
             with ui.column().classes("w-full max-w-3xl mx-auto p-6 gap-3"):
                 ui.label(f"/{full_path}").classes("text-2xl font-bold")

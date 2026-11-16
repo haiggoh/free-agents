@@ -10,6 +10,7 @@ import unittest
 
 import picker_core as pc
 import session_picker_model as m
+import fa_gui.app as app
 from fa_gui.app import PREFETCH_LOADERS, _loader_for
 
 
@@ -57,6 +58,46 @@ class PrefetchMapTests(unittest.TestCase):
         entries = catalog_data[0]
         self.assertGreater(len(entries), 0, "catalog loader returned no entries on this machine")
         self.assertEqual(len(build2.screen.entries), len(entries))
+
+
+class PromptDialogTests(unittest.TestCase):
+    """The prompt:* dialog core: review payload + the confirm->CLI-argv delivery path."""
+
+    def _download_screen(self, queued=("kat-coder-optiq",)):
+        settings = m.Settings()
+        first = queued[0] if queued else "kat-coder-optiq"
+        entry = m.CatalogEntry(alias=first, state="ABSENT", size_gb=20.0, groups="g", repo="r")
+        scr = m.DownloadScreen(settings, [entry], 100.0, 10.0, m.HOME_OWNED)
+        for a in queued:
+            scr.queue.append(a)
+        return scr
+
+    def test_review_payload_is_the_models_own_review(self):
+        scr = self._download_screen()
+        payload = app.prompt_payload("prompt:download-review", scr)
+        self.assertEqual(payload["kind"], "download-review")
+        self.assertEqual(payload["aliases"], ["kat-coder-optiq"])
+        self.assertEqual(payload["total_gb"], 20.0)
+        self.assertTrue(payload["fits"])
+
+    def test_confirm_produces_the_exact_cli_argv(self):
+        # delivery-shaped: confirm(True) -> LaunchRequest -> command_for -> argv
+        scr = self._download_screen(("kat-coder-optiq", "qwen-3.8-operator"))
+        # second alias needs an entry or review() keys it — add one
+        scr.entries["qwen-3.8-operator"] = m.CatalogEntry(
+            alias="qwen-3.8-operator", state="ABSENT", size_gb=16.0, groups="g", repo="r")
+        argv = app.confirm_prompt_argv(scr, "prompt:download-review")
+        self.assertIsNotNone(argv)
+        self.assertTrue(argv[0].endswith("install/download-models.sh"), argv[0])
+        self.assertEqual(argv[1:].count("--select"), 2)
+        self.assertEqual(argv[1:], ["--select", "kat-coder-optiq", "--select", "qwen-3.8-operator"])
+
+    def test_unknown_prompt_yields_none(self):
+        about = m.AboutScreen(m.Settings(), m.HOME_OWNED)  # no confirm() method
+        self.assertIsNone(app.confirm_prompt_argv(about, "prompt:rt-remove"))
+        self.assertIsNone(app.prompt_payload("not-a-prompt", about))
+        # and an empty queue declines even on a screen that has confirm()
+        self.assertIsNone(app.confirm_prompt_argv(self._download_screen(()), "prompt:download-review"))
 
 
 if __name__ == "__main__":
