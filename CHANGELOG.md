@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.59.3] — unreleased
+
+### Fixed — waypoint cleanup sweep (open fa waypoints 2026-11-05..15)
+- `bin/la-detect-backend.py`: `_discover_rapid_bin` now matches the shell `la_discover_rapid_bin` — every candidate (system, PATH, venv) must pass `venv_health` (the python mirror of `la_backend_bin_health`), not just `X_OK`, and `*.repair-*` aside dirs are never candidates (0.58.4 shell parity). A Homebrew-upgrade-broken venv is no longer picked over a healthy older one. Tests: `DetectBackendHealthParityTest` (broken-newest skipped, repair aside excluded, dead-interpreter system + PATH candidates skipped; mutations RED-verified).
+- `tests/smoke_qwen38_mtp.sh`: worktree-safe — fails early and clearly (naming `LA_LIVE_CONFIG_DIR`) when the git-ignored `config.local.sh` is absent, before any runtime/port preflight; also no longer dies silently under `set -e` when `la_load_config`'s tail returns 1.
+- Offload nudge (paid sessions): no longer suggests the nonexistent headless `-p` flag — `hooks/cloud-agent-intercept.py` and the offload skill's routing block now point at the free-session-handover skill with `--prompt-file`; the suggested flag is pinned against the real `remote-session.sh` parser (`-p` rejected, `--prompt-file` accepted).
+- Lint hygiene: `la-model-profile.py` `Optional[List[Dict]]` annotation + unused imports removed; `tests/test_theme_files.py` unused import removed; `install/download-models.sh`'s inert undocumented `--json` flag now exits 2 naming `--inventory`.
+- `config/config-lib.sh`: bash-4 guard scoped to `la_load_config` + the `declare -A` blocks are version-guarded — sourcing under macOS `/bin/bash` 3.2 is now clean and the registry load fails loudly with the requirement named (was: cryptic `declare: -A: invalid option` + arithmetic error). The non-registry helpers keep working under 3.2 (the shell test suites rely on that).
+- Verified already-fixed and closed with evidence (no code): `free-agent-tool.py` null-timeout crash (fixed 0.56.2 + regression test), both PreToolUse guard false positives (fixed 0.19.7 segment-aware guard; probe 6/6 incl. planted positives), catalog-overlay migration, the 0.55.6/0.55.7 release split.
+- QC: independent review (Gemini 3.8 Flash, out-of-family dispatch) before tagging; all actionable findings applied with RED-verified mutations.
+
 ## [0.59.2] — 2026-11-15 — Wave D: portable guidance package (C1/C2)
 
 ### Added — Wave D: committed portable GUIDANCE package (COORDINATION C1/C2)
