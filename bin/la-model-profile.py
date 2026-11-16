@@ -17,13 +17,11 @@ Commands:
 """
 
 import json
-import os
 import sys
 import argparse
-import re
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = REPO_ROOT / "config"
@@ -214,7 +212,7 @@ def parse_legacy_config(path: Path) -> List[Dict]:
                     })
     return profiles
 
-def resolve_profile(profile_id: str, runtime: Dict, resource: Dict, environment: Dict, legacy: List[Dict] = None) -> Optional[Dict]:
+def resolve_profile(profile_id: str, runtime: Dict, resource: Dict, environment: Dict, legacy: Optional[List[Dict]] = None) -> Optional[Dict]:
     """Resolve a profile to its full expanded form."""
     all_runtime = {p['id']: p for p in runtime.get("profiles", [])}
     if legacy:

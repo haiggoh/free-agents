@@ -6,7 +6,6 @@ Two facts measured on CLI 2.1.296 (2026-10-13) are pinned here:
   * the theme role `clawd_body` recolours the welcome-screen mascot (seen magenta in a probe).
 """
 import json
-import os
 import subprocess
 import sys
 import tempfile

@@ -72,7 +72,7 @@ BACKGROUND_QOS=${LA_DOWNLOAD_BACKGROUND:-1}
 FORCE=0; LIST_ONLY=0; DRY_RUN=0; CHECK_AUTH=0; NON_AUTH_ACTION=0; ALL=0; ALLOW_TIGHT=0
 GROUP_FILTER=""; SELECTED=(); CATALOG_OVERRIDE=(); TARGET_OVERRIDE=""
 HEADROOM_GB=${LA_DISK_HEADROOM_GB:-100}
-PROFILE_FILTER=""; BACKEND_FILTER=""; CAPABILITY_FILTER=""; RECOMMENDED_ONLY=0; JSON_OUTPUT=0
+PROFILE_FILTER=""; BACKEND_FILTER=""; CAPABILITY_FILTER=""; RECOMMENDED_ONLY=0
 while (($#)); do
   case "$1" in
     --force) FORCE=1; NON_AUTH_ACTION=1; shift ;;
@@ -94,7 +94,7 @@ while (($#)); do
     --hf-repo) (($# >= 2)) || { echo '--hf-repo needs a repo ID' >&2; exit 2; }; DYNAMIC_HF_REPO=$2; DYNAMIC_HF=1; NON_AUTH_ACTION=1; shift 2 ;;
     --alias) (($# >= 2)) || { echo '--alias needs an alias' >&2; exit 2; }; DYNAMIC_ALIAS=$2; NON_AUTH_ACTION=1; shift 2 ;;
     --include) (($# >= 2)) || { echo '--include needs a pattern' >&2; exit 2; }; DYNAMIC_INCLUDE=$2; NON_AUTH_ACTION=1; shift 2 ;;
-    --json) JSON_OUTPUT=1; NON_AUTH_ACTION=1; shift ;;
+    --json) echo 'download-models.sh: --json is not a supported flag (the catalog is machine-readable via --inventory); unknown flag' >&2; exit 2 ;;
     --full-speed) BACKGROUND_QOS=0; NON_AUTH_ACTION=1; shift ;;
     -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
