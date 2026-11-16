@@ -313,6 +313,35 @@ def build() -> None:
     def _tile_cls(scr, c, action):
         return _tile_cls_raw(type(scr).__name__, c, action)
 
+    def render_download_entries(body, scr, st: dict) -> None:
+        """The DownloadScreen's catalog list: one row per entry, click toggles the queue
+        (csl's Enter/Space), a leading ✓ marks queued rows. Rendered here because the
+        entries are NOT part of the screen's actions() — the TUI draws them as its own
+        table. A click re-renders so the ✓ markers and the review row's count update."""
+        from nicegui import ui as _ui
+        with body:
+            _ui.label("Catalog (click to queue)").classes("group-header")
+            for alias, e in sorted(scr.entries.items()):
+                queued = alias in scr.queue
+                row = _ui.label(f"{'✓ ' if queued else '   '}{alias}  ·  {e.size_gb:.1f} GB  [{e.state}]")
+                row.classes("menu-item model-row")
+                row.props["data-entry"] = alias
+
+                def _toggle(a=alias):
+                    # the queue lives in per-client state: the screen is rebuilt on every
+                    # render, so a queue stored on it would vanish between clicks
+                    q = st.setdefault("download_queue", [])
+                    if a in q:
+                        q.remove(a)
+                    else:
+                        q.append(a)
+                    scr.queue = list(q)
+                    if st.get("rerender"):
+                        st["rerender"]()
+                row.on("click", _toggle)
+                if queued:
+                    row.classes(add="queued")
+
     def render_rows(scr, st: dict) -> None:
         # csl parity (m.rendered_actions): lane screens fold model/settings rows under two
         # collapsible headers — "🔩 Model settings" / "🛠️ Advanced", triangle before the name,
@@ -557,6 +586,11 @@ def build() -> None:
         # "Go launch" returns a LaunchRequest — run it exactly like a model-row click
         if isinstance(res, m.LaunchRequest) and st.get("launch_req"):
             st["launch_req"](res)
+        elif isinstance(res, m.Nav):
+            # an action that navigates (e.g. Download's Review → prompt:download-review):
+            # route it; the catch-all renders prompt:* as a dialog
+            from nicegui import ui as _ui
+            _ui.navigate.to(f"/{res.target}")
 
     def _cycle_key(e, action, val, st: dict) -> None:
         """Phase 3: keyboard on a FOCUSED cycle row — Left steps -1, Right/Enter/Space
@@ -859,10 +893,23 @@ def build() -> None:
                 scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache, savers=settings_state.get('savers')).screen
             except Exception:
                 scr = None
+        # the launch/confirm dispatch hook, set on EVERY page (prompt:* dialogs confirm
+        # on their own route — FA_GUI_LAUNCH_STUB in tests)
+        st = cstate(client)
+        if st.get("launch_req") is None:
+            def _launch_req(req):
+                stub = os.environ.get("FA_GUI_LAUNCH_STUB")
+                if stub:
+                    Path(stub).write_text(json.dumps({"argv": pc.command_for(req)}))
+            st["launch_req"] = _launch_req
+        if target.startswith("prompt:"):
+            # prompt:* dialogs (csl's typed confirmations): the payload comes from the
+            # screen that EMITTED the prompt (the last built screen) —
+            # build_screen itself has no prompt: target
+            scr = settings_state.get("last_scr") or scr
         if target.startswith("prompt:") and scr is not None:
-            # prompt:* dialogs (csl's typed confirmations): show the payload, Yes runs the
-            # model's confirm() -> LaunchRequest -> command_for, dispatched like a launch
             from nicegui import ui as _ui
+            _st = cstate(client)   # the Yes handler dispatches through this client's launch hook
             payload = prompt_payload(target, scr)
             with _ui.dialog() as dlg, _ui.card().classes("w-full max-w-md"):
                 _ui.label(target).classes("text-lg font-bold")
@@ -873,7 +920,7 @@ def build() -> None:
                 else:
                     _ui.label("Confirm?")
                 with _ui.row():
-                    _ui.button("Yes", on_click=lambda: _confirm_prompt(scr, target, st, dlg))
+                    _ui.button("Yes", on_click=lambda: _confirm_prompt(scr, target, _st, dlg))
                     _ui.button("No", on_click=dlg.close)
             dlg.open()
             return
@@ -885,9 +932,39 @@ def build() -> None:
             return
         loader.leave_page(client=client.id)     # Phase 2: this client's old page is gone
         st = cstate(client)
+        if scr is not None:
+            # process-global: ui.navigate.to re-runs the page with a FRESH websocket client,
+            # so per-client state (st) is empty on the prompt: route — prompt:* dialogs
+            # read their payload from here
+            settings_state["last_scr"] = scr
         body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
             render_rows(scr, st)
         if full_path == "theme_config":
             render_appearance(body, st)         # Phase 4: GUI-only appearance section
+        if isinstance(scr, m.DownloadScreen):
+            scr.queue = list(st.get("download_queue", []))   # re-attach the per-client queue
+            for _a in scr.actions():
+                if _a.key == "c":
+                    _a.enabled = bool(scr.queue)   # review row is disabled until the queue is non-empty
+            render_download_entries(body, scr, st)   # queue rows (csl's entry list)
         wire_rerender(body, m.Nav(full_path, m.HOME_OWNED), st)
+        if isinstance(scr, m.DownloadScreen):
+            # wrap AFTER wire_rerender (it sets st["rerender"]): the plain rebuild only
+            # restores action rows — re-attach the queue and re-render the entry rows too
+            _base_rerender = st.get("rerender")
+            def _dl_rerender(_b=body, _t=full_path, _s=st):
+                # full rebuild from a FRESH screen (the base rerender would use the stale
+                # one whose review row was built disabled with an empty queue)
+                scr2 = pc.build_screen(m.Nav(_t, m.HOME_OWNED), get_settings(), loader.cache,
+                                       savers=settings_state.get('savers')).screen
+                scr2.queue = list(_s.get("download_queue", []))
+                for _a in scr2.actions():
+                    if _a.key == "c":
+                        _a.enabled = bool(scr2.queue)
+                _b.clear()
+                with _b:
+                    render_rows(scr2, _s)
+                    render_download_entries(_b, scr2, _s)
+            if _base_rerender is not None:
+                st["rerender"] = _dl_rerender

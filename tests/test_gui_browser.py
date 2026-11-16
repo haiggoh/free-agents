@@ -159,3 +159,32 @@ def test_settings_row_click_writes_the_store(browser, tmp_path):
             f"store unchanged after click: {before.get('rate_limiter')} -> {after.get('rate_limiter')}"
     finally:
         assert srv.stop() == []
+
+
+def test_download_queue_review_confirm_produces_cli_argv(browser, tmp_path):
+    # Task 1/4 delivery-shaped: queue an entry on /download, Review, Yes in the dialog →
+    # the launch stub file gets download-models.sh --select <alias>
+    stub = tmp_path / "launch.json"
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}download")
+        entry = page.locator("[data-entry]").first
+        entry.wait_for(timeout=20000)          # catalog prefetched by the catch-all
+        alias = entry.get_attribute("data-entry")
+        entry.click()                           # queue it
+        page.wait_for_selector(f"[data-entry='{alias}'].queued", timeout=10000)
+        page.get_by_text("Review queue and confirm", exact=False).first.click()  # the c action row
+        page.wait_for_selector(".q-dialog", timeout=10000)         # the prompt dialog opened
+        assert alias in page.locator(".q-dialog").inner_text()
+        page.locator(".q-dialog button", has_text="Yes").click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), "confirm did not dispatch a launch"
+        argv = json.loads(stub.read_text())["argv"]
+        assert argv[0].endswith("install/download-models.sh")
+        i = argv.index("--select")
+        assert argv[i + 1] == alias
+    finally:
+        assert srv.stop() == []
