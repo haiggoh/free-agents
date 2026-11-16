@@ -962,7 +962,10 @@ def run(input_data, env, out_path=None) -> int:
                       "family_avoided": family_avoided if avoid else None},
         shown_role=shown_role, shown_avoid=shown_avoid,
         note=lambda msg: print(msg, file=sys.stderr))
-    if status == "ok":
+    if status == "ok" and result is not None:
+        # execute_plan returns result=None only on non-ok statuses, so this guard is
+        # behavior-identical — it narrows the tuple type for Pyright
+        # (reportOptionalMemberAccess on result.get(...), waypoint free-agents-hygiene-pre)
         line = json.dumps(result)
         print(line)
         print(f"free-agents: ANSWERED BY {result.get('display') or result.get('model_used') or '?'}"
