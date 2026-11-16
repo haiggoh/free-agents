@@ -470,6 +470,14 @@ class Savers:
             warning = sms.save_memguard(self.config_dir, values)
         except ValueError as exc:
             warning = f"{exc}; not saved"
+
+    def local_registry(self, values):
+        # 0.55.8 Task 8 (main): the local_registry section's save path — the auto-sync row
+        # persists through on_local_registry_saved, not the memguard one
+        try:
+            warning = sms.save_local_registry(self.config_dir, values)
+        except ValueError as exc:
+            warning = f"{exc}; not saved"
         self._warn(warning)
 
     def lowkey_filters(self, key, value):          # schema-9 section, ported from main 0.54.0
@@ -518,7 +526,7 @@ def build_settings(flags: "argparse.Namespace | None", savers: Savers,
         security_review_offered=cloud["plugin_active"],
         routes={p: cse.route(p) for p in cse.ROUTE_PATHS},
         on_cloud_saved=savers.cloud,
-        on_memguard_saved=savers.memguard,
+        on_local_registry_saved=savers.local_registry,
         last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
                              **state.last_launched},
         last_launched_tier=dict(state.last_launched_tier),
