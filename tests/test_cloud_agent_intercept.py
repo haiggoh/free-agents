@@ -251,9 +251,13 @@ class RoutingMessage(unittest.TestCase):
     def test_message_offers_dispatch_and_headless_session_commands(self):
         reason = self.deny_reason(FA_ROUTE_SESSION_ALIAS="test-alias-9")
         self.assertIn("free-agent-tool.py", reason)                       # the dispatch heredoc
-        self.assertRegex(reason, r'remote-session\.sh test-alias-9 --effort \S+ -p "<brief>"')
+        # the free-SESSION route must NOT offer a headless command: remote-session.sh has no
+        # -p/headless flag and execs an interactive claude (waypoint free-agents-paid-session)
+        self.assertNotIn('-p "<brief>"', reason)
+        self.assertIn("free-session-handover", reason)
+        self.assertIn("test-alias-9", reason)  # the alias still appears (in the handover route)
         reason2 = self.deny_reason(FA_ROUTE_SESSION_ALIAS="other-alias-3")  # alias not hardcoded
-        self.assertIn("remote-session.sh other-alias-3", reason2)
+        self.assertIn("other-alias-3", reason2)
         self.assertNotIn("test-alias-9", reason2)
 
     def test_paid_requires_stated_reason_not_route_failure(self):

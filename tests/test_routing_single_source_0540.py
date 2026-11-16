@@ -146,8 +146,10 @@ class InterceptRoutingTests(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn(offload_routing.routing_block(str(ROOT)), reason)
         self.assertIn("free-agent-tool.py", reason)           # the dispatch heredoc stays
-        # the free-SESSION route offered as a ready-to-run command (alias resolved, --effort set)
-        self.assertRegex(reason, r'remote-session\.sh \S+ --effort \S+ -p "<brief>"')
+        # the free-SESSION route must point at the handover skill, not a headless -p command
+        # (remote-session.sh has no -p/headless flag — waypoint free-agents-paid-session)
+        self.assertNotIn('-p "<brief>"', reason)
+        self.assertIn("free-session-handover", reason)
 
     def test_workflow_routed_per_route_workflow(self):
         payload = {"hook_event_name": "PreToolUse", "tool_name": "Workflow",
@@ -159,7 +161,8 @@ class InterceptRoutingTests(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn(offload_routing.routing_block(str(ROOT)), reason)
         self.assertNotIn("FA_AGENT_JSON", reason, "Workflow must not get the Agent-only heredoc")
-        self.assertRegex(reason, r'remote-session\.sh \S+ --effort \S+ -p "<brief>"')
+        self.assertNotIn('-p "<brief>"', reason)
+        self.assertIn("free-session-handover", reason)
         # paid route -> pass through (no output, exit 0)
         r2 = run_hook(payload, ROOT, self.cfg, extra_env={"FA_ROUTE_WORKFLOW": "paid"})
         self.assertEqual(r2.returncode, 0)
