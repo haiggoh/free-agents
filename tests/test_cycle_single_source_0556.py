@@ -18,6 +18,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from picker_harness import ROOT  # noqa: E402
 import pytest  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "bin"))
+try:
+    import session_picker  # noqa: E402  (bin/session_picker.py sys.exit(3)s without rich/textual — catch that too)
+except (ImportError, SystemExit):
+    session_picker = None
+
 pytestmark = pytest.mark.load_sensitive
 
 PICKER = ROOT / "bin" / "session_picker.py"
@@ -31,6 +37,8 @@ def _code_lines(path: Path):
         yield line.split("#", 1)[0]
 
 
+@unittest.skipUnless(session_picker is not None,
+                     "session_picker needs the picker venv (rich/textual): run under the venv python")
 class HoverColourSingleSource(unittest.TestCase):
     def test_hover_colour_has_one_definition(self):
         src = PICKER.read_text()
@@ -41,7 +49,7 @@ class HoverColourSingleSource(unittest.TestCase):
         import emoji_constants as ec
         self.assertEqual(ec.CYCLE_HOVER_CSS, "ansi_" + ec.CYCLE_HOVER,
                          "the CSS form must be DERIVED from the rich name")
-        import session_picker
+        assert session_picker is not None  # for the type checker; the class guard skips otherwise
         self.assertIn(f"color: {ec.CYCLE_HOVER_CSS};", session_picker.Picker.CSS,
                       "the hover rule must read the derived constant")
 

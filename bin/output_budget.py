@@ -46,7 +46,10 @@ _PATTERNS = [
 
 def explain(status, error_text, requested):
     """Return (ceiling, pattern_name) or (None, None). See allowed_max_tokens."""
-    if 200 <= int(status or 0) < 300 or not error_text:
+    status = int(status or 0)
+    # Only a 4xx refusal counts: a 5xx whose body happens to contain a matching phrase is a
+    # server error, not a budget/max_tokens refusal (QC review 2026-11-17).
+    if not 400 <= status < 500 or not error_text:
         return None, None
     for name, rx, extract, kind in _PATTERNS:
         m = rx.search(error_text)

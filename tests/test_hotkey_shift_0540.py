@@ -115,20 +115,10 @@ class ShiftLetterTests(PilotCase):
                 app.dispatch = orig_dispatch
         self.run_picker(scenario, start="home")
 
-
-def _make_per_screen_test(cls):
-    def test(self):
-        self._check_screen(cls)
-    test.__name__ = f"test_shift_letter_on_{cls.__name__}"
-    test.__doc__ = f"shift+letter on {cls.__name__} dispatches like the letter (0.56.15 per-screen split)"
-    return test
-
-
-for _cls in _screen_subclasses():
-    if _cls is m.HomeScreen:
-        continue          # root: Quit on 'q', no Back
-    setattr(ShiftLetterTests, f"test_shift_letter_on_{_cls.__name__}", _make_per_screen_test(_cls))
-
+    # 2026-11-17 fix: these three were accidentally indented into the for-loop below, so they
+    # landed in the MODULE namespace as functions taking `self` — pytest then collected them as
+    # plain tests and every run (any interpreter) errored with "fixture 'self' not found".
+    # They belong to ShiftLetterTests; moved up into the class body, indentation unchanged.
     def test_uppercase_still_types_into_search(self):
         async def scenario(app, pilot, h):
             sm = app.screen_model
@@ -176,6 +166,20 @@ for _cls in _screen_subclasses():
             self.assertIsInstance(app.screen, ConfirmPanel, "panel must still own the keys")
 
         self.run_picker(scenario, start="home")
+
+
+def _make_per_screen_test(cls):
+    def test(self):
+        self._check_screen(cls)
+    test.__name__ = f"test_shift_letter_on_{cls.__name__}"
+    test.__doc__ = f"shift+letter on {cls.__name__} dispatches like the letter (0.56.15 per-screen split)"
+    return test
+
+
+for _cls in _screen_subclasses():
+    if _cls is m.HomeScreen:
+        continue          # root: Quit on 'q', no Back
+    setattr(ShiftLetterTests, f"test_shift_letter_on_{_cls.__name__}", _make_per_screen_test(_cls))
 
 
 if __name__ == "__main__":

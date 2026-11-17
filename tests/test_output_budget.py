@@ -46,6 +46,17 @@ class AllowedMaxTokensTests(unittest.TestCase):
         # a credit balance shrinks with use, so stay 5% under what it can afford
         self.assertEqual(output_budget.allowed_max_tokens(402, OPENROUTER_402, 128000), 18087)
 
+    def test_openrouter_margin_scales_with_the_balance(self):
+        # QC 2026-11-17: two different balances must yield two different ceilings — a hardcoded
+        # 19039/18087 would fail the second value
+        bigger = OPENROUTER_402.replace("19039", "50000")
+        self.assertEqual(output_budget.allowed_max_tokens(402, bigger, 128000), 47500)
+
+    def test_a_5xx_with_a_matching_body_is_not_a_refusal(self):
+        # a server error that happens to quote the phrase must not trigger a retry
+        self.assertIsNone(output_budget.allowed_max_tokens(500, OPENROUTER_402, 128000))
+        self.assertIsNone(output_budget.allowed_max_tokens(503, OPENAI_400, 128000))
+
     def test_openai_model_output_cap_is_used_exactly(self):
         self.assertEqual(output_budget.allowed_max_tokens(400, OPENAI_400, 128000), 32768)
 
@@ -116,6 +127,99 @@ class DispatcherRetryTests(unittest.TestCase):
         rc, calls, _ = self.run_dispatch([other])
         self.assertEqual(len(calls), 1)
         self.assertEqual(rc, 2)
+
+
+class CLITests(unittest.TestCase):
+    """Every shipped script must support --help, verified by RUNNING it (repo rule)."""
+
+    def test_help_exits_0_and_prints_usage(self):
+        with mock.patch.object(sys, "argv", ["output_budget.py", "--help"]), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out, \
+                self.assertRaises(SystemExit) as cm:
+            output_budget.main()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("--status", out.getvalue())
+
+    @staticmethod
+    def _stdin(text):
+        return mock.patch("sys.stdin", io.StringIO(text))
+
+    def test_reads_error_from_stdin_and_prints_ceiling(self):
+        with self._stdin(OPENROUTER_402), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            rc = output_budget.main(["--status", "402", "--requested", "128000"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.getvalue().startswith("18087\t"), out.getvalue())
+
+    def test_no_usable_ceiling_exits_1(self):
+        with self._stdin('{"error":{"message":"Insufficient credits"}}'), \
+                mock.patch("sys.stderr", new_callable=io.StringIO):
+            rc = output_budget.main(["--status", "402", "--requested", "128000"])
+        self.assertEqual(rc, 1)
+
+    def test_unknown_flag_exits_nonzero(self):
+        with mock.patch.object(sys, "argv", ["output_budget.py", "--bogus"]), \
+                mock.patch("sys.stderr", new_callable=io.StringIO), \
+                self.assertRaises(SystemExit) as cm:
+            output_budget.main()
+        self.assertNotEqual(cm.exception.code, 0)
+
+
+class DispatcherFreshOutputTests(unittest.TestCase):
+    def test_retry_reopens_output_files_with_w(self):
+        # QC 2026-11-17: a retry must truncate, never append to the refused attempt's output
+        calls = []
+        modes = []
+        real_open = open
+
+        def spy_open(file, mode="r", *a, **k):
+            if str(file).endswith(("output.txt", "reasoning.txt")):
+                modes.append((str(file), mode))
+            return real_open(file, mode, *a, **k)
+
+        def fake_stream(provider, body, *a, **k):
+            calls.append(dict(body))
+            r = {"model_effective": "m", **(DispatcherRetryTests.REFUSED if len(calls) == 1
+                                             else DispatcherRetryTests.ANSWERED)}
+            return rad.remote_http.Result(provider=provider.id, tier=provider.tier,
+                                          model_requested=body["model"], **r)
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.dict("os.environ", {"OPENROUTER_API_KEY": "k"}), \
+                mock.patch.object(rad.remote_http, "stream_chat", side_effect=fake_stream), \
+                mock.patch.object(rad, "_record_quota"), \
+                mock.patch("builtins.open", side_effect=spy_open), \
+                mock.patch.object(sys, "argv", ["x", "--provider", "openrouter", "--model",
+                                                "m", "--prompt", "hi", "--max-tokens", "128000",
+                                                "--outdir", td]), \
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+            rc = rad.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(modes), 4, modes)          # 2 files x 2 attempts
+        self.assertTrue(all(m == "w" for _, m in modes), modes)
+
+    def test_a_5xx_with_a_matching_body_is_not_retried(self):
+        calls = []
+
+        def fake_stream(provider, body, *a, **k):
+            calls.append(dict(body))
+            return rad.remote_http.Result(provider=provider.id, tier=provider.tier,
+                                          model_requested=body["model"], model_effective="m",
+                                          ok=False, status=500, error_class="transient",
+                                          error_reason=OPENROUTER_402)
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.dict("os.environ", {"OPENROUTER_API_KEY": "k"}), \
+                mock.patch.object(rad.remote_http, "stream_chat", side_effect=fake_stream), \
+                mock.patch.object(rad, "_record_quota"), \
+                mock.patch.object(sys, "argv", ["x", "--provider", "openrouter", "--model",
+                                                "m", "--prompt", "hi", "--max-tokens", "128000",
+                                                "--outdir", td]), \
+                mock.patch.object(sys, "stderr", new_callable=io.StringIO):
+            rc = rad.main()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(rc, 3)                         # retriable class, but no budget retry
 
 
 if __name__ == "__main__":
