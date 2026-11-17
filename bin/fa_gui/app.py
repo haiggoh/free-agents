@@ -52,6 +52,14 @@ def prompt_payload(target: str, scr) -> dict | None:
     return None
 
 
+def dispatch_argv(req) -> list:
+    """The argv a dispatched LaunchRequest runs. command_for covers the launch lanes;
+    tool: requests carry a ready-made argv (picker_core.tool_argv) — use it verbatim."""
+    if req.lane == "tool":
+        return req.argv[1:]
+    return pc.command_for(req)
+
+
 def confirm_prompt_argv(scr, target: str) -> "list[str] | None":
     """The CLI argv a confirmed prompt:* dialog produces — the real delivery path:
     model confirm() -> LaunchRequest -> picker_core.command_for. None when the dialog
@@ -586,6 +594,12 @@ def build() -> None:
         # "Go launch" returns a LaunchRequest — run it exactly like a model-row click
         if isinstance(res, m.LaunchRequest) and st.get("launch_req"):
             st["launch_req"](res)
+        elif isinstance(res, m.Nav) and res.target.startswith("tool:"):
+            # tool: rows RUN a command in csl (never navigate) — dispatch the argv
+            argv = pc.tool_argv(res.target, get_settings().runtime_backend,
+                                settings_state.get("last_scr"))
+            if argv and st.get("launch_req"):
+                st["launch_req"](m.LaunchRequest("tool", ["tool", *argv], {}, ""))
         elif isinstance(res, m.Nav):
             # an action that navigates (e.g. Download's Review → prompt:download-review):
             # route it; the catch-all renders prompt:* as a dialog
@@ -794,7 +808,7 @@ def build() -> None:
                     # the delivery hook: model-row clicks and the "Go launch" action both land here
                     stub = os.environ.get("FA_GUI_LAUNCH_STUB")
                     if stub:
-                        Path(stub).write_text(json.dumps({"argv": pc.command_for(req)}))
+                        Path(stub).write_text(json.dumps({"argv": dispatch_argv(req)}))
                 st["launch_req"] = _launch_req
 
                 def do_launch(mid, mdl=None):
@@ -900,7 +914,7 @@ def build() -> None:
             def _launch_req(req):
                 stub = os.environ.get("FA_GUI_LAUNCH_STUB")
                 if stub:
-                    Path(stub).write_text(json.dumps({"argv": pc.command_for(req)}))
+                    Path(stub).write_text(json.dumps({"argv": dispatch_argv(req)}))
             st["launch_req"] = _launch_req
         if target.startswith("prompt:"):
             # prompt:* dialogs (csl's typed confirmations): the payload comes from the

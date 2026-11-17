@@ -188,3 +188,23 @@ def test_download_queue_review_confirm_produces_cli_argv(browser, tmp_path):
         assert argv[i + 1] == alias
     finally:
         assert srv.stop() == []
+
+
+def test_tool_action_row_dispatches_cli_argv(browser, tmp_path):
+    # Task 3: a tool: row runs its command (csl parity) instead of navigating —
+    # click "Show live limiter status" on /rate_limiter, assert the stub argv
+    stub = tmp_path / "tool.json"
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}rate_limiter")
+        page.get_by_text("Show live limiter status", exact=False).first.click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), "tool row did not dispatch"
+        argv = json.loads(stub.read_text())["argv"]
+        assert argv[0] == "python3" and argv[1].endswith("bin/rate_limiter.py"), argv
+        assert argv[2:] == ["status"], argv
+    finally:
+        assert srv.stop() == []

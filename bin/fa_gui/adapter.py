@@ -87,6 +87,10 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
             # (e.g. the memguard percent rows) — both cycle via ◀ ▶
             kind = "toggle" if (a.choices is not None and len(a.choices) == 2
                                 and set(a.choices) <= {False, True}) else "select"
+        elif a.section in NAV_SECTIONS and a.nav_target and a.nav_target.startswith("tool:"):
+            # tool: targets RUN a command in csl, they don't navigate — render as a button
+            # carrying the tool target, so the app dispatches pc.tool_argv on click
+            kind = "button"
         elif a.section in NAV_SECTIONS:
             kind = "nav"
             if not a.nav_target:
@@ -98,5 +102,5 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
             kind = "button"
         out.append(RenderedControl(action_id=sid, kind=kind, label=a.label, enabled=a.enabled,
                                    group=member_group.get(id(a), ""),
-                                   target=a.nav_target if kind == "nav" else ""))
+                                   target=a.nav_target if kind in ("nav", "button") else ""))
     return out
