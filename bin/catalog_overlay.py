@@ -22,6 +22,95 @@ class OverlayOverrideError(ValueError):
     """LA_MODEL_CATALOG_LOCAL is set but names no file."""
 
 
+# PSV row fields, in order: alias|name|repo|rev|subdir|size_gb|groups|tier|notes|serve
+ROW_FIELDS = ("alias", "name", "repo", "rev", "subdir", "size_gb", "groups",
+              "tier", "notes", "serve")
+
+
+class OverlayWriteError(ValueError):
+    """A row edit would produce an invalid store file."""
+
+
+def read_rows(path: Path) -> "list[dict]":
+    """Parse the overlay store: '#' comment lines skipped, one dict per data row.
+    Malformed rows (wrong field count) raise — a half-written file must not pass silently."""
+    rows = []
+    for n, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = line.split("|")
+        if len(parts) != len(ROW_FIELDS):
+            raise OverlayWriteError(f"{path}:{n}: expected {len(ROW_FIELDS)} fields, got {len(parts)}")
+        rows.append(dict(zip(ROW_FIELDS, parts)))
+    return rows
+
+
+def _validate_row(row: dict) -> None:
+    if not row.get("alias"):
+        raise OverlayWriteError("alias must be non-empty")
+    for f in ROW_FIELDS:
+        if "|" in row.get(f, "") or "\n" in row.get(f, ""):
+            raise OverlayWriteError(f"field {f} contains a pipe or newline")
+    try:
+        float(row.get("size_gb") or 0)
+    except ValueError:
+        raise OverlayWriteError(f"size_gb is not a number: {row.get('size_gb')!r}") from None
+
+
+def _comment_lines(path: Path) -> "list[str]":
+    """The store's '#' comment and blank lines, in order — user annotations, preserved
+    across rewrites (read BEFORE write_rows replaces the file)."""
+    if not Path(path).exists():
+        return []
+    return [line for line in Path(path).read_text(encoding="utf-8").splitlines()
+            if not line.strip() or line.lstrip().startswith("#")]
+
+
+def write_rows(path: Path, rows: "list[dict]", comments: "list[str] | None" = None) -> None:
+    """Atomically replace the store: validate every row, unique aliases, mode 600.
+    `comments` defaults to the file's own comment/blank lines, written ahead of the rows."""
+    seen = set()
+    for r in rows:
+        _validate_row(r)
+        if r["alias"] in seen:
+            raise OverlayWriteError(f"duplicate alias: {r['alias']}")
+        seen.add(r["alias"])
+    path = Path(path)
+    if comments is None:
+        comments = _comment_lines(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".psv.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        for c in comments:
+            f.write(c + "\n")
+        for r in rows:
+            f.write("|".join(r.get(fld, "") for fld in ROW_FIELDS) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def add_row(path: Path, row: dict) -> None:
+    """Insert a row (appended at the end); duplicate alias raises."""
+    rows = read_rows(path) if Path(path).exists() else []
+    if any(r["alias"] == row.get("alias") for r in rows):
+        raise OverlayWriteError(f"alias already present: {row.get('alias')}")
+    rows.append({f: row.get(f, "") for f in ROW_FIELDS})
+    write_rows(path, rows)
+
+
+def remove_row(path: Path, alias: str) -> bool:
+    """Remove the row with this alias; returns False when absent (not an error)."""
+    if not Path(path).exists():
+        return False
+    rows = read_rows(path)
+    kept = [r for r in rows if r["alias"] != alias]
+    if len(kept) == len(rows):
+        return False
+    write_rows(path, kept)
+    return True
+
+
 def store_path() -> Path:
     return Path.home() / ".claude" / "free-agents" / NAME
 

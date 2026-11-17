@@ -50,7 +50,12 @@ migration notice from the SessionStart hook). Registration/update flows in csl:
 1. **Download/register a model** — `DownloadScreen`: queue from the catalog, review,
    one `download-models.sh --select A …` call. GUI: missing (❌ above).
 2. **Catalog overlay edits** — user-local rows in `model-catalog.local.psv`
-   (`la-catalog-overlay.sh path` to print it); migration from old layouts. GUI: missing.
+   (`la-catalog-overlay.sh path` to print it); migration from old layouts.
+   GUI: ✅ `/catalog` page (add/remove rows through `catalog_overlay.py`'s validated
+   read/write, comments preserved, subdir defaults to the repo basename as
+   `download-models.sh` requires); reachable via "✏️ Edit overlay catalog" on /download;
+   browser-proven: store-file bytes asserted, invalid rows rejected with notify + no write,
+   download-screen catalog cache refreshed after a write.
 3. **#missing cleanup** — registered alias whose weights are gone is offered once per
    session for removal/migration. GUI: missing.
 4. **Backend install/upgrade** — runtime manager screen (`download-models.sh` for
@@ -58,8 +63,8 @@ migration notice from the SessionStart hook). Registration/update flows in csl:
 5. **Model profiles** — `la-model-profile.py` list/artifact/… drive capability display
    in the list. GUI: reads the catalog for display only.
 
-GUI currently has: model LIST display on /local (load_local_models) and launch — nothing
-that writes the list or the overlay store.
+GUI currently has: model LIST display on /local (load_local_models), launch, and the
+/catalog overlay-edit screen that writes the overlay store (see item 2).
 
 ## Suggested build order (feeds the plan)
 

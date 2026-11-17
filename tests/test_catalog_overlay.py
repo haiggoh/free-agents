@@ -317,3 +317,66 @@ def test_model_profile_reads_store_overlay(home):
                        env=env_for(home), capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr
     assert str(store(home)) in r.stdout.splitlines(), r.stdout
+
+
+class TestOverlayWrite:
+    """0.59.x Task 4 (GUI catalog screen): validated read/write of the overlay store.
+    NOTE: must be named Test* — a class named *Tests without a TestCase base is never
+    collected by pytest, and self.assert* needs the base; both silently read as green."""
+
+    def test_read_rows_skips_comments_and_parses_fields(self, tmp_path):
+        import catalog_overlay as co
+        p = tmp_path / NAME
+        p.write_text("# header comment\n\nalias1|Name One|repo/one|main|sub1|1.5|g1|primary|note|vllm-mlx\n")
+        rows = co.read_rows(p)
+        assert len(rows) == 1
+        assert rows[0]["alias"] == "alias1"
+        assert rows[0]["size_gb"] == "1.5"
+        assert rows[0]["serve"] == "vllm-mlx"
+
+    def test_read_rows_rejects_wrong_field_count(self, tmp_path):
+        import catalog_overlay as co
+        p = tmp_path / NAME
+        p.write_text("too|few\n")
+        with pytest.raises(co.OverlayWriteError):
+            co.read_rows(p)
+
+    def test_add_then_remove_roundtrip(self, tmp_path):
+        import catalog_overlay as co
+        p = tmp_path / NAME
+        co.add_row(p, {"alias": "my-model", "name": "My Model", "repo": "org/repo",
+                       "size_gb": "3.2", "groups": "default", "serve": "rapid"})
+        rows = co.read_rows(p)
+        assert [r["alias"] for r in rows] == ["my-model"]
+        assert oct(p.stat().st_mode & 0o777) == "0o600"
+        with pytest.raises(co.OverlayWriteError):
+            co.add_row(p, {"alias": "my-model"})  # duplicate alias
+        with pytest.raises(co.OverlayWriteError):
+            co.add_row(p, {"alias": "bad|alias"})  # pipe in a field
+        assert co.remove_row(p, "my-model") is True
+        assert co.read_rows(p) == []
+        assert co.remove_row(p, "my-model") is False  # already gone: not an error
+
+    def test_write_is_atomic_and_mode_600(self, tmp_path):
+        import catalog_overlay as co
+        p = tmp_path / NAME
+        co.write_rows(p, [{"alias": "a"}, {"alias": "b", "size_gb": "0"}])
+        assert not (tmp_path / (NAME + ".tmp")).exists(), "tmp file must not linger"
+        assert oct(p.stat().st_mode & 0o777) == "0o600"
+        assert len(co.read_rows(p)) == 2
+
+    def test_comments_survive_add_and_remove(self, tmp_path):
+        # the store is user-owned: '#' comments are how rows get annotated, so a GUI
+        # add/remove must not silently drop them on rewrite
+        import catalog_overlay as co
+        p = tmp_path / NAME
+        p.write_text("# my models\n# todo: prune old ones\na|Model A|org/a|main||1.0||||rapid\n")
+        co.add_row(p, {"alias": "b", "name": "Model B", "repo": "org/b", "size_gb": "2.0",
+                       "groups": "default", "serve": "vllm-mlx"})
+        text = p.read_text()
+        assert text.startswith("# my models\n# todo: prune old ones\n"), text
+        assert "a|Model A|org/a|main||1.0||||rapid\n" in text, text
+        co.remove_row(p, "a")
+        text = p.read_text()
+        assert text.startswith("# my models\n# todo: prune old ones\n"), text
+        assert "a|Model A" not in text and "b|Model B" in text, text
