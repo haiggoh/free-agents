@@ -117,5 +117,33 @@ class ToolArgvTests(unittest.TestCase):
         self.assertIsNone(pc.tool_argv("tool:nope", "rapid-mlx"))
 
 
+class RtRemoveConfirmTests(unittest.TestCase):
+    """The rt-op remove confirm path (Task 3): pending tool recorded, Yes dispatches
+    the manage-backend remove argv with --yes (csl parity: remove always confirms)."""
+
+    def test_rt_remove_yes_dispatches_remove_argv(self):
+        import fa_gui.app as app
+        scr = m.VersionsScreen(m.Settings(), "remove", owner=m.SUB)
+        scr.backend = "rapid-mlx"
+        app._settings_state["last_scr"] = scr
+        app._settings_state["pending_tool"] = "tool:rt-op:remove:1.2.3"
+        sent = []
+        st = {"launch_req": sent.append}
+
+        class _Dlg:
+            def close(self):
+                pass
+
+        app._confirm_prompt(scr, "prompt:rt-remove", st, _Dlg())
+        self.assertEqual(len(sent), 1)
+        argv = app.dispatch_argv(sent[0])
+        self.assertEqual(argv[2:], ["--backend", "rapid-mlx", "remove", "1.2.3", "--yes"], argv)
+        self.assertIsNone(app._settings_state.get("pending_tool"), "pending tool must be consumed")
+
+    def test_rt_remove_prompt_payload_is_generic_confirm(self):
+        payload = app.prompt_payload("prompt:rt-remove", None)
+        self.assertEqual(payload["kind"], "confirm")
+
+
 if __name__ == "__main__":
     unittest.main()

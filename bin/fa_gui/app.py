@@ -60,6 +60,16 @@ def dispatch_argv(req) -> list:
     return pc.command_for(req)
 
 
+# Process-global settings holder, hoisted so module-level handlers (prompt dialogs)
+# can read it — build() aliases it into its own scope.
+_settings_state: dict = {}
+
+
+def _runtime_backend() -> str:
+    s = _settings_state.get("settings")
+    return getattr(s, "runtime_backend", "rapid-mlx") if s else "rapid-mlx"
+
+
 def confirm_prompt_argv(scr, target: str) -> "list[str] | None":
     """The CLI argv a confirmed prompt:* dialog produces — the real delivery path:
     model confirm() -> LaunchRequest -> picker_core.command_for. None when the dialog
@@ -73,8 +83,16 @@ def confirm_prompt_argv(scr, target: str) -> "list[str] | None":
 
 def _confirm_prompt(scr, target: str, st: dict, dlg) -> None:
     """Yes-button handler: run the model's confirm(True) and dispatch the resulting
-    LaunchRequest through the page's launch hook (the FA_GUI_LAUNCH_STUB in tests)."""
-    if target.startswith("prompt:") and hasattr(scr, "confirm"):
+    LaunchRequest through the page's launch hook (the FA_GUI_LAUNCH_STUB in tests).
+    prompt:rt-remove has no confirm() on the screen — it dispatches the pending
+    tool:rt-op:remove:<version> recorded when the row was clicked (csl parity)."""
+    if target == "prompt:rt-remove":
+        pending = _settings_state.pop("pending_tool", None)
+        if pending and st.get("launch_req"):
+            argv = pc.tool_argv(pending, _runtime_backend(), _settings_state.get("last_scr"))
+            if argv:
+                st["launch_req"](m.LaunchRequest("tool", ["tool", *argv], {}, ""))
+    elif target.startswith("prompt:") and hasattr(scr, "confirm"):
         req = scr.confirm(True)
         if isinstance(req, m.LaunchRequest) and st.get("launch_req"):
             st["launch_req"](req)
@@ -210,7 +228,7 @@ def build() -> None:
     loader = Loader()
     # Process-global, shared INTENTIONALLY: the settings object + its savers (field-level
     # locked merge is the cross-frontend write path) and the loader's inventory cache.
-    settings_state: dict = {}
+    settings_state = _settings_state  # alias the module-level holder
     # Continuation plan Phase 2: everything else is PER CLIENT (keyed by the websocket
     # client id), so one browser tab never advances another's state. toggle_list /
     # launch_req / rerender are REASSIGNED on every page build; `collapsed` is setdefault
@@ -594,6 +612,11 @@ def build() -> None:
         # "Go launch" returns a LaunchRequest — run it exactly like a model-row click
         if isinstance(res, m.LaunchRequest) and st.get("launch_req"):
             st["launch_req"](res)
+        elif isinstance(res, m.Nav) and res.target.startswith("tool:rt-op:remove:"):
+            # csl confirms a REMOVE through prompt:rt-remove before running it — same here
+            _settings_state["pending_tool"] = res.target
+            from nicegui import ui as _ui
+            _ui.navigate.to("/prompt:rt-remove")
         elif isinstance(res, m.Nav) and res.target.startswith("tool:"):
             # tool: rows RUN a command in csl (never navigate) — dispatch the argv
             argv = pc.tool_argv(res.target, get_settings().runtime_backend,
