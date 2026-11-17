@@ -100,5 +100,22 @@ class PromptDialogTests(unittest.TestCase):
         self.assertIsNone(app.confirm_prompt_argv(self._download_screen(()), "prompt:download-review"))
 
 
+class ToolArgvTests(unittest.TestCase):
+    """picker_core.tool_argv mirrors csl's goto() switch for tool: targets (Task 3)."""
+
+    def test_plain_tool_uses_backend(self):
+        argv = pc.tool_argv("tool:rt-launchd-status", "rapid-mlx")
+        self.assertEqual(argv[2:], ["--backend", "rapid-mlx", "launchd", "status"], argv)
+
+    def test_rt_op_uses_screen_argv_for(self):
+        scr = m.VersionsScreen(m.Settings(), "remove", owner=m.SUB)
+        scr.backend = "vllm-mlx"
+        argv = pc.tool_argv("tool:rt-op:remove:1.2.3", "rapid-mlx", scr)
+        self.assertEqual(argv[2:], ["--backend", "vllm-mlx", "remove", "1.2.3", "--yes"], argv)
+
+    def test_unknown_tool_is_none(self):
+        self.assertIsNone(pc.tool_argv("tool:nope", "rapid-mlx"))
+
+
 if __name__ == "__main__":
     unittest.main()
