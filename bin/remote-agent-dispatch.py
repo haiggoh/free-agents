@@ -48,6 +48,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from remote_provider_core import PROVIDERS, IMPLEMENTED, get  # noqa: E402
 import remote_http  # noqa: E402
+import output_budget  # noqa: E402
 
 DEFAULT_MAX_FILE_CHARS = 48000
 
@@ -199,14 +200,32 @@ def main(argv=None):
     # Thinking models (GLM on NVIDIA, Gemini) stream reasoning separately; keep it, so a run
     # that spends its whole max_tokens on reasoning shows WHERE the tokens went.
     reasoning_path = os.path.join(outdir, "reasoning.txt")
-    out_fd = open(out_path, "w")
-    rfd = open(reasoning_path, "w")
-    try:
-        result = remote_http.stream_chat(provider, body, outdir, out_fd, rfd=rfd,
-                                         timeout=a.timeout, dry_run=a.dry_run)
-    finally:
-        out_fd.close()
-        rfd.close()
+    def _stream(b):
+        # Fresh files per attempt: a retry must never append to a refused attempt's output.
+        out_fd = open(out_path, "w")
+        rfd = open(reasoning_path, "w")
+        try:
+            return remote_http.stream_chat(provider, b, outdir, out_fd, rfd=rfd,
+                                           timeout=a.timeout, dry_run=a.dry_run)
+        finally:
+            out_fd.close()
+            rfd.close()
+
+    result = _stream(body)
+
+    # Adaptive output budget (2026-11-17): a provider that refuses max_tokens but names the
+    # ceiling it WOULD accept (OpenRouter's credit check, model output caps, context arithmetic)
+    # gets exactly ONE retry at that ceiling. The number comes from the provider's own answer —
+    # never a hardcoded cap. bin/output_budget.py holds the per-provider message shapes.
+    if not result.ok and not a.dry_run and "max_tokens" in body:
+        ceiling, why = output_budget.explain(result.status, result.error_reason,
+                                             body["max_tokens"])
+        if ceiling is not None:
+            print("[output-budget] %s HTTP %d refused max_tokens=%d (%s); retrying once with "
+                  "max_tokens=%d" % (provider.id, result.status, body["max_tokens"], why,
+                                     ceiling), file=sys.stderr, flush=True)
+            body = dict(body, max_tokens=ceiling)
+            result = _stream(body)
 
     result.output_path = out_path
     if a.dry_run:

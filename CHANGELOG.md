@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.59.5] — unreleased
+
+### Fixed — adaptive output budget: a max_tokens refusal is retried once at the ceiling the provider names (waypoint free-agents-openrouter-402)
+- New `bin/output_budget.py` (library + CLI with `--help`): reads the output-token ceiling a provider WOULD accept from its own refusal — OpenRouter's credit check ("can only afford N", kept 5% under because the balance shrinks), OpenAI-style "supports at most N completion tokens", Anthropic-style "max_tokens: X > Y", vLLM-style context arithmetic. One row per message shape; no per-provider cap is hardcoded. Never returns a value at or above the request (no retry loop) or below 256 tokens.
+- `bin/remote-agent-dispatch.py`: on such a refusal, logs `[output-budget] <provider> HTTP <status> refused max_tokens=<n> (<shape>); retrying once with max_tokens=<ceiling>` and retries exactly ONCE with fresh output files. Every remote dispatch (each preference entry and alternate) passes through here.
+- Root cause it fixes (measured 2026-11-17): the Mistral entry's `max_tokens: 128000` was inherited by its `@openrouter` alternate; OpenRouter checks the CEILING against the credit balance before generating, so every call 402'd and was logged as `[malformed]`, while the same request at max_tokens=1000 answered in 2.7 s. Live after the fix: 128000 → 402 → retry at 16434 → answered in 3.4 s.
+- Tests: `tests/test_output_budget.py` (12: four message shapes, no-number refusal, no-loop, too-small, success status; dispatcher retries once, logs the reason, never twice, unrelated failures untouched). RED verified before the fix. Full suite: 1797 passed; the 2 failures + 3 errors reproduce on clean origin/main (hover-colour single source; hotkey_shift needs `rich` in the test env) or pass serially (picker startup perf, timing under `-n auto`).
+
 ## [0.59.4] — unreleased
 
 ### Fixed — free-agent-tool.py result narrowing (waypoint free-agents-hygiene-pre)
