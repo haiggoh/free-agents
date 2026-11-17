@@ -421,6 +421,19 @@ TOOLS = {
 }
 
 
+def tool_argv(target: str, backend: str, screen=None) -> "list[str] | None":
+    """The argv a `tool:*` nav target runs in csl (session_picker.py's goto switch), for GUI
+    frontends that dispatch tools instead of navigating. rt-op targets need the current
+    VersionsScreen (its argv_for builds the op argv); other tool: entries take the backend."""
+    if target in TOOLS:
+        fn = TOOLS[target]
+        return fn(backend) if fn.__code__.co_argcount else fn()
+    if target.startswith("tool:rt-op:") and screen is not None:
+        _, _, op, version = target.split(":", 3)
+        return _mb(screen.backend, *screen.argv_for(version))
+    return None
+
+
 
 
 # --- Task 6 new interfaces ---------------------------------------------------------------
