@@ -23,6 +23,7 @@ from pathlib import Path
 
 import session_picker_model as m
 import picker_core as pc
+import catalog_overlay as co
 
 # Cache-kind -> loader, mirroring the Textual picker's LOADERS map (session_picker.py:1371)
 # plus its versions:/rcat: prefixes, so every screen that build_screen declares a prefetch
@@ -347,6 +348,8 @@ def build() -> None:
         from nicegui import ui as _ui
         with body:
             _ui.label("Catalog (click to queue)").classes("group-header")
+            nav = _ui.button("✏️ Edit overlay catalog", on_click=lambda: _ui.navigate.to("/catalog"))
+            nav.props["data-nav"] = "catalog"
             for alias, e in sorted(scr.entries.items()):
                 queued = alias in scr.queue
                 row = _ui.label(f"{'✓ ' if queued else '   '}{alias}  ·  {e.size_gb:.1f} GB  [{e.state}]")
@@ -906,6 +909,70 @@ def build() -> None:
 
     make_lane("local", "local", pc.load_local_models)
     make_lane("remote", "remote", pc.load_remote_agents)
+
+    @ui.page("/catalog")
+    async def catalog_page(client):
+        # Task 4: the local model-list REGISTRATION screen — view/edit the per-user
+        # overlay store (co.NAME) through catalog_overlay's validated read/write,
+        # and refresh the download screen's catalog cache after a write.
+        from nicegui import ui as _ui
+        await client.connected()
+        loader.leave_page(client=client.id)
+        st = cstate(client)
+        if st.get("launch_req") is None:
+            st["launch_req"] = lambda req: None
+        store = co.overlay_path(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or ".")) or co.store_path()
+        body = render_shell("Local model catalog (overlay store)", "")
+        with body:
+            _ui.label(str(store)).classes("text-xs opacity-70")
+            rows_box = _ui.column().classes("w-full gap-1")
+
+            def paint_rows():
+                rows_box.clear()
+                with rows_box:
+                    try:
+                        rows = co.read_rows(store)
+                    except co.OverlayWriteError as e:
+                        _ui.label(f"invalid store: {e}").classes("text-red-500")
+                        rows = []
+                    for r in rows:
+                        with _ui.row().classes("menu-item w-full"):
+                            _ui.label(f"{r['alias']}  ·  {r['name']}  ·  {r['size_gb']} GB  [{r['serve']}]")
+                            rm = _ui.button("✕", on_click=lambda a=r["alias"]: remove_row(a))
+                            rm.props["data-remove"] = r["alias"]
+            def _refresh_catalog_cache():
+                # repopulate synchronously: a cache-miss load on the next /download can return
+                # Stale (leave_page race in jobs.Loader) and render the catalog empty
+                loader.cache["catalog"] = pc.load_catalog()
+            def add_row(alias, name, repo, size, groups, serve):
+                repo = repo.strip()
+                try:
+                    co.add_row(store, {"alias": alias.strip(), "name": name.strip(),
+                                       "repo": repo, "rev": "main",
+                                       # download-models.sh rejects rows without a subdir;
+                                       # default to the repo basename (its own convention)
+                                       "subdir": (repo.rsplit("/", 1)[-1] or alias.strip()),
+                                       "size_gb": size.strip(),
+                                       "groups": groups.strip(), "serve": serve.strip()})
+                except co.OverlayWriteError as e:
+                    _ui.notify(f"invalid row: {e}", type="negative")
+                    return
+                _refresh_catalog_cache()
+                paint_rows()
+            def remove_row(alias):
+                co.remove_row(store, alias)
+                _refresh_catalog_cache()
+                paint_rows()
+            with _ui.row().classes("w-full gap-2"):
+                a = _ui.input("alias").props('data-add="alias"')
+                n = _ui.input("display name").props('data-add="name"')
+                rp = _ui.input("hf repo").props('data-add="repo"')
+                sz = _ui.input("size GB").props('data-add="size"')
+                gr = _ui.input("groups (comma)").props('data-add="groups"')
+                sv = _ui.input("serve (rapid|vllm-mlx|…)").props('data-add="serve"')
+                _ui.button("Add", on_click=lambda: add_row(a.value, n.value, rp.value, sz.value,
+                                                             gr.value, sv.value))
+            paint_rows()
 
     @ui.page("/{full_path:path}")
     async def screen_or_catchall(client, full_path: str):

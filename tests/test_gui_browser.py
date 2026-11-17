@@ -226,3 +226,90 @@ def test_launchd_status_tool_row_dispatches_backend_argv(browser, tmp_path):
         assert argv[2:] == ["--backend", "rapid-mlx", "launchd", "status"], argv  # default backend
     finally:
         assert srv.stop() == []
+
+
+def test_catalog_page_adds_and_removes_overlay_row(browser, tmp_path):
+    # Task 4 delivery-shaped: the /catalog screen writes the overlay store through
+    # catalog_overlay's validated path; the store file (fixture, not the real one)
+    # gains then loses the row, and the download screen's catalog cache is invalidated.
+    store = tmp_path / "model-catalog.local.psv"
+    store.write_text("# existing\nexisting1|Existing|org/existing|main|ex1|1.0|default|||rapid\n")
+    srv = Server(env={"LA_MODEL_CATALOG_LOCAL": str(store)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}catalog")
+        page.wait_for_selector('[data-remove="existing1"]', timeout=15000)  # row + remove button render
+        page.wait_for_selector("text=1.0 GB  [rapid]", timeout=15000)       # full row label, not just alias
+        page.locator('[data-add="alias"]').fill("gui-added")
+        page.locator('[data-add="name"]').fill("GUI Added")
+        page.locator('[data-add="repo"]').fill("org/new")
+        page.locator('[data-add="size"]').fill("2.5")
+        page.locator('[data-add="groups"]').fill("default")
+        page.locator('[data-add="serve"]').fill("rapid")
+        page.get_by_text("Add", exact=True).click()
+        page.wait_for_selector("text=gui-added", timeout=10000)
+        content = store.read_text()
+        assert content == ("# existing\n"
+                           "existing1|Existing|org/existing|main|ex1|1.0|default|||rapid\n"
+                           "gui-added|GUI Added|org/new|main|new|2.5|default|||rapid\n"), content
+        page.locator('[data-remove="gui-added"]').click()
+        page.wait_for_selector("text=gui-added", state="detached", timeout=10000)
+        # full-file equality after remove too: comment line + untouched row byte-identical
+        assert store.read_text() == ("# existing\n"
+                                     "existing1|Existing|org/existing|main|ex1|1.0|default|||rapid\n")
+    finally:
+        assert srv.stop() == []
+
+
+def test_catalog_page_rejects_invalid_row(browser, tmp_path):
+    # validation is the point of the screen: a rejected row must notify AND leave the store byte-identical
+    store = tmp_path / "model-catalog.local.psv"
+    store.write_text("# existing\nexisting1|Existing|org/existing|main|ex1|1.0|default|||rapid\n")
+    srv = Server(env={"LA_MODEL_CATALOG_LOCAL": str(store)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}catalog")
+        page.wait_for_selector('[data-remove="existing1"]', timeout=15000)
+        before = store.read_text()
+        page.locator('[data-add="alias"]').fill("bad-size")
+        page.locator('[data-add="name"]').fill("Bad")
+        page.locator('[data-add="repo"]').fill("org/bad")
+        page.locator('[data-add="size"]').fill("abc")          # not a number -> OverlayWriteError
+        page.locator('[data-add="groups"]').fill("default")
+        page.locator('[data-add="serve"]').fill("rapid")
+        page.get_by_text("Add", exact=True).click()
+        page.wait_for_selector("text=invalid row", timeout=10000)
+        assert store.read_text() == before                     # no write on rejection
+        page.locator('[data-add="alias"]').fill("existing1")   # duplicate alias also rejected
+        page.locator('[data-add="size"]').fill("2.0")
+        page.get_by_text("Add", exact=True).click()
+        assert store.read_text() == before
+        assert page.locator('[data-remove="existing1"]').count() == 1   # only the original row
+    finally:
+        assert srv.stop() == []
+
+
+def test_catalog_edit_reaches_download_screen_and_invalidates_its_cache(browser, tmp_path):
+    # /catalog must be reachable from the download screen's catalog list, and a write there must
+    # invalidate the download screen's "catalog" cache (jobs.Loader.load returns cached kinds as-is)
+    store = tmp_path / "model-catalog.local.psv"
+    store.write_text("# existing\nexisting1|Existing|org/existing|main|ex1|1.0|default|||rapid\n")
+    srv = Server(env={"LA_MODEL_CATALOG_LOCAL": str(store)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}download")
+        page.wait_for_selector('[data-entry="existing1"]', timeout=15000)   # catalog cache populated
+        page.locator('[data-nav="catalog"]').click()                         # nav reaches /catalog
+        page.wait_for_selector('[data-add="alias"]', timeout=15000)
+        page.locator('[data-add="alias"]').fill("gui-added")
+        page.locator('[data-add="name"]').fill("GUI Added")
+        page.locator('[data-add="repo"]').fill("org/new")
+        page.locator('[data-add="size"]').fill("2.5")
+        page.locator('[data-add="groups"]').fill("default")
+        page.locator('[data-add="serve"]').fill("rapid")
+        page.get_by_text("Add", exact=True).click()
+        page.wait_for_selector('[data-remove="gui-added"]', timeout=10000)
+        page.goto(f"{srv.url}download")                                      # cache was popped -> re-read
+        page.wait_for_selector('[data-entry="gui-added"]', timeout=15000)    # fresh row visible
+    finally:
+        assert srv.stop() == []
