@@ -208,3 +208,21 @@ def test_tool_action_row_dispatches_cli_argv(browser, tmp_path):
         assert argv[2:] == ["status"], argv
     finally:
         assert srv.stop() == []
+
+
+def test_launchd_status_tool_row_dispatches_backend_argv(browser, tmp_path):
+    # Task 3: a tool:rt-* row on /runtime_launchd dispatches manage-backend.py argv
+    stub = tmp_path / "tool2.json"
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}runtime_launchd")
+        page.get_by_text("Status", exact=False).first.click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), "launchd status row did not dispatch"
+        argv = json.loads(stub.read_text())["argv"]
+        assert argv[2:] == ["--backend", "rapid-mlx", "launchd", "status"], argv  # default backend
+    finally:
+        assert srv.stop() == []
