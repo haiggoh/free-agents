@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.59.4] — unreleased
+
+### Fixed — free-agent-tool.py result narrowing (waypoint free-agents-hygiene-pre)
+- `bin/free-agent-tool.py`: after execute_plan, `status == "ok"` now also guards `result is not None` — behavior-identical (execute_plan returns result=None only on non-ok statuses, verified at its return sites) and clears Pyright's reportOptionalMemberAccess on the `.get(...)` calls. Reachability confirmed before fixing. pyright 0 errors; dispatch tests 122 passed.
+- The offload-to-local SKILL.md word-budget item of the same waypoint remains open.
+
 ## [0.59.3] — unreleased
 
 ### Fixed — waypoint cleanup sweep (open fa waypoints 2026-11-05..15)
