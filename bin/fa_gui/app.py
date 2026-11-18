@@ -48,6 +48,8 @@ def prompt_payload(target: str, scr) -> dict | None:
         r = scr.review()
         return {"kind": "download-review", "aliases": list(r.aliases),
                 "total_gb": r.total_gb, "fits": r.fits}
+    if target.startswith("prompt:missing-cleanup:"):
+        return {"kind": "missing-cleanup", "alias": target.split(":", 2)[2]}
     if target.startswith("prompt:"):
         return {"kind": "confirm", "prompt": target}
     return None
@@ -93,6 +95,16 @@ def _confirm_prompt(scr, target: str, st: dict, dlg) -> None:
             argv = pc.tool_argv(pending, _runtime_backend(), _settings_state.get("last_scr"))
             if argv:
                 st["launch_req"](m.LaunchRequest("tool", ["tool", *argv], {}, ""))
+    elif target.startswith("prompt:missing-cleanup:"):
+        alias = target.split(":", 2)[2]
+        if st.get("launch_req"):
+            csl = os.environ.get("CSL_SELF") or str(pc.BIN / "csl")
+            st["launch_req"](m.LaunchRequest("tool", ["tool", csl, "--unregister-models", alias], {}, ""))
+        refresh = _settings_state.get("refresh_inventory")
+        if refresh is not None:
+            refresh("local", pc.load_local_models)
+        from nicegui import ui as _ui
+        _ui.navigate.to("/local")
     elif target.startswith("prompt:") and hasattr(scr, "confirm"):
         req = scr.confirm(True)
         if isinstance(req, m.LaunchRequest) and st.get("launch_req"):
@@ -227,6 +239,12 @@ def build() -> None:
     </style>""", shared=True)
 
     loader = Loader()
+
+    def _refresh_inventory(kind: str, fn) -> None:
+        """Repopulate an inventory cache synchronously after a write (a cache-miss reload
+        can return Stale and render the lane empty). Registered for module-level handlers."""
+        loader.cache[kind] = fn()
+    _settings_state["refresh_inventory"] = _refresh_inventory
     # Process-global, shared INTENTIONALLY: the settings object + its savers (field-level
     # locked merge is the cross-frontend write path) and the loader's inventory cache.
     settings_state = _settings_state  # alias the module-level holder
@@ -818,6 +836,7 @@ def build() -> None:
             loader.leave_page(client=client.id)     # Phase 2: this client's old page is gone
             st = cstate(client)
             scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache, savers=settings_state.get('savers')).screen
+            settings_state["last_scr"] = scr   # prompt:* dialogs opened from a lane need a screen
             body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "", lane=True)
             st["toggle_list"] = lambda: None     # placeholder; reassigned below before any click can fire
             with body:
@@ -866,6 +885,13 @@ def build() -> None:
                                     row.props["data-model"] = mid
                                     row.on("click", lambda m=mid, d=mdl: do_launch(m, d))
                                     row.on("mouseenter", lambda d=mdl: info.set_text(_info_text(d)))
+                        if target == "local":
+                            for alias in list(pc.MISSING_MODELS):
+                                if query and query.lower() not in alias.lower():
+                                    continue
+                                mrow = ui.label(f"    {alias}  —  weights missing from disk").classes("menu-item model-row missing-row")
+                                mrow.props["data-missing"] = alias
+                                mrow.on("click", lambda a=alias: ui.navigate.to(f"/prompt:missing-cleanup:{a}"))
                         if not any_shown:
                             msg = ("No local models on disk yet — download some first"
                                    if target == "local" else
@@ -1017,7 +1043,10 @@ def build() -> None:
             payload = prompt_payload(target, scr)
             with _ui.dialog() as dlg, _ui.card().classes("w-full max-w-md"):
                 _ui.label(target).classes("text-lg font-bold")
-                if payload and payload.get("kind") == "download-review":
+                if payload and payload.get("kind") == "missing-cleanup":
+                    _ui.label(f"Remove '{payload['alias']}' from the local registry?")
+                    _ui.label("weights missing from disk — the #missing cleanup offer")
+                elif payload and payload.get("kind") == "download-review":
                     _ui.label(f"{len(payload['aliases'])} queued, {payload['total_gb']:.1f} GB"
                               + ("" if payload["fits"] else " — DOES NOT FIT in free space"))
                     _ui.label(", ".join(payload["aliases"]))
