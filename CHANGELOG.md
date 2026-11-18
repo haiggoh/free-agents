@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.59.8] — unreleased
+
+### Fixed — NVIDIA retired `deepseek-ai/deepseek-v4.1-flash` (410 EOL 2026-11-16T08:00:00Z); the roster no longer offers, dispatches to, or falls back to it
+- `config/dispatch-preferences.json`: the `nvidia-deepseek-v4.1-flash` entry is removed from the dispatch order and from `session_fallbacks.order` — the same rule that removed `z-ai/glm-5.3` on 2026-10-31 ("a retired id must never be in a fallback chain"); the maintainer_note records the retirement. Dispatches no longer burn one failed `[model_eol]` attempt before falling over to the next model (measured 2026-11-17: the ladder paid the 410 on every dispatch before reaching Step 5 Preview, which answered).
+- `config/broken-nvidia-models.json`: the id is listed (`failure_mode: end_of_life`) so the picker hides it and `bin/session-fallbacks.py` filters it from explicit `LA_REMOTE_FALLBACKS` overrides too.
+- `config/remote-agents.sh`, `config/remote-registry.yaml`, `config/remote-registry.json`: the `nvidia-deepseek-v4` row's note is now ⚠️ RETIRED with the 410 detail and the live-catalog check (2026-11-18: no deepseek rows listed at all); the row stays for history, hidden by the broken list.
+- Tests: the pinned dispatch order is now 5 remote + 3 local entries (`test_free_agent_tool_preferences.py`); the fallback EOL test (`test_fallback_eol_0493.py`) uses Step 5 Preview as its live keeper and asserts the retired id is filtered from both the shipped chain and explicit overrides. 66 preference/fallback tests green.
+- Evidence: 410 detail "reached its end of life on 2026-11-16T08:00:00Z and is no longer available" from a live dispatch fall-over (2026-11-17 QC dispatch); live catalog GET confirms absence.
+
 ## [0.59.7] — unreleased
 
 ### Fixed — caller-requested dispatch bounds are honoured, not raised (waypoint free-agents-free-agent-tool-2; QC by GLM 5.3 Flash, 2026-11-18)

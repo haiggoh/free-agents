@@ -1,6 +1,6 @@
 {
   "description": "NVIDIA models that are known to be non-functional on NVIDIA NIM API. Distinction: 'broken' = model endpoint fails (timeout/404) regardless of account tier; 'paid_only' = model works but requires paid subscription (separate tier in remote-agents.sh). These models are hidden by default via --show-broken / 'u' toggle, NOT by --show-paid-only / 'p' toggle.",
-  "last_updated": "2026-11-04",
+  "last_updated": "2026-11-18",
   "models": [
     {
       "model_id": "01-ai/yi-large",
@@ -73,6 +73,14 @@
       "status": "broken",
       "failure_mode": "end_of_life",
       "evidence": "410 detail 2026-10-31; catalog GET 2026-10-31 confirms absence. Use nvidia-mistral-large4 (Mistral Large 4, Le Chonk) or nvidia-glm53 (Flash). The former nvidia-glm53-full-thinking alias was removed with the 2026-11-02 one-entry-per-model dedup."
+    },
+    {
+      "model_id": "deepseek-ai/deepseek-v4.1-flash",
+      "alias": "nvidia-deepseek-v4",
+      "reason": "HTTP 410 Gone: NVIDIA retired the model — \"reached its end of life on 2026-11-16T08:00:00Z and is no longer available\" (410 detail, live dispatch). The previous generation v4-flash-0731 was retired the same way earlier.",
+      "status": "broken",
+      "failure_mode": "end_of_life",
+      "evidence": "2026-11-17 free-agent-tool.py dispatch fall-over ladder: the nvidia attempt failed [model_eol] HTTP 410 with the end-of-life message (fell over to Step 5 Preview, which answered). Live catalog check 2026-11-18 (remote-session.sh --models nvidia-mistral-large4, GET only): no deepseek rows listed at all. Use Step 5 Preview or Nemotron 3 Ultra for reasoning/validator dispatches."
     }
   ]
 }

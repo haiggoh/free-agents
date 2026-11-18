@@ -470,7 +470,7 @@ entries:
     display: DeepSeek V4.1 Flash
     tier: unknown
     notes: >-
-      WORKS, SLOW (2026-10-21): a 4-file review dispatch answered in ~10 min with a substantive result; earlier probes (2026-10-10/13) timed out at 90-180 s. Dispatch with a long timeout; too slow for a full session. Old v4-flash-0731 is 410 Gone.
+      ⚠️ RETIRED: NVIDIA returns 410 Gone — "reached its end of life on 2026-11-16T08:00:00Z and is no longer available" (dispatch fall-over detail, 2026-11-17). Live catalog check 2026-11-18 (remote-session.sh --models, GET only): no deepseek rows listed. Hidden via broken-nvidia-models.json. Was: WORKS, SLOW — a 4-file review dispatch answered in ~10 min with a substantive result (2026-10-21). Use Step 5 Preview or Nemotron 3 Ultra for reasoning/validator dispatches.
     autocompact_default: "-"
 
   - alias: nvidia-nemotron-ultra

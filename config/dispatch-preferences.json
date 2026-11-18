@@ -44,27 +44,6 @@
    "note": "TOP PICK for full SESSIONS (user 2026-10-29): 1.05T total / 52B active granular MoE, multimodal, 1M context, NVFP4 on NIM; faster and more responsive than GLM Flash in full sessions (user 2026-10-31). Second for dispatches (after Gemini). Fills the gap left by GLM 5.3 full (NVIDIA 410 EOL 2026-10-28T08:00:00Z; removed from this file 2026-10-31)."
   },
   {
-   "id": "nvidia-deepseek-v4.1-flash",
-   "kind": "remote",
-   "provider": "nvidia",
-   "model": "deepseek-ai/deepseek-v4.1-flash",
-   "display": "DeepSeek V4.1 Flash (NVIDIA)",
-   "alternates": [
-    {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash", "smoke_tested": false},
-    {"provider": "siliconflow", "model": "deepseek-ai/DeepSeek-V4.1-Flash", "smoke_tested": false},
-    {"provider": "kilo", "model": "deepseek/deepseek-v4.1-flash", "smoke_tested": false}
-   ],
-   "reasoning_effort": "high",
-   "max_tokens": 64000,
-   "smoke_tested": true,
-   "family": "deepseek",
-   "roles": [
-    "reasoner",
-    "validator"
-   ],
-   "note": "Thorough analysis and review; slow per request (minutes), too slow for a full session."
-  },
-  {
    "id": "nvidia-glm-5.3-flash",
    "kind": "remote",
    "provider": "nvidia",
@@ -172,7 +151,7 @@
  ],
  "session_fallbacks": {
   "description": "Fallback chain for a FREE SESSION's proxy (bin/remote-session.sh), used when the session's own model is throttled upstream: the proxy answers from the next model here, same port, no restart. Same provider only (a session would drain another provider's free quota). The session's own model is skipped. LA_REMOTE_FALLBACKS=off disables; LA_REMOTE_FALLBACKS=provider:model,... overrides.",
-  "maintainer_note": "Order set 2026-10-31: Mistral Large 4 (Le Chonk) first, then GLM 5.3 Flash, DeepSeek V4.1 Flash (slow but superior quality, so above Nemotron), Step 5 Preview, Nemotron 3 Ultra last (least capable, least likely to be throttled). z-ai/glm-5.3 removed — retired by NVIDIA (410 EOL 2026-10-28T08:00:00Z); a retired id must never be in a fallback chain.",
+  "maintainer_note": "Order set 2026-10-31: Mistral Large 4 (Le Chonk) first, then GLM 5.3 Flash, Step 5 Preview, Nemotron 3 Ultra last (least capable, least likely to be throttled). z-ai/glm-5.3 removed 2026-10-31 — retired by NVIDIA (410 EOL 2026-10-28T08:00:00Z); deepseek-ai/deepseek-v4.1-flash removed 2026-11-18 — retired by NVIDIA (410 EOL 2026-11-16T08:00:00Z). A retired id must never be in a fallback chain.",
   "order": [
    {
     "provider": "nvidia",
@@ -181,10 +160,6 @@
    {
     "provider": "nvidia",
     "model": "z-ai/glm-5.3-flash"
-   },
-   {
-    "provider": "nvidia",
-    "model": "deepseek-ai/deepseek-v4.1-flash"
    },
    {
     "provider": "nvidia",

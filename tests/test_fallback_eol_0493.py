@@ -23,17 +23,19 @@ class EolChainTests(unittest.TestCase):
     def test_shipped_chain_leads_with_le_chonk_and_has_no_glm_full(self):
         chain = sf.chain("nvidia", "mistralai/mistral-large-4-1t-a52b")  # own model skipped
         self.assertEqual(chain, ["nvidia:z-ai/glm-5.3-flash",
-                                 "nvidia:deepseek-ai/deepseek-v4.1-flash",
                                  "nvidia:stepfun-ai/step-5-preview",
                                  "nvidia:nvidia/nemotron-3-ultra-550b-a55b"])
         self.assertNotIn("nvidia:z-ai/glm-5.3", sf.chain("nvidia", "nvidia:x"))
+        # retired 2026-11-18 (NVIDIA 410 EOL 2026-11-16T08:00:00Z, broken-nvidia-models.json)
+        self.assertNotIn("nvidia:deepseek-ai/deepseek-v4.1-flash", sf.chain("nvidia", "nvidia:x"))
 
     def test_eol_id_dropped_even_from_explicit_override(self):
+        # step-5-preview is the live keeper now that deepseek-v4.1-flash is broken too
         with mock.patch.dict(os.environ, {
-                "LA_REMOTE_FALLBACKS": "nvidia:z-ai/glm-5.3,nvidia:deepseek-ai/deepseek-v4.1-flash",
+                "LA_REMOTE_FALLBACKS": "nvidia:z-ai/glm-5.3,nvidia:stepfun-ai/step-5-preview",
                 "LA_BROKEN_MODELS_FILE": str(BROKEN)}):
             self.assertEqual(sf.chain("nvidia", "nvidia:x"),
-                             ["nvidia:deepseek-ai/deepseek-v4.1-flash"],
+                             ["nvidia:stepfun-ai/step-5-preview"],
                              "the retired id must be filtered from the override too")
 
     def test_missing_broken_file_fails_open(self):
