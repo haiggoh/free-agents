@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.59.6] — unreleased
+
+### Changed — 🧠 free-lane knowledge section at SessionStart (memory migration group B, plan 2026-11-18)
+- New `hooks/knowledge-primer.py` carrying a PRIMER constant (read via AST by offload-nudge.py, never executed there); `offload-nudge.py` appends it as a 🧠 section on both paid and free sessions, fail-open. Lines migrated from the MEMORY.md index (originals archived at ~/.claude/reference/memory-history/plugin-primer-20261118/): transcript-data → Google/NVIDIA OK (still secret-scan; other providers not covered), 600 s stream watchdog → resume inline, la-evict --tier 0 standing okay + RSS lies on MLX + never kill the endpoint you run on (gate on ANTHROPIC_BASE_URL), local-stack wedge probe (one generation per port, >10 min/turn → DISPATCH), one-shot waits via watch-until (never sleep/poll). `scripts/build-portable.py` ships the new hook file in portable/.
+- Tests: tests/test_knowledge_primer.py (4: PRIMER shape, AST load, section present on free AND paid nudge output, fail-open when the file is missing).
+
 ## [0.59.5] — unreleased
 
 ### Fixed — adaptive output budget: a max_tokens refusal is retried once at the ceiling the provider names (waypoint free-agents-openrouter-402)

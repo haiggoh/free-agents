@@ -69,6 +69,7 @@ COPY_FILES = [
     "hooks/hooks.json",
     "hooks/cloud-agent-intercept.py",
     "hooks/guard-own-endpoint.py",
+    "hooks/knowledge-primer.py",
     "hooks/guard-tool-owned-state.py",
     "hooks/offload-nudge.py",
     "hooks/read-pages-guard.py",

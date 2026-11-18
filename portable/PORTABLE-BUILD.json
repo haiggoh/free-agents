@@ -52,12 +52,13 @@
     }
   ],
   "files": {
-    ".claude-plugin/plugin.json": "d770e801e96f52db9f9f5d02c9df3122e2a8eaef3e1e4562fb34c2b1f2d6cd7a",
+    ".claude-plugin/plugin.json": "204521a7544677b1d5c0205b9b7f62d708cdb445eec0699fae53a626fc9899f9",
     "hooks/cloud-agent-intercept.py": "97111f1ce6464e229e1346f7477ed9b72a8cf247716a01020a74285f3edaa5e0",
     "hooks/guard-own-endpoint.py": "a568dd8a352cbe34ec3454b98ebc6e77d09f487f183fa6b0296a58ea899ad5a8",
     "hooks/guard-tool-owned-state.py": "84810c40d06eb709ae08e8656d35a4690654bfb074d2f7ab9210f4ab39fc11ef",
     "hooks/hooks.json": "c4ed9a161e5e2f90620e4ba7e58376635ec5cfc2daaead5da29f094a5db081dd",
-    "hooks/offload-nudge.py": "03563a8898bfec613a2963f91b30dd9fc6d212bbeb7cb36edb610b7119c9aca9",
+    "hooks/knowledge-primer.py": "9c1a0d92a79cf8efaa501d9744152bfa9ccd922ec9eff11c88e7e525e4c49b66",
+    "hooks/offload-nudge.py": "fae361989471150dccd4496aa0a1691310afc4348acf5b7785d19a5e3fb39517",
     "hooks/read-pages-guard.py": "b83026eba0f623c87ca2cd0ff844f159629f5be4424414c2ce66459861ddd267",
     "hooks/session-title-prefix.py": "6cc1c79242391db3e09d8910c6b6461dcdc0973f978a9e306c7a90938a4506f6",
     "hooks/transcript-identity.py": "41e3e9ef490d9cb54371d48299aa6d6320317df8626fdb33d2914b70adbf3de6",
@@ -72,7 +73,7 @@
     "skills/verify-delegated-work/SKILL.md": "bca40230e044016a7f50a7656c87b0e3dacd008d67cb8afe8bf84f33800c6474"
   },
   "schema": "haiggoh-portable-build/1",
-  "source_commit": "aff63526746328cd1d893a524b82dbe5dd6b5d76",
+  "source_commit": "08ec9a42a5b7405d2a3d526b3bf5e5c62ffaac60",
   "source_repo": "haiggoh/free-agents",
   "transform_version": "1"
 }

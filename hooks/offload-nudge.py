@@ -120,6 +120,19 @@ def free_nudge(root: str) -> str:
 
 
 GUARD_HOOKS = ("guard-own-endpoint.py", "guard-tool-owned-state.py", "read-pages-guard.py")
+# 2026-11-18: knowledge lines migrated from the memory index (group B); PRIMER read via AST like the
+# guards, never executed here.
+KNOWLEDGE_HOOKS = ("knowledge-primer.py",)
+
+
+def knowledge_section() -> str:
+    """The 🧠 free-lane knowledge lines, injected once at SessionStart. Fail-open: any error -> ""."""
+    try:
+        hooks_dir = Path(__file__).resolve().parent
+        lines = [p for p in (_load_primer(hooks_dir, n) for n in KNOWLEDGE_HOOKS) if p]
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def _load_primer(hooks_dir: Path, name: str) -> str:
@@ -196,6 +209,9 @@ def main():
         section = guards_section(modes, free)
         if section:
             text = f"{text}\n{section}" if text else section
+        ksection = knowledge_section()
+        if ksection:
+            text = f"{text}\n{ksection}" if text else ksection
         if text:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                      "additionalContext": text}}))
