@@ -313,3 +313,40 @@ def test_catalog_edit_reaches_download_screen_and_invalidates_its_cache(browser,
         page.wait_for_selector('[data-entry="gui-added"]', timeout=15000)    # fresh row visible
     finally:
         assert srv.stop() == []
+
+
+def test_local_missing_row_offers_cleanup_and_unregisters(browser, tmp_path):
+    # Task 4 (#missing cleanup): a registered-but-weights-missing alias renders as a red row
+    # on /local; clicking it opens the confirm dialog; Yes dispatches csl --unregister-models
+    # (the same subcommand csl's cleanup panel uses) and the row disappears after refresh
+    stub = tmp_path / "launch.json"
+    marker = tmp_path / "unregistered"
+    csl_stub = tmp_path / "csl-stub.sh"
+    csl_stub.write_text("#!/usr/bin/env bash\n"
+                        "if [ \"$1\" = \"--inventory\" ]; then\n"
+                        "  printf 'on-disk\\tvllm-mlx\\teager\\toperator\\n'\n"
+                        "  [ -f \"$GHOST_MARKER\" ] || printf '#missing\\tghost-alias\\tghost-sub\\n'\n"
+                        "elif [ \"$1\" = \"--unregister-models\" ]; then\n"
+                        "  touch \"$GHOST_MARKER\"\n"
+                        "fi\n")
+    csl_stub.chmod(0o755)
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub), "CSL_SELF": str(csl_stub),
+                      "GHOST_MARKER": str(marker)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}local")
+        page.get_by_text("Choose model", exact=False).first.click()   # reveal the lane list (csl parity)
+        page.wait_for_selector('[data-missing="ghost-alias"]', timeout=15000)
+        page.locator('[data-missing="ghost-alias"]').click()
+        page.wait_for_selector(".q-dialog", timeout=10000)
+        assert "ghost-alias" in page.locator(".q-dialog").inner_text()
+        page.locator(".q-dialog button", has_text="Yes").click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), "confirm did not dispatch"
+        argv = json.loads(stub.read_text())["argv"]
+        assert argv == [str(csl_stub), "--unregister-models", "ghost-alias"], argv
+        page.wait_for_selector('[data-missing="ghost-alias"]', state="detached", timeout=15000)
+    finally:
+        assert srv.stop() == []

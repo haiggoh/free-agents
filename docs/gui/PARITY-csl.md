@@ -57,7 +57,11 @@ migration notice from the SessionStart hook). Registration/update flows in csl:
    browser-proven: store-file bytes asserted, invalid rows rejected with notify + no write,
    download-screen catalog cache refreshed after a write.
 3. **#missing cleanup** — registered alias whose weights are gone is offered once per
-   session for removal/migration. GUI: missing.
+   session for removal/migration. GUI: ✅ `/local` renders `#missing` aliases as red
+   `data-missing` rows; clicking one opens a confirm dialog whose Yes dispatches
+   `csl --unregister-models <alias>` (the same subcommand csl's panel uses), refreshes
+   the local inventory synchronously and returns to `/local`; browser-proven (stub argv
+   asserted, row detaches after removal).
 4. **Backend install/upgrade** — runtime manager screen (`download-models.sh` for
    backends, `runtime_versions:install/validate/info`). GUI: missing.
 5. **Model profiles** — `la-model-profile.py` list/artifact/… drive capability display
