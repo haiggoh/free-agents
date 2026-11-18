@@ -800,6 +800,10 @@ def resolve_policy(env, prefs):
             policy[key] = v
     policy["_tier"] = tier
     policy["_tiers"] = tiers
+    # 2026-11-18 (QC review): persist override provenance so a --resume in a fresh shell (env var
+    # gone) does not re-apply the min_attempt_s floor to a caller-set bound.
+    policy["_attempt_max_s_overridden"] = "FA_DISPATCH_ATTEMPT_TIMEOUT_S" in env
+    policy["_attempt_stall_s_overridden"] = "FA_DISPATCH_STALL_S" in env
     return policy
 
 
@@ -857,17 +861,31 @@ def execute_plan(plan, full_prompt, env, policy, *, role=None, start_index=0,
             return "decision_needed", None, attempts, len(plan) - i
         attempt_cap = policy["attempt_max_s"]
         attempt_stall = policy["attempt_stall_s"]
+        # 2026-11-18: an explicit FA_DISPATCH_ATTEMPT_TIMEOUT_S / FA_DISPATCH_STALL_S override is a
+        # caller's deliberate bound — never raise it to min_attempt_s (that silently turned a
+        # requested 45s into 180s). Provenance comes from the persisted policy on resume (the env
+        # var may be gone in the fresh shell), falling back to live env presence.
+        overridden = {"attempt_max_s": policy.get("_attempt_max_s_overridden")
+                      or "FA_DISPATCH_ATTEMPT_TIMEOUT_S" in env,
+                      "attempt_stall_s": policy.get("_attempt_stall_s_overridden")
+                      or "FA_DISPATCH_STALL_S" in env}
         if entry.get("provider") in RATE_LIMITED_PROVIDERS and nvidia_load_detected(env):
             patient = (policy.get("_tiers") or DEFAULT_TIMEOUT_TIERS).get("patient") or {}
             p_cap, p_stall = patient.get("attempt_max_s"), patient.get("attempt_stall_s")
-            if p_cap is not None:
+            if p_cap is not None and not overridden["attempt_max_s"]:
                 attempt_cap = max(attempt_cap, float(p_cap))
-            if p_stall is not None:
+            if p_stall is not None and not overridden["attempt_stall_s"]:
                 attempt_stall = max(attempt_stall, float(p_stall))
             note(f"free-agents: rate limiter in an active cooldown — {entry['id']} gets the "
                  f"patient timeout (budget {attempt_cap:g}s, stall {attempt_stall:g}s)")
-        budget = max(min(cap - elapsed, attempt_cap),
-                     policy["min_attempt_s"])
+        floor = 0.0 if overridden["attempt_max_s"] else policy["min_attempt_s"]
+        budget = max(min(cap - elapsed, attempt_cap), floor)
+        if overridden["attempt_max_s"]:
+            note(f"free-agents: attempt budget {budget:g}s is the caller's "
+                 f"FA_DISPATCH_ATTEMPT_TIMEOUT_S override (floor not applied)")
+        if overridden["attempt_stall_s"] and attempt_stall < policy["min_attempt_s"]:
+            note(f"free-agents: stall bound {attempt_stall:g}s is the caller's override, below "
+                 f"min_attempt_s — honoured as requested")
         resolved_thinking, think_effort, think_overridden, think_note = resolve_thinking(entry, role)
         note(f"free-agents: offloading to {entry.get('display', entry['id'])} "
              f"({route_of(entry)}{', role ' + shown_role if shown_role else ''}"

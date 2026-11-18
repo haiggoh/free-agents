@@ -491,11 +491,23 @@ class Exhaustion(unittest.TestCase):
     def test_no_attempts_is_not_exhaustion(self):
         self.assertFalse(fat.exhausted([], self.order(2), self.POLICY))
 
-    def run_main(self, payload, fake, monotonic=None, keys_dir=None):
+    def run_main(self, payload, fake, monotonic=None, keys_dir=None, env_extra=None):
         """Run fat.run with recorded dispatches; keys_dir makes entries available."""
         env = {"LA_API_KEYS_DIR": keys_dir or "missing"}
         old_env = {k: os.environ.get(k) for k in env}
         os.environ.update(env)
+        # 2026-11-18: run() reads timeout overrides from the PASSED env. Scrub EVERY ambient
+        # FA_DISPATCH_* var (this box exports FA_DISPATCH_TIMEOUT_TIER=patient, whose 1800s cap
+        # silently overrode the test's 45s) and pin a prefs file carrying the DEFAULT policy so
+        # the shipped config's paid_fallback cannot win resolve_policy's merge order either.
+        for k in [k for k in env if k.startswith("FA_DISPATCH_")]:
+            del env[k]
+        for k in [k for k in os.environ if k.startswith("FA_DISPATCH_")]:
+            del os.environ[k]
+        env.update(env_extra or {})
+        # 2026-11-18: do NOT pin FA_DISPATCH_PREFS here — an empty-order file makes run() exit
+        # with "no dispatch model" before any attempt. The shipped prefs file is correct; only
+        # the ambient FA_DISPATCH_* env needed scrubbing above.
         calls = {"n": 0}
 
         self.dispatch_calls = []
@@ -560,6 +572,71 @@ class Exhaustion(unittest.TestCase):
         self.assertEqual(second["timeout_s"], fat.DEFAULT_PAID_FALLBACK["min_attempt_s"])
         self.assertEqual(first["stall_s"], fat.DEFAULT_PAID_FALLBACK["attempt_stall_s"])
         self.assertIn("wall-clock cap", err)
+
+    def test_env_override_below_the_floor_is_honoured_not_raised(self):
+        # 2026-11-18 defect: a caller-requested 45s attempt bound was silently raised to the
+        # 180s min_attempt_s floor (budget = max(min(cap-elapsed, attempt_cap), min_attempt_s)),
+        # which is how a review dispatch's 45s became 180s. An explicit override must win.
+        keys = tempfile.mkdtemp()
+        Path(keys, "gemini").write_text("fixture-key")   # gemini only: nvidia entries are rate-limited
+        # providers and would get the patient-tier bump (max(cap,1800)); that path is tested elsewhere
+        old = os.environ.get("FA_DISPATCH_ATTEMPT_TIMEOUT_S")
+        os.environ["FA_DISPATCH_ATTEMPT_TIMEOUT_S"] = "45"
+        # run() reads the passed env dict, so hand the override over explicitly (2026-11-18).
+        env_override = {"FA_DISPATCH_ATTEMPT_TIMEOUT_S": "45"}
+        try:
+            code, _out, err = self.run_main({"prompt": "hi"}, {}, keys_dir=keys,
+                                            monotonic=[0.0, 0.1, 0.2, 0.3],
+                                            env_extra=env_override)
+        finally:
+            if old is None:
+                os.environ.pop("FA_DISPATCH_ATTEMPT_TIMEOUT_S", None)
+            else:
+                os.environ["FA_DISPATCH_ATTEMPT_TIMEOUT_S"] = old
+        self.assertEqual(code, 1)
+        self.assertTrue(self.dispatch_calls, "at least one attempt ran")
+        for _id, kw in self.dispatch_calls:
+            self.assertEqual(kw["timeout_s"], 45.0, kw)
+        self.assertIn("attempt budget 45s", err)
+
+    def test_stall_override_is_honoured_not_floored(self):
+        # QC 2026-11-18 R3: FA_DISPATCH_STALL_S must reach dispatch_entry's stall_s as-is.
+        keys = tempfile.mkdtemp()
+        Path(keys, "gemini").write_text("fixture-key")
+        code, _out, _err = self.run_main({"prompt": "hi"}, {}, keys_dir=keys,
+                                         monotonic=[0.0, 0.1, 0.2, 0.3],
+                                         env_extra={"FA_DISPATCH_STALL_S": "45"})
+        self.assertEqual(code, 1)
+        self.assertTrue(self.dispatch_calls)
+        for _id, kw in self.dispatch_calls:
+            self.assertEqual(kw["stall_s"], 45.0, kw)
+
+    def test_resume_keeps_the_override_without_the_env_var(self):
+        # QC 2026-11-18 R5: a --background run persists the policy; on resume in a fresh shell the
+        # env var is gone, but the persisted override flag must still suppress the floor.
+        keys = tempfile.mkdtemp()
+        Path(keys, "gemini").write_text("fixture-key")
+        env = {"LA_API_KEYS_DIR": keys, "FA_DISPATCH_ATTEMPT_TIMEOUT_S": "45"}
+        policy = fat.resolve_policy(env, fat.load_preferences(env))
+        self.assertEqual(policy["attempt_max_s"], 45.0)
+        self.assertTrue(policy["_attempt_max_s_overridden"])
+        resumed_env = {"LA_API_KEYS_DIR": keys}          # env var gone, as in a fresh shell
+        plan = [{"id": "gemini-3.8-flash", "kind": "remote", "provider": "gemini", "model": "m",
+                 "display": "G", "smoke_tested": True}]
+        calls = []
+        real = fat.dispatch_entry
+        def fake(entry, prompt, e, thinking_effort=None, **kw):
+            calls.append(kw)
+            raise fat.DispatchFailed("boom")
+        fat.dispatch_entry = fake
+        fat.local_on_disk = lambda a: True
+        try:
+            status, _r, _a, _rem = fat.execute_plan(plan, "hi", resumed_env, dict(policy),
+                                                   note=lambda m: None)
+        finally:
+            fat.dispatch_entry = real
+        self.assertEqual(status, "failed")
+        self.assertTrue(calls and all(kw["timeout_s"] == 45.0 for kw in calls), calls)  # the override notice, not a bare number
 
     def test_total_failure_arms_the_mark_for_this_session(self):
         keys = tempfile.mkdtemp()

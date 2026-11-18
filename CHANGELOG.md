@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.59.7] — unreleased
+
+### Fixed — caller-requested dispatch bounds are honoured, not raised (waypoint free-agents-free-agent-tool-2; QC by GLM 5.3 Flash, 2026-11-18)
+- `execute_plan` applied `min_attempt_s` (180) as a floor even when `FA_DISPATCH_ATTEMPT_TIMEOUT_S`/`FA_DISPATCH_STALL_S` explicitly set a smaller bound — a requested 45s became 180s (seen in the Codex self-test thread). Now the floor applies only when no override set the key, and an override notice is logged.
+- The nvidia "patient" tier bump no longer raises an explicit override either.
+- `resolve_policy` persists `_attempt_max_s_overridden`/`_attempt_stall_s_overridden` into the policy (saved in plan.json), so a `--resume` in a fresh shell without the env var still honours the original bound.
+- Tests: 3 new (override honoured at the dispatch boundary, stall override, resume-without-env), plus an ambient-`FA_DISPATCH_*` scrub in the test harness (this box exports `FA_DISPATCH_TIMEOUT_TIER=patient`). Mutation-tested: floor-always, no-patient-guard, and persisted-flag-ignored each go RED. Full gate: 1673 passed.
+
 ## [0.59.6] — unreleased
 
 ### Changed — 🧠 free-lane knowledge section at SessionStart (memory migration group B, plan 2026-11-18)
