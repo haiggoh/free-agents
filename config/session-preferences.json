@@ -1,0 +1,9 @@
+{
+  "description": "Full-SESSION model order for interactive free sessions (bin/launch-remote-window.sh consumers, e.g. motion-pipeline's 'Add motion graphics' step). Distinct from dispatch-preferences.json 'order': dispatch-first models (Gemini 3.8 Flash) lead STATELESS dispatches but must NOT lead a full session \u2014 their free quota burns inside minutes (user 2026-10-31, reaffirmed 2026-11-19 after a session launcher put Gemini on top and exhausted it). Order from the dispatch-preferences maintainer note: Mistral Large 4 is TOP PICK for full sessions (user 2026-10-29/31), then DeepSeek V4.1 Flash, GLM 5.3 Flash, StepFun Step 5 Preview, Nemotron 3 Ultra as fallback. Keep aliases in sync with the --inventory roster; entries missing there are skipped by consumers. (nvidia-deepseek-v4 dropped 2026-11-19: NVIDIA retired deepseek-ai/deepseek-v4.1-flash 410 EOL 2026-11-16 \u2014 a retired id must never be in a fallback chain, same rule that removed z-ai/glm-5.3.)",
+  "order": [
+    "nvidia-mistral-large4",
+    "nvidia-glm53",
+    "nvidia-step5-preview",
+    "nvidia-nemotron-ultra"
+  ]
+}
