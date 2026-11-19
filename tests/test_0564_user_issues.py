@@ -109,6 +109,18 @@ class VibrancyMaterialTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ap.save(p, {"follow_system_appearance": "yes"})
 
+    def test_dark_mode_resolution_store_wins_by_default(self):
+        from fa_gui.native_window import resolve_dark_mode, is_system_dark
+        # store wins when follow_system_appearance is off (the default)
+        self.assertTrue(resolve_dark_mode({"dark_mode": True, "follow_system_appearance": False}, system_dark=False))
+        self.assertFalse(resolve_dark_mode({"dark_mode": False, "follow_system_appearance": False}, system_dark=True))
+        # system wins when the opt-in is on
+        self.assertFalse(resolve_dark_mode({"dark_mode": True, "follow_system_appearance": True}, system_dark=False))
+        self.assertTrue(resolve_dark_mode({"dark_mode": False, "follow_system_appearance": True}, system_dark=True))
+        self.assertTrue(is_system_dark("NSAppearanceNameDarkAqua"))
+        self.assertFalse(is_system_dark("NSAppearanceNameAqua"))
+        self.assertFalse(is_system_dark(None))
+
 
 class RemoteFilterRowTests(unittest.TestCase):
     def test_remote_actions_single_filter_row_with_nav_target(self):
