@@ -8,11 +8,14 @@
 # user's Terminal and returns to it when the session ends.
 #
 # Usage: launch-remote-window.sh <alias> [--effort low|medium|high|xhigh|max] [--prompt TEXT]
+#                                       [-- ...]   # everything after `--` passes through to claude
+#                                                       (e.g. -- --permission-mode plan)
 #
 # Environment:
 #   LAUNCH_REMOTE_WINDOW_CSL   override the csl binary to exec (default: this repo's bin/csl)
 #
-# Exit codes: 0 launched (csl's own exit), 2 usage error or headless refusal, 3 unknown flag.
+# Exit codes: 0 launched (csl's own exit), 2 usage error or headless refusal, 3 unknown flag
+# (before `--`; args after `--` are passthrough and not validated here).
 set -uo pipefail
 
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,11 +24,12 @@ usage() {
     cat <<'USAGE'
 launch-remote-window.sh — start a free remote session in a REAL interactive window
 
-Usage: launch-remote-window.sh <alias> [--effort low|medium|high|xhigh|max] [--prompt TEXT]
+Usage: launch-remote-window.sh <alias> [--effort low|medium|high|xhigh|max] [--prompt TEXT] [-- ...]
 
 Hard-requires a TTY: from an agent Bash tool (no TTY) it refuses with a one-line message
 and exits non-zero instead of starting a headless session. With a TTY it execs
-`csl remote "$@"`.
+`csl remote "$@"`. Everything after a bare `--` is passed through unvalidated
+(remote-session.sh forwards it to the claude command line).
 
 Environment:
   LAUNCH_REMOTE_WINDOW_CSL   csl binary to exec (default: this repo's bin/csl)
@@ -42,7 +46,12 @@ esac
 # Pass-through flags only; anything else starting with '-' is a usage error (never
 # silently swallowed into the launch). 0.54.0: the dead KNOWN_FLAGS array and prev
 # assignment (shellcheck SC2034) are removed — the case below already validates the flags.
+# 0.60.0: a bare `--` ends validation; everything after it is claude passthrough
+# (remote-session.sh appends it to the claude command line), so it is NOT rejected here.
+seen_dd=0
 for a in "$@"; do
+    if [ "$seen_dd" -eq 1 ]; then continue; fi
+    if [ "$a" = "--" ]; then seen_dd=1; continue; fi
     case "$a" in
         -*) case "$a" in
                 --effort|--prompt|--dry-run|--list) ;;

@@ -157,6 +157,24 @@ def pending_tool_uses(records) -> list:
     return [t for t in _tool_uses(records) if t.tool_use_id not in done]
 
 
+def tool_result_texts(records) -> list:
+    """(line, tool_use_id, content_text) for every tool_result block, chronological.
+
+    Used by fa-takeover verify to prove the handoff nonce entered the model's context.
+    """
+    out = []
+    for ln, rec in records:
+        for block in _content_blocks(rec):
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                content = block.get("content", "")
+                if isinstance(content, list):
+                    content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+                elif not isinstance(content, str):
+                    content = ""
+                out.append((ln, block.get("tool_use_id", ""), content))
+    return out
+
+
 def files_touched(records) -> list:
     """File paths from Edit/Write/NotebookEdit inputs, first occurrence order, deduped."""
     seen = set()

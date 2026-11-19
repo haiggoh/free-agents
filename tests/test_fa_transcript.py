@@ -140,3 +140,8 @@ def test_string_message_field_is_not_crashing():
     assert ft.pending_tool_uses([(1, rec)]) == []
     # an error marker on a non-assistant record is not an API error record
     assert ft.api_errors([(1, dict(rec, isApiErrorMessage=True))]) == []
+
+
+def test_tool_result_texts():
+    records, _ = load("pending_tool.jsonl")
+    assert ft.tool_result_texts(records) == [(4, "toolu_done", "ok")]
