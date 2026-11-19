@@ -27,8 +27,13 @@ opacity lever (it already works); the new lever is the vibrancy **material**.
    switching (NSApplicationDidChangeEffectiveAppearanceNotification) is phase 2, documented
    here but not in v1.
 4. Browser mode unchanged (no window args, no vibrancy — existing behavior).
-5. At 100% opacity + blur the background must still read pure white (the 2026-11-19 tint
-   compensation ×1.35 stays as is — the material lever and the tint lever are orthogonal).
+5. At 100% opacity + blur the background must still read pure white. **The 2026-11-19 tint
+   compensation (BLUR_BRIGHTNESS_FACTOR ×1.35 with blur) is REMOVED in this work**: it was a
+   hack against the vibrancy darkening, but it compresses the slider's visible range (with
+   blur on, actual overlay alpha = opacity × 1.35, so ≥74% already renders fully opaque —
+   the user's "above 50% barely translucent" observation). Once the material itself is
+   bright in light mode, `tint_alpha` returns the raw opacity in both modes and both
+   blur states (100% = alpha 1.0 = pure white anyway); the unit test is updated to pin that.
 
 ## Non-goals / anti-goals
 
