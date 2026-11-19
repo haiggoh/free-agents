@@ -665,26 +665,36 @@ _band_full_report() {
     for ((p=LA_REMOTE_PROXY_PORT_MIN; p<=LA_REMOTE_PROXY_PORT_MAX; p++)); do
         listener="$(lsof -ti tcp:"$p" 2>/dev/null | head -1)"
         pid="$(awk '{print $1}' "$RUNDIR/proxy-$p.pid" 2>/dev/null)"
-        owner="$(cat "$RUNDIR/proxy-$p.owner" 2>/dev/null)"
+        owner="$(head -1 "$RUNDIR/proxy-$p.owner" 2>/dev/null)"   # first line only: a garbled file cannot smuggle a second pid
         opid="${owner%% *}"
         logage=""
-        [[ -f "$RUNDIR/proxy-$p.log" ]] && logage=$(( $(date +%s) - $(stat -f %m "$RUNDIR/proxy-$p.log" 2>/dev/null || echo 0) ))
+        if [[ -f "$RUNDIR/proxy-$p.log" ]]; then
+            # BSD stat is -f %m, GNU stat is -c %Y; on GNU the -f form prints nothing, so fall through.
+            logage=$(( $(date +%s) - $(stat -f %m "$RUNDIR/proxy-$p.log" 2>/dev/null || stat -c %Y "$RUNDIR/proxy-$p.log" 2>/dev/null || echo 0) ))
+        fi
         reason=""
-        if [[ -n "$opid" ]] && _owner_alive "$owner"; then
+        if [[ -r "$RUNDIR/proxy-$p.owner" ]] && [[ -n "$opid" ]] && _owner_alive "$owner"; then
             registry="not in ~/.claude/sessions/ — verify before touching"
             [[ -r "$HOME/.claude/sessions/$opid.json" ]] && registry="live session registered"
             reason="live session owner pid $opid ($registry"
             if [[ -z "$listener" ]]; then
-                reason="$reason; its proxy is GONE, so the port stays reserved for its ANTHROPIC_BASE_URL)"
+                reason="$reason; its proxy is not listening, so the port stays reserved for its ANTHROPIC_BASE_URL)"
             else
                 reason="$reason)"
             fi
-        elif [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && [[ -n "$logage" ]] && (( logage > stale_s )); then
-            reason="stale-looking proxy pid $pid (log ${logage}s old, owner ${opid:-none} gone; idle ≠ dead — the USER decides, never auto-reap; stop candidate: $0 --stop $p)"
+        elif [[ -r "$RUNDIR/proxy-$p.owner" ]] && [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && [[ -n "$logage" ]] && (( logage > stale_s )); then
+            # Stale-looking needs an owner RECORD whose owner is gone — a MISSING owner file is
+            # "unknown is not orphaned" (same rule as stop_proxy): an older launcher left no
+            # record, and the session may still be live.
+            reason="stale-looking proxy pid $pid (owner pid $opid gone, log ${logage}s old; idle ≠ dead — the USER decides, never auto-reap; stop candidate: $0 --stop $p)"
         elif [[ -n "$listener" ]]; then
-            reason="held: listener pid $listener, no owner record (unknown is not orphaned)"
+            if [[ -r "$RUNDIR/proxy-$p.owner" ]]; then
+                reason="held: listener pid $listener, owner pid ${opid:-?} not running"
+            else
+                reason="held: listener pid $listener, no owner record (unknown is not orphaned)"
+            fi
         elif [[ -n "$pid" ]]; then
-            reason="proxy pid $pid in the pid file, not listening, owner gone"
+            reason="proxy pid $pid in the pid file, not listening, owner ${opid:-record missing}"
         else
             reason="unused (no owner, no listener)"
         fi

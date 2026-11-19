@@ -949,6 +949,29 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
             self.assertEqual(result.returncode, 2)
             self.assertIn('--remote-model', result.stderr)
 
+    def test_nvidia_catalog_fetch_is_complete_and_auth_stays_out_of_argv(self):
+        """0.59.9 review pin (fetch layer): _catalog_request must GET the registry's full catalog
+        URL — no pagination params, the whole body goes to the parser — with --fail so an error
+        body is a loud failure, and the API key only via --config stdin, never in argv."""
+        self.env['CATALOG'] = json.dumps({'object': 'list',
+                                          'data': [{'id': 'vendor/m1', 'type': 'chat'}]})
+        r = self.run_cli('--models', 'nvidia-mistral-large4')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('vendor/m1', r.stdout)
+        argv = json.loads((self.root / 'curl-argv').read_text())
+        self.assertIn('--fail', argv)
+        self.assertIn('--config', argv)
+        url = next(a for a in argv if a.startswith('https://'))
+        self.assertEqual(url, 'https://integrate.api.nvidia.com/v1/models',
+                         'the whole catalog is fetched; no page/per_page truncation')
+        self.assertNotIn('fixture-not-a-real-key', json.dumps(argv),
+                         'the credential must travel via --config stdin, never argv')
+        # an HTTP error must fail loudly, not parse as an empty catalog
+        self.env['CURL_CODE'] = '500'
+        r2 = self.run_cli('--models', 'nvidia-mistral-large4')
+        self.assertNotEqual(r2.returncode, 0)
+        self.assertIn('catalog request failed', r2.stderr)
+
     def test_catalog_prices_capabilities_and_invalid_records(self):
         self.env['CATALOG'] = json.dumps({'data': [
             {'id': 'free-model', 'pricing': {'prompt': '0', 'completion': '0'}, 'tools_calling': True},
@@ -1947,6 +1970,34 @@ class BandFullReportTests(unittest.TestCase):
         self.assertIn(str(stale.pid), r.stderr, 'the stale proxy pid must be named')
         self.assertIn('stale', r.stderr.lower())
         self.assertIn('--stop', r.stderr, 'the report must say how to reclaim the stale proxy')
+
+    def test_missing_owner_record_is_never_called_stale(self):
+        """stop_proxy's own rule: a proxy with NO owner record (older launcher) is UNKNOWN, not
+        orphaned — 'unknown is not orphaned'. The band report must not label it stale or suggest
+        --stop for it (adversarial review finding 2026-11-19): killing it would strand a live
+        session whose ANTHROPIC_BASE_URL still points at the port."""
+        stale = subprocess.Popen(['sleep', '300'])   # live proxy process, log days old, NO owner file
+        self.addCleanup(stale.kill)
+        start = subprocess.run(['bash', '-c', 'source "$1"; _proc_start "$2"', 'x',
+                                str(self.root / 'bin/library.sh'), str(stale.pid)],
+                               env=self.env, text=True, capture_output=True).stdout.strip()
+        p = 4146
+        (self.rundir / f'proxy-{p}.pid').write_text(f'{stale.pid} {start}\n')
+        # deliberately NO proxy-4146.owner
+        log = self.rundir / f'proxy-{p}.log'
+        log.write_text('old\n')
+        subprocess.run(['touch', '-t', '202601010000', str(log)], check=True)
+        line = self._live_owner_line()[0]
+        for q in range(4141, 4152):
+            if q != p:
+                (self.rundir / f'proxy-{q}.owner').write_text(line)
+        r = self._free_port()                        # LSOF_BUSY=1: every port has a listener
+        self.assertEqual(r.returncode, 1)
+        line_p = next(ln for ln in r.stderr.splitlines() if ln.strip().startswith(str(p)))
+        self.assertNotIn('stale', line_p.lower(), f'port {p} line must not say stale: {line_p}')
+        self.assertNotIn('--stop', line_p, f'port {p} line must not suggest --stop: {line_p}')
+        self.assertIn('no owner record', line_p)
+        self.assertIn('unknown is not orphaned', line_p)
 
 
 if __name__ == '__main__':

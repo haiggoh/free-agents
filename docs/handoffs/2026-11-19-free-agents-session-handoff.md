@@ -124,6 +124,13 @@ proxy for you (see State) so a port exists for your launch.
 - **session-preferences.json — verified in sync** (all 4 order aliases in the roster, none
   broken/retired, no gemini); pinned by tests/test_session_preferences_sync.py — mutation
   check: planting retired `nvidia-deepseek-v4` in the chain turns the test RED (witnessed).
+- **Shipped as 0916c62 (pushed, origin/main verified via ls-remote).** Cross-family review
+  (nvidia-nemotron-3-ultra dispatch, avoid_family=mistral) confirmed findings and added fixes
+  in a follow-up commit: missing-owner-record ports are never labelled stale (unknown is not
+  orphaned, same rule as stop_proxy); fetch-layer pin (full URL, no pagination, --fail loud,
+  key via --config only — mutation-checked RED with a paginated URL); GNU stat fallback;
+  roster regex widened. Reviewer's "no BandFullReportTests" was a stale snapshot read — the
+  class exists at tests/test_remote_session.py:1869 and passes.
 
 ## ADDENDUM (2026-11-19, after launch — read before designing the port fix)
 

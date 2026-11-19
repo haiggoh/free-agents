@@ -22,7 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def roster_aliases():
     """Aliases from the generated config/remote-agents.sh LA_REMOTE_AGENTS block."""
     text = (ROOT / 'config' / 'remote-agents.sh').read_text()
-    return set(re.findall(r'^\s*"([a-z0-9-]+)\|', text, re.MULTILINE))
+    # first field of a quoted roster entry — any charset, not just [a-z0-9-] (review 2026-11-19:
+    # a future alias with _ . or uppercase must not false-fail the sync test)
+    return set(re.findall(r'^\s*"([^"|]+)\|', text, re.MULTILINE))
 
 
 def broken_aliases():
