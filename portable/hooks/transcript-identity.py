@@ -29,7 +29,6 @@ import sys
 import fcntl
 from pathlib import Path
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 # The marker parser lives in bin/fa_transcript.py — one parser, shared with the takeover
 # pipeline (plan v2 Task 1.1 Step 5). bin/ is the plugin root's sibling in every layout.
@@ -71,9 +70,6 @@ def find_transcript_marker(transcript_path):
     return marker.raw, marker.line
 
 
-LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
-
-
 def resume_warning(payload, env, marker, has_prior_turns):
     """Warn-only free->paid resume warning (plan v2 Task 1.5; user decision 2026-11-19).
 
@@ -91,13 +87,11 @@ def resume_warning(payload, env, marker, has_prior_turns):
     if not (payload.get("source") == "resume" or has_prior_turns):
         return None
     url = env.get("ANTHROPIC_BASE_URL", "")
-    try:
-        host = urlparse(url).hostname or ""
-    except Exception:
-        host = ""
-    if host in LOOPBACK_HOSTS or host.startswith("127."):
+    if fa_transcript.is_loopback_url(url):
         if env.get("FA_RESUME_WARNING_ALLOW_LOOPBACK") != "1":
             return None
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "") if url else ""
     host = host or "an unknown route"
     kind = marker.kind
     model = marker.model or "unknown"
