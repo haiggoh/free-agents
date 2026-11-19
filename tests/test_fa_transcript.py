@@ -1,0 +1,106 @@
+"""Tests for bin/fa_transcript.py — the pure transcript reader (plan v2 Task 1.1)."""
+import json
+from pathlib import Path
+
+import fa_transcript as ft
+
+FIX = Path(__file__).parent / "fixtures" / "transcripts"
+
+
+def load(name):
+    return ft.load_records(str(FIX / name))
+
+
+# --- Step 1 pinned tests -----------------------------------------------------
+
+def test_marker_in_list_content():
+    records, malformed = load("list_content.jsonl")
+    assert malformed == 0
+    m = ft.identity_marker(records)
+    assert m is not None
+    assert m.line == 1
+    assert m.kind == "free_api"
+    assert m.raw["session_id"] == "sess-list"
+
+
+def test_identical_prompts_kept():
+    records, _ = load("duplicates.jsonl")
+    instrs = ft.user_instructions(records)
+    assert [i.text for i in instrs].count("do the same thing") == 2
+    assert len({i.line for i in instrs}) == 2
+
+
+def test_tool_result_not_an_instruction():
+    records, _ = load("pending_tool.jsonl")
+    instrs = ft.user_instructions(records)
+    assert [i.text for i in instrs] == ["edit the file"]
+
+
+def test_pending_tool_detected():
+    records, _ = load("pending_tool.jsonl")
+    pending = ft.pending_tool_uses(records)
+    assert [(t.tool_use_id, t.name) for t in pending] == [("toolu_pending", "Bash")]
+
+
+def test_budget_wall_classified():
+    text = ("API Error: 422 Budget has been exceeded! Key=Test-Key (sk-...test) "
+            "Current cost: 40.00000000000001, Max budget: 40.0")
+    assert ft.classify_api_error(text) == "budget_wall"
+    records, _ = load("budget_wall.jsonl")
+    errs = ft.api_errors(records)
+    assert len(errs) == 1
+    assert errs[0].kind == "budget_wall"
+    assert errs[0].line == 2
+
+
+def test_overloaded_not_budget():
+    text = 'API Error: 529 {"error":{"message":"Service temporarily overloaded"}}'
+    assert ft.classify_api_error(text) == "overloaded"
+
+
+def test_malformed_line_counted():
+    records, malformed = load("malformed.jsonl")
+    assert malformed == 1
+    assert [ln for ln, _ in records] == [1, 3]
+
+
+# --- remaining interface coverage --------------------------------------------
+
+def test_load_records_shape_and_message_text():
+    records, malformed = load("basic.jsonl")
+    assert malformed == 0 and len(records) == 3
+    assert ft.message_text(records[0][1]) == "fix the bug"
+    # list content is joined
+    lrecords, _ = load("list_content.jsonl")
+    assert ft.message_text(lrecords[1][1]) == "hello world"
+
+
+def test_user_instructions_exclude_meta_echoes():
+    records, _ = load("basic.jsonl")
+    instrs = ft.user_instructions(records)
+    assert [i.text for i in instrs] == ["fix the bug"]
+    assert instrs[0].uuid == "u1"
+    assert instrs[0].timestamp == "2026-11-19T03:00:00.000Z"
+
+
+def test_files_touched_from_edit_write_inputs():
+    records, _ = load("pending_tool.jsonl")
+    assert ft.files_touched(records) == ["/tmp/x.py"]
+
+
+def test_last_todos_parses_latest_todowrite_result():
+    todos = [{"content": "ship it", "status": "pending", "activeForm": "shipping"}]
+    records = [
+        (1, {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "TodoWrite", "input": {"todos": []}}]}}),
+        (2, {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": json.dumps(todos)}]}}),
+        (3, {"type": "user", "message": {"role": "user", "content": "next"}}),
+    ]
+    assert ft.last_todos(records) == todos
+    assert ft.last_todos([(1, {"type": "user", "message": {"role": "user", "content": "hi"}})]) is None
+
+
+def test_identity_marker_absent_when_no_marker():
+    records, _ = load("basic.jsonl")
+    assert ft.identity_marker(records) is None

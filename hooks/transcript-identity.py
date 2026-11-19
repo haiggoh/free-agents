@@ -26,10 +26,14 @@ Environment variables available:
 import json
 import os
 import sys
-import re
 import fcntl
 from pathlib import Path
 from datetime import datetime, timezone
+
+# The marker parser lives in bin/fa_transcript.py — one parser, shared with the takeover
+# pipeline (plan v2 Task 1.1 Step 5). bin/ is the plugin root's sibling in every layout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
+import fa_transcript
 
 
 def log(msg):
@@ -50,43 +54,20 @@ def find_transcript_marker(transcript_path):
     """
     Search transcript for FREE_AGENTS_SESSION_IDENTITY marker.
     Returns (marker_json, line_number) or (None, None) if not found.
+    Parsing is delegated to fa_transcript.identity_marker (plan v2 Task 1.1 Step 5);
+    message.content as a LIST is handled there via the single message_text accessor.
     """
     if not transcript_path or not os.path.exists(transcript_path):
         return None, None
-
-    pattern = re.compile(r'FREE_AGENTS_SESSION_IDENTITY_V(\d+)\|(.+)')
     try:
-        with open(transcript_path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                # First try direct match (for markers written directly)
-                match = pattern.search(line)
-                if match:
-                    version = int(match.group(1))
-                    marker_json = match.group(2)
-                    try:
-                        return json.loads(marker_json), line_num
-                    except json.JSONDecodeError:
-                        pass
-
-                # Then try parsing as JSONL and checking message.content
-                try:
-                    entry = json.loads(line)
-                    if entry.get('type') == 'system':
-                        content = entry.get('message', {}).get('content', '')
-                        match = pattern.search(content)
-                        if match:
-                            version = int(match.group(1))
-                            marker_json = match.group(2)
-                            try:
-                                return json.loads(marker_json), line_num
-                            except json.JSONDecodeError:
-                                pass
-                except json.JSONDecodeError:
-                    continue
+        records, _malformed = fa_transcript.load_records(transcript_path)
     except Exception as e:
         log(f"Error reading transcript: {e}")
-    return None, None
+        return None, None
+    marker = fa_transcript.identity_marker(records)
+    if marker is None:
+        return None, None
+    return marker.raw, marker.line
 
 
 def get_session_kind_from_marker(marker):

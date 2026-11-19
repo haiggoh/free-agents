@@ -1,0 +1,3 @@
+{"type":"user","uuid":"u1","sessionId":"sess-mf","timestamp":"2026-11-19T03:00:00.000Z","message":{"role":"user","content":"first"}}
+{"type":"assistant","uuid":"a1" this line is not valid json
+{"type":"user","uuid":"u2","sessionId":"sess-mf","timestamp":"2026-11-19T03:00:02.000Z","message":{"role":"user","content":"third"}}
