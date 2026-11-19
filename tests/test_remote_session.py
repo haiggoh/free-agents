@@ -1866,6 +1866,89 @@ with open(os.environ['CLAUDE_ARGV'], 'a') as f:
             self.assertIn('★ Insight ─', text, name)
 
 
+class BandFullReportTests(unittest.TestCase):
+    """0.59.9 regression (user report 2026-11-19: launching any remote session failed with a bare
+    'no free port in 4141-4151' while the band was full): when the band is full, free_port must
+    report WHICH ports are held by WHAT — live session owner, listener pid, or a STALE proxy
+    (dead owner, log mtime old, pid named) with a reclaim hint — instead of the bare error line."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        for d in ('bin', 'config', 'keys', 'stubs', 'home'):
+            (self.root / d).mkdir()
+        for rel in ('bin/remote-session.sh', 'bin/remote-provider-registry.sh',
+                    'config/remote-agents.sh', 'config/emoji.sh'):
+            shutil.copy2(ROOT / rel, self.root / rel)
+        source = (self.root / 'bin/remote-session.sh').read_text()
+        (self.root / 'bin/library.sh').write_text(source.split('# ---- argument parsing')[0])
+        (self.root / 'keys' / 'nvidia').write_text('fixture-not-a-real-key')
+        self.env = dict(os.environ, HOME=str(self.root / 'home'), TMPDIR=str(self.root),
+                        LA_API_KEYS_DIR=str(self.root / 'keys'),
+                        PATH=str(self.root / 'stubs') + ':' + os.environ['PATH'],
+                        LSOF_BUSY='1')
+        self.rundir = self.root / 'local-agents-remote'
+        self.rundir.mkdir()
+        self.stub('lsof', '#!/bin/sh\nif [ "${LSOF_BUSY:-0}" = 1 ]; then echo 424242; exit 0; fi\nexit 1\n')
+
+    def stub(self, name, content):
+        path = self.root / 'stubs' / name
+        path.write_text(content)
+        path.chmod(0o755)
+        return path
+
+    def _free_port(self, extra_env=None):
+        env = dict(self.env, **(extra_env or {}))
+        return subprocess.run(['bash', '-c', 'source "$1"; free_port', 'x', str(self.root / 'bin/library.sh')],
+                              env=env, text=True, capture_output=True)
+
+    def _live_owner_line(self):
+        p = subprocess.Popen(['sleep', '300'])
+        self.addCleanup(p.kill)
+        start = subprocess.run(['bash', '-c', 'source "$1"; _proc_start "$2"', 'x',
+                                str(self.root / 'bin/library.sh'), str(p.pid)],
+                               env=self.env, text=True, capture_output=True).stdout.strip()
+        self.assertTrue(start)
+        return f'{p.pid} {start}\n', p
+
+    def test_full_band_of_live_sessions_reports_every_port_and_the_owner_pid(self):
+        line, owner = self._live_owner_line()
+        for p in range(4141, 4152):
+            (self.rundir / f'proxy-{p}.owner').write_text(line)
+        r = self._free_port({'LSOF_BUSY': '0'})      # no listener; owners alone hold the band
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('no free port in 4141-4151', r.stderr)
+        for p in range(4141, 4152):
+            self.assertIn(str(p), r.stderr, f'the report must name port {p}')
+        self.assertIn(str(owner.pid), r.stderr, 'the report must name the live owner pid')
+        self.assertIn('live session', r.stderr)
+
+    def test_stale_proxy_is_named_with_pid_log_age_and_reclaim_hint(self):
+        stale = subprocess.Popen(['sleep', '300'])   # the stale proxy process, still listening
+        self.addCleanup(stale.kill)
+        start = subprocess.run(['bash', '-c', 'source "$1"; _proc_start "$2"', 'x',
+                                str(self.root / 'bin/library.sh'), str(stale.pid)],
+                               env=self.env, text=True, capture_output=True).stdout.strip()
+        p = 4146
+        (self.rundir / f'proxy-{p}.owner').write_text('999999 Mo._1_Jan_00:00:00_2024\n')  # owner gone
+        (self.rundir / f'proxy-{p}.pid').write_text(f'{stale.pid} {start}\n')
+        log = self.rundir / f'proxy-{p}.log'
+        log.write_text('stale proxy log\n')
+        subprocess.run(['touch', '-t', '202601010000', str(log)], check=True)   # log days old
+        line = self._live_owner_line()[0]
+        for q in range(4141, 4152):
+            if q != p:
+                (self.rundir / f'proxy-{q}.owner').write_text(line)
+        r = self._free_port()                        # LSOF_BUSY=1: every port has a listener
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('no free port in 4141-4151', r.stderr)
+        self.assertIn(str(p), r.stderr)
+        self.assertIn(str(stale.pid), r.stderr, 'the stale proxy pid must be named')
+        self.assertIn('stale', r.stderr.lower())
+        self.assertIn('--stop', r.stderr, 'the report must say how to reclaim the stale proxy')
+
+
 if __name__ == '__main__':
     if '--help' in sys.argv or '-h' in sys.argv:
         print(__doc__)

@@ -95,6 +95,36 @@ proxy for you (see State) so a port exists for your launch.
 4. Bump 0.59.9 + CHANGELOG (the 0.59.8 top entry already records the deepseek retirement —
    follow that format), push `main` after the gate is green.
 
+## Progress receipts (successor session, 2026-11-19, nvidia-mistral-large4)
+
+- **Roster regression — VERIFIED, no fetch bug.** Live fetch checked 2026-11-19:
+  `integrate.api.nvidia.com/v1/models` returns 32 rows (http 200, anon == authed bearer,
+  `page_size=1000`/`page=2` return the same 32 — no pagination truncation). The "85 models"
+  in the 0.49.1-era comment was measured 2026-10-31; the upstream catalog shrank, our fetch is
+  complete. `remote-catalog-parse.py` keeps all 31 chat rows and drops only the 1 non-chat
+  (vlm) row; empty/error/no-candidate bodies exit 1 loudly. Picker view reproduced exactly:
+  nvidia shows **7** = 5 visible pinned + 2 visible catalog rows (the PARAM_COUNT_UNKNOWN ids);
+  24/31 catalog rows hidden by the intended local-capable filter (0.52.1 verdict now actually
+  fires), 15/20 pinned hidden (8 local-capable + 8 broken − 1 overlap). `--inventory` is the
+  unfiltered truth (20 nvidia rows); `--list` applies psv+broken (5 nvidia). Pinned by
+  tests/test_remote_catalog_parse.py and tests/test_remote_visibility_counts_0599.py
+  (every landed row counted exactly once in every toggle state; mutation: a lost row turns red).
+- **Port regression — FIXED (0.59.9), per the addendum below: report-only, never auto-reap.**
+  `free_port` now prints a per-port holder report when the band is full: live session owner pid
+  (+ session-registry presence), listener pid, or a stale-LOOKING proxy (dead owner + log older
+  than LA_REMOTE_STALE_LOG_S, default 7200 s + live pid) named as a stop CANDIDATE with an
+  explicit "idle ≠ dead — the USER decides" note. It kills nothing itself — the addendum's rule
+  (log mtime is not liveness; the 4146 kill cost a user an in-flight task) is baked into the
+  wording. Live band verified 2026-11-19 ~17:20: 10 ports held by live owners; 4146 = owner pid
+  19665 alive (idle window, NOT orphaned), proxy gone — reported as reserved (misroute guard)
+  with the registry gap flagged. Tests: BandFullReportTests in tests/test_remote_session.py
+  (RED before, GREEN after; 63 passed + 165 subtests in the full file). No
+  `exec`-discards-EXIT-trap leak found — the launch path already runs claude as a child under
+  `trap _teardown EXIT INT TERM HUP` (line ~2415).
+- **session-preferences.json — verified in sync** (all 4 order aliases in the roster, none
+  broken/retired, no gemini); pinned by tests/test_session_preferences_sync.py — mutation
+  check: planting retired `nvidia-deepseek-v4` in the chain turns the test RED (witnessed).
+
 ## ADDENDUM (2026-11-19, after launch — read before designing the port fix)
 
 The "orphaned" proxy on 4146 was NOT orphaned: the user still had that window open and meant

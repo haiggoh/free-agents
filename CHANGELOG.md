@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.59.9] — unreleased
+
+### Fixed — a full proxy band (4141-4151) now says WHICH ports are held by WHAT (user report 2026-11-19: launching any remote session failed with a bare "no free port in 4141-4151")
+- `bin/remote-session.sh` `free_port()`: on a full band it now prints a per-port holder report before the error — live session owner pid (with session-registry presence), listener pid, or a STALE proxy (dead owner + proxy log older than `LA_REMOTE_STALE_LOG_S`, default 7200 s, pid named) with a `--stop <port>` reclaim hint. It never kills anything itself; freeing another session's port remains the 2026-10-20 misroute guard. Verified against the live band 2026-11-19: 10 ports held by live owners, 4146 reported as owner-alive-but-proxy-gone-and-unregistered.
+- Tests: `BandFullReportTests` in `tests/test_remote_session.py` (full band of live owners names every port + owner pid; stale proxy named with pid, log age and reclaim hint; RED before the fix, GREEN after).
+
+### Verified + pinned — the remote roster fetch is complete; "only 7 nvidia models" is filters, not a fetch bug (user report 2026-11-19)
+- Live check 2026-11-19: `integrate.api.nvidia.com/v1/models` returns the complete catalog (32 rows; anon == authed; no pagination), the "85 models" of 2026-10-31 was upstream shrinkage. `remote-catalog-parse.py` keeps every chat/tool row and drops only documented non-candidates; empty/error bodies exit 1 loudly. The picker's 7 visible nvidia rows = 5 pinned + 2 catalog, with every other row hidden by the intended local-capable/broken filters and all accounted for in the counts.
+- Tests: `tests/test_remote_catalog_parse.py` (nvidia-shaped payload keeps all chat rows; documented drops only; loud failures), `tests/test_remote_visibility_counts_0599.py` (every landed row counted exactly once in every filter-toggle state).
+
+### Pinned — `config/session-preferences.json` session ladder stays in sync with the roster (2026-11-19 handoff, item 3)
+- Verified: all 4 `order` aliases exist in `config/remote-agents.sh`, none are retired/broken, no dispatch-only (gemini) provider in a session slot. `tests/test_session_preferences_sync.py` fails when a session-order alias is retired-but-present (mutation-checked with `nvidia-deepseek-v4` planted, RED) or absent from the roster.
+
 ## [0.59.8] — unreleased
 
 ### Fixed — NVIDIA retired `deepseek-ai/deepseek-v4.1-flash` (410 EOL 2026-11-16T08:00:00Z); the roster no longer offers, dispatches to, or falls back to it

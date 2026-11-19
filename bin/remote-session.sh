@@ -646,8 +646,50 @@ free_port() {
         fi
         if ! lsof -ti tcp:"$p" >/dev/null 2>&1; then echo "$p"; return 0; fi
     done
+    _band_full_report
     echo "remote-session: no free port in ${LA_REMOTE_PROXY_PORT_MIN}-${LA_REMOTE_PROXY_PORT_MAX}" >&2
+    echo "remote-session: LA_REMOTE_KEEP_PROXY=1 proxies stay after their session ends; free a port with: $0 --stop <port> (see the per-port report above)" >&2
     return 1
+}
+
+# 0.59.9: when the band is full, say WHICH ports are held by WHAT — the 2026-11-19 report had a
+# bare 'no free port in 4141-4151' and no way to tell a live session from an idle proxy. It only
+# PRINTS candidates (port, pid, log age) and never kills or reaps anything itself: an idle session
+# writes nothing to its proxy log, so log mtime is not liveness (handoff addendum 2026-11-19 —
+# the 4146 kill cost a user an in-flight task). Stale-looking = dead/absent owner + log older
+# than LA_REMOTE_STALE_LOG_S (default 2 h) + a live pid; even then the USER decides via --stop.
+_band_full_report() {
+    local p listener pid owner opid logage stale_s reason registry
+    stale_s="${LA_REMOTE_STALE_LOG_S:-7200}"
+    echo "remote-session: proxy band ${LA_REMOTE_PROXY_PORT_MIN}-${LA_REMOTE_PROXY_PORT_MAX} full — per-port holders:" >&2
+    for ((p=LA_REMOTE_PROXY_PORT_MIN; p<=LA_REMOTE_PROXY_PORT_MAX; p++)); do
+        listener="$(lsof -ti tcp:"$p" 2>/dev/null | head -1)"
+        pid="$(awk '{print $1}' "$RUNDIR/proxy-$p.pid" 2>/dev/null)"
+        owner="$(cat "$RUNDIR/proxy-$p.owner" 2>/dev/null)"
+        opid="${owner%% *}"
+        logage=""
+        [[ -f "$RUNDIR/proxy-$p.log" ]] && logage=$(( $(date +%s) - $(stat -f %m "$RUNDIR/proxy-$p.log" 2>/dev/null || echo 0) ))
+        reason=""
+        if [[ -n "$opid" ]] && _owner_alive "$owner"; then
+            registry="not in ~/.claude/sessions/ — verify before touching"
+            [[ -r "$HOME/.claude/sessions/$opid.json" ]] && registry="live session registered"
+            reason="live session owner pid $opid ($registry"
+            if [[ -z "$listener" ]]; then
+                reason="$reason; its proxy is GONE, so the port stays reserved for its ANTHROPIC_BASE_URL)"
+            else
+                reason="$reason)"
+            fi
+        elif [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && [[ -n "$logage" ]] && (( logage > stale_s )); then
+            reason="stale-looking proxy pid $pid (log ${logage}s old, owner ${opid:-none} gone; idle ≠ dead — the USER decides, never auto-reap; stop candidate: $0 --stop $p)"
+        elif [[ -n "$listener" ]]; then
+            reason="held: listener pid $listener, no owner record (unknown is not orphaned)"
+        elif [[ -n "$pid" ]]; then
+            reason="proxy pid $pid in the pid file, not listening, owner gone"
+        else
+            reason="unused (no owner, no listener)"
+        fi
+        printf '  %-4s %s\n' "$p" "$reason" >&2
+    done
 }
 
 # A pid can be REUSED by an unrelated process after ours dies, so never kill on the
