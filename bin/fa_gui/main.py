@@ -23,6 +23,15 @@ if str(BIN) not in sys.path:
 
 HOST = "127.0.0.1"   # loopback only, in every mode
 
+# 2026-11-20 vibrancy material (spec docs/superpowers/specs/2026-11-19-vibrancy-material-design.md):
+# applied at MODULE level on purpose — NiceGUI's native mode re-imports this file as
+# __mp_main__ in the spawn child, where main() never runs. No-op without pywebview / in browser mode.
+try:
+    from fa_gui import native_window as _native_window
+    _native_window.apply_vibrancy_patch()
+except Exception:
+    pass
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="free-agents-gui",
