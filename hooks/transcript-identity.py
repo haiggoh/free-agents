@@ -29,6 +29,7 @@ import sys
 import fcntl
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 # The marker parser lives in bin/fa_transcript.py — one parser, shared with the takeover
 # pipeline (plan v2 Task 1.1 Step 5). bin/ is the plugin root's sibling in every layout.
@@ -68,6 +69,42 @@ def find_transcript_marker(transcript_path):
     if marker is None:
         return None, None
     return marker.raw, marker.line
+
+
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def resume_warning(payload, env, marker, has_prior_turns):
+    """Warn-only free->paid resume warning (plan v2 Task 1.5; user decision 2026-11-19).
+
+    Warns when LA_SESSION_IDENTITY is absent (not a launcher session) AND the transcript
+    carries a free-lane identity marker AND (the SessionStart source is "resume" OR the
+    transcript already has turns). Never fires on a loopback endpoint (probes) unless
+    FA_RESUME_WARNING_ALLOW_LOOPBACK=1 (hermetic delivery probe only). Returns the fixed
+    warning copy, or None. When LA_SESSION_IDENTITY is set this returns None and the
+    caller's behaviour stays byte-identical.
+    """
+    if env.get("LA_SESSION_IDENTITY"):
+        return None
+    if not marker or marker.kind not in ("free_api", "local"):
+        return None
+    if not (payload.get("source") == "resume" or has_prior_turns):
+        return None
+    url = env.get("ANTHROPIC_BASE_URL", "")
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:
+        host = ""
+    if host in LOOPBACK_HOSTS or host.startswith("127."):
+        if env.get("FA_RESUME_WARNING_ALLOW_LOOPBACK") != "1":
+            return None
+    host = host or "an unknown route"
+    kind = marker.kind
+    model = marker.model or "unknown"
+    sid = payload.get("session_id") or "unknown"
+    return (f"⚠️ free-agents: this conversation started on a free lane ({kind}, {model}). "
+            f"It now runs on {host} — a paid route — and its full history is sent there. "
+            f"To continue free: fa-takeover capture {sid}")
 
 
 def get_session_kind_from_marker(marker):
@@ -170,6 +207,25 @@ def main():
     # Get current session identity from environment
     la_session_identity = os.environ.get('LA_SESSION_IDENTITY')
     if not la_session_identity:
+        # Task 1.5 (warn only): a free-lane conversation resumed on a paid route warns once.
+        # Emits SessionStart JSON with BOTH systemMessage and additionalContext. When
+        # LA_SESSION_IDENTITY is set this block is skipped entirely (byte-identical path).
+        try:
+            marker = None
+            has_prior = False
+            if transcript_path and os.path.exists(transcript_path):
+                records, _malformed = fa_transcript.load_records(transcript_path)
+                marker = fa_transcript.identity_marker(records)
+                has_prior = bool(fa_transcript.user_instructions(records))
+            warning = resume_warning(input_data, os.environ, marker, has_prior)
+            if warning:
+                print(json.dumps({
+                    "systemMessage": warning,
+                    "hookSpecificOutput": {"hookEventName": "SessionStart",
+                                           "additionalContext": warning},
+                }))
+        except Exception as e:
+            log(f"resume warning failed: {e}")
         log("No LA_SESSION_IDENTITY in environment, skipping")
         return 0
 

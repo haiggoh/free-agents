@@ -1,4 +1,4 @@
-"""Tests for hooks/budget-wall-capture.py — the StopFailure budget-wall hook (plan v2 Task 1.4)."""
+"""Tests for bin/budget-wall-capture.py — the budget-wall capture worker (plan v2 Task 1.4)."""
 import importlib.machinery
 import importlib.util
 import io
@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-HOOK = REPO / "hooks" / "budget-wall-capture.py"
+HOOK = REPO / "bin" / "budget-wall-capture.py"
 FIX = Path(__file__).parent / "fixtures" / "transcripts"
 
 _loader = importlib.machinery.SourceFileLoader("budget_wall_capture", str(HOOK))

@@ -24,7 +24,7 @@
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/budget-wall-capture.py\" --pending",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/bin/budget-wall-capture.py\" --pending",
             "timeout": 20
           }
         ]
