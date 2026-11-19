@@ -1,0 +1,184 @@
+{
+  "measured_at": "2026-11-19T23:11:18Z",
+  "note": "one bounded generation per provider; evidence, not a verdict",
+  "records": [
+    {
+      "provider": "cerebras",
+      "tier": "trial",
+      "model": "gpt-oss-120b",
+      "url": "https://api.cerebras.ai/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "402",
+      "seconds": 0.33,
+      "quota_headers": {},
+      "body_head": "{\"message\":\"Payment required to access this resource. Visit your billing tab.\",\"type\":\"payment_required_error\",\"param\":\"quota\",\"code\":\"payment_required\"}"
+    },
+    {
+      "provider": "gemini",
+      "tier": "renewing_free",
+      "model": "gemini-3.8-flash",
+      "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "curl_rc": 28,
+      "http_status": null,
+      "seconds": 40.45,
+      "quota_headers": {},
+      "body_head": "curl: (28) Operation timed out after 40005 milliseconds with 0 bytes received\n"
+    },
+    {
+      "provider": "github",
+      "tier": "renewing_free",
+      "model": "openai/gpt-4o-mini",
+      "url": "https://models.github.ai/inference/chat/completions",
+      "curl_rc": 0,
+      "http_status": "200",
+      "seconds": 0.84,
+      "quota_headers": {},
+      "body_head": "OK\n"
+    },
+    {
+      "provider": "groq",
+      "tier": "renewing_free",
+      "model": "openai/gpt-oss-120b",
+      "url": "https://api.groq.com/openai/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "200",
+      "seconds": 0.82,
+      "quota_headers": {
+        "x-ratelimit-limit-requests": "1000",
+        "x-ratelimit-limit-tokens": "8000",
+        "x-ratelimit-remaining-requests": "999",
+        "x-ratelimit-remaining-tokens": "7924",
+        "x-ratelimit-reset-requests": "1m26.4s",
+        "x-ratelimit-reset-tokens": "570ms"
+      },
+      "body_head": "{\"id\":\"chatcmpl-eef4b35d-794c-4417-9175-64e6887b02b7\",\"object\":\"chat.completion\",\"created\":1795129849,\"model\":\"openai/gpt-oss-120b\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"re"
+    },
+    {
+      "provider": "huggingface",
+      "tier": "paid",
+      "model": "tencent/Hy4-flash",
+      "url": "https://router.huggingface.co/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "402",
+      "seconds": 1.23,
+      "quota_headers": {},
+      "body_head": "{\"error\":\"Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits.\"}"
+    },
+    {
+      "provider": "kilo",
+      "tier": "unknown",
+      "model": "kilo-auto/efficient",
+      "url": "https://api.kilo.ai/api/gateway/chat/completions",
+      "curl_rc": 0,
+      "http_status": "402",
+      "seconds": 1.95,
+      "quota_headers": {},
+      "body_head": "{\"error\":{\"title\":\"Paid Model - Credits Required\",\"message\":\"Add credits to continue, or switch to a free model\",\"balance\":0,\"buyCreditsUrl\":\"https://app.kilo.ai/profile\"},\"error_type\":\"usage_limit_ex"
+    },
+    {
+      "provider": "llm7",
+      "tier": "unknown",
+      "model": "Inkling-Small",
+      "url": "https://api.llm7.io/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "402",
+      "seconds": 1.79,
+      "quota_headers": {},
+      "body_head": "{\"error\":{\"message\":\"Your balance is too low for this request. Please add funds to continue: https://dash.llm7.io/#/billing\",\"type\":\"insufficient_quota\",\"param\":null,\"code\":\"insufficient_balance\"}}"
+    },
+    {
+      "provider": "mistral",
+      "tier": "unknown",
+      "model": "codestral-2508",
+      "url": "https://api.mistral.ai/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "200",
+      "seconds": 0.35,
+      "quota_headers": {
+        "x-ratelimit-limit-tokens-minute": "40000",
+        "x-ratelimit-remaining-tokens-minute": "39992",
+        "x-ratelimit-tokens-query-cost": "8",
+        "x-ratelimit-limit-req-minute": "2",
+        "x-ratelimit-remaining-req-minute": "1"
+      },
+      "body_head": "{\"id\":\"11d7ca603b204010acfba67da6ca3700\",\"created\":1795129858,\"model\":\"codestral-2508\",\"usage\":{\"prompt_tokens\":4,\"total_tokens\":8,\"completion_tokens\":4,\"prompt_tokens_details\":{\"cached_tokens\":0},\"co"
+    },
+    {
+      "provider": "nvidia",
+      "tier": "unknown",
+      "model": "mistralai/mistral-large-4-1t-a52b",
+      "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "200",
+      "seconds": 1.77,
+      "quota_headers": {},
+      "body_head": "{\"id\":\"chatcmpl-311193b7-2211-4bc8-9f38-f01357b4ea96\",\"choices\":[{\"index\":0,\"message\":{\"content\":null,\"refusal\":null,\"role\":\"assistant\",\"reasoning_content\":\"The user just\"},\"finish_reason\":\"length\",\"l"
+    },
+    {
+      "provider": "openrouter",
+      "tier": "unknown",
+      "model": "openrouter/free",
+      "url": "https://openrouter.ai/api/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "200",
+      "seconds": 1.73,
+      "quota_headers": {},
+      "body_head": "\n         \n{\"id\":\"gen-1795129861-ePo0eNwMq7SFIwxg9twA\",\"object\":\"chat.completion\",\"created\":1795129861,\"model\":\"baidu/ernie-5.5-flash-preview:free\",\"provider\":\"Baidu\",\"system_fingerprint\":null,\"servic"
+    },
+    {
+      "provider": "sambanova",
+      "tier": "unknown",
+      "model": "GLM-5.3",
+      "url": "https://api.sambanova.ai/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "429",
+      "seconds": 1.89,
+      "quota_headers": {},
+      "body_head": "{\"error\":{\"code\":null,\"message\":\"GLM-5.3-1024k is currently experiencing high demand. Please try again later!\",\"param\":null,\"type\":\"\"},\"request_id\":\"23b5bb36-be56-4851-80f1-960e08f317c1\"}\n"
+    },
+    {
+      "provider": "siliconflow",
+      "tier": "unknown",
+      "model": "moonshotai/Kimi-K3.1-Pro",
+      "url": "https://api.siliconflow.com/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "402",
+      "seconds": 1.24,
+      "quota_headers": {},
+      "body_head": "{\"code\":30001,\"message\":\"Sorry, your account balance is insufficient\",\"data\":null}"
+    },
+    {
+      "provider": "streamlake",
+      "tier": "unknown",
+      "model": "deepseek-r1",
+      "url": "https://vanchin.streamlake.ai/api/gateway/v1/endpoints/chat/completions",
+      "curl_rc": 0,
+      "http_status": "400",
+      "seconds": 1.8,
+      "quota_headers": {},
+      "body_head": "{\"error\":{\"code\":\"UnaccessibleUser\",\"message\":\"Request was rejected due to reason: user is not allowed to access, reason: CustomerId\uff1a2506438643\uff0cAction\uff1aChatCompletions\uff0cRealtime available check failed, "
+    },
+    {
+      "provider": "vercel",
+      "tier": "unknown",
+      "model": "alibaba/qwen-3-14b",
+      "url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+      "curl_rc": 0,
+      "http_status": "403",
+      "seconds": 0.76,
+      "quota_headers": {},
+      "body_head": "{\"error\":{\"message\":\"AI Gateway requires a valid credit card on file to service requests. Please visit https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card to add a card and unlo"
+    },
+    {
+      "provider": "zai",
+      "tier": "unknown",
+      "model": "glm-4.5",
+      "url": "https://api.z.ai/api/paas/v4/chat/completions",
+      "curl_rc": 0,
+      "http_status": "429",
+      "seconds": 1.54,
+      "quota_headers": {},
+      "body_head": "{\"error\":{\"code\":\"1113\",\"message\":\"Insufficient balance or no resource package. Please recharge.\"}}"
+    }
+  ]
+}
