@@ -488,14 +488,15 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         models, block = self._fallbacks(text)
         # 2026-10-31: Mistral Large 4 leads the chain; z-ai/glm-5.3 is gone (retired 410 EOL
         # 2026-10-28) and retired ids are filtered even if listed (0.49.7 H5).
+        # 2026-11-18: deepseek-ai/deepseek-v4.1-flash is gone too (NVIDIA 410 EOL
+        # 2026-11-16T08:00:00Z) — same rule, chain is now three fallbacks.
         self.assertEqual(models, ['nvidia_nim/mistralai/mistral-large-4-1t-a52b',
-                                  'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
                                   'nvidia_nim/stepfun-ai/step-5-preview',
                                   'nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b'])
         # Every spoofed id AND the generic "*" key (measured: a "claude-*" key does not match a
         # subagent id such as claude-haiku-9) list the chain in order.
-        self.assertIn('"*": ["la-fallback-1", "la-fallback-2", "la-fallback-3", "la-fallback-4"]', block)
-        self.assertIn('"claude-opus-5-5": ["la-fallback-1", "la-fallback-2", "la-fallback-3", "la-fallback-4"]', block)
+        self.assertIn('"*": ["la-fallback-1", "la-fallback-2", "la-fallback-3"]', block)
+        self.assertIn('"claude-opus-5-5": ["la-fallback-1", "la-fallback-2", "la-fallback-3"]', block)
         self.assertNotIn('"claude-*":', block)
         # A throttled model fails over at once instead of retrying itself three times.
         self.assertIn('    RateLimitErrorRetries: 0\n', text)
@@ -504,7 +505,7 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
 
     def test_fallbacks_reuse_the_model_specific_params(self):
         text, _ = self._write_cfg(model='z-ai/glm-5.3-flash')
-        ultra = text.split('  - model_name: "la-fallback-4"\n', 1)[1].split('  - model_name:', 1)[0]
+        ultra = text.split('  - model_name: "la-fallback-3"\n', 1)[1].split('  - model_name:', 1)[0]
         self.assertIn('enable_thinking: false', ultra.split('litellm_settings:')[0])
         mistral = text.split('  - model_name: "la-fallback-1"\n', 1)[1].split('  - model_name:', 1)[0]
         self.assertIn('mistralai/mistral-large-4-1t-a52b', mistral)   # 2026-10-31: Le Chonk leads
@@ -515,7 +516,6 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         models, _ = self._fallbacks(text)
         self.assertEqual(models, ['nvidia_nim/mistralai/mistral-large-4-1t-a52b',
                                   'nvidia_nim/z-ai/glm-5.3-flash',
-                                  'nvidia_nim/deepseek-ai/deepseek-v4.1-flash',
                                   'nvidia_nim/stepfun-ai/step-5-preview'])
 
     def test_fallbacks_off_and_override_and_other_providers(self):
@@ -526,9 +526,10 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'nvidia:z-ai/glm-5.3, bogus'},
                                   model='z-ai/glm-5.3-flash')
         self.assertEqual(self._fallbacks(text)[0], [])
-        text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'nvidia:z-ai/glm-5.3,nvidia:deepseek-ai/deepseek-v4.1-flash'},
+        # step-5-preview is the live keeper now that deepseek-v4.1-flash is retired too
+        text, _ = self._write_cfg({'LA_REMOTE_FALLBACKS': 'nvidia:z-ai/glm-5.3,nvidia:stepfun-ai/step-5-preview'},
                                   model='z-ai/glm-5.3-flash')
-        self.assertEqual(self._fallbacks(text)[0], ['nvidia_nim/deepseek-ai/deepseek-v4.1-flash'])
+        self.assertEqual(self._fallbacks(text)[0], ['nvidia_nim/stepfun-ai/step-5-preview'])
         # A provider with no session chain in the roster gets none (no cross-provider quota drain).
         text, _ = self._write_cfg(prov='gemini', model='gemini-3.8-flash')
         self.assertEqual(self._fallbacks(text), ([], ''))
