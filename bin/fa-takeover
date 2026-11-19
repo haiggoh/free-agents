@@ -128,11 +128,15 @@ def cmd_launch(args) -> int:
 
 
 def _successor_transcript(handoff_path: str, source_path: str):
-    """A transcript whose FIRST genuine instruction names the handoff path (the source
-    session itself is excluded)."""
+    """The NEWEST transcript whose first genuine instruction names the handoff path
+    (final review finding 5: an abandoned earlier launch must not win over the newest).
+    The source session is excluded by realpath."""
     handoff_path = str(handoff_path)
-    for t in sorted(_home().glob(".claude/projects/*/*.jsonl")):
-        if str(t) == source_path:
+    source_real = os.path.realpath(source_path) if source_path else None
+    best = None
+    best_mtime = -1.0
+    for t in _home().glob(".claude/projects/*/*.jsonl"):
+        if os.path.realpath(str(t)) == source_real:
             continue
         try:
             records, _malformed = fa_transcript.load_records(str(t))
@@ -140,8 +144,10 @@ def _successor_transcript(handoff_path: str, source_path: str):
             continue
         instrs = fa_transcript.user_instructions(records)
         if instrs and handoff_path in instrs[0].text:
-            return str(t)
-    return None
+            mt = t.stat().st_mtime
+            if mt > best_mtime:
+                best, best_mtime = str(t), mt
+    return best
 
 
 def cmd_verify(args) -> int:

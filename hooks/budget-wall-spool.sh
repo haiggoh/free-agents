@@ -30,7 +30,9 @@ case "$root" in
     *) echo "budget-wall-spool.sh: FA_TAKEOVER_DIR must be absolute: $root" >&2; exit 2 ;;
 esac
 d="$root/.pending"
-mkdir -p "$d" 2>/dev/null || exit 0   # fail-open: never stall teardown
+# NO fork in the hot path when the dir already exists (the SessionStart worker pre-creates
+# it): `[ -d ]` is a builtin; mkdir runs only on first use. fail-open on any error.
+[ -d "$d" ] || mkdir -p "$d" 2>/dev/null || exit 0
 f="$d/$$.json"
 while IFS= read -r line || [ -n "$line" ]; do
     printf '%s\n' "$line"

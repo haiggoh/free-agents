@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 import fa_transcript as ft
 
 FIX = Path(__file__).parent / "fixtures" / "transcripts"
@@ -145,3 +147,22 @@ def test_string_message_field_is_not_crashing():
 def test_tool_result_texts():
     records, _ = load("pending_tool.jsonl")
     assert ft.tool_result_texts(records) == [(4, "toolu_done", "ok")]
+
+
+# --- shared loopback detector (final review finding 2) -----------------------
+
+@pytest.mark.parametrize("url,expected", [
+    ("http://127.0.0.1:4147", True),
+    ("http://127.5.5.5:9", True),
+    ("https://localhost/v1", True),
+    ("http://[::1]:8080/v1", True),
+    ("http://0.0.0.0:4147", True),
+    ("http://2130706433:4147", True),          # decimal 127.0.0.1
+    ("http://[::ffff:127.0.0.1]:4147", True),   # IPv4-mapped loopback
+    ("https://llmgw.joyia.example/v1", False),
+    ("http://localhost.example.com/v1", False),  # hostname ENDING in localhost is not loopback
+    ("", False),
+    (None, False),
+])
+def test_is_loopback_url(url, expected):
+    assert ft.is_loopback_url(url) is expected

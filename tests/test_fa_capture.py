@@ -249,6 +249,48 @@ def test_completeness_bytes_included_never_exceeds_total(tmp_path):
     assert 0 <= c["bytes_included"] <= c["bytes_total"]
 
 
+def test_scanner_failure_fails_closed(tmp_path, monkeypatch):
+    """Final review finding 1c: a scanner that errors must never read as 'clean'."""
+    import subprocess as sp
+    scanner = fa_capture.external_secret_scanner()
+    assert scanner is not None  # the plugin cache exists on this machine
+    real_run = sp.run
+
+    def broken_run(*a, **kw):
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "boom"
+        return R()
+
+    monkeypatch.setattr(fa_capture.subprocess, "run", broken_run)
+    findings = scanner("some text with sk-ant-api03-aaa")
+    assert findings and findings[0].startswith("<secret-scanner failed")
+    monkeypatch.setattr(fa_capture.subprocess, "run", real_run)
+
+
+def test_write_package_sweeps_stale_tmp(tmp_path):
+    pkg = build(tmp_path, "duplicates.jsonl")
+    root = tmp_path / "takeovers"
+    stale = root / ".tmp-old-abc"
+    stale.mkdir(parents=True)
+    (stale / "junk").write_text("x")
+    fa_capture.write_package(pkg, root)
+    assert not stale.exists()          # swept
+    assert (root / pkg.takeover_id).is_dir()
+
+
+def test_source_path_is_realpath(tmp_path):
+    real = tmp_path / "real.jsonl"
+    real.write_text((FIX / "duplicates.jsonl").read_text())
+    link = tmp_path / "link.jsonl"
+    link.symlink_to(real)
+    pkg = fa_capture.build_package(str(link), cwd=str(tmp_path), dest_route="r",
+                                   dest_window_tokens=1_000_000, base_overhead_tokens=200,
+                                   reason="x", scanner=None, now=NOW)
+    assert pkg.manifest["source"]["transcript_path"] == str(real.resolve())
+
+
 def test_default_root_override_and_invalid_override(tmp_path, monkeypatch):
     monkeypatch.delenv("FA_TAKEOVER_DIR", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))

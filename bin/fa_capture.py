@@ -153,7 +153,13 @@ def external_secret_scanner():
         try:
             r = subprocess.run([sys.executable, str(script), "--scan-only", path],
                                capture_output=True, text=True, timeout=60)
+            if r.returncode != 0:
+                # fail CLOSED on scanner failure: an unparseable output must never read
+                # as "clean" (final review finding 1c)
+                return ["<secret-scanner failed rc=%d>" % r.returncode]
             return re.findall(r"would redact \d+: (\S+)", r.stdout + r.stderr)
+        except Exception as e:
+            return [f"<secret-scanner error: {e!r}>"]
         finally:
             os.unlink(path)
 
@@ -292,7 +298,9 @@ def build_package(transcript_path: str, *, cwd=None, dest_route: str,
         "reason": reason,
         "source": {
             "session_id": _session_id(records, transcript_path),
-            "transcript_path": os.path.abspath(transcript_path),
+            # realpath: _successor_transcript compares against globbed realpaths, so a
+            # capture made through a symlink must still identify the source session
+            "transcript_path": os.path.realpath(transcript_path),
             "transcript_sha256": hashlib.sha256(Path(transcript_path).read_bytes()).hexdigest(),
             "line_count": len(records) + malformed,
             "malformed": malformed,
@@ -375,24 +383,52 @@ def _render_handoff(takeover_id, nonce, reason, errors, manifest, instructions,
     return "\n".join(lines)
 
 
+def _write_file_durable(path: Path, data: str) -> None:
+    """Write + fsync so a crash after return cannot leave an empty/partial package."""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+
+
 def write_package(pkg: Package, root) -> Path:
-    """Atomic temp-dir + rename; refuses an existing id; dir 0700, files 0600."""
+    """Atomic temp-dir + rename; refuses an existing id; dir 0700, files 0600.
+
+    Sweeps stale .tmp-* dirs left by a SIGKILLed earlier write (final review finding 9).
+    """
     root = Path(root)
     target = root / pkg.takeover_id
     if target.exists():
         raise FileExistsError(f"takeover package {pkg.takeover_id} already exists at {target}")
     root.mkdir(parents=True, exist_ok=True)
     os.chmod(root, 0o700)
+    for stale in root.glob(".tmp-*"):
+        if stale.is_dir():
+            for f in stale.glob("*"):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+            try:
+                stale.rmdir()
+            except OSError:
+                pass
     tmp = root / f".tmp-{pkg.takeover_id}-{secrets.token_hex(4)}"
     try:
         tmp.mkdir(mode=0o700)
-        (tmp / "manifest.json").write_text(json.dumps(pkg.manifest, indent=2, sort_keys=True) + "\n",
-                                           encoding="utf-8")
-        (tmp / "handoff.md").write_text(pkg.handoff_md, encoding="utf-8")
+        _write_file_durable(tmp / "manifest.json",
+                            json.dumps(pkg.manifest, indent=2, sort_keys=True) + "\n")
+        _write_file_durable(tmp / "handoff.md", pkg.handoff_md)
         os.chmod(tmp, 0o700)
         for name in ("manifest.json", "handoff.md"):
             os.chmod(tmp / name, 0o600)
         os.rename(tmp, target)
+        # fsync the directory entry so the rename itself is durable
+        dfd = os.open(root, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
     except BaseException:
         for f in tmp.glob("*"):
             try:

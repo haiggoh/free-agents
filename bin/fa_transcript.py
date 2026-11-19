@@ -25,6 +25,34 @@ MARKER_RE = re.compile(r"FREE_AGENTS_SESSION_IDENTITY_V(\d+)\|(.+)")
 
 FILE_TOOLS = ("Edit", "Write", "NotebookEdit")
 
+# Loopback spellings the probes and the guard must all catch (final review finding 2):
+# dotted 127.*, ::1, localhost, 0.0.0.0, the decimal/hex numeric forms of 127.0.0.1,
+# and the IPv4-mapped ::ffff:127.0.0.1.
+_LOOPBACK_HOSTS = {"localhost", "::1", "0.0.0.0", "::"}
+
+
+def is_loopback_url(url) -> bool:
+    """True when the URL points at loopback (probes/fakes) — never at a paid route."""
+    if not url:
+        return False
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(url).hostname or "").strip("[]").lower()
+    except Exception:
+        return False
+    if host in _LOOPBACK_HOSTS:
+        return True
+    if host.startswith("127.") or host.startswith("::ffff:127.") or host.startswith("::ffff:0."):
+        return True
+    if host.isdigit():  # decimal IPv4 of 127.0.0.1 / 0.0.0.0
+        n = int(host)
+        return n == 0 or (0x7F000000 <= n <= 0x7FFFFFFF)
+    try:
+        import ipaddress
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
 
 @dataclass(frozen=True)
 class Instruction:

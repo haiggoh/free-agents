@@ -229,6 +229,39 @@ def test_exact_session_lookup(tmp_path):
     assert m["source"]["transcript_path"].endswith("aaa-111.jsonl")
 
 
+def test_verify_picks_newest_successor(tmp_path):
+    """Final review finding 5: among several transcripts naming the handoff, the NEWEST wins."""
+    tk, tid, handoff, home = mk_package(tmp_path)
+    succ = home / ".claude" / "projects" / "-p2"
+    succ.mkdir(parents=True)
+    old = succ / "old-1.jsonl"
+    new = succ / "new-2.jsonl"
+    rec = {"type": "user", "uuid": "u1", "sessionId": "s", "timestamp": "2026-11-19T05:00:00Z",
+           "message": {"role": "user", "content": f"Read {handoff} first and follow it exactly"}}
+    old.write_text(json.dumps(rec) + "\n")
+    new.write_text(json.dumps(rec) + "\n")
+    os.utime(old, (1000, 1000))
+    os.utime(new, (2000, 2000))
+    r = run_cli(["verify", tid, "--timeout", "1"],
+                env={"HOME": str(home), "FA_TAKEOVER_DIR": str(tk)})
+    assert r.returncode == 5
+    assert "DELIVERED: yes" in r.stdout and "new-2.jsonl" in r.stdout and "old-1" not in r.stdout
+
+
+def test_capture_via_symlink_stores_realpath(tmp_path):
+    home = mk_home(tmp_path)
+    real = home / ".claude" / "projects" / "-p" / "real-sess.jsonl"
+    real.write_text((FIX / "duplicates.jsonl").read_text())
+    link = home / ".claude" / "projects" / "-p" / "link-sess.jsonl"
+    link.symlink_to(real)
+    tk = tmp_path / "takeovers"
+    r = run_cli(["capture", str(link), "--route", "nvidia-glm53", "--cwd", str(tmp_path)],
+                env={"HOME": str(home), "FA_TAKEOVER_DIR": str(tk)})
+    assert r.returncode == 0, r.stderr
+    m = json.loads((next(tk.iterdir()) / "manifest.json").read_text())
+    assert m["source"]["transcript_path"] == str(real.resolve())
+
+
 # --- route seam + wrapper passthrough ----------------------------------------
 
 def test_resolve_takeover_route():

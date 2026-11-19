@@ -28,13 +28,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 import fa_capture
 import fa_transcript
 
-LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 USAGE = ("budget-wall-capture.py — budget-wall takeover capture (worker; runs at SessionStart "
          "via --pending because the StopFailure window is ~100 ms — measured). "
          "Usage: python3 budget-wall-capture.py [--help] [--pending]   "
@@ -42,11 +40,7 @@ USAGE = ("budget-wall-capture.py — budget-wall takeover capture (worker; runs 
 
 
 def _is_loopback(url: str) -> bool:
-    try:
-        host = urlparse(url or "").hostname or ""
-    except Exception:
-        host = ""
-    return host in LOOPBACK_HOSTS or host.startswith("127.")
+    return fa_transcript.is_loopback_url(url)
 
 
 def _log(root: Path, msg: str) -> None:
@@ -96,6 +90,12 @@ def main(argv=None) -> int:
             except Exception:
                 pass
             return 0
+        # pre-create .pending here (full time available) so the StopFailure spool hook
+        # needs ZERO forks in its ~100 ms window (final review finding 8)
+        try:
+            (root / ".pending").mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
         pending = root / ".pending"
         if pending.is_dir():
             for f in sorted(pending.glob("*.json")):
