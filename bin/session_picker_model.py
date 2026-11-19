@@ -2227,9 +2227,9 @@ class RemoteScreen(Screen):
             # character, so a separate menu entry would only duplicate it.
             Action("s", f"{ec.SESSION_EMOJI_LOCAL_STR}  Switch to Local sessions", lambda: Nav("local", self.owner), section="nav", nav_target="local"),   # grouped with Back/Quit at the end (user 2026-10-30)
             Action("l", f"{ec.SESSION_EMOJI_LOCAL_STR}  Local sessions", lambda: Nav("local", self.owner), section="hidden", nav_target="local"),
-            # (the filter-settings row moves below — after the API keys / rate limiter tool
-            #  actions — per user 2026-11-09; see the insert after _tool_actions below)
-            Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings", nav_target="remote_filters"),
+            # (the filter-settings row lives below — after the API keys / rate limiter tool
+            #  actions — per user 2026-11-09; see the append after _tool_actions below. A
+            #  rebase kept BOTH rows once and actions() crashed on the duplicate 'y'.)
             setting("m", f"{ec.gap(ec.EMOJI_MCP_STR)}Load MCPs in session: {'ENABLED' if s.enable_mcp else 'DISABLED'}",
                     *_toggle(s, "enable_mcp"), labels=("DISABLED", "ENABLED")),
         ]
@@ -2246,7 +2246,7 @@ class RemoteScreen(Screen):
         acts += _tool_actions(backend=False, settings_keys=("k", "n"))  # API keys + rate limiter are settings (user 2026-10-30)
         # user 2026-11-09 (ported from the GUI): API keys setup comes BEFORE filter settings,
         # so filter settings lands on the second row together with the NVIDIA rate limiter
-        acts.append(Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings"))
+        acts.append(Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings", nav_target="remote_filters"))
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
@@ -3856,14 +3856,10 @@ class LowkeyScreen(Screen):
             temp_get=lambda: s.lowkey_temperature, temp_set=self._set_lowkey_temperature,
             think_get=lambda: s.lowkey_thinking, think_set=self._set_thinking)
         # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
+        # (the old per-row e/j/t model-settings block was removed here — model_settings_rows
+        #  above already provides the e/o/j template; a rebase kept both and actions()
+        #  crashed on duplicate shortcuts, 2026-11-19 user report)
         acts += [
-            setting("j", f"{ec.gap(ec.EMOJI_THINKING_STR)}Thinking: {self._thinking_label()}",
-                    (None, False), lambda: s.lowkey_thinking, self._set_thinking, section="model"),
-            setting("e", f"{ec.gap(ec.EMOJI_EFFORT_STR)}Effort: {s.lowkey_effort} (sent as reasoning_effort)",
-                    effort_choices("lowkey"), lambda: s.lowkey_effort, lambda v: self._cycle_effort(), section="model"),
-            setting("t", f"{ec.gap(ec.EMOJI_TEMPERATURE_STR)}Temperature: {temperature_display(s.lowkey_temperature)}",
-                    TEMPERATURES, lambda: s.lowkey_temperature, lambda v: self._cycle_temperature(), section="model"),
-            # 0.54.0 (D3): opt-in Remote-screen filters for the API list; default OFF.
             setting("f", f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Apply Remote-screen filters: "
                         f"{'ON' if self._remote_filters else 'OFF'}",
                     (False, True), lambda: self._remote_filters, self._put_remote_filters,
