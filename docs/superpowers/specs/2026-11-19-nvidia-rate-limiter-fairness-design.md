@@ -35,6 +35,11 @@ only into test fixtures (`tests/conftest.py:112`).
 - Deficit ranker built and opt-in (candidate for a later default promotion).
 - Manual priority lanes on demand: queue-jump + bounded share, reachable from
   the picker rate-limiter screen and a launcher flag.
+- Dispatches and background sessions are not disadvantaged by the ladder:
+  within the lowest tier they rank slightly ahead of interactive requests, so
+  a saturated machine cannot stall them past the 600 s stream-watchdog horizon
+  (a stalled dispatch is killed and loses all its work; a stalled interactive
+  session merely waits). They still yield to aged and manual-lane requests.
 - Zero idle capacity: scheduling only reorders demand, never withholds supply.
 - Full settings integration: every threshold settable (env > saved picker
   setting > default), validated, editable in the csl rate-limiter submenu.
@@ -82,11 +87,18 @@ New top-level key `waiters` in the shared state file:
 ```json
 "waiters": {"<token>": {"owner": "...", "arrived": 1732...,
                          "last_seen": 1732..., "class": "normal|priority",
+                         "kind": "interactive|dispatch|background",
                          "model": "..."}}
 ```
 
 - `token` = unique per `acquire()` call (owner + pid + counter), so an owner
   with several concurrent in-flight requests registers each separately.
+- `kind` — who is asking: `interactive` (default), `dispatch`, or `background`.
+  Dispatch entry points (`free-agent-tool.py`, `remote-agent-dispatch.py`) set
+  `LA_LIMITER_KIND=dispatch` for their own processes at startup (they set no
+  limiter identity today — verified 2026-11-19); `set-owner --kind` can set it
+  live per owner. Grant-time authority is the live env/owner opt, so a flip
+  applies at the next evaluation; the stored value is for display.
 - `acquire()` registers on its first failed `try_acquire`; every loop iteration
   refreshes `last_seen` (idempotent per token; `arrived` never resets on
   re-register).
@@ -123,11 +135,16 @@ differs (window count vs tokens ≥ cost), the ranking does not.
 
 **Policies** (`policy` setting):
 
-- `aging` (**default, always on**): rank = `(tier desc, arrived asc)`.
-  Tier 0 normal; tier 1 once this request has waited `tier1_seconds`;
-  tier 2 at `tier2_seconds`. Self-extinguishing: grant resets to served.
-  Fast sessions only ever yield to a request that has already waited
-  `tier1_seconds` — i.e. only under genuine saturation.
+- `aging` (**default, always on**): rank = `(lane class, tier, dispatch-boost,
+  arrived)`. Manual-lane class first (`priority` over `normal`, under the share
+  cap); then tier — 0 normal, 1 once this request has waited `tier1_seconds`,
+  2 at `tier2_seconds`; then, **within tier 0 only** and when `dispatch_boost`
+  is on, `kind=dispatch|background` ranks ahead of `interactive`; then FIFO by
+  `arrived`. Self-extinguishing: grant resets to served. Fast sessions only
+  ever yield to a request that has already waited `tier1_seconds` — i.e. only
+  under genuine saturation. A dispatch outranks fresh interactive requests but
+  still yields to anything aged into tier 1+ and to manual lanes: slightly
+  preferential, never overruling the ladder.
 - `deficit` (**built, opt-in**): rank = `(debt desc, arrived asc)`. Debt is
   computed, not ticked: at grant evaluation each owner's debt =
   stored residual + Σ over its waiting requests of `(now - arrived)`, capped at
@@ -197,6 +214,7 @@ read by the limiter via `_setting()`, validated (type + range) in
 | `deficit_rate` | `LA_NVIDIA_DEFICIT_RATE` | 1.0 | 0.1–10 | debt accrual multiplier |
 | `deficit_cap_seconds` | `LA_NVIDIA_DEFICIT_CAP_SECONDS` | 600 | 30–7200 | debt ceiling |
 | `lane_share_cap` | `LA_LIMITER_RESERVE` (name kept) | 0.2 | 0.05–0.9 | priority share cap under contention |
+| `dispatch_boost` | `LA_NVIDIA_DISPATCH_BOOST` | on | bool | dispatch/background rank ahead within tier 0 (600 s watchdog asymmetry) |
 | `lane_approval` | `LA_LIMITER_LANE_APPROVAL` | `ask` | `ask\|agent` | agent-initiated lane gate |
 
 **Hot reload**: `policy` and the tier/TTL/poll/deficit knobs are read per
@@ -274,3 +292,7 @@ never cut a running session off.
 - Lane wiring: picker screen + launcher flag, both (user, 2026-11-19).
 - Approval: agent-initiated lanes require user approval by default,
   flippable to agent-choice (user, 2026-11-19).
+- Dispatch/background preference: slightly ahead within tier 0, never above
+  aging tiers or manual lanes (user, 2026-11-19 — the 600 s stream watchdog
+  kills a stalled dispatch, which loses all its work; a stalled interactive
+  session only waits).
