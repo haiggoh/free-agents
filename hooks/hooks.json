@@ -21,6 +21,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/bin/la-catalog-overlay.sh\" migrate --hook",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/budget-wall-capture.py\" --pending",
+            "timeout": 20
           }
         ]
       }
@@ -122,6 +127,11 @@
     "StopFailure": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/budget-wall-spool.sh\"",
+            "timeout": 5
+          },
           {
             "type": "command",
             "command": "[ -z \"${LA_MEMGUARD_SESSION_ID:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/bin/la-memguard-registry.py\" hook",

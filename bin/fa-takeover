@@ -18,80 +18,25 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
-import tempfile
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fa_capture
 import fa_transcript
+# Route resolution and the external secret scanner live in fa_capture (the hook imports
+# them from there too); re-exported here so existing callers/tests keep working.
+from fa_capture import Route, external_secret_scanner, resolve_takeover_route  # noqa: F401
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-ROSTER_FILE = REPO_ROOT / "config" / "remote-agents.sh"
-BROKEN_FILE = REPO_ROOT / "config" / "broken-nvidia-models.json"
 DEFAULT_LAUNCHER = Path(__file__).resolve().parent / "launch-remote-window.sh"
-
-# Roster field 7 (autocompact_default) is the repo's window proxy for a route.
-WINDOW_TOKENS = {"1m": 1_000_000, "200k": 200_000, "256k": 256_000}
-DEFAULT_WINDOW_TOKENS = 200_000  # "-" / "default" / empty -> conservative spoof window
 
 EXIT_OK, EXIT_USAGE, EXIT_REFUSED, EXIT_NOT_FOUND, EXIT_NOT_DELIVERED, EXIT_NO_TTY = 0, 2, 3, 4, 5, 6
 
 LAUNCH_PROMPT = ("Read {handoff} first and follow it exactly: adopt its standing rules, "
                  "produce the reconciliation, then wait.")
-
-
-@dataclass(frozen=True)
-class Route:
-    alias: str
-    window_tokens: int
-    provider: str
-
-
-def _roster_entries() -> list:
-    """Parse the roster array in config/remote-agents.sh: "alias|provider|model|display|tier|notes|autocompact"."""
-    entries = []
-    for m in re.finditer(r'^\s*"([^"]+)"\s*,?\s*$', ROSTER_FILE.read_text(encoding="utf-8"), re.M):
-        parts = m.group(1).split("|")
-        if len(parts) < 3:
-            continue
-        autocompact = parts[-1] if len(parts) >= 7 else "-"
-        entries.append((parts[0], parts[1], parts[2], autocompact))
-    return entries
-
-
-def _hidden_aliases() -> set:
-    """Retired/hidden routes from config/broken-nvidia-models.json (never picked, even explicitly)."""
-    try:
-        data = json.loads(BROKEN_FILE.read_text(encoding="utf-8"))
-        return {m.get("alias") for m in data.get("models", []) if m.get("alias")}
-    except Exception:
-        return set()
-
-
-def resolve_takeover_route(alias):
-    """Task 0.3 seam: roster in config/remote-agents.sh + hidden list. Raises on an
-    unknown or retired alias — it never falls back silently."""
-    entries = _roster_entries()
-    hidden = _hidden_aliases()
-    if alias is None:
-        for a, prov, _model, ac in entries:
-            if a not in hidden:
-                return Route(alias=a, window_tokens=WINDOW_TOKENS.get(ac, DEFAULT_WINDOW_TOKENS),
-                             provider=prov)
-        raise ValueError("roster has no session-capable route")
-    for a, prov, _model, ac in entries:
-        if a == alias:
-            if a in hidden:
-                raise ValueError(f"route {alias!r} is retired/hidden (config/broken-nvidia-models.json)")
-            return Route(alias=a, window_tokens=WINDOW_TOKENS.get(ac, DEFAULT_WINDOW_TOKENS),
-                         provider=prov)
-    raise ValueError(f"unknown route {alias!r} (not in the roster config/remote-agents.sh)")
 
 
 def _root() -> Path:
@@ -117,36 +62,6 @@ def _find_transcript(arg: str):
     return str(matches[0])
 
 
-def _external_scanner():
-    """Resolve the newest installed audit-loose-ends redact-secret.py at run time
-    (Task 0.3 Step 3: free-agents itself has no scanner). Returns a callable or None."""
-    base = Path.home() / ".claude" / "plugins" / "cache" / "haiggoh" / "audit-loose-ends"
-    cands = []
-    if base.is_dir():
-        for d in base.iterdir():
-            s = d / "scripts" / "redact-secret.py"
-            if d.is_dir() and s.is_file():
-                ver = tuple(int(x) for x in re.findall(r"\d+", d.name)) or (0,)
-                cands.append((ver, s))
-    if not cands:
-        return None
-    script = sorted(cands)[-1][1]
-
-    def scan(text: str) -> list:
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
-                                         encoding="utf-8") as f:
-            f.write(text)
-            path = f.name
-        try:
-            r = subprocess.run([sys.executable, str(script), "--scan-only", path],
-                               capture_output=True, text=True, timeout=60)
-            return re.findall(r"would redact \d+: (\S+)", r.stdout + r.stderr)
-        finally:
-            os.unlink(path)
-
-    return scan
-
-
 def cmd_capture(args) -> int:
     root = _root()
     try:
@@ -163,7 +78,7 @@ def cmd_capture(args) -> int:
     except ValueError as e:
         print(f"fa-takeover: {e}", file=sys.stderr)
         return EXIT_USAGE
-    scanner = _external_scanner() if args.scan else None
+    scanner = external_secret_scanner() if args.scan else None
     reason = f"manual capture of session {args.session} (fa-takeover capture)"
     try:
         pkg = fa_capture.build_package(

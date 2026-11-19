@@ -12,9 +12,11 @@ import hashlib
 import json
 import math
 import os
+import re
 import secrets
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,6 +68,96 @@ def default_root() -> Path:
         return Path(override)
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(base) / "free-agents" / "takeovers"
+
+
+# --- route seam (Task 0.3): the remote roster, resolved at RUN TIME — no model name
+# is ever hardcoded. Roster field 7 (autocompact_default) is the repo's window proxy. ---
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ROSTER_FILE = REPO_ROOT / "config" / "remote-agents.sh"
+BROKEN_FILE = REPO_ROOT / "config" / "broken-nvidia-models.json"
+WINDOW_TOKENS = {"1m": 1_000_000, "200k": 200_000, "256k": 256_000}
+DEFAULT_WINDOW_TOKENS = 200_000  # "-" / "default" / empty -> conservative spoof window
+
+
+@dataclass(frozen=True)
+class Route:
+    alias: str
+    window_tokens: int
+    provider: str
+
+
+def _roster_entries() -> list:
+    """Parse the LA_REMOTE_AGENTS array in config/remote-agents.sh:
+    "alias|provider|model-id|display|tier|notes|autocompact_default"."""
+    entries = []
+    text = ROSTER_FILE.read_text(encoding="utf-8")
+    for m in re.finditer(r'^\s*"([^"]+)"\s*,?\s*$', text, re.M):
+        parts = m.group(1).split("|")
+        if len(parts) < 3:
+            continue
+        autocompact = parts[-1] if len(parts) >= 7 else "-"
+        entries.append((parts[0], parts[1], parts[2], autocompact))
+    return entries
+
+
+def _hidden_aliases() -> set:
+    """Retired/hidden routes from config/broken-nvidia-models.json — never picked."""
+    try:
+        data = json.loads(BROKEN_FILE.read_text(encoding="utf-8"))
+        return {m.get("alias") for m in data.get("models", []) if m.get("alias")}
+    except Exception:
+        return set()
+
+
+def resolve_takeover_route(alias):
+    """Resolve a route alias to its window. Raises on unknown or retired aliases —
+    it never falls back silently. alias=None -> first session-capable (non-hidden) route."""
+    entries = _roster_entries()
+    hidden = _hidden_aliases()
+    if alias is None:
+        for a, prov, _model, ac in entries:
+            if a not in hidden:
+                return Route(alias=a, window_tokens=WINDOW_TOKENS.get(ac, DEFAULT_WINDOW_TOKENS),
+                             provider=prov)
+        raise ValueError("roster has no session-capable route")
+    for a, prov, _model, ac in entries:
+        if a == alias:
+            if a in hidden:
+                raise ValueError(f"route {alias!r} is retired/hidden (config/broken-nvidia-models.json)")
+            return Route(alias=a, window_tokens=WINDOW_TOKENS.get(ac, DEFAULT_WINDOW_TOKENS),
+                         provider=prov)
+    raise ValueError(f"unknown route {alias!r} (not in the roster config/remote-agents.sh)")
+
+
+def external_secret_scanner():
+    """Resolve the newest installed audit-loose-ends redact-secret.py at run time
+    (Task 0.3 Step 3: free-agents itself ships no scanner). Returns a callable
+    text -> [masked findings], or None when not installed."""
+    base = Path.home() / ".claude" / "plugins" / "cache" / "haiggoh" / "audit-loose-ends"
+    cands = []
+    if base.is_dir():
+        for d in base.iterdir():
+            s = d / "scripts" / "redact-secret.py"
+            if d.is_dir() and s.is_file():
+                ver = tuple(int(x) for x in re.findall(r"\d+", d.name)) or (0,)
+                cands.append((ver, s))
+    if not cands:
+        return None
+    script = sorted(cands)[-1][1]
+
+    def scan(text: str) -> list:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
+                                         encoding="utf-8") as f:
+            f.write(text)
+            path = f.name
+        try:
+            r = subprocess.run([sys.executable, str(script), "--scan-only", path],
+                               capture_output=True, text=True, timeout=60)
+            return re.findall(r"would redact \d+: (\S+)", r.stdout + r.stderr)
+        finally:
+            os.unlink(path)
+
+    return scan
 
 
 def _session_id(records, transcript_path: str):
