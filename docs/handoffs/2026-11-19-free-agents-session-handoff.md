@@ -94,3 +94,14 @@ proxy for you (see State) so a port exists for your launch.
    retired-but-present in a chain.
 4. Bump 0.59.9 + CHANGELOG (the 0.59.8 top entry already records the deepseek retirement —
    follow that format), push `main` after the gate is green.
+
+## ADDENDUM (2026-11-19, after launch — read before designing the port fix)
+
+The "orphaned" proxy on 4146 was NOT orphaned: the user still had that window open and meant
+to reuse it — it was IDLE, not dead. The previous context's liveness heuristic (proxy log
+mtime stale ⇒ orphan) is WRONG: an idle session writes nothing to the proxy log. Design
+consequence for item 2: the port allocator must NOT auto-reap by log mtime. When no port is
+free, print the candidates (port, pid, age, last activity) and let the USER decide — or use
+a signal the session owner controls. The user lost an in-flight task to that kill (they will
+pick its waypoint up elsewhere). Standing rule 6 now reads: never kill a band proxy without
+the USER's explicit say-so for THAT pid, even if it looks stale.
