@@ -56,7 +56,7 @@ class Server:
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                      start_new_session=True)
         self.url = f"http://127.0.0.1:{self.port}/"
-        deadline = time.time() + 30
+        deadline = time.time() + 90   # 2026-11-20: cold GUI-venv import alone took 10.6 s; under load >30 s
         while time.time() < deadline:
             try:
                 with socket.create_connection(("127.0.0.1", self.port), timeout=0.5):
@@ -386,5 +386,23 @@ def test_dark_mode_switch_flips_store_and_shell(browser, tmp_path):
         assert json.loads(ap.read_text())["dark_mode"] is True   # store write is the outcome
         page.goto(srv.url)
         page.wait_for_selector(".dark-shell", timeout=15000)    # shell flips to dark tokens
+    finally:
+        assert srv.stop() == []
+
+
+def test_follow_system_switch_writes_store(browser, tmp_path):
+    # 2026-11-20 spec: launch-only switch; the store write is the delivery-shaped outcome
+    ap = tmp_path / "appearance.json"
+    ap.write_text(json.dumps({"follow_system_appearance": False}))
+    srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}theme_config")
+        page.wait_for_selector('[data-key="follow_system_appearance"]', timeout=15000)
+        page.locator('[data-key="follow_system_appearance"] .q-checkbox').click()
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text()).get("follow_system_appearance") is not True:
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["follow_system_appearance"] is True
     finally:
         assert srv.stop() == []

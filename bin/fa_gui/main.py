@@ -25,10 +25,12 @@ HOST = "127.0.0.1"   # loopback only, in every mode
 
 # 2026-11-20 vibrancy material (spec docs/superpowers/specs/2026-11-19-vibrancy-material-design.md):
 # applied at MODULE level on purpose — NiceGUI's native mode re-imports this file as
-# __mp_main__ in the spawn child, where main() never runs. No-op without pywebview / in browser mode.
+# __mp_main__ in the spawn child, where main() never runs. Browser children (tests, dev)
+# skip it: argv carries the parent's mode and import webview per child slowed their startup.
 try:
-    from fa_gui import native_window as _native_window
-    _native_window.apply_vibrancy_patch()
+    if "--browser" not in sys.argv:
+        from fa_gui import native_window as _native_window
+        _native_window.apply_vibrancy_patch()
 except Exception:
     pass
 
