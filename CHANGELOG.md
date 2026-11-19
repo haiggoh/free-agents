@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.59.10] — unreleased
+
+### Changed — free-lane session system prompts carry the tool-casing rule (2026-11-19)
+- `config/local-agent-system-prompt.txt` (schema-reminder block) and `config/remote-agent-system-prompt.txt` (verify section) now state: tool names are case-sensitive, the shell tool is `Bash` (capital B), never `bash`; on `No such tool available: bash` retry once with `Bash`. The slip recurred on free lanes despite CLAUDE.md; the WYS primer also owns it now (watch-your-step 0.10.4), and CLAUDE.md no longer duplicates it. Test: tests/test_prompt_casing_line.py.
+
+### Between 0.59.9 and 0.59.10 — docs-only commit on main after the 0.59.9 tag
+- `3b942a4` measure: per-provider quota feasibility for full sessions (2026-11-20 probe) — one bounded 4-token generation per keyed provider; verdict: nvidia session-feasible (no daily cap), groq/mistral/openrouter burst-limited, gemini dispatch-only, zai/sambanova/cerebras not. No code change; this branch rebased onto it.
+
 ## [0.59.9] — unreleased
 
 ### Fixed — a full proxy band (4141-4151) now says WHICH ports are held by WHAT (user report 2026-11-19: launching any remote session failed with a bare "no free port in 4141-4151")
@@ -13,7 +21,6 @@
 
 ### Pinned — `config/session-preferences.json` session ladder stays in sync with the roster (2026-11-19 handoff, item 3)
 - Verified: all 4 `order` aliases exist in `config/remote-agents.sh`, none are retired/broken, no dispatch-only (gemini) provider in a session slot. `tests/test_session_preferences_sync.py` fails when a session-order alias is retired-but-present (mutation-checked with `nvidia-deepseek-v4` planted, RED) or absent from the roster.
-
 ## [0.59.8] — unreleased
 
 ### Fixed — NVIDIA retired `deepseek-ai/deepseek-v4.1-flash` (410 EOL 2026-11-16T08:00:00Z); the roster no longer offers, dispatches to, or falls back to it
