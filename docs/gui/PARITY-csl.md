@@ -31,7 +31,7 @@ the nav target but no `@ui.page` exists for it.
 | rate limiter | `RateLimiterScreen` | ◐ renders | tool:rl-status / tool:rl-reset actions |
 | memguard (OOM guard) | `MemoryGuardScreen` | ◐ renders | — |
 | cloud session config | `CloudConfigScreen` | ◐ renders | route/security-review write path |
-| theme config | `ThemeConfigScreen` | ◐ renders + GUI-only appearance section (`render_appearance`) | — |
+| theme config | `ThemeConfigScreen` | ✅ renders + GUI-only appearance section (`render_appearance`): presentation cycle (compat/modern tiles), translucent switch, opacity slider 0–100%, blur request, 🌙 dark-mode switch (dark-shell CSS tokens flip text). Blur-darkening corrected: with blur active the white tint is scaled ×1.35 so 100% = pure white, 0% = raw vibrancy (user 2026-11-19). Remaining gap: theme color presets (yellow/lime) + swatch preview | — |
 | remote filters | `RemoteFiltersScreen` | ◐ renders | filter write path |
 | runtime manager / backend | `RuntimeManagerScreen` | ◐ renders; version data prefetched (Task 1) | install/upgrade/validate/repair WRITE actions (`runtime_versions:*` → backend-manager CLIs) |
 | runtime + launchd | `RuntimeScreen`, `LaunchdScreen` | ◐ renders | tool:rt-launchd-* actions |

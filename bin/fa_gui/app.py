@@ -810,8 +810,9 @@ def build() -> None:
 
             _appearance_cycle("presentation", "Presentation", list(ap.PRESENTATIONS))
             _appearance_switch("background_translucent", "Translucent background", launch_only=True)
-            _appearance_cycle("background_opacity_pct", "Opacity %", list(range(50, 101, 5)), clamp=True)
+            _appearance_cycle("background_opacity_pct", "Opacity %", list(range(0, 101, 5)), clamp=True)  # 0% = raw material (user 2026-11-19)
             _appearance_switch("background_blur_requested", "Request native blur", launch_only=True)
+            _appearance_switch("dark_mode", "🌙 Dark mode")   # Phase 8 store key; CSS tokens already exist (dark-shell)
 
     @ui.page("/")
     @ui.page("/home")

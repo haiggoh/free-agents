@@ -350,3 +350,41 @@ def test_local_missing_row_offers_cleanup_and_unregisters(browser, tmp_path):
         page.wait_for_selector('[data-missing="ghost-alias"]', state="detached", timeout=15000)
     finally:
         assert srv.stop() == []
+
+
+def test_modern_presentation_renders_tiles(browser, tmp_path):
+    # 2026-11-19 regression: the rebase merged main's Action default choices=() and
+    # render_plan misclassified nav rows as "select", so the tile grid rendered empty
+    ap = tmp_path / "appearance.json"
+    ap.write_text(json.dumps({"presentation": "modern"}))
+    srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+    try:
+        page = browser.new_page()
+        page.goto(srv.url)                       # home
+        page.wait_for_selector(".tile-grid", timeout=15000)
+        n = page.locator(".tile-grid > *").count()   # delivery-shaped: tiles actually exist
+        assert n > 0, "modern mode rendered an empty tile grid"
+    finally:
+        assert srv.stop() == []
+
+
+def test_dark_mode_switch_flips_store_and_shell(browser, tmp_path):
+    # feature wish 2026-11-19: light/dark mode switch in the appearance section; the
+    # dark-shell class carries the flipped text colors
+    ap = tmp_path / "appearance.json"
+    ap.write_text(json.dumps({"dark_mode": False}))
+    srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}theme_config")
+        page.wait_for_selector('[data-key="dark_mode"]', timeout=15000)
+        assert page.locator(".dark-shell").count() == 0
+        page.locator('[data-key="dark_mode"] .q-checkbox').click()
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text())["dark_mode"] is not True:
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["dark_mode"] is True   # store write is the outcome
+        page.goto(srv.url)
+        page.wait_for_selector(".dark-shell", timeout=15000)    # shell flips to dark tokens
+    finally:
+        assert srv.stop() == []
