@@ -29,15 +29,16 @@ DEFAULTS: dict[str, Any] = {
     # (50 was unreadable without blur). An explicit saved value always wins.
     "background_blur_requested": False,       # request flag only — never proof blur is active
     "dark_mode": False,                       # Phase 8, LAST; initial light
+    # 2026-11-20: follow the OS light/dark instead of the store's dark_mode (read at window
+    # creation, native mode only — blur/vibrancy are native-only); browser mode: no effect
+    "follow_system_appearance": False,
 }
 
 DEFAULT_OPACITY_BLUR_ACTIVE = 50     # user 2026-11-08: with blur on, 50% is the default...
 DEFAULT_OPACITY_NO_BLUR = 95
-# user 2026-11-19 (native-window measurement): the vibrancy/blur layer itself DARKENS the
-# backdrop (100% read as mid-grey, lower felt like transparent anthracite), so with blur ON
-# the white tint is scaled by BLUR_BRIGHTNESS_FACTOR: 100% = pure white (alpha 1.0), 0% = the
-# raw material (alpha 0, for testing), and every value stays >= the no-blur tint (never darker).
-BLUR_BRIGHTNESS_FACTOR = 1.35
+# 2026-11-20: the vibrancy MATERIAL carries the brightness (native_window.material_name_for),
+# so the tint no longer needs a blur-brightness compensation factor — tint_alpha is the raw
+# opacity in every mode (the old x1.35 factor compressed the slider: >=74% already opaque).
 
 
 def resolve_opacity(doc: dict, blur_active: bool = False) -> int:
@@ -50,14 +51,10 @@ def resolve_opacity(doc: dict, blur_active: bool = False) -> int:
 
 
 def tint_alpha(opacity_pct: int, blur_active: bool = False) -> float:
-    """The tint layer's EFFECTIVE alpha. Without blur the requested opacity applies unchanged
-    (0..100%). With native blur ON the vibrancy material darkens the backdrop, so the white
-    tint is scaled by BLUR_BRIGHTNESS_FACTOR — 100% reads pure white, 0% shows the raw
-    material, and the result is never darker than the same value without blur."""
-    a = min(100, max(0, opacity_pct)) / 100
-    if blur_active:
-        return round(min(1.0, a * BLUR_BRIGHTNESS_FACTOR), 3)
-    return round(a, 3)
+    """The tint layer's alpha = the requested opacity, in every mode/blur state (0..1.0).
+    The 2026-11-20 material lever (fa_gui.native_window) provides the brightness; the
+    earlier x1.35 blur compensation was removed because it compressed the slider's range."""
+    return round(min(100, max(0, opacity_pct)) / 100, 3)
 
 PRESENTATIONS = ("compatibility", "modern")
 _OPACITY_MIN, _OPACITY_MAX = 0, 100
@@ -85,7 +82,8 @@ def _validate(key: str, value: Any) -> None:
     if key == "presentation":
         if value not in PRESENTATIONS:
             raise ValueError(f"presentation must be one of {PRESENTATIONS}, got {value!r}")
-    elif key in ("background_translucent", "background_blur_requested", "dark_mode"):
+    elif key in ("background_translucent", "background_blur_requested", "dark_mode",
+                 "follow_system_appearance"):
         if not isinstance(value, bool):
             raise ValueError(f"{key} must be a bool, got {value!r}")
     elif key == "background_opacity_pct":
