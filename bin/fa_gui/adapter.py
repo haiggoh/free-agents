@@ -82,7 +82,10 @@ def render_plan(screen: m.Screen) -> list[RenderedControl]:
                                        label="Model settings" if gid == "model" else "Advanced",
                                        group=gid))
             continue
-        if a.choices is not None or a.step is not None:
+        # empty tuple means NO choices: the rebase merged main's Action default choices=(),
+        # and `is not None` here misclassified every nav row as "select" (2026-11-19:
+        # modern mode rendered an empty tile grid because of it)
+        if a.choices or a.step is not None:
             # cycle row: typed (choices) or a custom stepper without a choices tuple
             # (e.g. the memguard percent rows) — both cycle via ◀ ▶
             kind = "toggle" if (a.choices is not None and len(a.choices) == 2

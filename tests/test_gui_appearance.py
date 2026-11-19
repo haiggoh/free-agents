@@ -40,14 +40,15 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(list(Path(self.tmp.name).glob("*.tmp*")), [], "atomic save leaves no tmp")
 
     def test_opacity_bounds_and_types(self):
-        for bad in (49, 101, 50.5, True, "80"):
+        # user 2026-11-19: the slider goes all the way down to 0% (raw vibrancy for testing)
+        for bad in (-1, 101, 50.5, True, "80"):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     ap.save(self.path, {"background_opacity_pct": bad})
         with self.assertRaises(ValueError):
             ap.save(self.path, {"background_opacity_pct": None})   # None = auto, not savable
         self.assertFalse(self.path.exists(), "a rejected write must not create the file")
-        for good in (50, 75, 100):
+        for good in (0, 50, 75, 100):
             ap.save(self.path, {"background_opacity_pct": good})
             self.assertEqual(ap.load(self.path)["background_opacity_pct"], good)
 
@@ -107,20 +108,22 @@ class StoreTests(unittest.TestCase):
             ap.store_path({"LA_GUI_APPEARANCE_FILE": str(d / "nope" / "a.json")})
 
     def test_tint_alpha_never_darkens_with_blur(self):
-        # user 2026-11-08: with blur on, 50% translucency must feel as bright as 85% without
-        # blur -> blur active adds +35 points of effective brightness
-        self.assertEqual(ap.tint_alpha(95, blur_active=False), 0.95)
-        self.assertEqual(ap.tint_alpha(50, blur_active=False), 0.5)
-        self.assertEqual(ap.tint_alpha(100, blur_active=False), 1.0)
-        self.assertEqual(ap.tint_alpha(50, blur_active=True), 0.05,
-                         "with blur ON the tint starts near 0 — the vibrancy material is the surface")
-        # the slider must still respond with blur on (user 2026-11-09), never exceeding +0.30
-        self.assertEqual(ap.tint_alpha(100, blur_active=True), 0.35)
-        self.assertLess(ap.tint_alpha(60, True), ap.tint_alpha(90, True))
-        # without blur: the requested opacity applies unchanged; with blur never darker
-        self.assertLess(ap.tint_alpha(60, False), ap.tint_alpha(90, False))
-        for pct in (50, 60, 70, 80, 90, 100):
-            self.assertLessEqual(ap.tint_alpha(pct, True), ap.tint_alpha(pct, False))
+        # user 2026-11-19 (native-window measurement): the vibrancy/blur layer itself darkens
+        # the backdrop, so with blur ON the white tint is scaled by 1.35 — 100% reads pure
+        # white (no darkening at all), 0% shows the raw material for testing, and at every
+        # slider value the result is never darker than the same value without blur.
+        for pct in (0, 25, 50, 95, 100):
+            self.assertEqual(ap.tint_alpha(pct, blur_active=False), round(pct / 100, 3))
+        self.assertEqual(ap.tint_alpha(0, blur_active=True), 0.0, "0% with blur = raw vibrancy")
+        self.assertEqual(ap.tint_alpha(100, blur_active=True), 1.0, "100% with blur = pure white")
+        self.assertEqual(ap.tint_alpha(50, blur_active=True), 0.675)
+        prev = -1.0
+        for pct in range(0, 101, 5):
+            a_blur = ap.tint_alpha(pct, blur_active=True)
+            self.assertGreaterEqual(a_blur, prev, "monotonic in the slider")
+            prev = a_blur
+            self.assertGreaterEqual(a_blur, ap.tint_alpha(pct, blur_active=False),
+                                    "with blur never darker than without at the same value")
 
     def test_native_window_args_mapping(self):
         # Phase 6: translucent -> transparent window; blur requested -> vibrancy (built-in

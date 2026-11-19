@@ -74,6 +74,24 @@ class APIKeysScreenTests(unittest.TestCase):
                              for g in scr.accordion.groups))
 
 
+class ModernTilesTests(unittest.TestCase):
+    def test_home_nav_rows_classify_as_nav_not_select(self):
+        # 2026-11-19 user report: modern mode rendered an EMPTY tile grid. Root cause:
+        # the rebase merged main's Action default choices=() (empty tuple), and
+        # render_plan's `a.choices is not None` predicate then misclassified every nav
+        # row as "select", so app.py's tiling (kind in nav/button) matched nothing.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin" / "fa_gui"))
+        import picker_core as pc
+        from fa_gui import adapter
+        s = m.Settings()
+        s.hw_hardware = "mlx"
+        scr = pc.build_screen(m.Nav("home", m.HOME_OWNED), s, {"local": [], "remote": []}).screen
+        kinds = {c.action_id: c.kind for c in adapter.render_plan(scr)}
+        self.assertEqual(kinds.get("HomeScreen.l"), "nav", kinds)
+        self.assertEqual(kinds.get("HomeScreen.q"), "nav", kinds)
+        self.assertGreater(sum(1 for c in kinds.values() if c in ("nav", "button")), 0)
+
+
 class RemoteFilterRowTests(unittest.TestCase):
     def test_remote_actions_single_filter_row_with_nav_target(self):
         # 2026-11-19 user report: the remote lane rendered EMPTY — RemoteScreen.actions()

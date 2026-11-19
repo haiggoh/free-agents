@@ -33,10 +33,11 @@ DEFAULTS: dict[str, Any] = {
 
 DEFAULT_OPACITY_BLUR_ACTIVE = 50     # user 2026-11-08: with blur on, 50% is the default...
 DEFAULT_OPACITY_NO_BLUR = 95
-# ...but with blur ON the tint goes to ~0 (user 2026-11-09): the vibrancy material itself is
-# the bright frosted surface; a white tint on top just read as opaque grey and killed the
-# color shining through. 0% opacity with blur is the attempt the user asked for.
-BLUR_TINT_ALPHA = 0.05
+# user 2026-11-19 (native-window measurement): the vibrancy/blur layer itself DARKENS the
+# backdrop (100% read as mid-grey, lower felt like transparent anthracite), so with blur ON
+# the white tint is scaled by BLUR_BRIGHTNESS_FACTOR: 100% = pure white (alpha 1.0), 0% = the
+# raw material (alpha 0, for testing), and every value stays >= the no-blur tint (never darker).
+BLUR_BRIGHTNESS_FACTOR = 1.35
 
 
 def resolve_opacity(doc: dict, blur_active: bool = False) -> int:
@@ -49,20 +50,17 @@ def resolve_opacity(doc: dict, blur_active: bool = False) -> int:
 
 
 def tint_alpha(opacity_pct: int, blur_active: bool = False) -> float:
-    """The tint layer's EFFECTIVE alpha. User ruling 2026-11-09: with native blur ON the
-    vibrancy material is itself the bright frosted surface, so the white tint starts near 0
-    (0% with blur lets the backdrop's color shine through instead of reading as grey) and
-    the opacity slider still adds a SMALL white share (max +30 at 100%) — the setting must
-    keep responding, without ever darkening below the no-blur brightness."""
-    a = min(100, max(50, opacity_pct)) / 100
+    """The tint layer's EFFECTIVE alpha. Without blur the requested opacity applies unchanged
+    (0..100%). With native blur ON the vibrancy material darkens the backdrop, so the white
+    tint is scaled by BLUR_BRIGHTNESS_FACTOR — 100% reads pure white, 0% shows the raw
+    material, and the result is never darker than the same value without blur."""
+    a = min(100, max(0, opacity_pct)) / 100
     if blur_active:
-        # 50% requested with blur = 0.05 tint (vibrancy is the surface); the slider adds up to
-        # +0.30 above the 50% floor, so it always responds and never darkens
-        return round(BLUR_TINT_ALPHA + max(0.0, a - 0.5) * 0.60, 3)
+        return round(min(1.0, a * BLUR_BRIGHTNESS_FACTOR), 3)
     return round(a, 3)
 
 PRESENTATIONS = ("compatibility", "modern")
-_OPACITY_MIN, _OPACITY_MAX = 50, 100
+_OPACITY_MIN, _OPACITY_MAX = 0, 100
 
 
 def store_path(env=None) -> Path:
