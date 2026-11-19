@@ -223,6 +223,32 @@ def test_handoff_fixed_headings_and_standing_rules(tmp_path):
     assert "Produce the reconciliation, then wait" in h
 
 
+def test_git_porcelain_rename_with_unstaged_edit(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+    subprocess.run(["git", "-C", str(repo), "init", "-b", "main"], check=True, env=env,
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True, env=env)
+    (repo / "orig.txt").write_text("v1")
+    subprocess.run(["git", "-C", str(repo), "add", "orig.txt"], check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "init"], check=True, env=env,
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "mv", "orig.txt", "renamed.txt"], check=True,
+                   env=env, capture_output=True)
+    (repo / "renamed.txt").write_text("v2")  # RM: renamed in index, modified in worktree
+    pkg = build(tmp_path, "duplicates.jsonl", cwd=str(repo))
+    paths = pkg.manifest["git"]["porcelain_paths"]
+    assert paths == ["renamed.txt"]  # no truncated garbage from the -z orig field
+
+
+def test_completeness_bytes_included_never_exceeds_total(tmp_path):
+    pkg = build(tmp_path, "budget_wall.jsonl")
+    c = pkg.manifest["completeness"]
+    assert 0 <= c["bytes_included"] <= c["bytes_total"]
+
+
 def test_default_root_override_and_invalid_override(tmp_path, monkeypatch):
     monkeypatch.delenv("FA_TAKEOVER_DIR", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))

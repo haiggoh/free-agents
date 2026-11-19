@@ -121,8 +121,8 @@ def _git_state(cwd) -> dict:
                 i += 1
                 continue
             paths.append(rec[3:])
-            if rec[:2] in ("R ", "C ") and i + 1 < len(fields):
-                i += 1  # -z rename/copy: the following field is the original path
+            if (rec[0] in "RC" or rec[1] in "RC") and i + 1 < len(fields):
+                i += 1  # -z rename/copy (R, C in X or Y, e.g. "RM"): next field is the orig path
             i += 1
         state["porcelain_paths"] = paths
     except Exception:
@@ -187,7 +187,7 @@ def build_package(transcript_path: str, *, cwd=None, dest_route: str,
             break
     included.reverse()
 
-    bytes_total = sum(len(i.text) for i in instructions) + sum(len(e[2]) for e in recent)
+    bytes_total = len(instr_text) + sum(len(e[2]) for e in recent)
     bytes_included = len(instr_text) + sum(len(e[2]) for e in included)
 
     takeover_id = "tk-" + now.astimezone(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(4)

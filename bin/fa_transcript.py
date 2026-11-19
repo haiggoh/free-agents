@@ -64,21 +64,32 @@ def load_records(path: str):
     """
     records = []
     malformed = 0
-    with open(path, "r", encoding="utf-8") as f:
+    # errors="replace": a killed mid-write line must never raise UnicodeDecodeError.
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
         for ln, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
             try:
-                records.append((ln, json.loads(line)))
+                data = json.loads(line)
             except json.JSONDecodeError:
                 malformed += 1
+                continue
+            if not isinstance(data, dict):  # null / "heartbeat" / 123 are malformed records
+                malformed += 1
+                continue
+            records.append((ln, data))
     return records, malformed
 
 
 def message_text(record: dict) -> str:
-    """The only content accessor: string content as-is, or text blocks of a list joined."""
-    msg = record.get("message") or {}
+    """The only TEXT accessor: string content as-is, or text blocks of a list joined.
+
+    (Tool blocks are read structurally via _content_blocks — a text accessor cannot
+    yield tool ids/inputs.)
+    """
+    msg = record.get("message")
+    msg = msg if isinstance(msg, dict) else {}
     content = msg.get("content", "")
     if isinstance(content, str):
         return content
@@ -94,7 +105,8 @@ def message_text(record: dict) -> str:
 
 
 def _content_blocks(record: dict) -> list:
-    msg = record.get("message") or {}
+    msg = record.get("message")
+    msg = msg if isinstance(msg, dict) else {}
     content = msg.get("content", [])
     return content if isinstance(content, list) else []
 
@@ -192,9 +204,10 @@ def classify_api_error(text: str) -> str:
 
 
 def api_errors(records) -> list:
+    """Engine-written API error records: assistant records carrying the error markers."""
     out = []
     for ln, rec in records:
-        if rec.get("isApiErrorMessage") or rec.get("apiErrorStatus"):
+        if rec.get("type") == "assistant" and (rec.get("isApiErrorMessage") or rec.get("apiErrorStatus")):
             text = message_text(rec)
             out.append(ApiError(line=ln, text=text, kind=classify_api_error(text)))
     return out

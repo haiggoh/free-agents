@@ -104,3 +104,39 @@ def test_last_todos_parses_latest_todowrite_result():
 def test_identity_marker_absent_when_no_marker():
     records, _ = load("basic.jsonl")
     assert ft.identity_marker(records) is None
+
+
+# --- hardening (independent review findings, 2026-11-19) ----------------------
+
+def test_load_records_counts_non_dict_json_as_malformed(tmp_path):
+    t = tmp_path / "t.jsonl"
+    t.write_text(
+        '{"type":"user","uuid":"u1","message":{"role":"user","content":"ok"}}\n'
+        "null\n"
+        '"heartbeat"\n'
+        "123\n"
+    )
+    records, malformed = ft.load_records(str(t))
+    assert malformed == 3
+    assert [r.get("uuid") for _line, r in records] == ["u1"]
+
+
+def test_load_records_survives_non_utf8_bytes(tmp_path):
+    t = tmp_path / "t.jsonl"
+    t.write_bytes(
+        b'{"type":"user","uuid":"u1","message":{"role":"user","content":"ok"}}\n'
+        b'{"type":"user","uuid":"u2","message":{"role":"user","content":"\xff\xfe bad"}}\n'
+    )
+    records, malformed = ft.load_records(str(t))  # never raises
+    assert len(records) == 2
+    assert malformed == 0
+    assert "�?" in ft.message_text(records[1][1]) or "bad" in ft.message_text(records[1][1])
+
+
+def test_string_message_field_is_not_crashing():
+    rec = {"type": "user", "uuid": "u1", "message": "hello"}
+    assert ft.message_text(rec) == ""
+    assert ft.user_instructions([(1, rec)]) == []
+    assert ft.pending_tool_uses([(1, rec)]) == []
+    # an error marker on a non-assistant record is not an API error record
+    assert ft.api_errors([(1, dict(rec, isApiErrorMessage=True))]) == []
