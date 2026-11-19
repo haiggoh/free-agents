@@ -92,6 +92,24 @@ class ModernTilesTests(unittest.TestCase):
         self.assertGreater(sum(1 for c in kinds.values() if c in ("nav", "button")), 0)
 
 
+class VibrancyMaterialTests(unittest.TestCase):
+    def test_material_map_is_binary(self):
+        # 2026-11-20 spec: light -> mediumLight, dark -> ultraDark (spike-verified in Task 5)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin" / "fa_gui"))
+        from fa_gui.native_window import material_name_for
+        self.assertEqual(material_name_for(True), "ultraDark")
+        self.assertEqual(material_name_for(False), "mediumLight")
+
+    def test_follow_system_key_defaults_off_and_validates(self):
+        import fa_gui.appearance as ap
+        self.assertIs(ap.DEFAULTS["follow_system_appearance"], False)
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "a.json"
+            with self.assertRaises(ValueError):
+                ap.save(p, {"follow_system_appearance": "yes"})
+
+
 class RemoteFilterRowTests(unittest.TestCase):
     def test_remote_actions_single_filter_row_with_nav_target(self):
         # 2026-11-19 user report: the remote lane rendered EMPTY — RemoteScreen.actions()
