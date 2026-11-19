@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""fa_capture.py — capture-package builder for the deterministic budget-wall takeover.
+
+Plan v2 Task 1.2. Builds a takeover package (manifest.json + handoff.md) from a Claude
+Code transcript: every verbatim instruction is always included (refuse, never trim),
+the recent exchange is bounded by the destination window, tool outputs are referenced
+never inlined, and a secret scan can refuse the package. Stdlib only.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import secrets
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fa_transcript
+
+# Receipt 1 Q1 (2026-11-19, fake loopback upstream, --mode ok, engine 2.1.327): the single
+# POST /v1/messages?beta=true request body was 47_787 bytes -> ceil(47787/4) = 11_947 tokens
+# of Claude Code base overhead. The CLI passes this unless --base-overhead-tokens N is given.
+DEFAULT_BASE_OVERHEAD_TOKENS = 11_947
+MIN_BASE_OVERHEAD_TOKENS = 40_000   # never reserve less than this for the engine base
+REPLY_RESERVE_TOKENS = 8_000        # reserved for the successor's first reply
+
+
+class CaptureRefused(Exception):
+    """code: over_budget | secret_findings | no_instructions | transcript_missing."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+@dataclass(frozen=True)
+class Package:
+    takeover_id: str
+    manifest: dict
+    handoff_md: str
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough char-based estimate, labelled as an estimate in the manifest."""
+    return math.ceil(len(text) / 4)
+
+
+def default_root() -> Path:
+    """${XDG_STATE_HOME:-~/.local/state}/free-agents/takeovers, override FA_TAKEOVER_DIR.
+
+    An override that is SET but invalid aborts loudly (never falls through).
+    """
+    override = os.environ.get("FA_TAKEOVER_DIR")
+    if override:
+        if not os.path.isabs(override):
+            raise ValueError(f"FA_TAKEOVER_DIR must be an absolute path, got: {override!r}")
+        parent = os.path.dirname(override) or "/"
+        if not os.path.isdir(parent):
+            raise ValueError(f"FA_TAKEOVER_DIR parent directory does not exist: {override!r}")
+        return Path(override)
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "free-agents" / "takeovers"
+
+
+def _session_id(records, transcript_path: str):
+    for _ln, rec in records:
+        sid = rec.get("sessionId") or rec.get("session_id")
+        if sid:
+            return sid
+    return Path(transcript_path).stem
+
+
+def _recent_entries(records) -> list:
+    """(line, role, text) for assistant text and user prompts, chronological.
+
+    Tool outputs never enter this list: message_text only yields text blocks, and
+    tool_result carriers yield "" (excluded as instructions too).
+    """
+    out = []
+    for ln, rec in records:
+        if rec.get("type") == "assistant":
+            text = fa_transcript.message_text(rec)
+            if text.strip():
+                out.append((ln, "assistant", text))
+        elif rec.get("type") == "user" and not rec.get("isMeta"):
+            text = fa_transcript.message_text(rec)
+            if text.strip():
+                out.append((ln, "user", text))
+    return out
+
+
+def _git_state(cwd) -> dict:
+    """Read-only git state of cwd; not a repo -> is_repo False, never raises."""
+    state = {"is_repo": False, "head": None, "branch": None, "porcelain_paths": []}
+    if not cwd:
+        return state
+    try:
+        head = subprocess.run(["git", "-C", cwd, "rev-parse", "HEAD"],
+                              capture_output=True, text=True, timeout=10)
+        if head.returncode != 0:
+            return state
+        state["is_repo"] = True
+        state["head"] = head.stdout.strip()
+        branch = subprocess.run(["git", "-C", cwd, "branch", "--show-current"],
+                                capture_output=True, text=True, timeout=10)
+        state["branch"] = branch.stdout.strip() or None
+        st = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
+                            capture_output=True, text=True, timeout=10)
+        fields = st.stdout.split("\0")
+        paths = []
+        i = 0
+        while i < len(fields):
+            rec = fields[i]
+            if not rec:
+                i += 1
+                continue
+            paths.append(rec[3:])
+            if rec[:2] in ("R ", "C ") and i + 1 < len(fields):
+                i += 1  # -z rename/copy: the following field is the original path
+            i += 1
+        state["porcelain_paths"] = paths
+    except Exception:
+        pass
+    return state
+
+
+def build_package(transcript_path: str, *, cwd=None, dest_route: str,
+                  dest_window_tokens: int, base_overhead_tokens: int, reason: str,
+                  scanner=None, allow_findings: bool = False, now=None) -> Package:
+    now = now or datetime.now(timezone.utc)
+    if not os.path.isfile(transcript_path):
+        raise CaptureRefused("transcript_missing", f"transcript not found: {transcript_path}")
+    records, malformed = fa_transcript.load_records(transcript_path)
+    instructions = fa_transcript.user_instructions(records)
+    if not instructions:
+        raise CaptureRefused("no_instructions", "transcript carries no user instructions")
+    errors = fa_transcript.api_errors(records)
+    pending = fa_transcript.pending_tool_uses(records)
+    todos = fa_transcript.last_todos(records)
+    files = fa_transcript.files_touched(records)
+    recent = _recent_entries(records)
+
+    budget_tokens = (dest_window_tokens - max(base_overhead_tokens, MIN_BASE_OVERHEAD_TOKENS)
+                     - REPLY_RESERVE_TOKENS)
+
+    # Secret scan over everything that would enter the package, BEFORE the budget check.
+    secret_scan = {"ran": False, "findings": []}
+    if scanner is not None:
+        findings = list(scanner("\n".join([i.text for i in instructions]
+                                           + [e[2] for e in recent])) or [])
+        secret_scan = {"ran": True, "findings": findings}
+        if findings and not allow_findings:
+            raise CaptureRefused(
+                "secret_findings",
+                f"secret scan found {len(findings)} finding(s); "
+                "rerun with --allow-findings to record them in the manifest instead")
+
+    # Verbatim instructions are ALWAYS included; if they alone exceed the budget, refuse.
+    numbered = [f"{n}. (line {i.line}) {i.text}" for n, i in enumerate(instructions, 1)]
+    instr_text = "\n".join(numbered)
+    instr_tokens = estimate_tokens(instr_text)
+    if instr_tokens > budget_tokens:
+        raise CaptureRefused(
+            "over_budget",
+            f"instructions alone need ~{instr_tokens} tokens but the {dest_route} budget is "
+            f"{budget_tokens} tokens (window {dest_window_tokens} - base "
+            f"{max(base_overhead_tokens, MIN_BASE_OVERHEAD_TOKENS)} - reply reserve "
+            f"{REPLY_RESERVE_TOKENS}); instructions are never trimmed")
+
+    # Recent exchange fills what remains, newest first, printed chronological.
+    included = []
+    used = instr_tokens
+    truncated = False
+    for entry in reversed(recent):
+        t = estimate_tokens(entry[2])
+        if used + t <= budget_tokens:
+            included.append(entry)
+            used += t
+        else:
+            truncated = True
+            break
+    included.reverse()
+
+    bytes_total = sum(len(i.text) for i in instructions) + sum(len(e[2]) for e in recent)
+    bytes_included = len(instr_text) + sum(len(e[2]) for e in included)
+
+    takeover_id = "tk-" + now.astimezone(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(4)
+    nonce = secrets.token_hex(8)
+    manifest = {
+        "schema_version": 1,
+        "takeover_id": takeover_id,
+        "nonce_sha256": hashlib.sha256(nonce.encode()).hexdigest(),
+        "created_at": now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "reason": reason,
+        "source": {
+            "session_id": _session_id(records, transcript_path),
+            "transcript_path": os.path.abspath(transcript_path),
+            "transcript_sha256": hashlib.sha256(Path(transcript_path).read_bytes()).hexdigest(),
+            "line_count": len(records) + malformed,
+            "malformed": malformed,
+        },
+        "dest": {"route": dest_route, "window_tokens": dest_window_tokens,
+                 "budget_tokens": budget_tokens},
+        "counts": {"instructions": len(instructions), "recent_records": len(included),
+                   "pending_tools": len(pending), "files_touched": files},
+        "git": _git_state(cwd),
+        "completeness": {"instructions_complete": True, "recent_truncated": truncated,
+                         "bytes_total": bytes_total, "bytes_included": bytes_included},
+        "secret_scan": secret_scan,
+    }
+    handoff_md = _render_handoff(takeover_id, nonce, reason, errors, manifest, instructions,
+                                 included, pending, todos, files)
+    return Package(takeover_id=takeover_id, manifest=manifest, handoff_md=handoff_md)
+
+
+def _render_handoff(takeover_id, nonce, reason, errors, manifest, instructions,
+                    included, pending, todos, files) -> str:
+    g = manifest["git"]
+    lines = []
+    lines.append(f"# Takeover package {takeover_id}")
+    lines.append("")
+    lines.append(f"TAKEOVER-NONCE: {nonce}")
+    lines.append("")
+    lines.append("## 1. Why this exists")
+    lines.append("")
+    lines.append(reason)
+    for e in errors:
+        lines.append(f"API error at transcript line {e.line} (kind: {e.kind}): {e.text[:200]}")
+    lines.append("")
+    lines.append("## 2. State")
+    lines.append("")
+    if g["is_repo"]:
+        lines.append(f"- git: HEAD {g['head']} on branch {g['branch']}")
+        lines.append(f"- dirty paths ({len(g['porcelain_paths'])}): "
+                     + (", ".join(g["porcelain_paths"]) if g["porcelain_paths"] else "none"))
+    else:
+        lines.append("- git: not a repository (or unreadable) — record state manually")
+    lines.append("- todos: " + (json.dumps(todos) if todos else "none recorded"))
+    if pending:
+        lines.append("- pending tool calls (OUTCOME UNKNOWN — inspect, never re-run blindly):")
+        for t in pending:
+            lines.append(f"  - line {t.line} {t.tool_use_id} {t.name}"
+                         " — OUTCOME UNKNOWN — inspect, never re-run blindly")
+    else:
+        lines.append("- pending tool calls: none")
+    lines.append("- files touched: " + (", ".join(files) if files else "none recorded"))
+    lines.append("")
+    lines.append("## 3. The goal, verbatim")
+    lines.append("")
+    for n, i in enumerate(instructions, 1):
+        lines.append(f"{n}. (line {i.line}) {i.text}")
+    lines.append("")
+    lines.append("## 4. Standing rules")
+    lines.append("")
+    lines.append("- Your first turn is read-only: reconcile before acting.")
+    lines.append("- Never re-run a pending tool call, push, or deploy without inspecting "
+                 "its actual state first.")
+    lines.append("- Preserve dirty work; never discard uncommitted changes.")
+    lines.append("- Your first output is `## Takeover reconciliation` plus the nonce, "
+                 "instructions understood, state, and a proposed next action — then WAIT "
+                 "for the user.")
+    lines.append("")
+    lines.append("## 5. Next action")
+    lines.append("")
+    lines.append("Produce the reconciliation, then wait")
+    lines.append("")
+    lines.append("## 6. Appendix: recent exchange (bounded)")
+    lines.append("")
+    c = manifest["completeness"]
+    lines.append(f"completeness: instructions_complete={c['instructions_complete']} "
+                 f"recent_truncated={c['recent_truncated']} "
+                 f"bytes_included={c['bytes_included']}/{c['bytes_total']}")
+    lines.append("")
+    for ln, role, text in included:
+        lines.append(f"- line {ln} ({role}): {text}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_package(pkg: Package, root) -> Path:
+    """Atomic temp-dir + rename; refuses an existing id; dir 0700, files 0600."""
+    root = Path(root)
+    target = root / pkg.takeover_id
+    if target.exists():
+        raise FileExistsError(f"takeover package {pkg.takeover_id} already exists at {target}")
+    root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
+    tmp = root / f".tmp-{pkg.takeover_id}-{secrets.token_hex(4)}"
+    try:
+        tmp.mkdir(mode=0o700)
+        (tmp / "manifest.json").write_text(json.dumps(pkg.manifest, indent=2, sort_keys=True) + "\n",
+                                           encoding="utf-8")
+        (tmp / "handoff.md").write_text(pkg.handoff_md, encoding="utf-8")
+        os.chmod(tmp, 0o700)
+        for name in ("manifest.json", "handoff.md"):
+            os.chmod(tmp / name, 0o600)
+        os.rename(tmp, target)
+    except BaseException:
+        for f in tmp.glob("*"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        try:
+            tmp.rmdir()
+        except OSError:
+            pass
+        raise
+    return target
+
+
+def _main(argv):
+    if any(a in ("-h", "--help") for a in argv):
+        print("fa_capture.py — capture-package builder library (used by bin/fa-takeover).")
+        print("Usage: python3 fa_capture.py --help")
+        print("Exposes build_package / write_package / default_root / estimate_tokens / "
+              "CaptureRefused / Package. No runtime arguments.")
+        return 0
+    if argv:
+        print(f"fa_capture.py: unknown argument: {argv[0]}", file=sys.stderr)
+        print("Usage: python3 fa_capture.py --help", file=sys.stderr)
+        return 2
+    print("fa_capture.py: library module — import it; no CLI.", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main(sys.argv[1:]))
