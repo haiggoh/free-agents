@@ -92,6 +92,13 @@ class ModernTilesTests(unittest.TestCase):
         self.assertGreater(sum(1 for c in kinds.values() if c in ("nav", "button")), 0)
 
 
+try:
+    import webview  # noqa: F401  (GUI-venv only; the patch tests skip without it)
+    _HAVE_PYWEBVIEW = True
+except ImportError:
+    _HAVE_PYWEBVIEW = False
+
+
 class VibrancyMaterialTests(unittest.TestCase):
     def test_material_map_is_binary(self):
         # 2026-11-20 spec: light -> mediumLight, dark -> ultraDark (spike-verified in Task 5)
@@ -120,6 +127,28 @@ class VibrancyMaterialTests(unittest.TestCase):
         self.assertTrue(is_system_dark("NSAppearanceNameDarkAqua"))
         self.assertFalse(is_system_dark("NSAppearanceNameAqua"))
         self.assertFalse(is_system_dark(None))
+
+    @unittest.skipUnless(_HAVE_PYWEBVIEW, "pywebview lives only in the GUI venv")
+    def test_patch_applies_idempotently_and_marks_wrapper(self):
+        import webview
+        from fa_gui import native_window as nw
+        from webview.platforms import cocoa
+        nw.apply_vibrancy_patch()
+        self.assertTrue(getattr(cocoa.BrowserView.__init__, "_fa_vibrancy_patch", False))
+        wrapped = cocoa.BrowserView.__init__
+        nw.apply_vibrancy_patch()   # idempotent: no double wrap
+        self.assertIs(cocoa.BrowserView.__init__, wrapped)
+
+    def test_patch_without_pywebview_is_a_noop(self):
+        # runs everywhere: with webview present it is popped from sys.modules for the call
+        import sys as _sys
+        from fa_gui import native_window as nw
+        saved = _sys.modules.pop("webview", None)
+        try:
+            nw.apply_vibrancy_patch()   # must not raise without pywebview
+        finally:
+            if saved is not None:
+                _sys.modules["webview"] = saved
 
 
 class RemoteFilterRowTests(unittest.TestCase):
