@@ -74,5 +74,19 @@ class APIKeysScreenTests(unittest.TestCase):
                              for g in scr.accordion.groups))
 
 
+class RemoteFilterRowTests(unittest.TestCase):
+    def test_remote_actions_single_filter_row_with_nav_target(self):
+        # 2026-11-19 user report: the remote lane rendered EMPTY — RemoteScreen.actions()
+        # raised "duplicate shortcut 'y': 'Filter settings…'" because a rebase kept BOTH
+        # the in-list row (main's, with nav_target) and the moved row (the branch's).
+        s = m.Settings()
+        agents = [m.RemoteAgent("nvidia-a", "nvidia", "NVIDIA A", "unknown")]
+        scr = m.RemoteScreen(s, agents, owner=m.HOME_OWNED)
+        acts = scr.actions()          # check_action_table raises on any duplicate key
+        filters = [a for a in acts if a.label.endswith("Filter settings…")]
+        self.assertEqual(len(filters), 1, filters)
+        self.assertEqual(filters[0].nav_target, "remote_filters")
+
+
 if __name__ == "__main__":
     unittest.main()
