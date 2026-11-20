@@ -182,10 +182,13 @@ def test_hooks_json_registers_once():
     commands = [h["command"] for matcher in sf for h in matcher["hooks"]]
     spool = [c for c in commands if "budget-wall-spool.sh" in c]
     assert len(spool) == 1
-    # RULING (measured q1hook7): only the FIRST StopFailure hook gets a usable window,
-    # so the instant spool goes first, memguard second (plan said memguard first).
+    # MEASURED 2026-11-20 (PR #7 review, engine 2.1.329, 3 hermetic runs): StopFailure hooks
+    # run in PARALLEL (order A0 B A1: B wrote while A slept), so the ~100 ms teardown window
+    # applies to EVERY hook and list order is irrelevant. Plan order kept: memguard first.
+    # What matters is pinned instead: both registered, spool stays a fork-free shell script.
     memguard_idx = next(i for i, c in enumerate(commands) if "la-memguard-registry.py" in c)
-    assert commands.index(spool[0]) < memguard_idx
+    assert memguard_idx < commands.index(spool[0])
+    assert spool[0].startswith("bash ") and spool[0].endswith("budget-wall-spool.sh\"")
     ss = cfg["hooks"]["SessionStart"]
     ss_cmds = [h["command"] for matcher in ss for h in matcher["hooks"]]
     ours = [c for c in ss_cmds if "budget-wall-capture.py" in c]

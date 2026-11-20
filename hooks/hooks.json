@@ -129,12 +129,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/budget-wall-spool.sh\"",
+            "command": "[ -z \"${LA_MEMGUARD_SESSION_ID:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/bin/la-memguard-registry.py\" hook",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "[ -z \"${LA_MEMGUARD_SESSION_ID:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/bin/la-memguard-registry.py\" hook",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/budget-wall-spool.sh\"",
             "timeout": 5
           }
         ]

@@ -6,7 +6,8 @@ on a non-loopback endpoint builds ONE takeover package (idempotent per session_i
 error line, via <root>/.seen). It NEVER launches a successor.
 
 Timing (measured 2026-11-19, probes q1hook7/8/9, engine 2.1.327): at StopFailure the
-engine gives only the FIRST hook process a ~100 ms window and kills everything it spawns
+engine gives EVERY hook (they run in parallel — measured 2026-11-20) a ~100 ms window
+and kills everything it spawns
 (same-group and setsid grandchildren alike died before their first write). So the
 StopFailure hook is budget-wall-spool.sh (instant `cat` into <root>/.pending/), and THIS
 script runs at SessionStart — which has full time (Q1/Q2 cat-hook captures prove it) —

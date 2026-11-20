@@ -4,8 +4,9 @@
 # Measured 2026-11-19 (probes q1hook7/8/9/10/11, engine 2.1.327): at StopFailure the engine
 # gives the hook only a small, variable window (~100 ms; probes 10/11 showed it winning and
 # losing the same race across runs) and kills anything it spawns (same-group backgrounded
-# python AND setsid grandchildren both died before their first write). So this hook is
-# first in StopFailure and does the minimum: mkdir the pending dir, then consume stdin with
+# python AND setsid grandchildren both died before their first write). StopFailure hooks
+# run in PARALLEL (measured 2026-11-20), so list order is irrelevant; this hook does the
+# minimum: mkdir the pending dir, then consume stdin with
 # BASH BUILTINS ONLY (no cat, no date, no subshell — every fork narrows the window), and
 # exit. The capture itself runs at the next SessionStart (budget-wall-capture.py --pending),
 # where full time is available (Q1/Q2 cat-hook captures prove SessionStart is reliable).
