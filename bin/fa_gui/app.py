@@ -16,6 +16,7 @@ NEVER set id on Quasar elements (input/button) — NiceGUI 3.19 drops them from 
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from contextlib import nullcontext
@@ -966,13 +967,17 @@ def build() -> None:
                     for r in rows:
                         with _ui.row().classes("menu-item w-full"):
                             _ui.label(f"{r['alias']}  ·  {r['name']}  ·  {r['size_gb']} GB  [{r['serve']}]")
-                            rm = _ui.button("✕", on_click=lambda a=r["alias"]: remove_row(a))
+                            async def _on_rm(a=r["alias"]):
+                                await remove_row(a)
+                            rm = _ui.button("✕", on_click=_on_rm)
                             rm.props["data-remove"] = r["alias"]
-            def _refresh_catalog_cache():
-                # repopulate synchronously: a cache-miss load on the next /download can return
-                # Stale (leave_page race in jobs.Loader) and render the catalog empty
-                loader.cache["catalog"] = pc.load_catalog()
-            def add_row(alias, name, repo, size, groups, serve):
+            async def _refresh_catalog_cache():
+                # repopulate OFF the UI thread after the pop: a cache-miss load on the next
+                # /download can return Stale (leave_page race in jobs.Loader) and render the
+                # catalog empty. The pop happens before paint_rows, so the row shows at once
+                # and the (blocking) inventory subprocess no longer delays the click response.
+                loader.cache["catalog"] = await asyncio.to_thread(pc.load_catalog)
+            async def add_row(alias, name, repo, size, groups, serve):
                 repo = repo.strip()
                 try:
                     co.add_row(store, {"alias": alias.strip(), "name": name.strip(),
@@ -985,12 +990,14 @@ def build() -> None:
                 except co.OverlayWriteError as e:
                     _ui.notify(f"invalid row: {e}", type="negative")
                     return
-                _refresh_catalog_cache()
+                loader.cache.pop("catalog", None)
                 paint_rows()
-            def remove_row(alias):
+                await _refresh_catalog_cache()
+            async def remove_row(alias):
                 co.remove_row(store, alias)
-                _refresh_catalog_cache()
+                loader.cache.pop("catalog", None)
                 paint_rows()
+                await _refresh_catalog_cache()
             with _ui.row().classes("w-full gap-2"):
                 a = _ui.input("alias").props('data-add="alias"')
                 n = _ui.input("display name").props('data-add="name"')
@@ -998,8 +1005,9 @@ def build() -> None:
                 sz = _ui.input("size GB").props('data-add="size"')
                 gr = _ui.input("groups (comma)").props('data-add="groups"')
                 sv = _ui.input("serve (rapid|vllm-mlx|…)").props('data-add="serve"')
-                _ui.button("Add", on_click=lambda: add_row(a.value, n.value, rp.value, sz.value,
-                                                             gr.value, sv.value))
+                async def _on_add():
+                    await add_row(a.value, n.value, rp.value, sz.value, gr.value, sv.value)
+                _ui.button("Add", on_click=_on_add)
             paint_rows()
 
     @ui.page("/{full_path:path}")
