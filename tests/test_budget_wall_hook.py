@@ -135,14 +135,25 @@ def test_spool_hook_writes_payload_instantly(tmp_path, monkeypatch):
     env = {"FA_TAKEOVER_DIR": str(tmp_path / "takeovers")}
     e = {k: v for k, v in os.environ.items() if not k.startswith(("LA_", "FA_"))}
     e.update(env)
+    e["ANTHROPIC_BASE_URL"] = "https://llmgw.example/v1"  # the DYING session's endpoint
     r = subprocess.run(["bash", str(spool)], input=json.dumps(payload()),
                        capture_output=True, text=True, env=e, timeout=10)
     assert r.returncode == 0, r.stderr
     pend = tmp_path / "takeovers" / ".pending"
     files = list(pend.glob("*.json"))
     assert len(files) == 1
-    assert json.loads(files[0].read_text())["session_id"] == "sess-bw"
-    assert (pend.stat().st_mode & 0o777) & 0o077 == 0 or True
+    endpoint, raw = bwc._parse_spool(files[0].read_text())
+    assert endpoint == "https://llmgw.example/v1"   # recorded for the NEXT session's worker
+    assert json.loads(raw)["session_id"] == "sess-bw"
+    # was `... or True` (could never fail) — PR #7 review: modes are now really pinned
+    assert pend.stat().st_mode & 0o777 == 0o700
+    assert files[0].stat().st_mode & 0o777 == 0o600
+    e.pop("ANTHROPIC_BASE_URL")
+    files[0].unlink()
+    subprocess.run(["bash", str(spool)], input=json.dumps(payload()), capture_output=True,
+                   text=True, env=e, timeout=10)
+    (only,) = list(pend.glob("*.json"))
+    assert only.read_text().startswith("#fa-endpoint-unset\n")
     r2 = subprocess.run(["bash", str(spool), "--bogus"], capture_output=True, text=True, env=e)
     assert r2.returncode == 2
     r3 = subprocess.run(["bash", str(spool), "--help"], capture_output=True, text=True, env=e)
@@ -192,3 +203,70 @@ def test_hook_refuses_without_scanner(tmp_path, monkeypatch):
     assert rc == 0
     assert packages(tmp_path) == []
     assert "capture refused (no_scanner)" in json.loads(out)["systemMessage"]
+
+
+# --- PR #7 review: the worker runs in the NEXT session — judge the RECORDED endpoint ----
+
+def _spool(tmp_path, name, endpoint_header, pl=None):
+    pend = tmp_path / "takeovers" / ".pending"
+    pend.mkdir(parents=True, exist_ok=True)
+    (pend / name).write_text(endpoint_header + "\n" + json.dumps(pl or payload()) + "\n")
+    return pend
+
+
+def _run_pending(tmp_path, monkeypatch, env):
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    out = io.StringIO()
+    monkeypatch.setattr("sys.stdout", out)
+    assert bwc.main(["--pending"]) == 0
+    return out.getvalue()
+
+
+def test_pending_wall_survives_a_free_lane_next_session(tmp_path, monkeypatch):
+    """The reproduced loss: wall on the paid gateway, next session on 127.0.0.1:4141."""
+    _spool(tmp_path, "1.json", "#fa-endpoint https://llmgw.example/v1")
+    env = base_env(tmp_path)
+    env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:4141"  # the NEXT (free) session
+    out = _run_pending(tmp_path, monkeypatch, env)
+    assert len(packages(tmp_path)) == 1
+    assert "fa-takeover launch" in json.loads(out)["systemMessage"]
+
+
+def test_pending_recorded_loopback_is_skipped(tmp_path, monkeypatch):
+    pend = _spool(tmp_path, "1.json", "#fa-endpoint http://127.0.0.1:9999")
+    out = _run_pending(tmp_path, monkeypatch, base_env(tmp_path))  # next session: paid
+    assert packages(tmp_path) == [] and out == ""
+    assert not list(pend.glob("*.json"))
+
+
+def test_pending_exception_keeps_the_payload(tmp_path, monkeypatch):
+    _spool(tmp_path, "1.json", "#fa-endpoint https://llmgw.example/v1")
+
+    def boom(*_a, **_k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(bwc.fa_capture, "build_package", boom)
+    _run_pending(tmp_path, monkeypatch, base_env(tmp_path))
+    root = tmp_path / "takeovers"
+    assert list((root / ".failed").glob("1.json"))          # evidence kept
+    assert not list((root / ".pending").glob("*.json"))     # not retried every start
+    assert not list((root / ".seen").glob("*"))             # claim released
+
+
+def test_two_pending_payloads_emit_one_json_object(tmp_path, monkeypatch):
+    _spool(tmp_path, "1.json", "#fa-endpoint https://llmgw.example/v1", payload(sid="s-a"))
+    _spool(tmp_path, "2.json", "#fa-endpoint https://llmgw.example/v1", payload(sid="s-b"))
+    out = _run_pending(tmp_path, monkeypatch, base_env(tmp_path))
+    msg = json.loads(out)["systemMessage"]                 # ONE parseable object
+    assert msg.count("fa-takeover launch") == 2
+    assert len(packages(tmp_path)) == 2
+
+
+def test_claim_in_progress_is_not_doubled(tmp_path, monkeypatch):
+    """An EMPTY claim = another session is capturing this wall right now (O_EXCL race)."""
+    seen = tmp_path / "takeovers" / ".seen"
+    seen.mkdir(parents=True)
+    (seen / "sess-bw-2").write_text("")
+    rc, out = run_hook(payload(), base_env(tmp_path), monkeypatch)
+    assert rc == 0 and out == "" and packages(tmp_path) == []

@@ -30,11 +30,23 @@ case "$root" in
     *) echo "budget-wall-spool.sh: FA_TAKEOVER_DIR must be absolute: $root" >&2; exit 2 ;;
 esac
 d="$root/.pending"
+# payloads carry the walled session's last message: dir 0700 / file 0600 (umask is a builtin)
+umask 077
 # NO fork in the hot path when the dir already exists (the SessionStart worker pre-creates
 # it): `[ -d ]` is a builtin; mkdir runs only on first use. fail-open on any error.
 [ -d "$d" ] || mkdir -p "$d" 2>/dev/null || exit 0
 f="$d/$$.json"
-while IFS= read -r line || [ -n "$line" ]; do
-    printf '%s\n' "$line"
-done > "$f"
+{
+    # Header line: THIS (dying) session's endpoint. The worker runs in the NEXT session,
+    # whose own ANTHROPIC_BASE_URL says nothing about where the wall happened (PR #7
+    # review). printf and ${var+x} are builtins/expansions — still zero forks.
+    if [ -n "${ANTHROPIC_BASE_URL+x}" ]; then
+        printf '#fa-endpoint %s\n' "$ANTHROPIC_BASE_URL"
+    else
+        printf '#fa-endpoint-unset\n'
+    fi
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+    done
+} > "$f"
 exit 0
