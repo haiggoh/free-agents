@@ -92,3 +92,9 @@ def test_cloud_marker_silent():
 
 def test_no_marker_silent():
     assert tid.resume_warning(payload("resume"), PAID, None, True) is None
+
+
+def test_compaction_does_not_repeat_the_warning():
+    """PR #7 review: SessionStart(source=compact) has prior turns but is not a resume —
+    the warning was already shown when the conversation moved to the paid route."""
+    assert tid.resume_warning(payload("compact"), PAID, marker(), has_prior_turns=True) is None

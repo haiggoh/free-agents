@@ -186,7 +186,7 @@ def test_state_section_marks_pending_tools_unknown(tmp_path):
     assert "toolu_pending" in pkg.handoff_md and "Bash" in pkg.handoff_md
     assert "/tmp/x.py" in pkg.handoff_md  # files touched
     assert pkg.manifest["counts"]["pending_tools"] == 1
-    assert pkg.manifest["counts"]["files_touched"] == ["/tmp/x.py"]
+    assert pkg.manifest["counts"]["files_touched"] == 1  # plan schema v1: counts are counts
 
 
 def test_recent_exchange_bounded_newest_first_then_chronological(tmp_path):

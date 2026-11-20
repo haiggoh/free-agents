@@ -84,6 +84,8 @@ def resume_warning(payload, env, marker, has_prior_turns):
         return None
     if not marker or marker.kind not in ("free_api", "local"):
         return None
+    if payload.get("source") == "compact":
+        return None  # not a resume: the warning was shown when the move happened (PR #7 review)
     if not (payload.get("source") == "resume" or has_prior_turns):
         return None
     url = env.get("ANTHROPIC_BASE_URL", "")
@@ -201,7 +203,8 @@ def main():
     # Get current session identity from environment
     la_session_identity = os.environ.get('LA_SESSION_IDENTITY')
     if not la_session_identity:
-        # Task 1.5 (warn only): a free-lane conversation resumed on a paid route warns once.
+        # Task 1.5 (warn only): a free-lane conversation on a paid route warns at every
+        # session start with prior turns EXCEPT compaction (source=compact).
         # Emits SessionStart JSON with BOTH systemMessage and additionalContext. When
         # LA_SESSION_IDENTITY is set this block is skipped entirely (byte-identical path).
         try:
