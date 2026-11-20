@@ -1444,9 +1444,11 @@ def main(argv: list[str]) -> int:
                     help="record that the user approved an agent-initiated --priority lane "
                          "(required in ask mode outside a TTY)")
     sub.add_parser("probe", help="print this owner's external occupancy (other owners' slots in window)")
-    sub.add_parser("lane-toggle",
-                   help="flip THIS owner's priority lane (a user action — the picker calls it; "
-                        "no approval gate, recorded as user-approved)")
+    lt = sub.add_parser("lane-toggle",
+                        help="flip THIS owner's priority lane (a user action — the picker calls "
+                             "it with --user-approved; gated like set-owner in ask mode)")
+    lt.add_argument("--user-approved", action="store_true",
+                    help="record that the user approved the flip (required in ask mode outside a TTY)")
     sub.add_parser("menu", help="open the session picker's rate limiter screen")
     args = parser.parse_args(argv)
 
@@ -1492,6 +1494,22 @@ def main(argv: list[str]) -> int:
                           "queue_position": _queue_position(limiter)}))
         return 0
     if args.cmd == "lane-toggle":
+        # the SAME approval gate as set-owner --priority: lane-toggle is a CLI any process
+        # could call, so an agent must not self-grant a lane through it. The picker passes
+        # --user-approved because the click IS the user acting.
+        if not args.user_approved:
+            approval = str(_hot("lane_approval", DEFAULT_LANE_APPROVAL)).lower()
+            if approval != "agent":
+                if sys.stdin.isatty():
+                    ans = input(f"flip the priority lane for owner {_owner()!r}? [y/N] ")
+                    if ans.strip().lower() not in ("y", "yes"):
+                        print("rate_limiter: refused", file=sys.stderr)
+                        return 2
+                else:
+                    print("rate_limiter: flipping a priority lane outside a TTY needs user "
+                          "approval (lane_approval=ask): ask the user first, then re-run with "
+                          "--user-approved, or set lane_approval=agent", file=sys.stderr)
+                    return 2
         owner = _owner()
         info = owners_info(limiter)
         cur = bool((info.get("owners") or {}).get(owner, {}).get("priority"))

@@ -517,7 +517,7 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
                 import io
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf):
-                    rc = rl.main(["lane-toggle"])
+                    rc = rl.main(["lane-toggle", "--user-approved"])
                 self.assertEqual(rc, 0)
                 out = json.loads(buf.getvalue())
                 self.assertEqual((out["owner"], out["priority"], out["approved_by_user"]),
@@ -526,8 +526,27 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
                 self.assertEqual(self._state()["owners"]["sess-A"].get("approved_by_user"), True,
                                  "the approval is recorded in the persisted owner opts")
                 with contextlib.redirect_stdout(io.StringIO()):
-                    self.assertEqual(rl.main(["lane-toggle"]), 0)
+                    self.assertEqual(rl.main(["lane-toggle", "--user-approved"]), 0)
                 self.assertEqual(self._state()["owners"]["sess-A"]["priority"], False)
+
+    def test_lane_toggle_is_gated_like_set_owner(self):
+        # lane-toggle is a CLI any process could call: in ask mode, outside a TTY, an
+        # agent must NOT be able to self-grant a lane through it (same gate as set-owner)
+        with tempfile.TemporaryDirectory() as cfg:
+            with unittest.mock.patch.dict(os.environ, {
+                    "LA_NVIDIA_THROTTLE_STATE": self.path, "LA_LIMITER_OWNER": "sess-A",
+                    "LA_SESSION_MENU_CONFIG_DIR": cfg}):
+                with open(self.path, "w") as f:
+                    json.dump({"stamps": [], "limit": 40}, f)
+                rc = rl.main(["lane-toggle"])
+                self.assertNotEqual(rc, 0, "non-TTY lane-toggle without --user-approved is refused")
+                self.assertNotIn("sess-A", self._state().get("owners", {}))
+                os.environ["LA_LIMITER_LANE_APPROVAL"] = "agent"
+                try:
+                    self.assertEqual(rl.main(["lane-toggle"]), 0, "agent mode skips the gate")
+                    self.assertEqual(self._state()["owners"]["sess-A"]["priority"], True)
+                finally:
+                    del os.environ["LA_LIMITER_LANE_APPROVAL"]
 
     def test_lane_approval_refuses_nontty_without_user_approved(self):
         # stdin is not a TTY under pytest: an agent-initiated lane must be refused (rc != 0)
