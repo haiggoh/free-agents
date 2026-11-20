@@ -717,7 +717,7 @@ def build() -> None:
             _alpha = _ap.tint_alpha(_pct, blur_active=_blur_active)
             ui.element("div").props('id="tint-layer"').style(
                 f"background: rgba({_tint}, {_alpha:.3f})")
-        outer = ("w-full max-w-3xl mx-auto p-4 gap-1" + (" lane-shell" if lane else "")
+        outer = ("w-full max-w-3xl mx-auto p-4 gap-1 shell-root" + (" lane-shell" if lane else "")
                  + (" dark-shell" if _dark else ""))   # tighter overall spacing (user 2026-11-05)
         with ui.column().classes(outer):
             # user 2026-11-08: title 28px / subtitle 17px (ratio ~1.6 golden), subtitle matches
@@ -729,6 +729,25 @@ def build() -> None:
                 ui.label(subtitle).classes("text-[17px] opacity-70").props('id="subtitle"')
             ui.element("div").classes("title-spacer").style("height: 26px")   # empty spacer row, title-height
             return ui.column().classes("w-full gap-1" + (" lane-body" if lane else ""))
+
+    def _apply_appearance_live(store, key: str, st: dict) -> None:
+        """Apply an appearance change IN PLACE, no page reload (user 2026-11-20: the
+        reload flashed white). Toggles the dark-shell class and re-tints #tint-layer via
+        JS; presentation swaps rows/tiles via the existing rerender hook."""
+        from fa_gui import appearance as _ap2
+        doc2 = _ap2.load(store)
+        dark = bool(doc2.get("dark_mode"))
+        blur_active = bool(doc2.get("background_blur_requested")) and os.environ.get("LA_GUI_NATIVE") == "1"
+        pct = _ap2.resolve_opacity(doc2, blur_active=blur_active)
+        alpha = _ap2.tint_alpha(pct, blur_active=blur_active)
+        tint = "20, 20, 20" if dark else "255, 255, 255"
+        js = (f"var r=document.querySelector('.shell-root');"
+              f"if(r) r.classList.toggle('dark-shell', {'true' if dark else 'false'});"
+              f"var t=document.getElementById('tint-layer');"
+              f"if(t) t.style.background='rgba({tint}, {alpha:.3f})';")
+        ui.run_javascript(js)
+        if key == "presentation" and st.get("rerender"):
+            st["rerender"]()
 
     def render_appearance(body, st: dict) -> None:
         """Phase 4 UI: a GUI-only appearance section on the theme screen, bound to the
@@ -770,9 +789,7 @@ def build() -> None:
                             nxt = ch[(i + d) % len(ch)]
                         ap.save(store, {k: nxt})
                         v.set_text(str(nxt))
-                        # user 2026-11-20: appearance settings apply instantly — reload this
-                        # page so the shell (dark class, tint layer) and rows re-render at once
-                        ui.run_javascript("location.reload()")
+                        _apply_appearance_live(store, k, st)
 
                     left.on("click", lambda e=None: _step(-step))
                     right.on("click", lambda e=None: _step(+step))
@@ -809,8 +826,7 @@ def build() -> None:
                                 patch["background_blur_requested"] = True
                         ap.save(store, patch)
                         v.set_text("ON" if e.value else "OFF")
-                        # instant apply (user 2026-11-20): reload so shell + rows re-render now
-                        ui.run_javascript("location.reload()")
+                        _apply_appearance_live(store, k, st)
 
                     ui.checkbox("", value=bool(doc[key]), on_change=_set).classes("switch")
 

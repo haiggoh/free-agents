@@ -142,8 +142,13 @@ def apply_vibrancy_patch() -> None:
                     continue
                 if m != last:
                     if last is not None:          # skip the first sight: init already applied
-                        poller.performSelectorOnMainThread_withObject_afterDelay_(
-                            "poll:", None, 0.0)
+                        try:
+                            # non-blocking main-thread dispatch (pyobjc name — the
+                            # performSelectorOnMainThread_withObject_afterDelay_ variant
+                            # does not exist in this pyobjc and killed the thread before)
+                            poller.pyobjc_performSelectorOnMainThread_withObject_("poll:", None)
+                        except Exception as e:
+                            print(f"native_window: poller dispatch failed ({e!r})", flush=True)
                     last = m
 
         threading.Thread(target=_watch, daemon=True).start()
