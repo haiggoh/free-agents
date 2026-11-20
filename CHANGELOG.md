@@ -1,5 +1,33 @@
 # Changelog
 
+## [unreleased] — feat/nicegui-frontend GUI work (2026-11-19/20, user-tested in the native window)
+
+### Fixed — rebase-duplicated action rows crashed screen builds (empty remote/local lanes, dead theme toggle)
+- `session_picker_model.py`: removed the duplicate `y` Filter-settings row in `RemoteScreen.actions()`
+  and the superseded e/j/t rows in `LowkeyScreen.actions()` (both kept by the 77/77 rebase next to
+  main's newer rows; `check_action_table` raised on every build, so the GUI rendered empty screens).
+  Regression tests in `tests/test_0564_user_issues.py`; a sweep over all 14 build targets raises on none.
+
+### Fixed — modern presentation rendered an empty tile grid
+- `fa_gui/adapter.py`: `a.choices is not None` → truthy check — main's `Action` default `choices=()`
+  (merged by the rebase) misclassified every nav row as "select", so tiling matched nothing.
+  Browser test asserts `.tile-grid` has children in modern mode; probe went 0 → 10 tiles.
+
+### Changed — appearance: dark-mode switch, follow-system, 0–100% opacity, vibrancy material follows the mode
+- `fa_gui/appearance.py`: `dark_mode` switch now in the appearance section; new
+  `follow_system_appearance` key (launch-only); opacity slider 0–100 (was 50–100);
+  `tint_alpha` returns the raw opacity in every mode — the ×1.35 blur-brightness factor is
+  removed (it compressed the slider: ≥74% already looked opaque with blur).
+- `fa_gui/native_window.py` (new): fail-open pyobjc patch wrapping pywebview's Cocoa
+  `BrowserView.__init__` sets the `NSVisualEffectView` material from `dark_mode`
+  (mediumLight light / ultraDark dark; system appearance when opted in). Applied at
+  `main.py` module level (NiceGUI's SPAWN child re-imports main); browser children skip it.
+  In-process readback spike: DARK=0 → mediumLight, DARK=1 → ultraDark.
+
+### Fixed — /catalog add/remove blocked the click on the inventory subprocess under load
+- The handler now writes, pops the catalog cache, repaints immediately, and refreshes the
+  cache off the UI thread (`asyncio.to_thread`); browser tests green again.
+
 ## [0.63.2] — 2026-11-24
 
 ### Fixed — hotfix: a model that never answers fails over instead of hanging the session
