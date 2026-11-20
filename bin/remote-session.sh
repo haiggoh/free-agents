@@ -209,6 +209,7 @@ usage() {
     echo "  --show-broken         Show unworking models (config/broken-nvidia-models.json) in picker (default: hidden; menu key u)"
     echo "  --show-old            Show catalog models over the age cutoff in picker (default: hidden; LA_REMOTE_MAX_MODEL_AGE_MONTHS, default 18 months; filter menu key o)"
     echo "  --enable-mcp          Enable MCPs for this free-API session (sets LA_REMOTE_ENABLE_MCP=1)"
+    echo "  --priority            Register this session in the limiter's priority lane (evals bin/rl-lane-env.sh --priority; sets LA_LIMITER_PRIORITY=1 — queue-jump, share-capped under contention)"
     echo "  --print-spoof         Print the spoofed model id claude will be launched with, then exit"
 }
 
@@ -1605,6 +1606,7 @@ while [[ $# -gt 0 ]]; do
         --show-broken)    SHOW_BROKEN_MODELS=1; shift ;;
         --show-old)       SHOW_OLD_MODELS=1; shift ;;
         --enable-mcp)     export LA_REMOTE_ENABLE_MCP=1; shift ;;
+        --priority)       eval "$("$SCRIPT_DIR/rl-lane-env.sh" --priority)"; shift ;;
         --prompt-file)    [[ $# -ge 2 ]] || { echo 'remote-session: --prompt-file needs a path' >&2; exit 2; }
                           PROMPT_FILE="$2"; shift 2 ;;
         --prompt)         [[ $# -ge 2 ]] || { echo 'remote-session: --prompt needs text' >&2; exit 2; }

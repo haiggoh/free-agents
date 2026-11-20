@@ -1250,7 +1250,15 @@ def run_background(input_data, env, run_dir, resume=False, extend=None):
     return {"ok": 0, "failed": 5, "decision_needed": 6}[status]
 
 
+def _limiter_kind_env() -> None:
+    """A dispatch is `dispatch` kind in the NVIDIA limiter ladder (the 600 s stream watchdog
+    kills a stalled dispatch and loses all its work): within tier 0 it ranks ahead of
+    interactive requests, never above aged tiers or manual lanes."""
+    os.environ.setdefault("LA_LIMITER_KIND", "dispatch")
+
+
 def main():
+    _limiter_kind_env()
     res = parse_args(sys.argv[1:])
     out_path, mode, err = res
     if err:

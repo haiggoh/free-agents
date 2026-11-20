@@ -26,6 +26,7 @@ Usage: launch-claude-agent.sh <alias> [effort-override]
        launch-claude-agent.sh --dry-run-skip-preflight <alias> [effort-override]
        launch-claude-agent.sh --enable-mcp <alias> [effort-override]
        launch-claude-agent.sh --temperature VALUE <alias> [effort-override]
+       launch-claude-agent.sh --priority <alias> [effort-override]
 
   <alias>           Model alias from config (e.g., qwen-3.8-operator, qwen-3.8-thinking)
                     Role names also accepted: operator, reasoner, validator, utility
@@ -37,6 +38,7 @@ Flags:
   --dry-run-skip-preflight  Dry-run without RAM preflight (quick config inspection)
   --enable-mcp            Enable MCP tools in blind-trust auto mode (sets LA_ENABLE_MCP=1)
   --temperature VALUE     Set sampling temperature 0.0-2.0 (passed to Rapid-MLX as --default-temperature)
+  --priority              Register this session in the NVIDIA limiter's priority lane (sets LA_LIMITER_PRIORITY=1; queue-jump, share-capped under contention)
 
 Environment (set by csl or caller):
   LA_AUTO_MODE=1                    Enable auto mode (permission-mode=auto)
@@ -71,6 +73,11 @@ HELP
     ;;
   --enable-mcp)
     export LA_ENABLE_MCP=1
+    shift
+    ;;
+  --priority)
+    _d="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    eval "$("$_d/rl-lane-env.sh" --priority)"
     shift
     ;;
   --temperature)

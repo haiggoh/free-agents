@@ -129,7 +129,14 @@ def _record_quota(provider_id, result):
     return None
 
 
+def _limiter_kind_env() -> None:
+    """Same ladder kind as free-agent-tool.py: a dispatch ranks ahead of interactive within
+    tier 0 only (600 s stream-watchdog asymmetry)."""
+    os.environ.setdefault("LA_LIMITER_KIND", "dispatch")
+
+
 def main(argv=None):
+    _limiter_kind_env()
     ap = argparse.ArgumentParser(
         description="Dispatch a prompt to a remote provider (OpenAI-compatible). "
                     "Prints a loud REMOTE banner before sending; files need "
