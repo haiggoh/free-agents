@@ -25,8 +25,14 @@ sys.modules["fa_takeover"] = fa_takeover  # dataclasses looks the module up here
 spec.loader.exec_module(fa_takeover)
 
 
+STUB_SCANNER = Path(__file__).parent / "fixtures" / "stub_redact_secret.py"
+
+
 def run_cli(args, env=None):
     e = {k: v for k, v in os.environ.items() if not k.startswith(("LA_", "FA_"))}
+    # capture scans by default (PR #7 review): tests get the hermetic stub scanner unless
+    # they pass FA_SECRET_SCANNER="" to exercise the no-scanner refusal
+    e["FA_SECRET_SCANNER"] = str(STUB_SCANNER)
     if env:
         e.update(env)
     return subprocess.run([str(CLI)] + args, capture_output=True, text=True,
@@ -285,3 +291,43 @@ def test_wrapper_passthrough_of_double_dash():
     r2 = subprocess.run([str(WRAPPER), "nvidia-glm53", "--bogus"],
                         capture_output=True, text=True, stdin=subprocess.DEVNULL)
     assert r2.returncode == 3  # unknown flag before `--` still rejected
+
+
+# --- PR #7 review: scan by default, refuse without a scanner, explicit --no-scan ------
+
+def test_capture_refuses_without_scanner(tmp_path):
+    home = mk_home(tmp_path)
+    tk = tmp_path / "tk"
+    r = run_cli(["capture", "src-sess", "--route", "nvidia-glm53", "--cwd", str(tmp_path)],
+                env={"HOME": str(home), "FA_TAKEOVER_DIR": str(tk), "FA_SECRET_SCANNER": ""})
+    assert r.returncode == 3, r.stderr
+    assert "no_scanner" in r.stderr
+    assert not tk.exists() or not list(tk.glob("tk-*"))
+
+
+def test_capture_no_scan_records_the_opt_out(tmp_path):
+    home = mk_home(tmp_path)
+    tk = tmp_path / "tk"
+    r = run_cli(["capture", "src-sess", "--route", "nvidia-glm53", "--cwd", str(tmp_path),
+                 "--no-scan", "--json"],
+                env={"HOME": str(home), "FA_TAKEOVER_DIR": str(tk), "FA_SECRET_SCANNER": ""})
+    assert r.returncode == 0, r.stderr
+    m = json.loads(r.stdout)
+    assert m["secret_scan"] == {"ran": False, "findings": [], "skipped_by": "--no-scan"}
+
+
+def test_capture_default_scan_refuses_planted_secret(tmp_path):
+    home = tmp_path / "home"
+    proj = home / ".claude" / "projects" / "-p"
+    proj.mkdir(parents=True)
+    (proj / "sec-sess.jsonl").write_text(json.dumps({"type": "user", "uuid": "u1", "message": {
+        "role": "user", "content": "deploy with sk-ant-test-dummy-999"}}) + "\n")
+    r = run_cli(["capture", "sec-sess", "--route", "nvidia-glm53", "--cwd", str(tmp_path)],
+                env={"HOME": str(home), "FA_TAKEOVER_DIR": str(tmp_path / "tk")})
+    assert r.returncode == 3, r.stderr
+    assert "secret_findings" in r.stderr
+
+
+def test_scan_flag_is_gone(tmp_path):
+    r = run_cli(["capture", "x", "--scan"], env={"HOME": str(tmp_path)})
+    assert r.returncode == 2

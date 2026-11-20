@@ -78,9 +78,10 @@ def cmd_capture(args) -> int:
     except ValueError as e:
         print(f"fa-takeover: {e}", file=sys.stderr)
         return EXIT_USAGE
-    scanner = external_secret_scanner() if args.scan else None
     reason = f"manual capture of session {args.session} (fa-takeover capture)"
     try:
+        # scan by DEFAULT (PR #7 review): the package goes to a free provider
+        scanner = None if args.no_scan else fa_capture.require_scanner()
         pkg = fa_capture.build_package(
             transcript, cwd=args.cwd or os.getcwd(), dest_route=route.alias,
             dest_window_tokens=route.window_tokens,
@@ -89,6 +90,8 @@ def cmd_capture(args) -> int:
     except fa_capture.CaptureRefused as e:
         print(f"fa-takeover: capture refused ({e.code}): {e.message}", file=sys.stderr)
         return EXIT_REFUSED
+    if args.no_scan:
+        pkg.manifest["secret_scan"]["skipped_by"] = "--no-scan"
     if args.dry_run:
         print("fa-takeover: dry-run — nothing written, nothing spawned. Planned manifest:")
         print(json.dumps({"takeover_id": pkg.takeover_id, "counts": pkg.manifest["counts"],
@@ -260,8 +263,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="record secret-scan findings in the manifest instead of refusing")
     c.add_argument("--dry-run", action="store_true", help="write nothing, spawn nothing; print planned counts")
     c.add_argument("--json", action="store_true", help="print the manifest JSON on success")
-    c.add_argument("--scan", action="store_true",
-                   help="scan with the installed audit-loose-ends redact-secret.py (resolved at run time)")
+    c.add_argument("--no-scan", action="store_true",
+                   help="skip the secret scan (default: scan with FA_SECRET_SCANNER or the installed "
+                        "audit-loose-ends redact-secret.py, and REFUSE when neither resolves)")
     c.add_argument("--base-overhead-tokens", type=int, default=0,
                    help="override the engine base-overhead reserve (default: measured constant)")
     c.set_defaults(func=cmd_capture)

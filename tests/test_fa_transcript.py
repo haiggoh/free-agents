@@ -166,3 +166,39 @@ def test_tool_result_texts():
 ])
 def test_is_loopback_url(url, expected):
     assert ft.is_loopback_url(url) is expected
+
+
+# --- review fixes (PR #7 review, 2026-11-20): fixtures mirror the REAL corpus shapes ----
+# Census of 44 real wall transcripts: ~33% of "instructions" were harness injections
+# (586 task-notifications origin.kind=task-notification/promptSource=system, 51 bash-input,
+# 51 bash-stdout, 20 isCompactSummary records, 56 interrupt markers). Real identity markers
+# are type=system with STRING content (166x); user records only ever MENTION the marker.
+
+def test_harness_injections_are_not_instructions():
+    records, malformed = load("harness_injections.jsonl")
+    assert malformed == 0
+    texts = [i.text for i in ft.user_instructions(records)]
+    assert texts == ["genuine typed goal", "genuine queued goal",
+                     "genuine sdk prompt without origin",
+                     "[Image #1] genuine prompt with an image"]
+
+
+@pytest.mark.parametrize("line", [2, 3, 4, 5, 6, 7, 10])
+def test_is_harness_injection_each_real_shape(line):
+    records, _ = load("harness_injections.jsonl")
+    rec = dict(records)[line]
+    assert ft.is_harness_injection(rec, ft.message_text(rec)) is True
+
+
+@pytest.mark.parametrize("line", [1, 8, 9, 11])
+def test_genuine_prompts_are_not_injections(line):
+    records, _ = load("harness_injections.jsonl")
+    rec = dict(records)[line]
+    assert ft.is_harness_injection(rec, ft.message_text(rec)) is False
+
+
+def test_marker_system_string_content_wins_over_user_mention():
+    records, _ = load("marker_system_str.jsonl")
+    m = ft.identity_marker(records)
+    assert m is not None
+    assert (m.line, m.kind, m.model) == (2, "free_api", "m-x")

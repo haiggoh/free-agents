@@ -129,11 +129,16 @@ def resolve_takeover_route(alias):
     raise ValueError(f"unknown route {alias!r} (not in the roster config/remote-agents.sh)")
 
 
-def external_secret_scanner():
-    """Resolve the newest installed audit-loose-ends redact-secret.py at run time
-    (Task 0.3 Step 3: free-agents itself ships no scanner). Returns a callable
-    text -> [masked findings], or None when not installed."""
-    base = Path.home() / ".claude" / "plugins" / "cache" / "haiggoh" / "audit-loose-ends"
+def _resolve_scanner_script():
+    """FA_SECRET_SCANNER (explicit; set-but-missing raises ValueError naming it), else the
+    newest audit-loose-ends redact-secret.py under $HOME's plugin cache, else None."""
+    override = os.environ.get("FA_SECRET_SCANNER")
+    if override:
+        if not os.path.isfile(override):
+            raise ValueError(f"FA_SECRET_SCANNER={override!r} is not a file")
+        return Path(override)
+    home = Path(os.environ.get("HOME") or Path.home())
+    base = home / ".claude" / "plugins" / "cache" / "haiggoh" / "audit-loose-ends"
     cands = []
     if base.is_dir():
         for d in base.iterdir():
@@ -141,9 +146,29 @@ def external_secret_scanner():
             if d.is_dir() and s.is_file():
                 ver = tuple(int(x) for x in re.findall(r"\d+", d.name)) or (0,)
                 cands.append((ver, s))
-    if not cands:
+    return sorted(cands)[-1][1] if cands else None
+
+
+def require_scanner():
+    """The scanner every capture route uses by default (PR #7 review: a package bound for a
+    free provider is never written unscanned unless the user opts out explicitly).
+    Raises CaptureRefused("no_scanner") when none resolves."""
+    scan = external_secret_scanner()
+    if scan is None:
+        raise CaptureRefused(
+            "no_scanner",
+            "no secret scanner found (install audit-loose-ends, or set FA_SECRET_SCANNER); "
+            "refusing to write an unscanned package — `fa-takeover capture --no-scan` opts out")
+    return scan
+
+
+def external_secret_scanner():
+    """Resolve the secret scanner at run time (Task 0.3 Step 3: free-agents itself ships
+    none). Returns a callable text -> [masked findings], or None when not installed.
+    An invalid FA_SECRET_SCANNER raises ValueError (explicit overrides fail loudly)."""
+    script = _resolve_scanner_script()
+    if script is None:
         return None
-    script = sorted(cands)[-1][1]
 
     def scan(text: str) -> list:
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
@@ -186,9 +211,9 @@ def _recent_entries(records) -> list:
             text = fa_transcript.message_text(rec)
             if text.strip():
                 out.append((ln, "assistant", text))
-        elif rec.get("type") == "user" and not rec.get("isMeta"):
+        elif rec.get("type") == "user":
             text = fa_transcript.message_text(rec)
-            if text.strip():
+            if text.strip() and not fa_transcript.is_harness_injection(rec, text):
                 out.append((ln, "user", text))
     return out
 

@@ -139,17 +139,36 @@ def _content_blocks(record: dict) -> list:
     return content if isinstance(content, list) else []
 
 
+# Text prefixes the HARNESS writes into user records (never typed as a goal). Pinned from a
+# census of 44 real wall transcripts (PR #7 review, 2026-11-20).
+_INJECTION_PREFIXES = ("<command-", "<hook", "<bash-input>", "<bash-stdout>", "<bash-stderr>",
+                       "<local-command-", "<task-notification>", "[Request interrupted by user")
+
+
+def is_harness_injection(rec: dict, text: str) -> bool:
+    """True for user records the harness wrote: task notifications (origin.kind other than
+    "human"), compaction summaries, `!`-command input/output, local-command output,
+    interrupt markers, command/hook echoes. A record with no `origin` (older engines, SDK
+    prompts) is judged by its text alone."""
+    if rec.get("isMeta") or rec.get("isCompactSummary") or rec.get("isVisibleInTranscriptOnly"):
+        return True
+    origin = rec.get("origin")
+    if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
+        return True
+    if rec.get("promptSource") == "system":
+        return True
+    return text.lstrip().startswith(_INJECTION_PREFIXES)
+
+
 def user_instructions(records) -> list:
-    """Verbatim user instructions: skips tool_result carriers, isMeta, hook/command echoes."""
+    """Verbatim user instructions: skips tool_result carriers and every harness injection
+    (is_harness_injection)."""
     out = []
     for ln, rec in records:
-        if rec.get("type") != "user" or rec.get("isMeta"):
+        if rec.get("type") != "user":
             continue
         text = message_text(rec)
-        stripped = text.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("<command-") or stripped.startswith("<hook"):
+        if not text.strip() or is_harness_injection(rec, text):
             continue
         out.append(Instruction(line=ln, uuid=rec.get("uuid"), timestamp=rec.get("timestamp"), text=text))
     return out
@@ -260,8 +279,12 @@ def api_errors(records) -> list:
 
 
 def identity_marker(records):
-    """First FREE_AGENTS_SESSION_IDENTITY marker found in any record's text, or None."""
+    """First FREE_AGENTS_SESSION_IDENTITY marker in a SYSTEM record (where
+    hooks/transcript-identity.py writes it), or None. User and assistant records only ever
+    MENTION a marker (a pasted line, a grep result) and must never re-label a session."""
     for ln, rec in records:
+        if rec.get("type") != "system":
+            continue
         text = message_text(rec)
         if not text:
             continue

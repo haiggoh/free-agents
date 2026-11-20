@@ -44,8 +44,10 @@ def run_hook(pl, env, monkeypatch):
 
 def base_env(tmp_path):
     # HOME points at an empty temp dir so the external scanner is NOT resolved (hermetic)
+    # FA_SECRET_SCANNER = the hermetic stub (scan is mandatory since the PR #7 review)
     return {"HOME": str(tmp_path), "FA_TAKEOVER_DIR": str(tmp_path / "takeovers"),
-            "ANTHROPIC_BASE_URL": "https://llmgw.example/v1"}
+            "ANTHROPIC_BASE_URL": "https://llmgw.example/v1",
+            "FA_SECRET_SCANNER": str(Path(__file__).parent / "fixtures" / "stub_redact_secret.py")}
 
 
 def packages(tmp_path):
@@ -180,3 +182,13 @@ def test_hooks_json_registers_once():
     hook_entry = next(h for matcher in ss for h in matcher["hooks"]
                       if "budget-wall-capture.py" in h["command"])
     assert hook_entry.get("timeout") == 20
+
+
+def test_hook_refuses_without_scanner(tmp_path, monkeypatch):
+    """PR #7 review: the automatic route never writes an unscanned package."""
+    env = base_env(tmp_path)
+    env["FA_SECRET_SCANNER"] = ""
+    rc, out = run_hook(payload(), env, monkeypatch)
+    assert rc == 0
+    assert packages(tmp_path) == []
+    assert "capture refused (no_scanner)" in json.loads(out)["systemMessage"]

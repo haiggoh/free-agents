@@ -179,7 +179,7 @@ def _capture_from(raw: str) -> int:
             transcript_path, cwd=payload.get("cwd") or os.getcwd(),
             dest_route=route.alias, dest_window_tokens=route.window_tokens,
             base_overhead_tokens=fa_capture.DEFAULT_BASE_OVERHEAD_TOKENS,
-            reason=reason, scanner=fa_capture.external_secret_scanner(), allow_findings=False)
+            reason=reason, scanner=fa_capture.require_scanner(), allow_findings=False)
         out = fa_capture.write_package(pkg, root)
         seen_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(seen_dir, 0o700)

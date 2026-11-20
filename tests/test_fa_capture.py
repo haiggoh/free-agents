@@ -249,24 +249,59 @@ def test_completeness_bytes_included_never_exceeds_total(tmp_path):
     assert 0 <= c["bytes_included"] <= c["bytes_total"]
 
 
+STUB_SCANNER = Path(__file__).parent / "fixtures" / "stub_redact_secret.py"
+
+
 def test_scanner_failure_fails_closed(tmp_path, monkeypatch):
-    """Final review finding 1c: a scanner that errors must never read as 'clean'."""
-    import subprocess as sp
-    scanner = fa_capture.external_secret_scanner()
-    assert scanner is not None  # the plugin cache exists on this machine
-    real_run = sp.run
-
-    def broken_run(*a, **kw):
-        class R:
-            returncode = 1
-            stdout = ""
-            stderr = "boom"
-        return R()
-
-    monkeypatch.setattr(fa_capture.subprocess, "run", broken_run)
-    findings = scanner("some text with sk-ant-api03-aaa")
+    """Final review finding 1c: a scanner that errors must never read as 'clean'.
+    Hermetic (PR #7 review): a stub scanner via FA_SECRET_SCANNER, never the real cache."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("FA_SECRET_SCANNER", str(STUB_SCANNER))
+    monkeypatch.setenv("STUB_SCANNER_RC", "1")
+    scan = fa_capture.external_secret_scanner()
+    assert scan is not None
+    findings = scan("some text with sk-ant-api03-aaa")
     assert findings and findings[0].startswith("<secret-scanner failed")
-    monkeypatch.setattr(fa_capture.subprocess, "run", real_run)
+
+
+def test_real_output_format_findings_refuse(tmp_path, monkeypatch):
+    """The stub prints the REAL redact-secret.py line format; the parser must catch it."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("FA_SECRET_SCANNER", str(STUB_SCANNER))
+    t = tmp_path / "t.jsonl"
+    t.write_text(json.dumps({"type": "user", "uuid": "u1", "message": {
+        "role": "user", "content": "use key sk-ant-test-dummy-123"}}) + "\n")
+    with pytest.raises(fa_capture.CaptureRefused) as ei:
+        fa_capture.build_package(str(t), cwd=None, dest_route="r", dest_window_tokens=200_000,
+                                 base_overhead_tokens=0, reason="t",
+                                 scanner=fa_capture.require_scanner(), now=NOW)
+    assert ei.value.code == "secret_findings"
+
+
+def test_require_scanner_refuses_when_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))  # empty HOME: no plugin cache
+    monkeypatch.delenv("FA_SECRET_SCANNER", raising=False)
+    with pytest.raises(fa_capture.CaptureRefused) as ei:
+        fa_capture.require_scanner()
+    assert ei.value.code == "no_scanner"
+
+
+def test_invalid_scanner_override_fails_loudly(tmp_path, monkeypatch):
+    monkeypatch.setenv("FA_SECRET_SCANNER", str(tmp_path / "missing.py"))
+    with pytest.raises(ValueError, match="FA_SECRET_SCANNER"):
+        fa_capture.external_secret_scanner()
+
+
+def test_harness_injections_never_enter_handoff(tmp_path):
+    """Real-shape injections (task-notification, bash-stdout, compaction summary) are
+    neither instructions nor recent exchange."""
+    pkg = fa_capture.build_package(str(FIX / "harness_injections.jsonl"), cwd=None,
+                                   dest_route="r", dest_window_tokens=200_000,
+                                   base_overhead_tokens=0, reason="t", now=NOW)
+    for planted in ("FAKE-STDOUT", "FAKE SUMMARY", "<task-notification>", "git status",
+                    "[Request interrupted"):
+        assert planted not in pkg.handoff_md, planted
+    assert pkg.manifest["counts"]["instructions"] == 4
 
 
 def test_write_package_sweeps_stale_tmp(tmp_path):
