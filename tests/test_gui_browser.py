@@ -392,6 +392,24 @@ def test_dark_mode_switch_flips_store_and_shell(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_modern_tile_emoji_filter_follows_theme_mode(browser, tmp_path):
+    # 2026-11-21 user pick: modern tiles get a subdued dark emoji in light mode and a bright
+    # white one in dark mode. Assert the COMPUTED filter (the CSS contract) in both modes.
+    for dark, expect in ((False, "saturate(0.7) brightness(0.22)"), (True, "invert(1)")):
+        ap = tmp_path / f"appearance-{dark}.json"
+        ap.write_text(json.dumps({"presentation": "modern", "dark_mode": dark}))
+        srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+        try:
+            page = browser.new_page()
+            page.goto(srv.url)
+            page.wait_for_selector(".tile-grid .tile-emoji", timeout=20000)
+            f = page.evaluate(
+                "getComputedStyle(document.querySelector('.tile-grid .tile-emoji')).filter")
+            assert expect in f, (dark, f)
+        finally:
+            assert srv.stop() == []
+
+
 def test_follow_system_switch_writes_store(browser, tmp_path):
     # 2026-11-20 spec: launch-only switch; the store write is the delivery-shaped outcome
     ap = tmp_path / "appearance.json"
