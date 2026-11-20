@@ -136,8 +136,10 @@ class MixedWriterProcessTests(unittest.TestCase):
             for p in procs:
                 p.start()
             for p in procs:
-                p.join(60)
-            results = []
+                p.join(300)   # the box can be heavily loaded; 60s expired once under -n auto
+                self.assertFalse(p.is_alive(), "worker did not finish within 300s")
+                self.assertEqual(p.exitcode, 0, "worker exited non-zero")
+            results = []   # drain only AFTER every worker has exited: no lost puts
             while not q.empty():
                 results.append(q.get())
             self.assertEqual(len(results), 4, "every worker reported (no crash)")
