@@ -287,8 +287,19 @@ def _prio_grants_sliding(stamps: list, owners: dict) -> int:
     return n
 
 
+def _owner_debt(deficit: dict, waiters: dict, owner: str, now: float, cfg: dict) -> float:
+    """An owner's deficit: stored residual + sum over its waiting requests of
+    (now - arrived) * deficit_rate, capped at deficit_cap_seconds."""
+    total = float(deficit.get(owner, 0.0))
+    for w in waiters.values():
+        if "granted" not in w and w.get("owner") == owner:
+            total += (now - float(w.get("arrived", now))) * cfg["deficit_rate"]
+    return min(cfg["deficit_cap_seconds"], total)
+
+
 def _pick_winner(waiters: dict, now: float, cfg: dict, owners: dict,
-                 own_counts: dict, limit: int, prio_grants: int | None = None) -> str | None:
+                 own_counts: dict, limit: int, prio_grants: int | None = None,
+                 deficit: dict | None = None) -> str | None:
     """Rank the live waiters (stale already pruned, granted entries excluded) and return
     the winning token. The lane class is refreshed from the LIVE owners map at every
     evaluation, so a lane flip applies at the next poll. An owner at its rpm_scale cap is
@@ -319,6 +330,13 @@ def _pick_winner(waiters: dict, now: float, cfg: dict, owners: dict,
         eligible.append(tok)
     if not eligible:
         return None
+    if cfg["policy"] == "deficit" and deficit is not None:
+        def rank(tok):
+            w = waiters[tok]
+            cls = 1 if w.get("class") == "priority" else 0
+            debt = _owner_debt(deficit, waiters, w.get("owner", ""), now, cfg)
+            return (cls, debt, -float(w.get("arrived", now)))
+        return max(eligible, key=rank)
     return max(eligible, key=lambda tok: _rank(waiters[tok], now, cfg))
 
 
@@ -732,6 +750,7 @@ class SlidingWindowLimiter:
         self._last_429_time = 0.0
         self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}
         self._waiters: dict = {}          # fairness queue: token -> waiter entry
+        self._deficit: dict = {}          # deficit policy: owner -> residual seconds
 
     def _locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -755,10 +774,13 @@ class SlidingWindowLimiter:
             self._owners = owners if isinstance(owners, dict) else {}
             waiters = state.get("waiters", {})
             self._waiters = waiters if isinstance(waiters, dict) else {}
+            deficit = state.get("deficit", {})
+            self._deficit = deficit if isinstance(deficit, dict) else {}
         except Exception:
             # A missing, corrupt or old-format (token bucket) file starts EMPTY: the safe
             # failure is one extra window, never a permanently full one that wedges every session.
             self._waiters = {}
+            self._deficit = {}
             return [], 0.0, 0, 0.0, {}, {}
         # A stamp in the future (clock step) is treated as now, so a skewed clock can hold a
         # slot for at most one window, never forever.
@@ -782,11 +804,10 @@ class SlidingWindowLimiter:
                    # append-only schema: old code ignores unknown keys but drops them on
                    # its wholesale rewrites; new code re-writes them on every poll, so the
                    # registry self-heals within one poll interval (mixed-writer contract)
-                   "waiters": waiters if waiters is not None else getattr(self, "_waiters", {})}
+                   "waiters": waiters if waiters is not None else getattr(self, "_waiters", {}),
+                   "deficit": deficit if deficit is not None else getattr(self, "_deficit", {})}
         if grants is not None:
             payload["grants"] = grants
-        if deficit is not None:
-            payload["deficit"] = deficit
         data = json.dumps(payload).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
@@ -896,9 +917,14 @@ class SlidingWindowLimiter:
                     own_counts[o] = own_counts.get(o, 0) + 1
                 prio_grants = _prio_grants_sliding(stamps, self._owners)
                 winner = _pick_winner(waiters, now, cfg, self._owners, own_counts, self.limit,
-                                      prio_grants)
+                                      prio_grants, deficit=self._deficit)
                 if winner is not None:
                     w = waiters[winner]
+                    if cfg["policy"] == "deficit":
+                        # a grant spends the inter-slot credit; the remainder persists as residual
+                        w_owner = w.get("owner", "")
+                        debt = _owner_debt(self._deficit, waiters, w_owner, now, cfg)
+                        self._deficit[w_owner] = max(0.0, debt - WINDOW_SECONDS / self.limit)
                     if w.get("owner") == owner:
                         # our own owner outranks the queue: serve the caller directly
                         waiters.pop(winner, None)

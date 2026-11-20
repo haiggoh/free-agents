@@ -795,6 +795,122 @@ class WaiterQueueTests(unittest.TestCase):
             self.assertNotIn("granted", st["waiters"][tA])
 
 
+class DeficitPolicyTests(unittest.TestCase):
+    """Deficit policy (design 2026-11-19 section 4.1, opt-in via policy=deficit): rank by
+    (class, debt, -arrived). An owner's debt = stored residual + sum over its waiting
+    requests of (now-arrived)*deficit_rate, capped at deficit_cap_seconds; a grant spends
+    the inter-slot credit (WINDOW/limit) and persists the remainder as the owner's residual."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, "state")
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
+        cfg = tempfile.TemporaryDirectory()
+        self.addCleanup(cfg.cleanup)
+        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg.name
+        patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ["LA_NVIDIA_POLICY"] = "deficit"
+
+    def _state(self):
+        with open(self.path) as f:
+            return json.load(f)
+
+    def _as(self, owner):
+        return unittest.mock.patch.dict(os.environ, {"LA_LIMITER_OWNER": owner})
+
+    def _seed(self, stamps, waiters, owners=None, deficit=None, limit=4):
+        doc = {"stamps": stamps, "limit": limit, "waiters": waiters}
+        if owners:
+            doc["owners"] = owners
+        if deficit:
+            doc["deficit"] = deficit
+        with open(self.path, "w") as f:
+            json.dump(doc, f)
+
+    def _w(self, token, owner, arrived, last_seen):
+        return {token: {"owner": owner, "arrived": arrived, "last_seen": last_seen,
+                        "class": "normal", "kind": "interactive", "model": ""}}
+
+    def test_owner_with_two_waiters_wins_over_earlier_single_waiter(self):
+        # debt is summed over the owner's waiting requests: sess-A has 2 waiters (debt 200)
+        # vs sess-B's single waiter (debt 150) — deficit picks A, FIFO would pick B
+        now = [FROZEN + 100]
+        tA1 = rl._waiter_token("sess-A")
+        tA2 = rl._waiter_token("sess-A")
+        tB = rl._waiter_token("sess-B")
+        self._seed([{"t": FROZEN, "o": "sess-X"}] * 3,
+                   {**self._w(tA1, "sess-A", FROZEN, now[0]),
+                    **self._w(tA2, "sess-A", FROZEN, now[0]),
+                    **self._w(tB, "sess-B", FROZEN - 50, now[0])})
+        b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: now[0])
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            self.assertEqual(self._state()["stamps"][-1]["o"], "sess-A",
+                             "deficit: the owner with more accumulated wait wins over FIFO")
+
+    def test_debt_capped_at_deficit_cap_seconds(self):
+        # sess-A raw debt 5000 (residual), sess-B raw debt 700; cap 600 -> both 600 -> tie
+        # -> FIFO: the EARLIER arrival (sess-B) wins. Uncapped, sess-A would win.
+        now = [FROZEN + 700]
+        os.environ["LA_NVIDIA_DEFICIT_CAP_SECONDS"] = "600"
+        tA = rl._waiter_token("sess-A")
+        tB = rl._waiter_token("sess-B")
+        self._seed([{"t": FROZEN, "o": "sess-X"}] * 3,
+                   {**self._w(tA, "sess-A", now[0], now[0]),
+                    **self._w(tB, "sess-B", FROZEN, now[0])},
+                   deficit={"sess-A": 5000.0})
+        b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: now[0])
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            self.assertEqual(self._state()["stamps"][-1]["o"], "sess-B",
+                             "capped debts tie -> FIFO decides, not the bigger raw debt")
+
+    def test_grant_spends_credit_and_persists_residual(self):
+        # limit 4 -> inter-slot credit = 60/4 = 15s; sess-A debt = 200 residual + 100 waited
+        # = 300 -> after the grant the residual must be 300 - 15 = 285
+        now = [FROZEN + 100]
+        tA = rl._waiter_token("sess-A")
+        tB = rl._waiter_token("sess-B")
+        self._seed([{"t": FROZEN, "o": "sess-X"}] * 3,
+                   {**self._w(tA, "sess-A", FROZEN, now[0]),
+                    **self._w(tB, "sess-B", FROZEN + 90, now[0])},
+                   deficit={"sess-A": 200.0})
+        b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: now[0])
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            st = self._state()
+            self.assertEqual(st["stamps"][-1]["o"], "sess-A")
+            self.assertAlmostEqual(st["deficit"]["sess-A"], 285.0, places=6,
+                                   msg="grant spends the inter-slot credit, residual persists")
+
+    def test_policy_switch_between_aging_and_deficit(self):
+        # identical seed: under aging the earliest arrival wins; under deficit the max-debt
+        # owner wins — the policy is a hot env/saved switch
+        def run(policy):
+            now = [FROZEN + 100]
+            os.environ["LA_NVIDIA_POLICY"] = policy
+            tA = rl._waiter_token("sess-A")
+            tB = rl._waiter_token("sess-B")
+            self._seed([{"t": FROZEN, "o": "sess-X"}] * 3,
+                       {**self._w(tA, "sess-A", FROZEN, now[0]),
+                        **self._w(tB, "sess-B", FROZEN - 50, now[0])},
+                       deficit={"sess-A": 500.0})
+            b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: now[0])
+            with self._as("sess-C"):
+                tC = rl._waiter_token("sess-C")
+                b.try_acquire(token=tC)
+                return self._state()["stamps"][-1]["o"]
+        self.assertEqual(run("aging"), "sess-B", "aging: FIFO, earliest arrival")
+        self.assertEqual(run("deficit"), "sess-A", "deficit: residual + wait beats earlier arrival")
+
+
 if __name__ == "__main__":
     mp.set_start_method("fork", force=True)
     unittest.main(verbosity=2)
