@@ -248,14 +248,46 @@ def _register_waiter(waiters: dict, token: str, owner: str, cls: str, kind: str,
         w["kind"] = kind
 
 
-def _pick_winner(waiters: dict, now: float, cfg: dict) -> str | None:
+def _tier(arrived: float, now: float, t1: float, t2: float) -> int:
+    """Aging tier of a waiter: 0 fresh, 1 past tier1_seconds, 2 past tier2_seconds."""
+    waited = now - arrived
+    if waited >= t2:
+        return 2
+    if waited >= t1:
+        return 1
+    return 0
+
+
+def _rank(w: dict, now: float, cfg: dict) -> tuple:
+    """Higher wins. (class, tier, boost, -arrived): a manual lane beats normal; an aged
+    request beats a fresh one; within tier 0 only, dispatch/background rank ahead of
+    interactive when dispatch_boost is on (they still yield to tier 1+ and to lanes,
+    because tier sorts before boost); then FIFO by arrival."""
+    cls = 1 if w.get("class") == "priority" else 0
+    arrived = float(w.get("arrived", now))
+    tier = _tier(arrived, now, cfg["tier1_seconds"], cfg["tier2_seconds"])
+    boost = 1 if (tier == 0 and cfg["dispatch_boost"]
+                  and w.get("kind") in ("dispatch", "background")) else 0
+    return (cls, tier, boost, -arrived)
+
+
+def _pick_winner(waiters: dict, now: float, cfg: dict, owners: dict,
+                 own_counts: dict, limit: int) -> str | None:
     """Rank the live waiters (stale already pruned, granted entries excluded) and return
-    the winning token. FIFO by arrival — the aging tiers, dispatch boost, lane class,
-    share cap and rpm_scale eligibility extend this rank in the later tasks."""
-    live = [tok for tok, w in waiters.items() if "granted" not in w]
-    if not live:
+    the winning token. An owner already at its own rpm_scale cap is skipped this round —
+    the slot goes to the next eligible waiter (rpm_scale semantics unchanged)."""
+    eligible = []
+    for tok, w in waiters.items():
+        if "granted" in w:
+            continue
+        owner = w.get("owner", "")
+        opts = _owner_opts(owners, owner)
+        own_limit = max(1, int(limit * opts["rpm_scale"]))
+        if own_counts.get(owner, 0) < own_limit:
+            eligible.append(tok)
+    if not eligible:
         return None
-    return min(live, key=lambda tok: (float(waiters[tok].get("arrived", 0.0)), tok))
+    return max(eligible, key=lambda tok: _rank(waiters[tok], now, cfg))
 
 
 def _owner() -> str:
@@ -820,23 +852,29 @@ class SlidingWindowLimiter:
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return need_seconds()
 
-            if capacity_free:
-                winner = _pick_winner(waiters, now, cfg)
-                w = waiters[winner]
-                if w.get("owner") == owner:
-                    # our own owner outranks the queue: serve the caller directly
-                    waiters.pop(winner, None)
-                    stamps.append(_stamp(now, owner))
-                    self._consecutive_429s = 0
-                    self._last_429_time = 0.0
-                    self._write(fd, stamps, cooldown_until, 0, 0.0, models)
-                    return 0.0
-                # book the slot under the WINNER's owner; the winner acks on its next poll
-                stamps.append(_stamp(now, w["owner"]))
-                w["granted"] = now
-                _register_waiter(waiters, token, owner, cls, wkind, model, now)
-                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
-                return need_seconds()
+            window_free = len(stamps) < normal_limit
+            if window_free:
+                own_counts = {}
+                for s in stamps:
+                    _t, o = _stamp_parts(s)
+                    own_counts[o] = own_counts.get(o, 0) + 1
+                winner = _pick_winner(waiters, now, cfg, self._owners, own_counts, self.limit)
+                if winner is not None:
+                    w = waiters[winner]
+                    if w.get("owner") == owner:
+                        # our own owner outranks the queue: serve the caller directly
+                        waiters.pop(winner, None)
+                        stamps.append(_stamp(now, owner))
+                        self._consecutive_429s = 0
+                        self._last_429_time = 0.0
+                        self._write(fd, stamps, cooldown_until, 0, 0.0, models)
+                        return 0.0
+                    # book the slot under the WINNER's owner; the winner acks on its next poll
+                    stamps.append(_stamp(now, w["owner"]))
+                    w["granted"] = now
+                    _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                    self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
+                    return need_seconds()
 
             _register_waiter(waiters, token, owner, cls, wkind, model, now)
             self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)

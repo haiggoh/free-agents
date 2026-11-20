@@ -611,6 +611,102 @@ class WaiterQueueTests(unittest.TestCase):
             self.assertGreater(b.try_acquire(token=tA), 0.0)
             self.assertIn(tA, self._state()["waiters"])
 
+    # --- Task 2: aging tiers, tier-0-only dispatch boost, rpm_scale eligibility ---
+
+    def _seed(self, stamps, waiters, owners=None):
+        doc = {"stamps": stamps, "limit": 4, "waiters": waiters}
+        if owners:
+            doc["owners"] = owners
+        with open(self.path, "w") as f:
+            json.dump(doc, f)
+
+    def _waiter(self, token, owner, arrived, kind="interactive", cls="normal", last_seen=None):
+        return {token: {"owner": owner, "arrived": arrived,
+                        "last_seen": arrived if last_seen is None else last_seen,
+                        "class": cls, "kind": kind, "model": ""}}
+
+    def test_dispatch_boost_within_tier0(self):
+        now = [FROZEN]
+        os.environ["LA_NVIDIA_TIER1_SECONDS"] = "600"     # keep both waiters in tier 0
+        os.environ["LA_NVIDIA_TIER2_SECONDS"] = "3600"
+        os.environ["LA_NVIDIA_WAITER_TTL"] = "300"
+        tA = rl._waiter_token("sess-A")
+        tB = rl._waiter_token("sess-B")
+        self._seed([{"t": FROZEN, "o": "sess-A"}] * 3,          # one slot free
+                   {**self._waiter(tA, "sess-A", FROZEN),
+                    **self._waiter(tB, "sess-B", FROZEN + 1, kind="dispatch")})
+        b = self._limiter(now)
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            st = self._state()
+            self.assertEqual(st["stamps"][-1]["o"], "sess-B",
+                             "tier-0 dispatch outranks the earlier interactive")
+            self.assertIn("granted", st["waiters"][tB])
+
+    def test_dispatch_boost_off_falls_back_to_fifo(self):
+        now = [FROZEN]
+        os.environ["LA_NVIDIA_TIER1_SECONDS"] = "600"
+        os.environ["LA_NVIDIA_TIER2_SECONDS"] = "3600"
+        os.environ["LA_NVIDIA_WAITER_TTL"] = "300"
+        os.environ["LA_NVIDIA_DISPATCH_BOOST"] = "0"
+        tA = rl._waiter_token("sess-A")
+        tB = rl._waiter_token("sess-B")
+        self._seed([{"t": FROZEN, "o": "sess-A"}] * 3,
+                   {**self._waiter(tA, "sess-A", FROZEN),
+                    **self._waiter(tB, "sess-B", FROZEN + 1, kind="dispatch")})
+        b = self._limiter(now)
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            self.assertEqual(self._state()["stamps"][-1]["o"], "sess-A",
+                             "boost off: FIFO, the earlier interactive wins")
+
+    def test_aged_tier1_beats_tier0_dispatch(self):
+        now = [FROZEN + 61]                                   # default tier1 = 45s
+        os.environ["LA_NVIDIA_WAITER_TTL"] = "300"
+        tA = rl._waiter_token("sess-A")
+        tB = rl._waiter_token("sess-B")
+        self._seed([], {**self._waiter(tA, "sess-A", FROZEN),          # waited 61s -> tier 1
+                        **self._waiter(tB, "sess-B", FROZEN + 60, kind="dispatch")})  # tier 0
+        b = self._limiter(now)
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            self.assertEqual(self._state()["stamps"][-1]["o"], "sess-A",
+                             "an aged tier-1 request outranks a tier-0 dispatch")
+
+    def test_tier2_outranks_tier1(self):
+        now = [FROZEN + 200]                                  # tier1=45, tier2=150
+        tA = rl._waiter_token("sess-A")
+        tB = rl._waiter_token("sess-B")
+        # both heartbeated just now (ttl max is 120), but arrived long ago
+        self._seed([], {**self._waiter(tA, "sess-A", FROZEN, last_seen=now[0]),          # tier 2
+                        **self._waiter(tB, "sess-B", FROZEN + 150, last_seen=now[0])})    # tier 1
+        b = self._limiter(now)
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            self.assertEqual(self._state()["stamps"][-1]["o"], "sess-A")
+
+    def test_rpm_scale_owner_skipped_when_at_cap(self):
+        now = [FROZEN]
+        os.environ["LA_NVIDIA_WAITER_TTL"] = "300"
+        tA = rl._waiter_token("sess-A")
+        tB = rl._waiter_token("sess-B")
+        self._seed([{"t": FROZEN, "o": "sess-A"}] * 2,         # window has room (2 < 4) ...
+                   {**self._waiter(tA, "sess-A", FROZEN),
+                    **self._waiter(tB, "sess-B", FROZEN)},
+                   owners={"sess-A": {"rpm_scale": 0.5}})     # ... but A is at its cap of 2
+        b = self._limiter(now)
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            st = self._state()
+            self.assertEqual(st["stamps"][-1]["o"], "sess-B",
+                             "the capped owner is skipped; the slot goes to the next eligible")
+            self.assertNotIn("granted", st["waiters"][tA])
+
 
 if __name__ == "__main__":
     mp.set_start_method("fork", force=True)
