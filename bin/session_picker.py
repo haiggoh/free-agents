@@ -555,6 +555,7 @@ PROVIDER_SIGNUP_URLS = m.PROVIDER_SIGNUP_URLS   # one table: install/setup-api-k
 TOOLS = {
     "tool:keys": lambda: ["python3", str(REPO / "install/setup-api-keys.py")],
     "tool:rl-status": lambda: ["python3", str(BIN / "rate_limiter.py"), "status"],
+    "tool:rl-lane": lambda: ["python3", str(BIN / "rate_limiter.py"), "lane-toggle"],
     "tool:report": lambda: ["bash", str(BIN / "local-capable-filter.sh"), "--report",
                             str(REPO / "config/local-capable-remote-models.psv"), "--roster",
                             str(REPO / "config/remote-agents.sh")],

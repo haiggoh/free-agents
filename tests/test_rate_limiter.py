@@ -505,6 +505,30 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(self._state()["owners"]["sess-B"]["kind"], "dispatch")
 
+    def test_cli_lane_toggle_flips_own_lane(self):
+        # the picker's lane row calls `lane-toggle`: a USER action, so no approval gate
+        with tempfile.TemporaryDirectory() as cfg:
+            with unittest.mock.patch.dict(os.environ, {
+                    "LA_NVIDIA_THROTTLE_STATE": self.path, "LA_LIMITER_OWNER": "sess-A",
+                    "LA_SESSION_MENU_CONFIG_DIR": cfg}):
+                with open(self.path, "w") as f:
+                    json.dump({"stamps": [], "limit": 40}, f)
+                import contextlib
+                import io
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = rl.main(["lane-toggle"])
+                self.assertEqual(rc, 0)
+                out = json.loads(buf.getvalue())
+                self.assertEqual((out["owner"], out["priority"], out["approved_by_user"]),
+                                 ("sess-A", True, True))
+                self.assertEqual(self._state()["owners"]["sess-A"]["priority"], True)
+                self.assertEqual(self._state()["owners"]["sess-A"].get("approved_by_user"), True,
+                                 "the approval is recorded in the persisted owner opts")
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(rl.main(["lane-toggle"]), 0)
+                self.assertEqual(self._state()["owners"]["sess-A"]["priority"], False)
+
     def test_lane_approval_refuses_nontty_without_user_approved(self):
         # stdin is not a TTY under pytest: an agent-initiated lane must be refused (rc != 0)
         with unittest.mock.patch.dict(os.environ, {"LA_NVIDIA_THROTTLE_STATE": self.path}):

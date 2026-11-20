@@ -1318,6 +1318,31 @@ def set_owner(limiter, owner: str, priority: bool | None, rpm_scale: float | Non
         os.close(fd)
 
 
+def _queue_position(limiter) -> int | None:
+    """This owner's best position among the live waiters (1 = next grant), or None when the
+    owner is not queued. Informational (probe); ranked by the aging key."""
+    fd = limiter._locked()
+    try:
+        now = limiter._clock()
+        if isinstance(limiter, SlidingWindowLimiter):
+            _s, _cd, _c, _l, _m, waiters = limiter._read(fd, now)
+        else:
+            limiter._load_state(fd, now)
+            waiters = limiter._waiters
+        cfg = _cfg()
+        _prune_waiters(waiters, now, cfg["waiter_ttl_seconds"])
+        owner = _owner()
+        live = [tok for tok, w in waiters.items() if "granted" not in w]
+        own = [tok for tok in live if waiters[tok].get("owner") == owner]
+        if not own:
+            return None
+        ranked = sorted(live, key=lambda t: _rank(waiters[t], now, cfg), reverse=True)
+        return ranked.index(own[0]) + 1
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def external_occupancy(limiter, owner: str) -> int:
     """0.50.1 probe: how many in-window slots belong to OTHER owners — the classifier that
     tells 'concurrent sessions ate my bucket' apart from a genuine defect."""
@@ -1383,6 +1408,9 @@ def main(argv: list[str]) -> int:
                     help="record that the user approved an agent-initiated --priority lane "
                          "(required in ask mode outside a TTY)")
     sub.add_parser("probe", help="print this owner's external occupancy (other owners' slots in window)")
+    sub.add_parser("lane-toggle",
+                   help="flip THIS owner's priority lane (a user action — the picker calls it; "
+                        "no approval gate, recorded as user-approved)")
     sub.add_parser("menu", help="open the session picker's rate limiter screen")
     args = parser.parse_args(argv)
 
@@ -1424,7 +1452,15 @@ def main(argv: list[str]) -> int:
         return 0
     if args.cmd == "probe":
         occ = external_occupancy(limiter, _owner())
-        print(json.dumps({"owner": _owner(), "external_in_window": occ}))
+        print(json.dumps({"owner": _owner(), "external_in_window": occ,
+                          "queue_position": _queue_position(limiter)}))
+        return 0
+    if args.cmd == "lane-toggle":
+        owner = _owner()
+        info = owners_info(limiter)
+        cur = bool((info.get("owners") or {}).get(owner, {}).get("priority"))
+        set_owner(limiter, owner, priority=not cur, rpm_scale=None, approved=True)
+        print(json.dumps({"owner": owner, "priority": not cur, "approved_by_user": True}))
         return 0
     try:
         waited = limiter.acquire(args.max_wait, priority=args.priority)

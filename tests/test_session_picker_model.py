@@ -145,6 +145,44 @@ class RateLimiterScreenTests(unittest.TestCase):
             screen.handle_key(key)
         self.assertEqual(saved, {"max_cooldown": 600, "backoff_multiplier": 3.0, "max_retries": 10})
 
+    def test_fairness_rows_exist_with_limiter_defaults_and_persist(self):
+        # every new knob is a real row on the screen (no placeholders), shows the limiter's
+        # default, and persists through on_save
+        import rate_limiter as rl
+        saved = {}
+        screen = m.RateLimiterScreen(m.Settings(), on_save=saved.update)
+        keys = {a.key for a in screen.actions()}
+        for k in ("p", "t", "e", "g", "h", "j", "k", "l", "m", "a", "v"):
+            self.assertIn(k, keys, f"fairness row {k!r} missing from the rate-limiter screen")
+        labels = {a.key: a.label for a in screen.actions()}
+        self.assertIn(rl.DEFAULT_POLICY, labels["p"])
+        self.assertIn(f"{int(rl.DEFAULT_TIER1_SECONDS)}s", labels["t"])
+        self.assertIn(f"{int(rl.DEFAULT_TIER2_SECONDS)}s", labels["e"])
+        self.assertIn(f"{int(rl.DEFAULT_WAITER_TTL_SECONDS)}s", labels["g"])
+        # policy cycles through every choice and persists each step (default aging first)
+        seen = []
+        for _ in range(3):
+            screen.handle_key("p")
+            seen.append(saved["policy"])
+        self.assertEqual(seen, ["deficit", "legacy", "aging"])
+        screen.handle_key("t")
+        self.assertIn(saved["tier1_seconds"], m.RateLimiterScreen.TIER1_STEPS)
+        self.assertNotEqual(saved["tier1_seconds"], 45)
+        screen.handle_key("m")
+        self.assertEqual(saved["dispatch_boost"], False)
+        screen.handle_key("a")
+        self.assertEqual(saved["lane_approval"], "agent")
+
+    def test_rate_limiter_reachable_from_remote_nav(self):
+        # the DEFAULT path: Remote screen's "n" row -> Nav("rate_limiter") -> screen with rows
+        s = m.Settings()
+        remote = m.RemoteScreen(s, remote_agents())
+        navs = [a for a in remote.actions() if a.key == "n"]
+        self.assertEqual(len(navs), 1, "Remote screen must offer the rate-limiter row")
+        self.assertEqual(remote.handle_key("n"), m.Nav("rate_limiter"))
+        keys = {a.key for a in m.RateLimiterScreen(s).actions()}
+        self.assertIn("p", keys)
+
 
 class MemoryGuardScreenTests(unittest.TestCase):
     def test_every_cycle_includes_the_store_default(self):

@@ -2662,6 +2662,14 @@ class RateLimiterScreen(Screen):
     MAX_COOLDOWN_STEPS = (120, 300, 600, 900)
     MULTIPLIER_STEPS = (1.5, 2.0, 3.0)
     RETRY_STEPS = (0, 3, 5, 10)
+    # fairness rows (2026-11-20 design): every step list includes the limiter's default
+    TIER1_STEPS = (15, 30, 45, 60, 120, 300, 600)
+    TIER2_STEPS = (60, 150, 300, 600, 1800, 3600)
+    TTL_STEPS = (5, 10, 15, 30, 60, 120)
+    POLL_STEPS = (0.5, 1, 2, 5, 10)
+    DEFICIT_RATE_STEPS = (0.5, 1.0, 2.0, 5.0, 10.0)
+    DEFICIT_CAP_STEPS = (60, 300, 600, 1800, 3600, 7200)
+    LANE_CAP_STEPS = (0.05, 0.1, 0.2, 0.3, 0.5, 0.9)
 
     def __init__(self, settings: Settings, owner: str = DIRECT_ROOT,
                  on_save: Callable[[dict], object] | None = None):
@@ -2679,8 +2687,12 @@ class RateLimiterScreen(Screen):
     def _cycle(self, key, steps, default, d: int = 1):
         self._set(key, _next(steps, self.value(key, default), d))
 
+    def _cycle_choice(self, key, choices, default, d: int = 1):
+        self._set(key, _next(choices, self.value(key, default), d))
+
     def actions(self):
         mode = self.value("mode", "sliding_window")
+        D = sms.RATE_LIMITER_DEFAULTS
         acts = [
             Action("o", f"Mode: {mode}",
                    lambda: self._set("mode", _next(sms.RATE_LIMITER_MODES, mode)),
@@ -2717,6 +2729,46 @@ class RateLimiterScreen(Screen):
                    lambda: self._cycle("max_retries", self.RETRY_STEPS, 5),
                    step=lambda d: self._cycle("max_retries", self.RETRY_STEPS, 5, d),
                    labels=tuple(str(v) for v in self.RETRY_STEPS)),
+            Action("p", f"Grant policy: {self.value('policy', D['policy'])}",
+                   lambda: self._cycle_choice("policy", sms._RL_CHOICES["policy"], D["policy"]),
+                   step=lambda d: self._cycle_choice("policy", sms._RL_CHOICES["policy"], D["policy"], d),
+                   labels=tuple(sms._RL_CHOICES["policy"])),
+            Action("t", f"Aging tier 1: {self.value('tier1_seconds', D['tier1_seconds'])}s",
+                   lambda: self._cycle("tier1_seconds", self.TIER1_STEPS, D["tier1_seconds"]),
+                   step=lambda d: self._cycle("tier1_seconds", self.TIER1_STEPS, D["tier1_seconds"], d),
+                   labels=tuple(f"{v}s" for v in self.TIER1_STEPS)),
+            Action("e", f"Aging tier 2: {self.value('tier2_seconds', D['tier2_seconds'])}s",
+                   lambda: self._cycle("tier2_seconds", self.TIER2_STEPS, D["tier2_seconds"]),
+                   step=lambda d: self._cycle("tier2_seconds", self.TIER2_STEPS, D["tier2_seconds"], d),
+                   labels=tuple(f"{v}s" for v in self.TIER2_STEPS)),
+            Action("g", f"Waiter TTL: {self.value('waiter_ttl_seconds', D['waiter_ttl_seconds'])}s",
+                   lambda: self._cycle("waiter_ttl_seconds", self.TTL_STEPS, D["waiter_ttl_seconds"]),
+                   step=lambda d: self._cycle("waiter_ttl_seconds", self.TTL_STEPS, D["waiter_ttl_seconds"], d),
+                   labels=tuple(f"{v}s" for v in self.TTL_STEPS)),
+            Action("h", f"Waiter poll: {self.value('waiter_poll_seconds', D['waiter_poll_seconds'])}s",
+                   lambda: self._cycle("waiter_poll_seconds", self.POLL_STEPS, D["waiter_poll_seconds"]),
+                   step=lambda d: self._cycle("waiter_poll_seconds", self.POLL_STEPS, D["waiter_poll_seconds"], d),
+                   labels=tuple(f"{v}s" for v in self.POLL_STEPS)),
+            Action("j", f"Deficit rate: ×{self.value('deficit_rate', D['deficit_rate'])}",
+                   lambda: self._cycle("deficit_rate", self.DEFICIT_RATE_STEPS, D["deficit_rate"]),
+                   step=lambda d: self._cycle("deficit_rate", self.DEFICIT_RATE_STEPS, D["deficit_rate"], d),
+                   labels=tuple(f"×{v:g}" for v in self.DEFICIT_RATE_STEPS)),
+            Action("k", f"Deficit cap: {self.value('deficit_cap_seconds', D['deficit_cap_seconds'])}s",
+                   lambda: self._cycle("deficit_cap_seconds", self.DEFICIT_CAP_STEPS, D["deficit_cap_seconds"]),
+                   step=lambda d: self._cycle("deficit_cap_seconds", self.DEFICIT_CAP_STEPS, D["deficit_cap_seconds"], d),
+                   labels=tuple(f"{v}s" for v in self.DEFICIT_CAP_STEPS)),
+            Action("l", f"Lane share cap: {self.value('lane_share_cap', D['lane_share_cap'])}",
+                   lambda: self._cycle("lane_share_cap", self.LANE_CAP_STEPS, D["lane_share_cap"]),
+                   step=lambda d: self._cycle("lane_share_cap", self.LANE_CAP_STEPS, D["lane_share_cap"], d),
+                   labels=tuple(f"{v:g}" for v in self.LANE_CAP_STEPS)),
+            Action("m", f"Dispatch boost: {'on' if self.value('dispatch_boost', D['dispatch_boost']) else 'off'}",
+                   lambda: self._set("dispatch_boost", not self.value("dispatch_boost", D["dispatch_boost"])),
+                   labels=("on", "off")),
+            Action("a", f"Lane approval: {self.value('lane_approval', D['lane_approval'])}",
+                   lambda: self._cycle_choice("lane_approval", sms._RL_CHOICES["lane_approval"], D["lane_approval"]),
+                   step=lambda d: self._cycle_choice("lane_approval", sms._RL_CHOICES["lane_approval"], D["lane_approval"], d),
+                   labels=tuple(sms._RL_CHOICES["lane_approval"])),
+            Action("v", "Toggle priority lane for THIS session", lambda: Nav("tool:rl-lane"), section="tools"),
             Action("i", "Show live limiter status", lambda: Nav("tool:rl-status"), section="tools"),
             Action("x", "Reset shared limiter state file", lambda: Nav("tool:rl-reset"), section="tools"),
         ]
