@@ -770,6 +770,9 @@ def build() -> None:
                             nxt = ch[(i + d) % len(ch)]
                         ap.save(store, {k: nxt})
                         v.set_text(str(nxt))
+                        # user 2026-11-20: appearance settings apply instantly — reload this
+                        # page so the shell (dark class, tint layer) and rows re-render at once
+                        ui.run_javascript("location.reload()")
 
                     left.on("click", lambda e=None: _step(-step))
                     right.on("click", lambda e=None: _step(+step))
@@ -806,6 +809,8 @@ def build() -> None:
                                 patch["background_blur_requested"] = True
                         ap.save(store, patch)
                         v.set_text("ON" if e.value else "OFF")
+                        # instant apply (user 2026-11-20): reload so shell + rows re-render now
+                        ui.run_javascript("location.reload()")
 
                     ui.checkbox("", value=bool(doc[key]), on_change=_set).classes("switch")
 
