@@ -392,16 +392,12 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
         self.assertEqual(self._state()["stamps"][-1]["o"], "sess-A",
                          "a fresh stamp is attributed even when legacy ones were floats")
 
-    def test_bucket_reserve_blocks_normal_but_priority_passes(self):
-        # capacity 6, reserve 0.2 -> reserve 1.2 tokens: normal stops at tokens>=2.2
+    def test_bucket_reserve_is_a_cap_not_a_partition(self):
+        # capacity 6 with LA_LIMITER_RESERVE=0.2 (setUp): the reserve no longer withholds
+        # tokens — normal traffic fills the whole bucket when nobody is queued
         b = rl.SmoothTokenBucket(self.path, rpm=1, capacity=6, clock=lambda: FROZEN)
         ok = sum(1 for _ in range(10) if b.try_acquire() == 0.0)
-        self.assertEqual(ok, 4, f"normal should stop at the reserve: got {ok}")
-        os.environ["LA_LIMITER_PRIORITY"] = "1"
-        self.assertEqual(b.try_acquire(), 0.0, "priority draws from the reserve")
-        self.assertEqual(b.try_acquire(), 0.0, "priority drains the rest of the bucket")
-        self.assertGreater(b.try_acquire(), 0.0, "bucket empty even for priority")
-        os.environ.pop("LA_LIMITER_PRIORITY", None)
+        self.assertEqual(ok, 6, "no token partition: normal fills the bucket")
 
     def test_reserve_no_longer_partitions_normal_traffic(self):
         # LA_LIMITER_RESERVE=0.2 (setUp) is now the lane SHARE CAP, not a partition: with an
@@ -909,6 +905,116 @@ class DeficitPolicyTests(unittest.TestCase):
                 return self._state()["stamps"][-1]["o"]
         self.assertEqual(run("aging"), "sess-B", "aging: FIFO, earliest arrival")
         self.assertEqual(run("deficit"), "sess-A", "deficit: residual + wait beats earlier arrival")
+
+
+class BucketFairnessTests(unittest.TestCase):
+    """Smooth bucket (the user's live mode, capacity 10) gets the same queue: no barging,
+    the grant books tokens for the winner, the lane cap comes from the additive `grants`
+    rolling list, and the reserve token-partition is retired."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, "state")
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
+        cfg = tempfile.TemporaryDirectory()
+        self.addCleanup(cfg.cleanup)
+        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg.name
+        env["LA_LIMITER_RESERVE"] = "0.2"
+        patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _state(self):
+        with open(self.path) as f:
+            return json.load(f)
+
+    def _as(self, owner):
+        return unittest.mock.patch.dict(os.environ, {"LA_LIMITER_OWNER": owner})
+
+    def _bucket(self, now, rpm=40, capacity=10):
+        return rl.SmoothTokenBucket(self.path, rpm=rpm, capacity=capacity, clock=lambda: now[0])
+
+    def _seed(self, doc):
+        with open(self.path, "w") as f:
+            json.dump(doc, f)
+
+    def _w(self, token, owner, arrived, last_seen, cls="normal", kind="interactive"):
+        return {token: {"owner": owner, "arrived": arrived, "last_seen": last_seen,
+                        "class": cls, "kind": kind, "model": ""}}
+
+    def test_bucket_no_barging_grant_books_tokens_for_winner(self):
+        now = [FROZEN]
+        os.environ["LA_NVIDIA_WAITER_TTL"] = "120"     # the +60s refill step must not prune the waiter
+        b = self._bucket(now, rpm=1, capacity=2)
+        with self._as("sess-A"):
+            self.assertEqual(b.try_acquire(), 0.0)
+            self.assertEqual(b.try_acquire(), 0.0)     # bucket empty (frozen clock: no refill)
+            tA = rl._waiter_token("sess-A")
+            self.assertGreater(b.try_acquire(token=tA), 0.0)
+        now[0] += 60.0                                   # one token refilled (rpm=1)
+        with self._as("sess-B"):
+            tB = rl._waiter_token("sess-B")
+            self.assertGreater(b.try_acquire(token=tB), 0.0, "no barging")
+            st = self._state()
+            self.assertEqual(st["grants"][-1]["o"], "sess-A", "token booked for the winner")
+            self.assertAlmostEqual(st["tokens"], 0.0, places=6)
+            self.assertIn("granted", st["waiters"][tA])
+        with self._as("sess-A"):
+            self.assertEqual(b.try_acquire(token=tA), 0.0, "winner acks")
+
+    def test_bucket_lane_cap_via_grants_list(self):
+        # 8 priority grants in the rolling window (cap = round(0.2*40) = 8) + a normal
+        # waiter present -> the grant goes to the normal waiter
+        now = [FROZEN]
+        tP = rl._waiter_token("sess-A")
+        tN = rl._waiter_token("sess-B")
+        self._seed({"tokens": 10.0, "last_refill": FROZEN, "capacity": 10,
+                    "grants": [{"t": FROZEN, "o": "sess-A", "c": "priority"}] * 8,
+                    "owners": {"sess-A": {"priority": True}},
+                    "waiters": {**self._w(tP, "sess-A", FROZEN, FROZEN, cls="priority"),
+                                **self._w(tN, "sess-B", FROZEN + 1, FROZEN + 1)}})
+        b = self._bucket(now)
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            st = self._state()
+            self.assertEqual(st["grants"][-1]["o"], "sess-B", "cap reached: normal wins")
+            self.assertEqual(st["grants"][-1]["c"], "normal")
+
+    def test_bucket_lane_cap_free_without_normal_waiters(self):
+        now = [FROZEN]
+        tP = rl._waiter_token("sess-A")
+        self._seed({"tokens": 10.0, "last_refill": FROZEN, "capacity": 10,
+                    "grants": [{"t": FROZEN, "o": "sess-A", "c": "priority"}] * 8,
+                    "owners": {"sess-A": {"priority": True}},
+                    "waiters": {**self._w(tP, "sess-A", FROZEN, FROZEN, cls="priority")}})
+        b = self._bucket(now)
+        with self._as("sess-C"):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            self.assertEqual(self._state()["grants"][-1]["o"], "sess-A",
+                             "no normal waiters: the cap does not bind (zero idle capacity)")
+
+    def test_bucket_user_scenario_capacity10(self):
+        # the user's live config shape: capacity 10, rpm 40; frozen clock, refill by advancing
+        now = [FROZEN]
+        b = self._bucket(now, rpm=40, capacity=10)
+        with self._as("sess-A"):
+            for _ in range(10):
+                self.assertEqual(b.try_acquire(), 0.0)   # full burst, capacity 10
+            tA = rl._waiter_token("sess-A")
+            self.assertGreater(b.try_acquire(token=tA), 0.0)
+        now[0] += 2.0                                     # refill 2 * 40/60 = 1.333 tokens
+        with self._as("sess-B"):
+            tB = rl._waiter_token("sess-B")
+            self.assertGreater(b.try_acquire(token=tB), 0.0)
+            st = self._state()
+            self.assertAlmostEqual(st["tokens"], 2 * 40 / 60 - 1.0, places=6)
+            self.assertEqual(st["grants"][-1]["o"], "sess-A")
+        with self._as("sess-A"):
+            self.assertEqual(b.try_acquire(token=tA), 0.0)
 
 
 if __name__ == "__main__":

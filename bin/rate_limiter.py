@@ -453,6 +453,9 @@ class SmoothTokenBucket:
         self._last_429_time = 0.0
         self._models: dict = {}           # per-model cooldowns, same shape as the window's
         self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}, live-editable
+        self._waiters: dict = {}          # fairness queue (same schema as the window's)
+        self._deficit: dict = {}          # deficit policy residuals
+        self._grants: list = []           # rolling 60s grant log; feeds the lane share cap
         self._load()
 
     def _load(self):
@@ -467,6 +470,9 @@ class SmoothTokenBucket:
                     self._last_refill = self._clock()
                     self._cooldown_until = 0.0
                     self._consecutive_429s = 0
+                    self._waiters = {}
+                    self._deficit = {}
+                    self._grants = []
                 else:
                     self._tokens = float(data.get('tokens', self.capacity))
                     self._last_refill = float(data.get('last_refill', self._clock()))
@@ -475,6 +481,12 @@ class SmoothTokenBucket:
                     self._last_429_time = float(data.get('last_429_time', 0.0))
                     owners = data.get('owners', {})
                     self._owners = owners if isinstance(owners, dict) else {}
+                    waiters = data.get('waiters', {})
+                    self._waiters = waiters if isinstance(waiters, dict) else {}
+                    deficit = data.get('deficit', {})
+                    self._deficit = deficit if isinstance(deficit, dict) else {}
+                    grants = data.get('grants', [])
+                    self._grants = [g for g in grants if isinstance(g, dict)] if isinstance(grants, list) else []
             except Exception:
                 self._tokens = float(self.capacity)
                 self._last_refill = self._clock()
@@ -482,6 +494,9 @@ class SmoothTokenBucket:
                 self._consecutive_429s = 0
                 self._last_429_time = 0.0
                 self._owners = {}
+                self._waiters = {}
+                self._deficit = {}
+                self._grants = []
 
     def _save(self):
         data = {
@@ -492,7 +507,10 @@ class SmoothTokenBucket:
             'cooldown_until': self._cooldown_until,
             'consecutive_429s': self._consecutive_429s,
             'last_429_time': self._last_429_time,
-            'owners': self._owners
+            'owners': self._owners,
+            'waiters': self._waiters,
+            'deficit': self._deficit,
+            'grants': self._grants
         }
         # Atomic write
         tmp = self.path.with_suffix('.tmp')
@@ -507,7 +525,8 @@ class SmoothTokenBucket:
             self._tokens = min(self.capacity, self._tokens + elapsed * self.rate)
             self._last_refill = now
 
-    def try_acquire(self, priority: bool | None = None) -> float:
+    def try_acquire(self, priority: bool | None = None, token: str | None = None,
+                    kind: str | None = None, model: str | None = None) -> float:
         """Take a token if available. Returns 0.0 on success, else seconds to wait.
 
         Reads state from file on EVERY call (like SlidingWindowLimiter) so concurrent
@@ -515,40 +534,111 @@ class SmoothTokenBucket:
         Resets exponential backoff on successful acquisition only -- an EXPIRED pause no
         longer resets it (0.40.0, same fix as the sliding window).
 
-        0.50.1 priority lane: with LA_LIMITER_RESERVE>0, that fraction of the capacity is
-        reserved for priority acquisitions (per-owner "priority" in the state map, or
-        LA_LIMITER_PRIORITY=1 for this process); normal traffic stops at the reserve.
-        Default 0.0 = off (full 40 for everyone, exactly as before).
         Per-owner rpm_scale s makes this owner's acquisitions cost 1/s tokens (s<1 =
-        throttle: half rate costs 2 tokens)."""
+        throttle: half rate costs 2 tokens).
+
+        Fairness queue — the SAME protocol as SlidingWindowLimiter (shared _pick_winner):
+        acquire()/aacquire() always pass a `token`; a failed call registers in `waiters` and
+        the next affordable token is booked for the policy-ranked winner, logged in the
+        rolling `grants` list (which also feeds the lane share cap). The reserve
+        token-partition is retired: LA_LIMITER_RESERVE is the lane share cap only, and it
+        binds solely while normal waiters are queued. token=None is the legacy peek; an
+        empty registry behaves identically to it."""
         owner = _owner()
         opts = _owner_opts(self._owners, owner)
         prio = opts["priority"] if priority is None else bool(priority)
         cost = 1.0 / opts["rpm_scale"]
-        reserve = 0.0 if prio else self.capacity * _reserve_frac()
+        cfg = _cfg()
+        cls = "priority" if prio else "normal"
+        wkind = kind or _kind(opts)
+        limit = max(1, int(self.rate * 60))
         fd = self._locked()
         try:
             now = self._clock()
             # Read current state from file (handles concurrent updates)
             self._load_state(fd, now)
+            _prune_waiters(self._waiters, now, cfg["waiter_ttl_seconds"])
+            self._grants = [g for g in self._grants
+                            if now - float(g.get("t", 0.0)) < WINDOW_SECONDS]
+
+            def need_seconds() -> float:
+                need = cost - self._tokens
+                return need / self.rate if need > 0 else 1e-3
 
             if now < self._cooldown_until:
+                if token is not None:
+                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
                 self._save_state(fd)
                 return self._cooldown_until - now
 
             self._refill(now)
-            if self._tokens >= cost and self._tokens - cost >= reserve:
-                self._tokens -= cost
-                # SUCCESS: Reset exponential backoff counter
-                self._consecutive_429s = 0
-                self._last_429_time = 0.0
+            if token is None:
+                # legacy peek: today's exact semantics (minus the retired reserve partition)
+                if self._tokens >= cost:
+                    self._tokens -= cost
+                    # SUCCESS: Reset exponential backoff counter
+                    self._consecutive_429s = 0
+                    self._last_429_time = 0.0
+                    self._save_state(fd)
+                    return 0.0
+                self._save_state(fd)
+                return max(1e-3, need_seconds())
+
+            # a granted entry means our token was already booked for us by the granting poll
+            own_w = self._waiters.get(token)
+            if own_w is not None and "granted" in own_w:
+                self._waiters.pop(token, None)
                 self._save_state(fd)
                 return 0.0
-            # Time until the next affordable token
-            need = cost + reserve - self._tokens
-            wait = need / self.rate if need > 0 else 1e-3
+
+            registry = {t: w for t, w in self._waiters.items()
+                        if "granted" not in w and t != token}
+            if cfg["policy"] == "legacy" or not registry:
+                # empty queue (or kill-switch): uncontended behavior, identical to token=None
+                if self._tokens >= cost:
+                    self._waiters.pop(token, None)
+                    self._tokens -= cost
+                    self._grants.append({"t": now, "o": owner, "c": cls})
+                    self._consecutive_429s = 0
+                    self._last_429_time = 0.0
+                    self._save_state(fd)
+                    return 0.0
+                _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                self._save_state(fd)
+                return max(1e-3, need_seconds())
+
+            prio_grants = sum(1 for g in self._grants if g.get("c") == "priority")
+            winner = _pick_winner(self._waiters, now, cfg, self._owners, {}, limit,
+                                  prio_grants, deficit=self._deficit)
+            if winner is not None:
+                w = self._waiters[winner]
+                w_opts = _owner_opts(self._owners, w.get("owner", ""))
+                w_cost = 1.0 / w_opts["rpm_scale"]
+                if self._tokens >= w_cost:
+                    if cfg["policy"] == "deficit":
+                        w_owner = w.get("owner", "")
+                        debt = _owner_debt(self._deficit, self._waiters, w_owner, now, cfg)
+                        self._deficit[w_owner] = max(0.0, debt - WINDOW_SECONDS / limit)
+                    if w.get("owner") == owner:
+                        # our own owner outranks the queue: serve the caller directly
+                        self._waiters.pop(winner, None)
+                        self._tokens -= w_cost
+                        self._grants.append({"t": now, "o": owner, "c": w.get("class", cls)})
+                        self._consecutive_429s = 0
+                        self._last_429_time = 0.0
+                        self._save_state(fd)
+                        return 0.0
+                    # book the token for the WINNER; the winner acks on its next poll
+                    self._tokens -= w_cost
+                    self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", "normal")})
+                    w["granted"] = now
+                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                    self._save_state(fd)
+                    return max(1e-3, need_seconds())
+
+            _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
             self._save_state(fd)
-            return max(1e-3, wait)
+            return max(1e-3, need_seconds())
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -568,6 +658,12 @@ class SmoothTokenBucket:
             self._models = models if isinstance(models, dict) else {}
             owners = state.get('owners', {})
             self._owners = owners if isinstance(owners, dict) else {}
+            waiters = state.get('waiters', {})
+            self._waiters = waiters if isinstance(waiters, dict) else {}
+            deficit = state.get('deficit', {})
+            self._deficit = deficit if isinstance(deficit, dict) else {}
+            grants = state.get('grants', [])
+            self._grants = [g for g in grants if isinstance(g, dict)] if isinstance(grants, list) else []
         except Exception:
             self._tokens = float(self.capacity)
             self._last_refill = now
@@ -576,6 +672,9 @@ class SmoothTokenBucket:
             self._last_429_time = 0.0
             self._models = {}
             self._owners = {}
+            self._waiters = {}
+            self._deficit = {}
+            self._grants = []
         # Refill based on elapsed since last_refill
         elapsed = now - self._last_refill
         if elapsed > 0:
@@ -592,7 +691,12 @@ class SmoothTokenBucket:
             'consecutive_429s': self._consecutive_429s,
             'last_429_time': self._last_429_time,
             'models': self._models,
-            'owners': self._owners
+            'owners': self._owners,
+            # append-only schema: old code ignores unknown keys but drops them on its
+            # wholesale rewrites; new code re-writes them on every poll (self-heal)
+            'waiters': self._waiters,
+            'deficit': self._deficit,
+            'grants': self._grants
         }).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
@@ -685,29 +789,57 @@ class SmoothTokenBucket:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def acquire(self, max_wait: float | None = None, priority: bool | None = None) -> float:
-        limit = _max_wait(max_wait)
-        waited = 0.0
-        while True:
-            need = self.try_acquire(priority=priority)
-            if need == 0.0:
-                return waited
-            if waited + need > limit:
-                raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
-            time.sleep(need)
-            waited += need
+    def _release(self, token: str) -> None:
+        """Deregister one waiter (the timeout/exception path); a no-op when absent."""
+        fd = self._locked()
+        try:
+            now = self._clock()
+            self._load_state(fd, now)
+            if self._waiters.pop(token, None) is not None:
+                self._save_state(fd)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
-    async def aacquire(self, max_wait: float | None = None, priority: bool | None = None) -> float:
+    def acquire(self, max_wait: float | None = None, priority: bool | None = None,
+                kind: str | None = None, model: str | None = None) -> float:
+        """Block until a token is taken; every sleep is clamped to waiter_poll_seconds so a
+        long machine-wide cooldown never stops the queue heartbeats (same as the window)."""
         limit = _max_wait(max_wait)
         waited = 0.0
-        while True:
-            need = self.try_acquire(priority=priority)
-            if need == 0.0:
-                return waited
-            if waited + need > limit:
-                raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
-            await asyncio.sleep(need)
-            waited += need
+        token = _waiter_token(_owner())
+        poll = _cfg()["waiter_poll_seconds"]
+        try:
+            while True:
+                need = self.try_acquire(priority=priority, token=token, kind=kind, model=model)
+                if need == 0.0:
+                    return waited
+                if waited + need > limit:
+                    raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
+                s = min(need, poll)
+                time.sleep(s)
+                waited += s
+        finally:
+            self._release(token)
+
+    async def aacquire(self, max_wait: float | None = None, priority: bool | None = None,
+                       kind: str | None = None, model: str | None = None) -> float:
+        limit = _max_wait(max_wait)
+        waited = 0.0
+        token = _waiter_token(_owner())
+        poll = _cfg()["waiter_poll_seconds"]
+        try:
+            while True:
+                need = self.try_acquire(priority=priority, token=token, kind=kind, model=model)
+                if need == 0.0:
+                    return waited
+                if waited + need > limit:
+                    raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
+                s = min(need, poll)
+                await asyncio.sleep(s)
+                waited += s
+        finally:
+            self._release(token)
 
     def status(self) -> dict:
         fd = self._locked()
@@ -726,7 +858,12 @@ class SmoothTokenBucket:
                 "cooling_models": _cooling(self._models, now),
                 "base_cooldown": self.base_cooldown,
                 "max_cooldown": self.max_cooldown,
-                "backoff_multiplier": self.backoff_multiplier
+                "backoff_multiplier": self.backoff_multiplier,
+                "waiters": [{"token": t, "owner": w.get("owner", ""),
+                             "waited_s": round(now - float(w.get("arrived", now)), 1),
+                             "class": w.get("class", "normal"), "kind": w.get("kind", "interactive"),
+                             "granted": "granted" in w} for t, w in self._waiters.items()],
+                "lane_grants_in_window": sum(1 for g in self._grants if g.get("c") == "priority")
             }
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
