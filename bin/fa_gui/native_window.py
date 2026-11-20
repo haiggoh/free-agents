@@ -29,8 +29,10 @@ MATERIAL_BY_NAME = {
 
 
 def material_name_for(dark_mode: bool) -> str:
-    """The vibrancy material NAME for the app's dark_mode (binary; Task 5 spike confirms)."""
-    return "ultraDark" if dark_mode else "mediumLight"
+    """The vibrancy material NAME for the app's dark_mode (binary). 2026-11-20 user
+    iteration: at 0% opacity MediumLight vs UltraDark read too close — light mode takes
+    the brightest material (Light); dark stays at the darkest (UltraDark)."""
+    return "ultraDark" if dark_mode else "light"
 
 
 def is_system_dark(appearance_name: "str | None") -> bool:
