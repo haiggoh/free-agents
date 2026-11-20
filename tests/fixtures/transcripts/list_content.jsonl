@@ -1,0 +1,2 @@
+{"type":"system","uuid":"s1","sessionId":"sess-list","timestamp":"2026-11-19T03:00:00.000Z","message":{"role":"system","content":[{"type":"text","text":"FREE_AGENTS_SESSION_IDENTITY_V1|{\"session_kind\":\"free_api\",\"session_id\":\"sess-list\",\"marker_type\":\"identity\"}"}]}}
+{"type":"user","uuid":"u1","sessionId":"sess-list","timestamp":"2026-11-19T03:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"hello "},{"type":"text","text":"world"}]}}

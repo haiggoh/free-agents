@@ -81,10 +81,14 @@ HOST_TO_PORTABLE = {}
 
 def _drop_host_bin_hooks(hooks_doc):
     """Portable guidance package: drop hook entries whose command calls into bin/
-    (host machinery: catalog overlay, memguard registry, queue stop)."""
+    (host machinery: catalog overlay, memguard registry, queue stop) OR that belong to
+    the host-only takeover feature (budget-wall-*: its worker imports bin/fa_capture.py
+    + bin/fa_transcript.py, which are host-only — the portable package has no bin/)."""
     for _event, block in list(hooks_doc.get("hooks", {}).items()):
         kept = [h for h in block
-                if not any("/bin/" in json.dumps(hh.get("command", "")) for hh in h.get("hooks", []))]
+                if not any("/bin/" in json.dumps(hh.get("command", ""))
+                           or "budget-wall" in json.dumps(hh.get("command", ""))
+                           for hh in h.get("hooks", []))]
         if kept:
             hooks_doc["hooks"][_event] = kept
         else:

@@ -1,0 +1,4 @@
+{"type":"user","uuid":"u1","sessionId":"sess-pt","timestamp":"2026-11-19T03:00:00.000Z","message":{"role":"user","content":"edit the file"}}
+{"type":"assistant","uuid":"a1","sessionId":"sess-pt","timestamp":"2026-11-19T03:00:01.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_pending","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"assistant","uuid":"a2","sessionId":"sess-pt","timestamp":"2026-11-19T03:00:02.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_done","name":"Edit","input":{"file_path":"/tmp/x.py","old_string":"a","new_string":"b"}}]}}
+{"type":"user","uuid":"u2","sessionId":"sess-pt","timestamp":"2026-11-19T03:00:03.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_done","content":"ok"}]},"toolUseResult":{"status":"ok"}}

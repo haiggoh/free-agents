@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.60.0] — unreleased
+
+### Added — deterministic budget-wall takeover + free→paid resume warning (terminal-first, no app-config change)
+- `bin/fa_transcript.py`: pure transcript reader — never raises on a bad line (malformed counted, non-UTF-8 tolerated, non-dict lines counted), one text accessor (`message_text`, list-aware), verbatim `user_instructions` (duplicates kept, tool_result carriers/isMeta/echoes excluded), `pending_tool_uses`, `last_todos`, `files_touched`, `api_errors` + `classify_api_error` (`BUDGET_WALL_RE` pinned from a real wall record: assistant record, `isApiErrorMessage`, `apiErrorStatus` 422, text "Budget has been exceeded!"), `identity_marker`, `tool_result_texts`.
+- `bin/fa_capture.py`: capture-package builder. `build_package` refuses (`over_budget` / `secret_findings` / `no_instructions` / `transcript_missing`) instead of trimming; instructions always verbatim; recent exchange bounded by the destination window (newest-first fill, chronological print); tool outputs referenced, never inlined; secret scan via the installed audit-loose-ends `redact-secret.py` resolved at run time (`--scan`); route resolution from the roster at run time (retired/hidden aliases refused). `write_package` is atomic (temp dir + rename), refuses an existing id, dir 0700 / files 0600. State root `${XDG_STATE_HOME:-~/.local/state}/free-agents/takeovers`, override `FA_TAKEOVER_DIR` (invalid aborts loudly).
+- `bin/fa-takeover`: CLI `capture | launch | verify | list | show` (exit 0/2/3/4/5/6). `capture` resolves a session id by exact transcript filename (never newest), `--dry-run` writes and spawns nothing. `launch` requires a TTY and runs `launch-remote-window.sh <route> --effort <level> --prompt "Read <handoff.md> first …" -- --permission-mode plan` (the wrapper now passes `--` through; `remote-session.sh` appends it to the claude command line). `verify` proves DELIVERED (first genuine instruction names the handoff path), READ (the package nonce appears in a tool_result — proves the file entered the model's context), RECONCILED (self-reported), and reports `permissionMode` when recorded.
+- Hook: `hooks/budget-wall-spool.sh` is a StopFailure hook that only spools the payload (measured 2026-11-19: at StopFailure the engine gives each hook a ~100 ms variable window — hooks run in parallel, measured 2026-11-20 and kills anything it spawns — sequential, disowned, and setsid children all died; so no python at the wall). `bin/budget-wall-capture.py --pending` on SessionStart builds one package per (session_id, error line) via `<root>/.seen`, acts only on `budget_wall` on a non-loopback endpoint, never launches, fail-open exit 0, and emits the user-visible line as a `systemMessage` JSON plus `<root>/hook.log`:
+  `💸 free-agents: budget wall — takeover package ready (<route>). Nothing was launched. Run: fa-takeover launch <takeover_id>`
+- `hooks/transcript-identity.py`: warn-only free→paid resume warning (`⚠️ free-agents: this conversation started on a free lane (<kind>, <model>). It now runs on <host> — a paid route — … To continue free: fa-takeover capture <session_id>`), emitted as SessionStart JSON with `systemMessage` + `additionalContext`; loopback-silent; launcher sessions byte-identical. Its marker parsing now delegates to `fa_transcript.identity_marker`.
+- `bin/launch-remote-window.sh`: a bare `--` now ends flag validation; everything after it passes through to claude.
+- `portable/` regenerated; the takeover hooks are host-only (dropped from the guidance package).
+- Evidence: hermetic probes against a loopback fake upstream (engine 2.1.327 + Desktop 2.1.326) — StopFailure payload shape, 422 wall record shape, base overhead 47 787 request bytes (→ 11 947 tokens), SessionStart source=startup/resume, permissionMode recording, two-phase delivery probe (spool at the wall, package at next SessionStart) ×2, resume-warning delivery probe. NOT TESTED live: a real budget wall (needs real spend), Desktop rendering of hook messages, the Desktop-launched engine's env.
+
+
+### Fixed in review (PR #7, before merge)
+- A budget wall was silently LOST when the next session ran on a free lane: the `--pending` worker judged the NEXT session's `ANTHROPIC_BASE_URL` (127.0.0.1 → skipped) and deleted the payload. The spool now records the walled session's endpoint (`#fa-endpoint` header, builtins only); a crashed capture parks the payload in `takeovers/.failed/`.
+- Secret scan is mandatory on both routes (`no_scanner` refusal); `fa-takeover capture --no-scan` replaces the opt-in `--scan`; `FA_SECRET_SCANNER` override (set-but-missing aborts).
+- "Verbatim instructions" no longer include harness injections (task notifications, `!`-command input/output, local-command output, compaction summaries, interrupt markers) — ~33% of instructions in 44 real wall transcripts. Identity markers are read from `system` records only (parity with the old parser on the real corpus: 173/173).
+- Default route = first live alias of `config/session-preferences.json`, not the roster's line order.
+- One `systemMessage` JSON per worker run; atomic `.seen` claim (O_EXCL); `.pending` is 0700 (a mode assertion had been `… or True`); `counts.files_touched` is a count; no resume warning on compaction.
+- Measured: StopFailure hooks run in PARALLEL, so the ~100 ms window applies to every hook — memguard back first per the plan.
+- Tests: fixtures mirror real record shapes; hermetic stub scanner using the real scanner's output format.
+
 ## [0.59.10] — unreleased
 
 ### Changed — free-lane session system prompts carry the tool-casing rule (2026-11-19)
