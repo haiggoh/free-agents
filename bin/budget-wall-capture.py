@@ -15,7 +15,7 @@ via `--pending`:
 Usage: python3 budget-wall-capture.py [--help] [--pending]   # default: read one payload on stdin
   --pending  process every spooled payload in <root>/.pending/ (the StopFailure window)
 Env: FA_TAKEOVER_DIR (state root; invalid aborts loudly), FA_TAKEOVER_ROUTE (route alias;
-default: first session-capable roster route), FA_TAKEOVER_ALLOW_LOOPBACK=1 (probe override:
+default: first live alias of config/session-preferences.json order), FA_TAKEOVER_ALLOW_LOOPBACK=1 (probe override:
 allow a loopback endpoint — used only by the hermetic delivery probe), ANTHROPIC_BASE_URL
 (the session's endpoint; loopback endpoints are ignored).
 

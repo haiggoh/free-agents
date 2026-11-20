@@ -257,7 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("capture", help="build a takeover package from SESSION_ID or a transcript path")
     c.add_argument("session", help="session id (exact transcript filename) or a transcript file path")
     c.add_argument("--route", default=None,
-                   help="destination route alias (roster); default: first session-capable route")
+                   help="destination route alias (roster); default: first live alias of "
+                        "config/session-preferences.json order")
     c.add_argument("--cwd", default=None, help="working directory for git state (default: cwd)")
     c.add_argument("--allow-findings", action="store_true",
                    help="record secret-scan findings in the manifest instead of refusing")

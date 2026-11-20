@@ -336,3 +336,36 @@ def test_default_root_override_and_invalid_override(tmp_path, monkeypatch):
     with pytest.raises(ValueError) as e:
         fa_capture.default_root()
     assert "FA_TAKEOVER_DIR" in str(e.value)
+
+
+# --- PR #7 review: the default SESSION route comes from config/session-preferences.json ---
+# (its "order" is the measured full-session order; dispatch-first models must never lead a
+# session). The roster line order matched it only by accident.
+
+def _prefs(tmp_path, monkeypatch, order):
+    p = tmp_path / "session-preferences.json"
+    p.write_text(json.dumps({"order": order}))
+    monkeypatch.setattr(fa_capture, "SESSION_PREFS_FILE", p)
+
+
+def test_default_route_follows_session_preferences_not_roster_order(tmp_path, monkeypatch):
+    roster = [a for a, *_ in fa_capture._roster_entries()]
+    hidden = fa_capture._hidden_aliases()
+    usable = [a for a in roster if a not in hidden]
+    assert len(usable) >= 2
+    _prefs(tmp_path, monkeypatch, [usable[1], usable[0]])  # deliberately NOT roster order
+    assert fa_capture.resolve_takeover_route(None).alias == usable[1]
+
+
+def test_default_route_skips_hidden_and_unknown_preferences(tmp_path, monkeypatch):
+    roster = [a for a, *_ in fa_capture._roster_entries()]
+    hidden = sorted(fa_capture._hidden_aliases() & set(roster))
+    usable = [a for a in roster if a not in fa_capture._hidden_aliases()]
+    _prefs(tmp_path, monkeypatch, (hidden[:1]) + ["no-such-alias"] + [usable[-1]])
+    assert fa_capture.resolve_takeover_route(None).alias == usable[-1]
+
+
+def test_default_route_without_usable_preference_fails_loudly(tmp_path, monkeypatch):
+    _prefs(tmp_path, monkeypatch, ["no-such-alias"])
+    with pytest.raises(ValueError, match="session-preferences"):
+        fa_capture.resolve_takeover_route(None)

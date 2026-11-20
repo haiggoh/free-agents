@@ -75,6 +75,7 @@ def default_root() -> Path:
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROSTER_FILE = REPO_ROOT / "config" / "remote-agents.sh"
 BROKEN_FILE = REPO_ROOT / "config" / "broken-nvidia-models.json"
+SESSION_PREFS_FILE = REPO_ROOT / "config" / "session-preferences.json"  # full-SESSION order
 WINDOW_TOKENS = {"1m": 1_000_000, "200k": 200_000, "256k": 256_000}
 DEFAULT_WINDOW_TOKENS = 200_000  # "-" / "default" / empty -> conservative spoof window
 
@@ -111,15 +112,25 @@ def _hidden_aliases() -> set:
 
 def resolve_takeover_route(alias):
     """Resolve a route alias to its window. Raises on unknown or retired aliases —
-    it never falls back silently. alias=None -> first session-capable (non-hidden) route."""
+    it never falls back silently. alias=None -> first live alias of config/session-preferences.json order."""
     entries = _roster_entries()
     hidden = _hidden_aliases()
     if alias is None:
-        for a, prov, _model, ac in entries:
-            if a not in hidden:
+        # The default is the first usable alias of the MEASURED full-session order
+        # (config/session-preferences.json), never the roster's line order: dispatch-first
+        # models must not lead a session (PR #7 review).
+        by_alias = {a: (prov, ac) for a, prov, _model, ac in entries}
+        try:
+            order = json.loads(SESSION_PREFS_FILE.read_text(encoding="utf-8")).get("order") or []
+        except Exception as e:
+            raise ValueError(f"cannot read the session order {SESSION_PREFS_FILE}: {e}") from e
+        for a in order:
+            if a in by_alias and a not in hidden:
+                prov, ac = by_alias[a]
                 return Route(alias=a, window_tokens=WINDOW_TOKENS.get(ac, DEFAULT_WINDOW_TOKENS),
                              provider=prov)
-        raise ValueError("roster has no session-capable route")
+        raise ValueError(f"no usable session route: none of {SESSION_PREFS_FILE.name} "
+                         f"(session-preferences) order {order} is a live roster alias")
     for a, prov, _model, ac in entries:
         if a == alias:
             if a in hidden:
