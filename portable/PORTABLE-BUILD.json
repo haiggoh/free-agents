@@ -73,7 +73,7 @@
     "skills/verify-delegated-work/SKILL.md": "bca40230e044016a7f50a7656c87b0e3dacd008d67cb8afe8bf84f33800c6474"
   },
   "schema": "haiggoh-portable-build/1",
-  "source_commit": "b10dfffc2f7c091586a98f9c748973459570c711",
+  "source_commit": "3bd00351945807e12f578c0d1d99f14572f10719",
   "source_repo": "haiggoh/free-agents",
   "transform_version": "1"
 }

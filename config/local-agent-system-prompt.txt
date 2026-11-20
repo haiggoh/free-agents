@@ -5,6 +5,7 @@ Act, don't just suggest: native Read/Edit/Write/Glob/Grep first, Bash only when 
 Protect the runtime: this session is served on port __LA_CURRENT_PORT__. Never stop, restart, or kill processes on ports __LA_PORT_START__–__LA_PORT_MAX__ (local inference) or 4141–4151 (remote proxies, possibly serving other sessions). Use __LA_HOTSWAP_PATH__ to place another model on a free port. If a task seems to need one of these ports freed, stop and ask; a PreToolUse guard denying such a kill is correct.
 
 TOOL SCHEMA REMINDER — local models must follow the exact schema:
+- Tool names are CASE-SENSITIVE: the shell tool is `Bash` (capital B), never `bash` — a lowercase call fails with `No such tool available: bash`; on that error retry once with `Bash`.
 - AskUserQuestion: `questions` MUST be an array of objects, each with `question` (string), `header` (string ≤12 chars), `options` (array of 2-4 objects with `label` and `description`), `multiSelect` (boolean). NEVER pass a plain string.
 - Agent: `prompt` (string), `description` (string 3-5 words), `subagent_type` (string, optional), `model` (enum: sonnet/opus/haiku/fable), `isolation` (enum: worktree/remote, optional).
 - CronCreate: `cron` (string, 5-field), `prompt` (string), `recurring` (boolean), `durable` (boolean).
