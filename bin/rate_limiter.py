@@ -72,6 +72,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import fcntl
+import itertools
 import json
 import os
 import sys
@@ -95,7 +96,16 @@ _ENV_FOR = {"rpm": "LA_NVIDIA_RPM", "mode": "LA_NVIDIA_MODE",
             "bucket_capacity": "LA_NVIDIA_BUCKET_CAPACITY", "max_wait": "LA_NVIDIA_MAX_WAIT",
             "cooldown": "LA_NVIDIA_429_COOLDOWN", "max_cooldown": "LA_NVIDIA_429_MAX_COOLDOWN",
             "backoff_multiplier": "LA_NVIDIA_429_BACKOFF_MULTIPLIER",
-            "max_retries": "LA_NVIDIA_429_MAX_RETRIES"}
+            "max_retries": "LA_NVIDIA_429_MAX_RETRIES",
+            # fairness knobs (design docs/superpowers/specs/2026-11-19-nvidia-rate-limiter-
+            # fairness-design.md). lane_share_cap keeps the env name LA_LIMITER_RESERVE so
+            # existing env setups keep working under the new share-cap meaning.
+            "policy": "LA_NVIDIA_POLICY", "tier1_seconds": "LA_NVIDIA_TIER1_SECONDS",
+            "tier2_seconds": "LA_NVIDIA_TIER2_SECONDS", "waiter_ttl_seconds": "LA_NVIDIA_WAITER_TTL",
+            "waiter_poll_seconds": "LA_NVIDIA_WAITER_POLL", "deficit_rate": "LA_NVIDIA_DEFICIT_RATE",
+            "deficit_cap_seconds": "LA_NVIDIA_DEFICIT_CAP_SECONDS",
+            "lane_share_cap": "LA_LIMITER_RESERVE", "dispatch_boost": "LA_NVIDIA_DISPATCH_BOOST",
+            "lane_approval": "LA_LIMITER_LANE_APPROVAL"}
 
 
 def _saved_settings() -> dict:
@@ -119,6 +129,133 @@ def _setting(key: str, default):
         return env
     saved = _saved_settings().get(key)
     return default if saved is None else saved
+
+
+# --- fairness queue (design docs/superpowers/specs/2026-11-19-nvidia-rate-limiter-fairness-design.md)
+POLICIES = ("aging", "deficit", "legacy")
+KINDS = ("interactive", "dispatch", "background")
+DEFAULT_POLICY = "aging"
+DEFAULT_TIER1_SECONDS = 45.0
+DEFAULT_TIER2_SECONDS = 150.0
+DEFAULT_WAITER_TTL_SECONDS = 15.0
+DEFAULT_WAITER_POLL_SECONDS = 2.0
+DEFAULT_DEFICIT_RATE = 1.0
+DEFAULT_DEFICIT_CAP_SECONDS = 600.0
+DEFAULT_LANE_SHARE_CAP = 0.2
+DEFAULT_DISPATCH_BOOST = True
+DEFAULT_LANE_APPROVAL = "ask"
+
+_TOKEN_COUNTER = itertools.count()
+_SETTINGS_CACHE = {}
+
+
+def _saved_settings_cached() -> dict:
+    """_saved_settings() behind an mtime-keyed cache: one stat() per call instead of a
+    read+parse, so the hot grant path can re-read saved settings (hot reload) cheaply."""
+    try:
+        cfg = os.environ.get("LA_SESSION_MENU_CONFIG_DIR")
+        if not cfg:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import session_menu_state as sms
+            cfg = sms.REPO_CONFIG_DIR
+        p = Path(cfg) / "session-menu.local.json"
+        st = p.stat()
+        key = (str(p), st.st_mtime_ns, st.st_size)
+        hit = _SETTINGS_CACHE.get("entry")
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        val = _saved_settings()
+        _SETTINGS_CACHE["entry"] = (key, val)
+        return val
+    except Exception:
+        return {}
+
+
+def _hot(key: str, default):
+    """Hot resolution for the NEW fairness knobs: env > saved picker setting (mtime-cached
+    read, so a submenu change hot-applies to running proxies) > default. The eight
+    pre-fairness settings keep their __init__-time read via _setting()."""
+    env = os.environ.get(_ENV_FOR[key])
+    if env not in (None, ""):
+        return env
+    saved = _saved_settings_cached().get(key)
+    return default if saved is None else saved
+
+
+def _cfg() -> dict:
+    """Snapshot of the hot fairness knobs, coerced and clamped to their validated ranges."""
+    def num(key, default, lo, hi):
+        try:
+            v = float(_hot(key, default))
+        except (TypeError, ValueError):
+            return default
+        return min(hi, max(lo, v))
+
+    def choice(key, default, choices):
+        v = str(_hot(key, default)).strip().lower()
+        return v if v in choices else default
+
+    def boolean(key, default):
+        v = _hot(key, default)
+        if isinstance(v, str):
+            return v.strip().lower() in ("1", "true", "yes", "on")
+        return bool(v)
+
+    return {"policy": choice("policy", DEFAULT_POLICY, POLICIES),
+            "tier1_seconds": num("tier1_seconds", DEFAULT_TIER1_SECONDS, 5, 600),
+            "tier2_seconds": num("tier2_seconds", DEFAULT_TIER2_SECONDS, 10, 3600),
+            "waiter_ttl_seconds": num("waiter_ttl_seconds", DEFAULT_WAITER_TTL_SECONDS, 5, 120),
+            "waiter_poll_seconds": num("waiter_poll_seconds", DEFAULT_WAITER_POLL_SECONDS, 0.5, 10),
+            "deficit_rate": num("deficit_rate", DEFAULT_DEFICIT_RATE, 0.1, 10),
+            "deficit_cap_seconds": num("deficit_cap_seconds", DEFAULT_DEFICIT_CAP_SECONDS, 30, 7200),
+            "lane_share_cap": num("lane_share_cap", DEFAULT_LANE_SHARE_CAP, 0.05, 0.9),
+            "dispatch_boost": boolean("dispatch_boost", DEFAULT_DISPATCH_BOOST),
+            "lane_approval": choice("lane_approval", DEFAULT_LANE_APPROVAL, ("ask", "agent"))}
+
+
+def _waiter_token(owner: str) -> str:
+    """Unique per acquire() call: one owner with several in-flight requests registers each."""
+    return f"{owner}:{os.getpid()}:{next(_TOKEN_COUNTER)}"
+
+
+def _kind(owner_opts: dict | None = None) -> str:
+    k = (owner_opts or {}).get("kind") or os.environ.get("LA_LIMITER_KIND") or "interactive"
+    k = str(k).strip().lower()
+    return k if k in KINDS else "interactive"
+
+
+def _prune_waiters(waiters: dict, now: float, ttl: float) -> int:
+    """Drop waiters not heard from within ttl (granted entries get 2*ttl to ack), so a
+    killed proxy cannot hold the queue head. Returns the pruned count."""
+    stale = [tok for tok, w in waiters.items()
+             if now - float(w.get("last_seen", 0.0)) > (2.0 * ttl if "granted" in w else ttl)]
+    for tok in stale:
+        waiters.pop(tok, None)
+    return len(stale)
+
+
+def _register_waiter(waiters: dict, token: str, owner: str, cls: str, kind: str,
+                     model, now: float) -> None:
+    """Register or heartbeat one waiter. `arrived` is set once and never resets; every
+    call refreshes last_seen (the heartbeat that survives long cooldowns)."""
+    w = waiters.get(token)
+    if w is None:
+        waiters[token] = {"owner": owner, "arrived": now, "last_seen": now,
+                          "class": cls, "kind": kind, "model": model or ""}
+    else:
+        w["last_seen"] = now
+        w["class"] = cls
+        w["kind"] = kind
+
+
+def _pick_winner(waiters: dict, now: float, cfg: dict) -> str | None:
+    """Rank the live waiters (stale already pruned, granted entries excluded) and return
+    the winning token. FIFO by arrival — the aging tiers, dispatch boost, lane class,
+    share cap and rpm_scale eligibility extend this rank in the later tasks."""
+    live = [tok for tok, w in waiters.items() if "granted" not in w]
+    if not live:
+        return None
+    return min(live, key=lambda tok: (float(waiters[tok].get("arrived", 0.0)), tok))
 
 
 def _owner() -> str:
@@ -529,6 +666,7 @@ class SlidingWindowLimiter:
         self._consecutive_429s = 0
         self._last_429_time = 0.0
         self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}
+        self._waiters: dict = {}          # fairness queue: token -> waiter entry
 
     def _locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -536,7 +674,7 @@ class SlidingWindowLimiter:
         fcntl.flock(fd, fcntl.LOCK_EX)
         return fd
 
-    def _read(self, fd: int, now: float) -> tuple[list[float], float, int, float, dict]:
+    def _read(self, fd: int, now: float) -> tuple[list, float, int, float, dict, dict]:
         os.lseek(fd, 0, os.SEEK_SET)
         raw = os.read(fd, 65536)
         try:
@@ -550,32 +688,47 @@ class SlidingWindowLimiter:
             models = state.get("models", {}) if isinstance(state.get("models", {}), dict) else {}
             owners = state.get("owners", {})
             self._owners = owners if isinstance(owners, dict) else {}
+            waiters = state.get("waiters", {})
+            self._waiters = waiters if isinstance(waiters, dict) else {}
         except Exception:
             # A missing, corrupt or old-format (token bucket) file starts EMPTY: the safe
             # failure is one extra window, never a permanently full one that wedges every session.
-            return [], 0.0, 0, 0.0, {}
+            self._waiters = {}
+            return [], 0.0, 0, 0.0, {}, {}
         # A stamp in the future (clock step) is treated as now, so a skewed clock can hold a
         # slot for at most one window, never forever.
         stamps = [s for s in stamps if _stamp_parts(s)[0] > now - WINDOW_SECONDS]
         stamps.sort(key=lambda s: _stamp_parts(s)[0])
-        return stamps, cooldown_until, consecutive_429s, last_429_time, models
+        return stamps, cooldown_until, consecutive_429s, last_429_time, models, self._waiters
 
-    def _write(self, fd: int, stamps: list[float], cooldown_until: float,
+    def _write(self, fd: int, stamps: list, cooldown_until: float,
                consecutive_429s: int = 0, last_429_time: float = 0.0,
-               models: dict | None = None, owners: dict | None = None) -> None:
+               models: dict | None = None, owners: dict | None = None,
+               waiters: dict | None = None, grants: list | None = None,
+               deficit: dict | None = None) -> None:
         owner = _owner()
-        data = json.dumps({"stamps": [s if isinstance(s, dict) else _stamp(s, owner) for s in stamps],
-                           "cooldown_until": cooldown_until,
-                           "limit": self.limit,
-                           "consecutive_429s": consecutive_429s,
-                           "last_429_time": last_429_time,
-                           "models": models or {},
-                           "owners": owners if owners is not None else self._owners}).encode()
+        payload = {"stamps": [s if isinstance(s, dict) else _stamp(s, owner) for s in stamps],
+                   "cooldown_until": cooldown_until,
+                   "limit": self.limit,
+                   "consecutive_429s": consecutive_429s,
+                   "last_429_time": last_429_time,
+                   "models": models or {},
+                   "owners": owners if owners is not None else self._owners,
+                   # append-only schema: old code ignores unknown keys but drops them on
+                   # its wholesale rewrites; new code re-writes them on every poll, so the
+                   # registry self-heals within one poll interval (mixed-writer contract)
+                   "waiters": waiters if waiters is not None else getattr(self, "_waiters", {})}
+        if grants is not None:
+            payload["grants"] = grants
+        if deficit is not None:
+            payload["deficit"] = deficit
+        data = json.dumps(payload).encode()
         os.lseek(fd, 0, os.SEEK_SET)
         os.ftruncate(fd, 0)
         os.write(fd, data)
 
-    def try_acquire(self, priority: bool | None = None) -> float:
+    def try_acquire(self, priority: bool | None = None, token: str | None = None,
+                    kind: str | None = None, model: str | None = None) -> float:
         """Take a slot if one is free. Returns 0.0 on success, else the seconds to wait.
 
         The whole read-prune-append-write runs under one exclusive lock, so two processes can
@@ -591,37 +744,103 @@ class SlidingWindowLimiter:
         reserved for priority acquisitions (owner "priority" flag or LA_LIMITER_PRIORITY=1);
         normal traffic stops at limit*(1-reserve). An owner's rpm_scale s caps ITS OWN
         window count at limit*s (s<1 throttles that session live, at any time).
+
+        Fairness queue (design docs/superpowers/specs/2026-11-19-nvidia-rate-limiter-fairness-
+        design.md): acquire()/aacquire() always pass a `token`; a failed try_acquire registers
+        the caller in the shared `waiters` registry and the next free slot goes to the
+        policy-ranked winner, booked under the WINNER's owner — a fresh arrival never barges
+        an occupied queue. token=None is the legacy peek: exactly the pre-queue semantics,
+        registry untouched. An empty registry behaves identically to token=None, and
+        `policy: legacy` (hot setting) restores barging even for queued callers.
         """
         owner = _owner()
         opts = _owner_opts(self._owners, owner)
         prio = opts["priority"] if priority is None else bool(priority)
         own_limit = max(1, int(self.limit * opts["rpm_scale"]))
         normal_limit = self.limit if prio else max(1, int(self.limit * (1.0 - _reserve_frac())))
+        cfg = _cfg()
+        cls = "priority" if prio else "normal"
+        wkind = kind or _kind(opts)
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until, consecutive_429s, last_429_time, models = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time, models, waiters = self._read(fd, now)
             self._consecutive_429s = consecutive_429s
             self._last_429_time = last_429_time
+            _prune_waiters(waiters, now, cfg["waiter_ttl_seconds"])
+
+            def need_seconds() -> float:
+                # The oldest request leaves the window first; wait for exactly that. When the
+                # block came from the owner's OWN scale (fewer stamps than limit), wait on those.
+                if not stamps:
+                    return 1e-3
+                idx = min(self.limit, len(stamps))
+                return max(1e-3, _stamp_parts(stamps[-idx])[0] + WINDOW_SECONDS - now)
 
             if now < cooldown_until:
+                if token is not None:
+                    # no grants during a machine-wide pause, but the heartbeat continues
+                    _register_waiter(waiters, token, owner, cls, wkind, model, now)
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return cooldown_until - now
+
             own_count = sum(1 for s in stamps if _stamp_parts(s)[1] == owner)
-            if len(stamps) < normal_limit and own_count < own_limit:
-                stamps.append(now)
-                # SUCCESS: Reset exponential backoff counter
-                self._consecutive_429s = 0
-                self._last_429_time = 0.0
-                self._write(fd, stamps, cooldown_until, 0, 0.0, models)
+            capacity_free = len(stamps) < normal_limit and own_count < own_limit
+
+            if token is None:
+                # legacy peek: today's exact semantics, the registry is neither read nor written
+                if capacity_free:
+                    stamps.append(now)
+                    # SUCCESS: Reset exponential backoff counter
+                    self._consecutive_429s = 0
+                    self._last_429_time = 0.0
+                    self._write(fd, stamps, cooldown_until, 0, 0.0, models)
+                    return 0.0
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
+                return need_seconds()
+
+            # a granted entry means our slot was already booked for us by the granting poll
+            own_w = waiters.get(token)
+            if own_w is not None and "granted" in own_w:
+                waiters.pop(token, None)
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return 0.0
+
+            registry = {t: w for t, w in waiters.items() if "granted" not in w and t != token}
+            if cfg["policy"] == "legacy" or not registry:
+                # empty queue (or kill-switch): uncontended behavior, identical to token=None
+                if capacity_free:
+                    waiters.pop(token, None)
+                    stamps.append(_stamp(now, owner))
+                    self._consecutive_429s = 0
+                    self._last_429_time = 0.0
+                    self._write(fd, stamps, cooldown_until, 0, 0.0, models)
+                    return 0.0
+                _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
+                return need_seconds()
+
+            if capacity_free:
+                winner = _pick_winner(waiters, now, cfg)
+                w = waiters[winner]
+                if w.get("owner") == owner:
+                    # our own owner outranks the queue: serve the caller directly
+                    waiters.pop(winner, None)
+                    stamps.append(_stamp(now, owner))
+                    self._consecutive_429s = 0
+                    self._last_429_time = 0.0
+                    self._write(fd, stamps, cooldown_until, 0, 0.0, models)
+                    return 0.0
+                # book the slot under the WINNER's owner; the winner acks on its next poll
+                stamps.append(_stamp(now, w["owner"]))
+                w["granted"] = now
+                _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
+                return need_seconds()
+
+            _register_waiter(waiters, token, owner, cls, wkind, model, now)
             self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
-            # The oldest request leaves the window first; wait for exactly that. When the
-            # block came from the owner's OWN scale (fewer stamps than limit), wait on those.
-            if not stamps:
-                return 1e-3
-            idx = min(self.limit, len(stamps))
-            return max(1e-3, _stamp_parts(stamps[-idx])[0] + WINDOW_SECONDS - now)
+            return need_seconds()
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -648,7 +867,7 @@ class SlidingWindowLimiter:
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until, consecutive_429s, last_429_time, models = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time, models, waiters = self._read(fd, now)
 
             # Book hidden attempts
             stamps.extend([now] * max(0, int(hidden_attempts)))
@@ -693,7 +912,7 @@ class SlidingWindowLimiter:
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until, consecutive_429s, last_429_time, models = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time, models, waiters = self._read(fd, now)
             if model and model in models:
                 models.pop(model)
             self._write(fd, stamps, cooldown_until, 0, 0.0, models)
@@ -706,44 +925,75 @@ class SlidingWindowLimiter:
         fd = self._locked()
         try:
             now = self._clock()
-            _, _, _, _, models = self._read(fd, now)
+            _, _, _, _, models, _w = self._read(fd, now)
             entry = models.get(model)
             return max(0.0, float(entry.get("until", 0.0)) - now) if entry else 0.0
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def acquire(self, max_wait: float | None = None, priority: bool | None = None) -> float:
-        """Block until a slot is taken; returns the total seconds waited."""
+    def _release(self, token: str) -> None:
+        """Deregister one waiter (the timeout/exception path); a no-op when absent."""
+        fd = self._locked()
+        try:
+            now = self._clock()
+            stamps, cd, c429, l429, models, waiters = self._read(fd, now)
+            if waiters.pop(token, None) is not None:
+                self._write(fd, stamps, cd, c429, l429, models)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def acquire(self, max_wait: float | None = None, priority: bool | None = None,
+                kind: str | None = None, model: str | None = None) -> float:
+        """Block until a slot is taken; returns the total seconds waited.
+
+        Registers one waiter token in the shared queue on the first failed try_acquire and
+        heartbeats it on every poll; every sleep is clamped to waiter_poll_seconds, so a long
+        machine-wide cooldown (max_cooldown up to 900s) never stops the heartbeats and the
+        waiter never loses its queue position to the stale-waiter TTL."""
         limit = _max_wait(max_wait)
         waited = 0.0
-        while True:
-            need = self.try_acquire(priority=priority)
-            if need == 0.0:
-                return waited
-            if waited + need > limit:
-                raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
-            time.sleep(need)
-            waited += need
+        token = _waiter_token(_owner())
+        poll = _cfg()["waiter_poll_seconds"]
+        try:
+            while True:
+                need = self.try_acquire(priority=priority, token=token, kind=kind, model=model)
+                if need == 0.0:
+                    return waited
+                if waited + need > limit:
+                    raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
+                s = min(need, poll)
+                time.sleep(s)
+                waited += s
+        finally:
+            self._release(token)
 
-    async def aacquire(self, max_wait: float | None = None, priority: bool | None = None) -> float:
+    async def aacquire(self, max_wait: float | None = None, priority: bool | None = None,
+                       kind: str | None = None, model: str | None = None) -> float:
         """Async twin of acquire() -- sleeps without blocking the proxy's event loop."""
         limit = _max_wait(max_wait)
         waited = 0.0
-        while True:
-            need = self.try_acquire(priority=priority)
-            if need == 0.0:
-                return waited
-            if waited + need > limit:
-                raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
-            await asyncio.sleep(need)
-            waited += need
+        token = _waiter_token(_owner())
+        poll = _cfg()["waiter_poll_seconds"]
+        try:
+            while True:
+                need = self.try_acquire(priority=priority, token=token, kind=kind, model=model)
+                if need == 0.0:
+                    return waited
+                if waited + need > limit:
+                    raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
+                s = min(need, poll)
+                await asyncio.sleep(s)
+                waited += s
+        finally:
+            self._release(token)
 
     def status(self) -> dict:
         fd = self._locked()
         try:
             now = self._clock()
-            stamps, cooldown_until, consecutive_429s, last_429_time, models = self._read(fd, now)
+            stamps, cooldown_until, consecutive_429s, last_429_time, models, waiters = self._read(fd, now)
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
@@ -754,7 +1004,11 @@ class SlidingWindowLimiter:
                 "cooling_models": _cooling(models, now),
                 "base_cooldown": self.base_cooldown,
                 "max_cooldown": self.max_cooldown,
-                "backoff_multiplier": self.backoff_multiplier}
+                "backoff_multiplier": self.backoff_multiplier,
+                "waiters": [{"token": t, "owner": w.get("owner", ""),
+                             "waited_s": round(now - float(w.get("arrived", now)), 1),
+                             "class": w.get("class", "normal"), "kind": w.get("kind", "interactive"),
+                             "granted": "granted" in w} for t, w in waiters.items()]}
 
 
 def _max_wait(value: float | None) -> float:
@@ -809,7 +1063,7 @@ def set_owner(limiter, owner: str, priority: bool | None, rpm_scale: float | Non
             owners.pop(owner, None)
         limiter._owners = owners
         if isinstance(limiter, SlidingWindowLimiter):
-            stamps, cd, c429, l429, models = limiter._read(fd, now)
+            stamps, cd, c429, l429, models, _w = limiter._read(fd, now)
             limiter._write(fd, stamps, cd, c429, l429, models, owners=owners)
         else:
             limiter._save_state(fd)

@@ -440,6 +440,178 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
             self.assertEqual(owners["sess-B"], {"priority": True, "rpm_scale": 0.5})
 
 
+class WaiterQueueTests(unittest.TestCase):
+    """Fairness queue (design 2026-11-19, sections 4.0/4.1): waiting becomes visible in the
+    state file (`waiters`), grants are ranked under the lock, a fresh arrival does not barge
+    an occupied queue, and an empty queue keeps today's exact behavior."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, "state")
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
+        cfg = tempfile.TemporaryDirectory()
+        self.addCleanup(cfg.cleanup)
+        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg.name
+        patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _state(self):
+        with open(self.path) as f:
+            return json.load(f)
+
+    def _as(self, owner):
+        return unittest.mock.patch.dict(os.environ, {"LA_LIMITER_OWNER": owner})
+
+    def _limiter(self, now, rpm=4):
+        return rl.SlidingWindowLimiter(self.path, rpm=rpm, clock=lambda: now[0])
+
+    def test_no_barging_fresh_arrival_registers_when_queue_non_empty(self):
+        now = [FROZEN]
+        os.environ["LA_NVIDIA_WAITER_TTL"] = "120"     # window is 60s; keep the waiter fresh past it
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            self.assertEqual([b.try_acquire() for _ in range(4)], [0.0] * 4)   # window full
+            tA = rl._waiter_token("sess-A")
+            self.assertGreater(b.try_acquire(token=tA), 0.0)                    # registers
+        now[0] += 61.0                                                              # capacity free, waiter fresh
+        with self._as("sess-B"):
+            tB = rl._waiter_token("sess-B")
+            self.assertGreater(b.try_acquire(token=tB), 0.0, "fresh arrival must not barge")
+            st = self._state()
+            self.assertEqual(st["stamps"][-1]["o"], "sess-A", "slot booked under the WINNER's owner")
+            self.assertIn("granted", st["waiters"][tA])
+            self.assertIn(tB, st["waiters"])
+            self.assertEqual(b.try_acquire(token=tB), 0.0, "next poll: B is the only waiter")
+        with self._as("sess-A"):
+            self.assertEqual(b.try_acquire(token=tA), 0.0, "winner acks its granted entry")
+            self.assertNotIn(tA, self._state()["waiters"])
+
+    def test_own_owner_winner_takes_slot_for_caller(self):
+        now = [FROZEN]
+        os.environ["LA_NVIDIA_WAITER_TTL"] = "120"
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            for _ in range(4):
+                b.try_acquire()
+            tA = rl._waiter_token("sess-A")
+            self.assertGreater(b.try_acquire(token=tA), 0.0)
+        now[0] += 61.0
+        with self._as("sess-A"):
+            self.assertEqual(b.try_acquire(token=tA), 0.0)
+            st = self._state()
+            self.assertNotIn(tA, st["waiters"])
+            self.assertEqual(st["stamps"][-1]["o"], "sess-A")
+
+    def test_stale_waiter_ttl_prune(self):
+        now = [FROZEN]
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            for _ in range(4):
+                b.try_acquire()
+            tA = rl._waiter_token("sess-A")
+            self.assertGreater(b.try_acquire(token=tA), 0.0)
+        now[0] += 16.0                      # > default ttl 15; window (60s) still full
+        with self._as("sess-B"):
+            tB = rl._waiter_token("sess-B")
+            self.assertGreater(b.try_acquire(token=tB), 0.0)
+            st = self._state()
+            self.assertNotIn(tA, st["waiters"], "stale waiter pruned")
+            self.assertIn(tB, st["waiters"])
+
+    def test_heartbeat_clamp_survives_900s_cooldown(self):
+        now = [FROZEN]
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            for _ in range(4):
+                b.try_acquire()
+            tA = rl._waiter_token("sess-A")
+            self.assertGreater(b.try_acquire(token=tA), 0.0)
+            b.note_429(retry_after=900.0)                       # machine-wide 15 min pause
+            for _ in range(10):                                  # 20 s of polling, past ttl=15
+                need = b.try_acquire(token=tA)
+                self.assertGreater(need, 0.0)
+                now[0] += min(need, 2.0)                         # clamped heartbeat
+            st = self._state()
+            self.assertIn(tA, st["waiters"], "heartbeats keep the waiter alive past the TTL")
+            w = st["waiters"][tA]
+            self.assertEqual(w["arrived"], FROZEN, "arrived never resets on re-register")
+            self.assertEqual(w["last_seen"], now[0] - 2.0, "every poll refreshes last_seen")
+        now[0] += 900.0
+        with self._as("sess-A"):
+            self.assertEqual(b.try_acquire(token=tA), 0.0, "cooldown over: the aged waiter wins")
+
+    def test_acquire_clamps_sleeps_to_poll_and_serves_the_waiter(self):
+        now = [FROZEN]
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            for _ in range(4):
+                b.try_acquire()
+        sleeps = []
+
+        def fake_sleep(s):
+            sleeps.append(s)
+            now[0] += s
+
+        with self._as("sess-A"), unittest.mock.patch.object(rl.time, "sleep", fake_sleep):
+            waited = b.acquire(max_wait=300.0)
+        self.assertGreater(waited, 0.0)
+        self.assertLessEqual(max(sleeps), 2.0 + 1e-9, "every sleep clamped to waiter_poll_seconds")
+        self.assertEqual(self._state().get("waiters", {}), {})
+
+    def test_timeout_deregisters_waiter(self):
+        now = [FROZEN]
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            for _ in range(4):
+                b.try_acquire()
+            with self.assertRaises(rl.RateLimitTimeout):
+                b.acquire(max_wait=0.5)
+            self.assertEqual(self._state().get("waiters", {}), {}, "deregistered on timeout")
+
+    def test_legacy_policy_keeps_tokenless_semantics(self):
+        now = [FROZEN]
+        os.environ["LA_NVIDIA_POLICY"] = "legacy"
+        os.environ["LA_NVIDIA_WAITER_TTL"] = "120"
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            for _ in range(4):
+                b.try_acquire()
+            tA = rl._waiter_token("sess-A")
+            self.assertGreater(b.try_acquire(token=tA), 0.0)
+        now[0] += 61.0
+        with self._as("sess-B"):
+            tB = rl._waiter_token("sess-B")
+            self.assertEqual(b.try_acquire(token=tB), 0.0, "legacy: a capable caller barges (today)")
+            st = self._state()
+            self.assertEqual(st["stamps"][-1]["o"], "sess-B")
+            self.assertNotIn("granted", st["waiters"].get(tA, {}))
+
+    def test_tokenless_use_never_touches_the_registry(self):
+        now = [FROZEN]
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            self.assertEqual([b.try_acquire() for _ in range(4)], [0.0] * 4)
+            self.assertGreater(b.try_acquire(), 0.0)
+        self.assertEqual(self._state().get("waiters", {}), {},
+                         "tokenless callers leave no waiter entries")
+
+    def test_state_without_waiters_key_loads(self):
+        now = [FROZEN]
+        with open(self.path, "w") as f:
+            json.dump({"stamps": [{"t": FROZEN - 1, "o": "legacy"}], "limit": 4}, f)
+        b = self._limiter(now)
+        with self._as("sess-A"):
+            self.assertEqual(b.try_acquire(), 0.0)          # tokenless parity on a pre-change file
+            for _ in range(2):
+                self.assertEqual(b.try_acquire(), 0.0)      # window now full (1 legacy + 1 + 2)
+            tA = rl._waiter_token("sess-A")
+            self.assertGreater(b.try_acquire(token=tA), 0.0)
+            self.assertIn(tA, self._state()["waiters"])
+
+
 if __name__ == "__main__":
     mp.set_start_method("fork", force=True)
     unittest.main(verbosity=2)
