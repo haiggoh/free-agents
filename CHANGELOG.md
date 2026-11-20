@@ -14,6 +14,15 @@
 - Evidence: hermetic probes against a loopback fake upstream (engine 2.1.327 + Desktop 2.1.326) — StopFailure payload shape, 422 wall record shape, base overhead 47 787 request bytes (→ 11 947 tokens), SessionStart source=startup/resume, permissionMode recording, two-phase delivery probe (spool at the wall, package at next SessionStart) ×2, resume-warning delivery probe. NOT TESTED live: a real budget wall (needs real spend), Desktop rendering of hook messages, the Desktop-launched engine's env.
 
 
+### Fixed in review (PR #7, before merge)
+- A budget wall was silently LOST when the next session ran on a free lane: the `--pending` worker judged the NEXT session's `ANTHROPIC_BASE_URL` (127.0.0.1 → skipped) and deleted the payload. The spool now records the walled session's endpoint (`#fa-endpoint` header, builtins only); a crashed capture parks the payload in `takeovers/.failed/`.
+- Secret scan is mandatory on both routes (`no_scanner` refusal); `fa-takeover capture --no-scan` replaces the opt-in `--scan`; `FA_SECRET_SCANNER` override (set-but-missing aborts).
+- "Verbatim instructions" no longer include harness injections (task notifications, `!`-command input/output, local-command output, compaction summaries, interrupt markers) — ~33% of instructions in 44 real wall transcripts. Identity markers are read from `system` records only (parity with the old parser on the real corpus: 173/173).
+- Default route = first live alias of `config/session-preferences.json`, not the roster's line order.
+- One `systemMessage` JSON per worker run; atomic `.seen` claim (O_EXCL); `.pending` is 0700 (a mode assertion had been `… or True`); `counts.files_touched` is a count; no resume warning on compaction.
+- Measured: StopFailure hooks run in PARALLEL, so the ~100 ms window applies to every hook — memguard back first per the plan.
+- Tests: fixtures mirror real record shapes; hermetic stub scanner using the real scanner's output format.
+
 ## [0.59.10] — unreleased
 
 ### Changed — free-lane session system prompts carry the tool-casing rule (2026-11-19)

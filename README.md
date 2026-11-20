@@ -245,23 +245,31 @@ When a paid session hits the JoyIA budget wall, the session dies — and until n
 its context, because the handover skills need a working model on the outgoing side. 0.60.0 adds a
 **deterministic, no-model** takeover path:
 
-- At the wall, a StopFailure hook spools the failure payload (measured: the engine gives that hook
-  only a ~100 ms window and kills anything it spawns, so the spool is pure shell). At the next
-  SessionStart, `bin/budget-wall-capture.py --pending` classifies the error and — only for a budget
-  wall on a non-loopback endpoint — writes one **takeover package** under
-  `${XDG_STATE_HOME:-~/.local/state}/free-agents/takeovers/<id>/` (`manifest.json` + `handoff.md`,
-  modes 0700/0600). The package carries every verbatim instruction (never trimmed — it refuses
-  instead), git state, pending tool calls marked "OUTCOME UNKNOWN", files touched, and a bounded
-  recent exchange. It is idempotent per (session, error line) and a secret scan can refuse it.
+- At the wall, a StopFailure hook spools the failure payload together with the walled session's
+  endpoint (measured: the engine gives every StopFailure hook — they run in parallel — only a
+  ~100 ms window and kills anything it spawns, so the spool is pure shell). At the next
+  SessionStart, whichever lane it runs on, `bin/budget-wall-capture.py --pending` classifies the
+  error and — only for a budget wall on a non-loopback endpoint — writes one **takeover package**
+  under `${XDG_STATE_HOME:-~/.local/state}/free-agents/takeovers/<id>/` (`manifest.json` +
+  `handoff.md`, modes 0700/0600). The package carries every verbatim instruction you typed
+  (never trimmed — it refuses instead; harness injections such as task notifications, `!`-command
+  output and compaction summaries are not instructions), git state, pending tool calls marked
+  "OUTCOME UNKNOWN", files touched, and a bounded recent exchange. It is idempotent per (session,
+  error line). It is **always secret-scanned** (audit-loose-ends `redact-secret.py`, or
+  `FA_SECRET_SCANNER`): a finding refuses the package, and no scanner at all refuses it too.
+  A payload whose capture crashed is kept in `takeovers/.failed/`.
+- The successor route defaults to the first live alias of `config/session-preferences.json`
+  (the measured full-session order); `FA_TAKEOVER_ROUTE` / `--route` override it.
 - It **never launches anything by itself**. You do: `bin/fa-takeover launch <id>` runs
   `launch-remote-window.sh <route> --effort max --prompt "Read <handoff.md> first …" -- --permission-mode plan`
   in a real Terminal window. `bin/fa-takeover verify <id>` then proves DELIVERED (the successor's
   first instruction names the handoff), READ (the package nonce appears in a tool_result, so the
   rules really entered the model's context), and RECONCILED (self-reported).
-- Manual capture works any time: `bin/fa-takeover capture <session-id|transcript> --route <alias>
-  [--dry-run] [--json] [--scan]`.
+- Manual capture works any time: `bin/fa-takeover capture <session-id|transcript> [--route <alias>]
+  [--dry-run] [--json] [--no-scan]` (`--no-scan` is the explicit, recorded opt-out of the scan).
 - Resuming a free-lane conversation on a paid route (Desktop, or a terminal without the launcher)
-  now warns once at session start: `⚠️ free-agents: this conversation started on a free lane …`.
+  now warns at session start (not again on compaction):
+  `⚠️ free-agents: this conversation started on a free lane …`.
 
 ## Recent releases
 
