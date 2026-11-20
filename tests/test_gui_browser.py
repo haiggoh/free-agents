@@ -384,8 +384,10 @@ def test_dark_mode_switch_flips_store_and_shell(browser, tmp_path):
         while time.time() < deadline and json.loads(ap.read_text())["dark_mode"] is not True:
             time.sleep(0.1)
         assert json.loads(ap.read_text())["dark_mode"] is True   # store write is the outcome
-        page.goto(srv.url)
-        page.wait_for_selector(".dark-shell", timeout=15000)    # shell flips to dark tokens
+        # user 2026-11-20: applies WITHOUT leaving the theme submenu — the toggle reloads the
+        # page itself, so .dark-shell appears on the SAME url (no navigation in the test)
+        page.wait_for_selector(".dark-shell", timeout=20000)
+        assert page.url.rstrip("/").endswith("theme_config"), page.url
     finally:
         assert srv.stop() == []
 

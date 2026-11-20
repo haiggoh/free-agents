@@ -47,10 +47,34 @@ def resolve_dark_mode(doc: dict, system_dark: bool) -> bool:
     return bool(doc.get("dark_mode"))
 
 
+import time
+
+
+def _apply_material_to_all_windows(AppKit, material) -> int:
+    """Set the material on every NSVisualEffectView under every window; returns the count."""
+    changed = 0
+    for w in AppKit.NSApp.windows():
+        cv = w.contentView()
+        if not cv:
+            continue
+        def walk(view):
+            n = 0
+            for sub in view.subviews():
+                if isinstance(sub, AppKit.NSVisualEffectView):
+                    sub.setMaterial_(material)
+                    n += 1
+                n += walk(sub)
+            return n
+        changed += walk(cv)
+    return changed
+
+
 def apply_vibrancy_patch() -> None:
     """Wrap pywebview's Cocoa BrowserView init to set the vibrancy material from the
     appearance store. No-op (and never raises) when pywebview is absent or the internals
-    moved — default vibrancy stays. Idempotent."""
+    moved — default vibrancy stays. Idempotent. Also starts a 1 s poller that re-applies
+    the material when the store changes (user 2026-11-20: theme settings must apply
+    without a restart) — AppKit work is dispatched to the main thread."""
     try:
         import webview  # noqa: WPS433  (local import: browser mode must not need pywebview)
         from webview.platforms import cocoa
@@ -81,5 +105,47 @@ def apply_vibrancy_patch() -> None:
 
         _patched_init._fa_vibrancy_patch = True
         cocoa.BrowserView.__init__ = _patched_init
+
+        # live updates: a python thread watches the store and dispatches the AppKit work
+        # to the main thread (never touch AppKit from a worker thread)
+        import threading
+
+        class _VibrancyPoller(AppKit.NSObject):
+            """Re-applies the material when the appearance store changes (main thread)."""
+
+            def poll_(self, sender):
+                try:
+                    from fa_gui import appearance as ap
+                    doc = ap.load(ap.store_path())
+                    try:
+                        app = AppKit.NSApplication.sharedApplication()
+                        sys_dark = is_system_dark(app.effectiveAppearance().name())
+                    except Exception:
+                        sys_dark = False
+                    dark = resolve_dark_mode(doc, sys_dark)
+                    material = getattr(AppKit, MATERIAL_BY_NAME[material_name_for(dark)])
+                    _apply_material_to_all_windows(AppKit, material)
+                except Exception:
+                    pass
+
+        poller = _VibrancyPoller.new()
+
+        def _watch():
+            last = None
+            while True:
+                time.sleep(1.0)
+                try:
+                    from fa_gui import appearance as ap
+                    p = ap.store_path()
+                    m = p.stat().st_mtime if p.exists() else None
+                except Exception:
+                    continue
+                if m != last:
+                    if last is not None:          # skip the first sight: init already applied
+                        poller.performSelectorOnMainThread_withObject_afterDelay_(
+                            "poll:", None, 0.0)
+                    last = m
+
+        threading.Thread(target=_watch, daemon=True).start()
     except Exception as e:
         print(f"native_window: vibrancy patch skipped ({e!r})", flush=True)
