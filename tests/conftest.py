@@ -97,9 +97,12 @@ def _limiter_knobs_for_load_sensitive(request, monkeypatch):
     # shared nvidia rate limiter, and the limiter is the flake source (waypoint
     # pty-litellm-venv-tests-flake). Give marked tests the priority lane BY DEFAULT instead of
     # waiting for a quiet limiter — the knobs exist since 0.50.1 (bin/rate_limiter.py):
-    #   LA_LIMITER_RESERVE=0.2  reserve 20% of the bucket for priority acquisitions; normal
-    #                           traffic stops at 80% (limit*(1-reserve)). Default 0.0 = off.
-    #   LA_LIMITER_PRIORITY=1   this process acquires with priority=True, drawing from the reserve.
+    #   LA_LIMITER_PRIORITY=1   this process registers its requests in the priority lane
+    #                           (queue-jump over normal waiters under contention).
+    #   LA_LIMITER_RESERVE=0.2  lane SHARE CAP since the fairness rework: while normal waiters
+    #                           are queued, priority grants are capped at max(1, round(0.2*limit))
+    #                           in the rolling window; with no normal waiters the cap does not
+    #                           bind, so no capacity idles. Default 0.2.
     # The limiter reads both from the env AT CALL TIME, and subprocesses inherit os.environ,
     # so monkeypatch covers in-process limiter use and spawned proxy/dispatch children alike.
     # Manual / live-session use (marked tests don't need this — it is set here automatically):

@@ -271,11 +271,39 @@ def _rank(w: dict, now: float, cfg: dict) -> tuple:
     return (cls, tier, boost, -arrived)
 
 
+def _lane_cap(limit: int, share_cap: float) -> int:
+    """Max priority-owned grants in the rolling window while normal waiters are queued."""
+    return max(1, round(share_cap * limit))
+
+
+def _prio_grants_sliding(stamps: list, owners: dict) -> int:
+    """Priority-owned stamps currently in the window. Sliding mode derives the lane cap
+    from the existing stamps + owners map — no new state keys."""
+    n = 0
+    for s in stamps:
+        _t, o = _stamp_parts(s)
+        if o != "legacy" and _owner_opts(owners, o)["priority"]:
+            n += 1
+    return n
+
+
 def _pick_winner(waiters: dict, now: float, cfg: dict, owners: dict,
-                 own_counts: dict, limit: int) -> str | None:
+                 own_counts: dict, limit: int, prio_grants: int | None = None) -> str | None:
     """Rank the live waiters (stale already pruned, granted entries excluded) and return
-    the winning token. An owner already at its own rpm_scale cap is skipped this round —
-    the slot goes to the next eligible waiter (rpm_scale semantics unchanged)."""
+    the winning token. The lane class is refreshed from the LIVE owners map at every
+    evaluation, so a lane flip applies at the next poll. An owner at its rpm_scale cap is
+    skipped; while >=1 normal waiter is registered, a priority grant additionally needs
+    room under the lane share cap (with no normal waiters the cap does not bind — zero
+    idle capacity)."""
+    cap = _lane_cap(limit, cfg["lane_share_cap"])
+    normal_waiting = False
+    for tok, w in waiters.items():
+        if "granted" in w:
+            continue
+        owner = w.get("owner", "")
+        w["class"] = "priority" if _owner_opts(owners, owner)["priority"] else "normal"
+        if w["class"] != "priority":
+            normal_waiting = True
     eligible = []
     for tok, w in waiters.items():
         if "granted" in w:
@@ -283,8 +311,12 @@ def _pick_winner(waiters: dict, now: float, cfg: dict, owners: dict,
         owner = w.get("owner", "")
         opts = _owner_opts(owners, owner)
         own_limit = max(1, int(limit * opts["rpm_scale"]))
-        if own_counts.get(owner, 0) < own_limit:
-            eligible.append(tok)
+        if own_counts.get(owner, 0) >= own_limit:
+            continue
+        if (w["class"] == "priority" and normal_waiting and prio_grants is not None
+                and prio_grants >= cap):
+            continue
+        eligible.append(tok)
     if not eligible:
         return None
     return max(eligible, key=lambda tok: _rank(waiters[tok], now, cfg))
@@ -306,9 +338,9 @@ def _owner() -> str:
 
 
 def _reserve_frac() -> float:
-    """Fraction of capacity reserved for priority requests (0.50.1 priority lane).
-    LA_LIMITER_RESERVE — DEFAULT 0.0 (off): the lane only exists when explicitly enabled
-    (tests / a live priority session), so normal traffic keeps the full 40."""
+    """DEPRECATED (kept for compatibility): LA_LIMITER_RESERVE is now the lane SHARE CAP (hot
+    key lane_share_cap, default 0.2), enforced at grant time only while normal waiters are
+    queued. The old capacity partition (an idle reserve) is retired — no capacity is withheld."""
     try:
         return min(0.9, max(0.0, float(os.environ.get("LA_LIMITER_RESERVE", "0.0"))))
     except ValueError:
@@ -324,7 +356,8 @@ def _owner_opts(owners: dict, owner: str) -> dict:
     except (TypeError, ValueError):
         scale = 1.0
     return {"priority": bool(o.get("priority", False)) or os.environ.get("LA_LIMITER_PRIORITY") == "1",
-            "rpm_scale": min(8.0, max(0.05, scale))}
+            "rpm_scale": min(8.0, max(0.05, scale)),
+            "kind": o.get("kind")}
 
 
 def _stamp(t: float, owner: str) -> dict:
@@ -789,7 +822,10 @@ class SlidingWindowLimiter:
         opts = _owner_opts(self._owners, owner)
         prio = opts["priority"] if priority is None else bool(priority)
         own_limit = max(1, int(self.limit * opts["rpm_scale"]))
-        normal_limit = self.limit if prio else max(1, int(self.limit * (1.0 - _reserve_frac())))
+        # The reserve PARTITION is retired: LA_LIMITER_RESERVE now means the lane share cap
+        # (hot key lane_share_cap), enforced at grant time only while normal waiters exist —
+        # the window is open to everyone otherwise, so no capacity ever idles.
+        normal_limit = self.limit
         cfg = _cfg()
         cls = "priority" if prio else "normal"
         wkind = kind or _kind(opts)
@@ -858,7 +894,9 @@ class SlidingWindowLimiter:
                 for s in stamps:
                     _t, o = _stamp_parts(s)
                     own_counts[o] = own_counts.get(o, 0) + 1
-                winner = _pick_winner(waiters, now, cfg, self._owners, own_counts, self.limit)
+                prio_grants = _prio_grants_sliding(stamps, self._owners)
+                winner = _pick_winner(waiters, now, cfg, self._owners, own_counts, self.limit,
+                                      prio_grants)
                 if winner is not None:
                     w = waiters[winner]
                     if w.get("owner") == owner:
@@ -1079,9 +1117,12 @@ def owners_info(limiter) -> dict:
         os.close(fd)
 
 
-def set_owner(limiter, owner: str, priority: bool | None, rpm_scale: float | None) -> None:
+def set_owner(limiter, owner: str, priority: bool | None, rpm_scale: float | None,
+              kind: str | None = None, approved: bool = False) -> None:
     """0.50.1: live per-owner options, written under the lock — throttle or prioritize one
-    session at any time (rate_limiter.py set-owner <owner> --rpm-scale 0.5 --priority)."""
+    session at any time (rate_limiter.py set-owner <owner> --rpm-scale 0.5 --priority).
+    `kind` is the fairness-ladder request kind; `approved` records that an agent-initiated
+    priority lane had user approval (--user-approved)."""
     fd = limiter._locked()
     try:
         now = limiter._clock()
@@ -1095,6 +1136,10 @@ def set_owner(limiter, owner: str, priority: bool | None, rpm_scale: float | Non
             o["priority"] = bool(priority)
         if rpm_scale is not None:
             o["rpm_scale"] = min(8.0, max(0.05, float(rpm_scale)))
+        if kind is not None:
+            o["kind"] = kind if kind in KINDS else "interactive"
+        if approved:
+            o["approved_by_user"] = True
         if o:
             owners[owner] = o
         else:
@@ -1151,12 +1196,15 @@ def main(argv: list[str]) -> int:
                "LA_NVIDIA_BUCKET_CAPACITY (default 6), "
                "LA_NVIDIA_MAX_WAIT (default 300), LA_NVIDIA_429_COOLDOWN (base, default 30), "
                "LA_NVIDIA_429_MAX_COOLDOWN (default 300), LA_NVIDIA_429_BACKOFF_MULTIPLIER (default 2.0), "
-               "LA_NVIDIA_429_MAX_RETRIES (default 5); saved picker settings below the environment.")
+               "LA_NVIDIA_429_MAX_RETRIES (default 5); lane keys LA_LIMITER_PRIORITY / "
+               "LA_LIMITER_RESERVE (lane share cap) / LA_LIMITER_KIND / LA_LIMITER_LANE_APPROVAL; "
+               "saved picker settings below the environment.")
     sub = parser.add_subparsers(dest="cmd", required=False)
     acq = sub.add_parser("acquire", help="take one slot, waiting if needed")
     acq.add_argument("--max-wait", type=float, default=None)
     acq.add_argument("--priority", action="store_true",
-                     help="draw from the reserved priority fraction (0.50.1 lane)")
+                     help="register this request in the priority lane (queue-jump, "
+                          "share-capped under contention)")
     sub.add_parser("status", help="print window state without taking a slot")
     sub.add_parser("owners", help="list known owners with their window counts and options")
     so = sub.add_parser("set-owner", help="set one owner's options live (throttle/prioritize)")
@@ -1165,6 +1213,12 @@ def main(argv: list[str]) -> int:
     so.add_argument("--no-priority", dest="priority", action="store_false")
     so.add_argument("--rpm-scale", type=float, default=None,
                     help="this owner's allowed fraction of the window (0.5 = half rate)")
+    so.add_argument("--kind", choices=KINDS, default=None,
+                    help="this owner's request kind for the fairness ladder "
+                         "(interactive|dispatch|background)")
+    so.add_argument("--user-approved", action="store_true",
+                    help="record that the user approved an agent-initiated --priority lane "
+                         "(required in ask mode outside a TTY)")
     sub.add_parser("probe", help="print this owner's external occupancy (other owners' slots in window)")
     sub.add_parser("menu", help="open the session picker's rate limiter screen")
     args = parser.parse_args(argv)
@@ -1185,7 +1239,24 @@ def main(argv: list[str]) -> int:
         print(json.dumps(info, indent=2))
         return 0
     if args.cmd == "set-owner":
-        set_owner(limiter, args.owner, priority=args.priority, rpm_scale=args.rpm_scale)
+        if args.priority and not args.user_approved:
+            # approval gate (lane_approval, default ask): an AGENT-initiated lane needs the
+            # user. Picker clicks and launcher flags are the user acting — they pass
+            # --user-approved. `agent` mode skips the gate entirely.
+            approval = str(_hot("lane_approval", DEFAULT_LANE_APPROVAL)).lower()
+            if approval != "agent":
+                if sys.stdin.isatty():
+                    ans = input(f"grant the priority lane to owner {args.owner!r}? [y/N] ")
+                    if ans.strip().lower() not in ("y", "yes"):
+                        print("rate_limiter: refused", file=sys.stderr)
+                        return 2
+                else:
+                    print("rate_limiter: an agent-initiated priority lane needs user approval "
+                          "(lane_approval=ask): ask the user first, then re-run with "
+                          "--user-approved, or set lane_approval=agent", file=sys.stderr)
+                    return 2
+        set_owner(limiter, args.owner, priority=args.priority, rpm_scale=args.rpm_scale,
+                  kind=args.kind, approved=bool(args.priority and args.user_approved))
         print(json.dumps(owners_info(limiter)))
         return 0
     if args.cmd == "probe":

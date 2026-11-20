@@ -18,9 +18,9 @@ import loadscale  # noqa: E402
 # flake under extreme shared-box load (the 2026-11-01 pty-litellm-venv flake). They must
 # carry pytest.mark.load_sensitive so `-m "not load_sensitive"` can deselect them.
 # Marked tests ALSO get the limiter priority knobs by default (conftest
-# _limiter_knobs_for_load_sensitive): LA_LIMITER_RESERVE=0.2 + LA_LIMITER_PRIORITY=1, so
-# they draw from the reserved 20% of the rate-limiter bucket instead of flaking when a
-# concurrent session fills it. See LimiterKnobDefaultTests below and rtc-ship.json
+# _limiter_knobs_for_load_sensitive): LA_LIMITER_PRIORITY=1 + LA_LIMITER_RESERVE=0.2 (the
+# lane share cap), so their requests queue-jump normal waiters instead of flaking when a
+# concurrent session fills the limiter. See LimiterKnobDefaultTests below and rtc-ship.json
 # "_comment_limiter_knobs" for manual/live use.
 LOAD_SENSITIVE_MODULES = [
     "test_session_picker_pty.py",
@@ -130,11 +130,13 @@ class LimiterKnobDefaultTests(unittest.TestCase):
     so they don't flake when a concurrent session hammers the shared limiter.
 
     The knobs (bin/rate_limiter.py, shipped 0.50.1):
-      LA_LIMITER_RESERVE=0.2  reserve 20% of the bucket for PRIORITY acquisitions; normal
-                              traffic stops at 80% (limit*(1-reserve)). Default 0.0 = off.
-      LA_LIMITER_PRIORITY=1   this process acquires with priority=True and draws from the reserve.
+      LA_LIMITER_PRIORITY=1   this process registers its requests in the priority lane
+                              (queue-jump over normal waiters under contention).
+      LA_LIMITER_RESERVE=0.2  lane SHARE CAP: while normal waiters are queued, priority grants
+                              are capped at max(1, round(0.2*limit)) in the rolling window;
+                              with no normal waiters the cap does not bind. Default 0.2.
     Manual / live-session use (NOT needed for marked tests — conftest sets it):
-      LA_LIMITER_RESERVE=0.2 in the env of the priority process, or
+      LA_LIMITER_PRIORITY=1 in the env of the priority process, or
       python3 bin/rate_limiter.py set-owner <session-id> --priority [--rpm-scale 0.2]
       python3 bin/rate_limiter.py owners    # who is eating the bucket
       python3 bin/rate_limiter.py probe     # my bucket's external occupancy

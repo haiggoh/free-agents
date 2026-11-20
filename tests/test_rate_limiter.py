@@ -403,23 +403,83 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
         self.assertGreater(b.try_acquire(), 0.0, "bucket empty even for priority")
         os.environ.pop("LA_LIMITER_PRIORITY", None)
 
-    def test_sliding_reserve_and_per_owner_scale(self):
-        b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: FROZEN)   # limit 4
+    def test_reserve_no_longer_partitions_normal_traffic(self):
+        # LA_LIMITER_RESERVE=0.2 (setUp) is now the lane SHARE CAP, not a partition: with an
+        # empty queue, normal traffic uses the full window — zero idle capacity.
+        b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: FROZEN)
         ok = sum(1 for _ in range(6) if b.try_acquire() == 0.0)
-        self.assertEqual(ok, 3, "normal stops at limit*(1-reserve)=3")        # 0.2 reserve
-        os.environ["LA_LIMITER_PRIORITY"] = "1"
-        self.assertEqual(b.try_acquire(), 0.0, "priority takes the 4th slot")
-        os.environ.pop("LA_LIMITER_PRIORITY", None)
-        # per-owner throttle live: scale 0.5 -> own limit 2 even though the window has room
+        self.assertEqual(ok, 4, "no partition: normal uses the full limit when the queue is empty")
+
+    def test_per_owner_scale_still_caps_own_window_count(self):
+        rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: FROZEN).status()
+        b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: FROZEN)
         rl.set_owner(b, "sess-A", priority=None, rpm_scale=0.5)
-        with tempfile.TemporaryDirectory() as d2:
-            p2 = os.path.join(d2, "s")
-            rl.SlidingWindowLimiter(p2, rpm=4, clock=lambda: FROZEN).status()
-            b2 = rl.SlidingWindowLimiter(p2, rpm=4, clock=lambda: FROZEN)
-            rl.set_owner(b2, "sess-A", priority=None, rpm_scale=0.5)
-            self.assertEqual(b2.try_acquire(), 0.0)
-            self.assertEqual(b2.try_acquire(), 0.0)
-            self.assertGreater(b2.try_acquire(), 0.0, "own scale 0.5 caps at 2 of 4")
+        self.assertEqual(b.try_acquire(), 0.0)
+        self.assertEqual(b.try_acquire(), 0.0)
+        self.assertGreater(b.try_acquire(), 0.0, "own scale 0.5 caps at 2 of 4")
+
+    def _seed_queue(self, stamps, waiters, owners=None, limit=4):
+        doc = {"stamps": stamps, "limit": limit, "waiters": waiters}
+        if owners:
+            doc["owners"] = owners
+        with open(self.path, "w") as f:
+            json.dump(doc, f)
+
+    def _w(self, token, owner, arrived, cls="normal", kind="interactive"):
+        return {token: {"owner": owner, "arrived": arrived, "last_seen": arrived,
+                        "class": cls, "kind": kind, "model": ""}}
+
+    def test_priority_waiter_jumps_normal_queue(self):
+        now = [FROZEN]
+        tN = rl._waiter_token("sess-B")
+        tP = rl._waiter_token("sess-A")
+        self._seed_queue([{"t": FROZEN, "o": "sess-B"}] * 3,
+                         {**self._w(tN, "sess-B", FROZEN),
+                          # registered BEFORE the lane was granted (class still "normal"):
+                          # the live owners map must refresh the class at grant time
+                          **self._w(tP, "sess-A", FROZEN + 1, cls="normal")},
+                         owners={"sess-A": {"priority": True}})
+        b = rl.SlidingWindowLimiter(self.path, rpm=4, clock=lambda: now[0])
+        with unittest.mock.patch.dict(os.environ, {"LA_LIMITER_OWNER": "sess-C"}):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            st = self._state()
+            self.assertEqual(st["stamps"][-1]["o"], "sess-A", "priority lane jumps the queue")
+            self.assertIn("granted", st["waiters"][tP])
+
+    def test_lane_cap_binds_under_contention(self):
+        # limit 40, cap 0.2 -> 8: with 8 priority stamps in the window AND a normal waiter
+        # present, the next grant must go to the normal waiter
+        now = [FROZEN]
+        tP = rl._waiter_token("sess-A")
+        tN = rl._waiter_token("sess-B")
+        self._seed_queue([{"t": FROZEN, "o": "sess-A"}] * 8 + [{"t": FROZEN, "o": "sess-B"}],
+                         {**self._w(tP, "sess-A", FROZEN, cls="priority"),
+                          **self._w(tN, "sess-B", FROZEN + 1)},
+                         owners={"sess-A": {"priority": True}}, limit=40)
+        b = rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: now[0])
+        with unittest.mock.patch.dict(os.environ, {"LA_LIMITER_OWNER": "sess-C"}):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            st = self._state()
+            self.assertEqual(st["stamps"][-1]["o"], "sess-B", "cap reached: grant goes to normal")
+            self.assertNotIn("granted", st["waiters"][tP])
+
+    def test_lane_cap_free_when_no_normal_waiters(self):
+        # same 8 priority stamps, but the only waiter is priority: the cap must NOT bind
+        # (no normal waiter) — idle capacity never occurs
+        now = [FROZEN]
+        tP = rl._waiter_token("sess-A")
+        self._seed_queue([{"t": FROZEN, "o": "sess-A"}] * 8,
+                         {**self._w(tP, "sess-A", FROZEN, cls="priority")},
+                         owners={"sess-A": {"priority": True}}, limit=40)
+        b = rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: now[0])
+        with unittest.mock.patch.dict(os.environ, {"LA_LIMITER_OWNER": "sess-C"}):
+            tC = rl._waiter_token("sess-C")
+            self.assertGreater(b.try_acquire(token=tC), 0.0)
+            st = self._state()
+            self.assertEqual(st["stamps"][-1]["o"], "sess-A", "no normal waiters: priority uncapped")
+            self.assertIn("granted", st["waiters"][tP])
 
     def test_probe_counts_only_other_owners(self):
         b = rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN)
@@ -434,10 +494,37 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
     def test_cli_set_owner_and_owners(self):
         with unittest.mock.patch.dict(os.environ, {"LA_NVIDIA_THROTTLE_STATE": self.path}):
             rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN).status()
-            rc = rl.main(["set-owner", "sess-B", "--priority", "--rpm-scale", "0.5"])
+            rc = rl.main(["set-owner", "sess-B", "--priority", "--rpm-scale", "0.5",
+                          "--user-approved"])
             self.assertEqual(rc, 0)
             owners = self._state().get("owners", {})
-            self.assertEqual(owners["sess-B"], {"priority": True, "rpm_scale": 0.5})
+            self.assertEqual(owners["sess-B"]["priority"], True)
+            self.assertEqual(owners["sess-B"]["rpm_scale"], 0.5)
+            self.assertEqual(owners["sess-B"].get("approved_by_user"), True)
+
+    def test_cli_set_owner_kind(self):
+        with unittest.mock.patch.dict(os.environ, {"LA_NVIDIA_THROTTLE_STATE": self.path}):
+            rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN).status()
+            rc = rl.main(["set-owner", "sess-B", "--kind", "dispatch"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(self._state()["owners"]["sess-B"]["kind"], "dispatch")
+
+    def test_lane_approval_refuses_nontty_without_user_approved(self):
+        # stdin is not a TTY under pytest: an agent-initiated lane must be refused (rc != 0)
+        with unittest.mock.patch.dict(os.environ, {"LA_NVIDIA_THROTTLE_STATE": self.path}):
+            with open(self.path, "w") as f:
+                json.dump({"stamps": [], "limit": 40}, f)
+            rl.SlidingWindowLimiter(self.path, rpm=40, clock=lambda: FROZEN).status()
+            rc = rl.main(["set-owner", "sess-B", "--priority"])
+            self.assertNotEqual(rc, 0, "non-TTY without --user-approved is refused")
+            self.assertNotIn("sess-B", self._state().get("owners", {}))
+            os.environ["LA_LIMITER_LANE_APPROVAL"] = "agent"
+            try:
+                rc = rl.main(["set-owner", "sess-B", "--priority"])
+                self.assertEqual(rc, 0, "lane_approval=agent skips the gate")
+                self.assertEqual(self._state()["owners"]["sess-B"]["priority"], True)
+            finally:
+                del os.environ["LA_LIMITER_LANE_APPROVAL"]
 
 
 class WaiterQueueTests(unittest.TestCase):
