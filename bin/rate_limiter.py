@@ -37,6 +37,15 @@ WHY IT WAITS INSTEAD OF FAILING. A 429 surfaced to Claude Code is retried by Cla
 adds load to the very window that is full. Queueing here (bounded by max_wait) converts a burst
 into a short delay that the user never sees as an error.
 
+FAIRNESS QUEUE (2026-11-20, design docs/superpowers/specs/2026-11-19-nvidia-rate-limiter-
+fairness-design.md). Waiting is visible: acquire()/aacquire() register each call in the shared
+"waiters" key, and the next free slot goes to the policy-ranked winner under the same lock —
+never by polling luck, and no capacity is ever reserved idle. The new keys (waiters, grants,
+deficit) are append-only, so older running proxies keep parsing the file and their window
+accounting stays exact; they drop the new keys on their wholesale rewrites and new code
+re-writes them on every poll (self-heal within waiter_poll_seconds). `policy: legacy`
+hot-reloads to the pre-queue semantics as the kill-switch.
+
 WHY A 429 PAUSES EVERYONE. If NVIDIA still answers 429, the window's idea of the limit is wrong
 (or NVIDIA counts differently). note_429() records a machine-wide cooldown, so the OTHER
 proxies stop too instead of spending their remaining allowance into the same wall, and returns
@@ -46,6 +55,7 @@ upstream attempts the caller could not see (see la_proxy_hooks.SDK_HIDDEN_RETRIE
 Usage:
   rate_limiter.py acquire [--max-wait S]  take one slot, waiting if needed; prints the wait
   rate_limiter.py status                  print the current window state, take nothing
+  rate_limiter.py lane-toggle             flip THIS owner's priority lane (user action)
   rate_limiter.py menu                    open the NVIDIA rate limiter screen of the session picker
   rate_limiter.py --help
 
@@ -64,6 +74,18 @@ Environment:
   LA_NVIDIA_429_BACKOFF_MULTIPLIER  exponential backoff multiplier (default 2.0)
   LA_NVIDIA_429_MAX_RETRIES   max retry attempts before giving up (default 5)
   LA_SESSION_MENU_CONFIG_DIR  where the saved picker settings live (default: ~/.claude/free-agents/session-menu/)
+  LA_NVIDIA_POLICY            grant policy: aging (default) | deficit | legacy (kill-switch)
+  LA_NVIDIA_TIER1_SECONDS     aging tier 1 threshold seconds (default 45)
+  LA_NVIDIA_TIER2_SECONDS     aging tier 2 threshold seconds (default 150)
+  LA_NVIDIA_WAITER_TTL        stale-waiter prune seconds (default 15)
+  LA_NVIDIA_WAITER_POLL       wait-loop sleep clamp / heartbeat interval seconds (default 2)
+  LA_NVIDIA_DEFICIT_RATE      deficit accrual multiplier (default 1.0)
+  LA_NVIDIA_DEFICIT_CAP_SECONDS  deficit ceiling seconds (default 600)
+  LA_LIMITER_RESERVE          lane share cap fraction (default 0.2; env name kept from 0.50.1)
+  LA_NVIDIA_DISPATCH_BOOST    "on" (default): dispatch/background rank ahead within tier 0 only
+  LA_LIMITER_KIND             this caller's kind: interactive (default) | dispatch | background
+  LA_LIMITER_LANE_APPROVAL    agent-initiated lane gate: ask (default) | agent
+  LA_LIMITER_PRIORITY         "1" = register this process in the priority lane
 
 Exit codes: 0 ok; 2 usage error; 3 timed out waiting for a slot.
 """
@@ -1268,12 +1290,26 @@ def owners_info(limiter) -> dict:
                 _t, o = _stamp_parts(s)
                 counts[o] = counts.get(o, 0) + 1
             owners = dict(getattr(limiter, "_owners", {}))
+            waiters = dict(getattr(limiter, "_waiters", {}))
+        else:
+            limiter._load_state(fd, now)
+            owners = dict(getattr(limiter, "_owners", {}))
+            waiters = dict(getattr(limiter, "_waiters", {}))
+        # per-owner live queue length (ungranted waiters only — a granted entry is a slot
+        # that is already booked for that owner)
+        waiting = {}
+        for w in waiters.values():
+            if "granted" not in w:
+                o = w.get("owner", "")
+                waiting[o] = waiting.get(o, 0) + 1
+        if isinstance(limiter, SlidingWindowLimiter):
             return {"limit": limiter.limit, "in_window": len(stamps),
+                    "waiting": waiting,
                     "owners": {o: {**opts, "in_window": counts.get(o, 0)}
                                for o, opts in owners.items()},
                     "unowned_in_window": counts.get("legacy", 0)}
-        limiter._load_state(fd, now)
         return {"capacity": limiter.capacity, "tokens": round(limiter._tokens, 2),
+                "waiting": waiting,
                 "owners": dict(getattr(limiter, "_owners", {}))}
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
