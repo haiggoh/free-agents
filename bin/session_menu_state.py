@@ -78,8 +78,24 @@ RATE_LIMITER_MODES = ("sliding_window", "smooth_bucket")
 # keeps its pre-backoff name so files saved before the backoff still load unchanged.
 _RL_NUMERIC = {"rpm": (1, 10000), "bucket_capacity": (1, 1000),
                "max_wait": (0, 3600), "cooldown": (0, 3600),
-               "max_cooldown": (0, 3600), "backoff_multiplier": (1, 10), "max_retries": (0, 50)}
+               "max_cooldown": (0, 3600), "backoff_multiplier": (1, 10), "max_retries": (0, 50),
+               # fairness knobs (2026-11-20 design): every new threshold is a real saved
+               # setting, validated here exactly like the eight above
+               "tier1_seconds": (5, 600), "tier2_seconds": (10, 3600),
+               "waiter_ttl_seconds": (5, 120), "waiter_poll_seconds": (0.5, 10),
+               "deficit_rate": (0.1, 10), "deficit_cap_seconds": (30, 7200),
+               "lane_share_cap": (0.05, 0.9)}
 _RL_WHOLE = ("rpm", "bucket_capacity", "max_retries")
+_RL_CHOICES = {"policy": ("aging", "deficit", "legacy"), "lane_approval": ("ask", "agent")}
+_RL_BOOL = ("dispatch_boost",)
+# What the picker shows when a key is unset; must match rate_limiter.py's defaults.
+RATE_LIMITER_DEFAULTS = {"mode": "sliding_window", "rpm": 40, "bucket_capacity": 6,
+                         "max_wait": 300, "cooldown": 30, "max_cooldown": 300,
+                         "backoff_multiplier": 2.0, "max_retries": 5,
+                         "policy": "aging", "tier1_seconds": 45, "tier2_seconds": 150,
+                         "waiter_ttl_seconds": 15, "waiter_poll_seconds": 2,
+                         "deficit_rate": 1.0, "deficit_cap_seconds": 600,
+                         "lane_share_cap": 0.2, "dispatch_boost": True, "lane_approval": "ask"}
 
 # Memory guard (schema 5; kv_dtype grew it to 6 so pre-kv_dtype readers reject the file loudly on
 # the VERSION, not on an unknown key). Booleans plus bounded numbers; the watchdog and the
@@ -182,6 +198,12 @@ def _validate_rate_limiter(values: dict, allow_none: bool = False) -> None:
         if key == "mode":
             if value not in RATE_LIMITER_MODES:
                 raise ValueError(f"mode must be one of {', '.join(RATE_LIMITER_MODES)}")
+        elif key in _RL_CHOICES:
+            if value not in _RL_CHOICES[key]:
+                raise ValueError(f"{key} must be one of {', '.join(_RL_CHOICES[key])}")
+        elif key in _RL_BOOL:
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be true or false")
         elif key in _RL_NUMERIC:
             lo, hi = _RL_NUMERIC[key]
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not lo <= value <= hi:

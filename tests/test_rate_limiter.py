@@ -1017,6 +1017,68 @@ class BucketFairnessTests(unittest.TestCase):
             self.assertEqual(b.try_acquire(token=tA), 0.0)
 
 
+class HotSettingsTests(unittest.TestCase):
+    """The new fairness knobs are hot: env > saved picker setting > default, re-read through
+    an mtime-cached settings file, so a submenu change hot-applies to running proxies."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = Path(self.tmp.name)
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
+        env["LA_SESSION_MENU_CONFIG_DIR"] = str(self.cfg)
+        patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        rl._SETTINGS_CACHE.clear()
+        self.addCleanup(rl._SETTINGS_CACHE.clear)
+
+    def _save(self, rl_section):
+        p = self.cfg / "session-menu.local.json"
+        p.write_text(json.dumps({"schema_version": 10, "rate_limiter": rl_section}))
+        return p
+
+    def test_defaults_when_nothing_saved(self):
+        cfg = rl._cfg()
+        self.assertEqual(cfg["policy"], "aging")
+        self.assertEqual(cfg["tier1_seconds"], 45.0)
+        self.assertEqual(cfg["dispatch_boost"], True)
+        self.assertEqual(cfg["lane_approval"], "ask")
+
+    def test_saved_settings_hot_reload_on_mtime_change(self):
+        p = self._save({"tier1_seconds": 45, "policy": "aging"})
+        self.assertEqual(rl._cfg()["tier1_seconds"], 45.0)
+        st = p.stat()
+        p.write_text(json.dumps({"schema_version": 10,
+                                 "rate_limiter": {"tier1_seconds": 5, "policy": "deficit"}}))
+        os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+        cfg = rl._cfg()
+        self.assertEqual(cfg["tier1_seconds"], 5.0, "mtime change invalidates the cache")
+        self.assertEqual(cfg["policy"], "deficit")
+
+    def test_env_beats_saved_for_new_keys(self):
+        self._save({"tier1_seconds": 45, "dispatch_boost": True})
+        os.environ["LA_NVIDIA_TIER1_SECONDS"] = "99"
+        os.environ["LA_NVIDIA_DISPATCH_BOOST"] = "0"
+        try:
+            cfg = rl._cfg()
+            self.assertEqual(cfg["tier1_seconds"], 99.0)
+            self.assertEqual(cfg["dispatch_boost"], False)
+        finally:
+            del os.environ["LA_NVIDIA_TIER1_SECONDS"]
+            del os.environ["LA_NVIDIA_DISPATCH_BOOST"]
+
+    def test_pre_fairness_saved_file_falls_back_to_defaults(self):
+        # the user's live file shape (schema 10, only the 8 old keys): new keys get defaults
+        self._save({"mode": "smooth_bucket", "bucket_capacity": 10, "cooldown": 10,
+                    "max_cooldown": 900, "backoff_multiplier": 1.5, "max_retries": 10,
+                    "max_wait": 300, "rpm": 40})
+        cfg = rl._cfg()
+        self.assertEqual((cfg["policy"], cfg["lane_share_cap"], cfg["waiter_poll_seconds"]),
+                         ("aging", 0.2, 2.0))
+
+
 if __name__ == "__main__":
     mp.set_start_method("fork", force=True)
     unittest.main(verbosity=2)

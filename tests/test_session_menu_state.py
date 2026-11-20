@@ -264,6 +264,40 @@ class StateTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 sms.save_rate_limiter(self.cfg, bad)
 
+    def test_fairness_knobs_round_trip_and_validate(self):
+        # Every new fairness threshold is a REAL saved setting (no placeholders): it
+        # round-trips and validates exactly like the eight pre-existing keys.
+        good = {"policy": "deficit", "tier1_seconds": 30, "tier2_seconds": 300,
+                "waiter_ttl_seconds": 20, "waiter_poll_seconds": 1.5,
+                "deficit_rate": 2.0, "deficit_cap_seconds": 900,
+                "lane_share_cap": 0.3, "dispatch_boost": False, "lane_approval": "agent"}
+        sms.save_rate_limiter(self.cfg, good)
+        self.assertEqual(sms.load(self.cfg).rate_limiter, good)
+        for bad in ({"policy": "yolo"}, {"lane_approval": "maybe"},
+                    {"tier1_seconds": 4}, {"tier1_seconds": 601}, {"tier2_seconds": 9},
+                    {"waiter_ttl_seconds": 121}, {"waiter_poll_seconds": 0.4},
+                    {"deficit_rate": 0.05}, {"deficit_cap_seconds": 29},
+                    {"lane_share_cap": 0.04}, {"lane_share_cap": 0.95},
+                    {"dispatch_boost": "yes"}, {"tier1_seconds": True}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                sms.save_rate_limiter(self.cfg, bad)
+        sms.save_rate_limiter(self.cfg, {"policy": None})     # None clears a key
+        self.assertNotIn("policy", sms.load(self.cfg).rate_limiter)
+
+    def test_pre_fairness_config_file_still_loads(self):
+        # A saved file from BEFORE the fairness knobs (schema 10, only the 8 old keys — the
+        # user's live file has exactly this shape) loads unchanged; new keys fall back to
+        # defaults in the limiter.
+        self.file.write_text(json.dumps(
+            {"schema_version": 10,
+             "rate_limiter": {"mode": "smooth_bucket", "rpm": 40, "bucket_capacity": 10,
+                              "cooldown": 10, "max_cooldown": 900, "backoff_multiplier": 1.5,
+                              "max_retries": 10, "max_wait": 300}}))
+        state = sms.load(self.cfg)
+        self.assertEqual(state.warnings, [])
+        self.assertEqual(state.rate_limiter["mode"], "smooth_bucket")
+        self.assertEqual(state.rate_limiter["max_cooldown"], 900)
+
     # --- memory guard (schema 5) ---------------------------------------------------
     def test_memguard_defaults_round_trip_and_env(self):
         st = sms.load(self.cfg)
