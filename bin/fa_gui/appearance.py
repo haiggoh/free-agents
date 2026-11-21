@@ -32,6 +32,9 @@ DEFAULTS: dict[str, Any] = {
     # 2026-11-20: follow the OS light/dark instead of the store's dark_mode (read at window
     # creation, native mode only — blur/vibrancy are native-only); browser mode: no effect
     "follow_system_appearance": False,
+    # 2026-11-21 theme option: modern-tile emoji treatment — "subdued" (dark near-black,
+    # light mode) | "noto" (mono line-art glyphs) | "full" (Apple color emoji, as before)
+    "tile_emoji_style": "subdued",
 }
 
 DEFAULT_OPACITY_BLUR_ACTIVE = 50     # user 2026-11-08: with blur on, 50% is the default...
@@ -57,6 +60,7 @@ def tint_alpha(opacity_pct: int, blur_active: bool = False) -> float:
     return round(min(100, max(0, opacity_pct)) / 100, 3)
 
 PRESENTATIONS = ("compatibility", "modern")
+TILE_EMOJI_STYLES = ("subdued", "noto", "full")
 _OPACITY_MIN, _OPACITY_MAX = 0, 100
 
 
@@ -82,6 +86,9 @@ def _validate(key: str, value: Any) -> None:
     if key == "presentation":
         if value not in PRESENTATIONS:
             raise ValueError(f"presentation must be one of {PRESENTATIONS}, got {value!r}")
+    elif key == "tile_emoji_style":
+        if value not in ("subdued", "noto", "full"):
+            raise ValueError(f"tile_emoji_style must be one of subdued|noto|full, got {value!r}")
     elif key in ("background_translucent", "background_blur_requested", "dark_mode",
                  "follow_system_appearance"):
         if not isinstance(value, bool):

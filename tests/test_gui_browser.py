@@ -410,6 +410,33 @@ def test_modern_tile_emoji_filter_follows_theme_mode(browser, tmp_path):
             assert srv.stop() == []
 
 
+def test_tile_emoji_style_options_all_render(browser, tmp_path):
+    # 2026-11-21 theme option: subdued (default) | noto (mono line-art font) | full (color)
+    for style, expect in (("subdued", "saturate(0.2) brightness(0.22)"),
+                          ("noto", "NotoEmojiMono"),
+                          ("full", "none")):
+        ap = tmp_path / f"appearance-{style}.json"
+        ap.write_text(json.dumps({"presentation": "modern", "tile_emoji_style": style}))
+        srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+        try:
+            page = browser.new_page()
+            page.goto(srv.url)
+            page.wait_for_selector(".tile-grid .tile-emoji", timeout=20000)
+            info = page.evaluate("""() => {
+                const el = document.querySelector('.tile-grid .tile-emoji');
+                const cs = getComputedStyle(el);
+                return [cs.filter, cs.fontFamily];
+            }""")
+            if expect == "none":
+                assert info[0] == "none", (style, info)
+            elif expect == "NotoEmojiMono":
+                assert expect in info[1], (style, info)
+            else:
+                assert expect in info[0], (style, info)
+        finally:
+            assert srv.stop() == []
+
+
 def test_follow_system_switch_writes_store(browser, tmp_path):
     # 2026-11-20 spec: launch-only switch; the store write is the delivery-shaped outcome
     ap = tmp_path / "appearance.json"
