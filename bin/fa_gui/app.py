@@ -119,9 +119,10 @@ def build() -> None:
     from fa_gui.adapter import render_plan
     from fa_gui.jobs import STALE, Loader
 
-    ui.add_head_html("""@font-face { font-family: 'NotoEmojiMono'; font-style: normal; font-weight: 300 700;
+    ui.add_head_html("""<style>
+    @font-face { font-family: 'NotoEmojiMono'; font-style: normal; font-weight: 300 700;
       font-display: swap; src: url('/assets/NotoEmojiMono.ttf') format('truetype'); }
-    """ + """<script>
+    </style><script>
       // Phase 3: Enter/Space/arrows on a focused .cycle-row must not also scroll the page
       // or double-fire — swallow them at capture time when the target is inside a cycle row.
       document.addEventListener('keydown', function(e){
@@ -779,8 +780,10 @@ def build() -> None:
               f"var t=document.getElementById('tint-layer');"
               f"if(t) t.style.background='rgba({tint}, {alpha:.3f})';")
         ui.run_javascript(js)
-        if key in ("presentation", "tile_emoji_style") and st.get("rerender"):
-            st["rerender"]()
+        # NB: presentation / tile_emoji_style take effect on the next screen build — they
+        # render the HOME tiles, which are not on this page, and rerendering here would wipe
+        # the appearance section itself (its rows are rendered by render_appearance, not by
+        # render_rows). 2026-11-21 user report: the theme options vanished until re-entry.
 
     def render_appearance(body, st: dict) -> None:
         """Phase 4 UI: a GUI-only appearance section on the theme screen, bound to the

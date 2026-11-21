@@ -429,12 +429,42 @@ def test_tile_emoji_style_options_all_render(browser, tmp_path):
             }""")
             if expect == "none":
                 assert info[0] == "none", (style, info)
+                # the font-face must be inside <style>, never stray visible text (2026-11-21
+                # regression: the rule was prepended as raw head text and showed as a line)
+                assert "@font-face" not in page.inner_text("body"), (style, "stray CSS text")
             elif expect == "NotoEmojiMono":
                 assert expect in info[1], (style, info)
+                loaded = page.evaluate(
+                    "document.fonts.ready.then(() => document.fonts.check("
+                    "'350 72px \"NotoEmojiMono\"', '\u0001F680'))")
+                assert loaded, (style, "noto font did not actually load")
             else:
                 assert expect in info[0], (style, info)
         finally:
             assert srv.stop() == []
+
+
+def test_tile_emoji_cycle_keeps_theme_rows(browser, tmp_path):
+    # 2026-11-21 user report: cycling a tile-emoji option wiped the appearance section
+    # (the live apply re-rendered rows only) until re-entering the menu.
+    ap = tmp_path / "appearance.json"
+    ap.write_text(json.dumps({"presentation": "modern", "tile_emoji_style": "subdued"}))
+    srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}theme_config")
+        page.wait_for_selector('[data-key="tile_emoji_style"]', timeout=20000)
+        page.locator('[data-key="tile_emoji_style"] .cycle-right').click()
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text())["tile_emoji_style"] == "subdued":
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["tile_emoji_style"] == "noto"
+        # the section must not vanish: the cycle rows stay, and no navigation happened
+        assert page.locator('[data-key="tile_emoji_style"]').count() == 1
+        assert page.locator('[data-key="presentation"]').count() == 1
+        assert "theme_config" in page.url
+    finally:
+        assert srv.stop() == []
 
 
 def test_follow_system_switch_writes_store(browser, tmp_path):
