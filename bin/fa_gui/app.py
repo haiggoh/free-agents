@@ -194,13 +194,14 @@ def build() -> None:
       .tile-lg .tile-emoji { font-size: 7.5rem; }                          /* 2x2 */
       .tile:hover { background: #f0f9ff !important; border-color: #00BFFF !important; }   /* flat sky tint, no gradient */
       body:has(.dark-shell) .tile { background: #1f1f1f !important; border-color: rgba(255, 255, 255, 0.14) !important; }
-      /* 2026-11-21 user pick (lab v3/v4 at real tile size): modern-mode tile emoji is a subdued
-         near-black in light mode (sat 70% + brightness 22%, color detail shimmers through) and
-         a bright white monochrome in dark mode (grayscale + invert + brightness 1.3 keeps the
-         inside detail). Compatibility mode keeps full-color emoji — the tile grid only exists
-         in modern mode, so scoping to .tile-grid is the modern-only gate. */
-      .tile-grid .tile .tile-emoji { filter: saturate(0.7) brightness(0.22); }
-      body:has(.dark-shell) .tile-grid .tile .tile-emoji { filter: grayscale(1) invert(1) brightness(1.3); }
+      /* 2026-11-21 user pick (lab v5 at real tile size): modern-mode tile emoji is a subdued
+         near-black in light mode (sat 20% + brightness 22%, faint color detail shimmers through)
+         and a bright near-white in dark mode (sat 10% + brightness 1.9 — brightness >1 clamps
+         toward white while the bitmap's own detail scales up first, so rocket/info stay
+         recognizable; inverting the bitmap was rejected as unnatural). Compatibility mode
+         keeps full-color emoji — the tile grid only exists in modern mode. */
+      .tile-grid .tile .tile-emoji { filter: saturate(0.2) brightness(0.22); }
+      body:has(.dark-shell) .tile-grid .tile .tile-emoji { filter: saturate(0.1) brightness(1.9); }
       body:has(.dark-shell) .tile:hover { background: #16324a !important; border-color: #00BFFF !important; }
       .menu-item { font-size: 1.0625rem; }   /* non-tile text menu items match tile text (17px, user 2026-11-09) */
       /* quit icon swaps ⏻ -> ⏼ on hover (user 2026-11-09) */
