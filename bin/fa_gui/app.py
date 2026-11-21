@@ -775,10 +775,14 @@ def build() -> None:
         pct = _ap2.resolve_opacity(doc2, blur_active=blur_active)
         alpha = _ap2.tint_alpha(pct, blur_active=blur_active)
         tint = "20, 20, 20" if dark else "255, 255, 255"
+        style = str(doc2.get("tile_emoji_style", "subdued"))
+        style_cls = "" if style == "full" else f" tile-emoji-{style}"
         js = (f"var r=document.querySelector('.shell-root');"
               f"if(r) r.classList.toggle('dark-shell', {'true' if dark else 'false'});"
               f"var t=document.getElementById('tint-layer');"
-              f"if(t) t.style.background='rgba({tint}, {alpha:.3f})';")
+              f"if(t) t.style.background='rgba({tint}, {alpha:.3f})';"
+              f"var p=document.querySelector('.appearance-preview .tile-emoji');"
+              f"if(p) p.className='tile-emoji{style_cls}';")
         ui.run_javascript(js)
         # NB: presentation / tile_emoji_style take effect on the next screen build — they
         # render the HOME tiles, which are not on this page, and rerendering here would wipe
@@ -789,6 +793,13 @@ def build() -> None:
         """Phase 4 UI: a GUI-only appearance section on the theme screen, bound to the
         fa_gui.appearance store (never to core Actions — it stays out of render_plan).
         Rows reuse the .cycle-row / .switch classes so styling and keyboard behavior match."""
+        # live preview tile: the same markup the home lanes render (a .tile-grid with one
+        # tile, so the tile-emoji-* CSS applies exactly as on the home lanes) — a theme
+        # change re-styles THIS tile in place via _apply_appearance_live
+        with ui.row().classes("w-full justify-center mb-2"):
+            with ui.element("div").classes("tile-grid"):
+                _prev = ui.element("div").classes("tile tile-menu-item appearance-preview")
+                _tile_label(_prev, "\U0001F9BE  Local sessions")
         from fa_gui import appearance as ap
         store = ap.store_path()
         doc = ap.load(store)
@@ -799,13 +810,16 @@ def build() -> None:
                 step = 5 if clamp else 1
                 with ui.row().classes("cycle-row items-center gap-1 w-full appearance-row") as crow:
                     crow.props["data-key"] = key
-                    ui.label(f"{label}:").classes("cycle-name row-action")
+                    name_lbl = ui.label(f"{label}:").classes("cycle-name row-action")
                     left = ui.label("<").classes("cycle-arrow cycle-left")
                     _init = (ap.resolve_opacity(doc, blur_active=(bool(doc["background_blur_requested"])
                                   and os.environ.get("LA_GUI_NATIVE") == "1"))
                              if key == "background_opacity_pct" else doc[key])
                     val = ui.label(str(_init)).classes("cycle-value row-action")
                     right = ui.label(">").classes("cycle-arrow cycle-right")
+                    # csl parity: clicking the value (or the name) acts like the right arrow
+                    val.on("click", lambda e=None, k=key, v=val, ch=choices, cl=clamp: _step(5 if cl else 1, k, v, ch, cl))
+                    name_lbl.on("click", lambda e=None, k=key, v=val, ch=choices, cl=clamp: _step(5 if cl else 1, k, v, ch, cl))
 
                     def _step(d, k=key, v=val, ch=choices, cl=clamp):
                         cur_doc = ap.load(store)

@@ -455,14 +455,45 @@ def test_tile_emoji_cycle_keeps_theme_rows(browser, tmp_path):
         page.goto(f"{srv.url}theme_config")
         page.wait_for_selector('[data-key="tile_emoji_style"]', timeout=20000)
         page.locator('[data-key="tile_emoji_style"] .cycle-right').click()
+        # live preview: the theme menu's preview tile now renders noto line art (the JS
+        # class swap lands a beat AFTER the store write, so poll the computed style)
         deadline = time.time() + 10
-        while time.time() < deadline and json.loads(ap.read_text())["tile_emoji_style"] == "subdued":
-            time.sleep(0.1)
+        ff = ""
+        while time.time() < deadline:
+            ff = page.evaluate(
+                "getComputedStyle(document.querySelector('.appearance-preview .tile-emoji')).fontFamily")
+            if "NotoEmojiMono" in ff:
+                break
+            time.sleep(0.2)
+        assert "NotoEmojiMono" in ff, ff
         assert json.loads(ap.read_text())["tile_emoji_style"] == "noto"
         # the section must not vanish: the cycle rows stay, and no navigation happened
         assert page.locator('[data-key="tile_emoji_style"]').count() == 1
         assert page.locator('[data-key="presentation"]').count() == 1
         assert "theme_config" in page.url
+    finally:
+        assert srv.stop() == []
+
+
+def test_tile_emoji_cycle_value_click_steps_like_the_arrow(browser, tmp_path):
+    # 2026-11-21 csl parity: clicking the VALUE (or the name) of a cycle row steps like ▶
+    ap = tmp_path / "appearance.json"
+    ap.write_text(json.dumps({"presentation": "modern", "tile_emoji_style": "subdued"}))
+    srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}theme_config")
+        page.wait_for_selector('[data-key="tile_emoji_style"]', timeout=20000)
+        page.locator('[data-key="tile_emoji_style"] .cycle-value').click()
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text())["tile_emoji_style"] == "subdued":
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["tile_emoji_style"] == "noto"
+        page.locator('[data-key="tile_emoji_style"] .cycle-name').click()   # name acts like ▶ too
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text())["tile_emoji_style"] == "noto":
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["tile_emoji_style"] == "full"
     finally:
         assert srv.stop() == []
 
