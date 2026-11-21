@@ -119,7 +119,9 @@ def build() -> None:
     from fa_gui.adapter import render_plan
     from fa_gui.jobs import STALE, Loader
 
-    ui.add_head_html("""<script>
+    ui.add_head_html("""@font-face { font-family: 'NotoEmojiMono'; font-style: normal; font-weight: 300 700;
+      font-display: swap; src: url('/assets/NotoEmojiMono.ttf') format('truetype'); }
+    """ + """<script>
       // Phase 3: Enter/Space/arrows on a focused .cycle-row must not also scroll the page
       // or double-fire — swallow them at capture time when the target is inside a cycle row.
       document.addEventListener('keydown', function(e){
@@ -200,8 +202,17 @@ def build() -> None:
          toward white while the bitmap's own detail scales up first, so rocket/info stay
          recognizable; inverting the bitmap was rejected as unnatural). Compatibility mode
          keeps full-color emoji — the tile grid only exists in modern mode. */
-      .tile-grid .tile .tile-emoji { filter: saturate(0.2) brightness(0.22); }
-      body:has(.dark-shell) .tile-grid .tile .tile-emoji { filter: saturate(0.1) brightness(1.9); }
+      /* 2026-11-21 theme option (lab v5/v6/v7): the modern-tile emoji treatment is picked per
+         appearance-store tile_emoji_style — subdued (default: dark near-black light mode,
+         near-white dark mode) | noto (mono line-art variable font, theme ink color) |
+         full (Apple color emoji, as before). Scoped to .tile-grid = modern-only. */
+      .tile-grid .tile .tile-emoji-subdued { filter: saturate(0.2) brightness(0.22); }
+      body:has(.dark-shell) .tile-grid .tile .tile-emoji-subdued { filter: saturate(0.1) brightness(1.9); }
+      /* noto mono line art (variable font, wght 300-700): a CSS monochrome glyph, so it takes
+         the theme's ink color directly — near-black in light, white in dark (dark-shell CSS) */
+      .tile-grid .tile .tile-emoji-noto { font-family: 'NotoEmojiMono'; font-weight: 350; color: #141414; }
+      body:has(.dark-shell) .tile-grid .tile .tile-emoji-noto { color: #f8f8f8; }
+      /* "full" (the default look for compatibility and a pickable option): no rule — Apple color emoji */
       body:has(.dark-shell) .tile:hover { background: #16324a !important; border-color: #00BFFF !important; }
       .menu-item { font-size: 1.0625rem; }   /* non-tile text menu items match tile text (17px, user 2026-11-09) */
       /* quit icon swaps ⏻ -> ⏼ on hover (user 2026-11-09) */
@@ -325,6 +336,15 @@ def build() -> None:
         except Exception:
             return False
 
+    def _tile_emoji_style() -> str:
+        """The modern-tile emoji treatment: subdued (default) | noto (mono line art) | full.
+        Read per render like _modern(); any store error -> the default."""
+        try:
+            from fa_gui import appearance as ap
+            return ap.load(ap.store_path()).get("tile_emoji_style", "subdued")
+        except Exception:
+            return "subdued"
+
     def _tile_label(parent, text, quit_icons: bool = False):
         """Metro tile content: emoji and label wrapped in ONE centered .tile-inner group —
         emoji above the text; a 2-line label grows the group and the emoji rides higher
@@ -333,12 +353,17 @@ def build() -> None:
         parts = str(text).split(" ", 1)
         head, rest = parts[0], (parts[1] if len(parts) > 1 else "")
         with parent:
+            _style = _tile_emoji_style()
+            cls = "" if _style == "full" else f" tile-emoji-{_style}"
+            emo = head
+            if _style == "noto":
+                emo = emo.replace("️", "")   # VS16: the FE0F sequences are not in the mono font
             if quit_icons:
                 ui.html('<span class="tile-emoji icon-on">⏻</span>'
                         '<span class="tile-emoji icon-off">⏼</span>')
                 ui.html(f'<span class="tile-label">{_html.escape(rest or str(text))}</span>')
             elif head and any(ord(ch) >= 0x2000 for ch in head):
-                ui.html(f'<span class="tile-emoji">{_html.escape(head)}</span>')
+                ui.html(f'<span class="tile-emoji{cls}">{_html.escape(emo)}</span>')
                 ui.html(f'<span class="tile-label">{_html.escape(rest)}</span>')
             else:
                 ui.label(str(text)).classes("tile-label")
@@ -754,7 +779,7 @@ def build() -> None:
               f"var t=document.getElementById('tint-layer');"
               f"if(t) t.style.background='rgba({tint}, {alpha:.3f})';")
         ui.run_javascript(js)
-        if key == "presentation" and st.get("rerender"):
+        if key in ("presentation", "tile_emoji_style") and st.get("rerender"):
             st["rerender"]()
 
     def render_appearance(body, st: dict) -> None:
@@ -844,6 +869,7 @@ def build() -> None:
             _appearance_switch("background_blur_requested", "Request native blur", launch_only=True)
             _appearance_switch("dark_mode", "🌙 Dark mode")   # Phase 8 store key; CSS tokens already exist (dark-shell); also drives the vibrancy material (native)
             _appearance_switch("follow_system_appearance", "🌗 Follow system appearance", launch_only=True)
+            _appearance_cycle("tile_emoji_style", "Tile emoji", list(ap.TILE_EMOJI_STYLES))
 
     @ui.page("/")
     @ui.page("/home")

@@ -90,6 +90,9 @@ def build_selftest_page() -> None:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     from nicegui import app, ui
+    # the tile-emoji font (NotoEmojiMono.ttf, 2026-11-21 theme option) is served from /assets
+    from starlette.staticfiles import StaticFiles
+    app.mount("/assets", StaticFiles(directory=Path(__file__).parent / "assets"), name="assets")
     ready = os.environ.get("LA_GUI_READY_FILE")
     if ready:
         # The launcher (install/gui-launcher/locate.sh) waits for this: a page has CONNECTED,

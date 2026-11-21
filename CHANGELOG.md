@@ -28,6 +28,21 @@
 - The handler now writes, pops the catalog cache, repaints immediately, and refreshes the
   cache off the UI thread (`asyncio.to_thread`); browser tests green again.
 
+### Added — Tile emoji theme option: subdued | noto line art | full color (user 2026-11-21)
+- The appearance section gains a "Tile emoji" cycle for the modern-mode tiles: **subdued**
+  (default — `saturate(0.2) brightness(0.22)` near-black with the color detail shimmering
+  through, `saturate(0.1) brightness(1.9)` near-white in dark mode), **noto** (the Noto Emoji
+  monochrome variable font at wght 350 — real line-art glyphs that take the theme's ink color,
+  with VS16 stripped because FE0F sequences are not in the mono font), and **full** (Apple
+  color emoji, as before). Compatibility mode keeps color in all three settings.
+- The font ships in `bin/fa_gui/assets/NotoEmojiMono.ttf` served from `/assets`
+  (starlette mount in main.py). Store key `tile_emoji_style` with validator + browser tests
+  asserting the computed filter / font-family per option (lab screenshots at real tile size:
+  /tmp/emoji-lab6.png, /tmp/emoji-lab7.png).
+- Fixes along the way: the subdued filter was scoped to `.tile-emoji` (every tile, including
+  the noto/full settings) — now scoped to `.tile-emoji-subdued`; per-style probe confirms
+  class + computed style for all three options.
+
 ## [0.63.2] — 2026-11-24
 
 ### Fixed — hotfix: a model that never answers fails over instead of hanging the session

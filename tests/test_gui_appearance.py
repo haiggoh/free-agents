@@ -70,6 +70,13 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(self.path.exists())
         ap.save(self.path, {"follow_system_appearance": True})   # 2026-11-20: opt-in key
         self.assertIs(ap.load(self.path)["follow_system_appearance"], True)
+        for bad in ("neon", "", None, 3):
+            with self.subTest(style=bad):
+                with self.assertRaises(ValueError):
+                    ap.save(self.path, {"tile_emoji_style": bad})
+        for good in ap.TILE_EMOJI_STYLES:
+            ap.save(self.path, {"tile_emoji_style": good})
+            self.assertEqual(ap.load(self.path)["tile_emoji_style"], good)
 
     def test_nan_and_nonfinite_rejected(self):
         # NaN is rejected at PARSE time on load (warn + defaults, file untouched — the store's
