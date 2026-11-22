@@ -161,9 +161,8 @@ Independent review: dispatch to Nemotron 3 Ultra (NVIDIA route), every claim re-
 Schema (versioned; every number carries provenance):
 ```
 {"schema_version": 1,
- "session_min_context": 262145,   # PENDING USER CONFIRMATION: = the C9 filter line (>256k);
-                                  # alternative 200000 keeps ~200k models (check GLM 5.3 Flash's
-                                  # documented context first — NVIDIA's catalog does not publish it)
+ "session_min_context": 262145,   # DECIDED (user 2026-11-22) = the C9 filter line (>256k);
+                                  # GLM 5.3 Flash runs sessions up to 1M (user-observed)
  "providers": {
    "nvidia":  {"rpm": 40, "tpm": null, "rpd": null, "rpw": null, "tpd": null,
                "dispatch_only": false, "measured_at": "2026-11-20", "source": "docs/measurements/2026-11-20-remote-quota-probe.md"},
