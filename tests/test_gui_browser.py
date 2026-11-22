@@ -598,6 +598,63 @@ def test_theme_accent_rows_show_live_swatches(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_lowkey_chooser_selection_rides_the_launch(browser, tmp_path):
+    # 2026-11-23 parity (QC R1): csl's lowkey chooser SELECTS a model (no launch on click);
+    # the selection survives the session-name dialog round-trip and rides the convo launch
+    # (--session + --provider); the one-shot dispatches --prompt without --session
+    stub = tmp_path / "launch.json"
+    csl_stub = tmp_path / "csl-stub.sh"
+    csl_stub.write_text("#!/usr/bin/env bash\n"
+                        "if [ \"$1\" = \"--inventory\" ]; then\n"
+                        "  printf 'my-model\\tvllm-mlx\\teager\\toperator\\n'\n"
+                        "fi\n")
+    csl_stub.chmod(0o755)
+    rs_stub = tmp_path / "remote-session.sh"
+    rs_stub.write_text("#!/usr/bin/env bash\n"
+                       "if [ \"$1\" = \"--inventory\" ]; then\n"
+                       "  printf 'agent-ok\\topenrouter\\tAgent OK\\tstandard\\t0\\t1\\n'\n"
+                       "fi\n")
+    rs_stub.chmod(0o755)
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub), "CSL_SELF": str(csl_stub),
+                      "CSL_REMOTE_LAUNCHER": str(rs_stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}lowkey")
+        page.get_by_text("Choose model", exact=False).first.click()
+        page.locator('[data-model="openrouter:agent-ok"]').click()      # SELECT (no launch)
+        assert not stub.exists(), "choosing a model must not launch it"
+        page.get_by_text("Set session name", exact=False).first.click()
+        page.locator(".q-dialog input").fill("my-run")
+        page.locator(".q-dialog button", has_text="Yes").click()
+        page.wait_for_selector("text=Set session name: my-run", timeout=15000)
+        # the selection survived the dialog round-trip
+        page.get_by_text("Choose model", exact=False).first.click()
+        assert "selected" in page.locator(
+            '[data-model="openrouter:agent-ok"]').get_attribute("class")
+        page.get_by_text("Start convo", exact=False).first.click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), "convo did not dispatch"
+        argv = json.loads(stub.read_text())["argv"]
+        assert argv[argv.index("--session") + 1] == "my-run", argv
+        assert argv[argv.index("--provider") + 1] == "openrouter", argv
+        # one-shot: the typed prompt rides, the session name does not (csl's contract)
+        stub.unlink()
+        page.get_by_text("Start one-shot", exact=False).first.click()
+        page.wait_for_selector(".q-dialog", timeout=10000)
+        page.locator(".q-dialog input").fill("summarize this repo")
+        page.locator(".q-dialog button", has_text="Yes").click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        argv = json.loads(stub.read_text())["argv"]
+        assert argv[argv.index("--prompt") + 1] == "summarize this repo", argv
+        assert "--session" not in argv, argv
+    finally:
+        assert srv.stop() == []
+
+
 def test_cloud_route_switch_writes_settings_env(browser, tmp_path):
     # 2026-11-22 parity: the cloud-config route row cycles AND persists — the write lands in
     # the launch dir's .claude/settings.json env (FA_ROUTE_AGENT), never the real one

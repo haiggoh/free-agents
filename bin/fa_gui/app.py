@@ -1260,6 +1260,8 @@ def build() -> None:
             # so per-client state (st) is empty on the prompt: route — prompt:* dialogs
             # read their payload from here
             settings_state["last_scr"] = scr
+        if full_path == "lowkey":
+            st["toggle_list"] = lambda: None   # placeholder; the chooser toggle is set below
         body = render_shell(scr.title, getattr(scr, 'policy', '') if isinstance(getattr(scr, 'policy', ''), str) else "")
         with body:
             render_rows(scr, st)
@@ -1271,6 +1273,63 @@ def build() -> None:
                 if _a.key == "c":
                     _a.enabled = bool(scr.queue)   # review row is disabled until the queue is non-empty
             render_download_entries(body, scr, st)   # queue rows (csl's entry list)
+        if full_path == "lowkey":
+            # csl parity (QC R1): the lowkey model chooser — local models + API agents,
+            # grouped; clicking a row SELECTS (no launch, like csl) and the selection is
+            # persisted process-globally so the session-name dialog round-trip keeps it
+            _sel = settings_state.get("lowkey_selection")
+            if _sel is not None:
+                try:
+                    scr.accordion.select(_sel)
+                    scr.activate_selected()
+                except Exception:
+                    pass
+            chooser = ui.column().classes("w-full gap-1 lane-list")
+            chooser.props["style"] = "display:none"
+
+            def _select(item_id: str) -> None:
+                settings_state["lowkey_selection"] = item_id
+                try:
+                    scr.accordion.select(item_id)
+                    scr.activate_selected()
+                except Exception:
+                    pass
+                _paint_chooser()
+
+            def _paint_chooser():
+                chooser.clear()
+                with chooser:
+                    _sel_now = settings_state.get("lowkey_selection")
+                    for mdl in (loader.cache.get("local") or []):
+                        alias = getattr(mdl, "alias", "")
+                        r = ui.label(f"    {alias}").classes(
+                            "menu-item model-row" + (" selected" if _sel_now == alias else ""))
+                        r.props["data-model"] = alias
+                        r.on("click", lambda a=alias: _select(a))
+                    by_prov: dict = {}
+                    for ag in (loader.cache.get("remote") or []):
+                        by_prov.setdefault(getattr(ag, "provider", "?"), []).append(ag)
+                    for prov, agents in by_prov.items():
+                        for ag in agents:
+                            iid = f"{prov}:{ag.model_id or ag.alias}"
+                            r = ui.label(f"    {ag.display or ag.alias}").classes(
+                                "menu-item model-row" + (" selected" if _sel_now == iid else ""))
+                            r.props["data-model"] = iid
+                            r.on("click", lambda a=iid: _select(a))
+
+            def _toggle_chooser():
+                visible = chooser.props.get("style", "") != "display:none"
+                chooser.props["style"] = "display:none" if visible else ""
+                if visible is False:
+                    _paint_chooser()
+
+            st["toggle_list"] = _toggle_chooser
+            for _kind, _fn in (("local", pc.load_local_models), ("remote", pc.load_remote_agents)):
+                try:
+                    await loader.load(_kind, _fn, client=client.id)
+                except Exception:
+                    pass
+            _paint_chooser()
         wire_rerender(body, m.Nav(full_path, m.HOME_OWNED), st)
         if full_path == "theme_config":
             # wrap AFTER wire_rerender (it sets st["rerender"]): a presentation switch must

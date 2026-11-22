@@ -469,9 +469,9 @@ class Savers:
         except (OSError, ValueError) as exc:
             self._warn(f"cloud setting not saved: {exc}")
 
-    def last_launched(self, lane, alias, tier):
+    def last_launched(self, lane, alias, tier, mode=None):
         try:
-            warning = sms.save_last_launched(self.config_dir, lane, alias, tier)
+            warning = sms.save_last_launched(self.config_dir, lane, alias, tier, mode)
         except ValueError as exc:          # an alias the store refuses: never block the launch
             warning = f"{exc}; Go last not remembered"
         self._warn(warning)
