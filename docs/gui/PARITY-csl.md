@@ -22,14 +22,14 @@ the nav target but no `@ui.page` exists for it.
 | csl screen / nav target | csl source | GUI status (measured) | Still missing |
 |---|---|---|---|
 | home | `HomeScreen` | ✅ `/home` renders | — |
-| local sessions | `LocalScreen` | ◐ `/local` renders with data | download entry point, #missing cleanup offer |
+| local sessions | `LocalScreen` | ✅ `/local` renders with data + #missing cleanup offer (red rows → confirm → `csl --unregister-models`) | the doc's earlier "download entry point" note was a mis-inventory: csl's LocalScreen has no such row either (it lives on Home → /download) |
 | remote sessions | `RemoteScreen` | ◐ `/remote` renders with data | `remote_filters` screen's controls, tool:rl-* panels |
 | lowkey | `LowkeyScreen` via `tool:lowkey` | ◐ renders via catch-all (data now prefetched) | prompt:session dialog |
 | download local models | `DownloadScreen` via `tool:download` | ✅ queue rows + review dialog + confirm→CLI argv all browser-proven (2eb5ea1) | — |
-| about | `AboutScreen` | ◐ renders | — |
+| about | `AboutScreen` | ✅ renders | — |
 | api keys | `APIKeysScreen` | ◐ renders | key add/remove write path (`setup-api-keys.py`), open: URLs |
 | rate limiter | `RateLimiterScreen` | ◐ renders | tool:rl-status / tool:rl-reset actions |
-| memguard (OOM guard) | `MemoryGuardScreen` | ◐ renders | — |
+| memguard (OOM guard) | `MemoryGuardScreen` | ✅ renders (switch + cycle controls, switch toggles on name/value click) | — |
 | cloud session config | `CloudConfigScreen` | ◐ renders | route/security-review write path |
 | theme config | `ThemeConfigScreen` | ✅ renders + GUI-only appearance section (`render_appearance`): presentation cycle (compat/modern tiles), translucent switch, opacity slider 0–100%, blur request, 🌙 dark-mode switch (dark-shell CSS tokens flip text). Native vibrancy MATERIAL now follows dark_mode (mediumLight/ultraDark; fail-open pyobjc patch on pywebview's BrowserView, in-process readback spike-verified 2026-11-20), so 0% opacity is bright in light mode; the ×1.35 tint hack was removed — tint_alpha is the raw opacity in every mode. 🌗 follow-system switch (launch-only). Tile-emoji theme option for modern tiles: subdued (default) | noto (mono line-art variable font, theme ink color, VS16-stripped) | full (Apple color emoji). The Tile emoji row shows only in the tiles menu (irrelevant in compatibility); the presentation value reads "Tiles menu"; theme rows toggle on name/value click (csl parity); the theme menu's real Back-to-home tile is the live style preview; dark-mode subdued = full-brightness bitmap + white silhouette overlay (::after, 0.6) since brightness>1 blew out the highlights. Remaining gap: theme color presets (yellow/lime) + swatch preview | — |
 | remote filters | `RemoteFiltersScreen` | ◐ renders | filter write path |
