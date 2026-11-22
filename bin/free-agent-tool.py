@@ -723,7 +723,24 @@ DEFAULT_PAID_FALLBACK: dict[str, float] = {"min_real_attempts": 3, "min_provider
 # RATE_LIMITED_PROVIDERS get the "patient" values per attempt whenever the shared rate limiter
 # is in an active 429 cooldown; non-rate-limited providers (gemini, ...) always use the active
 # tier's values — they have no rate limit to wait out.
-RATE_LIMITED_PROVIDERS = {"nvidia"}
+# 0.62.0 C3: "rate-limited provider" = every provider with a bucket dimension in
+# provider-limits.json — computed, not hard-coded.
+def bucketed_providers() -> set:
+    try:
+        from provider_limits import load
+        return {pid for pid, p in load().providers.items()
+                if any(v is not None for v in (p.rpm, p.tpm, p.rpd, p.rpw, p.tpd))}
+    except Exception:
+        return {"nvidia"}
+
+
+def load_detected(provider, env) -> bool:
+    """0.62.0 C3: provider-generic bucket-load peek (was nvidia-only)."""
+    from rate_limiter import load_detected as _ld
+    return _ld(provider, env)
+
+
+RATE_LIMITED_PROVIDERS = {"nvidia"}   # legacy name kept for older readers; see bucketed_providers()
 DEFAULT_TIMEOUT_TIERS = {
     "snappy":   {"wall_clock_cap_s": 900,  "attempt_max_s": 120,  "attempt_stall_s": 60},
     "balanced": {"wall_clock_cap_s": 3600, "attempt_max_s": 900,  "attempt_stall_s": 300},
@@ -732,10 +749,11 @@ DEFAULT_TIMEOUT_TIERS = {
 
 
 def nvidia_load_detected(env) -> bool:
-    """True when the shared NVIDIA rate limiter is in an active 429 cooldown right now (or has
-    consecutive 429s). Read-only peek at the limiter state file (LA_NVIDIA_THROTTLE_STATE);
-    never raises, never writes. L6 (0.62.0): writers ftruncate+write, so a torn read is
-    retried once before giving up — a silently-False load signal misroutes dispatches."""
+    """Legacy name (0.62.0): the nvidia bucket's load state. See load_detected() for the
+    provider-generic version. Read-only peek; never raises, never writes. L6: writers
+    ftruncate+write, so a torn read is retried once before giving up."""
+    from rate_limiter import load_detected as _ld
+    return _ld("nvidia", env)
     p = Path(env.get("LA_NVIDIA_THROTTLE_STATE")
              or (Path.home() / ".claude" / "free-agents" / ".nvidia_throttle_state"))
     doc = None
@@ -876,7 +894,7 @@ def execute_plan(plan, full_prompt, env, policy, *, role=None, start_index=0,
                       or "FA_DISPATCH_ATTEMPT_TIMEOUT_S" in env,
                       "attempt_stall_s": policy.get("_attempt_stall_s_overridden")
                       or "FA_DISPATCH_STALL_S" in env}
-        if entry.get("provider") in RATE_LIMITED_PROVIDERS and nvidia_load_detected(env):
+        if entry.get("provider") in bucketed_providers() and load_detected(entry.get("provider"), env):
             patient = (policy.get("_tiers") or DEFAULT_TIMEOUT_TIERS).get("patient") or {}
             p_cap, p_stall = patient.get("attempt_max_s"), patient.get("attempt_stall_s")
             if p_cap is not None and not overridden["attempt_max_s"]:

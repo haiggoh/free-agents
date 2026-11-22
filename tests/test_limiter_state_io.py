@@ -94,28 +94,46 @@ class StateIoTests(unittest.TestCase):
 
 
 class DispatchPeekTests(unittest.TestCase):
-    """L6: nvidia_load_detected tolerates a torn read — retry once, then False; never raises."""
+    """L6 + C3: the load peek goes through the limiter (whole-file read under flock, fail
+    SAFE on garbage) — never raises, never creates state. A torn file is treated as
+    loaded (conservative: the patient tier), a missing file as not loaded."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = os.path.join(self.tmp.name, "state")
         Path(self.path).write_text("{}")
-        self.env = {"LA_NVIDIA_THROTTLE_STATE": self.path}
+        self.env = {"LA_NVIDIA_THROTTLE_STATE": self.path,
+                    "FA_LIMITER_DIR": os.path.join(self.tmp.name, "limiter")}
 
-    def test_torn_read_is_retried_then_real_answer(self):
-        future = json.dumps({"cooldown_until": 4_000_000_000.0, "consecutive_429s": 0})
-        with mock.patch.object(Path, "read_text", side_effect=[ValueError("torn"), future]):
-            self.assertTrue(fat.nvidia_load_detected(self.env),
-                            "one retry must see the whole file")
+    def test_quiet_state_is_not_loaded(self):
+        self.assertFalse(fat.nvidia_load_detected(self.env))
 
-    def test_persistently_torn_read_returns_false_without_raising(self):
-        with mock.patch.object(Path, "read_text", side_effect=ValueError("torn")):
-            self.assertFalse(fat.nvidia_load_detected(self.env))
+    def test_active_cooldown_is_loaded(self):
+        import time
+        Path(self.path).write_text(json.dumps(
+            {"stamps": [], "cooldown_until": time.time() + 3600, "limit": 40,
+             "consecutive_429s": 0, "last_429_time": 0.0, "models": {}, "owners": {},
+             "waiters": {}, "deficit": {}}))
+        self.assertTrue(fat.nvidia_load_detected(self.env))
 
-    def test_missing_file_returns_false(self):
-        self.assertFalse(fat.nvidia_load_detected(
-            {"LA_NVIDIA_THROTTLE_STATE": os.path.join(self.tmp.name, "nope")}))
+    def test_garbage_state_fails_safe_towards_loaded(self):
+        Path(self.path).write_bytes(b'{"stamps": [trunc')
+        self.assertTrue(fat.nvidia_load_detected(self.env), "fail-safe: corrupt = loaded")
+
+    def test_torn_then_whole_read_sees_the_whole_file(self):
+        import time
+        Path(self.path).write_bytes(b'{"stamps": [trunc')      # torn
+        whole = json.dumps({"stamps": [], "cooldown_until": time.time() + 3600, "limit": 40,
+                            "consecutive_429s": 0, "last_429_time": 0.0, "models": {},
+                            "owners": {}, "waiters": {}, "deficit": {}})
+        Path(self.path).write_text(whole)                       # the writer finished
+        self.assertTrue(fat.nvidia_load_detected(self.env), "whole file read -> real answer")
+
+    def test_missing_file_returns_false_and_is_not_created(self):
+        p = os.path.join(self.tmp.name, "nope")
+        self.assertFalse(fat.nvidia_load_detected({"LA_NVIDIA_THROTTLE_STATE": p}))
+        self.assertFalse(Path(p).exists())
 
 
 if __name__ == "__main__":

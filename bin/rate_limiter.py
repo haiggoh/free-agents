@@ -1617,6 +1617,63 @@ def get_limiter(path: Path | str | None = None, rpm: float | None = None,
                                 quota=quota)
 
 
+def stretched_wait(provider: str, base: float, *, cap: float = 1800.0,
+                   clock=time.time) -> float:
+    """C3 (0.62.0): the wait budget for a bucketed provider, stretched by queue depth and an
+    active cooldown, capped by the patient tier:
+    min(cap, base * (1 + queued_waiters / max(1, rpm)) + remaining_cooldown).
+    Unknown/unlimited providers get the plain base (capped)."""
+    try:
+        lim = _provider_limits(provider)
+    except Exception:
+        return min(cap, base)
+    rpm = float(lim.rpm) if lim and lim.rpm else 40.0
+    try:
+        b = get_limiter(provider=provider, clock=clock)
+    except Exception:
+        return min(cap, base)
+    if b is None:
+        return min(cap, base)
+    st = b.status()
+    waiters = len(st.get("waiters", []))
+    cooldown = float(st.get("cooldown_remaining", 0.0) or 0.0)
+    return min(cap, base * (1 + waiters / max(1.0, rpm)) + cooldown)
+
+
+def load_detected(provider: str, env=None, clock=time.time) -> bool:
+    """C3 (0.62.0): True when the provider's bucket is loaded right now — active cooldown,
+    consecutive 429s, or queued waiters >= rpm/2. Read-only peek: never creates state,
+    never raises. Provider-generic (was nvidia-only)."""
+    env = env if env is not None else os.environ
+    try:
+        lim = _provider_limits(provider)
+    except Exception:
+        return False
+    if lim is None or all(v is None for v in (lim.rpm, lim.tpm, lim.rpd, lim.rpw, lim.tpd)):
+        return False
+    # resolve the state path WITHOUT creating it
+    if provider == "nvidia":
+        path = Path(env.get("LA_NVIDIA_THROTTLE_STATE")
+                    or (Path.home() / ".claude" / "free-agents" / ".nvidia_throttle_state"))
+    else:
+        d = env.get("FA_LIMITER_DIR") or str(
+            Path.home() / ".claude" / "free-agents" / "limiter")
+        path = Path(d) / f"{provider}.state"
+    if not path.is_file():
+        return False
+    try:
+        b = get_limiter(path=path, provider=provider, clock=clock)
+        if b is None:
+            return False
+        st = b.status()
+    except Exception:
+        return False
+    rpm = float(lim.rpm or 40)
+    return (float(st.get("cooldown_remaining", 0.0) or 0.0) > 0
+            or int(st.get("consecutive_429s", 0) or 0) > 0
+            or len(st.get("waiters", [])) >= rpm / 2)
+
+
 def provider_headroom(provider: str, clock=time.time) -> float:
     """Read-only 0.0–1.0: min over the provider's dimensions of remaining/limit;
     1.0 for unlimited or unknown providers. Used by the ladders (Tasks 9/10)."""

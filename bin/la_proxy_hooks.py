@@ -666,8 +666,12 @@ class LAProxyHooks(CustomLogger):
                 return normalize_nvidia_kwargs(kwargs)
             try:
                 # L1 (0.62.0): pass the model so a cooling model waits out its cooldown
-                # inside the queue instead of firing at it.
-                waited = await bucket.aacquire(model=str(kwargs.get("model") or ""))
+                # inside the queue instead of firing at it. C3: the wait budget is
+                # load-stretched (queue depth + active cooldown), capped by the patient tier.
+                from rate_limiter import _max_wait, stretched_wait
+                waited = await bucket.aacquire(
+                    model=str(kwargs.get("model") or ""),
+                    max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)))
             except Exception as exc:
                 from rate_limiter import RateLimitTimeout
                 if not isinstance(exc, RateLimitTimeout):
