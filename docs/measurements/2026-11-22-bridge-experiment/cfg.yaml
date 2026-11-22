@@ -1,0 +1,9 @@
+model_list:
+  - model_name: claude-opus-5-5
+    litellm_params: {model: nvidia_nim/fake-die, api_base: "http://127.0.0.1:55317/v1", api_key: x, num_retries: 0}
+  - model_name: la-fallback-1
+    litellm_params: {model: nvidia_nim/fake-ok, api_base: "http://127.0.0.1:55318/v1", api_key: x, num_retries: 0}
+router_settings:
+  fallbacks: [{"claude-opus-5-5": ["la-fallback-1"]}]
+litellm_settings: {drop_params: true, callbacks: [la_proxy_hooks.proxy_hooks]}
+general_settings: {master_key: sk-test}

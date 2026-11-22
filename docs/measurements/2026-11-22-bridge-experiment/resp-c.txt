@@ -1,0 +1,2 @@
+{"type":"error","error":{"type":"api_error","message":"litellm.APIConnectionError: APIConnectionError: OpenAIException - Stream ended before a finish_reason was received"}}
+HTTP:500

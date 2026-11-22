@@ -1,0 +1,14 @@
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_9e6ea0c9-32f6-47a6-adec-ad986727b615","type":"message","role":"assistant","content":[],"model":"claude-opus-5-5","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+
+event: content_block_start
+data: {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}
+
+event: content_block_delta
+data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "thinking"}}
+
+event: error
+data: {"type": "error", "error": {"type": "api_error", "message": "litellm.APIConnectionError: APIConnectionError: OpenAIException - Stream ended before a finish_reason was received"}}
+
+
+HTTP:200
