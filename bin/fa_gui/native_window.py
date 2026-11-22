@@ -12,9 +12,10 @@ dark mode). This module provides:
   module never requires pyobjc — browser mode and the plain pytest runs stay clean).
 - apply_vibrancy_patch() — wraps pywebview's cocoa BrowserView.__init__ so that after the
   original init it finds the NSVisualEffectView in the webview's subviews and sets its
-  material from the appearance store. FAIL-OPEN: any error logs once and leaves the default
-  vibrancy untouched. Idempotent. Call from main.py at MODULE level (NiceGUI's native mode
-  re-imports main as __mp_main__ in the spawn child, where main() never runs).
+  material from the appearance store. A 1 s poller re-applies it when the stored dark_mode
+  CHANGES (live). FAIL-OPEN: any error logs once and leaves the default vibrancy untouched.
+  Idempotent. Call from main.py at MODULE level (NiceGUI's native mode re-imports main as
+  __mp_main__ in the spawn child, where main() never runs).
 """
 
 # Spike-pending candidates, chosen by eye in Task 5 (screenshots at 0% opacity):
@@ -131,17 +132,18 @@ def apply_vibrancy_patch() -> None:
         poller = _VibrancyPoller.new()
 
         def _watch():
-            last = None
+            last_dark = None
             while True:
                 time.sleep(1.0)
                 try:
                     from fa_gui import appearance as ap
                     p = ap.store_path()
-                    m = p.stat().st_mtime if p.exists() else None
+                    doc = ap.load(p) if p.exists() else {}
+                    dark_now = bool(doc.get("dark_mode"))
                 except Exception:
                     continue
-                if m != last:
-                    if last is not None:          # skip the first sight: init already applied
+                if dark_now != last_dark:
+                    if last_dark is not None:      # skip the first sight: init already applied
                         try:
                             # non-blocking main-thread dispatch (pyobjc name — the
                             # performSelectorOnMainThread_withObject_afterDelay_ variant
@@ -149,7 +151,7 @@ def apply_vibrancy_patch() -> None:
                             poller.pyobjc_performSelectorOnMainThread_withObject_("poll:", None)
                         except Exception as e:
                             print(f"native_window: poller dispatch failed ({e!r})", flush=True)
-                    last = m
+                    last_dark = dark_now
 
         threading.Thread(target=_watch, daemon=True).start()
     except Exception as e:

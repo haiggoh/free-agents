@@ -396,7 +396,7 @@ def test_modern_tile_emoji_filter_follows_theme_mode(browser, tmp_path):
     # 2026-11-21/22 user pick: light mode = subdued filter on the bitmap; dark mode = the
     # bitmap untouched plus a solid-white ::after overlay at 0.6 (brightness>1 blew out the
     # highlights). Assert the COMPUTED contract in both modes.
-    for dark, expect in ((False, "saturate(0.2) brightness(0.22)"), (True, "none")):
+    for dark, expect in ((False, "saturate(0.3) brightness(0.22)"), (True, "none")):
         ap = tmp_path / f"appearance-{dark}.json"
         ap.write_text(json.dumps({"presentation": "modern", "dark_mode": dark}))
         srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
@@ -411,14 +411,14 @@ def test_modern_tile_emoji_filter_follows_theme_mode(browser, tmp_path):
             }""")
             assert expect == info[0], (dark, info)
             if dark:   # the overlay is the bright-silhouette mechanism
-                assert abs(float(info[1]) - 0.6) < 0.01, (dark, info)
+                assert abs(float(info[1]) - 0.75) < 0.01, (dark, info)
         finally:
             assert srv.stop() == []
 
 
 def test_tile_emoji_style_options_all_render(browser, tmp_path):
     # 2026-11-21 theme option: subdued (default) | noto (mono line-art font) | full (color)
-    for style, expect in (("subdued", "saturate(0.2) brightness(0.22)"),
+    for style, expect in (("subdued", "saturate(0.3) brightness(0.22)"),
                           ("noto", "NotoEmojiMono"),
                           ("full", "none")):
         ap = tmp_path / f"appearance-{style}.json"
@@ -509,6 +509,15 @@ def test_theme_menu_labels_and_toggle_clicks(browser, tmp_path):
             time.sleep(0.1)
         assert json.loads(ap.read_text())["dark_mode"] is False
         page.wait_for_selector(".dark-shell", state="detached", timeout=5000)
+        # follow-system is launch-only: the click stores the flag but never live-re-tints
+        # the window (user 2026-11-22: it flipped the bg when dark mode was off)
+        page.locator('[data-key="follow_system_appearance"] .cycle-value').click()
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text())["follow_system_appearance"] is not True:
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["follow_system_appearance"] is True
+        assert page.locator(".dark-shell").count() == 0
+        assert page.locator(".launch-hint").count() >= 1
     finally:
         assert srv.stop() == []
 

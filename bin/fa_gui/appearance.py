@@ -31,7 +31,7 @@ DEFAULTS: dict[str, Any] = {
     "dark_mode": False,                       # Phase 8, LAST; initial light
     # 2026-11-20: follow the OS light/dark instead of the store's dark_mode (read at window
     # creation, native mode only — blur/vibrancy are native-only); browser mode: no effect
-    "follow_system_appearance": False,
+    "follow_system_appearance": True,                # ON by default (user 2026-11-22)
     # 2026-11-21 theme option: modern-tile emoji treatment — "subdued" (dark near-black,
     # light mode) | "noto" (mono line-art glyphs) | "full" (Apple color emoji, as before)
     "tile_emoji_style": "subdued",

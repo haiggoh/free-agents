@@ -57,6 +57,7 @@ class StoreTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     ap.save(self.path, {"presentation": bad})
+        self.assertIs(ap.DEFAULTS["follow_system_appearance"], True)   # ON by default (user 2026-11-22)
         for bad in ("yes", 0, None, 1.5):
             with self.subTest(flag=bad):
                 with self.assertRaises(ValueError):

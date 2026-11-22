@@ -207,14 +207,14 @@ def build() -> None:
          appearance-store tile_emoji_style — subdued (default: dark near-black light mode,
          near-white dark mode) | noto (mono line-art variable font, theme ink color) |
          full (Apple color emoji, as before). Scoped to .tile-grid = modern-only. */
-      .tile-grid .tile .tile-emoji-subdued { filter: saturate(0.2) brightness(0.22); }
+      .tile-grid .tile .tile-emoji-subdued { filter: saturate(0.3) brightness(0.22); }
       /* dark mode (user 2026-11-22): brightness>1 blew out the bitmap's highlights, so the
          bitmap stays at full brightness and the white silhouette comes from an overlaid
          solid-white copy (::after) at 0.6 — dark detail survives, the glyph reads bright */
       body:has(.dark-shell) .tile-grid .tile .tile-emoji-subdued { filter: none; }
       body:has(.dark-shell) .tile-grid .tile .tile-emoji-subdued::after {
         content: attr(data-e); position: absolute; inset: 0;
-        filter: brightness(0) invert(1); opacity: 0.6; }
+        filter: saturate(0.3) brightness(0) invert(1); opacity: 0.75; }
       /* noto mono line art (variable font, wght 300-700): a CSS monochrome glyph, so it takes
          the theme's ink color directly — near-black in light, white in dark (dark-shell CSS) */
       .tile-grid .tile .tile-emoji-noto { font-family: 'NotoEmojiMono'; font-weight: 350; color: #141414; }
@@ -877,6 +877,10 @@ def build() -> None:
                         ui.label("(next launch)").classes("launch-hint text-xs opacity-50")
 
                     def _set(on: bool, k=key, v=val):
+                        # launch_only keys (translucent, blur, follow-system) change the
+                        # WINDOW, which is read once at startup — saving is live, the effect
+                        # is honest: "(next launch)". Never re-tint or re-material the window
+                        # from a click (user 2026-11-22: follow-system flipped the bg live).
                         patch = {k: bool(on)}
                         if k == "background_translucent" and on:
                             # user 2026-11-08: blur request defaults ON with translucency,
@@ -889,7 +893,8 @@ def build() -> None:
                                 patch["background_blur_requested"] = True
                         ap.save(store, patch)
                         v.set_text("ON" if on else "OFF")
-                        _apply_appearance_live(store, k, st)
+                        if not launch_only:
+                            _apply_appearance_live(store, k, st)
 
                     sw = ui.checkbox("", value=bool(doc[key]),
                                      on_change=lambda e, k=key, v=val: _set(e.value, k, v)).classes("switch")
