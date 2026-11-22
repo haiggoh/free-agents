@@ -59,6 +59,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 _BIN = Path(__file__).resolve().parent
@@ -187,6 +188,17 @@ def _is_nvidia(kwargs: dict) -> bool:
     model = str(kwargs.get("model") or "")
     provider = str(kwargs.get("custom_llm_provider") or "")
     return model.startswith(NVIDIA_PREFIX) or provider == "nvidia_nim"
+
+
+def _provider_of(kwargs: dict) -> str:
+    """The registry provider id for a deployment (0.62.0 C2): the litellm prefix maps to it
+    (nvidia_nim -> nvidia); anything else is the prefix itself (groq/, mistral/, ...)."""
+    model = str(kwargs.get("model") or "")
+    provider = str(kwargs.get("custom_llm_provider") or "")
+    prefix = model.split("/", 1)[0] if "/" in model else ""
+    if prefix == "nvidia_nim" or provider == "nvidia_nim":
+        return "nvidia"
+    return prefix or provider
 
 
 # ---- fix 4: learn each provider's output ceiling from its own 400 -------------------------
@@ -590,10 +602,31 @@ class LAProxyHooks(CustomLogger):
     def __init__(self):
         if CustomLogger is not object:
             super().__init__()
-        self._bucket = None
+        self._bucket = None            # the nvidia bucket, exactly as before
+        self._buckets: dict = {}       # 0.62.0 C2: per-provider buckets (None = unlimited)
         if os.environ.get("LA_PROXY_HOOKS_RATE_LIMIT", "1") != "0":
             from rate_limiter import get_limiter
             self._bucket = get_limiter()
+
+    def _bucket_for(self, kwargs):
+        """This deployment's provider bucket (0.62.0 C2). nvidia keeps self._bucket; other
+        providers get their own limiter from provider-limits.json; a provider with no
+        limits entry gets None = unthrottled, exactly as today."""
+        prov = _provider_of(kwargs)
+        if prov == "nvidia":
+            return self._bucket
+        if prov not in self._buckets:
+            if os.environ.get("LA_PROXY_HOOKS_RATE_LIMIT", "1") == "0":
+                self._buckets[prov] = None
+            else:
+                from rate_limiter import get_limiter
+                try:
+                    self._buckets[prov] = get_limiter(provider=prov)
+                except Exception as exc:
+                    print(f"la_proxy_hooks: no limiter for provider {prov} ({exc}); "
+                          f"unthrottled", file=sys.stderr)
+                    self._buckets[prov] = None
+        return self._buckets[prov]
 
     async def async_pre_call_deployment_hook(self, kwargs, call_type):
         changed = None
@@ -603,12 +636,12 @@ class LAProxyHooks(CustomLogger):
         fixed = apply_request_fixes(kwargs)              # fix 5: every provider
         if fixed is not None:
             kwargs = changed = fixed
-        if not _is_nvidia(kwargs):
-            # The rate limiter is NVIDIA's alone: no other provider has a known RPM ceiling.
-            return changed
-        if self._bucket is not None:
+        bucket = self._bucket_for(kwargs)
+        if bucket is None and not _is_nvidia(kwargs):
+            return changed          # non-nvidia without a bucket: unchanged, as before C2
+        if bucket is not None:
             model = str(kwargs.get("model") or "")
-            cooling = self._bucket.model_cooling(model)
+            cooling = bucket.model_cooling(model)
             if cooling > 0 and os.environ.get("LA_PROXY_FALLBACK_NAMES", ""):
                 # 0.40.0 fast-fail: probed on LiteLLM 1.105.1, raising here makes the router
                 # answer from the next fallback at once -- ZERO upstream calls to the cooling
@@ -634,7 +667,7 @@ class LAProxyHooks(CustomLogger):
             try:
                 # L1 (0.62.0): pass the model so a cooling model waits out its cooldown
                 # inside the queue instead of firing at it.
-                waited = await self._bucket.aacquire(model=str(kwargs.get("model") or ""))
+                waited = await bucket.aacquire(model=str(kwargs.get("model") or ""))
             except Exception as exc:
                 from rate_limiter import RateLimitTimeout
                 if not isinstance(exc, RateLimitTimeout):
@@ -650,7 +683,8 @@ class LAProxyHooks(CustomLogger):
             if waited > 0:
                 print(f"la_proxy_hooks: NVIDIA bucket queued this call {waited:.1f}s",
                       file=sys.stderr)
-        return normalize_nvidia_kwargs(kwargs)
+        # non-nvidia deployments (now bucketed too) keep the pre-C2 return shape: `changed`
+        return normalize_nvidia_kwargs(kwargs) if _is_nvidia(kwargs) else changed
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
         # fix 4, any provider: a 400 naming the provider's max_tokens cap is remembered, so the
@@ -667,7 +701,8 @@ class LAProxyHooks(CustomLogger):
         # model, other proxies run on; a window at least half full is our own RPM overrun --
         # pause every proxy on the machine. Either way, log how many requests the window held:
         # that number locates the real limit.
-        if self._bucket is None or not _is_nvidia(kwargs or {}):
+        bucket = self._bucket_for(kwargs or {})
+        if bucket is None:
             return
         exc = (kwargs or {}).get("exception")
         if exc is None or not _is_429(exc):
@@ -684,9 +719,16 @@ class LAProxyHooks(CustomLogger):
                   f"call {call_id[:8]} surfaces as 429", file=sys.stderr)
             return
         model = str((kwargs or {}).get("model") or "")
-        info = self._bucket.note_429(_retry_after_seconds(exc), hidden_attempts=SDK_HIDDEN_RETRIES,
-                                     model=model)
+        info = bucket.note_429(_retry_after_seconds(exc), hidden_attempts=SDK_HIDDEN_RETRIES,
+                               model=model)
         _record_call_rate_limited(call_id, info.get("pause"))
+        # C2: a quota-classified refusal marks the sidecar dimension exhausted until reset
+        if _DAILY_QUOTA.search(str(exc)):
+            import datetime
+            reset = (datetime.datetime.fromtimestamp(time.time(), datetime.timezone.utc)
+                     + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0,
+                                                             microsecond=0)
+            bucket.note_quota_refusal("day", reset.timestamp())
         if info.get("kind") == "model_throttle":
             print(f"la_proxy_hooks: NVIDIA 429 with {info['in_window']}/{info['limit']} requests "
                   f"in the last 60 s -> model throttle: {info['model']} cools {info['pause']:.0f}s "
@@ -700,9 +742,10 @@ class LAProxyHooks(CustomLogger):
         """A COMPLETED request (0.40.0): clear that model's cooldown entry and reset the
         global backoff counter. These are the only resets -- an expired pause clears
         nothing, or a model throttled for hours retried at base cooldown forever."""
-        if self._bucket is None or not _is_nvidia(kwargs or {}):
+        bucket = self._bucket_for(kwargs or {})
+        if bucket is None:
             return
-        self._bucket.note_success(str((kwargs or {}).get("model") or ""))
+        bucket.note_success(str((kwargs or {}).get("model") or ""))
 
     async def async_pre_request_hook(self, model, messages, kwargs):
         # fix 7, native Anthropic lane only (LA_PASSTHROUGH_MODELS set): fold per-turn effort into

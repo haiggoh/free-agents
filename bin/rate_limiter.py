@@ -452,6 +452,18 @@ def _model_wait(models: dict, model: str | None, now: float) -> float:
     return max(0.0, float(entry.get("until", 0.0)) - now)
 
 
+def _quota_wait(quota, now: float, tokens: int) -> float:
+    """Sidecar wait for a request of `tokens` (0.0 = fits now; inf = never fits)."""
+    if quota is None:
+        return 0.0
+    return quota.room(int(tokens), now)
+
+
+def _quota_book(quota, now: float, tokens: int) -> None:
+    if quota is not None and tokens:
+        quota.book(int(tokens), now)
+
+
 def _cool_model(models: dict, model: str, now: float, retry_after: float | None,
                 base: float, mult: float, cap: float) -> tuple[float, float, int]:
     """Book one per-model 429 into `models` (mutated): backoff base * mult^(n-1), capped,
@@ -486,8 +498,10 @@ class SmoothTokenBucket:
     - Resets backoff on successful requests
     """
     def __init__(self, path: Path | str | None = None, rpm: float | None = None,
-                 capacity: int | None = None, clock=time.time, cooldown: float | None = None):
+                 capacity: int | None = None, clock=time.time, cooldown: float | None = None,
+                 quota=None):
         self.path = Path(path or os.environ.get("LA_NVIDIA_THROTTLE_STATE") or DEFAULT_STATE)
+        self.quota = quota                # 0.62.0 C2: QuotaLedger sidecar (<state>.quota) or None
         self.rate = float(rpm or _setting("rpm", 40)) / 60.0  # tokens/sec
         self.capacity = int(capacity if capacity is not None
                            else _setting("bucket_capacity", DEFAULT_BUCKET_CAPACITY))
@@ -579,8 +593,12 @@ class SmoothTokenBucket:
             self._last_refill = now
 
     def try_acquire(self, priority: bool | None = None, token: str | None = None,
-                    kind: str | None = None, model: str | None = None) -> float:
+                    kind: str | None = None, model: str | None = None,
+                    tokens: int = 0) -> float:
         """Take a token if available. Returns 0.0 on success, else seconds to wait.
+        `tokens` (0.62.0 C2) also books that many tokens in the quota sidecar; a request
+        that can never fit (tokens > tpm) returns inf; while any sidecar dimension lacks
+        room the request waits in the queue without consuming a main token.
 
         Reads state from file on EVERY call (like SlidingWindowLimiter) so concurrent
         processes see each other's token consumption immediately.
@@ -633,12 +651,23 @@ class SmoothTokenBucket:
                 self._save_state(fd)
                 return model_wait
 
+            qwait = _quota_wait(self.quota, now, tokens)
+            if qwait == float("inf"):
+                return float("inf")          # ineligible: can never fit (e.g. tokens > tpm)
+            if qwait > 0:
+                # C2: a sidecar dimension lacks room — wait WITHOUT consuming a main token
+                if token is not None:
+                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                self._save_state(fd)
+                return qwait
+
             self._refill(now)
             if token is None:
                 # legacy peek: today's exact semantics (minus the retired reserve partition)
                 if self._tokens >= cost:
                     self._tokens -= cost
                     self._grants.append({"t": now, "o": owner, "c": cls})   # L7: peeks count
+                    _quota_book(self.quota, now, tokens)
                     # SUCCESS: Reset exponential backoff counter
                     self._consecutive_429s = 0
                     self._last_429_time = 0.0
@@ -662,6 +691,7 @@ class SmoothTokenBucket:
                     self._waiters.pop(token, None)
                     self._tokens -= cost
                     self._grants.append({"t": now, "o": owner, "c": cls})
+                    _quota_book(self.quota, now, tokens)
                     self._consecutive_429s = 0
                     self._last_429_time = 0.0
                     self._save_state(fd)
@@ -687,6 +717,7 @@ class SmoothTokenBucket:
                         # caller's queue age — popping the winner stole its `arrived`.
                         self._tokens -= w_cost
                         self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", cls)})
+                        _quota_book(self.quota, now, tokens)
                         w["granted"] = now
                         _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
                         self._consecutive_429s = 0
@@ -838,8 +869,11 @@ class SmoothTokenBucket:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def note_success(self, model: str | None = None) -> None:
-        """A completed request: clear that model's entry and reset the global counter."""
+    def note_success(self, model: str | None = None, tokens_used: int | None = None,
+                     booked: int = 0) -> None:
+        """A completed request: clear that model's entry and reset the global counter.
+        0.62.0 C2: when the real usage is known, refund (booked - tokens_used) in the
+        quota sidecar."""
         fd = self._locked()
         try:
             now = self._clock()
@@ -852,6 +886,18 @@ class SmoothTokenBucket:
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
+        if self.quota is not None and tokens_used is not None and booked > tokens_used:
+            self.quota.refund(booked - tokens_used, self._clock())
+
+    def note_quota_headers(self, headers) -> None:
+        """0.62.0 C2: adopt x-ratelimit-* headers into the sidecar (they override local)."""
+        if self.quota is not None:
+            self.quota.adopt_headers(headers, self._clock())
+
+    def note_quota_refusal(self, dimension: str, reset_at: float) -> None:
+        """0.62.0 C2: a quota refusal marks the dimension exhausted until its reset."""
+        if self.quota is not None:
+            self.quota.mark_exhausted(dimension, reset_at)
 
     def model_cooling(self, model: str) -> float:
         """Seconds left in that model's cooldown (0.0 = free to try). Read under the lock."""
@@ -878,7 +924,8 @@ class SmoothTokenBucket:
             os.close(fd)
 
     def acquire(self, max_wait: float | None = None, priority: bool | None = None,
-                kind: str | None = None, model: str | None = None) -> float:
+                kind: str | None = None, model: str | None = None,
+                tokens: int = 0) -> float:
         """Block until a token is taken; every sleep is clamped to waiter_poll_seconds so a
         long machine-wide cooldown never stops the queue heartbeats (same as the window)."""
         limit = _max_wait(max_wait)
@@ -887,9 +934,13 @@ class SmoothTokenBucket:
         poll = _cfg()["waiter_poll_seconds"]
         try:
             while True:
-                need = self.try_acquire(priority=priority, token=token, kind=kind, model=model)
+                need = self.try_acquire(priority=priority, token=token, kind=kind,
+                                        model=model, tokens=tokens)
                 if need == 0.0:
                     return waited
+                if need == float("inf"):
+                    raise RateLimitTimeout(
+                        f"ineligible: {tokens} tokens can never fit this provider's limits")
                 if waited + need > limit:
                     raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
                 s = min(need, poll)
@@ -899,16 +950,21 @@ class SmoothTokenBucket:
             self._release(token)
 
     async def aacquire(self, max_wait: float | None = None, priority: bool | None = None,
-                       kind: str | None = None, model: str | None = None) -> float:
+                       kind: str | None = None, model: str | None = None,
+                       tokens: int = 0) -> float:
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())
         poll = _cfg()["waiter_poll_seconds"]
         try:
             while True:
-                need = self.try_acquire(priority=priority, token=token, kind=kind, model=model)
+                need = self.try_acquire(priority=priority, token=token, kind=kind,
+                                        model=model, tokens=tokens)
                 if need == 0.0:
                     return waited
+                if need == float("inf"):
+                    raise RateLimitTimeout(
+                        f"ineligible: {tokens} tokens can never fit this provider's limits")
                 if waited + need > limit:
                     raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
                 s = min(need, poll)
@@ -948,8 +1004,9 @@ class SmoothTokenBucket:
 
 class SlidingWindowLimiter:
     def __init__(self, path: Path | str | None = None, rpm: float | None = None,
-                 clock=time.time, cooldown: float | None = None):
+                 clock=time.time, cooldown: float | None = None, quota=None):
         self.path = Path(path or os.environ.get("LA_NVIDIA_THROTTLE_STATE") or DEFAULT_STATE)
+        self.quota = quota                # 0.62.0 C2: QuotaLedger sidecar (<state>.quota) or None
         self.limit = int(float(rpm or _setting("rpm", 40)))
         # Exponential backoff config
         self.base_cooldown = float(cooldown if cooldown is not None
@@ -1031,8 +1088,11 @@ class SlidingWindowLimiter:
         os.write(fd, data)
 
     def try_acquire(self, priority: bool | None = None, token: str | None = None,
-                    kind: str | None = None, model: str | None = None) -> float:
+                    kind: str | None = None, model: str | None = None,
+                    tokens: int = 0) -> float:
         """Take a slot if one is free. Returns 0.0 on success, else the seconds to wait.
+        `tokens` (0.62.0 C2) also books that many tokens in the quota sidecar; inf when the
+        request can never fit (tokens > tpm).
 
         The whole read-prune-append-write runs under one exclusive lock, so two processes can
         never both take the last slot.
@@ -1099,6 +1159,16 @@ class SlidingWindowLimiter:
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return model_wait
 
+            qwait = _quota_wait(self.quota, now, tokens)
+            if qwait == float("inf"):
+                return float("inf")          # ineligible: can never fit (e.g. tokens > tpm)
+            if qwait > 0:
+                # C2: a sidecar dimension lacks room — wait WITHOUT consuming a stamp
+                if token is not None:
+                    _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
+                return qwait
+
             own_count = sum(1 for s in stamps if _stamp_parts(s)[1] == owner)
             capacity_free = len(stamps) < normal_limit and own_count < own_limit
 
@@ -1106,6 +1176,7 @@ class SlidingWindowLimiter:
                 # legacy peek: today's exact semantics, the registry is neither read nor written
                 if capacity_free:
                     stamps.append(now)
+                    _quota_book(self.quota, now, tokens)
                     # SUCCESS: Reset exponential backoff counter
                     self._consecutive_429s = 0
                     self._last_429_time = 0.0
@@ -1127,6 +1198,7 @@ class SlidingWindowLimiter:
                 if capacity_free:
                     waiters.pop(token, None)
                     stamps.append(_stamp(now, owner))
+                    _quota_book(self.quota, now, tokens)
                     self._consecutive_429s = 0
                     self._last_429_time = 0.0
                     self._write(fd, stamps, cooldown_until, 0, 0.0, models)
@@ -1155,6 +1227,7 @@ class SlidingWindowLimiter:
                         # L5 (0.62.0): serve the WINNER (book it as granted) and keep the
                         # caller's queue age — popping the winner stole its `arrived`.
                         stamps.append(_stamp(now, w["owner"]))
+                        _quota_book(self.quota, now, tokens)
                         w["granted"] = now
                         _register_waiter(waiters, token, owner, cls, wkind, model, now)
                         self._consecutive_429s = 0
@@ -1235,10 +1308,13 @@ class SlidingWindowLimiter:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def note_success(self, model: str | None = None) -> None:
+    def note_success(self, model: str | None = None, tokens_used: int | None = None,
+                     booked: int = 0) -> None:
         """A completed request: clear that model's cooldown entry, and reset the global
         backoff counter. The ONLY resets (0.40.0) — an expired pause no longer clears
-        anything, or a model throttled for hours retried at base cooldown forever."""
+        anything, or a model throttled for hours retried at base cooldown forever.
+        0.62.0 C2: when the real usage is known, refund (booked - tokens_used) in the
+        quota sidecar."""
         fd = self._locked()
         try:
             now = self._clock()
@@ -1249,6 +1325,18 @@ class SlidingWindowLimiter:
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
+        if self.quota is not None and tokens_used is not None and booked > tokens_used:
+            self.quota.refund(booked - tokens_used, self._clock())
+
+    def note_quota_headers(self, headers) -> None:
+        """0.62.0 C2: adopt x-ratelimit-* headers into the sidecar (they override local)."""
+        if self.quota is not None:
+            self.quota.adopt_headers(headers, self._clock())
+
+    def note_quota_refusal(self, dimension: str, reset_at: float) -> None:
+        """0.62.0 C2: a quota refusal marks the dimension exhausted until its reset."""
+        if self.quota is not None:
+            self.quota.mark_exhausted(dimension, reset_at)
 
     def model_cooling(self, model: str) -> float:
         """Seconds left in that model's cooldown (0.0 = free to try). Read under the lock."""
@@ -1275,7 +1363,8 @@ class SlidingWindowLimiter:
             os.close(fd)
 
     def acquire(self, max_wait: float | None = None, priority: bool | None = None,
-                kind: str | None = None, model: str | None = None) -> float:
+                kind: str | None = None, model: str | None = None,
+                tokens: int = 0) -> float:
         """Block until a slot is taken; returns the total seconds waited.
 
         Registers one waiter token in the shared queue on the first failed try_acquire and
@@ -1288,9 +1377,13 @@ class SlidingWindowLimiter:
         poll = _cfg()["waiter_poll_seconds"]
         try:
             while True:
-                need = self.try_acquire(priority=priority, token=token, kind=kind, model=model)
+                need = self.try_acquire(priority=priority, token=token, kind=kind,
+                                        model=model, tokens=tokens)
                 if need == 0.0:
                     return waited
+                if need == float("inf"):
+                    raise RateLimitTimeout(
+                        f"ineligible: {tokens} tokens can never fit this provider's limits")
                 if waited + need > limit:
                     raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
                 s = min(need, poll)
@@ -1300,7 +1393,8 @@ class SlidingWindowLimiter:
             self._release(token)
 
     async def aacquire(self, max_wait: float | None = None, priority: bool | None = None,
-                       kind: str | None = None, model: str | None = None) -> float:
+                       kind: str | None = None, model: str | None = None,
+                       tokens: int = 0) -> float:
         """Async twin of acquire() -- sleeps without blocking the proxy's event loop."""
         limit = _max_wait(max_wait)
         waited = 0.0
@@ -1308,9 +1402,13 @@ class SlidingWindowLimiter:
         poll = _cfg()["waiter_poll_seconds"]
         try:
             while True:
-                need = self.try_acquire(priority=priority, token=token, kind=kind, model=model)
+                need = self.try_acquire(priority=priority, token=token, kind=kind,
+                                        model=model, tokens=tokens)
                 if need == 0.0:
                     return waited
+                if need == float("inf"):
+                    raise RateLimitTimeout(
+                        f"ineligible: {tokens} tokens can never fit this provider's limits")
                 if waited + need > limit:
                     raise RateLimitTimeout(f"no NVIDIA slot within {limit:.0f}s")
                 s = min(need, poll)
@@ -1464,13 +1562,90 @@ def external_occupancy(limiter, owner: str) -> int:
         os.close(fd)
 
 
+def _provider_limits(provider: str):
+    """The provider's limits entry from provider-limits.json, or None. The file is strict:
+    a set-but-invalid FA_PROVIDER_LIMITS raises LimitsError (loud by design — the proxy
+    refuses to start rather than throttle on a broken file)."""
+    from provider_limits import load
+    return load().provider(provider)
+
+
 def get_limiter(path: Path | str | None = None, rpm: float | None = None,
-                clock=time.time, cooldown: float | None = None) -> SlidingWindowLimiter | SmoothTokenBucket:
-    """Factory: returns the configured limiter mode."""
-    mode = str(_setting("mode", "sliding_window")).lower()
+                clock=time.time, cooldown: float | None = None,
+                provider: str = "nvidia"):
+    """Factory. provider="nvidia" keeps TODAY's path/env/settings exactly
+    (LA_NVIDIA_THROTTLE_STATE, saved mode, rpm). Any other provider: state file
+    FA_LIMITER_DIR/<provider>.state (default ~/.claude/free-agents/limiter), rpm from
+    provider-limits.json, and a quota sidecar <state>.quota when the provider has any
+    tpm/rpd/rpw/tpd dimension. A provider with NO limits entry (or all dimensions null)
+    gets None — no limiter, exactly today's unthrottled behavior ("limits unknown")."""
+    quota = None
+    if provider != "nvidia":
+        lim = _provider_limits(provider)
+        if lim is None or all(v is None for v in (lim.rpm, lim.tpm, lim.rpd, lim.rpw, lim.tpd)):
+            return None
+        if path is None:
+            d = os.environ.get("FA_LIMITER_DIR") or str(
+                Path.home() / ".claude" / "free-agents" / "limiter")
+            path = Path(d) / f"{provider}.state"
+        if rpm is None:
+            rpm = lim.rpm
+        if any(v is not None for v in (lim.tpm, lim.rpd, lim.rpw, lim.tpd)):
+            from quota_ledger import QuotaLedger
+            quota = QuotaLedger(Path(str(path) + ".quota"), lim, clock=clock)
+        mode = "sliding_window"     # non-nvidia providers have no legacy writers
+    else:
+        lim = _provider_limits("nvidia")   # may raise LimitsError on a bad FA_PROVIDER_LIMITS (loud)
+        if rpm is None:
+            # today's order env > saved > 40, with the limits file between saved and default
+            env_rpm = os.environ.get("LA_NVIDIA_RPM")
+            if env_rpm:
+                rpm = float(env_rpm)
+            elif _saved_settings().get("rpm") is not None:
+                rpm = float(_saved_settings()["rpm"])
+            elif lim is not None and lim.rpm is not None:
+                rpm = float(lim.rpm)
+        if any(v is not None for v in ((lim.tpm, lim.rpd, lim.rpw, lim.tpd) if lim else ())):
+            from quota_ledger import QuotaLedger
+            side_path = Path(path or os.environ.get("LA_NVIDIA_THROTTLE_STATE") or DEFAULT_STATE)
+            quota = QuotaLedger(Path(str(side_path) + ".quota"), lim, clock=clock)
+        mode = str(_setting("mode", "sliding_window")).lower()
     if mode == "smooth_bucket":
-        return SmoothTokenBucket(path=path, rpm=rpm, clock=clock, cooldown=cooldown)
-    return SlidingWindowLimiter(path=path, rpm=rpm, clock=clock, cooldown=cooldown)
+        return SmoothTokenBucket(path=path, rpm=rpm, clock=clock, cooldown=cooldown,
+                                 quota=quota)
+    return SlidingWindowLimiter(path=path, rpm=rpm, clock=clock, cooldown=cooldown,
+                                quota=quota)
+
+
+def provider_headroom(provider: str, clock=time.time) -> float:
+    """Read-only 0.0–1.0: min over the provider's dimensions of remaining/limit;
+    1.0 for unlimited or unknown providers. Used by the ladders (Tasks 9/10)."""
+    try:
+        lim = _provider_limits(provider)
+    except Exception:
+        return 1.0
+    if lim is None or all(v is None for v in (lim.rpm, lim.tpm, lim.rpd, lim.rpw, lim.tpd)):
+        return 1.0
+    try:
+        b = get_limiter(provider=provider, clock=clock)
+        if b is None:
+            return 1.0
+        parts = []
+        if lim.rpm:
+            st = b.status()
+            in_window = st.get("in_window")
+            if in_window is None:
+                in_window = len(st.get("grants", []))
+            parts.append(max(0.0, 1.0 - float(in_window) / float(lim.rpm)))
+        if b.quota is not None:
+            snap = b.quota.snapshot(clock())
+            for dim, limit_v in (("tpm", lim.tpm), ("day", lim.rpd), ("week", lim.rpw)):
+                if limit_v:
+                    used = snap[dim].get("tokens", snap[dim].get("used", 0))
+                    parts.append(max(0.0, 1.0 - float(used) / float(limit_v)))
+        return min(parts) if parts else 1.0
+    except Exception:
+        return 1.0
 
 
 def _open_menu() -> int:

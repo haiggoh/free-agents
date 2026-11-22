@@ -82,7 +82,9 @@ def fetch(provider_ids, out_path):
         req = urllib.request.Request(url, headers={"User-Agent": UA, **p.auth_headers()})
         entry = {"url": url, "status": None, "models": {}, "error": None}
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            import fa_tls
+            with urllib.request.urlopen(req, timeout=30,
+                                       context=fa_tls.client_context()) as r:   # repo TLS path
                 entry["status"] = r.status
                 doc = json.loads(r.read().decode("utf-8", "replace"))
         except Exception as exc:  # noqa: BLE001 — record, never raise, never print the key

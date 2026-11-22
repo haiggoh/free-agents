@@ -56,6 +56,11 @@ os.environ["LA_NVIDIA_THROTTLE_STATE"] = str(
     Path(_tempfile.mkdtemp(prefix="fa-throttle-test-")) / f"throttle{_worker}.json")
 os.environ["LA_HF_PARAMS_CACHE"] = str(
     Path(_tempfile.mkdtemp(prefix="fa-hfparams-test-")) / f"hf-params{_worker}.json")
+# 0.62.0 (provider buckets): per-PROVIDER buckets live under FA_LIMITER_DIR (default
+# ~/.claude/free-agents/limiter) — the same live-state fence as the NVIDIA file applies:
+# FORCED to a per-worker sandbox, never the real dir.
+os.environ["FA_LIMITER_DIR"] = str(
+    Path(_tempfile.mkdtemp(prefix="fa-limiterdir-test-")) / f"limiter{_worker}")
 
 # 0.55.8 Task 0 (R1, 0541 plan Item H): no test may post a real notification or open a
 # window. One shim dir with no-op osascript/terminal-notifier/afplay/say/open stubs + a
@@ -221,12 +226,14 @@ def pytest_configure(config):
     # SmoothTokenBucket's separate atomic write.
     import rate_limiter as _rl
     _real_throttle = _rl.DEFAULT_STATE.resolve()
+    _real_limiter_dir = (Path.home() / ".claude" / "free-agents" / "limiter").resolve()
 
     def _guard_path(self):
-        if Path(self.path).resolve() == _real_throttle:
+        p = Path(self.path).resolve()
+        if p == _real_throttle or p.parent == _real_limiter_dir:
             raise AssertionError(
-                f"test opened the REAL throttle state {self.path} — LA_NVIDIA_THROTTLE_STATE "
-                "is forced to a sandbox by conftest; pass an explicit temp path instead")
+                f"test opened the REAL limiter state {self.path} — LA_NVIDIA_THROTTLE_STATE / "
+                "FA_LIMITER_DIR are forced to sandboxes by conftest; pass an explicit temp path")
 
     for _cls in (_rl.SmoothTokenBucket, _rl.SlidingWindowLimiter):
         _orig_locked = _cls._locked
