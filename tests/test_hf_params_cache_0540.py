@@ -41,7 +41,7 @@ sp = None
 if textual is not None:
     import session_picker as sp  # noqa: E402
 
-pytestmark = pytest.mark.load_sensitive
+PILOT = pytest.mark.load_sensitive  # Textual pilot classes only; the pure cache tests must run in every gate
 
 
 @pytest.fixture
@@ -124,12 +124,17 @@ class CacheRuleTests(unittest.TestCase):
                                                      "at": time.time()}}))
         orig = fp._hf_get
         calls = []
-        fp._hf_get = lambda url, timeout: calls.append(url) or {"safetensors": {"total": 42},
-                                                               "id": "poisoned/model"}
+        def fake(url, timeout):
+            calls.append(url)
+            if url.endswith("/resolve/main/config.json"):
+                return {"max_position_embeddings": 4096}
+            return {"safetensors": {"total": 42}, "id": "poisoned/model"}
+        fp._hf_get = fake
         self.addCleanup(setattr, fp, "_hf_get", orig)
         total, _ = fp.hf_total_params("poisoned/model")
         self.assertEqual(total, 42)
-        self.assertEqual(len(calls), 1, "a legacy v1 null entry must be refetched")
+        api_calls = [u for u in calls if "/api/models/" in u]
+        self.assertEqual(len(api_calls), 1, "a legacy v1 null entry must be refetched once")
 
     def test_v1_entries_with_a_count_still_answer(self):
         # a v1 entry with a count AND a created date answers with NO refetch (no mass refetch)
@@ -138,7 +143,13 @@ class CacheRuleTests(unittest.TestCase):
         p.write_text(json.dumps({"good/model": {"total": 99, "repo": "good/model",
                                                  "created": "2026-01-01", "at": time.time()}}))
         orig = fp._hf_get
-        fp._hf_get = lambda url, timeout: (_ for _ in ()).throw(AssertionError("refetched!"))
+        def no_network(url, timeout):
+            # 0.61.1: the one permitted call is the config.json ctx gain; the count itself
+            # must not be refetched
+            if url.endswith("/resolve/main/config.json"):
+                return {"max_position_embeddings": 4096}
+            raise AssertionError("refetched! " + url)
+        fp._hf_get = no_network
         self.addCleanup(setattr, fp, "_hf_get", orig)
         total, repo = fp.hf_total_params("good/model")
         self.assertEqual((total, repo), (99, "good/model"), "a v1 count must still answer")
@@ -171,6 +182,7 @@ CAT85 = [f"org/fake-{i}" for i in range(85)]
 
 
 @unittest.skipUnless(sp is not None, "session_picker needs textual: run under the picker venv python")
+@PILOT
 class WarmupTriggerTests(PilotCase):
     def setUp(self):
         super().setUp()
@@ -303,6 +315,7 @@ class OverrideTests(unittest.TestCase):
 
 
 @unittest.skipUnless(sp is not None, "session_picker needs textual: run under the picker venv python")
+@PILOT
 class RenderedSizesTests(PilotCase):
     """The user-visible layer: after the warm-up, Remote AND Lowkey rows carry the size."""
 
@@ -317,6 +330,8 @@ class RenderedSizesTests(PilotCase):
         orig_get = fpmod._hf_get
 
         def fake_get(url, timeout):
+            if url.endswith("/resolve/main/config.json"):
+                return {"max_position_embeddings": 4096}   # 0.61.1: the ctx fetch rides the same warm-up
             mid = url.split("/api/models/", 1)[1].split("?", 1)[0] if "/api/models/" in url else ""
             if mid and mid in HF_FIXTURE and HF_FIXTURE[mid]:
                 return {"safetensors": {"total": HF_FIXTURE[mid]}, "id": mid,

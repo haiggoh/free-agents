@@ -281,9 +281,11 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
         # v2 entries (incl. negatives) and v1 entries that already gained `created` answer
         # without a refetch; a v1 entry with a count but no `created` refetches ONCE to gain
         # it (and keeps the count if that refetch fails) — never a mass refetch.
-        if hit.get("repo") and not hit.get("ctx_done"):
+        if hit.get("repo") and not hit.get("ctx_done") and hit.get("total") is not None:
             # 2026-11-22 hotfix: an entry cached before context existed gains it ONCE — only
-            # config.json is fetched, the fresh count is not refetched.
+            # config.json is fetched, the fresh count is not refetched. A NEGATIVE entry
+            # (total None: "HF has no such repo") has no repo page to read config.json from —
+            # leave ctx_done unset so the next real resolution (or an expired negative) sets it.
             answered, ctx = _hf_fetch_context(hit["repo"], timeout)
             if answered:
                 try:
