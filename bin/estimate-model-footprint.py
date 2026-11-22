@@ -388,6 +388,101 @@ def hf_created(model_id: str):
     return None
 
 
+_CANDIDATE_KEYS = (
+    "max_position_embeddings",
+    "max_sequence_length",
+    "seq_length",
+    "n_positions",
+    "model_max_length",
+)
+_SUBCONFIG_KEYS = ("text_config", "llm_config", "language_config")
+_ABSURD_CAP = 100_000_000
+
+
+def _as_positive_int(value):
+    """Return value as a positive int <= cap, or None. bool/strings never count."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        n = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            return None
+        n = int(value)
+    else:
+        return None
+    if n <= 0 or n > _ABSURD_CAP:
+        return None
+    return n
+
+
+def _rope_candidate(scope):
+    rs = scope.get("rope_scaling")
+    if not isinstance(rs, dict):
+        return None
+    factor = rs.get("factor")
+    original = rs.get("original_max_position_embeddings")
+    if isinstance(factor, bool) or not isinstance(factor, (int, float)):
+        return None
+    if not factor > 1:
+        return None
+    if isinstance(original, bool) or not isinstance(original, int):
+        return None
+    if original <= 0:
+        return None
+    try:
+        scaled = int(factor * original)
+    except (OverflowError, ValueError):
+        return None
+    if scaled <= 0 or scaled > _ABSURD_CAP:
+        return None
+    return scaled
+
+
+def context_from_config(cfg) -> int | None:
+    """Context window (max tokens) from a parsed HF config.json dict, else None."""
+    try:
+        if not isinstance(cfg, dict):
+            return None
+        scopes = [cfg]
+        for key in _SUBCONFIG_KEYS:
+            sub = cfg.get(key)
+            if isinstance(sub, dict):
+                scopes.append(sub)
+        best = None
+        for scope in scopes:
+            for key in _CANDIDATE_KEYS:
+                n = _as_positive_int(scope.get(key))
+                if n is not None and (best is None or n > best):
+                    best = n
+            scaled = _rope_candidate(scope)
+            if scaled is not None and (best is None or scaled > best):
+                best = scaled
+        return best
+    except Exception:
+        return None
+
+
+def format_context(n) -> str:
+    """Short row label for a context length, in the style of format_param_count."""
+    try:
+        if isinstance(n, bool) or not isinstance(n, int):
+            return ""
+        if n <= 0:
+            return ""
+        if n % 1024 == 0:
+            k = n // 1024
+            if k % 1024 == 0:
+                return f"{k // 1024}M"
+            return f"{k}k"
+        if n >= 1_000_000:
+            m = f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".")
+            return f"{m}M"
+        return f"{round(n / 1000)}k"
+    except Exception:
+        return ""
+
+
 def _hf_fetch_context(repo: str, timeout: float) -> "tuple[bool, int | None]":
     """(answered, context window) from the RESOLVED repo's config.json (2026-11-22 hotfix).
 
