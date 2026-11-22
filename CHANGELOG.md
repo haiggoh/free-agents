@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.61.2] — 2026-11-22
+
+### Fixed
+- `~/.claude/scripts/sudo-in-terminal.sh` evaluated `--verify` in its own shell: any predicate containing `exit` (the natural port/LISTEN check shape) killed the driver silently — no window, no verdict line, exit 1. Both eval sites now use a subshell; covered by `tests/test_sudo_in_terminal.sh` (8/8, mutant RED).
+- The three HF cache test modules (`test_hf_params_cache_0540.py`, `test_hf_warm_completes_0541.py`, `test_hf_cache_writer_0541.py`) carried a module-level `load_sensitive` marker while every gate deselects it, so their cache rules (network-not-cached, 401 negative TTL, 5xx writes nothing, concurrent-writer safety) never ran at ship time. The marker now sits on the Textual pilot classes only; 11 pure cache tests join the main gate. Four were latent-broken by the 0.61.1 context fetch (config.json URLs crashed the URL-parsing stubs; negative v1 entries re-fetched config.json): stubs fixed, and the fresh-entry ctx gain skips `total: None` entries.
+
 ## [0.61.1] — 2026-11-22
 
 ### Fixed
