@@ -1163,13 +1163,21 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             # Retry configuration for NVIDIA (and other free-tier providers)
             # num_retries: retry failed upstream calls instead of returning 500 immediately
             # Note: retry_after is NOT supported by NVIDIA NIM (causes 400 BadRequestError)
-            if [[ "$prov" == "nvidia" || "$prov" == "gemini" || "$prov" == "groq" ]]; then
+            if [[ "${LA_CFG_TARGET_ONLY:-0}" == "1" ]]; then
+                # 0.62.0 C5: the swap pre-flight's scratch proxy probes the TARGET alone —
+                # no retries, so a 200 can only come from the target model.
+                echo "      num_retries: 0"
+            elif [[ "$prov" == "nvidia" || "$prov" == "gemini" || "$prov" == "groq" ]]; then
                 echo "      num_retries: 3"
             fi
             [[ -n "$native_line" ]] && echo "$native_line"
         } >> "$cfg"
     done
-    _write_fallbacks "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 1
+    # 0.62.0 C5: LA_CFG_TARGET_ONLY=1 writes NO fallback chain (a 200 then proves the target).
+    if [[ "${LA_CFG_TARGET_ONLY:-0}" != "1" ]]; then
+        _write_fallbacks "$cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 1
+    fi
+    # (fallbacks are written above only when not target-only)
     _write_subagent_pool "$cfg" "$prov" || return 1
     cat >> "$cfg" <<'YAML'
 litellm_settings:
@@ -1297,8 +1305,47 @@ _spawn_proxy_on() { # _spawn_proxy_on <port> <cfg> <log> <prov> -> background pi
     echo $!
 }
 
-_wait_proxy_ready() { # _wait_proxy_ready <port> <pid> <secs> -> 0 once the health endpoint answers
-    local port="$1" pid="$2" secs="$3" i
+_wait_proxy_ready() { # _wait_proxy_ready <port> <pid> <secs> [progress]
+    # progress mode (0.62.0 C5): <secs> is the NO-PROGRESS window (default 60); the hard cap
+    # is LA_PROXY_READY_CAP (default 420 — cold LiteLLM starts measured ~180-200 s). Progress =
+    # the health endpoint answers, OR the log grew, OR the child burned CPU (a silent loaded
+    # import can outlast the window while working hard — measured 2026-11-22).
+    local port="$1" pid="$2" secs="$3" mode="${4:-}"
+    if [[ "$mode" == "progress" ]]; then
+        local cap start now size cpu last_size=-1 last_cpu="" window_end i
+        cap="${LA_PROXY_READY_CAP:-420}"
+        start=$(date +%s); now=$start
+        window_end=$(( start + secs ))
+        for i in $(seq 1 "$cap"); do
+            if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
+                return 0
+            fi
+            kill -0 "$pid" 2>/dev/null || {
+                echo "remote-session: proxy died during startup; inspect the private log locally: $RUNDIR/proxy-$port.log" >&2
+                return 1; }
+            now=$(date +%s)
+            # the scratch pre-flight logs to swap-scratch-$port.log, the live proxy to
+            # proxy-$port.log — progress = either grew
+            size=$(stat -f %z "$RUNDIR/proxy-$port.log" 2>/dev/null || echo 0)
+            ssize=$(stat -f %z "$RUNDIR/swap-scratch-$port.log" 2>/dev/null || echo 0)
+            [[ "$ssize" != "0" && "$ssize" != "$last_size" ]] && size="$ssize"
+            cpu=$(ps -o time= -p "$pid" 2>/dev/null | tr -d ' ')
+            if [[ "$size" != "$last_size" || ( -n "$cpu" && "$cpu" != "$last_cpu" ) ]]; then
+                last_size="$size"; last_cpu="$cpu"; window_end=$(( now + secs ))
+            fi
+            if (( now >= window_end )); then
+                echo "remote-session: proxy made no progress for ${secs}s (hard cap ${cap}s); inspect the private log locally: $RUNDIR/proxy-$port.log" >&2
+                return 1
+            fi
+            if (( now - start >= cap )); then
+                echo "remote-session: proxy not ready after ${cap}s hard cap; inspect the private log locally: $RUNDIR/proxy-$port.log" >&2
+                return 1
+            fi
+            sleep 1
+        done
+        return 1
+    fi
+    local i
     for i in $(seq 1 "$secs"); do
         if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
             return 0
@@ -1311,6 +1358,13 @@ _wait_proxy_ready() { # _wait_proxy_ready <port> <pid> <secs> -> 0 once the heal
     echo "remote-session: proxy did not become ready in ${secs}s; inspect the private log locally: $RUNDIR/proxy-$port.log" >&2
     return 1
 }
+
+# 0.62.0: a tests-only knob that shrinks the swap's waits. It is IGNORED unless pytest is
+# actually running (PYTEST_CURRENT_TEST set) — a stray env var must never shrink production.
+if [[ -n "${LA_SWAP_TEST_FAST:-}" && -z "${PYTEST_CURRENT_TEST:-}" ]]; then
+    echo "remote-session: NOTE LA_SWAP_TEST_FAST is tests-only and ignored outside pytest" >&2
+    unset LA_SWAP_TEST_FAST
+fi
 
 start_proxy() { # start_proxy <provider> <model> <thinking> [effort] [temperature] -> echoes port
     local prov="$1" model="$2" thinking="$3" effort="${4:-}" temperature="${5:-}"
@@ -1368,18 +1422,24 @@ print(m.group(1) if m else "")
 PY
 }
 
-_swap_probe() { # _swap_probe <port> <cfg> <timeout> -> "HTTPCODE body-snippet"
+_swap_probe() { # _swap_probe <port> <cfg> <timeout> -> echoes "PREFLIGHT ok|refused <code>|throttled|timeout"
+    # 0.62.0 C5: ONE STREAMING request (also exercises the bridge path). The verdict line is
+    # what callers parse: ok / refused <code> / throttled / timeout.
     local port="$1" cfg="$2" tmo="$3" key out code
     key="$(_swap_master_key "$cfg")"
-    [[ -n "$key" ]] || { echo "000 no-master-key-in-config"; return 1; }
+    [[ -n "$key" ]] || { echo "PREFLIGHT refused 000-no-key"; return 1; }
     out="$RUNDIR/swap-probe-$port.out"
     code="$(curl -s -m "$tmo" -o "$out" -w '%{http_code}' \
         -H "x-api-key: $key" -H 'content-type: application/json' \
         -H 'anthropic-version: 2023-06-01' \
-        -d '{"model":"claude-opus-5-5","max_tokens":16,"messages":[{"role":"user","content":"ping"}]}' \
-        "http://127.0.0.1:$port/v1/messages" 2>/dev/null)" || { echo "000 curl-failed"; return 1; }
-    echo "$code $(head -c 120 "$out" | tr '\n' ' ')"
-    [[ "$code" == "200" ]]
+        -d '{"model":"claude-opus-5-5","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}' \
+        "http://127.0.0.1:$port/v1/messages" 2>/dev/null)" || code="000"
+    case "$code" in
+        200) echo "PREFLIGHT ok"; return 0 ;;
+        429) echo "PREFLIGHT throttled"; return 1 ;;
+        000|028) echo "PREFLIGHT timeout"; return 1 ;;
+        *) echo "PREFLIGHT refused $code"; return 1 ;;
+    esac
 }
 
 _swap_revert() { # _swap_revert <port> <bak-cfg> <cfg> <log> <pidf> <newpid> <prov> [secs]
@@ -1465,28 +1525,48 @@ swap_model() { # swap_model <port> <alias> [force]
     effort="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"^\s+reasoning_effort: (\S+)", t, re.M); print(m.group(1) if m else "")' "$cfg")"
     temperature="$(python3 -c 'import re,sys; t=open(sys.argv[1]).read(); m=re.search(r"^\s+temperature: (\S+)", t, re.M); print(m.group(1) if m else "")' "$cfg")"
 
-    # --- PRE-FLIGHT: prove the new model on a scratch port; nothing live is touched -------
-    # The scratch proxy runs with the hook limiter OFF: it isolates "does this model serve?"
-    # from the shared 40 RPM queue. The live proxy keeps the limiter.
-    local scratch scratch_cfg scratch_log scratch_pid scratch_pidf probe
+    # --- PRE-FLIGHT: prove the TARGET alone on a scratch port; nothing live is touched -------
+    # 0.62.0 C5: the scratch proxy KEEPS the limiter (it books the target's provider bucket
+    # like any request — a pre-flight must never overshoot the key's rate limit) and carries
+    # NO fallback chain + num_retries 0 (LA_CFG_TARGET_ONLY=1), so a 200 can only come from
+    # the target model. Readiness is progress-based (a cold start ~3 min is not an abort).
+    local scratch scratch_cfg scratch_log scratch_pid scratch_pidf probe verdict
+    local fast=0 ready_window=60
+    [[ -n "${LA_SWAP_TEST_FAST:-}" ]] && { fast=1; ready_window=15; }
+    # Dead-route rule (waypoint point 3): when the CURRENT route is dead (402/410/long 429),
+    # a paid_only target is allowed, labelled as such.
+    local live_probe target_tier
+    target_tier="$(_field "$entry" 5)"
+    live_probe="$(_swap_probe "$port" "$cfg" "$LA_SWAP_PROBE_TIMEOUT")"
+    if [[ "$live_probe" != "PREFLIGHT ok" && "$target_tier" == "paid_only" ]]; then
+        echo "remote-session: --swap-model: current route on :$port is dead ($live_probe) — allowing the paid_only target $alias (labelled)." >&2
+    fi
     scratch="$(swap_scratch_port)" || return 1
     scratch_cfg="$RUNDIR/swap-scratch-$port.yaml"; scratch_log="$RUNDIR/swap-scratch-$port.log"
     scratch_pidf="$RUNDIR/swap-scratch-$port.pid"
     _decide_native_route "$prov" "$model"
-    write_proxy_config "$scratch_cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 2
-    scratch_pid="$(LA_PROXY_HOOKS_RATE_LIMIT=0 _spawn_proxy_on "$scratch" "$scratch_cfg" "$scratch_log" "$prov")" || return 2
+    LA_CFG_TARGET_ONLY=1 write_proxy_config "$scratch_cfg" "$prov" "$model" "$thinking" "$effort" "$temperature" || return 2
+    scratch_pid="$(_spawn_proxy_on "$scratch" "$scratch_cfg" "$scratch_log" "$prov")" || return 2
     _write_pidf "$scratch_pidf" "$scratch_pid"
-    if ! _wait_proxy_ready "$scratch" "$scratch_pid" 90; then
+    if ! _wait_proxy_ready "$scratch" "$scratch_pid" "$ready_window" progress; then
         echo "remote-session: --swap-model: pre-flight proxy did not become ready -> ABORT, nothing changed." >&2
         kill "$scratch_pid" 2>/dev/null; rm -f "$scratch_pidf" "$scratch_cfg" "$scratch_log"
         return 1
     fi
-    probe="$(_swap_probe "$scratch" "$scratch_cfg" 300)"
-    echo "remote-session: --swap-model: pre-flight probe $probe"
+    verdict="$(_swap_probe "$scratch" "$scratch_cfg" "$LA_SWAP_PROBE_TIMEOUT")"
+    echo "remote-session: --swap-model: $verdict"
     kill "$scratch_pid" 2>/dev/null; rm -f "$scratch_pidf" "$scratch_cfg" "$scratch_log"
-    [[ "$probe" == 200* ]] || {
-        echo "remote-session: --swap-model: pre-flight FAILED -> ABORT, nothing changed." >&2
-        return 1; }
+    case "$verdict" in
+        "PREFLIGHT ok") ;;
+        "PREFLIGHT throttled")
+            if [[ "$force" != "force" ]]; then
+                echo "remote-session: --swap-model: target throttled (429) -> ABORT, nothing changed. Try another alias or --force." >&2
+                return 1
+            fi
+            echo "remote-session: --swap-model: target throttled but --force given; proceeding." >&2 ;;
+        *) echo "remote-session: --swap-model: pre-flight $verdict -> ABORT, nothing changed." >&2
+           return 1 ;;
+    esac
 
     # --- THE SWAP: backup, rewrite the SAME path (teardown keys on it), relaunch ------------
     local stamp bak newpid probe2
@@ -1521,7 +1601,7 @@ swap_model() { # swap_model <port> <alias> [force]
     fi
     probe2="$(_swap_probe "$port" "$cfg" "$LA_SWAP_PROBE_TIMEOUT")"
     echo "remote-session: --swap-model: live probe $probe2"
-    if [[ "$probe2" != 200* ]]; then
+    if [[ "$probe2" != "PREFLIGHT ok" ]]; then
         _swap_revert "$port" "$bak" "$cfg" "$log" "$pidf" "$newpid" "$prov"
         return 1
     fi

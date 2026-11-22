@@ -297,8 +297,8 @@ class SwapModelTests(unittest.TestCase):
                          "the .owner file is the session's identity — never touched")
         self.assertTrue(list(self.rundir.glob(f'proxy-{port}.yaml.bak-*')),
                         "the backup must stay on disk as the paper trail")
-        self.assertIn("pre-flight probe 200", r.stdout)
-        self.assertIn("live probe 200", r.stdout)
+        self.assertIn("PREFLIGHT ok", r.stdout)   # 0.62.0 C5: verdict line (was "pre-flight probe 200")
+        self.assertIn("live probe PREFLIGHT ok", r.stdout)   # 0.62.0 C5: verdict line
 
     def test_a_sigterm_stubborn_proxy_is_escalated_to_kill_before_rebind(self):
         """2026-10-25 live dogfood, twice: LiteLLM exits GRACEFULLY on SIGTERM (uvicorn
