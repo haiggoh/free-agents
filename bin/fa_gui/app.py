@@ -51,6 +51,13 @@ def prompt_payload(target: str, scr) -> dict | None:
                 "total_gb": r.total_gb, "fits": r.fits}
     if target.startswith("prompt:missing-cleanup:"):
         return {"kind": "missing-cleanup", "alias": target.split(":", 2)[2]}
+    if target == "prompt:session":
+        # csl's typed prompt: a text field, letters/digits/-/_ only (empty = ephemeral)
+        return {"kind": "input",
+                "prompt": "Set session name (letters, digits, - _; empty = ephemeral):"}
+    if target == "prompt:oneshot":
+        # csl's one-shot field: the lowkey screen turns the text into a --prompt launch
+        return {"kind": "input", "prompt": "One-shot prompt:"}
     if target.startswith("prompt:"):
         return {"kind": "confirm", "prompt": target}
     return None
@@ -1132,6 +1139,11 @@ def build() -> None:
                         if kind == "local" and get_settings().local_registry.get("auto_sync"):
                             await loader.load("local", pc.load_local_models, client=client.id)
                 scr = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache, savers=settings_state.get('savers')).screen
+                if isinstance(scr, m.LowkeyScreen):
+                    # csl keeps the name on the screen model; the prompt:session dialog is a
+                    # FRESH client on the prompt route, so the name lives process-globally
+                    # and is injected at build (it then rides the launch argv: --session NAME)
+                    scr.session_name = settings_state.get("lowkey_session_name", "")
             except Exception:
                 scr = None
         # the launch/confirm dispatch hook, set on EVERY page (prompt:* dialogs confirm
@@ -1161,6 +1173,37 @@ def build() -> None:
                     _ui.label(f"{len(payload['aliases'])} queued, {payload['total_gb']:.1f} GB"
                               + ("" if payload["fits"] else " — DOES NOT FIT in free space"))
                     _ui.label(", ".join(payload["aliases"]))
+                elif payload and payload.get("kind") == "input":
+                    # typed prompt (prompt:session / prompt:oneshot): Yes validates exactly
+                    # like csl and applies the value (name on the model, or a --prompt launch)
+                    _ui.label(payload["prompt"])
+                    field = _ui.input("text").classes("w-full")
+                    warn = _ui.label("").classes("text-red-500")
+
+                    def _submit_input():
+                        import re
+                        val = (field.value or "").strip()
+                        if target == "prompt:session":
+                            if val and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", val):
+                                warn.set_text("session name rejected: use letters, digits, - or _")
+                                return
+                            settings_state["lowkey_session_name"] = val
+                            _ui.navigate.to("/lowkey")
+                        else:   # prompt:oneshot: the screen turns the text into a --prompt launch
+                            res = scr.one_shot(val) if hasattr(scr, "one_shot") else None
+                            if res is None:
+                                warn.set_text("one-shot needs a prompt (and a selected model)")
+                                return
+                            if _st.get("launch_req"):
+                                _st["launch_req"](res)
+                        dlg.close()
+
+                    field.on("keydown", lambda e: e.action == "Enter" and _submit_input())
+                    with _ui.row():
+                        _ui.button("Yes", on_click=_submit_input)
+                        _ui.button("No", on_click=dlg.close)
+                    dlg.open()
+                    return
                 else:
                     _ui.label("Confirm?")
                 with _ui.row():

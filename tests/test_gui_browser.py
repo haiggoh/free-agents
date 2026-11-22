@@ -567,7 +567,33 @@ def test_tile_emoji_cycle_value_click_steps_like_the_arrow(browser, tmp_path):
         assert srv.stop() == []
 
 
-def test_follow_system_switch_writes_store(browser, tmp_path):
+def test_lowkey_session_name_prompt(browser, tmp_path):
+    # 2026-11-22 parity: the lowkey "Set session name" row opens a TEXT dialog (csl's
+    # typed prompt); a valid name lands in the row label AND the launch argv (--session)
+    stub = tmp_path / "launch.json"
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}lowkey")
+        page.get_by_text("Set session name", exact=False).first.click()
+        page.wait_for_selector(".q-dialog", timeout=10000)
+        page.locator(".q-dialog input").fill("bad name!")
+        page.locator(".q-dialog button", has_text="Yes").click()
+        page.wait_for_selector("text=session name rejected", timeout=5000)
+        assert json.loads(stub.read_text() if stub.exists() else "{}") == {}
+        page.locator(".q-dialog input").fill("my-run")
+        page.locator(".q-dialog button", has_text="Yes").click()
+        page.wait_for_selector("text=Set session name: my-run", timeout=15000)
+        page.get_by_text("Start one-shot", exact=False).first.click()
+        page.wait_for_selector(".q-dialog", timeout=10000)      # csl opens the typed prompt
+        page.locator(".q-dialog button", has_text="Yes").click()  # empty prompt = honest warning
+        page.wait_for_selector("text=one-shot needs a prompt", timeout=5000)
+        assert not stub.exists()
+        # the argv contract (name riding a real launch) is unit-pinned in
+        # tests/test_lowkey_session_name.py; selecting a model here would need a live
+        # inventory, which this fixture does not provide
+    finally:
+        assert srv.stop() == []
     # 2026-11-20 spec: launch-only switch; the store write is the delivery-shaped outcome
     ap = tmp_path / "appearance.json"
     ap.write_text(json.dumps({"follow_system_appearance": False}))

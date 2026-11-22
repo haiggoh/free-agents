@@ -24,7 +24,7 @@ the nav target but no `@ui.page` exists for it.
 | home | `HomeScreen` | ✅ `/home` renders | — |
 | local sessions | `LocalScreen` | ✅ `/local` renders with data + #missing cleanup offer (red rows → confirm → `csl --unregister-models`) | the doc's earlier "download entry point" note was a mis-inventory: csl's LocalScreen has no such row either (it lives on Home → /download) |
 | remote sessions | `RemoteScreen` | ◐ `/remote` renders with data | `remote_filters` screen's controls, tool:rl-* panels |
-| lowkey | `LowkeyScreen` via `tool:lowkey` | ◐ renders via catch-all (data now prefetched) | prompt:session dialog |
+| lowkey | `LowkeyScreen` via `tool:lowkey` | ✅ renders via catch-all (data prefetched) + prompt:session dialog (typed name, csl validation, rides the convo argv) + prompt:oneshot dialog | — |
 | download local models | `DownloadScreen` via `tool:download` | ✅ queue rows + review dialog + confirm→CLI argv all browser-proven (2eb5ea1) | — |
 | about | `AboutScreen` | ✅ renders | — |
 | api keys | `APIKeysScreen` | ◐ renders | key add/remove write path (`setup-api-keys.py`), open: URLs |
