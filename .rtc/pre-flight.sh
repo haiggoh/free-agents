@@ -24,7 +24,7 @@
 case "${1:-}" in
   -h|--help)
     printf 'Usage: bash %s [--help]\n\n%s\n' "$0" \
-      ".rtc/pre-flight.sh — extra test gates rtc-ship.sh runs before packaging (litellm + picker venvs). Env: FA_LITELLM_PY, FA_PICKER_PY override the venv interpreters."
+      ".rtc/pre-flight.sh — extra test gates rtc-ship.sh runs before packaging: the litellm and picker venv gates, plus the live_proxy gate (tests/live_proxy: REAL LiteLLM vs a fake OpenAI upstream, serial — cold starts ≈3 min; collected only with FA_LIVE_PROXY_GATE=1, set here). Env: FA_LITELLM_PY, FA_PICKER_PY override the venv interpreters; FA_LIVE_PROXY_TESTS overrides the live gate's test path (an empty dir must FAIL the gate)."
     exit 0 ;;
   "") ;;
   *) printf 'Usage: bash %s [--help]  (unknown argument: %s)\n' "$0" "$1" >&2; exit 2 ;;
@@ -83,17 +83,58 @@ run_gate() {  # run_gate <name> <interpreter> <space-separated test files>
   return 1
 }
 
-# Both gates in parallel: independent interpreters, and the gate is dominated by interpreter startup.
-a=$(mktemp -d); b=$(mktemp -d)
+# ---- live_proxy gate (provider-buckets Task 1): REAL LiteLLM vs a fake upstream -----------
+# tests/live_proxy/ is collected ONLY with FA_LIVE_PROXY_GATE=1 (tests/live_proxy/conftest.py),
+# so the main suite (-n 12) never starts real proxies. This gate is the ONLY route that runs
+# them, and it must fail when it would cover nothing.
+LIVE_PROXY_TESTS="${FA_LIVE_PROXY_TESTS:-tests/live_proxy}"
+
+run_live_gate() {  # run_live_gate — serial, NO -m filter: the delivery proofs carry no
+                   # load_sensitive marker and must never be deselected here; cold proxy
+                   # starts measured ≈3 min (readiness inside the rig is progress-based,
+                   # 420 s hard cap), so no -n either.
+  local d
+  if [ ! -d "$LIVE_PROXY_TESTS" ]; then
+    echo "✖ live_proxy gate: covers nothing — $LIVE_PROXY_TESTS does not exist" >&2; return 1
+  fi
+  local -a to=()
+  if "$LITELLM_PY" -m pytest --help 2>/dev/null | grep -q -- '--timeout=TIMEOUT'; then
+    to=(--timeout=1800 --timeout-method=thread)
+  fi
+  d=$(mktemp -d)
+  if FA_LIVE_PROXY_GATE=1 "$LITELLM_PY" -m pytest -q "$LIVE_PROXY_TESTS" \
+      -p no:cacheprovider "${to[@]}" </dev/null >"$d/out" 2>&1; then
+    if grep -q 'no tests ran' "$d/out" || ! grep -qE '[0-9]+ passed' "$d/out"; then
+      echo "✖ live_proxy gate: covers nothing — ran zero tests" >&2; return 1
+    fi
+    echo "  live_proxy: $(grep -E 'passed|failed|no tests ran' "$d/out" | tail -1)"
+    rm -rf "$d"; return 0
+  fi
+  if grep -q 'no tests ran' "$d/out"; then
+    echo "✖ live_proxy gate: covers nothing — ran zero tests" >&2
+  else
+    echo "✖ live_proxy gate FAILED: $(grep -E 'passed|failed|error' "$d/out" | tail -1)" >&2
+    grep -E '^(FAILED|ERROR) ' "$d/out" | head -10 >&2
+    echo "  full log kept in $d" >&2
+  fi
+  return 1
+}
+
+# All three gates in parallel: independent interpreters, and each gate is dominated by
+# interpreter startup (the live gate by the first cold proxy start).
+a=$(mktemp -d); b=$(mktemp -d); c=$(mktemp -d)
 ( run_gate litellm "$LITELLM_PY" "$LITELLM_TESTS" >"$a/out" 2>&1; echo $? >"$a/rc" ) &
 pa=$!
 ( run_gate picker  "$PICKER_PY"  "$PICKER_TESTS"  >"$b/out" 2>&1; echo $? >"$b/rc" ) &
 pb=$!
-wait "$pa" "$pb"
-cat "$a/out" "$b/out"
+( run_live_gate >"$c/out" 2>&1; echo $? >"$c/rc" ) &
+pc=$!
+wait "$pa" "$pb" "$pc"
+cat "$a/out" "$b/out" "$c/out"
 rc=0
 [ "$(cat "$a/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
 [ "$(cat "$b/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
-rm -rf "$a" "$b"
+[ "$(cat "$c/rc" 2>/dev/null || echo 1)" = 0 ] || rc=1
+rm -rf "$a" "$b" "$c"
 [ "$rc" = 0 ] || echo "✖ pre-flight gates FAILED" >&2
 exit "$rc"
