@@ -281,6 +281,15 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
         # v2 entries (incl. negatives) and v1 entries that already gained `created` answer
         # without a refetch; a v1 entry with a count but no `created` refetches ONCE to gain
         # it (and keeps the count if that refetch fails) — never a mass refetch.
+        if hit.get("repo") and not hit.get("ctx_done"):
+            # 2026-11-22 hotfix: an entry cached before context existed gains it ONCE — only
+            # config.json is fetched, the fresh count is not refetched.
+            answered, ctx = _hf_fetch_context(hit["repo"], timeout)
+            if answered:
+                try:
+                    _hf_cache_store(key, {**hit, "ctx": ctx, "ctx_done": True})
+                except OSError:
+                    pass
         return hit.get("total"), hit.get("repo")
 
     from urllib.parse import quote
@@ -349,6 +358,12 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
                      "at": now}
             if total is None and not (isinstance(hit, dict) and hit.get("v") == 2 and hit.get("total") is None):
                 entry["neg_until"] = now + NEG_CACHE_TTL_S
+        if repo and not entry.get("ctx_done"):
+            # 2026-11-22 hotfix: the context window rides on the same resolution (the repo just
+            # found); a network/5xx failure leaves ctx_done unset so the next warm-up retries.
+            answered, ctx = _hf_fetch_context(repo, timeout)
+            if answered:
+                entry = {**entry, "ctx": ctx, "ctx_done": True}
         try:
             _hf_cache_store(key, entry)
         except OSError:
@@ -370,6 +385,130 @@ def hf_created(model_id: str):
     hit = cache.get(model_id.lower())
     if hit and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S:
         return hit.get("created") or None
+    return None
+
+
+_CANDIDATE_KEYS = (
+    "max_position_embeddings",
+    "max_sequence_length",
+    "seq_length",
+    "n_positions",
+    "model_max_length",
+)
+_SUBCONFIG_KEYS = ("text_config", "llm_config", "language_config")
+_ABSURD_CAP = 100_000_000
+
+
+def _as_positive_int(value):
+    """Return value as a positive int <= cap, or None. bool/strings never count."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        n = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            return None
+        n = int(value)
+    else:
+        return None
+    if n <= 0 or n > _ABSURD_CAP:
+        return None
+    return n
+
+
+def _rope_candidate(scope):
+    rs = scope.get("rope_scaling")
+    if not isinstance(rs, dict):
+        return None
+    factor = rs.get("factor")
+    original = rs.get("original_max_position_embeddings")
+    if isinstance(factor, bool) or not isinstance(factor, (int, float)):
+        return None
+    if not factor > 1:
+        return None
+    if isinstance(original, bool) or not isinstance(original, int):
+        return None
+    if original <= 0:
+        return None
+    try:
+        scaled = int(factor * original)
+    except (OverflowError, ValueError):
+        return None
+    if scaled <= 0 or scaled > _ABSURD_CAP:
+        return None
+    return scaled
+
+
+def context_from_config(cfg) -> int | None:
+    """Context window (max tokens) from a parsed HF config.json dict, else None."""
+    try:
+        if not isinstance(cfg, dict):
+            return None
+        scopes = [cfg]
+        for key in _SUBCONFIG_KEYS:
+            sub = cfg.get(key)
+            if isinstance(sub, dict):
+                scopes.append(sub)
+        best = None
+        for scope in scopes:
+            for key in _CANDIDATE_KEYS:
+                n = _as_positive_int(scope.get(key))
+                if n is not None and (best is None or n > best):
+                    best = n
+            scaled = _rope_candidate(scope)
+            if scaled is not None and (best is None or scaled > best):
+                best = scaled
+        return best
+    except Exception:
+        return None
+
+
+def format_context(n) -> str:
+    """Short row label for a context length, in the style of format_param_count."""
+    try:
+        if isinstance(n, bool) or not isinstance(n, int):
+            return ""
+        if n <= 0:
+            return ""
+        if n % 1024 == 0:
+            k = n // 1024
+            if k % 1024 == 0:
+                return f"{k // 1024}M"
+            return f"{k}k"
+        if n >= 1_000_000:
+            m = f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".")
+            return f"{m}M"
+        return f"{round(n / 1000)}k"
+    except Exception:
+        return ""
+
+
+def _hf_fetch_context(repo: str, timeout: float) -> "tuple[bool, int | None]":
+    """(answered, context window) from the RESOLVED repo's config.json (2026-11-22 hotfix).
+
+    answered=False on a network error or a transient HTTP status: nothing is cached, the next
+    warm-up retries. 401/403/404 (gated, private, no config) is an ANSWER with context None, so a
+    gated repo is not refetched every warm-up. Honors LA_HF_API_BASE (same origin as the API)."""
+    from urllib.parse import quote
+    origin = _hf_api_base()[: -len("/api/models")]
+    obj = _hf_get(f"{origin}/{quote(repo, safe='/')}/resolve/main/config.json", timeout)
+    if isinstance(obj, HFError):
+        return (obj.kind == "http" and obj.status in (401, 403, 404)), None
+    return True, context_from_config(obj)
+
+
+def hf_context(model_id: str):
+    """The context window (tokens) for a model id, read from the HF cache ONLY (render-time
+    safe, like hf_created): None when never warmed, gated, unknown, or expired. Keyed by the
+    model id, so every provider whose id resolves to the same HF repo shares the answer."""
+    try:
+        cache = json.loads(_hf_cache_path().read_text())
+    except (OSError, ValueError):
+        return None
+    hit = cache.get(model_id.lower())
+    if isinstance(hit, dict) and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S:
+        ctx = hit.get("ctx")
+        return ctx if isinstance(ctx, int) and not isinstance(ctx, bool) and ctx > 0 else None
     return None
 
 

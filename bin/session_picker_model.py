@@ -40,6 +40,29 @@ except ImportError:
 import session_menu_state as sms
 import emoji_constants as ec
 import cloud_session_env as cse
+
+
+def _format_context(n) -> str:
+    """2026-11-22 hotfix: short context label ('1M', '256k', '200k'); '' when unknown. Delegates to
+    estimate-model-footprint.format_context when that module is importable (bin/ is on sys.path
+    inside the picker), else a local equivalent so this module never fails on the import."""
+    try:
+        import estimate_model_footprint as _fp  # bin/ is on sys.path in the picker process
+        return _fp.format_context(n)
+    except Exception:
+        pass
+    try:
+        if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
+            return ""
+        if n % 1024 == 0:
+            k = n // 1024
+            return f"{k // 1024}M" if k % 1024 == 0 else f"{k}k"
+        if n >= 1_000_000:
+            m = f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".")
+            return f"{m}M"
+        return f"{round(n / 1000)}k"
+    except Exception:
+        return ""
 import model_names
 import theme_colors as tc
 
@@ -205,6 +228,10 @@ class LocalModel:
     reasoning_parser: str = ""
     auto_scanned: bool = False   # on disk but not registered: selecting it offers registration
     folder: str = ""             # on-disk folder of an auto-scanned row (csl --inventory column 5)
+    # 2026-11-22 hotfix: inventory column 6 (effective context via la_get_effective_context) and
+    # column 7 (subdir/folder). Empty when the row predates the columns.
+    context: "int | None" = None
+    subdir: str = ""
 
 
 @dataclass
@@ -474,13 +501,37 @@ def catalog_param_size(settings, prov: str, model_id: str) -> "float | None":
         return None
 
 
+def catalog_context_window(settings, prov: str, model_id: str) -> "int | None":
+    """2026-11-22 hotfix: the one context-window lookup for row labels (Settings.model_context_window,
+    HF cache, offline). Same delegation shape as catalog_param_size so Remote/Lowkey/Local agree."""
+    fn = getattr(settings, "model_context_window", None)
+    if fn is None:
+        return None
+    try:
+        ctx = fn(prov, model_id)
+    except Exception:
+        return None
+    return ctx if isinstance(ctx, int) and not isinstance(ctx, bool) and ctx > 0 else None
+
+
+def _name_states(label: str, display: str) -> bool:
+    """Word-boundary, case-insensitive: the display name already carries this label."""
+    return bool(label) and bool(re.search(r"\b" + re.escape(label) + r"\b", display or "", re.IGNORECASE))
+
+
 def param_size_suffix(settings, prov: str, model_id: str, display: str) -> str:
     """0.54.0: '  · 1.05T' appended when the size is known and the name does not already state
-    it (word-boundary match, shared by Remote and Lowkey rows)."""
+    it (word-boundary match, shared by Remote and Lowkey rows). 2026-11-22 hotfix: the context
+    window is appended the same way, as '1M ctx', and each part is skipped independently when
+    the name already states it — so a row shows size only, context only, both, or neither."""
+    parts = []
     label = format_param_count(catalog_param_size(settings, prov, model_id))
-    if not label or re.search(r"\b" + re.escape(label) + r"\b", display or "", re.IGNORECASE):
-        return ""
-    return f"  · {label}"
+    if label and not _name_states(label, display):
+        parts.append(label)
+    ctx = _format_context(catalog_context_window(settings, prov, model_id))
+    if ctx and not _name_states(ctx, display) and not _name_states(ctx + " ctx", display):
+        parts.append(f"{ctx} ctx")
+    return ("  · " + " · ".join(parts)) if parts else ""
 
 
 def size_sorted(rows, size_of):
@@ -759,6 +810,9 @@ class Settings:
     # None when unknown (the row then sorts after the sized ones). Set by the picker; absent
     # (plain Settings()) means no data, and nothing sorts.
     model_param_count: Callable[[str, str], "float | None"] | None = None
+    # (provider, model id) -> context window in tokens, or None when unknown. Same rule as the
+    # param count: set by the picker (HF cache, offline reads only), absent means no data.
+    model_context_window: Callable[[str, str], "int | None"] | None = None
     # (provider, model id) -> True when a live-catalog row predates the age cutoff (hidden
     # unless show_old). Set by the picker; absent means no dates known, so nothing hides.
     catalog_model_old: Callable[[str, str], bool] | None = None
@@ -1382,13 +1436,31 @@ class LocalScreen(Screen):
             # The row reads as a NAME, not the kebab-case alias (user 2026-10-22, same
             # convention as the remote list); the alias stays the id and shows in the info box.
             name = model_names.readable(mdl.alias)
+            # 2026-11-22 hotfix: local rows carry size + context like remote rows. The facts come
+            # from the inventory's context column via Settings.model_context_window ("local", folder)
+            # and the same param path; each part is skipped when the name already states it.
+            # 2026-11-22 hotfix: local rows carry size + context like remote rows. Context comes
+            # first from the inventory column the picker parsed into mdl.context; when that is
+            # absent, the Settings hook (HF cache, offline) answers by folder/subdir.
+            if mdl.context is not None:
+                ctx_label = _format_context(mdl.context)
+                param_label = format_param_count(catalog_param_size(self.settings, "local",
+                                                                    mdl.folder or mdl.alias))
+                parts = [p for p, present in ((param_label, not _name_states(param_label, name)),
+                                              (ctx_label, not _name_states(ctx_label, name)
+                                               and not _name_states(ctx_label + " ctx", name)))
+                         if present and p]
+                local_facts = ("  · " + " · ".join(parts)) if parts else ""
+            else:
+                local_facts = param_size_suffix(self.settings, "local",
+                                                mdl.folder or mdl.alias, name)
             if mdl.auto_scanned:
                 # On disk but not registered: yellow, and it says so (user 2026-10-17).
                 item = Item(mdl.profile_id or mdl.alias,
-                            f"{name}  — on disk, not registered yet", style="yellow")
+                            f"{name}{local_facts}  — on disk, not registered yet", style="yellow")
             else:
                 item = Item(mdl.profile_id or mdl.alias,
-                            f"{name}"
+                            f"{name}{local_facts}"
                             # No [roles] bracket here (user 2026-10-31): roles are a dispatch/council
                             # concept and mean nothing when choosing a session launch model.
                             + (f" ({mdl.backend}" + (", thinking" if mdl.thinking else "") + ")" if mdl.backend else ""))

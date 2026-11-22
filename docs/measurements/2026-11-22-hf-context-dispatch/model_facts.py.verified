@@ -1,0 +1,944 @@
+#!/usr/bin/env python3
+"""Estimate a remote model's local RAM footprint from its model id, and flag
+roster entries whose local-capable classification is missing or disagrees.
+
+WHY THIS EXISTS (and how it supersedes an earlier decision)
+-----------------------------------------------------------
+The 2026-09-17 local-capable-filtering plan said: "Do not use a rigid 27B or 40B
+parameter cutoff as the decision rule... Do not infer a definitive classification
+merely from the first NNB substring in a model ID." That guidance was aimed at a
+real failure -- a naive first-NNB regex misreads `nemotron-3-ultra-550b-a55b`,
+version numbers, and context lengths.
+
+The user superseded that claim on 2026-09-19: parameter count is not exact, but for
+a model that is NOT ON DISK it is the only signal available offline. There is no
+better local mechanism -- real artifact bytes require a network call against a
+known HF repo, which a remote-only model does not have. So a rough first estimate
+beats no estimate.
+
+This tool keeps the plan's actual safety requirement while accepting the user's
+premise, by separating ESTIMATION from CLASSIFICATION:
+
+  * it parses MoE ids (total + active params) instead of the first NNB substring;
+  * it ignores version/context/quant-looking numbers rather than reading them as sizes;
+  * it reports by DEFAULT and writes only under an explicit --apply.
+
+The user authorized --apply on 2026-09-19 ("the manual file wasn't perfect yet"), and the
+first sweep justified it: 9 of 30 rows disagreed, including gpt-oss-20b filed as "No local
+equivalent" at ~18 GB. --apply is still gated to HIGH-CONFIDENCE rows -- a comfortable fit
+or a large overshoot -- so the near-ceiling ~68 GB MoE rows, where KV overhead genuinely
+could decide it, are left for a human. It backs the file up before writing.
+
+FORMULA
+-------
+    weights_GB  = total_params_B * bytes_per_weight   (4-bit => 0.5 B/param)
+    kv_overhead = a flat allowance for KV cache + runtime
+    fits        = weights_GB + kv_overhead <= budget_GB
+
+Dense models must hold every weight in memory. An MoE must ALSO hold every weight
+(all experts are resident; only compute is sparse), so the TOTAL count drives the
+memory verdict -- the active count is reported because it predicts speed, not size.
+Getting this backwards is the main way an MoE estimate goes wrong: judging
+`550b-a55b` by its 55B active figure would call a 275 GB model local-capable.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import sys
+import time
+
+# 4-bit is the quantization this stack actually serves, so it is the default.
+BYTES_PER_WEIGHT = {"4bit": 0.5, "6bit": 0.75, "8bit": 1.0, "fp16": 2.0}
+
+# KV cache + runtime + framework overhead, in GB. Deliberately coarse: this is a
+# triage estimate, and a too-small allowance is the dangerous direction.
+DEFAULT_KV_OVERHEAD_GB = 8.0
+
+# Mirrors LA_MEMORY_BUDGET_GB in config.example.sh rather than inventing a number.
+# This is the FALLBACK when the device cannot be read (and the explicit --budget-gb /
+# env override ladder above it fails); the budget itself is derived from the device
+# (T4, user 2026-10-20) — never from a hardcoded machine size.
+DEFAULT_BUDGET_GB = 96.0
+
+
+def fits_with_total(total_b: float, quant: str = "4bit", budget_gb=None) -> bool:
+    """The visibility rule applied to a KNOWN total parameter count (in billions) — e.g. from
+    the picker's PARAM_COUNT_OVERRIDES: weights = total_b * bpw(quant) + KV overhead must fit
+    the budget. 0.52.1: the picker's local-capable verdict used to go through estimate()
+    alone, whose id-parse misses vendor-documented ids (arctic-embed-l, kosmos-2,
+    laguna-xs-2.1) and whose HF rung needs the warmed cache — so those models were never
+    judged local-capable in practice (the filter never hid anything)."""
+    budget, _src = _resolve_budget_gb(budget_gb)
+    return (total_b * BYTES_PER_WEIGHT[quant] + DEFAULT_KV_OVERHEAD_GB) <= budget
+
+# Share of the device memory the estimator treats as usable budget. Unified RAM is
+# shared with the OS/GPU, so 75% — the standing convention (96 GB of a 128 GB Mac).
+# VRAM is dedicated to the GPU, so its share is higher.
+UNIFIED_BUDGET_SHARE = 0.75
+VRAM_BUDGET_SHARE = 0.9
+
+# Memoized (gb, kind) of the device read; None until first needed. Tests overwrite it
+# to fake a machine — they never run sysctl/nvidia-smi on real hardware.
+_DEVICE_BUDGET = None
+
+# A parameter count: 30b, 550b, a55b (active), 7.5b. Anchored to a token boundary so
+# it cannot match inside a version (3.5) or a date (0731).
+_PARAM_RE = re.compile(r"(?:^|[-_/.])(a?)(\d+(?:\.\d+)?)b(?=$|[-_/.])", re.IGNORECASE)
+
+# Numbers that LOOK like sizes but are not. Checked before the param regex so a
+# context length (128k) or a quant label (4bit) cannot be read as a weight count.
+_NOT_A_SIZE_RE = re.compile(r"\d+(?:k|bit|_\d)\b", re.IGNORECASE)
+
+
+def parse_params(model_id: str) -> dict:
+    """Extract (total_b, active_b) from a model id.
+
+    Returns a dict with total_b, active_b and a confidence label. An id carrying two
+    counts (`550b-a55b`) is an MoE: the bare number is the total, the a-prefixed one
+    is active. This is the case the plan's "first NNB substring" warning was about.
+    """
+    tail = model_id.split("/")[-1]
+    scrubbed = _NOT_A_SIZE_RE.sub("", tail)
+
+    total_b = active_b = None
+    found = []
+    for active_marker, number in _PARAM_RE.findall(scrubbed):
+        value = float(number)
+        found.append((bool(active_marker), value))
+        if active_marker:
+            # Keep the smallest a-prefixed figure; ids rarely carry two.
+            active_b = value if active_b is None else min(active_b, value)
+        else:
+            # Keep the LARGEST bare figure: it is the memory-relevant total.
+            total_b = value if total_b is None else max(total_b, value)
+
+    if total_b is None and active_b is not None:
+        # Only an active count is stated, so the total is unknown and certainly larger.
+        return {"total_b": None, "active_b": active_b, "confidence": "unknown",
+                "note": "only an active-parameter count is stated; total is unknown and larger"}
+    if total_b is None:
+        return {"total_b": None, "active_b": None, "confidence": "unknown",
+                "note": "no parameter count in the model id"}
+
+    confidence = "medium" if active_b is None else "medium-moe"
+    note = "dense" if active_b is None else f"MoE: {active_b:g}B active of {total_b:g}B total"
+    if len(found) > 2:
+        confidence = "low"
+        note += "; multiple numbers in id, verify by hand"
+    return {"total_b": total_b, "active_b": active_b,
+            "confidence": confidence, "note": note}
+
+
+# --- Hugging Face fallback: the parameter count when the id does not state one ------------
+# The model page's "fits your hardware" badge comes from the same field: safetensors.total.
+# Public API, no key. Results are cached so a picker never waits on the network twice.
+HF_API = "https://huggingface.co/api/models"
+HF_CACHE_TTL_S = 30 * 86400
+
+
+def _hf_cache_path() -> pathlib.Path:
+    import os
+    base = os.environ.get("LA_HF_PARAMS_CACHE")
+    if base:
+        return pathlib.Path(base)
+    root = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return pathlib.Path(root) / "free-agents" / "hf-params.json"
+
+
+def _hf_api_base() -> str:
+    """0.55.8 Task 1 (0541 plan Item A): HF_API honoring LA_HF_API_BASE (tests and dogfood
+    point it at a loopback fake). A SET but invalid value raises naming the variable — an
+    explicit override must never fall through to the default silently."""
+    import os
+    base = os.environ.get("LA_HF_API_BASE")
+    if base is not None:
+        if not (base.startswith("http://127.0.0.1:") or base.startswith("https://")):
+            raise ValueError(f"LA_HF_API_BASE={base!r} must start with http://127.0.0.1: or https://")
+        # the override replaces the ORIGIN; the /api/models path stays (same shape as HF_API)
+        return base.rstrip("/") + "/api/models"
+    return HF_API
+
+
+def _hf_cache_store(key: str, entry: dict) -> None:
+    """0.55.8 Task 1 (0541 plan Item A): the ONLY writer of the HF params cache. Takes an
+    exclusive flock on <cache>.lock, RE-READS the file under the lock, sets key, writes a
+    unique tmp (<cache>.<pid>.<thread>.tmp) and os.replace — concurrent warm-ups can no
+    longer lose each other's entries or collide on one fixed tmp name. A corrupt existing
+    file is treated as {} but PRESERVED as <cache>.corrupt-<ts>, never silently discarded.
+    A read-only cache costs a lookup, never a verdict."""
+    import fcntl
+    import os
+    import threading
+    cache_path = _hf_cache_path()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = cache_path.with_suffix(".lock")
+    with open(lock_path, "a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                raw = cache_path.read_text(encoding="utf-8")
+                cache = json.loads(raw) if raw.strip() else {}
+                if not isinstance(cache, dict):
+                    raise ValueError("cache is not a JSON object")
+            except FileNotFoundError:
+                cache = {}
+            except (ValueError, json.JSONDecodeError):
+                cache_path.rename(cache_path.with_name(f"{cache_path.name}.corrupt-{int(time.time())}"))
+                cache = {}
+            cache[key] = entry
+            tmp = cache_path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(cache, indent=1, sort_keys=True))
+            os.replace(tmp, cache_path)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+class HFError:
+    """0.54.0: a classified HF failure — the cache rules distinguish `network` (TLS/timeout/
+    DNS: must NEVER be cached as an answer) from `http` with a status (401/404 = a real
+    "HF has no such repo" negative; other statuses are transient)."""
+
+    def __init__(self, kind: str, status: "int | None" = None):
+        self.kind = kind                      # "network" | "http"
+        self.status = status
+
+    def __repr__(self):
+        return f"HFError({self.kind!r}, status={self.status!r})"
+
+
+def _hf_get(url: str, timeout: float):
+    """GET JSON from the HF API. Tests replace this function.
+
+    Returns the decoded JSON, or an HFError — NEVER None: None made a TLS failure
+    indistinguishable from "no such repo", and the old cache then stored `total: null`
+    for 30 days (the 2026-11-04 09:33 poisoned-cache incident).
+
+    0.54.0: the request goes through fa_tls.client_context() — on TLS-inspecting networks the
+    plain default context rejects the chain (VERIFY_X509_STRICT vs the missing-AKI inspection
+    CA) and the HF size warm-up silently never runs."""
+    import urllib.error
+    import urllib.request
+    import fa_tls
+    try:
+        with urllib.request.urlopen(url, timeout=timeout, context=fa_tls.client_context()) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return HFError("http", exc.code)
+    except Exception:
+        return HFError("network")
+
+
+NEG_CACHE_TTL_S = 7 * 86400      # a 401/404 "HF has no such repo" is cached short, not 30 days
+
+
+def _cache_entry_fresh(hit, now: float) -> bool:
+    """0.54.0 cache read rule: a v2 entry is fresh within its TTL; a v2 NEGATIVE entry
+    (total null) is fresh only within neg_until (never the 30-day TTL); a LEGACY v1 entry
+    (no "v" key) with total null is STALE and refetched — that is the poisoned shape; a
+    legacy entry WITH a count still answers (no mass refetch)."""
+    if not isinstance(hit, dict):
+        return False
+    if "v" in hit:
+        if hit.get("total") is None:
+            return hit.get("neg_until", 0) > now   # negative: neg_until governs, not the TTL
+        return now - hit.get("at", 0) < HF_CACHE_TTL_S
+    # legacy v1 entry: null total = stale (refetch); a real count still answers
+    return hit.get("total") is not None and now - hit.get("at", 0) < HF_CACHE_TTL_S
+
+
+def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = False):
+    """(total parameters, HF repo) for a model id, or (None, None) when no single base repo matches.
+
+    Exact repo first (case-sensitive on HF), then a name search accepting only a repo whose
+    name equals the id's last segment case-insensitively. Derivative uploads (-GGUF, -INT4,
+    -DFlash ...) carry a longer name, so they never match; a same-owner repo is preferred.
+    Ambiguity (two base repos) is "unknown": a wrong count is worse than none. The same GET
+    also carries createdAt (the T6 age filter reads it offline from this cache); entries
+    written before that field existed are refetched ONCE to gain it, and a failed refetch
+    keeps the count it already had.
+
+    0.54.0 cache WRITE rules (v2 entries): a NETWORK error writes NOTHING (a TLS failure is
+    never an answer); HTTP 401/404 writes {"v":2,"total":null,"neg_until":now+7d}; other HTTP
+    statuses write nothing (transient); success writes {"v":2,...}."""
+    cache_path = _hf_cache_path()
+    key = model_id.lower()
+    try:
+        cache = json.loads(cache_path.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get(key)
+    now = time.time()
+    fresh = _cache_entry_fresh(hit, now)
+    if offline:
+        # A render-time read never waits on the network: any fresh entry answers, with or
+        # without a date (an offline entry lacking one is simply not old yet).
+        return (hit.get("total"), hit.get("repo")) if fresh and isinstance(hit, dict) else (None, None)
+    if fresh and isinstance(hit, dict) and ("v" in hit or "created" in hit):
+        # v2 entries (incl. negatives) and v1 entries that already gained `created` answer
+        # without a refetch; a v1 entry with a count but no `created` refetches ONCE to gain
+        # it (and keeps the count if that refetch fails) — never a mass refetch.
+        if hit.get("repo") and not hit.get("ctx_done"):
+            # 2026-11-22 hotfix: an entry cached before context existed gains it ONCE — only
+            # config.json is fetched, the fresh count is not refetched.
+            answered, ctx = _hf_fetch_context(hit["repo"], timeout)
+            if answered:
+                try:
+                    _hf_cache_store(key, {**hit, "ctx": ctx, "ctx_done": True})
+                except OSError:
+                    pass
+        return hit.get("total"), hit.get("repo")
+
+    from urllib.parse import quote
+    total = repo = created = None
+    saw_network_error = False
+    saw_transient_http = False
+    saw_negative_http = False
+    if "/" in model_id:
+        obj = _hf_get(f"{_hf_api_base()}/{quote(model_id, safe='/')}?expand[]=safetensors&expand[]=createdAt", timeout)
+        if isinstance(obj, HFError):
+            if obj.kind == "network":
+                saw_network_error = True
+            elif obj.status in (401, 404):
+                saw_negative_http = True
+            else:
+                saw_transient_http = True
+        elif isinstance(obj, dict) and (obj.get("safetensors") or {}).get("total"):
+            total, repo = obj["safetensors"]["total"], obj.get("id", model_id)
+            created = obj.get("createdAt")
+    if total is None:
+        tail = model_id.split("/")[-1]
+        found = _hf_get(f"{_hf_api_base()}?search={quote(tail)}&limit=50"
+                        f"&expand[]=safetensors&expand[]=createdAt", timeout)
+        if isinstance(found, HFError):
+            if found.kind == "network":
+                saw_network_error = True
+            elif found.status in (401, 404):
+                saw_negative_http = True
+            else:
+                saw_transient_http = True
+        elif isinstance(found, list):
+            exact = [m for m in found if isinstance(m, dict)
+                     and str(m.get("id", "")).split("/")[-1].lower() == tail.lower()
+                     and (m.get("safetensors") or {}).get("total")]
+            owner = model_id.split("/")[0].lower() if "/" in model_id else None
+            if owner:
+                same_owner = [m for m in exact if m["id"].split("/")[0].lower() == owner]
+                exact = same_owner or exact
+            totals = {m["safetensors"]["total"] for m in exact}
+            if len(totals) == 1:
+                total, repo = totals.pop(), exact[0]["id"]
+                created = exact[0].get("createdAt")
+    if total is None and isinstance(hit, dict) and hit.get("total") is not None:
+        # A refetch that came back empty (offline-looking failure) must not erase a count
+        # we already had: keep it and record that the date is simply unknown.
+        total, repo = hit.get("total"), hit.get("repo")
+    if created is None and isinstance(hit, dict) and hit.get("created"):
+        created = hit.get("created")
+    # 0.54.0 write rules: a NETWORK error or a transient (5xx) http error writes NOTHING —
+    # never cached as an answer; 401/404 or a 200 with no unique match -> short negative;
+    # success -> v2 entry.
+    if saw_network_error or saw_transient_http:
+        pass                                  # no write: a failure is not an answer
+    elif total is not None or created is not None:
+        cache[key] = {"v": 2, "total": total, "repo": repo, "created": created, "at": now}
+    elif isinstance(hit, dict) and hit.get("v") == 2 and hit.get("total") is None:
+        pass                              # keep the existing negative entry as is
+    else:
+        cache[key] = {"v": 2, "total": None, "repo": repo, "created": created,
+                      "at": now, "neg_until": now + NEG_CACHE_TTL_S}
+    if not (saw_network_error or saw_transient_http):
+        # 0.55.8 Task 1: the only write goes through the locked re-reading store.
+        entry = cache[key] if key in cache else None
+        if entry is None:
+            entry = {"v": 2, "total": total, "repo": repo, "created": created,
+                     "at": now}
+            if total is None and not (isinstance(hit, dict) and hit.get("v") == 2 and hit.get("total") is None):
+                entry["neg_until"] = now + NEG_CACHE_TTL_S
+        if repo and not entry.get("ctx_done"):
+            # 2026-11-22 hotfix: the context window rides on the same resolution (the repo just
+            # found); a network/5xx failure leaves ctx_done unset so the next warm-up retries.
+            answered, ctx = _hf_fetch_context(repo, timeout)
+            if answered:
+                entry = {**entry, "ctx": ctx, "ctx_done": True}
+        try:
+            _hf_cache_store(key, entry)
+        except OSError:
+            pass                          # a read-only cache costs a lookup, never a verdict
+    return total, repo
+
+
+def hf_created(model_id: str):
+    """The repo's createdAt date ("YYYY-MM-DD..."), read from the cache ONLY.
+
+    The picker's age filter calls this at render time, which must never wait on the
+    network: an id that was never warmed (or whose cached entry predates the created
+    field) answers None, and the caller treats that as NOT old (fail-open). An expired
+    entry reads as unknown too — the next warm-up refetches it with a date."""
+    try:
+        cache = json.loads(_hf_cache_path().read_text())
+    except (OSError, ValueError):
+        return None
+    hit = cache.get(model_id.lower())
+    if hit and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S:
+        return hit.get("created") or None
+    return None
+
+
+_CANDIDATE_KEYS = (
+    "max_position_embeddings",
+    "max_sequence_length",
+    "seq_length",
+    "n_positions",
+    "model_max_length",
+)
+_SUBCONFIG_KEYS = ("text_config", "llm_config", "language_config")
+_ABSURD_CAP = 100_000_000
+
+
+def _as_positive_int(value):
+    """Return value as a positive int <= cap, or None. bool/strings never count."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        n = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            return None
+        n = int(value)
+    else:
+        return None
+    if n <= 0 or n > _ABSURD_CAP:
+        return None
+    return n
+
+
+def _rope_candidate(scope):
+    rs = scope.get("rope_scaling")
+    if not isinstance(rs, dict):
+        return None
+    factor = rs.get("factor")
+    original = rs.get("original_max_position_embeddings")
+    if isinstance(factor, bool) or not isinstance(factor, (int, float)):
+        return None
+    if not factor > 1:
+        return None
+    if isinstance(original, bool) or not isinstance(original, int):
+        return None
+    if original <= 0:
+        return None
+    try:
+        scaled = int(factor * original)
+    except (OverflowError, ValueError):
+        return None
+    if scaled <= 0 or scaled > _ABSURD_CAP:
+        return None
+    return scaled
+
+
+def context_from_config(cfg) -> int | None:
+    """Context window (max tokens) from a parsed HF config.json dict, else None."""
+    try:
+        if not isinstance(cfg, dict):
+            return None
+        scopes = [cfg]
+        for key in _SUBCONFIG_KEYS:
+            sub = cfg.get(key)
+            if isinstance(sub, dict):
+                scopes.append(sub)
+        best = None
+        for scope in scopes:
+            for key in _CANDIDATE_KEYS:
+                n = _as_positive_int(scope.get(key))
+                if n is not None and (best is None or n > best):
+                    best = n
+            scaled = _rope_candidate(scope)
+            if scaled is not None and (best is None or scaled > best):
+                best = scaled
+        return best
+    except Exception:
+        return None
+
+
+def format_context(n) -> str:
+    """Short row label for a context length, in the style of format_param_count."""
+    try:
+        if isinstance(n, bool) or not isinstance(n, int):
+            return ""
+        if n <= 0:
+            return ""
+        if n % 1024 == 0:
+            k = n // 1024
+            if k % 1024 == 0:
+                return f"{k // 1024}M"
+            return f"{k}k"
+        if n >= 1_000_000:
+            m = f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".")
+            return f"{m}M"
+        return f"{round(n / 1000)}k"
+    except Exception:
+        return ""
+
+
+def _hf_fetch_context(repo: str, timeout: float) -> "tuple[bool, int | None]":
+    """(answered, context window) from the RESOLVED repo's config.json (2026-11-22 hotfix).
+
+    answered=False on a network error or a transient HTTP status: nothing is cached, the next
+    warm-up retries. 401/403/404 (gated, private, no config) is an ANSWER with context None, so a
+    gated repo is not refetched every warm-up. Honors LA_HF_API_BASE (same origin as the API)."""
+    from urllib.parse import quote
+    origin = _hf_api_base()[: -len("/api/models")]
+    obj = _hf_get(f"{origin}/{quote(repo, safe='/')}/resolve/main/config.json", timeout)
+    if isinstance(obj, HFError):
+        return (obj.kind == "http" and obj.status in (401, 403, 404)), None
+    return True, context_from_config(obj)
+
+
+def hf_context(model_id: str):
+    """The context window (tokens) for a model id, read from the HF cache ONLY (render-time
+    safe, like hf_created): None when never warmed, gated, unknown, or expired. Keyed by the
+    model id, so every provider whose id resolves to the same HF repo shares the answer."""
+    try:
+        cache = json.loads(_hf_cache_path().read_text())
+    except (OSError, ValueError):
+        return None
+    hit = cache.get(model_id.lower())
+    if isinstance(hit, dict) and time.time() - hit.get("at", 0) < HF_CACHE_TTL_S:
+        ctx = hit.get("ctx")
+        return ctx if isinstance(ctx, int) and not isinstance(ctx, bool) and ctx > 0 else None
+    return None
+
+
+def _device_memory_gb():
+    """(usable_gb, kind) of THIS device — unified RAM on macOS/Linux, VRAM on CUDA —
+    memoized; (None, None) when nothing can be read. bin/la-hw-detect.sh reads the same
+    sources for the launcher; this is the estimator's own minimal read so a one-shot
+    `estimate` need not source a shell stack. Never raises."""
+    global _DEVICE_BUDGET
+    if _DEVICE_BUDGET is not None:
+        return _DEVICE_BUDGET
+    gb = kind = None
+    try:
+        import subprocess as _sp
+        if sys.platform == "darwin":
+            out = _sp.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True,
+                          timeout=5).stdout.strip()
+            if out.isdigit():
+                gb, kind = int(out) / 2 ** 30, "unified"     # Apple counts GiB
+        else:
+            meminfo = pathlib.Path("/proc/meminfo")
+            if meminfo.exists():
+                for line in meminfo.read_text().splitlines():
+                    if line.startswith("MemTotal:"):
+                        gb, kind = int(line.split()[1]) / 2 ** 20, "unified"   # kB -> GiB
+                        break
+            if gb is None:
+                out = _sp.run(["nvidia-smi", "--query-gpu=memory.total",
+                               "--format=csv,noheader,nounits"], capture_output=True,
+                              text=True, timeout=10).stdout.strip().splitlines()
+                if out and out[0].strip().isdigit():
+                    gb, kind = int(out[0].strip()) / 1024, "vram"              # MiB -> GiB
+    except Exception:
+        gb = kind = None
+    _DEVICE_BUDGET = (gb, kind)
+    return _DEVICE_BUDGET
+
+
+def derive_budget_gb(device_gb: float, kind: str) -> float:
+    """Usable budget from a detected device size: 75% of unified RAM (the standing
+    96-of-128 convention), 90% of dedicated VRAM."""
+    share = VRAM_BUDGET_SHARE if kind == "vram" else UNIFIED_BUDGET_SHARE
+    return round(device_gb * share, 1)
+
+
+def _resolve_budget_gb(explicit):
+    """(budget_gb, source): an explicit argument wins, then LA_MEMORY_BUDGET_GB, then the
+    device read, then the DEFAULT_BUDGET_GB fallback (never a hardcoded machine size)."""
+    if explicit is not None:
+        return float(explicit), "explicit"
+    import os
+    env = os.environ.get("LA_MEMORY_BUDGET_GB")
+    if env:
+        try:
+            return float(env), "env"
+        except ValueError:
+            pass
+    gb, kind = _device_memory_gb()
+    if gb and kind:
+        return derive_budget_gb(gb, kind), "device"
+    return DEFAULT_BUDGET_GB, "default"
+
+
+def estimate(model_id: str, quant: str = "4bit",
+             budget_gb=None,
+             kv_overhead_gb: float = DEFAULT_KV_OVERHEAD_GB, *,
+             use_hf: bool = False, hf_offline: bool = False) -> dict:
+    """Estimate footprint and give a SUGGESTED classification (never authoritative).
+
+    Precedence (user 2026-10-18): the HF safetensors count of the matching base repo, then
+    the count parsed from the id, then unknown (visible). With use_hf the HF rung is tried
+    first because it is a measurement; the id parse is the rough fallback.
+
+    Visibility rule (user 2026-10-20, superseding the old visible near-ceiling band): a
+    model that FITS at >=4-bit is local-capable and hidden; only models that do NOT fit
+    at 4-bit stay visible (2/3-bit-only fits are edge cases and stay visible too). The
+    old caution about near-ceiling fits lives on as a `medium` confidence label and in
+    the reason text, not in visibility. The budget is resolved explicit -> env
+    LA_MEMORY_BUDGET_GB -> device read -> DEFAULT_BUDGET_GB."""
+    budget_gb, budget_source = _resolve_budget_gb(budget_gb)
+    parsed = parse_params(model_id)
+    if use_hf:
+        total, repo = hf_total_params(model_id, offline=hf_offline)
+        if total:
+            parsed = {**parsed, "total_b": round(total / 1e9, 1),
+                      "confidence": "medium" if parsed.get("active_b") is None else "medium-moe",
+                      "note": f"HF {repo}: {total / 1e9:.1f}B params (safetensors)"
+                              + (f"; {parsed['active_b']:g}B active" if parsed.get("active_b") else "")}
+    bpw = BYTES_PER_WEIGHT[quant]
+    out = {"model_id": model_id, "quant": quant, "budget_gb": budget_gb,
+           "budget_source": budget_source, **parsed}
+
+    if parsed["total_b"] is None:
+        out.update(weights_gb=None, total_gb=None, fits=None, suggested="unknown",
+                   reason="cannot estimate without a total parameter count — stays VISIBLE (fail-open)")
+        return out
+
+    weights_gb = parsed["total_b"] * bpw
+    total_gb = weights_gb + kv_overhead_gb
+    fits = total_gb <= budget_gb
+    out.update(weights_gb=round(weights_gb, 1), total_gb=round(total_gb, 1), fits=fits)
+
+    margin = budget_gb - total_gb
+    # ONE visibility rule (user 2026-10-20): a fit at >=4-bit hides the row at ANY margin.
+    # Near the ceiling the estimate's own error is larger than the headroom, so THAT
+    # uncertainty is recorded as a `medium` confidence and said in the reason — it no
+    # longer keeps the row visible. Only a NON-fit stays visible: a model that would need
+    # 2-bit or 3-bit quantization to fit is the user's stated edge case, shown.
+    if fits:
+        near_ceiling = total_gb >= 0.5 * budget_gb
+        confidence = "medium" if near_ceiling else "high"
+        out.update(suggested="local-capable", confidence=confidence,
+                   reason=f"~{total_gb:.0f} GB (weights {weights_gb:.0f} + {kv_overhead_gb:.0f} overhead) "
+                          f"fits the {budget_gb:.0f} GB budget ({margin:.0f} GB spare)"
+                          + (" — near the ceiling: KV growth could decide it, hidden per the "
+                             "fit-at-4bit rule" if near_ceiling else
+                             " — comfortably local, no further math needed"))
+    else:
+        # ASYMMETRY, deliberately. The estimate's error is a fraction of the model size, so a
+        # large overshoot is a SAFER call than a near-fit: nothing about quantization, KV
+        # sizing or architecture turns a 283 GB model into one that fits 96 GB. A 500B model
+        # is not "unknown" -- leaving it that way would be false modesty that costs the user
+        # picker attention on a model that can obviously never run here. Only a NEAR miss is
+        # genuinely uncertain, and that case is handled on the fits side above.
+        confidence = "high" if total_gb > 1.5 * budget_gb else out["confidence"]
+        out.update(suggested="remote-preferred", confidence=confidence,
+                   reason=f"~{total_gb:.0f} GB exceeds the {budget_gb:.0f} GB budget "
+                          f"by {-margin:.0f} GB"
+                          + (" — far past the ceiling, so no quantization or KV choice "
+                             "recovers it" if total_gb > 1.5 * budget_gb else ""))
+    return out
+
+
+def read_policy(path: str) -> dict:
+    """(provider, model_id) -> classification, from the PSV policy file."""
+    policy = {}
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("|")
+            if len(fields) < 3:
+                continue
+            policy[(fields[0], fields[1])] = fields[2]
+    return policy
+
+
+def read_roster(path: str) -> list:
+    """(alias, provider, model_id) from pipe-separated roster lines."""
+    rows = []
+    stream = sys.stdin if path == "-" else open(path, encoding="utf-8")
+    try:
+        for line in stream:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("|")
+            if len(fields) >= 3:
+                rows.append((fields[0], fields[1], fields[2]))
+    finally:
+        if stream is not sys.stdin:
+            stream.close()
+    return rows
+
+
+def apply_to_policy(path: str, updates: list, *, dry_run: bool = False) -> dict:
+    """Rewrite policy rows in place for HIGH-CONFIDENCE estimates only.
+
+    Line-oriented and surgical: it rewrites the classification/reason of rows that already
+    exist and appends rows that do not, leaving comments, ordering and unrelated rows byte
+    for byte intact. A backup is written first -- this file is hand-curated evidence, so an
+    automated pass must never be the only copy.
+    """
+    original = pathlib.Path(path).read_text(encoding="utf-8")
+    by_key = {(u["provider"], u["model_id"]): u for u in updates}
+    out_lines, rewritten = [], []
+
+    for line in original.splitlines(keepends=True):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            out_lines.append(line)
+            continue
+        fields = stripped.split("|")
+        if len(fields) < 3:
+            out_lines.append(line)
+            continue
+        update = by_key.pop((fields[0], fields[1]), None)
+        if update is None:
+            out_lines.append(line)
+            continue
+        fields = (fields + [""] * 7)[:7]
+        fields[2] = update["suggested"]
+        fields[5] = str(update["weights_gb"] or "")
+        # PRESERVE the prior hand-written reason. The estimate answers "does it fit in
+        # memory"; a curated note may assert something else entirely -- "No confirmed MLX
+        # artifact", "OpenAI-native model" -- which size math neither confirms nor refutes.
+        # Overwriting it would destroy evidence the estimator never had.
+        previous = fields[6].strip()
+        note = f"auto-estimated {update['total_gb']:.0f} GB at 4bit: {update['reason']}"
+        if previous and not previous.startswith("auto-estimated"):
+            note += f" [prior note, size math does not refute it: {previous}]"
+        fields[6] = note
+        out_lines.append("|".join(fields) + "\n")
+        rewritten.append(update["model_id"])
+
+    appended = []
+    if by_key and out_lines and not out_lines[-1].endswith("\n"):
+        out_lines[-1] += "\n"       # a last line without a newline would swallow the first append
+    for update in by_key.values():
+        out_lines.append("|".join([
+            update["provider"], update["model_id"], update["suggested"], "", "",
+            str(update["weights_gb"] or ""),
+            f"auto-estimated {update['total_gb']:.0f} GB at 4bit: {update['reason']}",
+        ]) + "\n")
+        appended.append(update["model_id"])
+
+    result = {"rewritten": rewritten, "appended": appended, "backup": None}
+    if dry_run or not (rewritten or appended):
+        return result
+
+    target = pathlib.Path(path)
+    backup = target.with_suffix(target.suffix + ".bak-autoestimate-"
+                                + time.strftime("%Y%m%dT%H%M%S"))
+    backup.write_text(original, encoding="utf-8")
+    mode = target.stat().st_mode & 0o777
+    target.write_text("".join(out_lines), encoding="utf-8")
+    target.chmod(mode)   # preserve the original mode; never widen it
+    result["backup"] = str(backup)
+    return result
+
+
+HF_WARM_REQUEST_CAP = 200      # a finisher never hammers HF (0541 plan, bounded-orphan rule)
+
+
+def _run_hf_warm(ids_file: str, max_seconds: int, cache_override: str | None) -> int:
+    """0.55.8 Task 2 (0541 plan Item A): the detached warm finisher. Bounded by ONE lock
+    (a second instance prints 'already warming' and exits 0), a hard time cap and a
+    200-request cap; the picker hands it its RESOLVED cache path as --hf-cache AND as
+    LA_HF_PARAMS_CACHE (R6). Writes a one-line JSON outcome to <cache dir>/hf-warm-last.json
+    (R7) so the next picker open can surface a failure."""
+    import fcntl
+    cache_path = pathlib.Path(cache_override) if cache_override else _hf_cache_path()
+    if cache_override:
+        os.environ["LA_HF_PARAMS_CACHE"] = str(cache_path)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    ids = json.loads(pathlib.Path(ids_file).read_text(encoding="utf-8"))
+    lock_path = cache_path.with_suffix(".warm.lock")
+    with open(lock_path, "a+b") as lf:
+        try:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("already warming")
+            return 0
+        t0 = time.monotonic()
+        hits = 0
+        sized = 0
+        err = None
+        remaining = []
+        orig_get = _hf_get
+        def counting_get(url, timeout):
+            nonlocal hits
+            hits += 1
+            return orig_get(url, timeout)
+        globals()["_hf_get"] = counting_get
+        try:
+            for mid in ids:
+                elapsed = time.monotonic() - t0
+                if elapsed > max_seconds or hits >= HF_WARM_REQUEST_CAP:
+                    remaining.append(mid)
+                    continue
+                # the per-call timeout shrinks with the remaining budget (M2 review): one
+                # slow call can overshoot the cap by at most its own timeout, never hang
+                try:
+                    total, _repo = hf_total_params(mid, timeout=max(1.0, min(8.0, max_seconds - elapsed)))
+                    if total is not None:
+                        sized += 1
+                except Exception as exc:
+                    err = f"{type(exc).__name__}: {exc}"
+                on_disk = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+                if mid not in on_disk:
+                    remaining.append(mid)
+        finally:
+            globals()["_hf_get"] = orig_get
+        outcome = {"sized": sized, "remaining": remaining, "requests": hits,
+                   "error": err, "at": time.time()}
+        (cache_path.parent / "hf-warm-last.json").write_text(json.dumps(outcome))
+        print(json.dumps(outcome))
+        return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Estimate a remote model's local RAM footprint from its id, and flag "
+                    "roster rows whose policy classification is missing or disagrees.",
+        epilog="This tool NEVER edits the policy file and never hides a model. It reports; "
+               "config/local-capable-remote-models.psv stays the authority.")
+    parser.add_argument("model_id", nargs="?",
+                        help="a single model id to estimate, e.g. nvidia/nemotron-3-ultra-550b-a55b")
+    parser.add_argument("--quant", default="4bit", choices=sorted(BYTES_PER_WEIGHT),
+                        help="quantization assumed for the local artifact (default: 4bit)")
+    parser.add_argument("--budget-gb", type=float, default=None,
+                        help="usable memory budget in GB (default: auto — LA_MEMORY_BUDGET_GB "
+                             "if set, else the DEVICE: 75%% of unified RAM / 90%% of CUDA VRAM "
+                             f"via sysctl/nvidia-smi, else {DEFAULT_BUDGET_GB:g})")
+    parser.add_argument("--kv-overhead-gb", type=float, default=DEFAULT_KV_OVERHEAD_GB,
+                        help=f"KV cache + runtime allowance in GB (default: {DEFAULT_KV_OVERHEAD_GB:g})")
+    parser.add_argument("--roster", help="pipe-separated roster file, or - for stdin")
+    parser.add_argument("--policy", help="policy PSV to compare against")
+    parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    parser.add_argument("--hf", action="store_true",
+                        help="when the id states no parameter count, look up the Hugging Face "
+                             "safetensors total (public API, cached 30 d in "
+                             "~/.cache/free-agents/hf-params.json; LA_HF_PARAMS_CACHE overrides)")
+    parser.add_argument("--hf-offline", action="store_true",
+                        help="with --hf, use only cached Hugging Face results (no network)")
+    parser.add_argument("--disagreements-only", action="store_true",
+                        help="only report rows the policy misses or contradicts")
+    parser.add_argument("--apply", action="store_true",
+                        help="WRITE high-confidence verdicts into the policy file "
+                             "(backs it up first; needs --roster and --policy)")
+    parser.add_argument("--apply-dry-run", action="store_true",
+                        help="show exactly what --apply would change, without writing")
+    # 0.55.8 Task 2 (0541 plan Item A): the detached warm finisher mode. Args are parsed
+    # BEFORE anything runs; an unknown flag exits 2 via argparse; --help documents them.
+    parser.add_argument("--hf-warm", metavar="IDS_JSON",
+                        help="finisher mode: warm the HF cache for the ids in IDS_JSON "
+                             "(a JSON list) and exit; one lock (<cache>.warm.lock), capped "
+                             "by --max-seconds and 200 requests, outcome to "
+                             "<cache dir>/hf-warm-last.json")
+    parser.add_argument("--max-seconds", type=int, default=120,
+                        help="finisher time cap in seconds (default 120)")
+    parser.add_argument("--hf-cache", metavar="PATH",
+                        help="finisher: write to this cache file (also exported as "
+                             "LA_HF_PARAMS_CACHE); default: the resolved cache path")
+    args = parser.parse_args()
+
+    if args.hf_warm:
+        return _run_hf_warm(args.hf_warm, args.max_seconds, args.hf_cache)
+
+    if args.model_id and not args.roster:
+        result = estimate(args.model_id, args.quant, args.budget_gb, args.kv_overhead_gb,
+                          use_hf=args.hf, hf_offline=args.hf_offline)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"{result['model_id']}")
+            print(f"  params    : {result['note']}")
+            print(f"  estimate  : {result['total_gb'] or '?'} GB at {args.quant} "
+                  f"(budget {result['budget_gb']:g} GB, from {result['budget_source']})")
+            print(f"  suggested : {result['suggested']}  [confidence: {result['confidence']}]")
+            print(f"  reason    : {result['reason']}")
+        return 0
+
+    if not args.roster:
+        parser.error("give a model_id, or --roster to sweep a roster")
+
+    rows = read_roster(args.roster)
+    policy = read_policy(args.policy) if args.policy else {}
+    sweep_budget, sweep_budget_source = _resolve_budget_gb(args.budget_gb)
+    findings, agree = [], 0
+    for alias, provider, model_id in rows:
+        result = estimate(model_id, args.quant, sweep_budget, args.kv_overhead_gb,
+                          use_hf=args.hf, hf_offline=args.hf_offline)
+        current = policy.get((provider, model_id))
+        result.update(alias=alias, provider=provider, policy=current)
+        if current is None:
+            result["finding"] = "UNCLASSIFIED — no policy row"
+        elif result["suggested"] == "unknown":
+            result["finding"] = None if not args.disagreements_only else None
+        elif current != result["suggested"]:
+            result["finding"] = f"DISAGREES — policy says {current}, estimate suggests {result['suggested']}"
+        else:
+            result["finding"] = None
+            agree += 1
+        if result["finding"] or not args.disagreements_only:
+            findings.append(result)
+
+    if args.json:
+        print(json.dumps({"agreements": agree, "rows": findings}, indent=2))
+        return 0
+
+    flagged = [r for r in findings if r["finding"]]
+    print(f"Footprint sweep — {len(rows)} roster rows, {agree} agree with the policy, "
+          f"{len(flagged)} to review")
+    print(f"(assuming {args.quant}, {sweep_budget:g} GB budget "
+          f"[from {sweep_budget_source}], {args.kv_overhead_gb:g} GB overhead)\n")
+    for result in flagged:
+        print(f"  {result['alias']}  ({result['provider']})")
+        print(f"    {result['finding']}")
+        print(f"    ~{result['total_gb'] or '?'} GB — {result['reason']}")
+        print(f"    params: {result['note']}\n")
+    if not flagged:
+        print("  nothing to review.")
+
+    if not (args.apply or args.apply_dry_run):
+        print("Advisory only: nothing was changed. Use --apply to write high-confidence "
+              "verdicts into the policy file.")
+        return 0
+
+    if not args.policy:
+        print("--apply needs --policy", file=sys.stderr)
+        return 2
+
+    # What --apply may write, under the user's 2026-10-20 rule: a fit at >=4-bit IS the
+    # user's vouch, so `local-capable` is written at any confidence. `remote-preferred`
+    # stays high-confidence-only (a NEAR overshoot is genuinely uncertain; only a far
+    # miss is safe to write). A bare `unknown` is never written -- that would convert
+    # fail-open into a silent hide.
+    eligible = [r for r in findings
+                if r["finding"] and (
+                    r["suggested"] == "local-capable"
+                    or (r["confidence"] == "high" and r["suggested"] == "remote-preferred"))]
+    skipped = [r for r in findings if r["finding"] and r not in eligible]
+
+    outcome = apply_to_policy(args.policy, eligible, dry_run=args.apply_dry_run)
+    verb = "would rewrite" if args.apply_dry_run else "rewrote"
+    print(f"\n{verb} {len(outcome['rewritten'])} row(s), "
+          f"{'would append' if args.apply_dry_run else 'appended'} {len(outcome['appended'])}")
+    for model_id in outcome["rewritten"] + outcome["appended"]:
+        print(f"    {model_id}")
+    if skipped:
+        print(f"\nleft for review ({len(skipped)} — not high confidence):")
+        for result in skipped:
+            print(f"    {result['alias']}: {result['suggested']} "
+                  f"[{result['confidence']}] ~{result['total_gb']} GB")
+    if outcome["backup"]:
+        print(f"\nbackup: {outcome['backup']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -537,8 +537,9 @@ fi
 # they cannot drive an interactive session at all. LA_SERVE holds the RESOLVED backend
 # (la_finalize_serve ran inside la_load_config), so only rapid/vllm reach a session.
 if [ "${INVENTORY:-0}" = "1" ]; then
-  # TSV for the picker: alias, backend, configured effort, roles, explicit family. The registry
-  # has no family field yet, so column 5 is empty and the picker classifies by model name.
+  # TSV for the picker: alias, backend, configured effort, roles, explicit family, effective
+  # context, subdir. The registry has no family field yet, so column 5 is empty and the picker
+  # classifies by model name (auto-scanned rows: column 4 "auto-scanned", column 5 the folder).
   # First, registered aliases
   for a in "${LA_ALIASES[@]}"; do
     case "${LA_SERVE[$a]:-}" in
@@ -551,8 +552,12 @@ if [ "${INVENTORY:-0}" = "1" ]; then
           printf '#missing\t%s\t%s\n' "$a" "${LA_SUBDIR[$a]:-}"
           continue
         fi
-        printf '%s\t%s\t%s\t%s\t%s\n' "$a" "$(la_serve_display "$a")" "${LA_EFFORT[$a]:-}" \
-          "$(la_roles_for_alias "$a")" ""
+        # Columns 6-7 (2026-11-22 hotfix): effective context (la_get_effective_context — the ONE
+        # local context resolver, empty when unknown) and the on-disk subdir, appended so every
+        # positional consumer of columns 1-5 is unchanged.
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$a" "$(la_serve_display "$a")" "${LA_EFFORT[$a]:-}" \
+          "$(la_roles_for_alias "$a")" "" "$(la_get_effective_context "$a" 2>/dev/null || true)" \
+          "${LA_SUBDIR[$a]:-}"
         ;;
     esac
   done
@@ -597,8 +602,12 @@ if [ "${INVENTORY:-0}" = "1" ]; then
       mlx|unknown) _shown="rapid (auto)" ;;
       *)           _shown="${_auto_backend[$folder]} (auto)" ;;
     esac
-    printf '%s\t%s\t%s\t%s\t%s\n' "$alias" "$_shown" "medium" "auto-scanned" "$folder"
-  done < <(la_auto_scan_models)
+    # Column 6 empty (an unregistered folder has no catalogue entry; the picker reads its own
+    # config.json), column 7 = the folder — same 7-column shape as registered rows.
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$alias" "$_shown" "medium" "auto-scanned" "$folder" "" "$folder"
+  # A `for` loop reads no stdin: the old `done < <(la_auto_scan_models)` here only RAN the whole
+  # models-dir scan a second time (measured: 2 candidate scans per inventory, 2026-11-22).
+  done
   exit 0
 fi
 
