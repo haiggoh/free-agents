@@ -38,7 +38,7 @@ the nav target but no `@ui.page` exists for it.
 | hidden-model report | `tool:report` | ◐ renders | report generation action |
 | prompts (session name, rt-remove, download review) | `prompt:*` | ◐ dialog core wired (Task 1): payload + confirm→`command_for` argv unit-tested | browser click-through of the queue UI |
 | settings write path (all screens) | savers | ✅ fixed d33c609: every build_screen call passes savers; browser test clicks /rate_limiter's ▶ and asserts session-menu.local.json changes | — |
-| warnings | `warn:*` | ❌ | toast/banner pattern |
+| warnings | `warn:*` | ✅ notice page (message + Back-to-Home; the versions keep-one-core guard's warn: nav routes to it) | — |
 | quit | — | ✅ handled in app.py (target == "quit") | — |
 
 ## Special functionality: local model list registration & update

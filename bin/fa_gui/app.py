@@ -1126,6 +1126,15 @@ def build() -> None:
         await client.connected()
         target = full_path
         scr = None
+        if target.startswith("warn:"):
+            # csl's warn: rows append the text to state_warnings (a notice); the GUI
+            # renders the notice page with the message and a way back (2026-11-22)
+            _msg = target[len("warn:"):]
+            _b = render_shell("Warning", "")
+            with _b:
+                ui.label(_msg).classes("menu-item text-red-500").props('data-warn="msg"')
+                ui.link("🏠 Back to Home", "/home").classes("menu-item nav-row").props('data-target="home"')
+            return
         if target not in ("quit", "back"):          # not pages — handled by the launcher
             try:
                 build = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache, savers=settings_state.get('savers'))

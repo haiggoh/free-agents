@@ -567,6 +567,21 @@ def test_tile_emoji_cycle_value_click_steps_like_the_arrow(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_warn_notice_page(browser, tmp_path):
+    # 2026-11-22 parity: csl's warn: rows land a NOTICE (state_warnings); the GUI renders
+    # the warn message page with a Back-to-Home instead of the "not built yet" catch-all
+    srv = Server(env={})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}warn:1.2.3 is the only installed rapid-mlx version — not removed.")
+        page.wait_for_selector("[data-warn]", timeout=20000)
+        text = page.locator("[data-warn]").inner_text()
+        assert "only installed rapid-mlx version" in text, text
+        assert page.locator('[data-target="home"]').count() == 1
+    finally:
+        assert srv.stop() == []
+
+
 def test_lowkey_session_name_prompt(browser, tmp_path):
     # 2026-11-22 parity: the lowkey "Set session name" row opens a TEXT dialog (csl's
     # typed prompt); a valid name lands in the row label AND the launch argv (--session)
