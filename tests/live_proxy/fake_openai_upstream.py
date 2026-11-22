@@ -54,8 +54,9 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("content-length", 0))
         body = json.loads(self.rfile.read(n) or b"{}")
         mode = self._mode()
+        import time as _t
         open(ARGS.log, "a").write(json.dumps(
-            {"path": self.path, "stream": body.get("stream"), "mode": mode,
+            {"ts": _t.time(), "path": self.path, "stream": body.get("stream"), "mode": mode,
              "model": body.get("model")}) + "\n")
         if mode == "r429":
             b = json.dumps({"error": {"message": "Too Many Requests",

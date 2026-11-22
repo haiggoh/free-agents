@@ -734,12 +734,19 @@ DEFAULT_TIMEOUT_TIERS = {
 def nvidia_load_detected(env) -> bool:
     """True when the shared NVIDIA rate limiter is in an active 429 cooldown right now (or has
     consecutive 429s). Read-only peek at the limiter state file (LA_NVIDIA_THROTTLE_STATE);
-    never raises, never writes."""
+    never raises, never writes. L6 (0.62.0): writers ftruncate+write, so a torn read is
+    retried once before giving up — a silently-False load signal misroutes dispatches."""
     p = Path(env.get("LA_NVIDIA_THROTTLE_STATE")
              or (Path.home() / ".claude" / "free-agents" / ".nvidia_throttle_state"))
-    try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    doc = None
+    for _attempt in range(2):
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            break
+        except (OSError, ValueError):
+            doc = None
+            time.sleep(0.05)
+    if doc is None:
         return False
     return (float(doc.get("cooldown_until") or 0) > time.time()
             or int(doc.get("consecutive_429s") or 0) > 0)

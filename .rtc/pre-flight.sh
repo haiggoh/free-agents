@@ -97,9 +97,19 @@ run_live_gate() {  # run_live_gate — serial, NO -m filter: the delivery proofs
   if [ ! -d "$LIVE_PROXY_TESTS" ]; then
     echo "✖ live_proxy gate: covers nothing — $LIVE_PROXY_TESTS does not exist" >&2; return 1
   fi
+  if [ ! -x "$LITELLM_PY" ]; then
+    if [ "${FA_ALLOW_MISSING_VENVS:-0}" = 1 ]; then
+      echo "⚠ no LiteLLM venv at $LITELLM_PY — the live_proxy gate is NOT run" >&2; return 0
+    fi
+    echo "✖ no LiteLLM venv at $LITELLM_PY — the live_proxy gate would NOT run" >&2
+    echo "  recreate it, or set FA_ALLOW_MISSING_VENVS=1 to knowingly ship without it" >&2
+    return 1
+  fi
   local -a to=()
   if "$LITELLM_PY" -m pytest --help 2>/dev/null | grep -q -- '--timeout=TIMEOUT'; then
-    to=(--timeout=1800 --timeout-method=thread)
+    # repo invariant (test_gate_timeout_below_stall.py): every --timeout=N must satisfy
+    # N + 120 <= stall_seconds (1200) so the timeout dump prints before the watchdog kills
+    to=(--timeout=900 --timeout-method=thread)
   fi
   d=$(mktemp -d)
   if FA_LIVE_PROXY_GATE=1 "$LITELLM_PY" -m pytest -q "$LIVE_PROXY_TESTS" \

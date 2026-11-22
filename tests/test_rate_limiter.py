@@ -6,7 +6,9 @@ never take more slots than the window allows. The race test freezes the clock (n
 the expected total is exact, and widens the read->write window so a missing lock is caught
 reliably rather than by luck. The mutation check proves the test can fail.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import multiprocessing as mp
 import os
@@ -129,12 +131,23 @@ class SlidingWindowTests(unittest.TestCase):
             b = rl.SlidingWindowLimiter(p, rpm=40, clock=lambda: FROZEN)
             self.assertEqual(b.try_acquire(), 0.0)
 
-    def test_corrupt_state_starts_empty_not_wedged(self):
+    def test_corrupt_state_fails_safe_not_permissive(self):
+        # L2 (0.62.0): a corrupt file no longer resets to full capacity — that fail-OPEN
+        # let a burst straight through right after a 429. It fails SAFE: no grant, an
+        # active cooldown written back, and a loud log line.
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "s")
             Path(p).write_text("{not json")
             b = rl.SlidingWindowLimiter(p, rpm=40, clock=lambda: FROZEN)
-            self.assertEqual(b.try_acquire(), 0.0)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                wait = b.try_acquire()
+            self.assertGreater(wait, 0.0, "corrupt state must not grant")
+            self.assertIn("failing SAFE", err.getvalue(), err.getvalue())
+            st = json.loads(Path(p).read_text())
+            self.assertEqual(st["cooldown_until"], FROZEN + b.base_cooldown,
+                             "fail-safe cooldown written back")
+            self.assertEqual(st["stamps"], [], "fail-safe: empty window")
 
     def test_timeout_raises(self):
         with tempfile.TemporaryDirectory() as d:
@@ -333,10 +346,32 @@ class PerModelCooldownBucketTests(PerModelCooldownTests):
     """The same contract for the smooth_bucket mode. Before this, the bucket ignored the
     model and model_cooling was always 0 -- and the picker can SAVE smooth_bucket (the
     maintainer's machine had), so the whole per-model cooldown was inert for that user
-    (found 2026-10-22). "Near-empty window" maps to "bucket more than half full"."""
+    (found 2026-10-22). The 429 classifier's boundary is the REAL 60 s grant count (L3,
+    0.62.0), not the burst depletion the bucket exposes."""
 
     def limiter(self, path, now, **kw):
         return rl.SmoothTokenBucket(path, rpm=kw.pop("rpm", 40), clock=lambda: now[0], **kw)
+
+    def test_half_full_window_is_still_machine_wide(self):
+        # L3 (0.62.0): a genuinely half-full 60 s grant window (seeded: 40 grants over the
+        # last 60 s, tokens long since refilled to ~0) classifies a model 429 as OUR RPM
+        # overrun — every proxy pauses. The old capacity-tokens test misclassified steady
+        # load (tokens≈0 while only a few grants were in the window) as an overrun.
+        now = [FROZEN]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s")
+            Path(path).write_text(json.dumps({
+                "tokens": 0.0, "last_refill": FROZEN, "capacity": 6, "rate": 40 / 60,
+                "cooldown_until": 0.0, "consecutive_429s": 0, "last_429_time": 0.0,
+                "models": {}, "owners": {}, "waiters": {}, "deficit": {},
+                "grants": [{"t": FROZEN - i * 1.4, "o": "legacy", "c": "normal"}
+                           for i in range(40)]}))
+            a = self.limiter(path, now, cooldown=10)
+            other = self.limiter(path, now)
+            info = a.note_429(model="nvidia_nim/z-ai/glm-5.3-flash")
+            self.assertEqual(info["kind"], "rpm_overrun", info)
+            self.assertEqual(info["in_window"], 40, info)
+            self.assertGreater(other.try_acquire(), 0.0)     # every proxy pauses
 
     def test_global_backoff_survives_an_expired_pause_while_the_window_stays_full(self):
         # Bucket shape of the same defect: a 1 RPM bucket drained, the pause lapses while

@@ -421,6 +421,37 @@ class RateLimitTimeout(Exception):
     """No slot became available within max_wait."""
 
 
+def _read_all(fd) -> bytes:
+    """Read a state file to EOF (loop os.read until b""). One 64 KiB read TRUNCATES a file
+    grown under heavy queueing, and the truncated JSON then failed the parse (L2)."""
+    chunks = []
+    while True:
+        b = os.read(fd, 65536)
+        if not b:
+            return b"".join(chunks)
+        chunks.append(b)
+
+
+def _fail_safe_state(now: float, base_cooldown: float) -> dict:
+    """The state a CORRUPT file must yield (L2, 0.62.0): nothing grants — tokens 0 / empty
+    window and an ACTIVE cooldown — never the old reset to full capacity, which let a burst
+    straight through right after a 429. Callers write it back and log 'failing SAFE'."""
+    return {"tokens": 0.0, "last_refill": now, "stamps": [], "limit": 0,
+            "cooldown_until": now + base_cooldown, "consecutive_429s": 0,
+            "last_429_time": 0.0, "models": {}, "owners": {}, "waiters": {},
+            "deficit": {}, "grants": []}
+
+
+def _model_wait(models: dict, model: str | None, now: float) -> float:
+    """Seconds the model still cools (0.0 = free to try). Shared by both limiter classes."""
+    if not model:
+        return 0.0
+    entry = models.get(model)
+    if not entry:
+        return 0.0
+    return max(0.0, float(entry.get("until", 0.0)) - now)
+
+
 def _cool_model(models: dict, model: str, now: float, retry_after: float | None,
                 base: float, mult: float, cap: float) -> tuple[float, float, int]:
     """Book one per-model 429 into `models` (mutated): backoff base * mult^(n-1), capped,
@@ -593,11 +624,21 @@ class SmoothTokenBucket:
                 self._save_state(fd)
                 return self._cooldown_until - now
 
+            model_wait = _model_wait(self._models, model, now)
+            if model_wait > 0:
+                # L1 (0.62.0): a cooling model never gets a token — the request waits in
+                # the queue (registered waiter, heartbeats continue) instead of firing.
+                if token is not None:
+                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                self._save_state(fd)
+                return model_wait
+
             self._refill(now)
             if token is None:
                 # legacy peek: today's exact semantics (minus the retired reserve partition)
                 if self._tokens >= cost:
                     self._tokens -= cost
+                    self._grants.append({"t": now, "o": owner, "c": cls})   # L7: peeks count
                     # SUCCESS: Reset exponential backoff counter
                     self._consecutive_429s = 0
                     self._last_429_time = 0.0
@@ -642,14 +683,16 @@ class SmoothTokenBucket:
                         debt = _owner_debt(self._deficit, self._waiters, w_owner, now, cfg)
                         self._deficit[w_owner] = max(0.0, debt - WINDOW_SECONDS / limit)
                     if w.get("owner") == owner:
-                        # our own owner outranks the queue: serve the caller directly
-                        self._waiters.pop(winner, None)
+                        # L5 (0.62.0): serve the WINNER (book it as granted) and keep the
+                        # caller's queue age — popping the winner stole its `arrived`.
                         self._tokens -= w_cost
-                        self._grants.append({"t": now, "o": owner, "c": w.get("class", cls)})
+                        self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", cls)})
+                        w["granted"] = now
+                        _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
                         self._consecutive_429s = 0
                         self._last_429_time = 0.0
                         self._save_state(fd)
-                        return 0.0
+                        return max(1e-3, need_seconds())
                     # book the token for the WINNER; the winner acks on its next poll
                     self._tokens -= w_cost
                     self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", "normal")})
@@ -668,7 +711,7 @@ class SmoothTokenBucket:
     def _load_state(self, fd: int, now: float):
         """Load state from file and refill based on elapsed time."""
         os.lseek(fd, 0, os.SEEK_SET)
-        raw = os.read(fd, 65536)
+        raw = _read_all(fd)
         try:
             state = json.loads(raw) if raw else {}
             self._tokens = float(state.get('tokens', self.capacity))
@@ -686,10 +729,14 @@ class SmoothTokenBucket:
             self._deficit = deficit if isinstance(deficit, dict) else {}
             grants = state.get('grants', [])
             self._grants = [g for g in grants if isinstance(g, dict)] if isinstance(grants, list) else []
-        except Exception:
-            self._tokens = float(self.capacity)
-            self._last_refill = now
-            self._cooldown_until = 0.0
+        except Exception as exc:
+            # L2 (0.62.0): a corrupt/torn file FAILS SAFE — no tokens, active cooldown —
+            # written back and logged, never reset to permissive capacity.
+            state = _fail_safe_state(now, self.base_cooldown)
+            print(f"rate_limiter: state unreadable ({exc}) -> failing SAFE", file=sys.stderr)
+            self._tokens = float(state['tokens'])
+            self._last_refill = float(state['last_refill'])
+            self._cooldown_until = float(state['cooldown_until'])
             self._consecutive_429s = 0
             self._last_429_time = 0.0
             self._models = {}
@@ -697,6 +744,7 @@ class SmoothTokenBucket:
             self._waiters = {}
             self._deficit = {}
             self._grants = []
+            self._save_state(fd)
         # Refill based on elapsed since last_refill
         elapsed = now - self._last_refill
         if elapsed > 0:
@@ -748,11 +796,17 @@ class SmoothTokenBucket:
         try:
             now = self._clock()
             self._load_state(fd, now)
-            # Book hidden attempts
+            # Book hidden attempts (they count in the window too, like the sliding mode's stamps)
             self._tokens = max(0.0, self._tokens - float(hidden_attempts))
-            in_window = int(self.capacity - self._tokens)
+            self._grants.extend([{"t": now, "o": _owner(), "c": "normal"}] * max(0, int(hidden_attempts)))
+            self._grants = [g for g in self._grants if now - float(g.get("t", 0.0)) < WINDOW_SECONDS]
+            # L3 (0.62.0): the classifier counts REAL grants in the last 60 s — burst
+            # depletion (capacity - tokens) said "40/40" under steady load and misclassified
+            # a single model's 429 as an RPM overrun.
+            limit = max(1, int(self.rate * 60))
+            in_window = len(self._grants)
 
-            if model and self._tokens > self.capacity / 2:
+            if model and in_window < limit / 2:
                 pause, backoff_cooldown, n = _cool_model(
                     self._models, model, now, retry_after,
                     self.base_cooldown, self.backoff_multiplier, self.max_cooldown)
@@ -919,7 +973,7 @@ class SlidingWindowLimiter:
 
     def _read(self, fd: int, now: float) -> tuple[list, float, int, float, dict, dict]:
         os.lseek(fd, 0, os.SEEK_SET)
-        raw = os.read(fd, 65536)
+        raw = _read_all(fd)
         try:
             state = json.loads(raw) if raw else {}
             raw_stamps = state.get("stamps", [])
@@ -935,12 +989,16 @@ class SlidingWindowLimiter:
             self._waiters = waiters if isinstance(waiters, dict) else {}
             deficit = state.get("deficit", {})
             self._deficit = deficit if isinstance(deficit, dict) else {}
-        except Exception:
-            # A missing, corrupt or old-format (token bucket) file starts EMPTY: the safe
-            # failure is one extra window, never a permanently full one that wedges every session.
+        except Exception as exc:
+            # L2 (0.62.0): a corrupt/torn file FAILS SAFE — empty window, ACTIVE cooldown —
+            # written back and logged, never reset to permissive.
+            print(f"rate_limiter: state unreadable ({exc}) -> failing SAFE", file=sys.stderr)
             self._waiters = {}
             self._deficit = {}
-            return [], 0.0, 0, 0.0, {}, {}
+            self._owners = {}
+            cooldown_until = now + self.base_cooldown
+            self._write(fd, [], cooldown_until, 0, 0.0, {})
+            return [], cooldown_until, 0, 0.0, {}, {}
         # A stamp in the future (clock step) is treated as now, so a skewed clock can hold a
         # slot for at most one window, never forever.
         stamps = [s for s in stamps if _stamp_parts(s)[0] > now - WINDOW_SECONDS]
@@ -1032,6 +1090,15 @@ class SlidingWindowLimiter:
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return cooldown_until - now
 
+            model_wait = _model_wait(models, model, now)
+            if model_wait > 0:
+                # L1 (0.62.0): a cooling model never gets a stamp — the request waits in
+                # the queue (registered waiter, heartbeats continue) instead of firing.
+                if token is not None:
+                    _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
+                return model_wait
+
             own_count = sum(1 for s in stamps if _stamp_parts(s)[1] == owner)
             capacity_free = len(stamps) < normal_limit and own_count < own_limit
 
@@ -1085,13 +1152,15 @@ class SlidingWindowLimiter:
                         debt = _owner_debt(self._deficit, waiters, w_owner, now, cfg)
                         self._deficit[w_owner] = max(0.0, debt - WINDOW_SECONDS / self.limit)
                     if w.get("owner") == owner:
-                        # our own owner outranks the queue: serve the caller directly
-                        waiters.pop(winner, None)
-                        stamps.append(_stamp(now, owner))
+                        # L5 (0.62.0): serve the WINNER (book it as granted) and keep the
+                        # caller's queue age — popping the winner stole its `arrived`.
+                        stamps.append(_stamp(now, w["owner"]))
+                        w["granted"] = now
+                        _register_waiter(waiters, token, owner, cls, wkind, model, now)
                         self._consecutive_429s = 0
                         self._last_429_time = 0.0
                         self._write(fd, stamps, cooldown_until, 0, 0.0, models)
-                        return 0.0
+                        return need_seconds()
                     # book the slot under the WINNER's owner; the winner acks on its next poll
                     stamps.append(_stamp(now, w["owner"]))
                     w["granted"] = now

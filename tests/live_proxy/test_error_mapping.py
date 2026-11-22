@@ -105,3 +105,29 @@ def test_empty_unterminated_stream_is_retriable(fake_upstream, live_proxy, anthr
         assert errors, f"no error surfaced at all: status={status} events={events!r}"
     finally:
         proxy.stop()
+
+
+def test_chainless_cooling_model_gets_zero_upstream_hits(fake_upstream, live_proxy,
+                                                          anthropic_stream, two_tier_config,
+                                                          tmp_path):
+    """L1 delivery proof: with NO fallback chain, a cooling primary receives ZERO upstream
+    hits during the cooldown — the request waits it out inside the bucket queue and then
+    fires exactly once. (Before the fix the hook called aacquire() without model=, so a
+    chain-less proxy fired straight at the throttled model.)"""
+    primary = fake_upstream("ok")
+    state = tmp_path / "cooling-state"
+    cooldown = 15.0
+    seeded_at = time.time()
+    _seed_cooling(state, ["nvidia_nim/fake-primary", "fake-primary"], cooldown=cooldown)
+    proxy = live_proxy(two_tier_config(primary.port, None, hooks=True),
+                       env={"LA_NVIDIA_THROTTLE_STATE": str(state)})
+    try:
+        status, events, _headers = anthropic_stream(proxy.port, model=TEST_MODEL, timeout=90)
+        assert status == 200, (status, events, proxy.log_text()[-1500:])
+        hits = primary.hits()
+        assert len(hits) == 1, hits                        # exactly one upstream hit
+        # the hit must come AFTER the cooldown, not during it (fake records ts per hit)
+        assert hits[0]["ts"] >= seeded_at + cooldown - 1.5, \
+            f"hit at {hits[0]['ts'] - seeded_at:.1f}s after seeding, cooldown was {cooldown}s"
+    finally:
+        proxy.stop()

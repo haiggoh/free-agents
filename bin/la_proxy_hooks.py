@@ -631,7 +631,22 @@ class LAProxyHooks(CustomLogger):
                 # 40 RPM is really 20. A router retry repeats BOTH layers, so it still books
                 # exactly one -- which a dedupe on the call id would have swallowed.
                 return normalize_nvidia_kwargs(kwargs)
-            waited = await self._bucket.aacquire()
+            try:
+                # L1 (0.62.0): pass the model so a cooling model waits out its cooldown
+                # inside the queue instead of firing at it.
+                waited = await self._bucket.aacquire(model=str(kwargs.get("model") or ""))
+            except Exception as exc:
+                from rate_limiter import RateLimitTimeout
+                if not isinstance(exc, RateLimitTimeout):
+                    raise
+                # L4 (0.62.0): the bounded wait expired -> retriable 429 to the client,
+                # marked self-raised so L8 never books it as an upstream 429.
+                import litellm
+                e = litellm.RateLimitError(
+                    message=f"rate limited: no bucket slot within the wait budget ({exc})",
+                    llm_provider="nvidia_nim", model=str(kwargs.get("model") or ""))
+                e.la_self_raised = True
+                raise e from exc
             if waited > 0:
                 print(f"la_proxy_hooks: NVIDIA bucket queued this call {waited:.1f}s",
                       file=sys.stderr)

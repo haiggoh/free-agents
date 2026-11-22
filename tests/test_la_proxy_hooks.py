@@ -528,5 +528,49 @@ class AccountErrorTests(unittest.TestCase):
         self.assertIsNone(asyncio.run(hooks.async_post_call_failure_hook({}, plain, None)))
 
 
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class GrantPathTests(unittest.TestCase):
+    """Task 3: the hook passes model= to aacquire (L1 — a chain-less proxy must wait out a
+    per-model cooldown inside the queue) and maps RateLimitTimeout to a self-raised
+    litellm.RateLimitError (L4 — a retriable 429 to the client, never a 500)."""
+
+    def setUp(self):
+        self.mod = load_hooks()
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+
+    def _hooks(self):
+        from rate_limiter import SlidingWindowLimiter
+        hooks = self.mod.LAProxyHooks()
+        hooks._bucket = SlidingWindowLimiter(os.path.join(self.dir.name, "s"), rpm=40)
+        return hooks
+
+    def test_hook_passes_model_to_aacquire(self):
+        hooks = self._hooks()
+        seen = {}
+
+        async def fake_aacquire(**kw):
+            seen.update(kw)
+            return 0.0
+
+        hooks._bucket.aacquire = fake_aacquire
+        asyncio.run(hooks.async_pre_call_deployment_hook({"model": "nvidia_nim/m1"}, None))
+        self.assertEqual(seen.get("model"), "nvidia_nim/m1", seen)
+
+    def test_rate_limit_timeout_maps_to_self_raised_rate_limit_error(self):
+        import litellm
+        from rate_limiter import RateLimitTimeout
+        hooks = self._hooks()
+
+        async def boom(**kw):
+            raise RateLimitTimeout("no NVIDIA slot within 300s")
+
+        hooks._bucket.aacquire = boom
+        with self.assertRaises(litellm.RateLimitError) as cm:
+            asyncio.run(hooks.async_pre_call_deployment_hook({"model": "nvidia_nim/m1"}, None))
+        self.assertTrue(getattr(cm.exception, "la_self_raised", False),
+                        "self-raised marker required so L8 never books it")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
