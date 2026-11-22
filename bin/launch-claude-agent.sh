@@ -287,7 +287,18 @@ fi
 MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
 # If no effort override was passed and the alias's configured effort is the default (medium),
 # prompt interactively so the user can pick — mirroring what remote-session.sh's e) picker does.
-EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
+# 0.62.0 C6: an omitted effort resolves through bin/effort_resolve.py (explicit >
+# saved local_session lane default > last-launch > provider default LA_CUR_EFFORT).
+if [ -z "$EFFORT_OVERRIDE" ]; then
+    _resolved="$(python3 "$SCRIPT_DIR/effort_resolve.py" resolve --lane local_session 2>/dev/null || true)"
+    _eff="${_resolved%% *}"
+    case "$_eff" in
+        low|medium|high|xhigh|max) EFFORT="$_eff" ;;
+        *) EFFORT="${LA_CUR_EFFORT:-medium}" ;;
+    esac
+else
+    EFFORT="$EFFORT_OVERRIDE"
+fi
 if [ -z "$EFFORT_OVERRIDE" ] && [ "$EFFORT" = "medium" ]; then
     _efforts=("low" "medium" "high" "xhigh" "max")
     _def=2

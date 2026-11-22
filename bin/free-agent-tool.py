@@ -923,6 +923,15 @@ def execute_plan(plan, full_prompt, env, policy, *, role=None, start_index=0,
             note(f"free-agents: thinking note: {think_note}")
         rec = {"i": i, "id": entry["id"], "provider": entry.get("provider") or route_of(entry),
                "model": entry.get("model")}
+        # 0.62.0 C6: the dispatch's EFFORT level resolves through the same choke point as
+        # sessions (remote dispatch -> remote_api_session lane).
+        lane = "remote_api_session" if entry.get("kind") == "remote" else "local_session"
+        try:
+            import effort_resolve
+            rec["effort"], rec["effort_provenance"] = effort_resolve.resolve(
+                lane, alias=entry.get("id"))
+        except Exception:
+            rec["effort"], rec["effort_provenance"] = None, "provider-default"
         try:
             text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort,
                                   timeout_s=budget, stall_s=attempt_stall)

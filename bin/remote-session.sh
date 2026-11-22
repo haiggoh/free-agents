@@ -2137,12 +2137,15 @@ fi
 _valid_model "$MODEL" || exit 2
 
 # 0.49.3: when --effort is omitted, default to the effort stored from this alias's LAST launch
-# (user 2026-10-31: a handover launched without --effort must not drop to medium when the user's
-# stored setting is max). An explicit --effort / -c choice always wins. The store fails open.
+# (user 2026-10-31, revised 2026-11-22 C6: omitting --effort resolves through the ONE choke
+# point bin/effort_resolve.py: explicit > SAVED lane default (session-menu.local.json) >
+# per-alias last-launch > provider default). An explicit --effort / -c choice always wins.
+# The stores fail open (empty resolution falls through to the provider default).
 if [[ -z "$EFFORT_CHOICE" && -n "$ALIAS" ]]; then
-    _stored_effort="$(python3 "$SCRIPT_DIR/last-effort.py" get "$ALIAS" 2>/dev/null || true)"
-    case "$_stored_effort" in
-        low|medium|high|xhigh|max) EFFORT_CHOICE="$_stored_effort" ;;
+    _resolved="$(python3 "$SCRIPT_DIR/effort_resolve.py" resolve --lane remote_api_session --alias "$ALIAS" 2>/dev/null || true)"
+    _eff="${_resolved%% *}"
+    case "$_eff" in
+        low|medium|high|xhigh|max) EFFORT_CHOICE="$_eff" ;;
     esac
 fi
 
