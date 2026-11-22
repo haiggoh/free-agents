@@ -107,7 +107,10 @@ def load_local_models() -> list[m.LocalModel]:
             models.append(m.LocalModel(alias=parts[0], backend=parts[1], effort=parts[2],
                                        roles=parts[3], family=parts[4] if len(parts) > 4 else "",
                                        auto_scanned=auto,
-                                       folder=(parts[4] if auto and len(parts) > 4 else "")))
+                                       folder=(parts[4] if auto and len(parts) > 4 else ""),
+                                       # 2026-11-22 hotfix: columns 6-7; absent on older csl
+                                       context=(int(parts[5]) if len(parts) > 6 and parts[5].isdigit() else None),
+                                       subdir=(parts[6] if len(parts) > 6 else "")))
     # REPLACE, never append: the inventory is loaded more than once per picker run (startup
     # prefetch, then again after a registration), and appending double-counted every model.
     MISSING_MODELS[:] = missing
@@ -301,6 +304,20 @@ def model_param_count(provider, model_id):
     return _memoized_verdict("params", model_id, compute)
 
 
+def model_context_window(provider, model_id):
+    """Context window in tokens, or None when unknown (2026-11-22 hotfix).
+
+    Same offline rule as model_param_count: the HF cache ONLY — a render never waits on the
+    network. Provider-independent: any provider's id that resolves to the same HF repo shares
+    the answer (hf_context is keyed by model id)."""
+    def compute():
+        try:
+            return _footprint().hf_context(model_id)
+        except Exception:
+            return None
+    return _memoized_verdict("ctx", model_id, compute)
+
+
 def catalog_model_old(provider, model_id):
     """True when a live-catalog row predates the age cutoff (the filter hides it).
 
@@ -371,9 +388,14 @@ def _warm_hf_cache(provider, model_ids, stop=None):
             fp.hf_total_params(mid, timeout=4.0)
         except Exception:
             pass
+        try:
+            # 2026-11-22 hotfix: warm the context window with the same entry (config.json fetch)
+            fp.hf_total_params(mid, timeout=4.0)
+        except Exception:
+            pass
         # A verdict computed while the cache was still cold (fail-open) must not outlive
         # the warm-up (review finding 1, 2026-10-28).
-        for k in ("old", "cap", "params"):
+        for k in ("old", "cap", "params", "ctx"):
             _VERDICT_MEMO.pop((k, mid), None)
 
     workers = min(_hf_warm_workers(), max(1, len(ids)))
@@ -1060,6 +1082,7 @@ class Picker(App):
             on_last_launched=self._save_last_launched,
             catalog_local_capable=catalog_local_capable,
             model_param_count=model_param_count,
+            model_context_window=model_context_window,
             catalog_model_old=catalog_model_old)
         self.start = start
         self.nav_stack: list = []          # callers of sub-screens (Back returns to them)
