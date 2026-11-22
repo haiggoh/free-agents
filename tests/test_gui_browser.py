@@ -580,6 +580,8 @@ def test_theme_accent_rows_show_live_swatches(browser, tmp_path):
         swatch.wait_for(timeout=5000)
         before = swatch.evaluate("el => getComputedStyle(el).backgroundColor")
         assert before.startswith("rgb"), before
+        value_before = row.locator(".cycle-value").inner_text()
+        assert "#" in value_before, value_before
         row.locator(".cycle-right").click()
         deadline = time.time() + 10
         after = before
@@ -589,9 +591,9 @@ def test_theme_accent_rows_show_live_swatches(browser, tmp_path):
                 break
             time.sleep(0.2)
         assert after != before, (before, after)
-        # the value text names the preset and its hex (not a bare "custom")
-        value = row.locator(".cycle-value").inner_text()
-        assert "#" in value, value
+        # the value names the preset AND its hex — and BOTH follow the cycle
+        value_after = row.locator(".cycle-value").inner_text()
+        assert "#" in value_after and value_after != value_before, (value_before, value_after)
     finally:
         assert srv.stop() == []
 
@@ -639,7 +641,8 @@ def test_remote_filter_applies_to_the_remote_list(browser, tmp_path):
         page.get_by_text("Choose model", exact=False).first.click()   # reveal the list (csl parity)
         page.locator('[data-group="openrouter"]').first.click()      # expand the provider group
         page.wait_for_selector("text=Agent OK", timeout=20000)
-        assert "Agent Trial" in page.inner_text("body")
+        models = page.locator("[data-model]")
+        assert models.count() == 2 and "Agent Trial" in page.inner_text("body")
         page.goto(f"{srv.url}remote_filters")
         page.wait_for_selector(".cycle-row", timeout=20000)
         # the filter rows are BINARY switches (HIDDEN/SHOWN): the value click toggles
@@ -649,7 +652,9 @@ def test_remote_filter_applies_to_the_remote_list(browser, tmp_path):
         page.get_by_text("Choose model", exact=False).first.click()
         page.locator('[data-group="openrouter"]').first.click()
         page.wait_for_selector("text=Agent OK", timeout=20000)
-        assert "Agent Trial" not in page.inner_text("body")
+        models = page.locator("[data-model]")
+        ids = [m.get_attribute("data-model") for m in models.all()]
+        assert ids == ["agent-ok"], ids
         # and back on re-show
         page.goto(f"{srv.url}remote_filters")
         page.locator(".cycle-row", has_text="Limited trials").locator(".cycle-value").click()
@@ -657,6 +662,9 @@ def test_remote_filter_applies_to_the_remote_list(browser, tmp_path):
         page.get_by_text("Choose model", exact=False).first.click()
         page.locator('[data-group="openrouter"]').first.click()
         page.wait_for_selector("text=Agent Trial", timeout=20000)
+        models = page.locator("[data-model]")
+        ids = [m.get_attribute("data-model") for m in models.all()]
+        assert sorted(ids) == ["agent-ok", "agent-trial"], ids
     finally:
         assert srv.stop() == []
 
