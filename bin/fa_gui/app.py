@@ -972,6 +972,10 @@ def build() -> None:
                     _launch_req(m.LaunchRequest(target, [target, "--model", mid], {}, mid))
 
                 def paint(models, query):
+                    if target == "remote":
+                        # remote_filters parity (2026-11-22): the lane paints what csl's
+                        # RemoteScreen would show — the settings filters apply at paint time
+                        models = m.visible_agents(get_settings(), models)
                     list_box.clear()
                     with list_box:
                         groups: dict[str, list] = {}

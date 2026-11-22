@@ -567,6 +567,45 @@ def test_tile_emoji_cycle_value_click_steps_like_the_arrow(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_remote_filter_applies_to_the_remote_list(browser, tmp_path):
+    # 2026-11-22 parity: the RemoteFiltersScreen cycles must APPLY — a trial agent is
+    # visible on /remote, hidden after "Limited trials: HIDDEN" is chosen, back on re-show
+    stub = tmp_path / "remote-session.sh"
+    stub.write_text("#!/usr/bin/env bash\n"
+                    "if [ \"$1\" = \"--inventory\" ]; then\n"
+                    "  printf 'agent-ok\\topenrouter\\tAgent OK\\tstandard\\t0\\t1\\n'\n"
+                    "  printf 'agent-trial\\topenrouter\\tAgent Trial\\ttrial\\t0\\t1\\n'\n"
+                    "fi\n")
+    stub.chmod(0o755)
+    srv = Server(env={"CSL_REMOTE_LAUNCHER": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}remote")
+        page.get_by_text("Choose model", exact=False).first.click()   # reveal the list (csl parity)
+        page.locator('[data-group="openrouter"]').first.click()      # expand the provider group
+        page.wait_for_selector("text=Agent OK", timeout=20000)
+        assert "Agent Trial" in page.inner_text("body")
+        page.goto(f"{srv.url}remote_filters")
+        page.wait_for_selector(".cycle-row", timeout=20000)
+        # the filter rows are BINARY switches (HIDDEN/SHOWN): the value click toggles
+        trials = page.locator(".cycle-row", has_text="Limited trials")
+        trials.locator(".cycle-value").click()
+        page.goto(f"{srv.url}remote")
+        page.get_by_text("Choose model", exact=False).first.click()
+        page.locator('[data-group="openrouter"]').first.click()
+        page.wait_for_selector("text=Agent OK", timeout=20000)
+        assert "Agent Trial" not in page.inner_text("body")
+        # and back on re-show
+        page.goto(f"{srv.url}remote_filters")
+        page.locator(".cycle-row", has_text="Limited trials").locator(".cycle-value").click()
+        page.goto(f"{srv.url}remote")
+        page.get_by_text("Choose model", exact=False).first.click()
+        page.locator('[data-group="openrouter"]').first.click()
+        page.wait_for_selector("text=Agent Trial", timeout=20000)
+    finally:
+        assert srv.stop() == []
+
+
 def test_warn_notice_page(browser, tmp_path):
     # 2026-11-22 parity: csl's warn: rows land a NOTICE (state_warnings); the GUI renders
     # the warn message page with a Back-to-Home instead of the "not built yet" catch-all
