@@ -208,7 +208,13 @@ def build() -> None:
          near-white dark mode) | noto (mono line-art variable font, theme ink color) |
          full (Apple color emoji, as before). Scoped to .tile-grid = modern-only. */
       .tile-grid .tile .tile-emoji-subdued { filter: saturate(0.2) brightness(0.22); }
-      body:has(.dark-shell) .tile-grid .tile .tile-emoji-subdued { filter: saturate(0.1) brightness(1.9); }
+      /* dark mode (user 2026-11-22): brightness>1 blew out the bitmap's highlights, so the
+         bitmap stays at full brightness and the white silhouette comes from an overlaid
+         solid-white copy (::after) at 0.6 — dark detail survives, the glyph reads bright */
+      body:has(.dark-shell) .tile-grid .tile .tile-emoji-subdued { filter: none; }
+      body:has(.dark-shell) .tile-grid .tile .tile-emoji-subdued::after {
+        content: attr(data-e); position: absolute; inset: 0;
+        filter: brightness(0) invert(1); opacity: 0.6; }
       /* noto mono line art (variable font, wght 300-700): a CSS monochrome glyph, so it takes
          the theme's ink color directly — near-black in light, white in dark (dark-shell CSS) */
       .tile-grid .tile .tile-emoji-noto { font-family: 'NotoEmojiMono'; font-weight: 350; color: #141414; }
@@ -364,7 +370,10 @@ def build() -> None:
                         '<span class="tile-emoji icon-off">⏼</span>')
                 ui.html(f'<span class="tile-label">{_html.escape(rest or str(text))}</span>')
             elif head and any(ord(ch) >= 0x2000 for ch in head):
-                ui.html(f'<span class="tile-emoji{cls}">{_html.escape(emo)}</span>')
+                # data-e carries the ORIGINAL glyph (VS16 included) for the dark-mode
+                # white-silhouette overlay, which stacks a solid copy via ::after
+                ui.html(f'<span class="tile-emoji{cls}" data-e="{_html.escape(head)}">'
+                        f'{_html.escape(emo)}</span>')
                 ui.html(f'<span class="tile-label">{_html.escape(rest)}</span>')
             else:
                 ui.label(str(text)).classes("tile-label")
@@ -775,39 +784,43 @@ def build() -> None:
         pct = _ap2.resolve_opacity(doc2, blur_active=blur_active)
         alpha = _ap2.tint_alpha(pct, blur_active=blur_active)
         tint = "20, 20, 20" if dark else "255, 255, 255"
-        style = str(doc2.get("tile_emoji_style", "subdued"))
+        style = str(doc2.get("tile_emoji_style", _ap2.DEFAULTS["tile_emoji_style"]))
         style_cls = "" if style == "full" else f" tile-emoji-{style}"
         js = (f"var r=document.querySelector('.shell-root');"
               f"if(r) r.classList.toggle('dark-shell', {'true' if dark else 'false'});"
               f"var t=document.getElementById('tint-layer');"
               f"if(t) t.style.background='rgba({tint}, {alpha:.3f})';"
-              f"var p=document.querySelector('.appearance-preview .tile-emoji');"
-              f"if(p) p.className='tile-emoji{style_cls}';")
+              # any REAL tile on this page (e.g. the theme menu's Back-to-home tile) is a
+              # live preview of the tile-emoji treatment (2026-11-22, dummy preview removed)
+              f"document.querySelectorAll('.tile-grid .tile-emoji').forEach("
+              f"function(p){{ p.className='tile-emoji{style_cls}'; }});")
         ui.run_javascript(js)
-        # NB: presentation / tile_emoji_style take effect on the next screen build — they
-        # render the HOME tiles, which are not on this page, and rerendering here would wipe
-        # the appearance section itself (its rows are rendered by render_appearance, not by
-        # render_rows). 2026-11-21 user report: the theme options vanished until re-entry.
+        if key == "presentation" and st.get("rerender"):
+            # tiles-vs-rows swaps the current page's layout (on the theme menu the real
+            # Back-to-home tile changes shape) — the theme page's rerender below rebuilds
+            # rows AND the appearance section, so nothing vanishes (2026-11-21 regression)
+            st["rerender"]()
 
     def render_appearance(body, st: dict) -> None:
         """Phase 4 UI: a GUI-only appearance section on the theme screen, bound to the
         fa_gui.appearance store (never to core Actions — it stays out of render_plan).
         Rows reuse the .cycle-row / .switch classes so styling and keyboard behavior match."""
-        # live preview tile: the same markup the home lanes render (a .tile-grid with one
-        # tile, so the tile-emoji-* CSS applies exactly as on the home lanes) — a theme
-        # change re-styles THIS tile in place via _apply_appearance_live
-        with ui.row().classes("w-full justify-center mb-2"):
-            with ui.element("div").classes("tile-grid"):
-                _prev = ui.element("div").classes("tile tile-menu-item appearance-preview")
-                _tile_label(_prev, "\U0001F9BE  Local sessions")
         from fa_gui import appearance as ap
         store = ap.store_path()
+        _doc_now = ap.load(store)
+        _is_tiles = _doc_now.get("presentation") == "modern"
         doc = ap.load(store)
         with body:
-            ui.label("🖼 GUI appearance").classes("menu-item group-header").props('data-group="gui_appearance"')
+            # a sub-section HEADLINE, not an action row: no menu-item class (no hover), spaced
+            ui.label("🖼 GUI appearance").classes("group-header mt-5 mb-2").props('data-group="gui_appearance"')
 
             def _appearance_cycle(key: str, label: str, choices, clamp: bool = False):
                 step = 5 if clamp else 1
+
+                def _disp(k, v):
+                    # user 2026-11-22: the presentation value reads "Tiles menu", not "modern"
+                    return {"compatibility": "Compatibility", "modern": "Tiles menu"}.get(v, v) if k == "presentation" else v
+
                 with ui.row().classes("cycle-row items-center gap-1 w-full appearance-row") as crow:
                     crow.props["data-key"] = key
                     name_lbl = ui.label(f"{label}:").classes("cycle-name row-action")
@@ -815,7 +828,7 @@ def build() -> None:
                     _init = (ap.resolve_opacity(doc, blur_active=(bool(doc["background_blur_requested"])
                                   and os.environ.get("LA_GUI_NATIVE") == "1"))
                              if key == "background_opacity_pct" else doc[key])
-                    val = ui.label(str(_init)).classes("cycle-value row-action")
+                    val = ui.label(str(_disp(key, _init))).classes("cycle-value row-action")
                     right = ui.label(">").classes("cycle-arrow cycle-right")
                     # csl parity: clicking the value (or the name) acts like the right arrow
                     val.on("click", lambda e=None, k=key, v=val, ch=choices, cl=clamp: _step(5 if cl else 1, k, v, ch, cl))
@@ -838,7 +851,7 @@ def build() -> None:
                             i = ch.index(cur) if cur in ch else 0
                             nxt = ch[(i + d) % len(ch)]
                         ap.save(store, {k: nxt})
-                        v.set_text(str(nxt))
+                        v.set_text(str(_disp(k, nxt)))
                         _apply_appearance_live(store, k, st)
 
                     left.on("click", lambda e=None: _step(-step))
@@ -857,15 +870,15 @@ def build() -> None:
             def _appearance_switch(key: str, label: str, launch_only: bool = False):
                 with ui.row().classes("cycle-row items-center gap-2 w-full appearance-row") as crow:
                     crow.props["data-key"] = key
-                    ui.label(f"{label}:").classes("cycle-name row-action")
+                    name_lbl = ui.label(f"{label}:").classes("cycle-name row-action")
                     val = ui.label("ON" if doc[key] else "OFF").classes("cycle-value cycle-value-bin row-action")
                     if launch_only:
                         # window args are read once at startup — honest label, no fake live toggle
                         ui.label("(next launch)").classes("launch-hint text-xs opacity-50")
 
-                    def _set(e, k=key, v=val):
-                        patch = {k: bool(e.value)}
-                        if k == "background_translucent" and e.value:
+                    def _set(on: bool, k=key, v=val):
+                        patch = {k: bool(on)}
+                        if k == "background_translucent" and on:
                             # user 2026-11-08: blur request defaults ON with translucency,
                             # unless the user already made an explicit choice
                             try:
@@ -875,10 +888,20 @@ def build() -> None:
                             if "background_blur_requested" not in raw:
                                 patch["background_blur_requested"] = True
                         ap.save(store, patch)
-                        v.set_text("ON" if e.value else "OFF")
+                        v.set_text("ON" if on else "OFF")
                         _apply_appearance_live(store, k, st)
 
-                    ui.checkbox("", value=bool(doc[key]), on_change=_set).classes("switch")
+                    sw = ui.checkbox("", value=bool(doc[key]),
+                                     on_change=lambda e, k=key, v=val: _set(e.value, k, v)).classes("switch")
+
+                    def _row_toggle(k=key, v=val, s=sw):
+                        # csl parity: clicking the name or the value acts like the switch
+                        new_on = not ap.load(store).get(k, False)
+                        s.set_value(new_on)
+                        _set(new_on, k, v)
+
+                    name_lbl.on("click", _row_toggle)
+                    val.on("click", _row_toggle)
 
             _appearance_cycle("presentation", "Presentation", list(ap.PRESENTATIONS))
             _appearance_switch("background_translucent", "Translucent background", launch_only=True)
@@ -886,7 +909,8 @@ def build() -> None:
             _appearance_switch("background_blur_requested", "Request native blur", launch_only=True)
             _appearance_switch("dark_mode", "🌙 Dark mode")   # Phase 8 store key; CSS tokens already exist (dark-shell); also drives the vibrancy material (native)
             _appearance_switch("follow_system_appearance", "🌗 Follow system appearance", launch_only=True)
-            _appearance_cycle("tile_emoji_style", "Tile emoji", list(ap.TILE_EMOJI_STYLES))
+            if _is_tiles:      # tile-emoji treatment only exists in the tiles menu (user 2026-11-22)
+                _appearance_cycle("tile_emoji_style", "Tile emoji", list(ap.TILE_EMOJI_STYLES))
 
     @ui.page("/")
     @ui.page("/home")
@@ -1164,6 +1188,19 @@ def build() -> None:
                     _a.enabled = bool(scr.queue)   # review row is disabled until the queue is non-empty
             render_download_entries(body, scr, st)   # queue rows (csl's entry list)
         wire_rerender(body, m.Nav(full_path, m.HOME_OWNED), st)
+        if full_path == "theme_config":
+            # wrap AFTER wire_rerender (it sets st["rerender"]): a presentation switch must
+            # rebuild rows AND the appearance section, so the live apply never wipes the
+            # settings (2026-11-21 regression) and the menu's real tile preview changes
+            # shape (2026-11-22)
+            def _rerender_theme():
+                scr2 = pc.build_screen(m.Nav(full_path, m.HOME_OWNED), get_settings(),
+                                       loader.cache, savers=settings_state.get('savers')).screen
+                body.clear()
+                with body:
+                    render_rows(scr2, st)
+                render_appearance(body, st)
+            st["rerender"] = _rerender_theme
         if isinstance(scr, m.DownloadScreen):
             # wrap AFTER wire_rerender (it sets st["rerender"]): the plain rebuild only
             # restores action rows — re-attach the queue and re-render the entry rows too

@@ -393,19 +393,25 @@ def test_dark_mode_switch_flips_store_and_shell(browser, tmp_path):
 
 
 def test_modern_tile_emoji_filter_follows_theme_mode(browser, tmp_path):
-    # 2026-11-21 user pick: modern tiles get a subdued dark emoji in light mode and a bright
-    # white one in dark mode. Assert the COMPUTED filter (the CSS contract) in both modes.
-    for dark, expect in ((False, "saturate(0.2) brightness(0.22)"), (True, "saturate(0.1) brightness(1.9)")):
+    # 2026-11-21/22 user pick: light mode = subdued filter on the bitmap; dark mode = the
+    # bitmap untouched plus a solid-white ::after overlay at 0.6 (brightness>1 blew out the
+    # highlights). Assert the COMPUTED contract in both modes.
+    for dark, expect in ((False, "saturate(0.2) brightness(0.22)"), (True, "none")):
         ap = tmp_path / f"appearance-{dark}.json"
         ap.write_text(json.dumps({"presentation": "modern", "dark_mode": dark}))
         srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
         try:
             page = browser.new_page()
             page.goto(srv.url)
-            page.wait_for_selector(".tile-grid .tile-emoji", timeout=20000)
-            f = page.evaluate(
-                "getComputedStyle(document.querySelector('.tile-grid .tile-emoji')).filter")
-            assert expect in f, (dark, f)
+            page.wait_for_selector(".tile-grid .tile-emoji-subdued", timeout=20000)
+            info = page.evaluate("""() => {
+                const el = document.querySelector('.tile-grid .tile-emoji-subdued');
+                return [getComputedStyle(el).filter,
+                        getComputedStyle(el, '::after').opacity];
+            }""")
+            assert expect == info[0], (dark, info)
+            if dark:   # the overlay is the bright-silhouette mechanism
+                assert abs(float(info[1]) - 0.6) < 0.01, (dark, info)
         finally:
             assert srv.stop() == []
 
@@ -455,13 +461,13 @@ def test_tile_emoji_cycle_keeps_theme_rows(browser, tmp_path):
         page.goto(f"{srv.url}theme_config")
         page.wait_for_selector('[data-key="tile_emoji_style"]', timeout=20000)
         page.locator('[data-key="tile_emoji_style"] .cycle-right').click()
-        # live preview: the theme menu's preview tile now renders noto line art (the JS
-        # class swap lands a beat AFTER the store write, so poll the computed style)
+        # live preview: the theme menu's REAL tile (Back-to-home) is the preview — its emoji
+        # re-styles in place (the JS class swap lands a beat after the store write)
         deadline = time.time() + 10
         ff = ""
         while time.time() < deadline:
             ff = page.evaluate(
-                "getComputedStyle(document.querySelector('.appearance-preview .tile-emoji')).fontFamily")
+                "getComputedStyle(document.querySelector('.tile-grid .tile-emoji')).fontFamily")
             if "NotoEmojiMono" in ff:
                 break
             time.sleep(0.2)
@@ -471,6 +477,60 @@ def test_tile_emoji_cycle_keeps_theme_rows(browser, tmp_path):
         assert page.locator('[data-key="tile_emoji_style"]').count() == 1
         assert page.locator('[data-key="presentation"]').count() == 1
         assert "theme_config" in page.url
+    finally:
+        assert srv.stop() == []
+
+
+def test_theme_menu_labels_and_toggle_clicks(browser, tmp_path):
+    # 2026-11-22: presentation reads "Tiles menu"; switches toggle on VALUE click (csl parity);
+    # the appearance headline is a headline, not a hover row
+    ap = tmp_path / "appearance.json"
+    ap.write_text(json.dumps({"presentation": "modern", "dark_mode": False}))
+    srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}theme_config")
+        page.wait_for_selector('[data-key="dark_mode"]', timeout=20000)
+        rowname = page.evaluate(
+            "document.querySelector('[data-key=\"dark_mode\"] .cycle-name').className")
+        assert "menu-item" not in rowname, rowname       # hover is action-row only
+        pres = page.evaluate(
+            "document.querySelector('[data-key=\"presentation\"] .cycle-value').innerText")
+        assert "Tiles menu" in pres, pres
+        page.locator('[data-key="dark_mode"] .cycle-value').click()   # value click == toggle
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text())["dark_mode"] is not True:
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["dark_mode"] is True
+        page.wait_for_selector(".dark-shell", timeout=5000)         # applied live
+        page.locator('[data-key="dark_mode"] .cycle-name').click()  # name click == toggle too
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text())["dark_mode"] is not False:
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["dark_mode"] is False
+        page.wait_for_selector(".dark-shell", state="detached", timeout=5000)
+    finally:
+        assert srv.stop() == []
+
+
+def test_tile_emoji_row_only_in_tiles_menu(browser, tmp_path):
+    # 2026-11-22: the Tile emoji treatment is irrelevant in compatibility mode — hidden
+    ap = tmp_path / "appearance.json"
+    ap.write_text(json.dumps({"presentation": "compatibility"}))
+    srv = Server(env={"LA_GUI_APPEARANCE_FILE": str(ap)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}theme_config")
+        page.wait_for_selector('[data-key="presentation"]', timeout=20000)
+        assert page.locator('[data-key="tile_emoji_style"]').count() == 0
+        assert page.locator(".tile-grid").count() == 0    # no tiles to treat
+        page.locator('[data-key="presentation"] .cycle-value').click()   # step to Tiles menu
+        deadline = time.time() + 10
+        while time.time() < deadline and json.loads(ap.read_text())["presentation"] == "compatibility":
+            time.sleep(0.1)
+        assert json.loads(ap.read_text())["presentation"] == "modern"
+        # live: the row appears without re-entering the menu
+        page.wait_for_selector('[data-key="tile_emoji_style"]', timeout=20000)
     finally:
         assert srv.stop() == []
 
