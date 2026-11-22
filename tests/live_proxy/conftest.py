@@ -63,7 +63,7 @@ class FakeUpstream:
             [sys.executable, str(Path(__file__).resolve().parent / "fake_openai_upstream.py"),
              "--mode", mode, "--log", str(self.log), "--port-file", str(self.port_file)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 60   # loaded box: process spawn + import can exceed 15 s
         while not self.port_file.exists():
             if self.proc.poll() is not None:
                 raise RuntimeError(f"fake upstream exited rc={self.proc.returncode}")
@@ -90,16 +90,19 @@ class FakeUpstream:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
                 self.proc.wait(5)
+        port = getattr(self, "port", None)   # __init__ may have failed before setting it
+        if port is None:
+            return
         # the port must actually be free again
         s = socket.socket()
         s.settimeout(1)
         try:
-            s.connect(("127.0.0.1", self.port))
+            s.connect(("127.0.0.1", port))
         except OSError:
             pass
         else:
             s.close()
-            raise AssertionError(f"fake upstream port {self.port} still accepting after stop")
+            raise AssertionError(f"fake upstream port {port} still accepting after stop")
         finally:
             s.close()
 
@@ -149,11 +152,25 @@ class LiveProxy:
         except (urllib.error.URLError, OSError):
             return False
 
+    def _cpu_seconds(self) -> float:
+        """The child's accumulated CPU time (macOS+Linux), or -1.0 when unavailable."""
+        try:
+            out = subprocess.run(["ps", "-o", "time=", "-p", str(self.proc.pid)],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return -1.0
+        try:
+            parts = [float(x) for x in out.replace(",", ".").split(":")]
+        except ValueError:
+            return -1.0
+        return sum(v * m for v, m in zip(reversed(parts), (1.0, 60.0, 3600.0)))
+
     def _wait_ready(self, ready_cap: int, ready_window: int) -> None:
         started = time.monotonic()
         deadline = started + ready_cap
         window_end = started + ready_window
         last_size = -1
+        last_cpu = self._cpu_seconds()
         while True:
             if self._health_ok():
                 self.ready_seconds = time.monotonic() - started
@@ -169,8 +186,11 @@ class LiveProxy:
                 size = self.log_path.stat().st_size
             except OSError:
                 size = last_size
-            if size != last_size:            # progress: the log grew
-                last_size = size
+            cpu = self._cpu_seconds()
+            # progress = the log grew OR the child burned CPU (a silent, loaded import
+            # phase can outlast the window while working hard — measured 2026-11-22)
+            if size != last_size or cpu > last_cpu:
+                last_size, last_cpu = size, cpu
                 window_end = time.monotonic() + ready_window
             if time.monotonic() > window_end:
                 self.stop()
@@ -275,6 +295,13 @@ def _anthropic_stream(port: int, model: str = "claude-opus-5-5", max_tokens: int
                     events.append(json.loads(data))
                 except json.JSONDecodeError:
                     events.append({"raw": data})
+    if not events and text.lstrip().startswith("{"):
+        # a pre-first-chunk failure reaches the client as a JSON error BODY, not an SSE
+        # stream (resp-e.txt shape); surface it as one event so tests can assert on it
+        try:
+            events.append(json.loads(text))
+        except json.JSONDecodeError:
+            pass
     return status, events, {k.lower(): v for k, v in headers.items()}
 
 

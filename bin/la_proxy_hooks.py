@@ -35,6 +35,15 @@ Bug Bash plan, W1):
    for that model is clamped to it; the proxy YAML's one BadRequest retry makes the failing turn
    itself succeed. So each model gets exactly its provider's ceiling, never a guessed lower one.
 
+5. LiteLLM #53340 bridge (0.62.0, provider-buckets): the /v1/messages bridge on LiteLLM
+   1.110.2 turns a mid-flight upstream stream death into a 500 (or a silent empty 200) and
+   cannot fall back. install_bridge_shim() guards the funnel AT RUNTIME -- None stream /
+   None response raise retriable APIConnectionErrors, a zero-chunk stream errors instead of
+   synthesizing an empty message -- and self-retires once an upgraded LiteLLM ships the
+   guard. A fallback chain that ENDED on a rate limit reaches the client as 429 +
+   Retry-After (streaming-iterator hook), and our own self-raised refusals are never booked
+   as upstream 429s (defect L8). See docs/measurements/2026-11-22-bridge-experiment/.
+
 Usage:
   la_proxy_hooks.py --self-test   check the installed LiteLLM stream adapter handles mixed chunks
   la_proxy_hooks.py --help
@@ -46,6 +55,7 @@ Environment:
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -60,6 +70,13 @@ NVIDIA_PREFIX = "nvidia_nim/"
 # new Claude Code request field shows up as "Unsupported parameter(s)" in a proxy log.
 NVIDIA_DROP_KEYS = ("safeguards",)
 
+# Exceptions the hooks raise THEMSELVES (fast-fail, bucket timeouts, the 429 mapping) carry
+# this marker: async_log_failure_event must never book them as upstream 429s (defect L8 --
+# measured 2026-11-22: a self-raised fast-fail was booked against the PRIMARY with 2 phantom
+# hidden-retry slots, self-amplifying every cooldown), and the stream-iterator hook uses the
+# recorded call id to answer the client 429 + Retry-After instead of a 500.
+SELF_RAISED_ATTR = "la_self_raised"
+
 
 # ---- upstream check: the mixed-chunk stream bug (fixed in LiteLLM 1.102.1) -----------------
 
@@ -72,6 +89,7 @@ MIN_LITELLM = "1.102.1"
 _ADAPTER_MODULES = {
     "AnthropicStreamWrapper": "adapters.streaming_iterator",
     "_CombinedChunkSplitter": "adapters.streaming_iterator",
+    "AnthropicAdapter": "adapters.transformation",
     "LiteLLMAnthropicMessagesAdapter": "adapters.transformation",
 }
 _ADAPTER_PARENTS = ("pass_through", "experimental_pass_through")
@@ -370,6 +388,204 @@ def _is_429(exc) -> bool:
     return getattr(exc, "status_code", None) == 429 or type(exc).__name__ == "RateLimitError"
 
 
+def _chain_has_self_raised(exc) -> bool:
+    """True if `exc` or anything in its __cause__/__context__ chain is self-raised."""
+    seen: set[int] = set()
+    pending = [exc]
+    while pending:
+        e = pending.pop(0)
+        if e is None or id(e) in seen:
+            continue
+        seen.add(id(e))
+        if getattr(e, SELF_RAISED_ATTR, False):
+            return True
+        pending.extend(c for c in (getattr(e, "__cause__", None),
+                                   getattr(e, "__context__", None)) if c is not None)
+    return False
+
+
+# ---- C4: LiteLLM #53340 bridge shim + client-facing error mapping (0.62.0) -----------------
+# Measured (docs/measurements/2026-11-22-bridge-experiment/): on 1.110.2 a fallback chain
+# ending on a rate limit reaches the client as HTTP 500 naming the PRIMARY's stream error;
+# an upstream stream that dies before ANY chunk is a silent empty 200. This section guards
+# the bridge funnel AT RUNTIME (never the pipx venv) and maps the client-visible error.
+
+BRIDGE_SHIM_STATE = ""   # "" until the first install; then installed | upstream-guard-present | adapter-absent
+
+_CALL_429_RECORDS: dict[str, dict] = {}   # litellm_call_id -> {"retry_after": seconds, "at": t}
+_RECORD_TTL = 600.0
+
+
+def _record_call_rate_limited(call_id: str, retry_after: float | None) -> None:
+    """Remember that THIS call's chain ended on a rate limit; the stream-iterator hook
+    turns it into a client 429 + Retry-After. Entries expire (call ids are never reused)."""
+    import time
+    now = time.time()
+    for k in [k for k, v in _CALL_429_RECORDS.items()
+              if now - float(v.get("at", 0)) > _RECORD_TTL]:
+        _CALL_429_RECORDS.pop(k, None)
+    if call_id:
+        _CALL_429_RECORDS[call_id] = {"retry_after": float(retry_after or 0.0), "at": now}
+
+
+def _remaining_call_rate_limit(call_id: str) -> float | None:
+    """Seconds left of the cooldown recorded for this call id (pops it), else None."""
+    import time
+    rec = _CALL_429_RECORDS.pop(call_id or "", None)
+    if not rec or not rec.get("retry_after"):
+        return None
+    return max(1.0, float(rec["retry_after"]) - (time.time() - float(rec["at"])))
+
+
+def _retry_after_for_chain(exc) -> float | None:
+    """Shortest remaining cooldown named by the exception chain -- a Retry-After header or
+    a la_cooldown_seconds marker on any link -- else None. The dispatch tool reuses this."""
+    seen: set[int] = set()
+    best: float | None = None
+    pending = [exc]
+    while pending:
+        e = pending.pop(0)
+        if e is None or id(e) in seen:
+            continue
+        seen.add(id(e))
+        pending.extend(c for c in (getattr(e, "__cause__", None),
+                                   getattr(e, "__context__", None)) if c is not None)
+        secs = _retry_after_seconds(e)
+        mark = getattr(e, "la_cooldown_seconds", None)
+        if mark:
+            try:
+                mark = float(mark)
+            except (TypeError, ValueError):
+                mark = None
+        if mark and mark > 0:
+            secs = mark if not secs else min(secs, mark)
+        if secs and secs > 0:
+            best = secs if best is None else min(best, secs)
+    return best
+
+
+class _ZeroChunkGuard:
+    """Wraps a RAW upstream chunk stream and raises (instead of ending quietly) when the
+    stream yielded ZERO chunks. Measured die0 shape: the adapter otherwise synthesizes an
+    empty-but-complete Anthropic message (message_start..message_stop, no text, no error)
+    and the client gets a silent empty 200. One or more chunks pass through untouched."""
+
+    def __init__(self, inner, on_empty):
+        self._inner = inner
+        self._on_empty = on_empty
+        self._n = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            chunk = next(self._inner)
+        except StopIteration:
+            if self._n == 0:
+                raise self._on_empty() from None
+            raise
+        self._n += 1
+        return chunk
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            chunk = await self._inner.__anext__()
+        except StopAsyncIteration:
+            if self._n == 0:
+                raise self._on_empty() from None
+            raise
+        self._n += 1
+        return chunk
+
+
+def install_bridge_shim() -> str:
+    """Guard LiteLLM's /v1/messages bridge against the #53340 shapes AT RUNTIME (never the
+    pipx venv), mirroring upstream PR #53341: a None completion_stream -- and the non-stream
+    sibling, a None response/choices -- raises APIConnectionError (retriable, fallback-
+    eligible) instead of surfacing as a 500 AttributeError. Plus the actually-measured
+    harm: a raw stream with ZERO chunks surfaces as a retriable error, not a silent empty
+    200. Self-retiring: an installed LiteLLM that already carries the guard is detected by
+    source inspection and left untouched. Returns exactly one of "installed" |
+    "upstream-guard-present" | "adapter-absent"."""
+    global BRIDGE_SHIM_STATE
+    if BRIDGE_SHIM_STATE:
+        return BRIDGE_SHIM_STATE
+    import functools
+    import inspect
+    try:
+        import litellm
+        stream_cls = litellm_adapter("AnthropicAdapter")
+        messages_cls = litellm_adapter("LiteLLMAnthropicMessagesAdapter")
+    except Exception as exc:
+        print(f"la_proxy_hooks: bridge shim: adapter absent ({exc}) -- no guard installed",
+              file=sys.stderr)
+        BRIDGE_SHIM_STATE = "adapter-absent"
+        return BRIDGE_SHIM_STATE
+
+    def _api_error(model, why):
+        e = litellm.APIConnectionError(
+            message=f"upstream stream {why} (LiteLLM #53340 shape); retriable",
+            llm_provider="anthropic", model=str(model or ""))
+        e.status_code = 529
+        e.type = "overloaded_error"
+        return e
+
+    stream_fn = getattr(stream_cls, "translate_completion_output_params_streaming", None)
+    if stream_fn is None:
+        print("la_proxy_hooks: bridge shim: streaming funnel missing -- no guard installed",
+              file=sys.stderr)
+        BRIDGE_SHIM_STATE = "adapter-absent"
+        return BRIDGE_SHIM_STATE
+    try:
+        upstream_guarded = "completion_stream is None" in inspect.getsource(stream_fn)
+    except OSError:
+        upstream_guarded = False
+    if upstream_guarded:
+        print("la_proxy_hooks: bridge shim: upstream guard present -- shim off", file=sys.stderr)
+        BRIDGE_SHIM_STATE = "upstream-guard-present"
+        return BRIDGE_SHIM_STATE
+
+    @functools.wraps(stream_fn)
+    def guarded_stream(self, completion_stream, *args, **kwargs):
+        if completion_stream is None:
+            raise _api_error(kwargs.get("model") or (args[0] if args else ""),
+                             "died before any chunk (None completion_stream)")
+        return stream_fn(self, _ZeroChunkGuard(completion_stream, lambda: _api_error(
+            kwargs.get("model") or (args[0] if args else ""),
+            "ended before any content (empty, unterminated)")), *args, **kwargs)
+
+    guarded_stream._la_bridge_shim = True
+    stream_cls.translate_completion_output_params_streaming = guarded_stream
+
+    # the non-stream sibling lives on the messages adapter (response=None -> 'choices' crash)
+    nonstream_fn = getattr(messages_cls, "translate_openai_response_to_anthropic", None)
+    if nonstream_fn is not None and not getattr(nonstream_fn, "_la_bridge_shim", False):
+        try:
+            nonstream_guarded = "response is None" in inspect.getsource(nonstream_fn)
+        except OSError:
+            nonstream_guarded = False
+        if not nonstream_guarded:
+            @functools.wraps(nonstream_fn)
+            def guarded_nonstream(self, response, *args, **kwargs):
+                if response is None or getattr(response, "choices", None) is None:
+                    raise _api_error(kwargs.get("model") or "",
+                                     "returned no response object (None choices)")
+                return nonstream_fn(self, response, *args, **kwargs)
+
+            guarded_nonstream._la_bridge_shim = True
+            messages_cls.translate_openai_response_to_anthropic = guarded_nonstream
+
+    BRIDGE_SHIM_STATE = "installed"
+    print("la_proxy_hooks: bridge shim: installed for this LiteLLM "
+          "(upstream #53341 guard absent)", file=sys.stderr)
+    return BRIDGE_SHIM_STATE
+
+
+
 class LAProxyHooks(CustomLogger):
     def __init__(self):
         if CustomLogger is not object:
@@ -401,9 +617,12 @@ class LAProxyHooks(CustomLogger):
                 import litellm
                 print(f"la_proxy_hooks: {model} cooling {cooling:.0f}s after 429s "
                       f"-> failing over to a fallback at once", file=sys.stderr)
-                raise litellm.RateLimitError(
+                fast_fail = litellm.RateLimitError(
                     message=f"model cooling {cooling:.0f}s after consecutive upstream 429s",
                     llm_provider="nvidia_nim", model=model)
+                fast_fail.la_self_raised = True   # L8: our own refusal is never booked
+                fast_fail.la_cooldown_seconds = cooling
+                raise fast_fail
             if getattr(call_type, "value", call_type) == "anthropic_messages":
                 # 0.40.1: one /v1/messages request runs this hook TWICE with one call id --
                 # here, as it arrives, and again as the translated acompletion that actually
@@ -438,9 +657,21 @@ class LAProxyHooks(CustomLogger):
         exc = (kwargs or {}).get("exception")
         if exc is None or not _is_429(exc):
             return
+        call_id = str((kwargs or {}).get("litellm_call_id") or "")
+        if getattr(exc, SELF_RAISED_ATTR, False) or _chain_has_self_raised(exc):
+            # L8 (0.62.0): OUR OWN refusal (fast-fail, bucket timeout) books nothing and
+            # cools nothing -- a request that never left the machine is not an upstream 429,
+            # and booking it amplified the very cooldown it reacted to (measured: 1 real
+            # upstream request, 3 booked). It DOES mark the call id, so the stream-iterator
+            # hook answers the client 429 + Retry-After instead of a 500.
+            _record_call_rate_limited(call_id, getattr(exc, "la_cooldown_seconds", None))
+            print(f"la_proxy_hooks: self-raised rate-limit refusal not booked (L8); "
+                  f"call {call_id[:8]} surfaces as 429", file=sys.stderr)
+            return
         model = str((kwargs or {}).get("model") or "")
         info = self._bucket.note_429(_retry_after_seconds(exc), hidden_attempts=SDK_HIDDEN_RETRIES,
                                      model=model)
+        _record_call_rate_limited(call_id, info.get("pause"))
         if info.get("kind") == "model_throttle":
             print(f"la_proxy_hooks: NVIDIA 429 with {info['in_window']}/{info['limit']} requests "
                   f"in the last 60 s -> model throttle: {info['model']} cools {info['pause']:.0f}s "
@@ -505,6 +736,81 @@ class LAProxyHooks(CustomLogger):
                 pass
         return HTTPException(status_code=402, detail=detail)
 
+    async def async_post_call_streaming_iterator_hook(self, user_api_key_dict, response,
+                                                      request_data):
+        # C4 (mechanism PROVEN 2026-11-22 on 1.110.2, bridge experiment): on streaming
+        # /v1/messages the router's failure hooks are NOT reached with the rate-limit cause
+        # before the client stream starts -- the surfacing exception is the PRIMARY's stream
+        # error and the client gets 500. This hook wraps the FINAL client-facing iterator:
+        # re-yield every chunk; only when the stream dies BEFORE the first chunk AND this
+        # call's chain ended on a rate limit (async_log_failure_event recorded the call id)
+        # does it raise RateLimitError -> the client gets 429 + Retry-After. After the first
+        # chunk the headers are sent, so an error is never changed there.
+        import litellm
+        yielded = 0
+        saw_text = False
+        input_tokens: int | None = None
+
+        def _note(chunk):
+            nonlocal saw_text, input_tokens
+            ev = chunk
+            if isinstance(chunk, (bytes, bytearray)):
+                for line in str(chunk, "utf-8", "replace").splitlines():
+                    if line.startswith("data:"):
+                        try:
+                            ev = json.loads(line[5:].strip())
+                        except json.JSONDecodeError:
+                            continue
+                        break
+            if not isinstance(ev, dict):
+                return
+            if ev.get("type") == "message_start":
+                try:
+                    input_tokens = int(ev["message"]["usage"].get("input_tokens") or 0)
+                except (KeyError, TypeError, ValueError):
+                    input_tokens = 0
+            if ev.get("type") == "content_block_delta" and (ev.get("delta") or {}).get("text"):
+                saw_text = True
+
+        try:
+            async for chunk in response:
+                yielded += 1
+                _note(chunk)
+                yield chunk
+        except Exception as exc:
+            if yielded == 0:
+                remaining = _remaining_call_rate_limit(
+                    str((request_data or {}).get("litellm_call_id") or ""))
+                named = _retry_after_for_chain(exc)
+                secs = min([s for s in (remaining, named) if s and s > 0], default=None)
+                if remaining is not None:
+                    e2 = litellm.RateLimitError(
+                        message="rate limited: the fallback chain ended on a rate limit",
+                        llm_provider="nvidia_nim",
+                        model=str((request_data or {}).get("model") or ""))
+                    e2.la_self_raised = True
+                    if secs:
+                        e2.headers = {"retry-after": str(max(1, int(round(secs))))}
+                    print(f"la_proxy_hooks: chain ended on a rate limit -> client 429 "
+                          f"(retry-after {secs})", file=sys.stderr)
+                    raise e2 from exc
+            raise
+        if yielded == 0 or (not saw_text and input_tokens == 0):
+            # die0 (measured 2026-11-22): the upstream socket dies before any SSE data and
+            # LiteLLM's stream wrapper synthesizes 2 empty chunks; the adapter then emits a
+            # complete-looking EMPTY message (message_start..message_stop, usage all zero)
+            # and the client gets a silent empty 200. Discriminant: no text delta AND the
+            # echoed prompt usage is 0 — a real answer always carries input_tokens > 0.
+            # This is an error, never a silent empty 200 (invariant 4).
+            e3 = litellm.APIConnectionError(
+                message="upstream stream ended before any content (empty, unterminated)",
+                llm_provider="anthropic",
+                model=str((request_data or {}).get("model") or ""))
+            e3.status_code = 529
+            e3.type = "overloaded_error"
+            e3.la_self_raised = True
+            raise e3
+
 
 # ---- fix 7: the native Anthropic lane keeps thinking + effort ------------------------------
 
@@ -558,6 +864,7 @@ def fold_per_turn_effort(kwargs: dict) -> dict | None:
 # Loading this module (which LiteLLM does at proxy start) checks the upstream stream fix.
 if CustomLogger is not object:
     check_stream_adapter()
+    install_bridge_shim()
     if os.environ.get("LA_PASSTHROUGH_MODELS"):
         register_passthrough_models(os.environ["LA_PASSTHROUGH_MODELS"])
 proxy_hooks = LAProxyHooks() if CustomLogger is not object else None
@@ -567,6 +874,7 @@ proxy_hooks = LAProxyHooks() if CustomLogger is not object else None
 
 def _self_test() -> int:
     ok = True
+    print(f"bridge shim: {BRIDGE_SHIM_STATE or 'not-installed'}")
     for name, chunks in _probe_chunks().items():
         errors, _, thinking = stream_mismatches(chunks)
         print(f"{name:18s} -> {'OK' if not errors else errors}  thinking={thinking!r}")
