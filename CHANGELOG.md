@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.61.1] — 2026-11-22
+
+### Fixed
+- `csl --inventory` scanned the models dir twice: the auto-scanned `for` loop ended with `done < <(la_auto_scan_models)`, and a for-loop never reads stdin — the process substitution only re-ran the whole scan in the background. The loop now ends plain; a test counts real `find` calls via a PATH shim (mutant RED 3/3, fixed GREEN 3/3).
+
+### Added — context window on every model row, fetched from Hugging Face by the code itself
+- `bin/estimate-model-footprint.py`: a resolved HF repo's `config.json` is fetched once per cache entry and its context window (`max_position_embeddings` and friends, incl. nested `text_config`/`llm_config` and YaRN rope scaling) is cached as `ctx` beside the parameter count; `hf_context()` reads it offline. Network/5xx writes nothing; 401/403/404 records `ctx: null` once. Verified on real configs: GLM-5.3-Flash → 1 048 576, DeepSeek-V3 → 163 840, Qwen3-8B → 40 960. New models introduced later are covered by the normal warm-up — no manual step.
+- Picker rows (Remote, Lowkey, Local) show `  · 31B · 1M ctx` next to the name; each part is omitted when the display name already states it. `csl --inventory` appends columns 6–7 (effective context via `la_get_effective_context`, subdir/folder); columns 1–5 are unchanged, so existing consumers are unaffected.
+
 ## [0.61.0] — unreleased
 
 ### Added — NVIDIA rate-limiter fairness: the shared 40-RPM bucket grants by policy, not by polling luck
