@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -30,7 +31,11 @@ def _load_old(tmpdir):
     too — the mp tests must not depend on fork inheritance)."""
     src = subprocess.run(["git", "show", f"{BASE}:bin/rate_limiter.py"], cwd=str(REPO),
                          capture_output=True, text=True, check=True).stdout
-    p = Path(tmpdir) / "old_rate_limiter.py"
+    # 0b (2026-11-22 baseline flake): two workers sharing ONE filename raced — a concurrent
+    # write_text truncate landed between another worker's read and exec_module, which then
+    # compiled an EMPTY module ("no attribute 'SlidingWindowLimiter'"). A unique name per
+    # call removes the shared-write window entirely; the module NAME stays the same.
+    p = Path(tmpdir) / f"old_rate_limiter_{uuid.uuid4().hex}.py"
     p.write_text(src)
     spec = importlib.util.spec_from_file_location("old_rate_limiter", p)
     mod = importlib.util.module_from_spec(spec)
@@ -137,6 +142,10 @@ class MixedWriterProcessTests(unittest.TestCase):
                 p.start()
             for p in procs:
                 p.join(300)   # the box can be heavily loaded; 60s expired once under -n auto
+            # 0b: assert AFTER every worker has joined — an early abort on the first failure
+            # left siblings alive, and their writes raced the tmpdir cleanup
+            # ("OSError 66 Directory not empty"), masking the real failure.
+            for p in procs:
                 self.assertFalse(p.is_alive(), "worker did not finish within 300s")
                 self.assertEqual(p.exitcode, 0, "worker exited non-zero")
             results = []   # drain only AFTER every worker has exited: no lost puts
