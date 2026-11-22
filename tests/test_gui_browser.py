@@ -567,6 +567,32 @@ def test_tile_emoji_cycle_value_click_steps_like_the_arrow(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_cloud_route_switch_writes_settings_env(browser, tmp_path):
+    # 2026-11-22 parity: the cloud-config route row cycles AND persists — the write lands in
+    # the launch dir's .claude/settings.json env (FA_ROUTE_AGENT), never the real one
+    srv = Server()
+    try:
+        env_file = Path(srv.tmp.name) / ".claude" / "settings.json"
+        page = browser.new_page()
+        page.goto(f"{srv.url}cloud_config")
+        row = page.locator(".cycle-row", has_text="Agent dispatch")
+        row.wait_for(timeout=20000)
+        row.locator(".cycle-value").click()           # +1: free-first -> free-only
+        deadline = time.time() + 10
+        mode = None
+        while time.time() < deadline:
+            if env_file.exists():
+                mode = json.loads(env_file.read_text()).get("env", {}).get("FA_ROUTE_AGENT")
+                if mode:
+                    break
+            time.sleep(0.1)
+        assert mode == "free-only", (mode, env_file.read_text() if env_file.exists() else "no file")
+        # and the row label reflects the persisted value (the rerender pushes a beat later)
+        page.wait_for_selector("text=Free only", timeout=5000)
+    finally:
+        assert srv.stop() == []
+
+
 def test_remote_filter_applies_to_the_remote_list(browser, tmp_path):
     # 2026-11-22 parity: the RemoteFiltersScreen cycles must APPLY — a trial agent is
     # visible on /remote, hidden after "Limited trials: HIDDEN" is chosen, back on re-show

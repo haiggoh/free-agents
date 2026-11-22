@@ -715,6 +715,11 @@ def build() -> None:
     def _cycle(action, val, d: int, st: dict) -> None:
         if action.step:
             action.step(d)
+        # rows whose label EMBEDS the value (cloud-config route/timeout tiers: labels, no
+        # choices) have no getter to update in place — the fresh screen rebuilds the label
+        if action.labels and not action.choices and st.get("rerender"):
+            st["rerender"]()
+            return
         nav = st.get("nav")
         if st.get("rerender") and nav is not None:
             # Rebuild ONLY when the fresh screen's RENDERED control set differs — dependent
