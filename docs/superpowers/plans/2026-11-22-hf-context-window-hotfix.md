@@ -37,3 +37,7 @@ shared picker files: no reformatting, no moved code.
 ## Progress log
 - 2026-11-22 Task 0 DONE — commit eae754e (single scan, inventory cols 6-7; test 12/12, mutant RED 3/3).
 - 2026-11-22 Task 2 WIP — `_hf_fetch_context`, `hf_context`, ctx caching in `hf_total_params` written; tests/test_hf_context_0611.py written (8 tests, RED). MISSING: `context_from_config()` (Task 1) — a free dispatch drafted it: brief + fixtures + result (if it landed) in `docs/measurements/2026-11-22-hf-context-dispatch/`. VERIFY the draft against the three real configs (GLM 1048576, DeepSeek-V3 163840, Qwen3-8B 40960) before pasting it into bin/estimate-model-footprint.py. Then Tasks 3-5. User requirement (2026-11-22): all fetching is done by the code at runtime (warm-up), never by a manual step — future models must work unattended.
+- 2026-11-22 Tasks 1-3 DONE — 65beab8 (HF ctx cache; 8 tests), fadab4d (row labels Remote/Lowkey/Local;
+  8 unit tests; inventory cols 6-7 with the single-scan fix from eae754e). GLM-5.3-Flash verified
+  1048576 from zai-org/GLM-5.3-Flash config.json (text_config.max_position_embeddings). Next:
+  Task 5 (full gate + pre-flight + screenshots, then ask the user about shipping).
