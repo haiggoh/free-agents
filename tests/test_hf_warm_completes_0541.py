@@ -41,7 +41,7 @@ def _load_emf():
 
 
 emf = _load_emf()
-pytestmark = pytest.mark.load_sensitive
+PILOT = pytest.mark.load_sensitive  # Textual pilot classes only
 
 
 class FakeHF(BaseHTTPRequestHandler):
@@ -73,6 +73,7 @@ def _start_fake_hf():
     return srv, f"http://127.0.0.1:{srv.server_address[1]}"
 
 
+@PILOT
 class WarmOrderAndCLI(PilotCase):
     def setUp(self):
         super().setUp()
@@ -164,6 +165,7 @@ class WarmOrderAndCLI(PilotCase):
         self.assertIn("error", str(outcome).lower(), outcome)
 
 
+@PILOT
 class WarmHandOff(PilotCase):
     def setUp(self):
         super().setUp()

@@ -32,7 +32,7 @@ def _load_emf():
 emf = _load_emf()
 import pytest  # noqa: E402
 
-pytestmark = pytest.mark.load_sensitive
+PILOT = pytest.mark.load_sensitive  # Textual pilot classes only
 
 
 class HFCacheWriter(unittest.TestCase):
@@ -51,6 +51,8 @@ class HFCacheWriter(unittest.TestCase):
         barrier = threading.Barrier(8)
         def slow_get(url, timeout):
             barrier.wait(timeout=10)
+            if url.endswith("/resolve/main/config.json"):
+                return {"max_position_embeddings": 4096}   # 0.61.1: the ctx fetch rides the same warm-up
             mid = url.split("/api/models/")[1].split("?")[0]
             return {"id": mid, "createdAt": "2026-01-01",
                     "safetensors": {"total": 7_000_000_000}}
@@ -71,6 +73,8 @@ class HFCacheWriter(unittest.TestCase):
         barrier = threading.Barrier(2)
         def get(url, timeout):
             barrier.wait(timeout=10)
+            if url.endswith("/resolve/main/config.json"):
+                return {"max_position_embeddings": 4096}   # 0.61.1: the ctx fetch rides the same warm-up
             mid = url.split("/api/models/")[1].split("?")[0]
             return {"id": mid, "safetensors": {"total": 1}}
         emf._hf_get = get
