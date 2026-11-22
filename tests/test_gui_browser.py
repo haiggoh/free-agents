@@ -567,6 +567,35 @@ def test_tile_emoji_cycle_value_click_steps_like_the_arrow(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_theme_accent_rows_show_live_swatches(browser, tmp_path):
+    # 2026-11-22 parity: the theme accent cycles show a swatch chip (csl's THEME_PRESETS
+    # display) that follows the cycled value — objective mirror, no new dependencies
+    srv = Server()
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}theme_config")
+        row = page.locator('[data-action="ThemeConfigScreen.l"]')
+        row.wait_for(timeout=20000)
+        swatch = row.locator(".cycle-swatch")
+        swatch.wait_for(timeout=5000)
+        before = swatch.evaluate("el => getComputedStyle(el).backgroundColor")
+        assert before.startswith("rgb"), before
+        row.locator(".cycle-right").click()
+        deadline = time.time() + 10
+        after = before
+        while time.time() < deadline:
+            after = swatch.evaluate("el => getComputedStyle(el).backgroundColor")
+            if after != before:
+                break
+            time.sleep(0.2)
+        assert after != before, (before, after)
+        # the value text names the preset and its hex (not a bare "custom")
+        value = row.locator(".cycle-value").inner_text()
+        assert "#" in value, value
+    finally:
+        assert srv.stop() == []
+
+
 def test_cloud_route_switch_writes_settings_env(browser, tmp_path):
     # 2026-11-22 parity: the cloud-config route row cycles AND persists — the write lands in
     # the launch dir's .claude/settings.json env (FA_ROUTE_AGENT), never the real one

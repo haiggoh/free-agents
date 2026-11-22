@@ -202,6 +202,9 @@ def build() -> None:
       .tile .tile-emoji { font-size: 3.25rem; line-height: 1; }            /* 1x1 */
       .tile-wide .tile-emoji { font-size: 3.75rem; }                       /* 2x1 */
       .tile-lg .tile-emoji { font-size: 7.5rem; }                          /* 2x2 */
+      /* theme accent cycles (2026-11-22 parity): a swatch chip for hex-valued choices */
+      .cycle-swatch { display: inline-block; width: 1em; height: 1em; border-radius: 3px;
+                      margin-right: .4em; vertical-align: middle; border: 1px solid rgba(20,20,20,.2); }
       .tile:hover { background: #f0f9ff !important; border-color: #00BFFF !important; }   /* flat sky tint, no gradient */
       body:has(.dark-shell) .tile { background: #1f1f1f !important; border-color: rgba(255, 255, 255, 0.14) !important; }
       /* 2026-11-21 user pick (lab v5 at real tile size): modern-mode tile emoji is a subdued
@@ -558,9 +561,24 @@ def build() -> None:
         """The value part of a rich cycle-row label (after the last ': '), as HTML —
         keeps the swatch spans. Returns None for plain labels. (Duck-typed: the GUI venv
         has no rich — the model imports it only under TYPE_CHECKING.)"""
-        lbl = action.label if action is not None else None
+        if action is not None and action.choices and action.labels:
+            if all(isinstance(c, str) and c.startswith("#") for c in action.choices):
+                cur = action.value() if callable(getattr(action, "value", None)) else None
+                if isinstance(cur, str) and cur.startswith("#"):
+                    # theme accent rows: swatch chip + name + hex, overriding whatever the
+                    # label says (a rich 'Yellow' span has no chip; a custom hex has no name)
+                    i = action.choices.index(cur) if cur in action.choices else None
+                    name = action.labels[i] if i is not None else cur
+                    return (f'<span class="cycle-swatch" style="background:{cur}"></span>'
+                            f'{name} <span style="opacity:.6">{cur}</span>')
+        if action is None:
+            return None
+        lbl = action.label
         if lbl is None or not hasattr(lbl, "spans") or not hasattr(lbl, "plain"):
             return None
+        plain = lbl.plain
+        if ": " not in plain:
+            return _rich_html(lbl)
         plain = lbl.plain
         if ": " not in plain:
             return _rich_html(lbl)
