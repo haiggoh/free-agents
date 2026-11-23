@@ -1532,7 +1532,11 @@ swap_model() { # swap_model <port> <alias> [force]
     # the target model. Readiness is progress-based (a cold start ~3 min is not an abort).
     local scratch scratch_cfg scratch_log scratch_pid scratch_pidf probe verdict
     local fast=0 ready_window=60
-    [[ -n "${LA_SWAP_TEST_FAST:-}" ]] && { fast=1; ready_window=15; }
+    # 0.62.3: under the test knob the stub sleeps 15 s while logging — the no-progress window
+    # was also 15 s, so one scheduling hiccup on a loaded box aborted a healthy slow start
+    # (flaked twice in the 0.62.3 ship gate, passed serial). Give it cadence headroom: 45 s is
+    # still well under the real 60 s default and 4x faster than the 150 s stub sleep.
+    [[ -n "${LA_SWAP_TEST_FAST:-}" ]] && { fast=1; ready_window=45; }
     # Dead-route rule (waypoint point 3): when the CURRENT route is dead (402/410/long 429),
     # a paid_only target is allowed, labelled as such.
     local live_probe target_tier
