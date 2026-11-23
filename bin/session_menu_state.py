@@ -41,11 +41,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 10
-READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+SCHEMA_VERSION = 11
+READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "last_launched_mode", "temperature",
             "intercept_agents", "memguard", "thinking", "hidden_providers", "lowkey_filters",
-            "local_registry")
+            "local_registry", "remote_filters")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown",
@@ -176,6 +176,8 @@ class State:
     # 0.54.0: lowkey picker toggles (e.g. remote_filters: apply the Remote screen's filters
     # to lowkey's API list) — opt-in, persisted like the other lowkey settings.
     lowkey_filters: dict = field(default_factory=dict)
+    # 0.62.0 C9: Remote-screen filter toggles; large_context_only defaults ON (user 2026-11-22)
+    remote_filters: dict = field(default_factory=lambda: {"large_context_only": True})
     warnings: list = field(default_factory=list)
 
 
@@ -263,7 +265,7 @@ def _unsafe_dir(config_dir: Path) -> str | None:
     return None
 
 
-def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list, dict]:
+def _parse(raw: bytes) -> tuple:
     """Return (effort, rate_limiter, last_launched, temperature, intercept_agents, memguard,
     thinking) or raise ValueError with a short reason."""
     if len(raw) > MAX_BYTES:
@@ -291,6 +293,8 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list, d
         raise ValueError("lowkey_filters needs schema_version 9")
     if doc["schema_version"] < 10 and "local_registry" in doc:
         raise ValueError("local_registry needs schema_version 10")
+    if doc["schema_version"] < 11 and "remote_filters" in doc:
+        raise ValueError("remote_filters needs schema_version 11")
     memguard = doc.get("memguard", {})
     if not isinstance(memguard, dict):
         raise ValueError("preference sections must be JSON objects")
@@ -314,6 +318,15 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list, d
     lowkey_filters = doc.get("lowkey_filters", {})
     if not isinstance(lowkey_filters, dict) or not all(isinstance(v, bool) for v in lowkey_filters.values()):
         raise ValueError("lowkey_filters must be a JSON object of booleans")
+    # 0.62.0 C9: remote_filters migrated from v10 — the large-context filter defaults ON for
+    # the remote lane (user, 2026-11-22); a v11+ file must carry the section explicitly.
+    remote_filters = doc.get("remote_filters")
+    if remote_filters is None and doc["schema_version"] < 11:
+        remote_filters = {"large_context_only": True}
+    if remote_filters is None:
+        remote_filters = {}
+    if not isinstance(remote_filters, dict) or not all(isinstance(v, bool) for v in remote_filters.values()):
+        raise ValueError("remote_filters must be a JSON object of booleans")
     effort = doc.get("effort", {})
     limiter = doc.get("rate_limiter", {})
     last = doc.get("last_launched", {})
@@ -353,10 +366,11 @@ def _parse(raw: bytes) -> tuple[dict, dict, dict, dict, str, dict, dict, list, d
         if mode not in ("convo", "oneshot"):
             raise ValueError(f"{lane} last launched mode must be convo or oneshot")
         last[f"{lane}:mode"] = mode
-    return effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry
+    return (effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden,
+            lowkey_filters, local_registry, remote_filters)
 
 
-def _read(path: Path) -> tuple[dict, dict, dict, dict, str, dict, dict, list, dict] | None:
+def _read(path: Path) -> tuple | None:
     """None when absent; raises ValueError when present but unusable."""
     try:
         st = os.lstat(path)
@@ -385,7 +399,8 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.warnings.append(f"{exc}; using built-in defaults and leaving the file untouched")
         return state
     if found:
-        effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry = found
+        (effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden,
+         lowkey_filters, local_registry, remote_filters) = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
@@ -398,6 +413,7 @@ def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
         state.hidden_providers = list(hidden)
         state.local_registry.update(local_registry)
         state.lowkey_filters.update(lowkey_filters)
+        state.remote_filters.update(remote_filters)
     return state
 
 
@@ -501,7 +517,8 @@ def _write(config_dir: Path, doc: dict) -> None:
 
 
 def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking=None,
-         hidden_providers=None, lowkey_filters=None, local_registry=None) -> dict:
+         hidden_providers=None, lowkey_filters=None, local_registry=None,
+         remote_filters=None) -> dict:
     doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
            "last_launched": {k: v for k, v in last.items() if ":" not in k},
            "temperature": temperature,
@@ -524,12 +541,24 @@ def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinkin
     # lives in local_registry (an old on-disk copy is dropped by this very write, R19).
     if local_registry:
         doc["local_registry"] = dict(local_registry)
+    if remote_filters:
+        doc["remote_filters"] = dict(remote_filters)
     return doc
+
+
+def save_remote_filters(config_dir: Path | str, key: str, value: bool) -> str | None:
+    """Persist one Remote-screen filter toggle (0.62.0, schema 11 section remote_filters)."""
+    if not isinstance(value, bool):
+        raise ValueError("remote_filters toggles must be true or false")
+
+    def mutate_remote_filters(filters):
+        filters[key] = value
+    return _update(config_dir, None, mutate_remote_filters=mutate_remote_filters)
 
 
 def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinking=None,
             mutate_hidden=None, mutate_lowkey_filters=None,
-            mutate_local_registry=None) -> str | None:
+            mutate_local_registry=None, mutate_remote_filters=None) -> str | None:
     """Apply `mutate(effort, limiter, last_launched, temperature)` (or one of the section hooks)
     under the lock. Returns a warning or None.
 
@@ -556,14 +585,16 @@ def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinkin
                 pass
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry = found
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters = found
             else:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry = \
-                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, [], {}, {}
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters = \
+                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, [], {}, {}, {}
             if mutate_hidden is not None:
                 mutate_hidden(hidden)
             elif mutate_lowkey_filters is not None:
                 mutate_lowkey_filters(lowkey_filters)
+            elif mutate_remote_filters is not None:
+                mutate_remote_filters(remote_filters)
             elif mutate_local_registry is not None:
                 mutate_local_registry(local_registry)
             elif mutate_thinking is not None:
@@ -572,7 +603,7 @@ def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinkin
                 mutate_memguard(memguard)
             else:
                 mutate(effort, limiter, last, temperature)
-            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry)
+            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters)
             _write(config_dir, doc)
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
@@ -729,10 +760,10 @@ def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, _, memguard, thinking, hidden, lowkey_filters, local_registry = found
+                effort, limiter, last, temperature, _, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters = found
             else:
-                effort, limiter, last, temperature, memguard, thinking, hidden, lowkey_filters, local_registry = {}, {}, {}, {}, {}, {}, [], {}, {}
-            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden, lowkey_filters, local_registry))
+                effort, limiter, last, temperature, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters = {}, {}, {}, {}, {}, {}, [], {}, {}, {}
+            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters))
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
     except OSError as exc:

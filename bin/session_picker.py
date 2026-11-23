@@ -162,6 +162,17 @@ def load_remote_agents() -> list[m.RemoteAgent]:
             agents.append(m.RemoteAgent(p[0], p[1], p[2], p[3], local_capable=p[4] == "1",
                                         has_key=p[5] == "1", broken=len(p) >= 7 and p[6] == "1",
                                         model_id=p[7] if len(p) == 8 else ""))
+    # 0.62.0 C8/C10: attach the provider-limits facts (context / max_output) to each row
+    try:
+        import provider_limits as _pl
+        _limits = _pl.load()
+        for a in agents:
+            f = _limits.model(a.provider, a.model_id) if a.model_id else None
+            if f is not None:
+                a.context = f.context
+                a.max_output = f.max_output
+    except Exception:
+        pass                                    # facts are an aid, never a launch blocker
     return agents
 
 
@@ -1052,6 +1063,7 @@ class Picker(App):
             rate_limiter=dict(state.rate_limiter),
             memguard=dict(state.memguard),
             local_registry=dict(state.local_registry),   # 0.55.8 Task 8: the migrated section
+            remote_filters=dict(state.remote_filters),   # 0.62.0 C9: schema-11 section
             auto_mode=int(os.environ.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
             telemetry=os.environ.get("CSL_TELEMETRY", "0") == "1",
             stop_hook=os.environ.get("CSL_STOP_HOOK", "0") == "1",   # OFF by default (0.22.3)

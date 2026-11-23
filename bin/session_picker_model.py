@@ -245,6 +245,9 @@ class RemoteAgent:
     broken: bool = False      # listed in config/broken-nvidia-models.json
     model_id: str = ""        # provider model id (remote-session.sh --inventory column 8)
     old: bool = False         # catalog row older than the age cutoff (pinned rows: never)
+    # 0.62.0 C8/C10: facts from config/provider-limits.json (null = unknown, shown as such)
+    context: int | None = None
+    max_output: int | None = None
 
 
 @dataclass
@@ -634,6 +637,48 @@ NVIDIA_GROUP_NOTE = ("NVIDIA API key currently holds no daily cap — the only l
 NVIDIA_MODEL_QUOTA_SHORT = ("NVIDIA key: no daily cap, 40 req/min only; a model can be throttled "
                             "under high load for 24-48h, but the key is never blocked — pick "
                             "another model.")
+LARGE_CONTEXT_THRESHOLD = 262144   # 0.62.0 C9: the "large context only" filter line (256k)
+
+
+def limits_lines(provider: str, model_id: str | None = None,
+                 snapshot: dict | None = None) -> list[str]:
+    """0.62.0 C8: ONE shared renderer for the limits/quota infoboxes (model selector AND the
+    API-keys screen). Reads config/provider-limits.json; unknown provider -> the labelled
+    "limits unknown" line (never blank, never invented). `snapshot` is the provider bucket's
+    sidecar snapshot (Today: N used) when available."""
+    try:
+        import provider_limits as _pl
+        limits = _pl.load()
+    except Exception:
+        return ["Limits: unknown (provider-limits.json unreadable)"]
+    pl = limits.provider(provider)
+    if pl is None:
+        return ["Limits: unknown (no entry in provider-limits.json)"]
+    facts = limits.model(provider, model_id) if model_id else None
+
+    def fmt(v):
+        return "—" if v is None else f"{v:,}"
+    lines = [f"Requests/min: {fmt(pl.rpm)}",
+             f"Tokens/min: {fmt(pl.tpm)}",
+             f"Daily quota: {fmt(pl.rpd) if pl.rpd is not None else 'none known'}",
+             f"Weekly quota: {fmt(pl.rpw) if pl.rpw is not None else 'none known'}"]
+    if snapshot:
+        day = (snapshot.get("day") or {})
+        if day.get("key"):
+            lines.append(f"Today ({day['key']}): {day.get('requests', 0)} requests, "
+                         f"{day.get('tokens', 0):,} tokens used")
+    if facts is not None and facts.max_output is not None:
+        lines.append(f"Max output: {facts.max_output:,}")
+    if facts is not None and facts.context is not None:
+        lines.append(f"Context: {facts.context:,}")
+        lines.append("Full sessions: yes" if facts.context >= limits.session_min_context
+                     else f"no — context {facts.context:,} ≤ 256k")
+    elif facts is not None:
+        lines.append("Context: unknown")
+    lines.append(f"Measured {pl.measured_at} — {pl.source}")
+    return lines
+
+
 PROVIDER_INFOS = {
     "nvidia": NVIDIA_GROUP_NOTE,
     "gemini": ("Gemini's free tier is recommended for offload dispatch only: its free daily "
@@ -721,6 +766,7 @@ class Settings:
     watcher: bool = False
     enable_mcp: bool = True   # default ON (user 2026-10-15): new users missing MCPs they never disabled is worse than the reverse
     include_trials: bool = True      # interactive visibility only; direct CLI keeps its guard
+    remote_filters: dict = None      # 0.62.0 C9: set from sms.State (defaults ON) at load
     local_capable_shown: bool = False
     show_broken: bool = False        # unworking models; in-memory, like the CLI flag
     show_old: bool = False           # models over the age cutoff; in-memory, like the CLI flag
@@ -1666,6 +1712,11 @@ def _agent_remote_filters(settings, agent) -> bool:
         return False
     if agent.old and not s.show_old:
         return False
+    # 0.62.0 C9: "Large context only" (remote lane default ON, persisted in remote_filters).
+    # Unknown context is NEVER hidden — a filter must not hide what it cannot judge.
+    if (s.remote_filters or {}).get("large_context_only") and agent.context is not None \
+            and agent.context <= LARGE_CONTEXT_THRESHOLD:
+        return False
     return True
 
 
@@ -2078,7 +2129,8 @@ class RemoteScreen(Screen):
                            PROVIDER_ADVISORIES.get(parts[1], ""), note]
                 return "\n".join(filter(None, [base, *notices]))
         if item_id in PROVIDER_INFOS:
-            return PROVIDER_INFOS[item_id]          # group-header hover: provider-level facts
+            # group-header hover: provider-level prose PLUS the derived limits (C8)
+            return "\n".join([*limits_lines(item_id), "", PROVIDER_INFOS[item_id]])
         agent = next((a for a in self.agents if a.alias == item_id), None)
         if agent is None:
             return "Hover or highlight a model to see notes about it."
@@ -2092,7 +2144,18 @@ class RemoteScreen(Screen):
         if agent.provider == "nvidia":
             note = (note + " " if note else "") + NVIDIA_MODEL_QUOTA_SHORT
         base = f"{agent.display}\n{note}" if note else f"{agent.display}\nNo notes for this model yet."
-        return "\n".join([base, *filter(None, notices)])
+        # 0.62.0 C8: the limits/quota infobox from provider-limits.json (+ today's usage)
+        snap = None
+        try:
+            import rate_limiter as _rl
+            b = _rl.get_limiter(provider=agent.provider)
+            snap = b.quota.snapshot(time.time()) if (b is not None and b.quota is not None) else None
+        except Exception:
+            snap = None
+        ll = limits_lines(agent.provider, agent.model_id or None, snap)
+        if agent.context is None:
+            ll.append("Context: unknown")
+        return "\n".join([base, *filter(None, notices), "", *ll])
 
     def _visible(self, agent: RemoteAgent) -> bool:
         # 0.50.8: delegates to the module-level _agent_visible (one source for the screen
@@ -2304,6 +2367,12 @@ class RemoteFiltersScreen(Screen):
                         f"{'SHOWN' if s.show_old else 'HIDDEN'}",
                     (False, True), lambda: s.show_old, lambda v: self._put_filter("show_old", v),
                     labels=("HIDDEN", "SHOWN")),
+            setting("d", f"Large context only (>256k): "
+                        f"{'ON' if (s.remote_filters or {}).get('large_context_only') else 'OFF'}",
+                    (False, True),
+                    lambda: bool((s.remote_filters or {}).get("large_context_only")),
+                    lambda v: self._put_remote_filter("large_context_only", bool(v)),
+                    labels=("OFF", "ON")),   # 0.62.0 C9, persisted, default ON
             Action("x", f"{ec.EMOJI_HIDDEN_REPORT_STR}  Hidden-model report", lambda: Nav("tool:report"), section="tools"),
         ]
         acts += self.nav_actions()
@@ -2315,6 +2384,14 @@ class RemoteFiltersScreen(Screen):
         setattr(self.settings, attr, bool(v))
         # Regroup the remote screen if it's loaded (lazy loading means we can't directly access it)
         # The change will take effect when remote screen is next opened
+        self._regroup_remote_if_loaded()
+
+    def _put_remote_filter(self, key, v):
+        """0.62.0 C9: persist a remote_filters toggle (schema 11) and regroup the list."""
+        self.settings.remote_filters[key] = bool(v)
+        import session_menu_state as _sms
+        _sms.save_remote_filters(_sms.REPO_CONFIG_DIR, key, bool(v))
+        self._regroup()                       # this IS the remote filters screen's list owner
         self._regroup_remote_if_loaded()
 
     def _regroup_remote_if_loaded(self):
@@ -3339,6 +3416,7 @@ class APIKeysScreen(Screen):
         # Skip the note when the steps already say it (Vercel's card requirement is in both).
         if note and not ("credit card" in note.lower() and "credit card" in prov.steps.lower()):
             lines.append("Measured: " + note)
+        lines += ["", *limits_lines(slug or "")]    # 0.62.0 C8: same renderer as the selector
         return "\n".join(lines)
 
     def actions(self):
