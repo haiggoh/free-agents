@@ -7,6 +7,7 @@ attempt timeout/stall rate, mean grant wait, and per-arm wall time.
 
 Usage: python3 tests/fast_lane_ab.py [--dispatches N] [--prompt TEXT] [--out DIR]
 Env:   LA_LIMITER_FAST_LANE is set per arm by the harness; everything else inherited.
+Turns: the task JSON is written to STDIN; each result envelope lands at <out>/<arm>-<i>.json.
 """
 import argparse
 import json
@@ -27,9 +28,9 @@ def run_arm(arm: str, n: int, prompt: str, outdir: Path) -> dict:
     timeouts = 0
     attempts = 0
     for i in range(n):
-        r = subprocess.run([sys.executable, str(TOOL), "--prompt", prompt,
-                            "--out", str(outdir / f"{arm}-{i}.json")],
-                           env=env, capture_output=True, text=True, timeout=1200)
+        task = json.dumps({"prompt": prompt, "role": "utility"})
+        r = subprocess.run([sys.executable, str(TOOL), "--out", str(outdir / f"{arm}-{i}.json")],
+                           env=env, input=task, capture_output=True, text=True, timeout=1200)
         env_file = outdir / f"{arm}-{i}.json"
         if env_file.exists():
             try:
