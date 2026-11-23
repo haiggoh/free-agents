@@ -234,15 +234,32 @@ def _memoized_verdict(name, model_id, compute):
 
 
 def catalog_local_capable(provider, model_id):
-    """True when a live-catalog row would fit THIS device at >=4-bit (the filter hides it).
+    """True when a live-catalog row is in the LOCAL capability class of THIS device (the
+    "Locally-runnable models" filter hides it by default).
 
-    User rule 2026-10-20: hidden when downloadable weights exist that fit the device at
-    4-bit quantization or finer; 2/3-bit-only fits stay visible (edge cases). The budget
-    comes from the device itself (75% of unified RAM / 90% of CUDA VRAM), never a
-    hardcoded size. Runs while the accordion regroups, so it must never wait on the
-    network: it reads the Hugging Face count only from the cache that load_remote_catalog
-    warmed, then falls back to the count in the id. An unknown verdict stays visible
-    (fail-open)."""
+    WHY THIS FILTER EXISTS — the user's reasoning, settled 2026-11-23; do NOT relitigate it:
+      * There is a capability GAP between models this hardware can run locally and the much
+        larger models reachable over a remote API. A remote session should not accidentally
+        pick a model on the same level as the local ones: such a model is usually less capable
+        than the larger remote models, so the larger ones are preferred for the remote lane,
+        unless the user explicitly opts out of the filter (toggle "Locally-runnable models").
+      * It is a CAPABILITY-CLASS line, not an availability check. Whether a local build of THIS
+        model exists (an MLX build on a Mac, GGUF/AWQ on CUDA) does NOT matter: even if that
+        particular model cannot be obtained locally, it is still local-class. Do not add a
+        build/format/download-existence check.
+      * The line comes from the DETECTED hardware (bin/la-hw-detect.sh via
+        estimate-model-footprint's device budget): memory x the usable share — 75% of unified
+        RAM (Mac/mlx: 128 GB detected -> 96 GB usable; the rest holds macOS, the GPU working set
+        and the KV cache) or 90% of VRAM (cuda/rocm). A model whose >=4-bit weights fit that
+        budget is local-class. Never a hardcoded size.
+      * GREY ZONE (intended exception): models near the line that MAY run locally but not
+        reliably stay VISIBLE — 2/3-bit-only fits, and remote models matched to the local
+        acquisition catalogue ("potentially-local-capable") — because where reliable local
+        operation ends has not been pinned down. That uncertainty, not "the weights are not on
+        disk", is the reason they stay visible.
+    Runs while the accordion regroups, so it must never wait on the network: it reads the Hugging
+    Face count only from the warmed cache, then falls back to the count in the id. An unknown
+    verdict stays visible (fail-open)."""
     def compute():
         try:
             # 0.52.1: the count comes from model_param_count FIRST (PARAM_COUNT_OVERRIDES +

@@ -774,11 +774,20 @@ bin/read-acquisition-catalog.py --report        # or --parse for JSON; exit 1 on
 bin/la-catalogue-generate.py acquisitions       # same reader, as a subcommand
 ```
 
-`la-model-profile.py validate` refuses a malformed catalogue it consumes. The remote **local-capable
-filter** uses an **exact** catalogue match (a normalised id, never fuzzy) as evidence: an
+`la-model-profile.py validate` refuses a malformed catalogue it consumes.
+
+**Why the remote local-capable filter exists** (settled 2026-11-23 — the full reasoning is the
+docstring of `catalog_local_capable` in `bin/session_picker.py`): there is a capability gap between
+what this hardware runs locally and the larger models a remote API offers, so remote models in the
+LOCAL class are hidden by default — usually less capable than the larger remote ones — unless you
+opt out with the "Locally-runnable models" toggle. It is a capability-class line, not an
+availability check: whether a local build exists does not matter. The line is the detected memory
+× the usable share (Mac: 128 GB detected → 96 GB usable; CUDA: 90% of VRAM).
+
+The filter uses an **exact** catalogue match (a normalised id, never fuzzy) as evidence: an
 unclassified remote model with an acquisition row is marked `potentially-local-capable`, with its
-size in the reason. It stays visible, since a catalogue row says the weights *can* be fetched, not
-that they are on disk. A broken catalogue changes nothing (fail-open); `LA_LC_ACQUISITION_EVIDENCE=0`
+size in the reason. It stays visible on purpose — the GREY ZONE: such near-line models may run
+locally but not reliably, and where reliable local operation ends has not been pinned down. A broken catalogue changes nothing (fail-open); `LA_LC_ACQUISITION_EVIDENCE=0`
 turns the evidence off. A JoyIA export saved as `foo.psv.md` is found too.
 
 ## Downloading models
