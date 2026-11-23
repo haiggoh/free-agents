@@ -83,8 +83,123 @@ class Limits:
     def provider(self, pid: str) -> ProviderLimits | None:
         return self.providers.get(pid)
 
-    def model(self, pid: str, model_id: str) -> ModelFacts | None:
-        return self.models.get(f"{pid}:{model_id}")
+    def model(self, pid: str, model_id: str, *, online: bool = False) -> ModelFacts | None:
+        """The model's facts with RUNTIME facts layered in (fix/runtime-model-facts, user rule
+        2026-11-22: facts are fetched by the code, never by a manual snapshot). Context follows
+        CONTEXT_PRECEDENCE. online=False (default) reads caches only — render paths never wait;
+        online=True allows ONE bounded HF lookup (launch-time ladders) and caches its answer."""
+        return _with_runtime_facts(pid, model_id, self.models.get(f"{pid}:{model_id}"), online)
+
+
+# --- runtime model facts (fix/runtime-model-facts) ------------------------------------------------
+# Context precedence, highest first. "pinned" = a snapshot value whose source is a human/doc
+# measurement; "catalog" = the PROVIDER's own published number (what it actually serves); "hf" =
+# the model's config.json via the HF cache the code warms; "roster" = the alias's
+# autocompact_default window proxy (config/remote-registry.json).
+CONTEXT_PRECEDENCE = ("pinned", "catalog", "hf", "roster")
+ONLINE_TIMEOUT_S = 4.0
+_RUNTIME_SOURCES = ("catalog ", "hf ", "roster")
+_FOOTPRINT = None
+_ROSTER = None
+
+
+def _reset_runtime_caches() -> None:
+    """Tests: forget the memoized footprint module and roster windows."""
+    global _FOOTPRINT, _ROSTER
+    _FOOTPRINT = None
+    _ROSTER = None
+
+
+def _set_footprint_module_for_tests(module) -> None:
+    global _FOOTPRINT
+    _FOOTPRINT = module
+
+
+def _footprint():
+    """bin/estimate-model-footprint.py (hyphenated, so loaded by path); None if unavailable."""
+    global _FOOTPRINT
+    if _FOOTPRINT is None:
+        try:
+            import importlib.util
+            here = Path(__file__).resolve().parent
+            if str(here) not in sys.path:
+                sys.path.insert(0, str(here))           # its fa_tls import lives here
+            spec = importlib.util.spec_from_file_location(
+                "fa_footprint_rt", here / "estimate-model-footprint.py")
+            if spec is None or spec.loader is None:
+                return None
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _FOOTPRINT = mod
+        except Exception:
+            return None
+    return _FOOTPRINT
+
+
+def _roster_window(pid: str, model_id: str) -> int | None:
+    """The registry's autocompact_default for (provider, model id), as tokens (fa_capture's
+    WINDOW_TOKENS — one constant per shared label); None for '-', unknown or unreadable."""
+    global _ROSTER
+    if _ROSTER is None:
+        _ROSTER = {}
+        try:
+            here = str(Path(__file__).resolve().parent)
+            if here not in sys.path:
+                sys.path.insert(0, here)
+            import remote_provider_registry as rpr
+            from fa_capture import WINDOW_TOKENS
+            for e in rpr._load_registry()[1]:
+                tok = WINDOW_TOKENS.get(str(e.get("autocompact_default", "")).strip().lower())
+                if tok and e.get("model_id"):
+                    _ROSTER[(e.get("provider", ""), e["model_id"])] = tok
+        except Exception:
+            _ROSTER = {}
+    return _ROSTER.get((pid, model_id))
+
+
+def _hf_runtime_context(model_id: str, online: bool) -> int | None:
+    fp = _footprint()
+    if fp is None or "/" not in (model_id or ""):
+        return None
+    try:
+        ctx = fp.hf_context(model_id)
+        if ctx is None and online:
+            fp.hf_total_params(model_id, timeout=ONLINE_TIMEOUT_S, lane="remote")
+            ctx = fp.hf_context(model_id)
+        return ctx
+    except Exception:
+        return None
+
+
+def _with_runtime_facts(pid: str, model_id: str, base: ModelFacts | None,
+                        online: bool) -> ModelFacts | None:
+    snap_ctx = base.context if base is not None else None
+    snap_src = base.source if base is not None else ""
+    layers = {
+        "pinned": snap_ctx if snap_ctx is not None and not snap_src.startswith(_RUNTIME_SOURCES) else None,
+        "catalog": snap_ctx if snap_ctx is not None and snap_src.startswith(_RUNTIME_SOURCES) else None,
+    }
+    for name in CONTEXT_PRECEDENCE:
+        if name in ("pinned", "catalog") and layers[name] is not None:
+            return base                                  # the snapshot already answers
+        if name == "hf":
+            ctx = _hf_runtime_context(model_id, online)
+            if ctx is not None:
+                return _overlay(base, ctx, f"runtime hf config.json (cached) {model_id}")
+        if name == "roster":
+            ctx = _roster_window(pid, model_id)
+            if ctx is not None:
+                return _overlay(base, ctx, f"roster autocompact_default ({pid}:{model_id})")
+    return base
+
+
+def _overlay(base: ModelFacts | None, ctx: int, source: str) -> ModelFacts:
+    return ModelFacts(context=ctx,
+                      max_output=base.max_output if base is not None else None,
+                      released=base.released if base is not None else None,
+                      broken=base.broken if base is not None else None,
+                      source=source,
+                      reason=(base.reason if base is not None else None))
 
 
 def _err(msg: str) -> LimitsError:

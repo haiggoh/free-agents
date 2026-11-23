@@ -52,6 +52,15 @@ def pick(order, *, need_context, limits, headroom, predicted_wait, timeout, rost
             reasons.append((alias, f"skipped: {prov} is dispatch_only (never a full session)"))
             continue
         facts = limits.model(prov, model_id)
+        if facts is None or facts.context is None:
+            # fix/runtime-model-facts: a candidate the caches cannot answer gets ONE bounded online
+            # lookup (launch time, cached afterwards), so a model released after the snapshot is
+            # judged on real facts instead of being skipped forever. A stub limits object without
+            # the keyword keeps the offline answer.
+            try:
+                facts = limits.model(prov, model_id, online=True)
+            except TypeError:
+                pass
         if facts is not None and facts.broken:
             reasons.append((alias, f"skipped: {prov}:{model_id} is marked broken"))
             continue

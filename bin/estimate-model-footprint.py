@@ -232,6 +232,118 @@ def _hf_get(url: str, timeout: float):
         return HFError("network")
 
 
+def _hf_get_text(url: str, timeout: float):
+    """GET text (a model card README) — same transport, TLS context and error contract as
+    _hf_get (an HFError, never None). Tests replace this function."""
+    import urllib.error
+    import urllib.request
+    import fa_tls
+    try:
+        with urllib.request.urlopen(url, timeout=timeout, context=fa_tls.client_context()) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        return HFError("http", exc.code)
+    except Exception:
+        return HFError("network")
+
+
+# --- remote-lane resolution + context sources (fix/runtime-model-facts, 2026-11-23) ---------
+LANES = ("any", "remote")
+# Conversion orgs whose uploads are right for the LOCAL lane (MLX on a Mac) but are not the model
+# a remote API serves (user 2026-11-23). The remote lane skips them while an upstream repo exists.
+DERIVATIVE_ORGS = ("mlx-community",)
+# Variant suffixes that do not change WHICH model it is (precision / packaging). "-base" is NOT
+# here: a base checkpoint is a different model than the instruct one.
+_VARIANT_SUFFIX = r"-(bf16|fp16|fp8(-[a-z]+)?|nvfp4|fp4|int4|int8|awq|gptq|gguf|w4a16|quantized\.w4a16)$"
+CTX_VERSION = 2          # entries computed under an older context rule refetch once
+ROUTER_TTL_S = 86400
+
+
+def _norm_model_name(model_id: str) -> "tuple[str, str]":
+    """(normalized name, variant suffix) of an id, owner-independent: 'NVIDIA-Nemotron-3-Ultra-
+    550B-A55B-BF16' and 'nemotron-3-ultra-550b-a55b' both normalize to 'nemotron-3-ultra-550b-a55b'."""
+    import re
+    tail = model_id.split("/")[-1].lower()
+    owner = model_id.split("/")[0].lower() if "/" in model_id else ""
+    for pre in {owner, "nvidia"} - {""}:
+        if tail.startswith(pre + "-"):
+            tail = tail[len(pre) + 1:]
+    m = re.search(_VARIANT_SUFFIX, tail)
+    suffix = m.group(1) if m else ""
+    return (tail[: m.start()] if m else tail), suffix
+
+
+def _hf_router_url() -> str:
+    """The HF inference-router catalog (context per serving provider). LA_HF_ROUTER_URL overrides
+    it (tests); a SET value must be http://127.0.0.1:… or https://… or this raises naming it."""
+    import os
+    url = os.environ.get("LA_HF_ROUTER_URL")
+    if url is not None:
+        if not (url.startswith("http://127.0.0.1:") or url.startswith("https://")):
+            raise ValueError(f"LA_HF_ROUTER_URL={url!r} must start with http://127.0.0.1: or https://")
+        return url
+    return "https://router.huggingface.co/v1/models"
+
+
+def _hf_router_index(timeout: float = 8.0, offline: bool = False) -> dict:
+    """{normalized name: largest served context} from the router catalog, cached in the HF cache
+    under '__router__' for ROUTER_TTL_S. A failure caches nothing and answers {}."""
+    try:
+        cache = json.loads(_hf_cache_path().read_text())
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get("__router__")
+    if isinstance(hit, dict) and time.time() - hit.get("at", 0) < ROUTER_TTL_S:
+        return hit.get("index") or {}
+    if offline:
+        return {}
+    try:
+        doc = _hf_get(_hf_router_url(), timeout)
+    except Exception:
+        return {}                     # a test stub that does not know the router URL, or worse
+    if isinstance(doc, HFError) or not isinstance(doc, dict):
+        return {}
+    index: dict = {}
+    for m in doc.get("data") or []:
+        if not isinstance(m, dict) or not m.get("id"):
+            continue
+        name = _norm_model_name(str(m["id"]))[0]
+        ctxs = [p.get("context_length") for p in (m.get("providers") or []) if isinstance(p, dict)]
+        ctxs = [c for c in ctxs if isinstance(c, int) and not isinstance(c, bool) and c > 0]
+        if ctxs:
+            index[name] = max(index.get(name, 0), max(ctxs))
+    try:
+        _hf_cache_store("__router__", {"index": index, "at": time.time()})
+    except OSError:
+        pass
+    return index
+
+
+def hf_router_context(model_id: str, *, offline: bool = False, timeout: float = 8.0):
+    """Largest context any HF router provider serves for this model (owner-independent name
+    match), or None. `timeout` bounds the one catalog GET (callers pass their own budget)."""
+    return _hf_router_index(timeout=timeout, offline=offline).get(_norm_model_name(model_id)[0])
+
+
+def context_from_card(text) -> "int | None":
+    """Largest token count a model card states NEXT TO 'context' ('Context Length | Up to 1M
+    tokens', '1M context length', 'supports a 1M context window'); K/M are decimal (the card's
+    own rounding — exact counts come from the router/config). None when the card states none."""
+    import re
+    if not isinstance(text, str) or not text:
+        return None
+    num = r"(\d+(?:\.\d+)?)\s*([kKmM])\b"
+    pats = (r"context[ _-]*(?:length|window|size)?[^\n\d]{0,40}?" + num,
+            num + r"[ -]*(?:tokens?\s+)?(?:of\s+)?context")
+    best = 0
+    for pat in pats:
+        for m in re.finditer(pat, text, re.IGNORECASE):
+            v = float(m.group(1)) * (1_000_000 if m.group(2).lower() == "m" else 1_000)
+            if 1_000 <= v <= 100_000_000:
+                best = max(best, int(v))
+    return best or None
+
+
 NEG_CACHE_TTL_S = 7 * 86400      # a 401/404 "HF has no such repo" is cached short, not 30 days
 
 
@@ -250,7 +362,8 @@ def _cache_entry_fresh(hit, now: float) -> bool:
     return hit.get("total") is not None and now - hit.get("at", 0) < HF_CACHE_TTL_S
 
 
-def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = False):
+def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = False,
+                    lane: str = "any"):
     """(total parameters, HF repo) for a model id, or (None, None) when no single base repo matches.
 
     Exact repo first (case-sensitive on HF), then a name search accepting only a repo whose
@@ -263,7 +376,15 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
 
     0.54.0 cache WRITE rules (v2 entries): a NETWORK error writes NOTHING (a TLS failure is
     never an answer); HTTP 401/404 writes {"v":2,"total":null,"neg_until":now+7d}; other HTTP
-    statuses write nothing (transient); success writes {"v":2,...}."""
+    statuses write nothing (transient); success writes {"v":2,...}.
+
+    lane (fix/runtime-model-facts, user 2026-11-23): "any" (default) keeps the exact-tail rule —
+    right for LOCAL models and the local-capable filter, where an mlx-community build IS the
+    artifact. "remote" (API rows, ladders) matches the normalized model name, skips
+    DERIVATIVE_ORGS while an upstream repo exists, and prefers the full-precision build; an
+    entry resolved before to a derivative repo is re-resolved ONCE (lane recorded)."""
+    if lane not in LANES:
+        raise ValueError(f"hf_total_params: lane must be one of {LANES}, got {lane!r}")
     cache_path = _hf_cache_path()
     key = model_id.lower()
     try:
@@ -277,19 +398,20 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
         # A render-time read never waits on the network: any fresh entry answers, with or
         # without a date (an offline entry lacking one is simply not old yet).
         return (hit.get("total"), hit.get("repo")) if fresh and isinstance(hit, dict) else (None, None)
-    if fresh and isinstance(hit, dict) and ("v" in hit or "created" in hit):
+    stale_for_lane = (isinstance(hit, dict) and lane == "remote" and hit.get("lane") != "remote"
+                      and str(hit.get("repo") or "").split("/")[0].lower() in DERIVATIVE_ORGS)
+    if fresh and isinstance(hit, dict) and ("v" in hit or "created" in hit) and not stale_for_lane:
         # v2 entries (incl. negatives) and v1 entries that already gained `created` answer
         # without a refetch; a v1 entry with a count but no `created` refetches ONCE to gain
         # it (and keeps the count if that refetch fails) — never a mass refetch.
-        if hit.get("repo") and not hit.get("ctx_done") and hit.get("total") is not None:
-            # 2026-11-22 hotfix: an entry cached before context existed gains it ONCE — only
-            # config.json is fetched, the fresh count is not refetched. A NEGATIVE entry
-            # (total None: "HF has no such repo") has no repo page to read config.json from —
-            # leave ctx_done unset so the next real resolution (or an expired negative) sets it.
-            answered, ctx = _hf_fetch_context(hit["repo"], timeout)
+        if hit.get("ctx_v") != CTX_VERSION:
+            # An entry whose context predates the current rule gains it ONCE — the fresh count
+            # is not refetched. A NEGATIVE entry (no repo) still asks the router catalog, which
+            # needs no repo (mistral-large-4 has none, yet is served at 1048576).
+            answered, ctx = _hf_fetch_context(hit.get("repo"), timeout, model_id)
             if answered:
                 try:
-                    _hf_cache_store(key, {**hit, "ctx": ctx, "ctx_done": True})
+                    _hf_cache_store(key, {**hit, "ctx": ctx, "ctx_done": True, "ctx_v": CTX_VERSION})
                 except OSError:
                     pass
         return hit.get("total"), hit.get("repo")
@@ -323,9 +445,28 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
             else:
                 saw_transient_http = True
         elif isinstance(found, list):
-            exact = [m for m in found if isinstance(m, dict)
-                     and str(m.get("id", "")).split("/")[-1].lower() == tail.lower()
-                     and (m.get("safetensors") or {}).get("total")]
+            if lane == "remote":
+                want = _norm_model_name(model_id)[0]
+                exact = [m for m in found if isinstance(m, dict)
+                         and (m.get("safetensors") or {}).get("total")
+                         and _norm_model_name(str(m.get("id", "")))[0] == want]
+                upstream = [m for m in exact if m["id"].split("/")[0].lower() not in DERIVATIVE_ORGS]
+                exact = upstream or exact
+                # The model's OWN org first, THEN the precision tier — measured on live HF
+                # 2026-11-23: tier-first picked unsloth's suffix-less re-upload over
+                # nvidia/...-BF16 for nvidia/nemotron-3-ultra-550b-a55b.
+                id_owner = model_id.split("/")[0].lower() if "/" in model_id else ""
+                own = [m for m in exact if m["id"].split("/")[0].lower() == id_owner]
+                exact = own or exact
+                for tier in (("",), ("bf16", "fp16")):
+                    tiered = [m for m in exact if _norm_model_name(m["id"])[1] in tier]
+                    if tiered:
+                        exact = tiered      # quantized uploads report PACKED counts: full precision first
+                        break
+            else:
+                exact = [m for m in found if isinstance(m, dict)
+                         and str(m.get("id", "")).split("/")[-1].lower() == tail.lower()
+                         and (m.get("safetensors") or {}).get("total")]
             owner = model_id.split("/")[0].lower() if "/" in model_id else None
             if owner:
                 same_owner = [m for m in exact if m["id"].split("/")[0].lower() == owner]
@@ -360,12 +501,15 @@ def hf_total_params(model_id: str, *, timeout: float = 8.0, offline: bool = Fals
                      "at": now}
             if total is None and not (isinstance(hit, dict) and hit.get("v") == 2 and hit.get("total") is None):
                 entry["neg_until"] = now + NEG_CACHE_TTL_S
-        if repo and not entry.get("ctx_done"):
-            # 2026-11-22 hotfix: the context window rides on the same resolution (the repo just
-            # found); a network/5xx failure leaves ctx_done unset so the next warm-up retries.
-            answered, ctx = _hf_fetch_context(repo, timeout)
+        if entry.get("ctx_v") != CTX_VERSION:
+            # The context window rides on the same resolution (card + router + config.json of
+            # the repo just found; the router alone when there is none); a network/5xx failure
+            # leaves ctx_v unset so the next warm-up retries.
+            answered, ctx = _hf_fetch_context(repo, timeout, model_id)
             if answered:
-                entry = {**entry, "ctx": ctx, "ctx_done": True}
+                entry = {**entry, "ctx": ctx, "ctx_done": True, "ctx_v": CTX_VERSION}
+        if lane == "remote":
+            entry = {**entry, "lane": "remote"}
         try:
             _hf_cache_store(key, entry)
         except OSError:
@@ -485,18 +629,37 @@ def format_context(n) -> str:
         return ""
 
 
-def _hf_fetch_context(repo: str, timeout: float) -> "tuple[bool, int | None]":
-    """(answered, context window) from the RESOLVED repo's config.json (2026-11-22 hotfix).
-
-    answered=False on a network error or a transient HTTP status: nothing is cached, the next
-    warm-up retries. 401/403/404 (gated, private, no config) is an ANSWER with context None, so a
-    gated repo is not refetched every warm-up. Honors LA_HF_API_BASE (same origin as the API)."""
+def _hf_fetch_context(repo, timeout: float, model_id: str = "") -> "tuple[bool, int | None]":
+    """(answered, context window): the MAX of three HF sources (fix/runtime-model-facts —
+    config.json alone said 262144 for Nemotron 3 Ultra, whose card states up to 1M tokens):
+      * the model card (README) of the resolved repo — the advertised window (context_from_card)
+      * the HF router catalog — the largest window a provider actually serves (by model name)
+      * config.json max_position_embeddings & friends (context_from_config)
+    answered=False only when a repo's config fetch failed transiently (network/5xx) — nothing is
+    cached and the next warm-up retries; 401/403/404 is an answer. Without a repo the router alone
+    answers (answered=True even when it knows nothing: an empty router answer is still an answer
+    for 'no repo'). Honors LA_HF_API_BASE / LA_HF_ROUTER_URL."""
     from urllib.parse import quote
-    origin = _hf_api_base()[: -len("/api/models")]
-    obj = _hf_get(f"{origin}/{quote(repo, safe='/')}/resolve/main/config.json", timeout)
-    if isinstance(obj, HFError):
-        return (obj.kind == "http" and obj.status in (401, 403, 404)), None
-    return True, context_from_config(obj)
+    found = []
+    answered = True
+    if repo:
+        origin = _hf_api_base()[: -len("/api/models")]
+        obj = _hf_get(f"{origin}/{quote(repo, safe='/')}/resolve/main/config.json", timeout)
+        if isinstance(obj, HFError):
+            if not (obj.kind == "http" and obj.status in (401, 403, 404)):
+                answered = False
+        else:
+            found.append(context_from_config(obj))
+        card = _hf_get_text(f"{origin}/{quote(repo, safe='/')}/raw/main/README.md", timeout)
+        if not isinstance(card, HFError):
+            found.append(context_from_card(card))
+    for name in {model_id, repo} - {None, ""}:
+        try:
+            found.append(hf_router_context(name, timeout=timeout))
+        except Exception:
+            pass                              # a router failure never blocks the other sources
+    vals = [v for v in found if isinstance(v, int) and not isinstance(v, bool) and v > 0]
+    return answered, (max(vals) if vals else None)
 
 
 def hf_context(model_id: str):
@@ -785,7 +948,7 @@ def _run_hf_warm(ids_file: str, max_seconds: int, cache_override: str | None) ->
                 # the per-call timeout shrinks with the remaining budget (M2 review): one
                 # slow call can overshoot the cap by at most its own timeout, never hang
                 try:
-                    total, _repo = hf_total_params(mid, timeout=max(1.0, min(8.0, max_seconds - elapsed)))
+                    total, _repo = hf_total_params(mid, lane="remote", timeout=max(1.0, min(8.0, max_seconds - elapsed)))
                     if total is not None:
                         sized += 1
                 except Exception as exc:

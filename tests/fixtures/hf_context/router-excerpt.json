@@ -1,0 +1,680 @@
+{
+ "object": "list",
+ "data": [
+  {
+   "id": "zai-org/GLM-5.3-Flash",
+   "object": "model",
+   "created": 1787640194,
+   "owned_by": "zai-org",
+   "architecture": {
+    "input_modalities": [
+     "text",
+     "image"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "providers": [
+    {
+     "provider": "baseten",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 407,
+     "throughput": 99,
+     "is_model_author": false,
+     "provider_name": "BaseTen",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp8"
+    },
+    {
+     "provider": "cohere",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.105,
+      "output": 0.34
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 510,
+     "throughput": 205,
+     "is_model_author": false,
+     "provider_name": "Cohere",
+     "uptime_last_day_percent": 99.85984583041345,
+     "quantization": "nvfp4"
+    },
+    {
+     "provider": "coreweave",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.12,
+      "output": 0.38
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 570,
+     "throughput": 147,
+     "is_model_author": false,
+     "provider_name": "CoreWeave",
+     "uptime_last_day_percent": 97.70833333333333,
+     "quantization": "nvfp4"
+    },
+    {
+     "provider": "crusoe",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 704,
+     "throughput": 94,
+     "is_model_author": false,
+     "provider_name": "Crusoe",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "deepinfra",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.1005,
+      "output": 0.335
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 725.5,
+     "throughput": 101,
+     "is_model_author": false,
+     "provider_name": "DeepInfra",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "digitalocean",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.0975,
+      "output": 0.325
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 802,
+     "throughput": 109,
+     "is_model_author": false,
+     "provider_name": "DigitalOcean",
+     "uptime_last_day_percent": 99.30555555555556
+    },
+    {
+     "provider": "fireworks-ai",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 592,
+     "throughput": 119,
+     "is_model_author": false,
+     "provider_name": "Fireworks",
+     "uptime_last_day_percent": 99.79166666666667
+    },
+    {
+     "provider": "inceptron",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.16,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 593,
+     "throughput": 64,
+     "is_model_author": false,
+     "provider_name": "Inceptron",
+     "uptime_last_day_percent": 99.72222222222223,
+     "quantization": "fp8"
+    },
+    {
+     "provider": "inference-net",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.108,
+      "output": 0.35
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 361,
+     "throughput": 108,
+     "is_model_author": false,
+     "provider_name": "InferenceNet",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "makora",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.14,
+      "output": 0.29
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 1521,
+     "throughput": 58,
+     "is_model_author": false,
+     "provider_name": "Makora",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "mistral",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 1037,
+     "throughput": 129,
+     "is_model_author": false,
+     "provider_name": "Mistral",
+     "uptime_last_day_percent": 100
+    },
+    {
+     "provider": "modal",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 392,
+     "throughput": 83,
+     "is_model_author": false,
+     "provider_name": "Modal",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "morph",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.124,
+      "output": 0.356
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 1242,
+     "throughput": 16,
+     "is_model_author": false,
+     "provider_name": "Morph",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp8"
+    },
+    {
+     "provider": "near-ai",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.08,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 3657,
+     "throughput": 23,
+     "is_model_author": false,
+     "provider_name": "Near AI",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp8"
+    },
+    {
+     "provider": "nebius",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 646,
+     "throughput": 68,
+     "is_model_author": false,
+     "provider_name": "Nebius",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "open-inference",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.05,
+      "output": 0.45
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 898,
+     "throughput": 140,
+     "is_model_author": false,
+     "provider_name": "OpenInference",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "parasail",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 1126,
+     "throughput": 82,
+     "is_model_author": false,
+     "provider_name": "Parasail",
+     "uptime_last_day_percent": 98.75,
+     "quantization": "fp8"
+    },
+    {
+     "provider": "particle-ai",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.13,
+      "output": 0.65
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 552,
+     "throughput": 135,
+     "is_model_author": false,
+     "provider_name": "Particle AI",
+     "uptime_last_day_percent": 100,
+     "quantization": "nvfp4"
+    },
+    {
+     "provider": "reka",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.12,
+      "output": 0.3
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 558,
+     "throughput": 48,
+     "is_model_author": false,
+     "provider_name": "Reka",
+     "uptime_last_day_percent": 100
+    },
+    {
+     "provider": "relace",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.0399,
+      "output": 0.0784
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 1511,
+     "throughput": 67,
+     "is_model_author": false,
+     "provider_name": "Relace",
+     "uptime_last_day_percent": 99.65277777777779,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "river",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.12,
+      "output": 0.4
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 560,
+     "throughput": 100,
+     "is_model_author": false,
+     "provider_name": "River",
+     "uptime_last_day_percent": 99.01060070671377
+    },
+    {
+     "provider": "sail-research",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.175,
+      "output": 0.625
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 2415,
+     "throughput": 39,
+     "is_model_author": false,
+     "provider_name": "Sail Research",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "tenstorrent",
+     "status": "live",
+     "context_length": 262000,
+     "pricing": {
+      "input": 0.075,
+      "output": 0.25
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 2545,
+     "throughput": 36,
+     "is_model_author": false,
+     "provider_name": "Tenstorrent",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp8"
+    },
+    {
+     "provider": "together",
+     "status": "live",
+     "context_length": 1048575,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 503,
+     "throughput": 165,
+     "is_model_author": false,
+     "provider_name": "Together",
+     "uptime_last_day_percent": 100
+    },
+    {
+     "provider": "venice",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 710,
+     "throughput": 109,
+     "is_model_author": false,
+     "provider_name": "Venice",
+     "uptime_last_day_percent": 100
+    },
+    {
+     "provider": "wafer",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.042,
+      "output": 0.184
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 396,
+     "throughput": 108,
+     "is_model_author": false,
+     "provider_name": "Wafer",
+     "uptime_last_day_percent": 100,
+     "quantization": "nvfp4"
+    },
+    {
+     "provider": "novita",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.15,
+      "output": 0.5
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 644.4,
+     "throughput": 62.101053182823804,
+     "is_model_author": false
+    },
+    {
+     "provider": "featherless-ai",
+     "status": "live",
+     "is_free": false,
+     "is_model_author": false
+    },
+    {
+     "provider": "zai-org",
+     "status": "live",
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 1687.4,
+     "throughput": 38.80229478020617,
+     "is_model_author": true
+    }
+   ]
+  },
+  {
+   "id": "mistralai/Mistral-Large-4-1T-A52B",
+   "object": "model",
+   "created": 1790793313,
+   "owned_by": "mistralai",
+   "architecture": {
+    "input_modalities": [
+     "text",
+     "image"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "providers": [
+    {
+     "provider": "mistral",
+     "status": "live",
+     "context_length": 1048576,
+     "pricing": {
+      "input": 0.7,
+      "output": 2.1
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 1520.5,
+     "throughput": 44,
+     "is_model_author": true,
+     "provider_name": "Mistral",
+     "uptime_last_day_percent": 100
+    }
+   ]
+  },
+  {
+   "id": "zai-org/GLM-5.3-Flash-BF16",
+   "object": "model",
+   "created": 1787640305,
+   "owned_by": "zai-org",
+   "architecture": {
+    "input_modalities": [
+     "text",
+     "image"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "providers": [
+    {
+     "provider": "zai-org",
+     "status": "live",
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 1403,
+     "throughput": 33.77964325362138,
+     "is_model_author": true
+    }
+   ]
+  },
+  {
+   "id": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16",
+   "object": "model",
+   "created": 1780498204,
+   "owned_by": "nvidia",
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "providers": [
+    {
+     "provider": "baseten",
+     "status": "live",
+     "context_length": 202800,
+     "pricing": {
+      "input": 0.6,
+      "output": 2.4
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": false,
+     "first_token_latency_ms": 215,
+     "throughput": 112,
+     "is_model_author": false,
+     "provider_name": "BaseTen",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "coreweave",
+     "status": "live",
+     "context_length": 262144,
+     "pricing": {
+      "input": 0.5,
+      "output": 2.15
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 394,
+     "throughput": 262,
+     "is_model_author": false,
+     "provider_name": "CoreWeave",
+     "uptime_last_day_percent": 97.04880817253121,
+     "quantization": "bf16"
+    },
+    {
+     "provider": "deepinfra",
+     "status": "live",
+     "context_length": 262144,
+     "pricing": {
+      "input": 0.5,
+      "output": 2.2
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 330,
+     "throughput": 205,
+     "is_model_author": false,
+     "provider_name": "DeepInfra",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp4"
+    },
+    {
+     "provider": "fireworks-ai",
+     "status": "live",
+     "context_length": 262144,
+     "pricing": {
+      "input": 0.6,
+      "output": 2.4
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": true,
+     "first_token_latency_ms": 366.5,
+     "throughput": 211,
+     "is_model_author": false,
+     "provider_name": "Fireworks",
+     "uptime_last_day_percent": 97.71428571428571
+    },
+    {
+     "provider": "venice",
+     "status": "live",
+     "context_length": 256000,
+     "pricing": {
+      "input": 0.625,
+      "output": 3.125
+     },
+     "is_free": false,
+     "supports_tools": true,
+     "supports_structured_output": false,
+     "first_token_latency_ms": 764,
+     "throughput": 219,
+     "is_model_author": false,
+     "provider_name": "Venice",
+     "uptime_last_day_percent": 100,
+     "quantization": "fp8"
+    }
+   ]
+  }
+ ]
+}

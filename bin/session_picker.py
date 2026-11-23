@@ -163,6 +163,14 @@ def load_remote_agents() -> list[m.RemoteAgent]:
                                         has_key=p[5] == "1", broken=len(p) >= 7 and p[6] == "1",
                                         model_id=p[7] if len(p) == 8 else ""))
     # 0.62.0 C8/C10: attach the provider-limits facts (context / max_output) to each row
+    _attach_limits_facts(agents)
+    return agents
+
+
+def _attach_limits_facts(agents) -> None:
+    """Attach context / max_output to each roster row from Limits.model() — snapshot plus the
+    RUNTIME layers (HF cache, roster window). Cache-only: a render never waits on the network.
+    Re-run after a roster warm-up so the filter and infobox see the freshly fetched facts."""
     try:
         import provider_limits as _pl
         _limits = _pl.load()
@@ -173,7 +181,23 @@ def load_remote_agents() -> list[m.RemoteAgent]:
                 a.max_output = f.max_output
     except Exception:
         pass                                    # facts are an aid, never a launch blocker
-    return agents
+
+
+def _roster_warm_groups(agents) -> dict:
+    """{provider: [model ids]} for the roster rows' HF warm-up (fix/runtime-model-facts, F4: the
+    warm-up used to run only when a provider's live CATALOG was opened, so the roster aliases
+    people actually launch never gained context). HF-shaped ids only ("owner/name"), each once,
+    roster order kept."""
+    groups: dict = {}
+    for a in agents:
+        mid = getattr(a, "model_id", "") or ""
+        prov = getattr(a, "provider", "") or ""
+        if "/" not in mid or not prov:
+            continue
+        ids = groups.setdefault(prov, [])
+        if mid not in ids:
+            ids.append(mid)
+    return groups
 
 
 _FOOTPRINT = None
@@ -307,7 +331,7 @@ def model_param_count(provider, model_id):
             fp = _footprint()
             total = fp.parse_params(model_id)["total_b"]
             if total is None:
-                total, _repo = fp.hf_total_params(model_id, offline=True)
+                total, _repo = fp.hf_total_params(model_id, offline=True, lane="remote")
                 total = round(total / 1e9, 1) if total else None   # HF counts raw params
             return float(total) if total else None
         except Exception:
@@ -396,12 +420,12 @@ def _warm_hf_cache(provider, model_ids, stop=None):
         if stop.is_set():
             return
         try:
-            fp.hf_total_params(mid, timeout=4.0)
+            fp.hf_total_params(mid, timeout=4.0, lane="remote")
         except Exception:
             pass
         try:
             # 2026-11-22 hotfix: warm the context window with the same entry (config.json fetch)
-            fp.hf_total_params(mid, timeout=4.0)
+            fp.hf_total_params(mid, timeout=4.0, lane="remote")
         except Exception:
             pass
         # A verdict computed while the cache was still cold (fail-open) must not outlive
@@ -1478,6 +1502,16 @@ class Picker(App):
             t = threading.Thread(target=self._warm_catalog_bg, args=(prov, ids), daemon=True)
             self._bg_threads.append(t)      # 0.53.0: tracked for stop_background()
             t.start()
+        # fix/runtime-model-facts (F4): the ROSTER rows warm too — same background warm-up, same
+        # kill switch, after the rows were delivered.
+        if (kind == "remote" and data and not err
+                and os.environ.get("LA_PICKER_HF_LOOKUP", "1") != "0"):
+            import threading
+            for prov, ids in _roster_warm_groups(data).items():
+                t = threading.Thread(target=self._warm_catalog_bg, args=(prov, ids[:HF_WARM_LIMIT]),
+                                     daemon=True)
+                self._bg_threads.append(t)
+                t.start()
 
     def _warm_catalog_bg(self, provider, model_ids):
         """HF size/age warm-up for a landed catalog, in the background (0.50.8; 0.55.8 Task 2:
@@ -1491,6 +1525,9 @@ class Picker(App):
 
         def apply():
             sm = self.screen_model
+            # fix/runtime-model-facts: roster rows carry facts attached at load time; refresh
+            # them from the now-warm cache before the rebuild reads them.
+            _attach_limits_facts((getattr(self, "cache", {}) or {}).get("remote") or [])
             # 0.54.0 Task 3: after the warm-up, REBUILD the groups — the size suffix is baked
             # into the Item label at regroup/catalog-build time, so a bare render_model never
             # painted the sizes. Remote (list open) and Lowkey's API groups both.

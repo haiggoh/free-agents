@@ -56,6 +56,13 @@ os.environ["LA_NVIDIA_THROTTLE_STATE"] = str(
     Path(_tempfile.mkdtemp(prefix="fa-throttle-test-")) / f"throttle{_worker}.json")
 os.environ["LA_HF_PARAMS_CACHE"] = str(
     Path(_tempfile.mkdtemp(prefix="fa-hfparams-test-")) / f"hf-params{_worker}.json")
+# fix/runtime-model-facts: the NETWORK fence for Hugging Face. Limits.model(online=True) and the
+# warm-ups would otherwise reach the real huggingface.co from inside the suite (measured: a ladder
+# test's "unknown context" model resolved to 1M over the network). An unreachable loopback origin
+# makes every un-stubbed HF call a fast network error — which the cache rules never cache. Tests
+# with their own fake server override it; stubs of _hf_get never reach it.
+os.environ["LA_HF_API_BASE"] = "http://127.0.0.1:9"
+os.environ["LA_HF_ROUTER_URL"] = "http://127.0.0.1:9/v1/models"   # the router catalog too
 # 0.62.0 (provider buckets): per-PROVIDER buckets live under FA_LIMITER_DIR (default
 # ~/.claude/free-agents/limiter) — the same live-state fence as the NVIDIA file applies:
 # FORCED to a per-worker sandbox, never the real dir.
