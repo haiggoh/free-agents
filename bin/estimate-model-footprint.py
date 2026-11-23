@@ -677,35 +677,88 @@ def hf_context(model_id: str):
     return None
 
 
+def budget_from_hardware(hw: dict):
+    """(device_gb, kind) from the CANONICAL detection (bin/la-hw-detect.sh LA_* values): an
+    accelerator with its own memory (cuda/rocm) is judged by VRAM, mlx (Apple unified memory)
+    and cpu-only by system RAM; (None, None) when the detection says nothing usable."""
+    def num(key):
+        try:
+            v = float(str(hw.get(key) or "").strip())
+            return v if v > 0 else None
+        except ValueError:
+            return None
+    kind = str(hw.get("LA_HARDWARE") or "").strip().lower()
+    vram, ram = num("LA_VRAM_GB"), num("LA_SYSTEM_RAM_GB")
+    if kind in ("cuda", "rocm") and vram:
+        return vram, "vram"
+    if kind in ("mlx", "cpu-only", "opencl") and ram:
+        return ram, "unified"
+    return None, None
+
+
+def _canonical_hw() -> dict:
+    """The canonical detection, once: LA_HARDWARE/LA_VRAM_GB/LA_SYSTEM_RAM_GB from the
+    environment when a launcher already exported them, else bin/la-hw-detect.sh sourced in a
+    bash child (bounded). {} when unavailable. Tests replace this function."""
+    import os
+    keys = ("LA_HARDWARE", "LA_VRAM_GB", "LA_SYSTEM_RAM_GB")
+    if os.environ.get("LA_HARDWARE"):
+        return {k: os.environ.get(k, "") for k in keys}
+    script = pathlib.Path(__file__).resolve().parent / "la-hw-detect.sh"
+    if not script.is_file():
+        return {}
+    try:
+        import subprocess as _sp
+        out = _sp.run(["bash", "-c", 'source "$1" >/dev/null 2>&1; '
+                       'printf "%s|%s|%s" "$LA_HARDWARE" "$LA_VRAM_GB" "$LA_SYSTEM_RAM_GB"',
+                       "_", str(script)], capture_output=True, text=True, timeout=20,
+                      stdin=_sp.DEVNULL).stdout.strip()
+    except Exception:
+        return {}
+    parts = out.split("|")
+    return dict(zip(keys, parts)) if len(parts) == 3 else {}
+
+
+def _fallback_device_read(platform: str, run, meminfo_text):
+    """The estimator's own minimal read when the canonical detection is unavailable. On Linux
+    a CUDA GPU is asked FIRST: /proc/meminfo always exists there, so reading it first judged a
+    CUDA box by system RAM instead of VRAM (fixed 2026-11-23). `run(argv) -> stdout`."""
+    if platform == "darwin":
+        out = (run(["sysctl", "-n", "hw.memsize"]) or "").strip()
+        return (int(out) / 2 ** 30, "unified") if out.isdigit() else (None, None)
+    lines = (run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+             or "").strip().splitlines()
+    if lines and lines[0].strip().isdigit():
+        return int(lines[0].strip()) / 1024, "vram"                      # MiB -> GiB
+    for line in (meminfo_text or "").splitlines():
+        if line.startswith("MemTotal:"):
+            return int(line.split()[1]) / 2 ** 20, "unified"            # kB -> GiB
+    return None, None
+
+
 def _device_memory_gb():
-    """(usable_gb, kind) of THIS device — unified RAM on macOS/Linux, VRAM on CUDA —
-    memoized; (None, None) when nothing can be read. bin/la-hw-detect.sh reads the same
-    sources for the launcher; this is the estimator's own minimal read so a one-shot
-    `estimate` need not source a shell stack. Never raises."""
+    """(usable_gb, kind) of THIS device, tied to the DETECTED hardware (user 2026-11-23):
+    the canonical bin/la-hw-detect.sh first (one detection for launcher and estimator), the
+    estimator's minimal read only when that is unavailable. Memoized; (None, None) when
+    nothing can be read. Never raises."""
     global _DEVICE_BUDGET
     if _DEVICE_BUDGET is not None:
         return _DEVICE_BUDGET
     gb = kind = None
     try:
-        import subprocess as _sp
-        if sys.platform == "darwin":
-            out = _sp.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True,
-                          timeout=5).stdout.strip()
-            if out.isdigit():
-                gb, kind = int(out) / 2 ** 30, "unified"     # Apple counts GiB
-        else:
+        gb, kind = budget_from_hardware(_canonical_hw())
+        if gb is None:
+            import subprocess as _sp
+
+            def run(argv):
+                try:
+                    return _sp.run(argv, capture_output=True, text=True, timeout=10,
+                                   stdin=_sp.DEVNULL).stdout
+                except Exception:
+                    return ""
             meminfo = pathlib.Path("/proc/meminfo")
-            if meminfo.exists():
-                for line in meminfo.read_text().splitlines():
-                    if line.startswith("MemTotal:"):
-                        gb, kind = int(line.split()[1]) / 2 ** 20, "unified"   # kB -> GiB
-                        break
-            if gb is None:
-                out = _sp.run(["nvidia-smi", "--query-gpu=memory.total",
-                               "--format=csv,noheader,nounits"], capture_output=True,
-                              text=True, timeout=10).stdout.strip().splitlines()
-                if out and out[0].strip().isdigit():
-                    gb, kind = int(out[0].strip()) / 1024, "vram"              # MiB -> GiB
+            gb, kind = _fallback_device_read(sys.platform, run,
+                                             meminfo.read_text() if meminfo.exists() else "")
     except Exception:
         gb = kind = None
     _DEVICE_BUDGET = (gb, kind)
