@@ -74,6 +74,7 @@ Environment:
 
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -617,7 +618,58 @@ def candidates(prefs, env, local_ok=None, role=None, avoid_family=None, local_fa
     # entries are dropped here — every caller (run, --list, the intercept's dispatch) sees it
     if _local_agents_only(env) and _is_local_session(env):
         order = [e for e in order if e.get("kind") == "local"]
+    # 0.62.0 C7 (dispatch): capacity-weighted spread — but ONLY when the headrooms actually
+    # differ. With all-equal headroom the spread buys nothing and determinism is worth more
+    # (the alternates-adjacent-to-primary invariant of build_plan, reproducible attempts).
+    try:
+        import provider_limits as _pl
+        import rate_limiter as _rl
+        _limits = _pl.load()
+        _hrs = [round(_rl.provider_headroom(e.get("provider", "")), 6)
+                for e in order if e.get("kind") == "remote"]
+        if _hrs and len(set(_hrs)) > 1:
+            order = rank_entries(order, need_context=0, need_output=0, limits=_limits,
+                                 headroom=_rl.provider_headroom, rng=random.Random())
+    except Exception:
+        pass                                    # limits stack unavailable: plain order
     return order
+
+
+def pref_weight(rank: int) -> float:
+    """Preference weight of the rank-th entry: 1/(1+r)."""
+    return 1.0 / (1.0 + rank)
+
+
+def rank_entries(entries, *, need_context, need_output, limits, headroom, rng):
+    """0.62.0 C7: eligible entries ordered by weighted random draw WITHOUT replacement,
+    weight = pref_weight(original rank) * headroom(provider). Ineligible entries (model
+    max_output < need_output) are dropped; headroom-0 entries move to the END in original
+    order. A seeded rng makes tests deterministic."""
+    import random as _random  # noqa: F401  (type only; the caller's rng drives)
+    ranked = list(enumerate(entries))
+    eligible = []
+    for rank, e in ranked:
+        if e.get("kind") != "remote":
+            eligible.append((rank, e))
+            continue
+        prov = e.get("provider", "")
+        facts = limits.model(prov, e.get("model", "")) if prov else None
+        if facts is not None and facts.max_output is not None and facts.max_output < need_output:
+            continue                            # dropped: can never produce enough output
+        eligible.append((rank, e))
+    zero = [(r, e) for r, e in eligible if e.get("kind") == "remote"
+            and headroom(e.get("provider", "")) <= 0.0]
+    live = [(r, e) for r, e in eligible if (r, e) not in zero]
+    out = []
+    pool = list(live)
+    while pool:
+        weights = [pref_weight(r) * max(headroom(e.get("provider", "")), 1e-9)
+                   for r, e in pool]
+        pick = rng.choices([e for _r, e in pool], weights=weights, k=1)[0]
+        pool = [pe for pe in pool if pe[1] is not pick]
+        out.append(pick)
+    out.extend(e for _r, e in zero)              # exhausted providers last, still reachable
+    return out
 
 
 def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None, local_fallback=False):
