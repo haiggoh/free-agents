@@ -434,6 +434,76 @@ class LearnedRequestFixTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class TextOnlyFallbackTests(unittest.TestCase):
+    """A text-only fallback gets the conversation WITHOUT its images instead of a 400.
+
+    Incident 2026-11-23 (proxy-4143.log, 10:31:24): GLM 5.3 Flash 429'd; fallbacks 1-2 each
+    answered this 400 for every turn, because the history carried a screenshot. No retry could
+    ever succeed, so the session never recovered. A session that lost its images still works.
+    """
+    NIM = ("Nvidia_nimException - Received multimodal data but multimodal processing is not "
+           "enabled. Use --enable-multimodal flag to enable multimodal processing.")
+    PNG = {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}
+    setUp, _fail, _pre = (LearnedRequestFixTests.setUp, LearnedRequestFixTests._fail,
+                          LearnedRequestFixTests._pre)
+
+    def _messages(self):
+        return [
+            {"role": "user", "content": [{"type": "text", "text": "look"},
+                                         {"type": "image", "source": dict(self.PNG)}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Read",
+                                               "input": {"file_path": "shot.png"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                          "content": [{"type": "image", "source": dict(self.PNG)}]}]},
+            {"role": "user", "content": [{"type": "image_url",
+                                          "image_url": {"url": "data:image/png;base64,iVBO"}}]},
+            {"role": "user", "content": "plain string content"},
+        ]
+
+    @staticmethod
+    def _has_image(node) -> bool:
+        if isinstance(node, dict):
+            return node.get("type") in ("image", "image_url") or any(
+                TextOnlyFallbackTests._has_image(v) for v in node.values())
+        if isinstance(node, list):
+            return any(TextOnlyFallbackTests._has_image(v) for v in node)
+        return False
+
+    def test_images_pass_through_before_any_refusal(self):
+        out = self._pre("stepfun-ai/step-5-preview", provider="nvidia_nim", messages=self._messages())
+        self.assertTrue(self._has_image(out["messages"]))
+
+    def test_multimodal_refusal_strips_every_image_shape_for_that_model(self):
+        log = self._fail(self.NIM, "stepfun-ai/step-5-preview", provider="nvidia_nim")
+        self.assertIn("text-only", log)
+        out = self._pre("stepfun-ai/step-5-preview", provider="nvidia_nim", messages=self._messages())
+        msgs = out["messages"]
+        self.assertFalse(self._has_image(msgs), "top-level, tool_result-nested and image_url all go")
+        # Each image became a text note the model can read, so it knows one was there.
+        self.assertEqual(msgs[0]["content"][0], {"type": "text", "text": "look"})
+        self.assertEqual(msgs[0]["content"][1]["type"], "text")
+        self.assertIn("image", msgs[0]["content"][1]["text"].lower())
+        self.assertEqual(msgs[2]["content"][0]["type"], "tool_result")
+        self.assertEqual(msgs[2]["content"][0]["content"][0]["type"], "text")
+        self.assertEqual(msgs[3]["content"][0]["type"], "text")
+        self.assertEqual(msgs[4]["content"], "plain string content")
+        self.assertEqual(msgs[1], self._messages()[1], "non-image blocks are untouched")
+
+    def test_strip_never_mutates_the_shared_request(self):
+        # The router hands the same request to the primary and every fallback: an in-place
+        # edit would blind an image-capable model later in the chain.
+        self._fail(self.NIM, "stepfun-ai/step-5-preview", provider="nvidia_nim")
+        msgs = self._messages()
+        self._pre("stepfun-ai/step-5-preview", provider="nvidia_nim", messages=msgs)
+        self.assertEqual(msgs, self._messages())
+
+    def test_other_models_keep_their_images(self):
+        self._fail(self.NIM, "stepfun-ai/step-5-preview", provider="nvidia_nim")
+        out = self._pre("z-ai/glm-5.3-flash", provider="nvidia_nim", messages=self._messages())
+        self.assertTrue(self._has_image(out["messages"]))
+
+
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
 class NativeLaneTests(unittest.TestCase):
     """Fix 7: on the native Anthropic lane, Claude Code's PER-TURN effort (output_config on a
     mid-conversation role:system message, beta per-turn-control-2026-07-01) is folded into the

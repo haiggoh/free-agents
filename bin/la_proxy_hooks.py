@@ -267,6 +267,13 @@ _ALWAYS_THINKS = re.compile(r"(?:always\s+engages\s+in\s+thinking|thinking\s+can
 # prompt_cache_key because Groq's config CLAIMS support for it; Groq's API rejects it.
 _PROVIDER_DROP = {"groq": {"prompt_cache_key"}}
 _LEARNED_DROP: dict[str, set] = {}      # model -> request keys it rejected
+# 0.61.3: a text-only model refusing images. Real NIM text (proxy-4143.log, 2026-11-23): "Received
+# multimodal data but multimodal processing is not enabled". Claude Code resends the whole history
+# every turn, so ONE screenshot made every text-only fallback fail every turn, forever.
+_NO_IMAGES = re.compile(r"multimodal\s+(?:data|processing|input)|does\s+not\s+support\s+(?:image|vision)|"
+                        r"image\s+input\s+is\s+not\s+supported", re.I)
+_TEXT_ONLY_MODELS: set = set()
+IMAGE_PLACEHOLDER = "[image omitted: this fallback model cannot read images]"
 _NO_REASONING_MODELS: set = set()
 _ALWAYS_THINKING_MODELS: set = set()
 _REASONING_KEYS = ("reasoning_effort", "thinking")
@@ -288,7 +295,23 @@ def learn_request_fix(kwargs: dict) -> str | None:
     if _ALWAYS_THINKS.search(text):
         _ALWAYS_THINKING_MODELS.add(key)
         return f"{key} always thinks; a thinking-off turn is sent as reasoning_effort=low"
+    if _NO_IMAGES.search(text):
+        _TEXT_ONLY_MODELS.add(key)
+        return f"{key} is text-only; its requests go out with images replaced by a note for this session"
     return None
+
+
+def strip_images(node):
+    """A copy of `node` with every image block (Anthropic `image`, OpenAI `image_url`) replaced
+    by a text note, recursing into nested content such as tool_result. Never edits `node`: the
+    router shares one request between the primary and every fallback."""
+    if isinstance(node, list):
+        return [strip_images(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    if node.get("type") in ("image", "image_url", "input_image"):
+        return {"type": "text", "text": IMAGE_PLACEHOLDER}
+    return {k: strip_images(v) if isinstance(v, (list, dict)) else v for k, v in node.items()}
 
 
 def apply_request_fixes(kwargs: dict) -> dict | None:
@@ -299,6 +322,8 @@ def apply_request_fixes(kwargs: dict) -> dict | None:
     if key in _NO_REASONING_MODELS:
         drop.update(_REASONING_KEYS)
     out = {k: v for k, v in kwargs.items() if k not in drop}
+    if key in _TEXT_ONLY_MODELS and isinstance(out.get("messages"), list):
+        out["messages"] = strip_images(out["messages"])
     # Claude Code's thinking-disabled turns reach the provider as reasoning_effort="none".
     if key in _ALWAYS_THINKING_MODELS and out.get("reasoning_effort") in ("none", "disabled", None):
         if "reasoning_effort" in out or kwargs.get("thinking", {}) == {"type": "disabled"}:
