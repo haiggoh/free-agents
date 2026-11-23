@@ -1,6 +1,6 @@
 # Provider buckets, limiter fixes, swap pre-flight, effort defaults, bridge errors — Implementation Plan
 
-**Status:** draft
+**Status:** completed (shipped as v0.62.0, 2026-11-23 — merged to main, tag v0.62.0, release published, installed plugin refreshed and dogfooded: limiter 40rpm acquire + headroom 1.0, mistral bucket rpm 2, provider-limits CLI OK with 633 facts)
 > **Lasting Plans:** when every task below is done, set the Status line to `completed` by running `lasting-plans complete "docs/superpowers/plans/2026-11-22-provider-buckets-and-limiter-fixes.md"` as the closing step.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task (NATIVE execution — you implement every task yourself, then ONE final whole-branch review). Steps use checkbox (`- [ ]`) syntax for tracking.
