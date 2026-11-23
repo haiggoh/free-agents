@@ -1389,6 +1389,33 @@ def build() -> None:
                             ui.link("Signup", url).classes("text-xs")
                         ui.button("Add key",
                                   on_click=lambda s=slug: ui.navigate.to(f"/prompt:keys:key:{s}"))
+        if full_path.startswith("runtime_versions:"):
+            # csl parity: the version list csl's VersionsScreen shows as an OptionList —
+            # clicking a row runs the op for that version (remove confirms first)
+            _op = full_path.split(":", 1)[1]
+            _kind = getattr(scr, "inventory_kind", None)
+            _entries = (loader.cache.get(_kind) or []) if _kind else []
+            vlist = ui.column().classes("w-full gap-1")
+            with vlist:
+                for e in _entries:
+                    _v = getattr(e, "version", "") or str(e)
+                    _status = getattr(e, "status", "")
+                    _lbl = f"    {_v}" + (f"  ·  {_status}" if _status else "")
+                    if getattr(e, "pinned", False):
+                        _lbl += "  📌"
+                    r = ui.label(_lbl).classes("menu-item model-row")
+                    r.props["data-version"] = _v
+
+                    def _run_op(v=_v):
+                        if _op == "remove":
+                            # csl confirms a REMOVE through prompt:rt-remove first
+                            _settings_state["pending_tool"] = f"tool:rt-op:remove:{v}"
+                            ui.navigate.to("/prompt:rt-remove")
+                        else:
+                            _argv = pc.tool_argv(f"tool:rt-op:{_op}:{v}", scr.backend, scr)
+                            if _argv and st.get("launch_req"):
+                                st["launch_req"](m.LaunchRequest("tool", ["tool", *_argv], {}, ""))
+                    r.on("click", _run_op)
         wire_rerender(body, m.Nav(full_path, m.HOME_OWNED), st)
         if full_path == "theme_config":
             # wrap AFTER wire_rerender (it sets st["rerender"]): a presentation switch must

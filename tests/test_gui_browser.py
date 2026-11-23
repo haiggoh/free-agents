@@ -655,6 +655,48 @@ def test_lowkey_chooser_selection_rides_the_launch(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_runtime_versions_rows_dispatch_ops(browser, tmp_path):
+    # 2026-11-23 parity: the runtime_versions:<op> sub-screens render the version LIST
+    # (csl's OptionList) and clicking a row dispatches that op for that version; remove
+    # goes through the prompt:rt-remove confirmation first
+    stub = tmp_path / "launch.json"
+    mb = tmp_path / "manage-backend.sh"
+    mb.write_text("#!/usr/bin/env bash\n"
+                  "if [ \"$3\" = \"installed\" ]; then\n"
+                  "  printf '1.2.3 installed\\n'\n"
+                  "elif [ \"$3\" = \"releases\" ]; then\n"
+                  "  printf '1.3.0\\n1.2.3\\n'\n"
+                  "fi\n")
+    mb.chmod(0o755)
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub), "LA_MANAGE_BACKEND": str(mb)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}runtime_versions:install")
+        page.wait_for_selector('[data-version="1.2.3"]', timeout=20000)
+        assert page.locator('[data-version="1.3.0"]').count() == 1
+        page.locator('[data-version="1.3.0"]').click()          # install 1.3.0
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), "install op did not dispatch"
+        argv = json.loads(stub.read_text())["argv"]
+        assert "install" in argv and "1.3.0" in argv, argv
+        # remove: the row opens the confirm dialog first, then dispatches
+        stub.unlink()
+        page.goto(f"{srv.url}runtime_versions:remove")
+        page.wait_for_selector('[data-version="1.2.3"]', timeout=20000)
+        page.locator('[data-version="1.2.3"]').click()
+        page.wait_for_selector(".q-dialog", timeout=10000)
+        page.locator(".q-dialog button", has_text="Yes").click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        argv = json.loads(stub.read_text())["argv"]
+        assert "remove" in argv and "1.2.3" in argv, argv
+    finally:
+        assert srv.stop() == []
+
+
 def test_api_keys_screen_writes_a_key(browser, tmp_path):
     # 2026-11-23 parity: the api_keys screen lists providers with live status and SAVES a
     # key through the same Store csl uses (LA_API_KEYS_DIR, never the real keys dir)
