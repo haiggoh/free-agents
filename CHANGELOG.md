@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.62.0] — unreleased
+
+### Added — per-provider rate buckets: every free provider gets its own bucket built from one limits file
+- `config/provider-limits.json` (loader `bin/provider_limits.py`, strict schema) is the single structured source of per-provider limits (rpm/tpm/rpd/rpw/tpd, dispatch_only, reserves_on_request, measured_at + source) and per-model facts (context, max_output, released, broken — null carries a reason). `bin/model-facts.py fetch|merge` ingests the provider catalogs (ONE GET per keyed provider, UA `free-agents-model-facts/1`) without ever overwriting a non-catalog source; 633 model facts shipped, 505 with context.
+- `bin/rate_limiter.py` gains a `provider` dimension: `get_limiter(provider=...)` gives every keyed provider its own bucket (`FA_LIMITER_DIR/<provider>.state`) with rpm from the limits file; a provider with no entry is unthrottled exactly as before ("limits unknown"). NVIDIA's main state file path and key set are UNCHANGED — all new dimensions (tokens/min, UTC-day and ISO-week counters, header adoption, refusal marks) live in a sidecar `<state>.quota` (`bin/quota_ledger.py`) that the live 0.61.x proxies never open; the mixed-writer contract is pinned against the frozen 0.61.0 writer.
+- `try_acquire/aacquire` book tokens in the sidecar, wait while a dimension lacks room, and return inf / raise `RateLimitTimeout("ineligible")` when a request can never fit; `note_success` refunds booked-vs-used; `provider_headroom()` is the read-only 0–1 the ladders use.
+- `bin/la_proxy_hooks.py`: one bucket per provider (`_provider_of` maps deployments to registry providers); a self-raised refusal is NEVER booked as an upstream 429 (defect L8 — measured 1 real request, 3 booked, self-amplifying cooldowns); a fallback chain that ends on a rate limit reaches the client as 429 + Retry-After (streaming-iterator hook, mechanism proven on 1.110.2), never a 500 naming the primary's stream error; a stream that dies before ANY chunk is a retriable 529/overloaded_error instead of a silent empty 200; the LiteLLM #53340/#53341 bridge shim is installed at runtime (self-retiring on an upgraded LiteLLM, pipx venv untouched).
+- `stretched_wait(provider, base)`: queue-depth- and cooldown-stretched wait budgets for the proxy queue AND the dispatch tiers; `load_detected(provider)` is provider-generic — the patient tier applies to every loaded bucket, not just NVIDIA.
+
+### Added — ladders and picker know each provider's limits
+- `bin/effort_resolve.py`: the ONE choke point for launch/dispatch/handover effort — explicit > SAVED lane default (session-menu.local.json) > per-alias last-launch > provider default; remote-session.sh, launch-claude-agent.sh and free-agent-tool.py all resolve through it; the handover skill says omitting `--effort` uses the saved lane default.
+- `bin/session_ladder.py` (sessions/handovers): ORDERED with spill — the first eligible alias whose predicted wait fits its stretched timeout, with a "skipped: <why>" reason per passed-over alias; never a dispatch-only, small-context, broken, unknown-context or keyless model.
+- Dispatch (bin/free-agent-tool.py): capacity-weighted spread `pref_weight(rank) × headroom(provider)` when headrooms differ; `max_output < need` drops an entry; headroom 0 moves to the END (it queues, never dropped). New smoke-tested entries: mistral-codestral, groq gpt-oss-120b, openrouter nemotron-3.5-lightning :free.
+- Picker (csl): `limits_lines()` renders each provider's and model's limits/quota infobox on the Remote screen AND the API-keys screen from provider-limits.json (unknown = labelled "Limits: unknown"); the new "Large context only (>256k)" filter defaults ON for the remote lane and persists in schema 11 (v10 files migrate; unknown-context rows are never hidden). Screenshots: docs/measurements/2026-11-23-picker-screens/.
+
+### Fixed — limiter correctness (L1–L7) and the swap pre-flight (C5)
+- L1: a cooling model now waits out its per-model cooldown INSIDE the queue (`try_acquire(model=...)` honours `models[model].until`; the hook passes the model) — a chain-less proxy no longer fires at a throttled model (live-proven: zero upstream hits during the cooldown).
+- L2: state files are read to EOF (`_read_all`) and a corrupt/torn file FAILS SAFE (no tokens, active cooldown, written back, logged) instead of resetting to permissive capacity.
+- L3/L7: the 429 classifier counts REAL grants in the last 60 s (legacy peeks book into the window too) instead of burst depletion — steady-load single-model 429s no longer pause every NVIDIA proxy.
+- L5: an own-owner queue win serves the WINNER (booked as granted) and keeps the caller's queue age; L6: the dispatch load-peek tolerates torn reads; L4: `RateLimitTimeout` maps to a retriable 429, never a 500.
+- `remote-session.sh --swap-model`: the pre-flight proxy KEEPS the limiter (books the target's bucket — no more unthrottled overshoot) and probes the TARGET alone (no fallback chain, num_retries 0); readiness is progress-based (log/CPU within 60 s windows, 420 s hard cap — cold starts are not aborts); verdict lines `PREFLIGHT ok|refused|throttled|timeout`; a dead current route allows a labelled paid_only target; the superseded `LA_SWAP_SKIP_PREFLIGHT` knob is gone.
+
+
 ## [0.61.2] — 2026-11-22
 
 ### Fixed

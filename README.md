@@ -169,6 +169,14 @@ tier, Cloudflare Workers AI, Cerebras, Mistral, Z.AI, SiliconFlow, LLM7, Kilo, V
 ModelScope or Streamlake. Usage counts against that provider's quota. See
 [Remote API sessions](docs/remote-session/README.md).
 
+Every keyed provider gets its own rate bucket built from
+`config/provider-limits.json` — requests/min, tokens/min and UTC-day/ISO-week
+counters (per-provider limits + per-model context facts live there; the picker's
+model infoboxes and the "Large context only (>256k)" filter read the same file).
+Dispatches spread across providers by remaining capacity, and full sessions spill
+past a saturated provider to the next eligible one. Omitting `--effort` on any
+launch resolves to the saved lane default.
+
 <a id="provider-status"></a>
 > **Provider status: proven vs untested.** Remote sessions work, and they are faster than local
 > ones. What varies is the individual provider.
