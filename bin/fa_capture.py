@@ -119,14 +119,40 @@ def resolve_takeover_route(alias):
         # The default is the first usable alias of the MEASURED full-session order
         # (config/session-preferences.json), never the roster's line order: dispatch-first
         # models must not lead a session (PR #7 review).
-        by_alias = {a: (prov, ac) for a, prov, _model, ac in entries}
+        by_alias = {a: (prov, _model, ac) for a, prov, _model, ac in entries}
         try:
             order = json.loads(SESSION_PREFS_FILE.read_text(encoding="utf-8")).get("order") or []
         except Exception as e:
             raise ValueError(f"cannot read the session order {SESSION_PREFS_FILE}: {e}") from e
+        # 0.62.0 C7: the ladder KNOWS the limits — ordered + spill past a saturated/exhausted
+        # provider, never a small-context or dispatch-only or broken model.
+        try:
+            import provider_limits as pl
+            import rate_limiter as rl
+            import session_ladder as sl
+            limits = pl.load()
+            roster = {a: (prov, model) for a, (prov, model, _ac) in by_alias.items()}
+            import remote_provider_core as rpc
+            keyed = {pid for pid, p in rpc.PROVIDERS.items() if p.key_name and p.key()}
+            picked, reasons = sl.pick(
+                [a for a in order if a in by_alias and a not in hidden],
+                need_context=0, limits=limits, roster=roster,
+                headroom=rl.provider_headroom,
+                predicted_wait=lambda a: rl.stretched_wait(roster[a][0], 300),
+                timeout=lambda a: 600.0,
+                keyed=lambda prov: prov in keyed)
+            for a, why in reasons:
+                print(f"fa_capture: {why} [{a}]", file=sys.stderr)
+            if picked:
+                prov, _model, ac = by_alias[picked]
+                return Route(alias=picked,
+                             window_tokens=WINDOW_TOKENS.get(ac, DEFAULT_WINDOW_TOKENS),
+                             provider=prov)
+        except Exception:
+            pass                                    # fall through to the plain order below
         for a in order:
             if a in by_alias and a not in hidden:
-                prov, ac = by_alias[a]
+                prov, _model, ac = by_alias[a]
                 return Route(alias=a, window_tokens=WINDOW_TOKENS.get(ac, DEFAULT_WINDOW_TOKENS),
                              provider=prov)
         raise ValueError(f"no usable session route: none of {SESSION_PREFS_FILE.name} "
