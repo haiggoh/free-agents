@@ -58,6 +58,10 @@ def prompt_payload(target: str, scr) -> dict | None:
     if target == "prompt:oneshot":
         # csl's one-shot field: the lowkey screen turns the text into a --prompt launch
         return {"kind": "input", "prompt": "One-shot prompt:"}
+    if target == "prompt:rl-reset":
+        # csl's confirm: the shared rate-limiter state file is deleted once per prompt
+        return {"kind": "confirm-rl-reset",
+                "prompt": "Delete the shared rate-limiter state file?"}
     if target.startswith("prompt:keys:key:"):
         # csl's typed key prompt (hidden field); the write goes through the same Store
         slug = target.split(":", 3)[3]
@@ -108,6 +112,12 @@ def _confirm_prompt(scr, target: str, st: dict, dlg) -> None:
             argv = pc.tool_argv(pending, _runtime_backend(), _settings_state.get("last_scr"))
             if argv:
                 st["launch_req"](m.LaunchRequest("tool", ["tool", *argv], {}, ""))
+    elif target == "prompt:rl-reset":
+        # csl's reset: delete the shared rate-limiter state file (same command the TUI runs)
+        if st.get("launch_req"):
+            _argv = ["python3", "-c",
+                     "import rate_limiter as r,os;p=r.DEFAULT_STATE if not os.environ.get('LA_NVIDIA_THROTTLE_STATE') else r.Path(os.environ['LA_NVIDIA_THROTTLE_STATE']);p.unlink(missing_ok=True);print('state file reset')"]
+            st["launch_req"](m.LaunchRequest("tool", ["tool", *_argv], {}, ""))
     elif target.startswith("prompt:missing-cleanup:"):
         alias = target.split(":", 2)[2]
         if st.get("launch_req"):
@@ -712,6 +722,10 @@ def build() -> None:
             _settings_state["pending_tool"] = res.target
             from nicegui import ui as _ui
             _ui.navigate.to("/prompt:rt-remove")
+        elif isinstance(res, m.Nav) and res.target == "tool:rl-reset":
+            # csl's run_tool: rl-reset confirms through prompt:rl-reset first
+            from nicegui import ui as _ui
+            _ui.navigate.to("/prompt:rl-reset")
         elif isinstance(res, m.Nav) and res.target.startswith("tool:"):
             # tool: rows RUN a command in csl (never navigate) — dispatch the argv
             argv = pc.tool_argv(res.target, get_settings().runtime_backend,
@@ -1214,6 +1228,9 @@ def build() -> None:
                     _ui.label(f"{len(payload['aliases'])} queued, {payload['total_gb']:.1f} GB"
                               + ("" if payload["fits"] else " — DOES NOT FIT in free space"))
                     _ui.label(", ".join(payload["aliases"]))
+                if payload and payload.get("kind") == "confirm-rl-reset":
+                    _ui.label(payload["prompt"])
+                    _ui.label("Every free-API lane forgets its recorded request history and cooldowns.")
                 elif payload and payload.get("kind") == "input":
                     # typed prompt (prompt:session / prompt:oneshot / prompt:keys:key):
                     # Yes validates exactly like csl and applies the value

@@ -655,6 +655,48 @@ def test_lowkey_chooser_selection_rides_the_launch(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_rl_reset_row_confirm_dispatches_state_reset(browser, tmp_path):
+    # 2026-11-23 parity: csl's 'Reset shared limiter state file' row opens a confirm whose Yes
+    # deletes the state file (python3 -c ... unlink); the GUI mirrors the confirm + command
+    stub = tmp_path / "launch.json"
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}rate_limiter")
+        page.get_by_text("Reset shared limiter state file", exact=False).first.click()
+        page.wait_for_selector(".q-dialog", timeout=10000)
+        assert "Delete the shared rate-limiter state file" in page.locator(".q-dialog").inner_text()
+        assert not stub.exists(), "opening the prompt must not run anything"
+        page.locator(".q-dialog button", has_text="Yes").click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        argv = json.loads(stub.read_text())["argv"]
+        assert argv[:2] == ["python3", "-c"], argv
+        assert "unlink(missing_ok=True)" in argv[2], argv
+    finally:
+        assert srv.stop() == []
+
+
+def test_hidden_model_report_row_dispatches(browser, tmp_path):
+    # 2026-11-23 parity: the remote-filters screen's hidden-model report row dispatches the
+    # report CLI (the generic tool: dispatch path)
+    stub = tmp_path / "launch.json"
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}remote_filters")
+        page.get_by_text("Hidden-model report", exact=False).first.click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), "report row did not dispatch"
+        argv = json.loads(stub.read_text())["argv"]
+        assert "--report" in argv, argv
+    finally:
+        assert srv.stop() == []
+
+
 def test_runtime_versions_rows_dispatch_ops(browser, tmp_path):
     # 2026-11-23 parity: the runtime_versions:<op> sub-screens render the version LIST
     # (csl's OptionList) and clicking a row dispatches that op for that version; remove
