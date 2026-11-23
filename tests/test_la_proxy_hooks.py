@@ -15,10 +15,25 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 os.environ.setdefault("LA_NVIDIA_THROTTLE_STATE", os.path.join(tempfile.mkdtemp(), "state"))
+# Fix 8 reads the retired list; tests here that are not about it must not see the REAL one (it
+# names ids they use as healthy models). An absent file = empty list (fail-open). Scoped to THIS
+# module: a module-level os.environ write leaks into every later test of the same xdist worker
+# (measured 2026-11-23: 8 picker/fallback tests elsewhere saw an empty retired list).
+_ENV_PATCH = unittest.mock.patch.dict(
+    os.environ, {"LA_BROKEN_MODELS_FILE": os.path.join(tempfile.mkdtemp(), "none.json")})
+
+
+def setUpModule():
+    _ENV_PATCH.start()
+
+
+def tearDownModule():
+    _ENV_PATCH.stop()
 
 try:
     import litellm  # noqa: F401
@@ -501,6 +516,136 @@ class TextOnlyFallbackTests(unittest.TestCase):
         self._fail(self.NIM, "stepfun-ai/step-5-preview", provider="nvidia_nim")
         out = self._pre("z-ai/glm-5.3-flash", provider="nvidia_nim", messages=self._messages())
         self.assertTrue(self._has_image(out["messages"]))
+
+    def test_strip_applies_on_the_real_route_shape(self):
+        # Measured through LiteLLM's HTTP layer (Router + fake NIM server, 2026-11-23): the
+        # deployment hook gets model='nvidia_nim/<id>' with custom_llm_provider=None, while the
+        # failure side reports '<id>' with the provider set. Both must reach the same key.
+        self._fail(self.NIM, "stepfun-ai/step-5-preview", provider="nvidia_nim")
+        kwargs = {"model": "nvidia_nim/stepfun-ai/step-5-preview", "messages": self._messages()}
+        out = asyncio.run(self.hooks.async_pre_call_deployment_hook(kwargs, None)) or kwargs
+        self.assertFalse(self._has_image(out["messages"]))
+
+
+@unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")
+class RetiredModelTests(unittest.TestCase):
+    """A running proxy skips a fallback retired AFTER it started, with no upstream call.
+
+    Incident 2026-11-23: proxy-4143 started 2026-11-17; deepseek-ai/deepseek-v4.1-flash was
+    retired (410 EOL 2026-11-16) and dropped from the roster on 2026-11-18, but the proxy's
+    frozen fallback chain kept calling it -- every turn, router retry included.
+    """
+    GONE_ID = "deepseek-ai/deepseek-v4.1-flash"
+    NIM_410 = ("Nvidia_nimException - Error code: 410 - {'title': 'Gone', 'status': 410, 'detail': "
+               "\"The model 'deepseek-ai/deepseek-v4.1-flash' has reached its end of life on "
+               "2026-11-16T08:00:00Z and is no longer available.\"}")
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.broken = self.tmp / "broken.json"
+        self._write([])
+        self.env = unittest.mock.patch.dict(os.environ, {"LA_BROKEN_MODELS_FILE": str(self.broken)})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.mod = load_hooks()
+        self.hooks = self.mod.LAProxyHooks()
+        self.hooks._bucket = None
+
+    def _write(self, ids, bump=0):
+        import json
+        self.broken.write_text(json.dumps({"models": [{"model_id": i, "status": "retired"} for i in ids]}))
+        if bump:
+            st = self.broken.stat()
+            os.utime(self.broken, (st.st_atime, st.st_mtime + bump))
+
+    def _pre(self, model):
+        kwargs = {"model": f"nvidia_nim/{model}", "custom_llm_provider": "nvidia_nim", "max_tokens": 9}
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            out = asyncio.run(self.hooks.async_pre_call_deployment_hook(kwargs, None))
+        return (kwargs if out is None else out), err.getvalue()
+
+    def test_live_model_is_untouched(self):
+        out, _ = self._pre("z-ai/glm-5.3-flash")
+        self.assertEqual(out["model"], "nvidia_nim/z-ai/glm-5.3-flash")
+
+    def test_listed_model_is_skipped_on_the_real_route_shape(self):
+        # The real deployment hook sees custom_llm_provider=None (see TextOnlyFallbackTests).
+        self._write([self.GONE_ID], bump=5)
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(Exception):
+                asyncio.run(self.hooks.async_pre_call_deployment_hook(
+                    {"model": f"nvidia_nim/{self.GONE_ID}"}, None))
+
+    def test_key_strips_a_provider_prefix_only_when_the_provider_is_absent(self):
+        key = self.mod._cap_key
+        self.assertEqual(key({"model": "nvidia_nim/deepseek-ai/x"}), "deepseek-ai/x")
+        self.assertEqual(key({"model": "groq/openai/gpt-oss-120b"}), "openai/gpt-oss-120b")
+        # Failure side: provider present, the model has no prefix -- must NOT lose "openai/".
+        self.assertEqual(key({"model": "openai/gpt-oss-120b", "custom_llm_provider": "groq"}),
+                         "openai/gpt-oss-120b")
+        # An org segment that is not a provider is kept.
+        self.assertEqual(key({"model": "stepfun-ai/step-5-preview"}), "stepfun-ai/step-5-preview")
+
+    def test_listed_model_fails_over_without_an_upstream_call(self):
+        self._write([self.GONE_ID], bump=5)
+        with self.assertRaises(Exception) as ctx:
+            self._pre(self.GONE_ID)
+        self.assertIn("retired", str(ctx.exception))
+
+    def test_a_retirement_recorded_while_the_proxy_runs_is_picked_up(self):
+        out, _ = self._pre(self.GONE_ID)                  # not listed yet: goes upstream
+        self.assertEqual(out["model"], f"nvidia_nim/{self.GONE_ID}")
+        self._write([self.GONE_ID], bump=5)               # roster updated after proxy start
+        with self.assertRaises(Exception):
+            self._pre(self.GONE_ID)
+
+    def test_skip_tells_the_user_to_relaunch_once(self):
+        self._write([self.GONE_ID], bump=5)
+        logs = []
+        for _ in range(3):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                with self.assertRaises(Exception):
+                    asyncio.run(self.hooks.async_pre_call_deployment_hook(
+                        {"model": f"nvidia_nim/{self.GONE_ID}", "custom_llm_provider": "nvidia_nim"}, None))
+            logs.append(err.getvalue())
+        self.assertIn("relaunch", logs[0])
+        self.assertEqual(logs[1:], ["", ""], "one notice per model, not one per turn")
+
+    def test_a_410_is_learned_even_when_the_list_lacks_the_model(self):
+        import litellm
+        exc = litellm.APIError(status_code=410, message=self.NIM_410, llm_provider="nvidia_nim",
+                               model=self.GONE_ID)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            asyncio.run(self.hooks.async_log_failure_event(
+                {"model": self.GONE_ID, "custom_llm_provider": "nvidia_nim", "exception": exc},
+                None, None, None))
+        self.assertIn("retired", err.getvalue())
+        with self.assertRaises(Exception):
+            self._pre(self.GONE_ID)
+        out, _ = self._pre("z-ai/glm-5.3-flash")
+        self.assertEqual(out["model"], "nvidia_nim/z-ai/glm-5.3-flash", "only the 410 model")
+
+    def test_missing_or_corrupt_list_fails_open(self):
+        self.broken.unlink()
+        out, _ = self._pre(self.GONE_ID)
+        self.assertEqual(out["model"], f"nvidia_nim/{self.GONE_ID}")
+        self.broken.write_text("{not json")
+        out, _ = self._pre(self.GONE_ID)
+        self.assertEqual(out["model"], f"nvidia_nim/{self.GONE_ID}")
+
+    def test_default_list_is_found_through_the_proxy_symlink(self):
+        # Delivery route: remote-session.sh symlinks the hook into the proxy's tmp dir, so the
+        # default must resolve THROUGH the link to the repo's config, not next to the link.
+        link = self.tmp / "proxy" / "la_proxy_hooks.py"
+        link.parent.mkdir()
+        link.symlink_to(REPO / "bin" / "la_proxy_hooks.py")
+        spec = importlib.util.spec_from_file_location("la_proxy_hooks_linked", link)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LA_BROKEN_MODELS_FILE", None)
+            self.assertEqual(mod.retired_models_file(), REPO / "config" / "broken-nvidia-models.json")
 
 
 @unittest.skipUnless(HAVE_LITELLM, "run under the LiteLLM pipx interpreter")

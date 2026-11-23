@@ -214,11 +214,31 @@ _CAP_PATTERNS = (
 _LEARNED_CAPS: dict[str, int] = {}
 
 
+_FALLBACK_PROVIDERS = frozenset({"nvidia_nim", "groq", "openai", "anthropic", "gemini", "openrouter",
+                                 "mistral", "deepseek", "huggingface", "together_ai", "cerebras", "sambanova"})
+
+
+def _provider_names() -> frozenset:
+    try:
+        import litellm
+        return frozenset(str(getattr(p, "value", p)) for p in litellm.provider_list) | _FALLBACK_PROVIDERS
+    except Exception:
+        return _FALLBACK_PROVIDERS
+
+
 def _cap_key(kwargs: dict) -> str:
-    """Same key from the pre-call side ("groq/qwen/x") and the failure side ("qwen/x")."""
+    """Same key from the pre-call side ("groq/qwen/x") and the failure side ("qwen/x").
+
+    0.62.1: through LiteLLM's HTTP layer the deployment hook gets custom_llm_provider=None with
+    the prefix still on the model ('nvidia_nim/<id>', measured 2026-11-23), so every learned
+    lesson keyed '<id>' on the failure side missed. With no provider, a leading segment that
+    names a LiteLLM provider is stripped; with one, only that provider's prefix is."""
     model = str(kwargs.get("model") or "")
     provider = str(kwargs.get("custom_llm_provider") or "")
-    return model[len(provider) + 1:] if provider and model.startswith(provider + "/") else model
+    if provider:
+        return model[len(provider) + 1:] if model.startswith(provider + "/") else model
+    head, sep, rest = model.partition("/")
+    return rest if sep and rest and head in _provider_names() else model
 
 
 def output_cap_from_error(exc) -> int | None:
@@ -267,7 +287,7 @@ _ALWAYS_THINKS = re.compile(r"(?:always\s+engages\s+in\s+thinking|thinking\s+can
 # prompt_cache_key because Groq's config CLAIMS support for it; Groq's API rejects it.
 _PROVIDER_DROP = {"groq": {"prompt_cache_key"}}
 _LEARNED_DROP: dict[str, set] = {}      # model -> request keys it rejected
-# 0.61.3: a text-only model refusing images. Real NIM text (proxy-4143.log, 2026-11-23): "Received
+# 0.62.1: a text-only model refusing images. Real NIM text (proxy-4143.log, 2026-11-23): "Received
 # multimodal data but multimodal processing is not enabled". Claude Code resends the whole history
 # every turn, so ONE screenshot made every text-only fallback fail every turn, forever.
 _NO_IMAGES = re.compile(r"multimodal\s+(?:data|processing|input)|does\s+not\s+support\s+(?:image|vision)|"
@@ -622,6 +642,71 @@ def install_bridge_shim() -> str:
     return BRIDGE_SHIM_STATE
 
 
+# ---- fix 8: a fallback retired after the proxy started is skipped, not called -------------
+
+# A proxy's fallback chain is frozen into its YAML at launch; the roster is not. Incident
+# 2026-11-23: proxy-4143 (started 11-17) kept calling deepseek-v4.1-flash, retired 11-16 and
+# dropped from the roster 11-18 -- a 410 every turn, router retry included, each one a slot in
+# the shared NVIDIA RPM window. The hook re-reads the SAME retired list the picker and
+# session-fallbacks.py use (re-read only when its mtime moves), and learns a 410 Gone itself.
+_GONE_TEXT = re.compile(r"end\s+of\s+life|no\s+longer\s+available", re.I)
+_GONE_MODELS: set = set()               # learned from a 410 this proxy saw
+_RETIRED_NOTICED: set = set()           # one relaunch notice per model, not one per turn
+_RETIRED_CACHE: dict = {"key": None, "ids": frozenset()}
+
+
+def retired_models_file() -> Path:
+    """LA_BROKEN_MODELS_FILE, else the repo's list -- found THROUGH the proxy dir's symlink
+    (remote-session.sh links this file there), so a week-old proxy reads today's list."""
+    override = os.environ.get("LA_BROKEN_MODELS_FILE")
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / "config" / "broken-nvidia-models.json"
+
+
+def retired_model_ids() -> frozenset:
+    """Ids the retired list names. Missing/corrupt list = empty (fail-open, like
+    session-fallbacks.py: a broken list must never block a working model)."""
+    f = retired_models_file()
+    try:
+        st = f.stat()
+    except OSError:
+        return frozenset()
+    key = (str(f), st.st_mtime_ns, st.st_size)
+    if _RETIRED_CACHE["key"] != key:
+        try:
+            import json
+            ids = frozenset(m.get("model_id", "") for m in json.loads(f.read_text()).get("models", []))
+        except (OSError, ValueError, AttributeError):
+            ids = frozenset()
+        _RETIRED_CACHE.update(key=key, ids=ids - {""})
+    return _RETIRED_CACHE["ids"]
+
+
+def learn_gone(kwargs: dict) -> str | None:
+    """A 410 naming end of life marks the model gone for this proxy; return a log line."""
+    exc = (kwargs or {}).get("exception")
+    if exc is None:
+        return None
+    if getattr(exc, "status_code", None) != 410 and not _GONE_TEXT.search(str(exc)):
+        return None
+    key = _cap_key(kwargs)
+    if key in _GONE_MODELS:
+        return None
+    _GONE_MODELS.add(key)
+    return (f"{key} is retired upstream (410 Gone); skipping it with no upstream call for this "
+            f"session -- relaunch the session to get the current fallback chain")
+
+
+def retired_skip(kwargs: dict) -> str | None:
+    """Why this call must not go upstream (the model is retired), or None."""
+    key = _cap_key(kwargs)
+    if key in _GONE_MODELS:
+        return f"{key} retired upstream (410 Gone)"
+    if key in retired_model_ids():
+        return f"{key} retired ({retired_models_file().name})"
+    return None
+
 
 class LAProxyHooks(CustomLogger):
     def __init__(self):
@@ -654,6 +739,20 @@ class LAProxyHooks(CustomLogger):
         return self._buckets[prov]
 
     async def async_pre_call_deployment_hook(self, kwargs, call_type):
+        why = retired_skip(kwargs)                       # fix 8: every provider
+        if why is not None:
+            import litellm
+            key = _cap_key(kwargs)
+            if key not in _RETIRED_NOTICED:
+                _RETIRED_NOTICED.add(key)
+                print(f"la_proxy_hooks: {why} -> skipping it with no upstream call; this proxy's "
+                      f"fallback chain predates the roster -- relaunch the session to get the "
+                      f"current one", file=sys.stderr)
+            # Same raise as the 0.40.0 cooling fast-fail (probed on LiteLLM 1.105.1): the router
+            # answers from the next fallback at once, with zero upstream calls to this model.
+            raise litellm.RateLimitError(message=f"model {why}; skipped without an upstream call",
+                                         llm_provider=str(kwargs.get("custom_llm_provider") or ""),
+                                         model=str(kwargs.get("model") or ""))
         changed = None
         clamped = clamp_max_tokens(kwargs)               # fix 4: every provider
         if clamped is not None:
@@ -725,6 +824,10 @@ class LAProxyHooks(CustomLogger):
         lesson = learn_request_fix(kwargs or {}) if cap is None else None
         if lesson:
             print(f"la_proxy_hooks: {lesson}", file=sys.stderr)
+        gone = learn_gone(kwargs or {})                  # fix 8: any provider
+        if gone:
+            _RETIRED_NOTICED.add(_cap_key(kwargs or {}))
+            print(f"la_proxy_hooks: {gone}", file=sys.stderr)
         # Runs once per failed upstream ATTEMPT (router retries included). A 429 is CLASSIFIED
         # (0.40.0): a near-empty window is the provider throttling ONE model -- cool only that
         # model, other proxies run on; a window at least half full is our own RPM overrun --
