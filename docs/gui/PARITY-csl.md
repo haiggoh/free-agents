@@ -27,7 +27,7 @@ the nav target but no `@ui.page` exists for it.
 | lowkey | `LowkeyScreen` via `tool:lowkey` | ✅ renders via catch-all (data prefetched) + model CHOOSER (local + API agent rows; a row selects, no launch; selection persists across the dialog round-trip) + prompt:session dialog (typed name, csl validation) + prompt:oneshot dialog; convo launch carries --session NAME + --provider (Savers.last_launched 4-arg mode fix) | — |
 | download local models | `DownloadScreen` via `tool:download` | ✅ queue rows + review dialog + confirm→CLI argv all browser-proven (2eb5ea1) | — |
 | about | `AboutScreen` | ✅ renders | — |
-| api keys | `APIKeysScreen` | ◐ renders | key add/remove write path (`setup-api-keys.py`), open: URLs |
+| api keys | `APIKeysScreen` | ✅ renders the provider list with live Saved/Missing status, signup link and Add key; the key write goes through the SAME Store (`install/setup-api-keys.py`, `LA_API_KEYS_DIR`) | key REMOVE action |
 | rate limiter | `RateLimiterScreen` | ◐ renders | tool:rl-status / tool:rl-reset actions |
 | memguard (OOM guard) | `MemoryGuardScreen` | ✅ renders (switch + cycle controls, switch toggles on name/value click) | — |
 | cloud session config | `CloudConfigScreen` | ✅ renders; route/timeout-tier rows cycle AND persist to ~/.claude/settings.json env (firewall-tested with a temp HOME), label rebuilt in place | — |

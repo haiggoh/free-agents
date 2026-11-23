@@ -655,6 +655,39 @@ def test_lowkey_chooser_selection_rides_the_launch(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_api_keys_screen_writes_a_key(browser, tmp_path):
+    # 2026-11-23 parity: the api_keys screen lists providers with live status and SAVES a
+    # key through the same Store csl uses (LA_API_KEYS_DIR, never the real keys dir)
+    keys_dir = tmp_path / "keys"
+    keys_dir.mkdir(mode=0o700)      # the Store refuses a group/world-accessible dir
+    keys_dir.chmod(0o700)
+    srv = Server(env={"LA_API_KEYS_DIR": str(keys_dir)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}api_keys")
+        page.wait_for_selector("[data-provider]", timeout=20000)
+        slugs = page.evaluate("[...document.querySelectorAll('[data-provider]')].map(e => e.dataset.provider)")
+        assert slugs, "no provider rows rendered"
+        slug = slugs[0]
+        provider_row = page.locator(f'[data-provider="{slug}"]')
+        assert "Missing" in provider_row.inner_text()          # status is live from the keys dir
+        provider_row.get_by_text("Add key", exact=False).first.click()
+        page.wait_for_selector(".q-dialog", timeout=10000)
+        page.locator(".q-dialog input").fill("test-key-12345")
+        page.locator(".q-dialog button", has_text="Yes").click()
+        deadline = time.time() + 10
+        written = []
+        while time.time() < deadline and not written:
+            written = [p.name for p in keys_dir.iterdir() if p.is_file()]
+            if not written:
+                time.sleep(0.1)
+        assert written, f"no key file written to {keys_dir}"
+        # the status flips to Saved without reloading
+        page.wait_for_selector("text=Saved", timeout=5000)
+    finally:
+        assert srv.stop() == []
+
+
 def test_cloud_route_switch_writes_settings_env(browser, tmp_path):
     # 2026-11-22 parity: the cloud-config route row cycles AND persists — the write lands in
     # the launch dir's .claude/settings.json env (FA_ROUTE_AGENT), never the real one

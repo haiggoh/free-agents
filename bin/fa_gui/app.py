@@ -58,6 +58,11 @@ def prompt_payload(target: str, scr) -> dict | None:
     if target == "prompt:oneshot":
         # csl's one-shot field: the lowkey screen turns the text into a --prompt launch
         return {"kind": "input", "prompt": "One-shot prompt:"}
+    if target.startswith("prompt:keys:key:"):
+        # csl's typed key prompt (hidden field); the write goes through the same Store
+        slug = target.split(":", 3)[3]
+        return {"kind": "input", "slug": slug, "password": True,
+                "prompt": f"API key/token for {slug} (hidden):"}
     if target.startswith("prompt:"):
         return {"kind": "confirm", "prompt": target}
     return None
@@ -1210,11 +1215,37 @@ def build() -> None:
                               + ("" if payload["fits"] else " — DOES NOT FIT in free space"))
                     _ui.label(", ".join(payload["aliases"]))
                 elif payload and payload.get("kind") == "input":
-                    # typed prompt (prompt:session / prompt:oneshot): Yes validates exactly
-                    # like csl and applies the value (name on the model, or a --prompt launch)
+                    # typed prompt (prompt:session / prompt:oneshot / prompt:keys:key):
+                    # Yes validates exactly like csl and applies the value
                     _ui.label(payload["prompt"])
                     field = _ui.input("text").classes("w-full")
+                    if payload.get("password"):
+                        field.props('type="password"')
                     warn = _ui.label("").classes("text-red-500")
+
+                    def _save_api_key(slug: str, value: str) -> str:
+                        # csl's path: install/setup-api-keys.py's Store (LA_API_KEYS_DIR)
+                        import importlib.util
+                        from pathlib import Path as _P
+                        spec = importlib.util.spec_from_file_location(
+                            "setup_api_keys",
+                            _P(__file__).resolve().parents[2] / "install/setup-api-keys.py")
+                        mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                        prov = next((p for p in mod.PROVIDERS if p.slug == slug), None)
+                        if prov is None:
+                            return f"Unknown provider: {slug}"
+                        keys_dir = _P(os.environ.get("LA_API_KEYS_DIR", "~/.api_keys")).expanduser()
+                        with mod.Store(keys_dir) as store:
+                            missing = [n for n in prov.files if store.state(n) == "missing"]
+                            if not missing:
+                                return f"{prov.name}: key already saved"
+                            try:
+                                mod.validate_value(missing[0], value)
+                                store.save_new(missing[0], value)
+                            except mod.StoreError as exc:
+                                return f"{missing[0]}: {exc}"
+                        return f"Saved {missing[0]} for {prov.name}"
 
                     def _submit_input():
                         import re
@@ -1225,6 +1256,17 @@ def build() -> None:
                                 return
                             settings_state["lowkey_session_name"] = val
                             _ui.navigate.to("/lowkey")
+                        elif target.startswith("prompt:keys:key:"):
+                            slug = target.split(":", 3)[3]
+                            if not val:
+                                warn.set_text("skipped — no key saved")
+                                return
+                            msg = _save_api_key(slug, val)
+                            warn.set_text(msg)
+                            if msg.startswith("Saved"):
+                                _ui.navigate.to("/api_keys")
+                                dlg.close()
+                            return
                         else:   # prompt:oneshot: the screen turns the text into a --prompt launch
                             res = scr.one_shot(val) if hasattr(scr, "one_shot") else None
                             if res is None:
@@ -1330,6 +1372,23 @@ def build() -> None:
                 except Exception:
                     pass
             _paint_chooser()
+        if full_path == "api_keys":
+            # csl parity: the provider list with live Saved/Missing status, the signup
+            # link and the contextual Add key (csl's accordion rows on this screen)
+            with ui.column().classes("w-full gap-1"):
+                for slug, name, _sc, url, files in scr.PROVIDERS:
+                    try:
+                        status = scr._get_provider_status(slug, files)
+                    except Exception:
+                        status = "Unknown"
+                    row = ui.row().classes("menu-item items-center gap-2").props(
+                        f'data-provider="{slug}"')
+                    with row:
+                        ui.label(f"{name}:  {status}").classes("grow")
+                        if url:
+                            ui.link("Signup", url).classes("text-xs")
+                        ui.button("Add key",
+                                  on_click=lambda s=slug: ui.navigate.to(f"/prompt:keys:key:{s}"))
         wire_rerender(body, m.Nav(full_path, m.HOME_OWNED), st)
         if full_path == "theme_config":
             # wrap AFTER wire_rerender (it sets st["rerender"]): a presentation switch must
