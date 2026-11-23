@@ -63,7 +63,9 @@ if os.path.exists(p) and not os.path.exists(os.path.join(ctrl, f"{port}.noslow")
 end = time.time() + slow
 while time.time() < end:
     print(f"stub :{port} still starting ({slow:.0f}s budget)", flush=True)
-    time.sleep(1 if fast else 10)
+    # 0.62.0 final gate: 0.3 s cadence under the fast knob — a 1 s cadence starved under a
+    # loaded box and the (correct) progress-based readiness aborted a healthy slow start
+    time.sleep(0.3 if fast else 10)
 
 def _on_term(signum, frame):
     sys.exit(0)
