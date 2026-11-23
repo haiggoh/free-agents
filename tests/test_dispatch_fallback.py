@@ -65,11 +65,13 @@ class Stub:
         self.calls = []
         monkeypatch.setattr(fat, "dispatch_entry", self)
 
-    def __call__(self, entry, _prompt, _env, thinking_effort=None, timeout_s=None, stall_s=None):
+    def __call__(self, entry, _prompt, _env, thinking_effort=None, timeout_s=None, stall_s=None,
+                 effort=None):  # 0.62.3: dispatch_entry gained the resolved-effort kwarg
         key = (entry.get("provider"), entry.get("model"))
         self.calls.append({"id": entry.get("id"), "provider": entry.get("provider"),
                            "model": entry.get("model"), "timeout_s": timeout_s,
-                           "stall_s": stall_s})
+                           "stall_s": stall_s, "effort": effort,
+                           "thinking_effort": thinking_effort})
         out = self.script[key].pop(0)
         if out[0] == "ok":
             return out[1]
@@ -301,3 +303,31 @@ def test_rate_limited_lane_gets_patient_timeout_only_under_detected_load(monkeyp
     rc2, _out2, _ = run_capture({"prompt": "x"}, env2)
     assert rc2 == 0
     assert stub2.calls[0]["timeout_s"] == 900 and stub2.calls[0]["stall_s"] == 300
+
+
+def test_resolved_effort_reaches_dispatch_when_thinking_on(monkeypatch, tmp_path):
+    # 0.62.3: the resolved effort level (recorded in receipts since 0.62.0) must now reach
+    # dispatch_entry — when thinking is on and not model-overridden.
+    import effort_resolve
+    monkeypatch.setattr(effort_resolve, "resolve",
+                        lambda lane, alias=None, **kw: ("max", "test"))
+    prefs = base_prefs()
+    prefs["order"][0]["thinking"] = "on"          # entry A: thinking on -> effort applies
+    env = make_env(tmp_path, prefs)
+    stub = Stub(monkeypatch, {("p1", "m1"): [("ok", "ok")]})
+    rc, _out, _err = run_capture({"prompt": "x"}, env)
+    assert rc == 0
+    assert stub.calls[0]["effort"] == "max", \
+        f"resolved effort must reach dispatch_entry, got {stub.calls[0]}"
+
+
+def test_effort_not_sent_when_thinking_off(monkeypatch, tmp_path):
+    import effort_resolve
+    monkeypatch.setattr(effort_resolve, "resolve",
+                        lambda lane, alias=None, **kw: ("max", "test"))
+    env = make_env(tmp_path, base_prefs())        # thinking auto -> role default off
+    stub = Stub(monkeypatch, {("p1", "m1"): [("ok", "ok")]})
+    rc, _out, _err = run_capture({"prompt": "x"}, env)
+    assert rc == 0
+    assert stub.calls[0]["effort"] is None, \
+        f"thinking off must not wire an effort level, got {stub.calls[0]}"
