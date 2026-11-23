@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.62.1] — 2026-11-23
+
+### Fixed — a fallback retired after the proxy started is skipped, not called
+- Incident 2026-11-23: proxy-4143 (started 11-17) kept calling `deepseek-ai/deepseek-v4.1-flash`, retired 11-16 and off the roster since 11-18 — a 410 every turn, router retry included, each one a slot in the shared NVIDIA RPM window. `bin/la_proxy_hooks.py` now re-reads the SAME retired list the picker and `session-fallbacks.py` use (`config/broken-nvidia-models.json`, found through the proxy dir's symlink, re-read only when its mtime moves), learns a 410 naming end-of-life in-flight, and raises the same fast-fail as a cooling model so the router answers from the next fallback at once with zero upstream calls to the retired one; one relaunch notice per model per proxy. Covered by `RetiredModelTests` (listed model raises on the real route shape; a retirement recorded while the proxy runs is picked up; live models untouched; key strips a provider prefix only when the provider is absent).
+- Capability lessons keyed through LiteLLM's HTTP layer (`custom_llm_provider=None` with the provider still prefixed on the model, measured 2026-11-23) now land on the same key as the failure side: with no provider, a leading segment that names a LiteLLM provider is stripped; with one, only that provider's prefix is.
+
+### Fixed — text-only fallback keeps the conversation when a model refuses images
+- A model that rejects image input gets the conversation without its images instead of failing the turn: a working session that lost image input beats a session that can never recover (user, 2026-11-23).
+
+### Fixed — pre-existing test debt on main
+- `tests/test_lowkey_api_route_0540.py::test_api_launch_never_hotswaps` read `tokens`/`capacity` keys the 0.61.x state file never had (KeyError, failing on main). The assertion now accepts any pid-owned proof of acquisition across formats (0.61.x stamps, 0.62.0 tokens/grants). Mutation-checked: skipping `limiter.acquire()` in `bin/remote_http.py` turns it RED.
+- `tests/test_csl_menu.sh` expected the 5-column inventory; rows are 7 columns since the 0.61.1 hotfix (cols 6-7 = effective context + subdir). Waypoint `csl-menu-sh-fails-on-main-0` closed.
+
 ## [0.62.0] — unreleased
 
 ### Added — per-provider rate buckets: every free provider gets its own bucket built from one limits file

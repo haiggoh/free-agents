@@ -172,9 +172,12 @@ inv="$(csl -- --inventory)"
 # "#missing<TAB>alias<TAB>subdir" so the picker can offer to retire them (user 2026-10-15).
 assert_eq "${#ON_DISK_SESSION_MODELS[@]}" "$(printf '%s\n' "$inv" | grep -v '^#missing' | grep -c .)" \
   "inventory lists ${#ON_DISK_SESSION_MODELS[@]} models"
-assert_eq "$SESSION_RAPID	rapid	$SESSION_RAPID_EFFORT	$SESSION_RAPID_ROLE	" \
+# 7 columns since the 2026-11-22 hotfix: alias, backend, effort, role, broken-flag, ctx, subdir
+# (bin/csl appends cols 6-7 so positional consumers of 1-5 are unchanged; the fixture models
+# have no ctx, so col 6 is empty and col 7 is the on-disk subdir).
+assert_eq "$SESSION_RAPID	rapid	$SESSION_RAPID_EFFORT	$SESSION_RAPID_ROLE			$SESSION_RAPID_DIR" \
   "$(printf '%s\n' "$inv" | grep "^$SESSION_RAPID	")" 'a Rapid row carries backend, configured effort and role'
-assert_eq "$SESSION_VLLM	vllm	$SESSION_VLLM_EFFORT	$SESSION_VLLM_ROLE	" \
+assert_eq "$SESSION_VLLM	vllm	$SESSION_VLLM_EFFORT	$SESSION_VLLM_ROLE			$SESSION_VLLM_DIR" \
   "$(printf '%s\n' "$inv" | grep "^$SESSION_VLLM	")" 'a vllm row carries backend, configured effort and role'
 # Whole-line test (assert_no_grep is grep -F, where a leading ^ would be a literal character).
 if printf '%s\n' "$inv" | grep -q "^$ABSENT	"; then check 1 'a registered model with no weights is not listed as launchable'
