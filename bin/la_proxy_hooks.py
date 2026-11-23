@@ -241,6 +241,18 @@ def _cap_key(kwargs: dict) -> str:
     return rest if sep and rest and head in _provider_names() else model
 
 
+def _estimate_tokens(kwargs: dict) -> int:
+    """0.62.3 review fix: tokens booked in the quota sidecar at grant time — the completion
+    cap plus a flat prompt estimate (chars//4). The REAL usage reconciles on success via
+    note_success(tokens_used, booked) -> quota.refund(booked - used)."""
+    try:
+        mx = int(kwargs.get("max_tokens") or 0)
+    except (TypeError, ValueError):
+        mx = 0
+    prompt_chars = len(str(kwargs.get("messages") or ""))
+    return max(0, mx) + prompt_chars // 4
+
+
 def output_cap_from_error(exc) -> int | None:
     """The provider's max_tokens ceiling if `exc` is a rejection of max_tokens, else None."""
     if exc is None or getattr(exc, "status_code", None) not in (400, None):
@@ -792,10 +804,31 @@ class LAProxyHooks(CustomLogger):
                 # L1 (0.62.0): pass the model so a cooling model waits out its cooldown
                 # inside the queue instead of firing at it. C3: the wait budget is
                 # load-stretched (queue depth + active cooldown), capped by the patient tier.
-                from rate_limiter import _max_wait, stretched_wait
-                waited = await bucket.aacquire(
-                    model=str(kwargs.get("model") or ""),
-                    max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)))
+                from rate_limiter import _max_wait, stretched_wait, RateLimitTimeout
+                # 0.62.3 review fix: pass tokens= so the quota sidecar (tpm/tpd) actually
+                # books this request — 0.62.0 granted with tokens=0 (TPM accounting was
+                # limiter-API-only). The booked amount rides on kwargs for the success hook.
+                booked = _estimate_tokens(kwargs)
+                kwargs["_la_booked_tokens"] = booked
+                try:
+                    waited = await bucket.aacquire(
+                        model=str(kwargs.get("model") or ""),
+                        max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
+                        tokens=booked)
+                except RateLimitTimeout as exc:
+                    if "ineligible" not in str(exc):
+                        raise
+                    # The ESTIMATE alone can never fit tpm (e.g. an unclamped max_tokens the
+                    # provider has not rejected yet): acquire on rpm alone and book nothing —
+                    # the upstream 400 must answer and teach the real cap (fix 4), not a
+                    # self-raised 429.
+                    kwargs["_la_booked_tokens"] = 0
+                    print(f"la_proxy_hooks: estimated {booked} tokens never fit tpm; "
+                          "acquiring on rpm alone", file=sys.stderr)
+                    waited = await bucket.aacquire(
+                        model=str(kwargs.get("model") or ""),
+                        max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
+                        tokens=0)
             except Exception as exc:
                 from rate_limiter import RateLimitTimeout
                 if not isinstance(exc, RateLimitTimeout):
@@ -877,7 +910,27 @@ class LAProxyHooks(CustomLogger):
         bucket = self._bucket_for(kwargs or {})
         if bucket is None:
             return
-        bucket.note_success(str((kwargs or {}).get("model") or ""))
+        # 0.62.3 review fix: reconcile booked-vs-used in the quota sidecar when the response
+        # carries usage — 0.62.0 only cleared cooldowns and never refunded the over-estimate.
+        usage = response_obj.get("usage") if isinstance(response_obj, dict) \
+            else getattr(response_obj, "usage", None)
+        used = None
+        if usage:
+            try:
+                if isinstance(usage, dict):
+                    used = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+                else:
+                    used = int(getattr(usage, "prompt_tokens", 0) or 0) \
+                        + int(getattr(usage, "completion_tokens", 0) or 0)
+            except (TypeError, ValueError):
+                used = None
+        booked = 0
+        try:
+            booked = int((kwargs or {}).get("_la_booked_tokens") or 0)
+        except (TypeError, ValueError):
+            booked = 0
+        bucket.note_success(str((kwargs or {}).get("model") or ""),
+                            tokens_used=used, booked=booked)
 
     async def async_pre_request_hook(self, model, messages, kwargs):
         # fix 7, native Anthropic lane only (LA_PASSTHROUGH_MODELS set): fold per-turn effort into

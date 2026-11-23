@@ -787,5 +787,56 @@ class GrantPathTests(unittest.TestCase):
                         "self-raised marker required so L8 never books it")
 
 
+class TokensBookingTests(unittest.TestCase):
+    """0.62.3 review fix: the proxy hook books tokens= at grant time and reconciles
+    booked-vs-used on success (0.62.0 granted with tokens=0 — TPM accounting was
+    limiter-API-only — and never refunded the estimate)."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.mod = load_hooks()
+        self.hooks = self.mod.LAProxyHooks()
+        self.hooks._bucket = None
+
+    def _fake_bucket(self):
+        class FakeBucket:
+            def __init__(self):
+                self.acquire_kwargs = None
+                self.success = None
+
+            def model_cooling(self, model):
+                return 0.0
+
+            async def aacquire(self, **kw):
+                self.acquire_kwargs = kw
+                return 0.0
+
+            def note_success(self, model=None, tokens_used=None, booked=0):
+                self.success = (model, tokens_used, booked)
+        return FakeBucket()
+
+    def test_pre_call_books_estimated_tokens(self):
+        b = self._fake_bucket()
+        self.hooks._bucket = b
+        kwargs = {"model": "nvidia_nim/acme/x", "max_tokens": 1000,
+                  "messages": [{"role": "user", "content": "hi " * 100}]}
+        asyncio.run(self.hooks.async_pre_call_deployment_hook(kwargs, None))
+        self.assertIsNotNone(b.acquire_kwargs, "aacquire must be called")
+        booked = b.acquire_kwargs.get("tokens", 0)
+        self.assertGreaterEqual(booked, 1000, f"tokens= must cover max_tokens, got {booked}")
+        self.assertEqual(kwargs.get("_la_booked_tokens"), booked,
+                         "the booked amount must ride on kwargs for the success hook")
+
+    def test_success_reconciles_booked_vs_used(self):
+        b = self._fake_bucket()
+        self.hooks._bucket = b
+        kwargs = {"model": "nvidia_nim/acme/x", "_la_booked_tokens": 1250}
+        resp = {"usage": {"prompt_tokens": 1000, "completion_tokens": 250}}
+        asyncio.run(self.hooks.async_log_success_event(kwargs, resp, 0, 1))
+        self.assertEqual(b.success, ("nvidia_nim/acme/x", 1250, 1250),
+                         f"note_success must get tokens_used=1250, booked=1250, got {b.success}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

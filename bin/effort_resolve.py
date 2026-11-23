@@ -34,6 +34,18 @@ LANES = ("local_session", "remote_api_session", "lowkey")
 LEVELS = ("low", "medium", "high", "xhigh", "max")
 PROVENANCES = ("explicit", "saved-lane", "last-launch", "provider-default")
 
+# 0.62.3: the ONE effort-level -> wire mapping. NIM's reasoning_effort takes
+# low|medium|high, so xhigh/max clamp to high; None (provider default) stays None.
+EFFORT_TO_REASONING = {"low": "low", "medium": "medium", "high": "high",
+                       "xhigh": "high", "max": "high"}
+
+
+def effort_to_reasoning(level):
+    """Map a resolved effort LEVEL to the wire reasoning_effort value (or None)."""
+    if level is None:
+        return None
+    return EFFORT_TO_REASONING.get(level, "high")
+
 
 def _config_dir(config_dir=None) -> Path:
     if config_dir is not None:

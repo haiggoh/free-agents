@@ -694,11 +694,14 @@ def route_of(entry) -> str:
 
 
 def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED,
-                   timeout_s=None, stall_s=None) -> str:
+                   timeout_s=None, stall_s=None, effort=None) -> str:
     """Run one preference entry; raise DispatchFailed so the caller tries the next.
 
     thinking_effort: the resolved reasoning_effort from resolve_thinking(). Left at the
     sentinel (direct callers, older tests) the entry's own reasoning_effort stands.
+    effort: the resolved effort LEVEL (0.62.3 review fix: 0.62.0 recorded it in the receipt
+    but never sent it) — mapped through effort_resolve.effort_to_reasoning, the one
+    level->wire mapper; None keeps the thinking_effort path.
     timeout_s: the most this ONE attempt may take (run() passes what is left of the wall-clock
     cap); the entry's own "timeout" still wins when it is shorter. stall_s: seconds of silence
     on the socket before a remote attempt gives up (the dispatcher's --timeout is a per-read
@@ -710,9 +713,13 @@ def dispatch_entry(entry, prompt: str, env, thinking_effort=_UNRESOLVED,
                "--provider", entry["provider"], "--model", entry["model"],
                "--prompt", prompt, "--max-tokens", str(entry.get("max_tokens", 16384)),
                "--outdir", outdir]
-        effort = entry.get("reasoning_effort") if thinking_effort is _UNRESOLVED else thinking_effort
-        if effort:
-            cmd += ["--reasoning-effort", str(effort)]
+        if effort is not None:
+            import effort_resolve
+            wire = effort_resolve.effort_to_reasoning(effort)
+        else:
+            wire = entry.get("reasoning_effort") if thinking_effort is _UNRESOLVED else thinking_effort
+        if wire:
+            cmd += ["--reasoning-effort", str(wire)]
         if stall_s:
             cmd += ["--timeout", f"{stall_s:g}"]
         # 0.56.2 fix (waypoint free-agent-tool-py-dispatch-2): an entry whose timeout is
@@ -984,9 +991,15 @@ def execute_plan(plan, full_prompt, env, policy, *, role=None, start_index=0,
                 lane, alias=entry.get("id"))
         except Exception:
             rec["effort"], rec["effort_provenance"] = None, "provider-default"
+        # 0.62.3 review fix: the resolved effort level now reaches the wire — but only when
+        # thinking is on and not model-overridden (Nemotron takes no reasoning_effort at all).
+        effort_arg = (rec["effort"]
+                      if (resolved_thinking == "on" and think_effort is not None
+                          and not think_overridden)
+                      else None)
         try:
             text = dispatch_entry(entry, full_prompt, env, thinking_effort=think_effort,
-                                  timeout_s=budget, stall_s=attempt_stall)
+                                  timeout_s=budget, stall_s=attempt_stall, effort=effort_arg)
         except DispatchFailed as err:
             rec.update(ok=False, error=str(err))
             attempts.append({k: rec[k] for k in ("id", "provider", "model", "ok", "error")})

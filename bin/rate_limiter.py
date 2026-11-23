@@ -978,8 +978,15 @@ class SmoothTokenBucket:
         try:
             now = self._clock()
             self._load_state(fd, now)
+            recent = [g for g in self._grants
+                      if now - float(g.get("t", now)) < WINDOW_SECONDS]
             return {
                 "path": str(self.path),
+                # 0.62.3 review fix: the rpm headroom term needs these in smooth mode too
+                # (0.62.0 omitted them, so provider_headroom's rpm part read grants=[]
+                # and always reported 1.0).
+                "in_window": len(recent),
+                "grants": recent,
                 "tokens": round(self._tokens, 2),
                 "capacity": self.capacity,
                 "rate_per_sec": round(self.rate, 3),
@@ -1696,10 +1703,22 @@ def provider_headroom(provider: str, clock=time.time) -> float:
             parts.append(max(0.0, 1.0 - float(in_window) / float(lim.rpm)))
         if b.quota is not None:
             snap = b.quota.snapshot(clock())
-            for dim, limit_v in (("tpm", lim.tpm), ("day", lim.rpd), ("week", lim.rpw)):
-                if limit_v:
-                    used = snap[dim].get("tokens", snap[dim].get("used", 0))
-                    parts.append(max(0.0, 1.0 - float(used) / float(limit_v)))
+            # 0.62.3 review fix: units matter per dimension — requests compare against
+            # rpd/rpw, tokens against tpm/tpd. 0.62.0 compared day/week TOKENS against the
+            # rpd/rpw REQUEST limits and read a tpm "tokens" key the snapshot never has.
+            tpm = snap.get("tpm") or {}
+            if lim.tpm and tpm.get("used") is not None:
+                parts.append(max(0.0, 1.0 - float(tpm["used"]) / float(lim.tpm)))
+            day = snap.get("day") or {}
+            if lim.rpd:
+                rem = day.get("remaining_rpd")
+                used_req = (lim.rpd - rem) if rem is not None else day.get("requests", 0)
+                parts.append(max(0.0, 1.0 - float(used_req) / float(lim.rpd)))
+            if lim.tpd and day.get("tokens") is not None:
+                parts.append(max(0.0, 1.0 - float(day["tokens"]) / float(lim.tpd)))
+            week = snap.get("week") or {}
+            if lim.rpw and week.get("requests") is not None:
+                parts.append(max(0.0, 1.0 - float(week["requests"]) / float(lim.rpw)))
         return min(parts) if parts else 1.0
     except Exception:
         return 1.0
