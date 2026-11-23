@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.62.2] — 2026-11-23
+
+### Fixed — runtime model facts reach every consumer
+- Remote-lane models are judged from the Hugging Face card/router/config (context = max of the three), never from `mlx-community` (local-Mac-only catalogue). Fixes the Nemotron-3-Ultra misfetch: HF `config.json` said 262 144 because a wrong repo was fetched (mlx-community copy); the roster's autocompact default of 1M stands, GLM-5.3-Flash context recorded as 1M (user-observed 2026-11-22). `bin/estimate-model-footprint.py`, `bin/provider_limits.py`, `bin/session_ladder.py`, `bin/session_picker.py` all consume the same resolved facts; the ladder does one bounded HF lookup at launch when nothing cached answers, so newly released models are judged on real numbers. Tests: `test_runtime_model_facts.py`, `test_hf_remote_lane_0622.py`, `test_roster_warm_0621.py` (40 passed; 3 picker-venv skips run in the pre-flight gate).
+
+### Fixed — the local-capable filter's budget is the DETECTED hardware
+- `catalog_local_capable` now budgets from `bin/la-hw-detect.sh` via the estimator's device budget instead of a stale/assumed size; CUDA/ROCm boxes are judged by VRAM (90%), Macs by unified RAM (75% — 128 GB detected → 96 GB usable), never by system RAM on a discrete-GPU box. Mutation-checked (judging CUDA by RAM turns the new tests RED). Test: `test_device_budget_hw_0623.py`.
+
+### Documented — the local-capable filter's reasoning, settled 2026-11-23 (do not relitigate)
+- The docstring of `catalog_local_capable` in `bin/session_picker.py` now carries the user's reasoning, dated: the filter exists because of the capability GAP between what this hardware runs locally and the larger remote models — a capability-class line, NOT an availability check (whether a local build of the model exists does not matter; no build/format/download-existence check is to be added). The line is detected memory × usable share, never a hardcoded size. Grey-zone models near the line (2/3-bit-only fits, "potentially-local-capable" catalogue matches) stay visible on purpose; unknown verdicts stay visible (fail-open). `README.md` points at the docstring as the canonical home.
+
 ## [0.62.1] — 2026-11-23
 
 ### Fixed — a fallback retired after the proxy started is skipped, not called
