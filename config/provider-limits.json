@@ -117,12 +117,12 @@
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
     },
     "nvidia:mistralai/mistral-large-4-1t-a52b": {
-      "context": null,
+      "context": 1000000,
       "max_output": null,
-      "released": "1993-04-26",
-      "broken": null,
-      "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
-      "reason": "no catalog field/broken-list entry for: context, max_output, broken"
+      "released": null,
+      "broken": false,
+      "source": "user-observed 2026-11-22 (1M context; the 0.61.1 HF hotfix's picker row shows 1M ctx)",
+      "reason": "max_output/released/broken: no catalog field or broken-list entry; nvidia catalog lacks context_window and no HF repo resolves for this id, so hand-curated per the plan's exception"
     },
     "nvidia:moonshotai/kimi-k3.1-pro": {
       "context": 1048576,

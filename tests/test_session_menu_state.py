@@ -538,8 +538,8 @@ class StateTests(unittest.TestCase):
         doc = json.loads(self.file.read_text())
         # 0.54.0: schema 9 (lowkey_filters section); the invariant the test guards is that a
         # NEW key ships under a NEW schema number so older readers refuse loudly.
-        self.assertEqual(doc["schema_version"], 10)   # 0.55.8 Task 8: the schema bumped
-        self.assertIn(8, sms.READABLE_SCHEMAS)          # schema-8 files still load
+        self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)   # 0.62.0: v11 (remote_filters)
+        self.assertIn(10, sms.READABLE_SCHEMAS)         # schema-10 files still load
         # Simulate the OLD reader: schemas 1..8 only. It must refuse LOUDLY, not load.
         with mock.patch.object(sms, "READABLE_SCHEMAS", (1, 2, 3, 4, 5, 6, 7, 8)):
             state = sms.load(self.cfg)

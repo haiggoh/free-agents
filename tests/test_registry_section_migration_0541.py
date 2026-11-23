@@ -37,10 +37,10 @@ class RegistryMigration(unittest.TestCase):
         (cfg / sms.PREFS_NAME).write_text(json.dumps(V9_FILE))
         st = sms.load(cfg)
         self.assertIs(st.local_registry.get("auto_sync"), True, "migrated without loss")
-        st.memguard["soft_pct"] = 80                 # any save rewrites at schema 10
+        st.memguard["soft_pct"] = 80                 # any save rewrites at the CURRENT schema
         sms.save_memguard(cfg, {"soft_pct": 80})
         doc = json.loads((cfg / sms.PREFS_NAME).read_text())
-        self.assertEqual(doc["schema_version"], 10)
+        self.assertEqual(doc["schema_version"], sms.SCHEMA_VERSION)   # 0.62.0: v11 (remote_filters)
         self.assertEqual(doc.get("local_registry", {}).get("auto_sync"), True)
         self.assertNotIn("registry_auto_sync", doc.get("memguard", {}), "the stale key is dropped")
 

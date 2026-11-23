@@ -68,8 +68,8 @@ for the whole session, then continue autonomously from its Next action."*
      `~/.claude/scripts/sudo-in-terminal.sh --command "launch-remote-window.sh <alias>
      --prompt 'Read <handoff.md> first…' --effort <level>" --verify '<LISTEN on 4141-4151>'
      --label '<t>'` (verify = port/LISTEN; `pgrep -f` matches the driver's own argv);
-   - pass `--effort` explicitly or rely on the stored last-launch effort (0.49.3+ default) — never
-     an unset default when the stored one is higher;
+   - omitting `--effort` uses the saved lane default — never an unset default when the
+     saved one is higher;
    - **invoking this skill IS the launch authorization** — name concerns (blind-trust, branch
      pushes) but launch; defer only on the user's explicit doc-only request;
    - if `--prompt` is unavailable, make "paste this first prompt" the top-line action to the

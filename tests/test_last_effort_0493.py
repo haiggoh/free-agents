@@ -64,6 +64,8 @@ class EffortDefaultLaunchTests(_Harness):
         super().setUp()
         # the fixture root must carry the new store script, like the real repo does
         shutil.copy2(ROOT / "bin/last-effort.py", self.root / "bin/last-effort.py")
+        # 0.62.0 C6: an omitted --effort resolves through effort_resolve.py
+        shutil.copy2(ROOT / "bin/effort_resolve.py", self.root / "bin/effort_resolve.py")
         # 0.54.0: anthropic-route.py (copied by _Harness) imports fa_tls at module level
         if not (self.root / "bin/fa_tls.py").exists():
             shutil.copy2(ROOT / "bin/fa_tls.py", self.root / "bin/fa_tls.py")
