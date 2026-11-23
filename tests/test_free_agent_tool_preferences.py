@@ -58,7 +58,10 @@ class LoadingTests(Base):
                                      "nvidia-glm-5.3-flash",
                                      "nvidia-step5-preview",
                                      "nvidia-nemotron-3-ultra"])   # Gemini first for dispatches while quota lasts, Le Chonk second (user 2026-10-31); GLM 5.3 full removed 2026-10-31 (410 EOL 2026-10-28); DeepSeek V4.1 Flash removed 2026-11-18 (410 EOL 2026-11-16T08:00:00Z); stepfun above nemotron (user 2026-10-24)
-        self.assertEqual(order[5:], ["local-deepseek-v4-flash", "local-laguna-s", "local-kat-coder"])
+        self.assertEqual(order[5:8], ["local-deepseek-v4-flash", "local-laguna-s", "local-kat-coder"])
+        # 0.62.0 C7: the three new cross-provider dispatch entries ride at the END
+        self.assertEqual(order[8:], ["mistral-codestral", "groq-qwen32",
+                                     "openrouter-nemotron-lightning-free"])
 
     def test_every_shipped_entry_has_a_family_and_known_roles(self):
         # Council routing only works when the roster is fully annotated: a new entry without
