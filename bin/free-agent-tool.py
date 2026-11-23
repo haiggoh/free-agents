@@ -813,20 +813,6 @@ def nvidia_load_detected(env) -> bool:
     ftruncate+write, so a torn read is retried once before giving up."""
     from rate_limiter import load_detected as _ld
     return _ld("nvidia", env)
-    p = Path(env.get("LA_NVIDIA_THROTTLE_STATE")
-             or (Path.home() / ".claude" / "free-agents" / ".nvidia_throttle_state"))
-    doc = None
-    for _attempt in range(2):
-        try:
-            doc = json.loads(p.read_text(encoding="utf-8"))
-            break
-        except (OSError, ValueError):
-            doc = None
-            time.sleep(0.05)
-    if doc is None:
-        return False
-    return (float(doc.get("cooldown_until") or 0) > time.time()
-            or int(doc.get("consecutive_429s") or 0) > 0)
 # remote-agent-dispatch.py does not surface Retry-After to its caller (verified 2026-10-24:
 # its stderr carries only error_class + HTTP status + reason), so a 429 is a real failure
 # with no retry; retry_after_max_s stays in the policy for the day the dispatch surfaces it.

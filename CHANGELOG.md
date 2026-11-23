@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.62.3] — 2026-11-23
+
+### Fixed — the four Important findings of the 0.62.0 whole-branch review (evidence: reviewer session 5c7fddb4; each fix mutation-checked RED before green)
+- `provider_headroom` compares the right units per dimension: requests against rpd/rpw (header-adopted `remaining_rpd` honored), tokens against tpm/tpd. 0.62.0 compared day/week TOKENS against the rpd/rpw REQUEST limits and read a tpm key the snapshot never has, so tpd was unused and day/week headroom was garbage. `bin/rate_limiter.py`.
+- `smooth_bucket` `status()` now reports `in_window` + `grants` like the sliding window, so the rpm headroom term is real in the live smooth mode (was always 1.0). `bin/rate_limiter.py`.
+- The proxy hook books `tokens=` at grant (estimate = max_tokens + prompt chars/4); an estimate that can never fit tpm falls back to rpm-only so the upstream 400 still teaches the real max_tokens cap instead of a self-raised 429. On success, real usage reconciles via `note_success(tokens_used, booked)` → quota refund. TPM/tpd accounting is now live in the proxy, not limiter-API-only. `bin/la_proxy_hooks.py`.
+- A dispatch's RESOLVED effort level now reaches the wire (`--reasoning-effort`) through the single new `effort_resolve.effort_to_reasoning` mapper — 0.62.0 recorded it in the receipt but never sent it. Applied only when thinking is on and not model-overridden (Nemotron takes no reasoning_effort). `bin/free-agent-tool.py`, `bin/effort_resolve.py`.
+
+### Fixed — minors from the same review
+- Removed dead code after `return` in `nvidia_load_detected` (`bin/free-agent-tool.py`).
+- Known and parked (not fixed here): the LA_PROXY_HOOKS_RATE_LIMIT=0 fail-open edge and the context-unknown picker row tag; the SDK-hidden-retries booking gap stays a documented contract-test xfail (waypoint `out-of-scope-items-from-the` keeps the remainder).
+
+### Tests
+- New `tests/test_0623_review_fixes.py` (headroom units, tpm window, smooth-mode status, effort→wire mapping incl. entry fallback) and `TokensBookingTests` in `tests/test_la_proxy_hooks.py` (tokens= booked at grant, booked amount rides on kwargs, usage reconciled on success). Full main gate green on the branch; load flakes re-run serial before being called red (waypoint `ship-gate-load-flakes-are-not`, cadence headroom already landed in the 0.62.0 final gate).
+
 ## [0.62.2] — 2026-11-23
 
 ### Fixed — runtime model facts reach every consumer
