@@ -241,6 +241,21 @@ def _cap_key(kwargs: dict) -> str:
     return rest if sep and rest and head in _provider_names() else model
 
 
+def _request_kind(kwargs: dict) -> str | None:
+    """0.63.0: per-request kind for the fast lane. A subagent/agent caller marks its request
+    with the X-LA-Agent header (set by agent-driven launchers and dispatchers); otherwise
+    None -> the limiter falls back to the process env kind (dispatchers set dispatch)."""
+    headers = kwargs.get("headers") or {}
+    try:
+        items = headers.items() if hasattr(headers, "items") else []
+        for k, v in items:
+            if str(k).lower() == "x-la-agent" and str(v).strip().lower() not in ("", "0", "false"):
+                return "agent"
+    except Exception:
+        pass
+    return None
+
+
 def _estimate_tokens(kwargs: dict) -> int:
     """0.62.3 review fix: tokens booked in the quota sidecar at grant time — the completion
     cap plus a flat prompt estimate (chars//4). The REAL usage reconciles on success via
@@ -814,7 +829,7 @@ class LAProxyHooks(CustomLogger):
                     waited = await bucket.aacquire(
                         model=str(kwargs.get("model") or ""),
                         max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
-                        tokens=booked)
+                        tokens=booked, kind=_request_kind(kwargs))
                 except RateLimitTimeout as exc:
                     if "ineligible" not in str(exc):
                         raise

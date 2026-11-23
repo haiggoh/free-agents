@@ -127,7 +127,7 @@ _ENV_FOR = {"rpm": "LA_NVIDIA_RPM", "mode": "LA_NVIDIA_MODE",
             "waiter_poll_seconds": "LA_NVIDIA_WAITER_POLL", "deficit_rate": "LA_NVIDIA_DEFICIT_RATE",
             "deficit_cap_seconds": "LA_NVIDIA_DEFICIT_CAP_SECONDS",
             "lane_share_cap": "LA_LIMITER_RESERVE", "dispatch_boost": "LA_NVIDIA_DISPATCH_BOOST",
-            "lane_approval": "LA_LIMITER_LANE_APPROVAL"}
+            "lane_approval": "LA_LIMITER_LANE_APPROVAL", "fast_lane": "LA_LIMITER_FAST_LANE"}
 
 
 def _saved_settings() -> dict:
@@ -155,7 +155,7 @@ def _setting(key: str, default):
 
 # --- fairness queue (design docs/superpowers/specs/2026-11-19-nvidia-rate-limiter-fairness-design.md)
 POLICIES = ("aging", "deficit", "legacy")
-KINDS = ("interactive", "dispatch", "background")
+KINDS = ("interactive", "dispatch", "background", "agent")  # agent: 0.63.0 fast-lane kind
 DEFAULT_POLICY = "aging"
 DEFAULT_TIER1_SECONDS = 45.0
 DEFAULT_TIER2_SECONDS = 150.0
@@ -165,6 +165,7 @@ DEFAULT_DEFICIT_RATE = 1.0
 DEFAULT_DEFICIT_CAP_SECONDS = 600.0
 DEFAULT_LANE_SHARE_CAP = 0.2
 DEFAULT_DISPATCH_BOOST = True
+DEFAULT_FAST_LANE = "off"   # 0.63.0: off = 0.62.3 behavior (the A/B control arm)
 DEFAULT_LANE_APPROVAL = "ask"
 
 _TOKEN_COUNTER = itertools.count()
@@ -281,16 +282,18 @@ def _tier(arrived: float, now: float, t1: float, t2: float) -> int:
 
 
 def _rank(w: dict, now: float, cfg: dict) -> tuple:
-    """Higher wins. (class, tier, boost, -arrived): a manual lane beats normal; an aged
-    request beats a fresh one; within tier 0 only, dispatch/background rank ahead of
-    interactive when dispatch_boost is on (they still yield to tier 1+ and to lanes,
-    because tier sorts before boost); then FIFO by arrival."""
+    """Higher wins. (class, fast, tier, boost, -arrived): a manual lane beats everything;
+    0.63.0 fast lane — a fast-lane kind (fast_lane setting) beats any non-priority request
+    regardless of age tier, but still loses to the manual lane (class sorts first); an aged
+    request beats a fresh one within the same fast class; within tier 0 only,
+    dispatch/background rank ahead of interactive when dispatch_boost is on; then FIFO."""
     cls = 1 if w.get("class") == "priority" else 0
+    fast = 1 if w.get("kind") in _fast_lane_kinds(cfg) else 0
     arrived = float(w.get("arrived", now))
     tier = _tier(arrived, now, cfg["tier1_seconds"], cfg["tier2_seconds"])
     boost = 1 if (tier == 0 and cfg["dispatch_boost"]
                   and w.get("kind") in ("dispatch", "background")) else 0
-    return (cls, tier, boost, -arrived)
+    return (cls, fast, tier, boost, -arrived)
 
 
 def _lane_cap(limit: int, share_cap: float) -> int:
@@ -298,13 +301,28 @@ def _lane_cap(limit: int, share_cap: float) -> int:
     return max(1, round(share_cap * limit))
 
 
-def _prio_grants_sliding(stamps: list, owners: dict) -> int:
-    """Priority-owned stamps currently in the window. Sliding mode derives the lane cap
-    from the existing stamps + owners map — no new state keys."""
+def _fast_lane_kinds(cfg: dict) -> frozenset:
+    """0.63.0: kinds the fast lane ranks above interactive. off/empty = none (0.62.3 behavior);
+    agents = dispatch + agent; all-noninteractive also background; unknown set value -> agents."""
+    v = str(cfg.get("fast_lane", DEFAULT_FAST_LANE)).strip().lower()
+    if v in ("", "off", "0", "false", "none"):
+        return frozenset()
+    if v == "all-noninteractive":
+        return frozenset({"dispatch", "agent", "background"})
+    return frozenset({"dispatch", "agent"})
+
+
+def _prio_grants_sliding(stamps: list, owners: dict, fast_kinds=frozenset()) -> int:
+    """Lane grants (priority-owned, plus fast-lane-kind-owned when the lane is on) currently
+    in the window. Sliding mode derives the lane cap from the existing stamps + owners map —
+    no new state keys (grants carry the kind as "k"; stamps via the owner's kind)."""
     n = 0
     for s in stamps:
         _t, o = _stamp_parts(s)
-        if o != "legacy" and _owner_opts(owners, o)["priority"]:
+        if o == "legacy":
+            continue
+        opts = _owner_opts(owners, o)
+        if opts["priority"] or opts["kind"] in fast_kinds:
             n += 1
     return n
 
@@ -329,13 +347,17 @@ def _pick_winner(waiters: dict, now: float, cfg: dict, owners: dict,
     room under the lane share cap (with no normal waiters the cap does not bind — zero
     idle capacity)."""
     cap = _lane_cap(limit, cfg["lane_share_cap"])
+    fast_kinds = _fast_lane_kinds(cfg)
     normal_waiting = False
     for tok, w in waiters.items():
         if "granted" in w:
             continue
         owner = w.get("owner", "")
         w["class"] = "priority" if _owner_opts(owners, owner)["priority"] else "normal"
-        if w["class"] != "priority":
+        # 0.63.0: a fast-lane waiter is NOT a "normal" waiter — the share cap exists to protect
+        # interactive sessions, and binds only while one is queued.
+        if (w["class"] != "priority"
+                and not (fast_kinds and w.get("kind") in fast_kinds)):
             normal_waiting = True
     eligible = []
     for tok, w in waiters.items():
@@ -346,7 +368,10 @@ def _pick_winner(waiters: dict, now: float, cfg: dict, owners: dict,
         own_limit = max(1, int(limit * opts["rpm_scale"]))
         if own_counts.get(owner, 0) >= own_limit:
             continue
-        if (w["class"] == "priority" and normal_waiting and prio_grants is not None
+        # 0.63.0: while normal waiters queue, the lane share cap covers fast-lane grants too
+        # (priority + fast kinds), so interactive sessions are never starved by the fast lane.
+        is_lane = w["class"] == "priority" or (bool(fast_kinds) and w.get("kind") in fast_kinds)
+        if (is_lane and normal_waiting and prio_grants is not None
                 and prio_grants >= cap):
             continue
         eligible.append(tok)
@@ -666,7 +691,7 @@ class SmoothTokenBucket:
                 # legacy peek: today's exact semantics (minus the retired reserve partition)
                 if self._tokens >= cost:
                     self._tokens -= cost
-                    self._grants.append({"t": now, "o": owner, "c": cls})   # L7: peeks count
+                    self._grants.append({"t": now, "o": owner, "c": cls, "k": _kind()})
                     _quota_book(self.quota, now, tokens)
                     # SUCCESS: Reset exponential backoff counter
                     self._consecutive_429s = 0
@@ -690,7 +715,7 @@ class SmoothTokenBucket:
                 if self._tokens >= cost:
                     self._waiters.pop(token, None)
                     self._tokens -= cost
-                    self._grants.append({"t": now, "o": owner, "c": cls})
+                    self._grants.append({"t": now, "o": owner, "c": cls, "k": _kind()})
                     _quota_book(self.quota, now, tokens)
                     self._consecutive_429s = 0
                     self._last_429_time = 0.0
@@ -700,7 +725,9 @@ class SmoothTokenBucket:
                 self._save_state(fd)
                 return max(1e-3, need_seconds())
 
-            prio_grants = sum(1 for g in self._grants if g.get("c") == "priority")
+            fast_kinds = _fast_lane_kinds(cfg)
+            prio_grants = sum(1 for g in self._grants
+                              if g.get("c") == "priority" or g.get("k") in fast_kinds)
             winner = _pick_winner(self._waiters, now, cfg, self._owners, {}, limit,
                                   prio_grants, deficit=self._deficit)
             if winner is not None:
@@ -716,7 +743,8 @@ class SmoothTokenBucket:
                         # L5 (0.62.0): serve the WINNER (book it as granted) and keep the
                         # caller's queue age — popping the winner stole its `arrived`.
                         self._tokens -= w_cost
-                        self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", cls)})
+                        self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", cls),
+                                 "k": w.get("kind", "interactive")})
                         _quota_book(self.quota, now, tokens)
                         w["granted"] = now
                         _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
@@ -726,7 +754,8 @@ class SmoothTokenBucket:
                         return max(1e-3, need_seconds())
                     # book the token for the WINNER; the winner acks on its next poll
                     self._tokens -= w_cost
-                    self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", "normal")})
+                    self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", "normal"),
+                                 "k": w.get("kind", "interactive")})
                     w["granted"] = now
                     _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
                     self._save_state(fd)
@@ -1220,7 +1249,7 @@ class SlidingWindowLimiter:
                 for s in stamps:
                     _t, o = _stamp_parts(s)
                     own_counts[o] = own_counts.get(o, 0) + 1
-                prio_grants = _prio_grants_sliding(stamps, self._owners)
+                prio_grants = _prio_grants_sliding(stamps, self._owners, _fast_lane_kinds(cfg))
                 winner = _pick_winner(waiters, now, cfg, self._owners, own_counts, self.limit,
                                       prio_grants, deficit=self._deficit)
                 if winner is not None:

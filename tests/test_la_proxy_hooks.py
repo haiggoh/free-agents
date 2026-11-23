@@ -828,6 +828,16 @@ class TokensBookingTests(unittest.TestCase):
         self.assertEqual(kwargs.get("_la_booked_tokens"), booked,
                          "the booked amount must ride on kwargs for the success hook")
 
+    def test_hook_passes_agent_kind_from_header(self):
+        # 0.63.0: a request carrying X-LA-Agent registers kind=agent for the fast lane.
+        b = self._fake_bucket()
+        self.hooks._bucket = b
+        kwargs = {"model": "nvidia_nim/acme/x", "max_tokens": 100,
+                  "headers": {"X-LA-Agent": "1"}}
+        asyncio.run(self.hooks.async_pre_call_deployment_hook(kwargs, None))
+        self.assertEqual(b.acquire_kwargs.get("kind"), "agent",
+                         f"X-LA-Agent must map to kind=agent, got {b.acquire_kwargs}")
+
     def test_success_reconciles_booked_vs_used(self):
         b = self._fake_bucket()
         self.hooks._bucket = b

@@ -86,7 +86,9 @@ _RL_NUMERIC = {"rpm": (1, 10000), "bucket_capacity": (1, 1000),
                "deficit_rate": (0.1, 10), "deficit_cap_seconds": (30, 7200),
                "lane_share_cap": (0.05, 0.9)}
 _RL_WHOLE = ("rpm", "bucket_capacity", "max_retries")
-_RL_CHOICES = {"policy": ("aging", "deficit", "legacy"), "lane_approval": ("ask", "agent")}
+_RL_CHOICES = {"policy": ("aging", "deficit", "legacy"), "lane_approval": ("ask", "agent"),
+               # 0.63.0: fast lane for agents/offloads (off = A/B control arm)
+               "fast_lane": ("off", "agents", "all-noninteractive")}
 _RL_BOOL = ("dispatch_boost",)
 # What the picker shows when a key is unset; must match rate_limiter.py's defaults.
 RATE_LIMITER_DEFAULTS = {"mode": "sliding_window", "rpm": 40, "bucket_capacity": 6,
@@ -95,7 +97,8 @@ RATE_LIMITER_DEFAULTS = {"mode": "sliding_window", "rpm": 40, "bucket_capacity":
                          "policy": "aging", "tier1_seconds": 45, "tier2_seconds": 150,
                          "waiter_ttl_seconds": 15, "waiter_poll_seconds": 2,
                          "deficit_rate": 1.0, "deficit_cap_seconds": 600,
-                         "lane_share_cap": 0.2, "dispatch_boost": True, "lane_approval": "ask"}
+                         "lane_share_cap": 0.2, "dispatch_boost": True, "lane_approval": "ask",
+                         "fast_lane": "off"}
 
 # Memory guard (schema 5; kv_dtype grew it to 6 so pre-kv_dtype readers reject the file loudly on
 # the VERSION, not on an unknown key). Booleans plus bounded numbers; the watchdog and the
