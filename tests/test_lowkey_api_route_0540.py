@@ -133,8 +133,20 @@ def test_api_launch_never_hotswaps(fake, tmp_path):
     assert not (tmp_path / "hotswap-marker.txt").exists(), "hotswap ran despite --provider"
     assert "Hotswapping" not in r.stderr
     state = json.loads((tmp_path / "throttle.json").read_text())
-    assert state["tokens"] <= state["capacity"] - 0.5, (
-        f"limiter did not acquire in the lowkey process: {state}")
+    # The limiter must have booked a slot IN THIS lowkey subprocess (the fixture strips all
+    # LA_* vars, so the owner falls back to pid-<pid>). Format differs by release: 0.62.0
+    # writes {"tokens", "capacity", "grants": [{"o": "pid-…"}]}; 0.61.x wrote only
+    # {"stamps": [{"t","o"}]} with no token keys (that was the KeyError this test hit on
+    # 0.61.2). Accept any of the three pid-owned proofs.
+    booked = (
+        state.get("tokens") is not None
+        and state.get("capacity") is not None
+        and state["tokens"] <= state["capacity"] - 0.5
+    ) or any(isinstance(s, dict) and str(s.get("o", "")).startswith("pid-")
+             for s in (state.get("stamps") or [])) or any(
+        isinstance(g, dict) and str(g.get("o", "")).startswith("pid-")
+        for g in (state.get("grants") or []))
+    assert booked, f"limiter did not acquire in the lowkey process: {state}"
 
 
 def test_api_error_is_shown(fake, tmp_path):
