@@ -306,7 +306,7 @@ def _anthropic_stream(port: int, model: str = "claude-opus-5-5", max_tokens: int
 
 
 def _two_tier_config(primary_port: int, fallback_port: int | None = None,
-                     hooks: bool = True) -> str:
+                     hooks: bool = True, stream_timeout: float | None = None) -> str:
     """A rig proxy config in the PRODUCTION shape (spec §1.1b route fact): nvidia_nim/
     prefix — the openai/ prefix would bridge /v1/messages to the Responses API instead
     of chat/completions. hooks=True registers la_proxy_hooks exactly like live proxies."""
@@ -319,6 +319,10 @@ def _two_tier_config(primary_port: int, fallback_port: int | None = None,
         "      api_key: x",
         "      num_retries: 0",
     ]
+    # 0.63.2: the same two settings remote-session.sh now writes — a per-deployment
+    # stream_timeout and TimeoutErrorRetries: 0 — so a hung model fails over at once
+    st = [f"      stream_timeout: {stream_timeout}"] if stream_timeout is not None else []
+    lines += st
     if fallback_port is not None:
         lines += [
             "  - model_name: la-fallback-1",
@@ -327,7 +331,9 @@ def _two_tier_config(primary_port: int, fallback_port: int | None = None,
             f"      api_base: \"http://127.0.0.1:{fallback_port}/v1\"",
             "      api_key: x",
             "      num_retries: 0",
+        ] + st + [
             "router_settings:",
+        ] + (["  retry_policy: {TimeoutErrorRetries: 0}"] if stream_timeout is not None else []) + [
             "  fallbacks: [{\"claude-opus-5-5\": [\"la-fallback-1\"]}]",
         ]
     settings = "drop_params: true"

@@ -8,6 +8,8 @@ Modes (from docs/measurements/2026-11-22-bridge-experiment/fake_openai.py, exten
   die1  role-only chunk, then hard close
   dier  reasoning-only chunk, then hard close
   r429  HTTP 429 JSON error immediately
+  hang  accept the request, then send NOTHING for 60 s (no status line, no headers):
+        the 2026-11-24 NVIDIA glm-5.3-flash shape (client saw http=000)
 
 Task 1 additions over the experiment fake:
   --port         bind a SPECIFIC port (default 0 = ephemeral, written to --port-file)
@@ -24,7 +26,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-MODES = ("ok", "die", "die0", "die1", "dier", "r429")
+MODES = ("ok", "die", "die0", "die1", "dier", "r429", "hang")
 
 
 def chunk(content=None, finish=None):
@@ -58,6 +60,9 @@ class H(BaseHTTPRequestHandler):
         open(ARGS.log, "a").write(json.dumps(
             {"ts": _t.time(), "path": self.path, "stream": body.get("stream"), "mode": mode,
              "model": body.get("model")}) + "\n")
+        if mode == "hang":
+            time.sleep(60)
+            return
         if mode == "r429":
             b = json.dumps({"error": {"message": "Too Many Requests",
                                       "type": "rate_limit"}}).encode()

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.63.2] — 2026-11-24
+
+### Fixed — hotfix: a model that never answers fails over instead of hanging the session
+- Incident 2026-11-24: NVIDIA's `z-ai/glm-5.3-flash` stayed in the catalog but stopped answering. A 16-token request sent directly to NVIDIA got no reply in 90 s, while Mistral Large 4 on the same key answered in under 1 s. The session proxy set no timeout on its model deployments, so a GLM session sat for 18 minutes with zero replies and never reached its fallbacks.
+- Every session and fallback deployment now carries a `stream_timeout` (default **300 s**; a legitimate first reply on a large prompt was measured at 210 s), and `TimeoutErrorRetries: 0`, so a silent model fails over to the next fallback once instead of being retried in place.
+- New `LA_STREAM_TIMEOUT` sets the number of seconds a model may stay silent; `0` disables it; an invalid value refuses the launch with a message naming the variable (documented in `remote-session.sh --help`).
+- The timeout counts only silence from the provider. Time a request spends queued in free-agents' own rate limiter (a full window, a cooldown) is never counted, so a busy limiter cannot make a healthy model look hung.
+- Tests (real LiteLLM against the fake upstream's new `hang` mode, `tests/live_proxy/test_stream_timeout.py`):
+  - a hung primary fails over to the fallback within the timeout;
+  - without the setting, the same hang stays silent and never reaches the fallback (negative control);
+  - a request queued 6 s in the limiter under `stream_timeout: 2` still reaches the primary.
+- Generator test: `test_stream_timeout_on_every_deployment`. Removing the main-deployment line makes it go RED.
+- Not in this release: greying out unreachable models in csl (a background probe, an inline hint in the row and the infobox) is tracked separately.
+
 ## [0.63.1] — 2026-11-24
 
 ### Fixed — hotfix: NVIDIA free sessions answered HTTP 400 to every request

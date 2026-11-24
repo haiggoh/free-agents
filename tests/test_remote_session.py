@@ -413,6 +413,52 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         self.env['CATALOG'] = 'not json'
         self.assertEqual(self.run_cli('--verify', 'gemini-3.8-flash').returncode, 1)
 
+    def test_stream_timeout_on_every_deployment(self):
+        # 0.63.2 hotfix: a hung model (NVIDIA glm-5.3-flash, 2026-11-24) must fail over instead
+        # of waiting forever, so EVERY session/fallback deployment carries stream_timeout and a
+        # timeout is never retried in place. LA_STREAM_TIMEOUT overrides; 0 disables; an invalid
+        # value fails loudly (an explicit override never falls back to the default).
+        import yaml
+        alias, provider, model = next((a, p, m) for a, p, m, *_ in self.roster()
+                                      if p == 'nvidia' and m != 'SELECT')
+
+        def write(extra_env):
+            cfg = self.root / f'st-{len(extra_env)}-{extra_env.get("LA_STREAM_TIMEOUT", "def")}.yaml'
+            env = dict(self.env, **extra_env)
+            r = subprocess.run(['bash', '-c', 'source "$1"; write_proxy_config "$2" "$3" "$4" false',
+                                'config', str(self.root / 'bin/library.sh'), str(cfg), provider, model],
+                               env=env, text=True, capture_output=True)
+            return r, (yaml.safe_load(cfg.read_text()) if r.returncode == 0 else None)
+
+        def deployments(doc):
+            return [d for d in doc['model_list']
+                    if str(d['model_name']).startswith(('claude', 'la-fallback'))]
+
+        r, doc = write({})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        assert doc is not None
+        deps = deployments(doc)
+        self.assertTrue(any(str(d['model_name']).startswith('la-fallback') for d in deps),
+                        f'{alias}: fixture has no fallback deployment to check')
+        self.assertEqual({d['model_name']: d['litellm_params'].get('stream_timeout') for d in deps},
+                         {d['model_name']: 300 for d in deps})
+        self.assertEqual(doc['router_settings']['retry_policy'].get('TimeoutErrorRetries'), 0)
+
+        r, doc = write({'LA_STREAM_TIMEOUT': '45'})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        assert doc is not None
+        self.assertEqual({d['litellm_params'].get('stream_timeout') for d in deployments(doc)}, {45})
+
+        r, doc = write({'LA_STREAM_TIMEOUT': '0'})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        assert doc is not None
+        self.assertEqual({'stream_timeout' in d['litellm_params'] for d in deployments(doc)}, {False})
+
+        r, _ = write({'LA_STREAM_TIMEOUT': 'soon'})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('LA_STREAM_TIMEOUT', r.stderr)
+        self.assertIn('soon', r.stderr)
+
     def test_proxy_config_all_models_and_thinking(self):
         prefixes = dict(gemini='gemini/', groq='groq/', nvidia='nvidia_nim/',
                         openrouter='openrouter/', cerebras='cerebras/', cloudflare='openai/',

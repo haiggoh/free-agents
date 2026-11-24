@@ -36,6 +36,9 @@
 #   LA_REMOTE_MAX_OUTPUT_TOKENS   CLAUDE_CODE_MAX_OUTPUT_TOKENS (default 128000 = Claude Code's own
 #                                 ceiling for the spoofed model; the proxy clamps per provider)
 #   LA_REMOTE_KEEP_PROXY=1        leave the proxy running after the session exits
+#   LA_STREAM_TIMEOUT             seconds a model may stay SILENT before its request fails over
+#                                 to the fallback chain (default 300; 0 disables; time queued in
+#                                 the rate limiter is never counted; invalid = launch refused)
 #   LA_REMOTE_ENABLE_MCP=1        enable MCPs for free-API sessions (default: 0, disabled)
 #   LA_REMOTE_CLAUDE_SETTINGS     path to per-session settings JSON (merged with blind-trust settings
 #                                 if both active; if set but missing, prints warning and continues)
@@ -1077,6 +1080,25 @@ _session_fallbacks() { # _session_fallbacks <provider> <model> -> "provider:mode
 }
 
 FALLBACK_NAMES=()
+_stream_timeout_line() { # sets LA_STREAM_TIMEOUT_LINE ("" = disabled); invalid -> loud error, return 1
+    # 0.63.2 hotfix: a per-deployment stream_timeout, so a model that accepts the request but
+    # never answers (NVIDIA glm-5.3-flash, 2026-11-24: a GLM session sat 18 minutes with zero
+    # replies) fails over to the fallback chain instead of waiting forever. LiteLLM applies it as
+    # a READ timeout on the upstream connection: it counts silence from the provider only, never
+    # time queued in our own rate limiter (tests/live_proxy/test_stream_timeout.py proves both).
+    # Default 300 s: a legitimate first reply on a large prompt was measured at 210 s.
+    local v="${LA_STREAM_TIMEOUT-300}"
+    LA_STREAM_TIMEOUT_LINE=""
+    if [[ ! "$v" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        echo "remote-session: LA_STREAM_TIMEOUT='$v' is not a number of seconds (0 disables; default 300)" >&2
+        return 1
+    fi
+    if [[ "$v" =~ ^0+([.]0+)?$ ]]; then
+        return 0
+    fi
+    LA_STREAM_TIMEOUT_LINE="      stream_timeout: $v"
+}
+
 _write_fallbacks() { # _write_fallbacks <cfg> <provider> <model> <thinking> [effort] [temperature]
     local cfg="$1" prov="$2" model="$3" thinking="$4" effort="${5:-}" temperature="${6:-}"
     local line fprov fmodel route key n=0
@@ -1097,6 +1119,7 @@ _write_fallbacks() { # _write_fallbacks <cfg> <provider> <model> <thinking> [eff
             [[ -n "$MP_EFFORT_LINE" ]] && echo "$MP_EFFORT_LINE"
             [[ -n "$temperature" ]] && echo "      temperature: $temperature"
             echo "      num_retries: 1"
+            [[ -n "${LA_STREAM_TIMEOUT_LINE:-}" ]] && echo "$LA_STREAM_TIMEOUT_LINE"
         } >> "$cfg"
     done < <(_session_fallbacks "$prov" "$model")
     return 0
@@ -1137,6 +1160,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
     fi
 
     _prepare_runtime_file "$cfg" || return 1
+    _stream_timeout_line || return 1
     echo "model_list:" >> "$cfg"
     local spoof
     IFS=',' read -r -a _spoofs <<< "$LA_REMOTE_SPOOF_IDS"
@@ -1170,6 +1194,7 @@ write_proxy_config() { # write_proxy_config <cfgpath> <provider> <model> <thinki
             elif [[ "$prov" == "nvidia" || "$prov" == "gemini" || "$prov" == "groq" ]]; then
                 echo "      num_retries: 3"
             fi
+            [[ -n "${LA_STREAM_TIMEOUT_LINE:-}" ]] && echo "$LA_STREAM_TIMEOUT_LINE"
             [[ -n "$native_line" ]] && echo "$native_line"
         } >> "$cfg"
     done
@@ -1213,6 +1238,8 @@ YAML
 router_settings:
   retry_policy:
     BadRequestErrorRetries: 1
+    # 0.63.2: a timed-out (hung) model fails over AT ONCE; retrying it would multiply the wait
+    TimeoutErrorRetries: 0
 YAML
     if [[ ${#FALLBACK_NAMES[@]} -gt 0 ]]; then
         # A throttled model fails over AT ONCE instead of retrying itself; every spoofed id and the
