@@ -819,14 +819,29 @@ class TokensBookingTests(unittest.TestCase):
     def test_pre_call_books_estimated_tokens(self):
         b = self._fake_bucket()
         self.hooks._bucket = b
-        kwargs = {"model": "nvidia_nim/acme/x", "max_tokens": 1000,
+        kwargs = {"model": "nvidia_nim/acme/x", "max_tokens": 1000, "litellm_call_id": "c-1",
                   "messages": [{"role": "user", "content": "hi " * 100}]}
         asyncio.run(self.hooks.async_pre_call_deployment_hook(kwargs, None))
         self.assertIsNotNone(b.acquire_kwargs, "aacquire must be called")
         booked = b.acquire_kwargs.get("tokens", 0)
         self.assertGreaterEqual(booked, 1000, f"tokens= must cover max_tokens, got {booked}")
-        self.assertEqual(kwargs.get("_la_booked_tokens"), booked,
-                         "the booked amount must ride on kwargs for the success hook")
+        self.assertEqual(self.mod._CALL_BOOKED.get("c-1"), booked,
+                         "the booked amount is kept by call id for the success hook")
+
+    def test_booked_tokens_never_reach_the_upstream_request(self):
+        # 0.63.1 hotfix: 0.62.3 put `_la_booked_tokens` INTO the request kwargs; LiteLLM forwarded
+        # it and NVIDIA NIM 400'd every request ("Unsupported parameter(s): _la_booked_tokens",
+        # proxy log 2026-11-24). What goes upstream is the hook's return value, or the (mutated)
+        # input dict when it returns None -- neither may carry any `_la_` key, on any provider.
+        for model in ("nvidia_nim/acme/x", "groq/acme/x"):
+            with self.subTest(model=model):
+                self.hooks._bucket = self._fake_bucket()
+                kwargs = {"model": model, "max_tokens": 1000, "litellm_call_id": "c-2",
+                          "messages": [{"role": "user", "content": "hi"}]}
+                out = asyncio.run(self.hooks.async_pre_call_deployment_hook(kwargs, None))
+                upstream = out if out is not None else kwargs
+                leaked = [k for k in list(upstream) + list(kwargs) if str(k).startswith("_la_")]
+                self.assertEqual(leaked, [], f"{model}: internal keys forwarded upstream: {leaked}")
 
     def test_hook_passes_agent_kind_from_header(self):
         # 0.63.0: a request carrying X-LA-Agent registers kind=agent for the fast lane.
@@ -841,11 +856,13 @@ class TokensBookingTests(unittest.TestCase):
     def test_success_reconciles_booked_vs_used(self):
         b = self._fake_bucket()
         self.hooks._bucket = b
-        kwargs = {"model": "nvidia_nim/acme/x", "_la_booked_tokens": 1250}
+        self.mod._CALL_BOOKED["c-3"] = 1250
+        kwargs = {"model": "nvidia_nim/acme/x", "litellm_call_id": "c-3"}
         resp = {"usage": {"prompt_tokens": 1000, "completion_tokens": 250}}
         asyncio.run(self.hooks.async_log_success_event(kwargs, resp, 0, 1))
         self.assertEqual(b.success, ("nvidia_nim/acme/x", 1250, 1250),
                          f"note_success must get tokens_used=1250, booked=1250, got {b.success}")
+        self.assertNotIn("c-3", self.mod._CALL_BOOKED, "the success hook pops its entry")
 
 
 if __name__ == "__main__":

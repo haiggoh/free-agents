@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.63.1] — 2026-11-24
+
+### Fixed — hotfix: NVIDIA free sessions answered HTTP 400 to every request
+- Since 0.62.3 the proxy hook stored its booked-token count in the request itself (`_la_booked_tokens`). LiteLLM forwarded that field upstream, and NVIDIA NIM rejects unknown parameters, so every NVIDIA request failed with `400 Unsupported parameter(s): _la_booked_tokens`. Its fallbacks failed the same way. A new session then made no progress at all: measured 2026-11-24, a GLM 5.3 Flash session got zero assistant turns in 18 minutes. Non-NVIDIA providers received the field too.
+- The booked amount is now kept in the proxy, keyed by `litellm_call_id`. It expires like the 429 records, and the success hook reads it from there, so nothing internal goes upstream. TPM reconciliation is unchanged.
+- Restart any running free session's proxy to pick up the fix (`remote-session.sh --swap-model <port> <alias> --force`, or relaunch the session).
+- Tests: `test_booked_tokens_never_reach_the_upstream_request` asserts that no `_la_*` key reaches the forwarded request on NVIDIA or non-NVIDIA. Restoring the 0.62.3 line makes it go RED. The two booked-token tests now pin the call-id map. `tests/test_la_proxy_hooks.py`: 57 passed.
+
 ## [0.63.0] — 2026-11-24
 
 ### Added — opt-in fast lane for agents/offloads in the rate limiter (waypoint fast-lane-for-agents-offloads)

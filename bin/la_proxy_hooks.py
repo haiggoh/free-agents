@@ -499,6 +499,30 @@ BRIDGE_SHIM_STATE = ""   # "" until the first install; then installed | upstream
 _CALL_429_RECORDS: dict[str, dict] = {}   # litellm_call_id -> {"retry_after": seconds, "at": t}
 _RECORD_TTL = 600.0
 
+# 0.63.1 hotfix: tokens booked at pre-call, by litellm_call_id, for the success hook. NEVER in
+# the request kwargs: LiteLLM forwards unknown kwargs upstream and NVIDIA NIM 400s every request
+# on them (0.62.3 put `_la_booked_tokens` there). Entries expire like _CALL_429_RECORDS.
+_CALL_BOOKED: dict[str, int] = {}
+_CALL_BOOKED_AT: dict[str, float] = {}
+
+
+def _book_call(kwargs: dict, tokens: int) -> None:
+    import time
+    now = time.time()
+    for k in [k for k, t in _CALL_BOOKED_AT.items() if now - t > _RECORD_TTL]:
+        _CALL_BOOKED.pop(k, None)
+        _CALL_BOOKED_AT.pop(k, None)
+    call_id = str((kwargs or {}).get("litellm_call_id") or "")
+    if call_id:
+        _CALL_BOOKED[call_id] = int(tokens)
+        _CALL_BOOKED_AT[call_id] = now
+
+
+def _take_booked(kwargs: dict) -> int:
+    call_id = str((kwargs or {}).get("litellm_call_id") or "")
+    _CALL_BOOKED_AT.pop(call_id, None)
+    return int(_CALL_BOOKED.pop(call_id, 0) or 0)
+
 
 def _record_call_rate_limited(call_id: str, retry_after: float | None) -> None:
     """Remember that THIS call's chain ended on a rate limit; the stream-iterator hook
@@ -822,9 +846,10 @@ class LAProxyHooks(CustomLogger):
                 from rate_limiter import _max_wait, stretched_wait, RateLimitTimeout
                 # 0.62.3 review fix: pass tokens= so the quota sidecar (tpm/tpd) actually
                 # books this request — 0.62.0 granted with tokens=0 (TPM accounting was
-                # limiter-API-only). The booked amount rides on kwargs for the success hook.
+                # limiter-API-only). The booked amount is kept by call id (_book_call) for the
+                # success hook -- never in kwargs, which LiteLLM forwards upstream (0.63.1).
                 booked = _estimate_tokens(kwargs)
-                kwargs["_la_booked_tokens"] = booked
+                _book_call(kwargs, booked)
                 try:
                     waited = await bucket.aacquire(
                         model=str(kwargs.get("model") or ""),
@@ -837,7 +862,7 @@ class LAProxyHooks(CustomLogger):
                     # provider has not rejected yet): acquire on rpm alone and book nothing —
                     # the upstream 400 must answer and teach the real cap (fix 4), not a
                     # self-raised 429.
-                    kwargs["_la_booked_tokens"] = 0
+                    _book_call(kwargs, 0)
                     print(f"la_proxy_hooks: estimated {booked} tokens never fit tpm; "
                           "acquiring on rpm alone", file=sys.stderr)
                     waited = await bucket.aacquire(
@@ -939,9 +964,8 @@ class LAProxyHooks(CustomLogger):
                         + int(getattr(usage, "completion_tokens", 0) or 0)
             except (TypeError, ValueError):
                 used = None
-        booked = 0
         try:
-            booked = int((kwargs or {}).get("_la_booked_tokens") or 0)
+            booked = _take_booked(kwargs or {})
         except (TypeError, ValueError):
             booked = 0
         bucket.note_success(str((kwargs or {}).get("model") or ""),
