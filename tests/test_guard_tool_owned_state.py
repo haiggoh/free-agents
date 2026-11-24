@@ -18,8 +18,17 @@ ROOT = Path(__file__).resolve().parent.parent
 GUARD = ROOT / "hooks" / "guard-tool-owned-state.py"
 
 
-def run(tool, tool_input, extra_env=None, raw=None):
+def _default_env():
+    # These tests exercise the guard's DEFAULT location (~/.claude), so the conftest's per-test
+    # CLAUDE_CONFIG_DIR sandbox (0.63.2) is removed for the hook subprocess; a test that wants a
+    # custom config dir passes it through extra_env.
     env = dict(os.environ)
+    env.pop("CLAUDE_CONFIG_DIR", None)
+    return env
+
+
+def run(tool, tool_input, extra_env=None, raw=None):
+    env = _default_env()
     env.pop("LA_STATE_GUARD_DISABLE", None)
     env.update(extra_env or {})
     stdin = raw if raw is not None else json.dumps({"tool_name": tool, "tool_input": tool_input})
@@ -34,7 +43,8 @@ def denied(parsed):
 
 class GuardToolOwnedState(unittest.TestCase):
     def test_self_test_passes(self):
-        p = subprocess.run([sys.executable, str(GUARD), "--self-test"], capture_output=True, text=True)
+        p = subprocess.run([sys.executable, str(GUARD), "--self-test"], capture_output=True, text=True,
+                           env=_default_env())
         self.assertEqual(p.returncode, 0, p.stdout)
 
     def test_incident_write_is_denied_with_version_bump_advice(self):

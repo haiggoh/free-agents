@@ -33,14 +33,15 @@ def test_cloud_session_env_writes_into_the_sandbox():
     assert str(p).startswith(str(Path(os.environ["CLAUDE_CONFIG_DIR"]).resolve()))
 
 
-def test_each_test_gets_its_own_sandbox_dir(tmp_path):
-    # function-scoped: the sandbox of this test is not the previous test's
-    from conftest import _sandbox_claude_config_dir  # noqa: F401  (importable = defined)
-    assert Path(os.environ["CLAUDE_CONFIG_DIR"]).exists()
+def test_each_test_gets_its_own_sandbox_dir():
+    # function-scoped: the dir exists and lives under pytest's temp root, never under ~/.claude
+    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"])
+    assert cfg.exists()
+    assert REAL.resolve() not in cfg.resolve().parents
 
 
 def test_changed_setting_keys_names_only():
-    from conftest import changed_setting_keys
+    from settings_guard import changed_setting_keys
     before = b'{"a": 1, "env": {"X": "1", "TOKEN": "s3cr3t-value"}, "theme": "dark"}'
     after = b'{"a": 1, "env": {"X": "2", "TOKEN": "s3cr3t-value"}, "theme": "light", "new": true}'
     keys = changed_setting_keys(before, after)
@@ -49,7 +50,7 @@ def test_changed_setting_keys_names_only():
 
 
 def test_changed_setting_keys_edge_cases():
-    from conftest import changed_setting_keys
+    from settings_guard import changed_setting_keys
     assert changed_setting_keys(None, None) == []
     assert changed_setting_keys(None, b'{"a": 1}') == ["a"]
     assert changed_setting_keys(b'{"a": 1}', b'{not json') == ["<unparseable settings.json>"]

@@ -150,36 +150,22 @@ def _snapshot():
         return None
 
 
-def changed_setting_keys(before, after) -> list[str]:
-    """Dotted names of the keys whose value differs between two settings.json byte snapshots
-    (values are never returned: settings.json can hold tokens). A missing file is {};
-    unparseable JSON reports as ['<unparseable settings.json>']."""
-    import json
+def _load_settings_guard():
+    # Loaded BY FILE PATH and registered as `settings_guard`: when pytest imports this conftest,
+    # tests/ is not on sys.path (ModuleNotFoundError), and `from conftest import ...` is ambiguous
+    # (tests/live_proxy/conftest.py). Tests then `import settings_guard` and get this same module.
+    import importlib.util
+    import sys as _sys
+    spec = importlib.util.spec_from_file_location(
+        "settings_guard", Path(__file__).resolve().parent / "settings_guard.py")
+    assert spec is not None and spec.loader is not None, "tests/settings_guard.py is missing"
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _sys.modules.setdefault("settings_guard", mod)
+    return _sys.modules["settings_guard"]
 
-    def load(b):
-        if b is None:
-            return {}
-        try:
-            d = json.loads(b)
-        except ValueError:
-            return None
-        return d if isinstance(d, dict) else None
 
-    def flat(d, p=""):
-        out = {}
-        for k, v in d.items():
-            kk = f"{p}.{k}" if p else str(k)
-            if isinstance(v, dict) and v:
-                out.update(flat(v, kk))
-            else:
-                out[kk] = json.dumps(v, sort_keys=True)
-        return out
-
-    a, b = load(before), load(after)
-    if a is None or b is None:
-        return ["<unparseable settings.json>"]
-    fa, fb = flat(a), flat(b)
-    return sorted(k for k in set(fa) | set(fb) if fa.get(k) != fb.get(k))
+changed_setting_keys = _load_settings_guard().changed_setting_keys
 
 
 _BEFORE = _snapshot()

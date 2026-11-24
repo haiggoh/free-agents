@@ -17,7 +17,7 @@
 ### Fixed — the test suite no longer fails when YOU change settings during a run
 - The suite's guard byte-compared your real `~/.claude/settings.json` at the start and the end of a run, and failed the run if it differed. It could not tell a leaking test from your own edit or a live Claude Code session saving model, effort or theme: on 2026-11-24 it failed 2 of 3 free-agents ship gates whose tests had all passed.
 - Every test now runs with `CLAUDE_CONFIG_DIR` pointing at its own temp dir (autouse fixture in `tests/conftest.py`), so no code path that resolves Claude Code's config through it can reach your real file. The guard now only **reports** a change, naming the changed keys (never their values), and no longer fails the run.
-- Tests: `tests/test_config_sandbox.py` (5). Making the fixture non-autouse turns 3 of them RED.
+- Tests: `tests/test_config_sandbox.py` (5). Making the fixture non-autouse turns 3 of them RED. The key-diff helper lives in `tests/settings_guard.py`, loaded by file path, because `from conftest import …` resolved to `tests/live_proxy/conftest.py` in the full gate. `test_guard_tool_owned_state.py` removes the sandbox for its hook subprocess, since it tests the guard's DEFAULT `~/.claude` location.
 
 ## [0.63.1] — 2026-11-24
 
