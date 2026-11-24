@@ -359,7 +359,22 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
                                  'proxy', str(self.root / 'bin/library.sh')],
                                 env=self.env, stdin=subprocess.DEVNULL, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        received = json.loads((self.root / 'child-env').read_text())
+        # 0.63.1: start_proxy spawns the proxy inside `bgpid="$(_spawn_proxy_on ...)"`, a
+        # command-substitution subshell, so it is NOT a child of this `bash -c` and `wait`
+        # returns at once. Reading child-env right away raced the stub under the 12-worker
+        # gate (FileNotFoundError, failed 2 of 2 ship runs 2026-11-24). Wait for the stub's
+        # complete JSON with a deadline instead.
+        child_env = self.root / 'child-env'
+        deadline = time.monotonic() + 15
+        received = None
+        while time.monotonic() < deadline:
+            try:
+                received = json.loads(child_env.read_text())
+                break
+            except (FileNotFoundError, json.JSONDecodeError):
+                time.sleep(0.05)
+        if received is None:
+            self.fail('the stub proxy never wrote child-env within 15 s')
         self.assertEqual(received['CLOUDFLARE_API_TOKEN'], secret)
         self.assertEqual(received['CLOUDFLARE_ACCOUNT_ID'], 'a' * 32)
         self.assertFalse(marker.exists())

@@ -7,6 +7,7 @@
 - The booked amount is now kept in the proxy, keyed by `litellm_call_id`. It expires like the 429 records, and the success hook reads it from there, so nothing internal goes upstream. TPM reconciliation is unchanged.
 - Restart any running free session's proxy to pick up the fix (`remote-session.sh --swap-model <port> <alias> --force`, or relaunch the session).
 - Tests: `test_booked_tokens_never_reach_the_upstream_request` asserts that no `_la_*` key reaches the forwarded request on NVIDIA or non-NVIDIA. Restoring the 0.62.3 line makes it go RED. The two booked-token tests now pin the call-id map. `tests/test_la_proxy_hooks.py`: 57 passed.
+- Test fix: `test_proxy_receives_literal_credentials` waits for the stub proxy's output with a deadline. `start_proxy` spawns the proxy inside a command-substitution subshell, so the test's `wait` never waited for it, and the read raced the stub under the 12-worker gate (it failed 2 of 2 ship runs). With a 1 s stub delay, the old test fails with FileNotFoundError and the new one passes.
 
 ## [0.63.0] — 2026-11-24
 
