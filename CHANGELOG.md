@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.63.0] — 2026-11-24
+
+### Added — opt-in fast lane for agents/offloads in the rate limiter (waypoint fast-lane-for-agents-offloads)
+- New setting `fast_lane` (`LA_LIMITER_FAST_LANE`, saved picker setting, csl rate-limiter row `n`): `off` (default — the A/B control arm), `agents` (dispatch + agent rank above interactive), `all-noninteractive` (also background). Rank tuple is now `(class, fast, tier, boost, -arrived)`: a fast-lane kind beats any non-priority request regardless of age tier; the manual priority lane still wins; while interactive waiters queue, fast+priority grants share the lane share cap (`lane_share_cap`), so sessions are never starved by the fast lane; with no interactive waiters the cap does not bind.
+- New waiter kind `agent`: requests carrying the `X-LA-Agent` header register as `agent` (the proxy hook passes `kind=` through acquire/aacquire); grants carry the kind for lane-cap counting (`k` on grants; sliding mode reads the owner's kind).
+- A/B receipt (tests/fast_lane_ab.py, 6 dispatches/arm, 2026-11-24): timeout rate 0.00% in BOTH arms (19 attempts off vs 14 agents; wall 219 s vs 253 s) — on a lightly loaded box the 0.62.0 C3 stretched waits already prevent offload timeouts, so the lane ships OFF by default; enable it when you measure timeouts under load.
+- Tests: `tests/test_fast_lane.py` (setting mapping, agent kind, rank matrix incl. off==0.62.3 byte-identical, lane-cap binds only with interactive waiters, kind plumbing) — rank mutation (fast=0) verified RED; `test_la_proxy_hooks.py` gains the X-LA-Agent header test. 9 + 56 passed on the branch; picker suites 86 passed (new menu row).
+
 ## [0.62.3] — 2026-11-23
 
 ### Fixed — the four Important findings of the 0.62.0 whole-branch review (evidence: reviewer session 5c7fddb4; each fix mutation-checked RED before green)
