@@ -130,6 +130,19 @@ def _limiter_knobs_for_load_sensitive(request, monkeypatch):
 _REAL_SETTINGS = Path.home() / ".claude" / "settings.json"
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_claude_config_dir(tmp_path_factory, monkeypatch):
+    """0.63.2: EVERY test runs with CLAUDE_CONFIG_DIR pointing at a fresh temp dir, so no code
+    path that resolves Claude Code's config through it (cloud_session_env.config_dir(), and the
+    picker via cse) can reach the user's real ~/.claude/settings.json. A test that needs its own
+    dir still sets it; one that needs the default path unsets it AND sandboxes HOME itself
+    (test_fa_pre_trust's `sb`). Before this, sandboxing was per test, and the only backstop was
+    the byte-compare below, which could not tell a leaking test from the user editing settings
+    or a live Claude Code session saving model/effort/theme mid-gate (2026-11-24: 2 of 3 ship
+    gates failed that way)."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path_factory.mktemp("claude-config")))
+
+
 def _snapshot():
     try:
         return _REAL_SETTINGS.read_bytes()
@@ -137,14 +150,52 @@ def _snapshot():
         return None
 
 
+def changed_setting_keys(before, after) -> list[str]:
+    """Dotted names of the keys whose value differs between two settings.json byte snapshots
+    (values are never returned: settings.json can hold tokens). A missing file is {};
+    unparseable JSON reports as ['<unparseable settings.json>']."""
+    import json
+
+    def load(b):
+        if b is None:
+            return {}
+        try:
+            d = json.loads(b)
+        except ValueError:
+            return None
+        return d if isinstance(d, dict) else None
+
+    def flat(d, p=""):
+        out = {}
+        for k, v in d.items():
+            kk = f"{p}.{k}" if p else str(k)
+            if isinstance(v, dict) and v:
+                out.update(flat(v, kk))
+            else:
+                out[kk] = json.dumps(v, sort_keys=True)
+        return out
+
+    a, b = load(before), load(after)
+    if a is None or b is None:
+        return ["<unparseable settings.json>"]
+    fa, fb = flat(a), flat(b)
+    return sorted(k for k in set(fa) | set(fb) if fa.get(k) != fb.get(k))
+
+
 _BEFORE = _snapshot()
 
 
 def pytest_sessionfinish(session, exitstatus):
-    if _snapshot() != _BEFORE:
-        print(f"\nFAILED: a test changed the real {_REAL_SETTINGS} — sandbox CLAUDE_CONFIG_DIR "
-              "for any test that starts the picker or writes settings")
-        session.exitstatus = 1
+    after = _snapshot()
+    if after != _BEFORE:
+        # REPORT, never fail: every test is sandboxed (fixture above), so a change to the real
+        # file during the run is almost always the user or a live Claude Code session. Naming
+        # the keys lets a real leak still be spotted at a glance.
+        keys = changed_setting_keys(_BEFORE, after)
+        print(f"\nNOTE: the real {_REAL_SETTINGS} changed during this run "
+              f"(keys: {', '.join(keys) or 'formatting only'}). Tests run with CLAUDE_CONFIG_DIR "
+              "sandboxed, so this is most likely your own edit or a live Claude Code session; "
+              "it does not fail the run.")
     shim_log = Path(os.environ.get("FA_NOTIFY_SHIM_DIR", "")) / "calls.log"
     calls = []
     try:
