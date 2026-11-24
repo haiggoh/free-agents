@@ -138,7 +138,7 @@ def _saved_settings() -> dict:
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import session_menu_state as sms
-        cfg = os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR
+        cfg = sms.config_dir()
         return sms.load(cfg).rate_limiter
     except Exception:
         return {}
@@ -176,11 +176,9 @@ def _saved_settings_cached() -> dict:
     """_saved_settings() behind an mtime-keyed cache: one stat() per call instead of a
     read+parse, so the hot grant path can re-read saved settings (hot reload) cheaply."""
     try:
-        cfg = os.environ.get("LA_SESSION_MENU_CONFIG_DIR")
-        if not cfg:
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            import session_menu_state as sms
-            cfg = sms.REPO_CONFIG_DIR
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import session_menu_state as sms
+        cfg = sms.config_dir()
         p = Path(cfg) / "session-menu.local.json"
         st = p.stat()
         key = (str(p), st.st_mtime_ns, st.st_size)

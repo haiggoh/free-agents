@@ -1076,7 +1076,7 @@ class Picker(App):
         # app's fit/age/param verdicts (measured 2026-10-28: the full suite's age-filter
         # tests share one process, and a cached cutoff from an earlier test leaked).
         _VERDICT_MEMO.clear()
-        state = sms.load(Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR))
+        state = sms.load(sms.config_dir())
         self.state_warnings = list(state.warnings)
         # 0.50.0 F4: informational notes (cleanups, paste fixes) are NOT warnings — they get
         # the info emoji, not ⚠️ (which is reserved for problems).
@@ -1150,7 +1150,7 @@ class Picker(App):
 
     # --- persistence -----------------------------------------------------------------------
     def _config_dir(self):
-        return Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR)
+        return sms.config_dir()
 
     def _save_effort(self, lane, value):
         warning = sms.save_effort(self._config_dir(), lane, value)
