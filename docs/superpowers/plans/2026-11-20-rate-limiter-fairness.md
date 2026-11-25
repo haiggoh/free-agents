@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-19-nvidia-rate-limiter-fairness-design.md` (user-approved 2026-11-19, committed on this branch). Where plan and spec conflict, the spec wins; ledger the deviation as a `Ruling:` line.
 
-**Status:** in-progress
+**Status:** completed
 
 > **Lasting Plans:** when every task below is done, set the Status line to `completed` by running `lasting-plans complete "docs/superpowers/plans/2026-11-20-rate-limiter-fairness.md"` as the closing step.
 
