@@ -25,6 +25,7 @@ def _load_backend_upgrades():
                                                   ROOT / "install" / "backend_upgrades.py")
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod   # dataclass fields resolve cls.__module__ via sys.modules
     spec.loader.exec_module(mod)
     return mod
 

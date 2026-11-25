@@ -191,9 +191,12 @@ class CopyToast(PilotCase):
 class BackendUpgradeToggles(PilotCase):
     def setUp(self):
         super().setUp()
-        # Never the user's real backend-upgrades.json (conftest tripwire): the model resolves
-        # LA_BACKEND_UPGRADES_STATE first. Set it on os.environ DIRECTLY — PilotCase.setUp
-        # already pushed self.env into os.environ, so adding to self.env now would be inert.
+        # Never the user's real backend-upgrades.json: conftest forces LA_BACKEND_UPGRADES_STATE
+        # to a per-run sandbox AND installs the _fa_real_state_tripwire on Path.write_text /
+        # Path.replace in pytest_configure, which fails any in-process write to the real file.
+        # The model resolves LA_BACKEND_UPGRADES_STATE first. Set it on os.environ DIRECTLY —
+        # PilotCase.setUp already pushed self.env into os.environ, so adding to self.env now
+        # would be inert.
         self.bu_state = Path(self.cfg) / "backend-upgrades.json"
         self.env["LA_BACKEND_UPGRADES_STATE"] = str(self.bu_state)
         os.environ["LA_BACKEND_UPGRADES_STATE"] = str(self.bu_state)

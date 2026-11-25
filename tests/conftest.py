@@ -69,6 +69,24 @@ os.environ["LA_HF_ROUTER_URL"] = "http://127.0.0.1:9/v1/models"   # the router c
 os.environ["FA_LIMITER_DIR"] = str(
     Path(_tempfile.mkdtemp(prefix="fa-limiterdir-test-")) / f"limiter{_worker}")
 
+# F1 (2026-11-25 followups): fence the two remaining live-state writers. bin/last-effort.py
+# defaults its state file to <repo>/config/remote-last-effort.local.json when
+# LA_LAST_EFFORT_FILE is unset (measured 2026-11-25: a full suite run created that file in
+# the checkout it ran in — in the CANONICAL checkout that IS the user's live effort store),
+# and install/backend_upgrades.py defaults LA_BACKEND_UPGRADES_STATE to the REAL
+# ~/.claude/free-agents/backend-upgrades.json. Both FORCED, not setdefault (an inherited
+# override may point at the real file); per-xdist-worker like the throttle file above;
+# subprocesses inherit both. The autouse fixture below re-asserts them per test, because a
+# test may pop the override (test_cycle_ui_0554 sets LA_BACKEND_UPGRADES_STATE on
+# os.environ directly and pops it on cleanup, which would otherwise leave the fence unset
+# for every later test in the same worker).
+os.environ["LA_LAST_EFFORT_FILE"] = str(
+    Path(_tempfile.mkdtemp(prefix="fa-lasteffort-test-")) / f"last-effort{_worker}.json")
+os.environ["LA_BACKEND_UPGRADES_STATE"] = str(
+    Path(_tempfile.mkdtemp(prefix="fa-upgrades-test-")) / f"backend-upgrades{_worker}.json")
+_LAST_EFFORT_FENCE = os.environ["LA_LAST_EFFORT_FILE"]
+_BACKEND_UPGRADES_FENCE = os.environ["LA_BACKEND_UPGRADES_STATE"]
+
 # 0.63.3 (R1-A/D2): run-level sandbox for the session-menu config dir. FORCED like the
 # fences above (an inherited override may point at the real dir); the per-test autouse
 # fixture below overrides it with a per-test dir. The LA_SESSION_MENU_CONFIG_DIR alias is
@@ -162,6 +180,16 @@ def _sandbox_free_agents_config_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("FREE_AGENTS_CONFIG_DIR", str(tmp_path / "fa-config"))
 
 
+@pytest.fixture(autouse=True)
+def _reassert_live_state_fences(monkeypatch):
+    """F1: re-assert the run-level LA_LAST_EFFORT_FILE / LA_BACKEND_UPGRADES_STATE fences
+    for EVERY test — a test that sets an override on os.environ directly and pops it on
+    cleanup (test_cycle_ui_0554.py BackendUpgradeToggles) would otherwise leave the fence
+    unset for all later tests in the same xdist worker."""
+    monkeypatch.setenv("LA_LAST_EFFORT_FILE", _LAST_EFFORT_FENCE)
+    monkeypatch.setenv("LA_BACKEND_UPGRADES_STATE", _BACKEND_UPGRADES_FENCE)
+
+
 def _snapshot():
     try:
         return _REAL_SETTINGS.read_bytes()
@@ -189,6 +217,21 @@ changed_setting_keys = _load_settings_guard().changed_setting_keys
 
 _BEFORE = _snapshot()
 
+# F1.2: byte-snapshot the checkout's own config/remote-last-effort.local.json at import;
+# pytest_sessionfinish FAILS the run if it changed during the run (that file is
+# bin/last-effort.py's default target when LA_LAST_EFFORT_FILE is unset).
+_REPO_EFFORT_FILE = Path(__file__).resolve().parents[1] / "config" / "remote-last-effort.local.json"
+
+
+def _snapshot_repo_effort():
+    try:
+        return _REPO_EFFORT_FILE.read_bytes()
+    except OSError:
+        return None
+
+
+_REPO_EFFORT_BEFORE = _snapshot_repo_effort()
+
 
 def pytest_sessionfinish(session, exitstatus):
     after = _snapshot()
@@ -201,6 +244,16 @@ def pytest_sessionfinish(session, exitstatus):
               f"(keys: {', '.join(keys) or 'formatting only'}). Tests run with CLAUDE_CONFIG_DIR "
               "sandboxed, so this is most likely your own edit or a live Claude Code session; "
               "it does not fail the run.")
+    if _snapshot_repo_effort() != _REPO_EFFORT_BEFORE:
+        # F1.2: FAIL (unlike the settings.json note above) — a change to this file during
+        # the run means a test wrote the checkout's config/ effort store; conftest forces
+        # LA_LAST_EFFORT_FILE to a sandbox. The only benign writer is a live csl running
+        # in the CANONICAL checkout, never one started from this worktree's suite.
+        print(f"\nFAILED: {_REPO_EFFORT_FILE} changed during this run — a test wrote the "
+              "checkout's config/ effort store; conftest forces LA_LAST_EFFORT_FILE to a "
+              "sandbox (F1.2). (A live csl in the canonical checkout is the only benign "
+              "writer of that file.)")
+        session.exitstatus = 1
     shim_log = Path(os.environ.get("FA_NOTIFY_SHIM_DIR", "")) / "calls.log"
     calls = []
     try:
@@ -252,6 +305,12 @@ def pytest_configure(config):
     # LA_REMOTE_CATALOG_CACHE_DIR; an in-process write to the default dir fails the test.
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
+    # F1 ruling: install/ too — APPENDED so it never shadows bin/ or test modules.
+    # tests/test_suite_fences.py loads install/backend_upgrades.py by file path and its
+    # `import legacy_venv_migration` only resolves with install/ on sys.path; without
+    # this the fence tests flake with ModuleNotFoundError on any xdist worker that did
+    # not also import a test module inserting install/ itself.
+    sys.path.append(str(Path(__file__).resolve().parents[1] / "install"))
     import session_picker_model as _m
 
     _default_cache = Path.home() / ".local" / "state" / "local-agents" / "remote-catalogs"
@@ -313,3 +372,35 @@ def pytest_configure(config):
         return _orig_save(self)
 
     _rl.SmoothTokenBucket._save = _guarded_save
+
+    # F1.3 tripwire: any in-process write that still resolves to the REAL
+    # ~/.claude/free-agents/backend-upgrades.json (or its .tmp) fails the test BEFORE the
+    # file is touched. install/backend_upgrades.save_state() writes p.with_suffix(".tmp")
+    # via Path.write_text then Path.replace; tests load fresh module copies, so the Path
+    # methods are the one choke point every in-process writer shares. Both wrappers carry
+    # the _fa_real_state_tripwire marker (tests/test_suite_fences.py asserts it).
+    _real_upgrades = (Path.home() / ".claude" / "free-agents" / "backend-upgrades.json").resolve()
+    _real_upgrades_tmp = _real_upgrades.with_suffix(".tmp")
+    _orig_path_write_text = Path.write_text
+    _orig_path_replace = Path.replace
+
+    def _guarded_write_text(self, data, *args, **kwargs):
+        p = Path(self).resolve()
+        if p == _real_upgrades or p == _real_upgrades_tmp:
+            raise AssertionError(
+                f"test wrote the REAL backend-upgrades state {self} — conftest forces "
+                "LA_BACKEND_UPGRADES_STATE to a sandbox; pass an explicit temp path")
+        return _orig_path_write_text(self, data, *args, **kwargs)
+
+    def _guarded_replace(self, target, *args, **kwargs):
+        if Path(self).resolve() in (_real_upgrades, _real_upgrades_tmp) or \
+                Path(target).resolve() in (_real_upgrades, _real_upgrades_tmp):
+            raise AssertionError(
+                f"test replaced the REAL backend-upgrades state {self} -> {target} — conftest "
+                "forces LA_BACKEND_UPGRADES_STATE to a sandbox; pass an explicit temp path")
+        return _orig_path_replace(self, target, *args, **kwargs)
+
+    _guarded_write_text._fa_real_state_tripwire = True
+    _guarded_replace._fa_real_state_tripwire = True
+    Path.write_text = _guarded_write_text
+    Path.replace = _guarded_replace

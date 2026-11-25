@@ -2391,7 +2391,6 @@ class RemoteFiltersScreen(Screen):
         self.settings.remote_filters[key] = bool(v)
         import session_menu_state as _sms
         _sms.save_remote_filters(_sms.config_dir(), key, bool(v))
-        self._regroup()                       # this IS the remote filters screen's list owner
         self._regroup_remote_if_loaded()
 
     def _regroup_remote_if_loaded(self):
