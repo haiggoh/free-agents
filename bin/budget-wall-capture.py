@@ -244,11 +244,26 @@ def _capture_from(raw: str, endpoint: str) -> str:
         reason = (f"budget wall — API error at transcript line "
                   f"{err_line if err_line is not None else 'stop'} (session {session_id})")
         old = fa_capture.latest_package_for_session(root, session_id)  # before writing: newest wins
+        # D4/D6: read the opt-out once, at run time. An invalid FA_AUTO_TAKEOVER aborts the
+        # auto path LOUDLY (hook.log + notice) and never falls through to enabled.
+        try:
+            import session_menu_state
+            cfg_dir = Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR")
+                           or session_menu_state.REPO_CONFIG_DIR)
+            auto_enabled = session_menu_state.auto_takeover_enabled(config_dir=cfg_dir)
+            auto_err = None
+        except ValueError as e:
+            auto_enabled, auto_err = False, str(e)
+        except Exception:
+            auto_enabled, auto_err = False, None
+        # D6: a package that will be AUTO-launched is built in continue mode (the successor
+        # continues autonomously); the manual path keeps reconcile-then-WAIT.
         pkg = fa_capture.build_package(
             transcript_path, cwd=payload.get("cwd") or os.getcwd(),
             dest_route=route.alias, dest_window_tokens=route.window_tokens,
             base_overhead_tokens=fa_capture.DEFAULT_BASE_OVERHEAD_TOKENS,
-            reason=reason, scanner=fa_capture.require_scanner(), allow_findings=False)
+            reason=reason, scanner=fa_capture.require_scanner(), allow_findings=False,
+            mode="continue" if auto_enabled else "reconcile")
         out = fa_capture.write_package(pkg, root)
         _settle(pkg.takeover_id)
         if old and old != pkg.takeover_id:
@@ -257,11 +272,8 @@ def _capture_from(raw: str, endpoint: str) -> str:
         # (fail-open: any error keeps the manual path). `fa-takeover auto` is the single
         # launch decision point (opt-out / claim / superseded all checked there).
         auto_ran = False
-        try:
-            import session_menu_state
-            cfg_dir = Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR")
-                           or session_menu_state.REPO_CONFIG_DIR)
-            if session_menu_state.auto_takeover_enabled(config_dir=cfg_dir):
+        if auto_enabled:
+            try:
                 r = subprocess.run([sys.executable,
                                     str(Path(__file__).resolve().parent / "fa-takeover"),
                                     "auto", pkg.takeover_id],
@@ -269,14 +281,18 @@ def _capture_from(raw: str, endpoint: str) -> str:
                 auto_ran = r.returncode == 0
                 if not auto_ran and r.stderr.strip():
                     _log(root, "fa-takeover auto: " + r.stderr.strip().splitlines()[-1])
-        except Exception as e:
-            _log(root, f"auto path failed open: {e!r}")
+            except Exception as e:
+                _log(root, f"auto path failed open: {e!r}")
+        elif auto_err:
+            _log(root, f"auto path aborted loudly: {auto_err}")
         if auto_ran:
             _emit(root, _notice(session_id, "successor launched", route.alias,
                                 f"Verify: fa-takeover verify {pkg.takeover_id}"))
         else:
+            extra = f" ({auto_err} — see hook.log)" if auto_err else ""
             _emit(root, _notice(session_id, "takeover package ready", route.alias,
-                                f"Nothing was launched. Run: fa-takeover launch {pkg.takeover_id}"))
+                                f"Nothing was launched{extra}. "
+                                f"Run: fa-takeover launch {pkg.takeover_id}"))
         _log(root, f"package: {out}")
         return "done"
     except fa_capture.CaptureRefused as e:

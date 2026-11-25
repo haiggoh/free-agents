@@ -238,6 +238,10 @@ def test_auto_notice_line_through_hook(tmp_path, monkeypatch):
                     + f"successor launched ({route}) for session sess-bw. "
                       f"Verify: fa-takeover verify {pkg_dir.name}")
     assert len([r for r in window_records(sink) if r.get("kind") == "window"]) == 1
+    # D6: the AUTO-launched package is built in continue mode on disk (the successor must
+    # not be told to WAIT by its own handoff)
+    handoff = (pkg_dir / "handoff.md").read_text()
+    assert "continue autonomously" in handoff and "then wait" not in handoff
 
 
 # --- D9: the first prompt leads with the source topic ------------------------------

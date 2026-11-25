@@ -590,7 +590,11 @@ def source_topic(transcript_path: str, session_id: str) -> str:
     if not title:
         return f"session {sid8}"
     clean = re.sub(r"[\x00-\x1f\x7f]", "", title).strip()
-    if re.fullmatch(re.escape(getpass.getuser()) + r"-\S+", clean):
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = None  # env -i without USER: the generic-username match simply never fires
+    if user and re.fullmatch(re.escape(user) + r"-\S+", clean):
         return f"session {sid8}"
     return clean[:60]
 
