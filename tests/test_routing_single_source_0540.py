@@ -129,12 +129,20 @@ class OffloadReportingDocs(unittest.TestCase):
 
     def test_remote_system_prompt_pins_the_split_write_rule(self):
         # R1-B (waypoint free-agents-server-error-mid): the free sessions' own prompt must
-        # carry the split-large-writes rule — NVIDIA NIM buffers tool-call arguments into one
-        # final chunk and cuts ~300 s-silent connections, so one oversized Write is lost.
+        # carry the split-large-writes rule VERBATIM — NVIDIA NIM buffers tool-call arguments
+        # into one final chunk and cuts ~300 s-silent connections, so one oversized Write is
+        # lost. M2 dispatch: substring pins alone allow rephrasing around them — pin the
+        # whole paragraph as one substring.
+        paragraph = ("Large files: your provider may deliver a tool call's arguments only once the "
+                     "whole call is complete, and it closes a connection that stays silent for about "
+                     "300 seconds — so one tool call carrying more than about 6,000 characters (a plan, "
+                     "a long test file) can be lost entirely, surfacing as \"API Error: Server error "
+                     "mid-response\". Create any file longer than that in parts: Write the first "
+                     "section (under 6,000 characters), then append each further section with its own "
+                     "Edit call whose old_string is the file's current last line(s). Never retry the "
+                     "same oversized call after that error — split it.")
         raw = (ROOT / "config" / "remote-agent-system-prompt.txt").read_text(encoding="utf-8")
-        self.assertIn("more than about 6,000 characters", raw)
-        self.assertIn("Write the first section (under 6,000 characters), then append each further section", raw)
-        self.assertIn("Never retry the same oversized call after that error", raw)
+        self.assertIn(paragraph, raw)
 
 
 class InterceptRoutingTests(unittest.TestCase):
