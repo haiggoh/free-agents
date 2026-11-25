@@ -458,6 +458,11 @@ Tests: `tests/test_two_root_readers_0580.py` (15), `tests/test_repair_repins_058
 - Dispatch: auto-generated local fallback list from the csl registry (roles included), used
   after the curated list; opt-in "local sessions: only local agents" toggle.
 
+> Note (2026-11-25, R1): the versions 0.56.14, 0.56.15 and 0.56.16 were never tagged —
+> GitHub releases go v0.56.13 → v0.57.0 directly, and their content shipped inside this
+> 0.57.0 bundle. (The `0.56.15` heading below exists but is marked "unreleased"; 0.56.14
+> and 0.56.16 have no heading at all.) History is not rewritten; this note records it.
+
 ## [0.56.13] — unreleased
 
 ### Fixed — a load-sensitive timing flake in the watch-until CLI contract test
