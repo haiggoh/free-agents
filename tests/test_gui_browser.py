@@ -644,6 +644,33 @@ def test_theme_accent_rows_show_live_swatches(browser, tmp_path):
         assert srv.stop() == []
 
 
+def test_theme_accent_reaches_yellow_and_lime_presets(browser, tmp_path):
+    # PARITY-csl residual "theme color presets (yellow/lime)": csl's THEME_PRESETS carries
+    # Yellow #FFD700 and Lime #ADFF2F; the GUI cycle must reach both and paint their colour
+    srv = Server()
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}theme_config")
+        row = page.locator('[data-action="ThemeConfigScreen.l"]')
+        row.wait_for(timeout=20000)
+        swatch = row.locator(".cycle-swatch")
+        seen = {}
+        for _ in range(14):                       # 12 presets + custom: one full lap
+            value = row.locator(".cycle-value").inner_text()
+            for name in ("Yellow", "Lime"):
+                if name in value and name not in seen:
+                    time.sleep(0.3)               # the swatch repaint lands a beat after the label
+                    seen[name] = swatch.evaluate("el => getComputedStyle(el).backgroundColor")
+            if len(seen) == 2:
+                break
+            row.locator(".cycle-right").click()
+            page.wait_for_timeout(250)
+        assert seen.get("Yellow") == "rgb(255, 215, 0)", seen
+        assert seen.get("Lime") == "rgb(173, 255, 47)", seen
+    finally:
+        assert srv.stop() == []
+
+
 def test_lowkey_chooser_selection_rides_the_launch(browser, tmp_path):
     # 2026-11-23 parity (QC R1): csl's lowkey chooser SELECTS a model (no launch on click);
     # the selection survives the session-name dialog round-trip and rides the convo launch

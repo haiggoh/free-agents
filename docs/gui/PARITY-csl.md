@@ -19,24 +19,31 @@ the nav target but no `@ui.page` exists for it.
 
 ## Screen parity table
 
+> **Launch boundary (measured 2026-11-25):** every "dispatches" / "launches" below is proven up to
+> the GUI's launch hook (`FA_GUI_LAUNCH_STUB` records the exact argv). In production that hook does
+> NOTHING yet — the launch hand-off (`bin/fa_gui/terminal_host.py`, design plan
+> `2026-11-03-nicegui-frontend-and-thin-app.md` Task 10) was never built, so a model-row click, a
+> tool row or a confirm's Yes runs nothing for a real user. Parity of what csl RUNS is therefore
+> argv-level only until Task 10 lands.
+
 | csl screen / nav target | csl source | GUI status (measured) | Still missing |
 |---|---|---|---|
 | home | `HomeScreen` | ✅ `/home` renders | — |
 | local sessions | `LocalScreen` | ✅ `/local` renders with data + #missing cleanup offer (red rows → confirm → `csl --unregister-models`) | the doc's earlier "download entry point" note was a mis-inventory: csl's LocalScreen has no such row either (it lives on Home → /download) |
-| remote sessions | `RemoteScreen` | ◐ `/remote` renders with data; the hover infobox is csl's own `info_text` (notes, thinking constraint, provider-limits facts: requests/min, quota, max output, context) | `remote_filters` screen's controls, tool:rl-* panels |
+| remote sessions | `RemoteScreen` | ✅ `/remote` renders with data; the hover infobox is csl's own `info_text` (notes, thinking constraint, provider-limits facts: requests/min, quota, max output, context) | — (`remote_filters` controls: own ✅ row; the 🚦 rate-limiter row's tool:rl-* actions dispatch argv — showing their OUTPUT like csl's run_child panel is part of the launch hand-off, see the launch boundary note) |
 | lowkey | `LowkeyScreen` via `tool:lowkey` | ✅ renders via catch-all (data prefetched) + model CHOOSER (local + API agent rows; a row selects, no launch; selection persists across the dialog round-trip) + prompt:session dialog (typed name, csl validation) + prompt:oneshot dialog; convo launch carries --session NAME + --provider (Savers.last_launched 4-arg mode fix) | — |
 | download local models | `DownloadScreen` via `tool:download` | ✅ queue rows + review dialog + confirm→CLI argv all browser-proven (2eb5ea1) | — |
 | about | `AboutScreen` | ✅ renders | — |
-| api keys | `APIKeysScreen` | ✅ renders the provider list with live Saved/Missing status, signup link and Add key; the key write goes through the SAME Store (`install/setup-api-keys.py`, `LA_API_KEYS_DIR`) | key REMOVE action |
+| api keys | `APIKeysScreen` | ✅ renders the provider list with live Saved/Missing status, signup link and Add key; the key write goes through the SAME Store (`install/setup-api-keys.py`, `LA_API_KEYS_DIR`) | — (csl has no key-remove action either — the Store only adds; a GUI remove is a design decision, gate G4-keys-remove) |
 | rate limiter | `RateLimiterScreen` | ✅ renders; the reset row confirms (csl's wording) and dispatches the state-file delete; main 0.63.x rows: the fairness knobs (grant policy, aging tiers, waiter TTL/poll, deficit rate/cap, lane share cap, fast lane, lane approval) render as cycles and persist, Dispatch boost flips on/off like csl's plain row, "Toggle priority lane for THIS session" dispatches `rate_limiter.py lane-toggle --user-approved` (browser-proven) | — |
 | memguard (OOM guard) | `MemoryGuardScreen` | ✅ renders (switch + cycle controls, switch toggles on name/value click) | — |
 | cloud session config | `CloudConfigScreen` | ✅ renders; route/timeout-tier rows cycle AND persist to ~/.claude/settings.json env (firewall-tested with a temp HOME), label rebuilt in place | — |
-| theme config | `ThemeConfigScreen` | ✅ renders + GUI-only appearance section (`render_appearance`): presentation cycle (compat/modern tiles), translucent switch, opacity slider 0–100%, blur request, 🌙 dark-mode switch (dark-shell CSS tokens flip text). Native vibrancy MATERIAL now follows dark_mode (mediumLight/ultraDark; fail-open pyobjc patch on pywebview's BrowserView, in-process readback spike-verified 2026-11-20), so 0% opacity is bright in light mode; the ×1.35 tint hack was removed — tint_alpha is the raw opacity in every mode. 🌗 follow-system switch (launch-only). Tile-emoji theme option for modern tiles: subdued (default) | noto (mono line-art variable font, theme ink color, VS16-stripped) | full (Apple color emoji). The Tile emoji row shows only in the tiles menu (irrelevant in compatibility); the presentation value reads "Tiles menu"; theme rows toggle on name/value click (csl parity); the theme menu's real Back-to-home tile is the live style preview; dark-mode subdued = full-brightness bitmap + white silhouette overlay (::after, 0.6) since brightness>1 blew out the highlights. Theme accent rows now show a live swatch chip (name + hex from THEME_PRESETS/the stored custom value) that follows the cycled value. Remaining gap: theme color presets (yellow/lime) + swatch preview | — |
+| theme config | `ThemeConfigScreen` | ✅ renders + GUI-only appearance section (`render_appearance`): presentation cycle (compat/modern tiles), translucent switch, opacity slider 0–100%, blur request, 🌙 dark-mode switch (dark-shell CSS tokens flip text). Native vibrancy MATERIAL now follows dark_mode (mediumLight/ultraDark; fail-open pyobjc patch on pywebview's BrowserView, in-process readback spike-verified 2026-11-20), so 0% opacity is bright in light mode; the ×1.35 tint hack was removed — tint_alpha is the raw opacity in every mode. 🌗 follow-system switch (launch-only). Tile-emoji theme option for modern tiles: subdued (default) | noto (mono line-art variable font, theme ink color, VS16-stripped) | full (Apple color emoji). The Tile emoji row shows only in the tiles menu (irrelevant in compatibility); the presentation value reads "Tiles menu"; theme rows toggle on name/value click (csl parity); the theme menu's real Back-to-home tile is the live style preview; dark-mode subdued = full-brightness bitmap + white silhouette overlay (::after, 0.6) since brightness>1 blew out the highlights. Theme accent rows now show a live swatch chip (name + hex from THEME_PRESETS/the stored custom value) that follows the cycled value. All 12 csl THEME_PRESETS (incl. Yellow #FFD700, Lime #ADFF2F) are reachable in the accent cycle and paint their colour (`test_theme_accent_reaches_yellow_and_lime_presets`, computed style) | — |
 | remote filters | `RemoteFiltersScreen` | ✅ renders; filter toggles APPLY to the remote list at paint time (csl's visible_agents predicate); main 0.62.0 "Large context only (>256k)" defaults ON, hides rows whose KNOWN context is ≤262144 and persists through the injected saver (browser-proven; also fixes csl's AttributeError on that toggle) | — |
 | runtime manager / backend | `RuntimeManagerScreen` | ✅ renders; version data prefetched; the `runtime_versions:<op>` sub-screens render the version list and a row click dispatches the op (remove confirms via prompt:rt-remove first) | — |
 | runtime + launchd | `RuntimeScreen`, `LaunchdScreen` | ✅ renders; status/run-once rows dispatch; install/uninstall confirm with csl's question + detail line, Yes dispatches `manage-backend.py launchd install|uninstall`, No runs nothing and says "launchd unchanged — nothing was run" (browser-proven) | — |
 | hidden-model report | `tool:report` | ✅ the row dispatches the report CLI (browser-proven) | — |
-| prompts (session name, rt-remove, download review) | `prompt:*` | ◐ dialog core wired (Task 1): payload + confirm→`command_for` argv unit-tested | browser click-through of the queue UI |
+| prompts (session name, rt-remove, download review) | `prompt:*` | ✅ browser click-throughs: download queue → review dialog → confirm argv (`test_download_queue_review_confirm_produces_cli_argv`), rt-remove confirm before the op (`test_runtime_versions_rows_dispatch_ops`), session-name dialog (`test_lowkey_chooser_selection_rides_the_launch`), launchd install/uninstall (`test_launchd_*_confirm_*`) | — |
 | settings write path (all screens) | savers | ✅ fixed d33c609: every build_screen call passes savers; browser test clicks /rate_limiter's ▶ and asserts session-menu.local.json changes | — |
 | warnings | `warn:*` | ✅ notice page (message + Back-to-Home; the versions keep-one-core guard's warn: nav routes to it) | — |
 | quit | — | ✅ handled in app.py (target == "quit") | — |
@@ -48,7 +55,8 @@ csl's local model list is fed by `csl --inventory` + the catalog overlay store
 migration notice from the SessionStart hook). Registration/update flows in csl:
 
 1. **Download/register a model** — `DownloadScreen`: queue from the catalog, review,
-   one `download-models.sh --select A …` call. GUI: missing (❌ above).
+   one `download-models.sh --select A …` call. GUI: ✅ queue → review → confirm argv
+   (`test_download_queue_review_confirm_produces_cli_argv`, 2eb5ea1).
 2. **Catalog overlay edits** — user-local rows in `model-catalog.local.psv`
    (`la-catalog-overlay.sh path` to print it); migration from old layouts.
    GUI: ✅ `/catalog` page (add/remove rows through `catalog_overlay.py`'s validated
@@ -63,7 +71,9 @@ migration notice from the SessionStart hook). Registration/update flows in csl:
    the local inventory synchronously and returns to `/local`; browser-proven (stub argv
    asserted, row detaches after removal).
 4. **Backend install/upgrade** — runtime manager screen (`download-models.sh` for
-   backends, `runtime_versions:install/validate/info`). GUI: missing.
+   backends, `runtime_versions:install/validate/info`). GUI: ✅ the `runtime_versions:<op>`
+   rows dispatch the op for the clicked version, remove confirms first
+   (`test_runtime_versions_rows_dispatch_ops`; argv-level, see the launch boundary note).
 5. **Model profiles** — `la-model-profile.py` list/artifact/… drive capability display
    in the list. GUI: reads the catalog for display only.
 
