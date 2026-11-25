@@ -656,6 +656,113 @@ def _retry_after_for_chain(exc) -> float | None:
     return best
 
 
+# ---- R3: clean mid-stream end (plan ~/.claude/plans/2026-11-24-free-agents-r3-mid-stream-death-and-silent-tool-calls.md)
+# When an upstream stream dies AFTER >=1 chunk (NVIDIA NIM buffers tool-call arguments into one
+# final chunk and cuts ~300 s-silent connections), LiteLLM 1.110.x turns it into a 500 and the
+# partial turn is lost. The hook below ends the Anthropic stream VALIDLY instead: close the open
+# block, append a [free-agents] hint text block, then message_delta(end_turn) + message_stop.
+
+HINT_SPLIT = ("[free-agents] The provider closed this response mid-stream ({reason}, {secs} s "
+              "after the last data). Your provider delivers a tool call's arguments only when the "
+              "whole call is finished, so a large Write or Edit is silent until it completes and "
+              "can be cut by the provider's idle limit — the call was lost and nothing was written. "
+              "Next: write large files in parts — Write a first section under 6,000 characters, "
+              "then append each further section with its own Edit call. Do not retry the same "
+              "oversized call.")
+HINT_GENERIC = ("[free-agents] The provider closed this response mid-stream ({reason}, {secs} s "
+                "after the last data). The text above may be incomplete; reply \"continue\" to resume.")
+
+
+class _StreamState:
+    """Plain class, NOT @dataclass: the proxy loads this module via importlib WITHOUT putting it
+    in sys.modules, and dataclass+PEP-563 then crashes in _is_type (None.__dict__)."""
+    saw_message_start = False
+    open_block_index = None
+    next_index = 0
+    last_kind = "none"          # "thinking" | "text" | "tool_use" | "none"
+    saw_thinking = False
+    text_or_tool_after_thinking = False
+    saw_text = False
+    input_tokens = None
+    output_tokens = 0
+    last_chunk_at = 0.0
+
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def _note(chunk, st: _StreamState) -> None:
+    """The ONE chunk parser (extended from the hook's former closure): bytes SSE lines or dict
+    events. Updates st in place; never parses twice."""
+    ev = chunk
+    if isinstance(chunk, (bytes, bytearray)):
+        for line in str(chunk, "utf-8", "replace").splitlines():
+            if line.startswith("data:"):
+                try:
+                    ev = json.loads(line[5:].strip())
+                except json.JSONDecodeError:
+                    continue
+                break
+    if not isinstance(ev, dict):
+        return
+    t = ev.get("type")
+    if t == "message_start":
+        st.saw_message_start = True
+        try:
+            st.input_tokens = int(ev["message"]["usage"].get("input_tokens") or 0)
+        except (KeyError, TypeError, ValueError):
+            st.input_tokens = 0
+    elif t == "content_block_start":
+        cb = ev.get("content_block") or {}
+        idx = int(ev.get("index", st.next_index))
+        st.open_block_index = idx
+        st.next_index = max(st.next_index, idx + 1)
+        kind = cb.get("type") or "text"
+        st.last_kind = kind
+        if kind == "thinking":
+            st.saw_thinking = True
+        elif kind in ("text", "tool_use") and st.saw_thinking:
+            st.text_or_tool_after_thinking = True
+    elif t == "content_block_stop":
+        st.open_block_index = None
+    elif t == "content_block_delta":
+        d = ev.get("delta") or {}
+        if d.get("type") == "text_delta" and d.get("text"):
+            st.saw_text = True
+            if st.saw_thinking:
+                st.text_or_tool_after_thinking = True
+    elif t == "message_delta":
+        u = ev.get("usage") or {}
+        if isinstance(u.get("output_tokens"), int):
+            st.output_tokens = u["output_tokens"]
+
+
+def _midstream_tail(state: _StreamState, exc: BaseException, silence_s: float) -> list[bytes]:
+    """PURE: the SSE events (bytes, `data: {...}\\n\\n` — the Phase 0 capture's wire framing) that
+    close an open block, append the hint text block at next_index, then end_turn + message_stop.
+    Returns [] when no message_start was seen (the caller must re-raise)."""
+    if not state.saw_message_start:
+        return []
+    reason = type(exc).__name__          # class name only — never the message (may carry URLs/keys)
+    secs = max(0, int(round(silence_s)))
+    split = state.last_kind == "thinking"   # died during/after reasoning, nothing else after it
+    hint = (HINT_SPLIT if split else HINT_GENERIC).format(reason=reason, secs=secs)
+    events = []
+    if state.open_block_index is not None:
+        events.append({"type": "content_block_stop", "index": state.open_block_index})
+    events.append({"type": "content_block_start", "index": state.next_index,
+                   "content_block": {"type": "text", "text": ""}})
+    events.append({"type": "content_block_delta", "index": state.next_index,
+                   "delta": {"type": "text_delta", "text": hint}})
+    events.append({"type": "content_block_stop", "index": state.next_index})
+    events.append({"type": "message_delta",
+                   "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                   "usage": {"output_tokens": state.output_tokens}})
+    events.append({"type": "message_stop"})
+    return [("data: " + json.dumps(e) + "\n\n").encode() for e in events]
+
+
 class _ZeroChunkGuard:
     """Wraps a RAW upstream chunk stream and raises (instead of ending quietly) when the
     stream yielded ZERO chunks. Measured die0 shape: the adapter otherwise synthesizes an
@@ -1151,34 +1258,13 @@ class LAProxyHooks(CustomLogger):
         # chunk the headers are sent, so an error is never changed there.
         import litellm
         yielded = 0
-        saw_text = False
-        input_tokens: int | None = None
-
-        def _note(chunk):
-            nonlocal saw_text, input_tokens
-            ev = chunk
-            if isinstance(chunk, (bytes, bytearray)):
-                for line in str(chunk, "utf-8", "replace").splitlines():
-                    if line.startswith("data:"):
-                        try:
-                            ev = json.loads(line[5:].strip())
-                        except json.JSONDecodeError:
-                            continue
-                        break
-            if not isinstance(ev, dict):
-                return
-            if ev.get("type") == "message_start":
-                try:
-                    input_tokens = int(ev["message"]["usage"].get("input_tokens") or 0)
-                except (KeyError, TypeError, ValueError):
-                    input_tokens = 0
-            if ev.get("type") == "content_block_delta" and (ev.get("delta") or {}).get("text"):
-                saw_text = True
+        st = _StreamState(last_chunk_at=time.time())
 
         try:
             async for chunk in response:
                 yielded += 1
-                _note(chunk)
+                st.last_chunk_at = time.time()
+                _note(chunk, st)
                 yield chunk
         except Exception as exc:
             if yielded == 0:
@@ -1197,8 +1283,20 @@ class LAProxyHooks(CustomLogger):
                     print(f"la_proxy_hooks: chain ended on a rate limit -> client 429 "
                           f"(retry-after {secs})", file=sys.stderr)
                     raise e2 from exc
+            # R3: mid-stream death AFTER >=1 chunk — end the Anthropic stream VALIDLY with a
+            # [free-agents] hint text block instead of letting the 500 surface. No retry: the
+            # same oversized call would be cut again (plan D1). The yielded==0 paths above and
+            # below are unchanged.
+            if st.saw_message_start:
+                tail = _midstream_tail(st, exc, time.time() - st.last_chunk_at)
+                for ev in tail:
+                    yield ev
+                kind = "split" if st.last_kind == "thinking" else "generic"
+                print(f"la_proxy_hooks: mid-stream death after {yielded} chunks "
+                      f"({type(exc).__name__}) -> clean end ({kind})", file=sys.stderr)
+                return
             raise
-        if yielded == 0 or (not saw_text and input_tokens == 0):
+        if yielded == 0 or (not st.saw_text and st.input_tokens == 0):
             # die0 (measured 2026-11-22): the upstream socket dies before any SSE data and
             # LiteLLM's stream wrapper synthesizes 2 empty chunks; the adapter then emits a
             # complete-looking EMPTY message (message_start..message_stop, usage all zero)
