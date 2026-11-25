@@ -36,6 +36,7 @@ CONTEXT_FIELDS = ("context_window", "max_context_length", "context_length",
 MAXOUT_FIELDS = ("max_output_tokens", "outputTokenLimit", "max_completion_tokens",
                  "max_tokens")
 CREATED_FIELDS = ("created", "created_at", "released")
+PRE_2015_EPOCH = 1420070400  # 2015-01-01T00:00:00Z; anything older is a bogus catalog date
 
 
 def _providers(want):
@@ -91,17 +92,27 @@ def fetch(provider_ids, out_path):
             entry["error"] = f"{type(exc).__name__}: {exc}".split("sk-")[0][:200]
             result["providers"][pid] = entry
             continue
+        created_raw = {}
         for m in doc.get("data") or ([doc] if doc.get("id") else []):
             if not isinstance(m, dict) or not m.get("id"):
                 continue
             mid = str(m["id"])
-            created = _to_int(_dig(m, CREATED_FIELDS))
+            created_raw[mid] = _to_int(_dig(m, CREATED_FIELDS))
             entry["models"][mid] = {
                 "context": _to_int(_dig(m, CONTEXT_FIELDS)),
                 "max_output": _to_int(_dig(m, MAXOUT_FIELDS)),
-                "released": (datetime.datetime.fromtimestamp(created, datetime.timezone.utc)
-                             .date().isoformat() if created else None),
             }
+        # A provider-wide constant `created` is a sentinel (NVIDIA stamps every model with the
+        # same timestamp — it surfaced as released "1993-04-26"), and anything before 2015 is
+        # bogus: both mean "unknown" (released None). Waypoint model-facts-py-nvidia-catalog.
+        vals = {v for v in created_raw.values() if v is not None}
+        sentinel = next(iter(vals)) if len(vals) == 1 and len(entry["models"]) > 1 else None
+        for mid, created in created_raw.items():
+            if created is not None and (created < PRE_2015_EPOCH or created == sentinel):
+                created = None
+            entry["models"][mid]["released"] = (
+                datetime.datetime.fromtimestamp(created, datetime.timezone.utc).date().isoformat()
+                if created else None)
         result["providers"][pid] = entry
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

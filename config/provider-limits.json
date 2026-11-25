@@ -63,7 +63,7 @@
     "nvidia:bigcode/starcoder2-15b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -71,7 +71,7 @@
     "nvidia:fastino/gliner2-pii": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -79,7 +79,7 @@
     "nvidia:google/gemma-3-12b-it": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -87,7 +87,7 @@
     "nvidia:google/gemma-3-4b-it": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -95,7 +95,7 @@
     "nvidia:google/gemma-4-31b-it": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -103,7 +103,7 @@
     "nvidia:meta/muse-glimmer-30b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -111,7 +111,7 @@
     "nvidia:minimaxai/minimax-m3.1-flash": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -127,7 +127,7 @@
     "nvidia:moonshotai/kimi-k3.1-pro": {
       "context": 1048576,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: max_output, broken"
@@ -135,7 +135,7 @@
     "nvidia:nvidia/ai-synthetic-video-detector": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -143,7 +143,7 @@
     "nvidia:nvidia/cosmos-reason2-8b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -151,7 +151,7 @@
     "nvidia:nvidia/embed-qa-4": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -159,7 +159,7 @@
     "nvidia:nvidia/ising-calibration-1.5-31b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -167,7 +167,7 @@
     "nvidia:nvidia/llama-3.1-nemoguard-8b-topic-control": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -175,7 +175,7 @@
     "nvidia:nvidia/llama-3.1-nemotron-safety-guard-8b-v3": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -183,7 +183,7 @@
     "nvidia:nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -191,7 +191,7 @@
     "nvidia:nvidia/llama-3.2-nv-embedqa-1b-v1": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -199,7 +199,7 @@
     "nvidia:nvidia/nemotron-3-embed-1b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -207,7 +207,7 @@
     "nvidia:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -215,7 +215,7 @@
     "nvidia:nvidia/nemotron-3-ultra-550b-a55b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -223,7 +223,7 @@
     "nvidia:nvidia/nemotron-3.5-bolt-e4b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -231,7 +231,7 @@
     "nvidia:nvidia/nemotron-3.5-content-safety": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -239,7 +239,7 @@
     "nvidia:nvidia/nemotron-3.5-embed-1b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -247,7 +247,7 @@
     "nvidia:nvidia/nemotron-3.5-embed-8b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -255,7 +255,7 @@
     "nvidia:nvidia/nemotron-3.5-lightning-30b-a3b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -263,7 +263,7 @@
     "nvidia:nvidia/nemotron-3.5-super-vl-120b-a12b": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -271,7 +271,7 @@
     "nvidia:nvidia/nv-embedqa-mistral-7b-v2": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -279,7 +279,7 @@
     "nvidia:nvidia/nvclip": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -287,7 +287,7 @@
     "nvidia:nvidia/riva-translate-4b-instruct-v2": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -295,7 +295,7 @@
     "nvidia:poolside/laguna-xs-2.1": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -303,7 +303,7 @@
     "nvidia:snowflake/arctic-embed-l": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -311,7 +311,7 @@
     "nvidia:stepfun-ai/step-5-preview": {
       "context": null,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "catalog https://integrate.api.nvidia.com/v1/models 2026-11-22",
       "reason": "no catalog field/broken-list entry for: context, max_output, broken"
@@ -319,7 +319,7 @@
     "nvidia:z-ai/glm-5.3-flash": {
       "context": 1048576,
       "max_output": null,
-      "released": "1993-04-26",
+      "released": null,
       "broken": null,
       "source": "hf config.json (via estimate-model-footprint) z-ai/glm-5.3-flash",
       "reason": "max_output/broken: no catalog field or broken-list entry; context from HF config.json"
