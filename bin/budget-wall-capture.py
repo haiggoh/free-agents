@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -252,8 +253,30 @@ def _capture_from(raw: str, endpoint: str) -> str:
         _settle(pkg.takeover_id)
         if old and old != pkg.takeover_id:
             fa_capture.mark_superseded(root, old, pkg.takeover_id)
-        _emit(root, _notice(session_id, "takeover package ready", route.alias,
-                            f"Nothing was launched. Run: fa-takeover launch {pkg.takeover_id}"))
+        # D3: when the auto-takeover setting is ON, launch the deterministic successor now
+        # (fail-open: any error keeps the manual path). `fa-takeover auto` is the single
+        # launch decision point (opt-out / claim / superseded all checked there).
+        auto_ran = False
+        try:
+            import session_menu_state
+            cfg_dir = Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR")
+                           or session_menu_state.REPO_CONFIG_DIR)
+            if session_menu_state.auto_takeover_enabled(config_dir=cfg_dir):
+                r = subprocess.run([sys.executable,
+                                    str(Path(__file__).resolve().parent / "fa-takeover"),
+                                    "auto", pkg.takeover_id],
+                                   capture_output=True, text=True, timeout=60)
+                auto_ran = r.returncode == 0
+                if not auto_ran and r.stderr.strip():
+                    _log(root, "fa-takeover auto: " + r.stderr.strip().splitlines()[-1])
+        except Exception as e:
+            _log(root, f"auto path failed open: {e!r}")
+        if auto_ran:
+            _emit(root, _notice(session_id, "successor launched", route.alias,
+                                f"Verify: fa-takeover verify {pkg.takeover_id}"))
+        else:
+            _emit(root, _notice(session_id, "takeover package ready", route.alias,
+                                f"Nothing was launched. Run: fa-takeover launch {pkg.takeover_id}"))
         _log(root, f"package: {out}")
         return "done"
     except fa_capture.CaptureRefused as e:

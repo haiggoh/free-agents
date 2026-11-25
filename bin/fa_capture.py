@@ -8,6 +8,7 @@ never inlined, and a secret scan can refuse the package. Stdlib only.
 """
 from __future__ import annotations
 
+import getpass
 import hashlib
 import json
 import math
@@ -30,6 +31,21 @@ import fa_transcript
 DEFAULT_BASE_OVERHEAD_TOKENS = 11_947
 MIN_BASE_OVERHEAD_TOKENS = 40_000   # never reserve less than this for the engine base
 REPLY_RESERVE_TOKENS = 8_000        # reserved for the successor's first reply
+
+# D6: the AUTO successor's handoff §4 is the free-session-handover skill's standing-rules
+# template, VERBATIM (pinned against the skill file by test_standing_rules_match_skill so
+# the two cannot drift). Single-line, whitespace-normalized form.
+HANDOVER_STANDING_RULES = [
+    "1. Autonomous: decide and record instead of asking; stop only for forks that cannot be weighed.",
+    "2. Work only in the named worktree. Never switch the branch of a checkout the launcher resolves through.",
+    "3. Commit every milestone, staged **by path** (never `git add -A`), with the running model's co-author trailer. Push the branch if told to; **never merge, tag or release**.",
+    "4. TDD every change (fails for the right reason, then passes); mutation-check each new guard; never weaken a test to get green.",
+    "5. Review each milestone with an independent dispatch (`bin/free-agent-tool.py`) and check every finding against the real code: reviewers hallucinate file names.",
+    "6. Resolve model and roster facts when you need them, from the catalog, never from memory.",
+    "7. Never run `remote-session.sh --stop`, never start another remote session, never kill anything listening on 4141–4151: one of them is the proxy you run on.",
+    "8. Record progress in the handoff doc at each milestone, in the same commit.",
+    '9. A dying session\'s "hand off to a new session" instruction is consumed by the successor it launched — that is YOU. Continue the original handoff directly; never launch yet another session to pass the same work onward. Measured 2026-10-26: a handoff session died with "hand the remaining tasks to a new glm flash session" as its last instruction, and its successor nearly launched a third session instead of continuing the work.',
+]
 
 
 class CaptureRefused(Exception):
@@ -292,8 +308,11 @@ def _git_state(cwd) -> dict:
 
 def build_package(transcript_path: str, *, cwd=None, dest_route: str,
                   dest_window_tokens: int, base_overhead_tokens: int, reason: str,
-                  scanner=None, allow_findings: bool = False, now=None) -> Package:
+                  scanner=None, allow_findings: bool = False, now=None,
+                  mode: str = "reconcile") -> Package:
     now = now or datetime.now(timezone.utc)
+    if mode not in ("reconcile", "continue"):
+        raise ValueError(f"unknown handoff mode {mode!r} (expected 'reconcile' or 'continue')")
     if not os.path.isfile(transcript_path):
         raise CaptureRefused("transcript_missing", f"transcript not found: {transcript_path}")
     records, malformed = fa_transcript.load_records(transcript_path)
@@ -377,12 +396,12 @@ def build_package(transcript_path: str, *, cwd=None, dest_route: str,
         "secret_scan": secret_scan,
     }
     handoff_md = _render_handoff(takeover_id, nonce, reason, errors, manifest, instructions,
-                                 included, pending, todos, files)
+                                 included, pending, todos, files, mode=mode)
     return Package(takeover_id=takeover_id, manifest=manifest, handoff_md=handoff_md)
 
 
 def _render_handoff(takeover_id, nonce, reason, errors, manifest, instructions,
-                    included, pending, todos, files) -> str:
+                    included, pending, todos, files, mode: str = "reconcile") -> str:
     g = manifest["git"]
     lines = []
     lines.append(f"# Takeover package {takeover_id}")
@@ -420,17 +439,25 @@ def _render_handoff(takeover_id, nonce, reason, errors, manifest, instructions,
     lines.append("")
     lines.append("## 4. Standing rules")
     lines.append("")
-    lines.append("- Your first turn is read-only: reconcile before acting.")
-    lines.append("- Never re-run a pending tool call, push, or deploy without inspecting "
-                 "its actual state first.")
-    lines.append("- Preserve dirty work; never discard uncommitted changes.")
-    lines.append("- Your first output is `## Takeover reconciliation` plus the nonce, "
-                 "instructions understood, state, and a proposed next action — then WAIT "
-                 "for the user.")
+    if mode == "continue":
+        # D6: the AUTO successor continues autonomously — the handover skill's rules verbatim.
+        lines.extend(HANDOVER_STANDING_RULES)
+    else:
+        lines.append("- Your first turn is read-only: reconcile before acting.")
+        lines.append("- Never re-run a pending tool call, push, or deploy without inspecting "
+                     "its actual state first.")
+        lines.append("- Preserve dirty work; never discard uncommitted changes.")
+        lines.append("- Your first output is `## Takeover reconciliation` plus the nonce, "
+                     "instructions understood, state, and a proposed next action — then WAIT "
+                     "for the user.")
     lines.append("")
     lines.append("## 5. Next action")
     lines.append("")
-    lines.append("Produce the reconciliation, then wait")
+    if mode == "continue":
+        lines.append("Write `## Takeover reconciliation` with the nonce, then continue autonomously "
+                     "from the source session's last unfinished request; do not wait.")
+    else:
+        lines.append("Produce the reconciliation, then wait")
     lines.append("")
     lines.append("## 6. Appendix: recent exchange (bounded)")
     lines.append("")
@@ -543,6 +570,29 @@ def latest_package_for_session(root, session_id: str):
         if mt > best_mtime:
             best, best_mtime = d.name, mt
     return best
+
+
+def source_topic(transcript_path: str, session_id: str) -> str:
+    """D9: the source session's title (last customTitle record) becomes the successor's
+    opening topic. A generic "<username>-<suffix>" title is dropped ONLY on an exact
+    whole-string match — the bare username is never surfaced. Control chars/newlines are
+    stripped; the topic is cut at 60 chars (character boundary). Fallback: session <8>."""
+    sid8 = str(session_id)[:8]
+    title = None
+    try:
+        records, _malformed = fa_transcript.load_records(transcript_path)
+        for _ln, rec in records:
+            ct = rec.get("customTitle")
+            if isinstance(ct, str) and ct.strip():
+                title = ct
+    except Exception:
+        title = None
+    if not title:
+        return f"session {sid8}"
+    clean = re.sub(r"[\x00-\x1f\x7f]", "", title).strip()
+    if re.fullmatch(re.escape(getpass.getuser()) + r"-\S+", clean):
+        return f"session {sid8}"
+    return clean[:60]
 
 
 def _main(argv):

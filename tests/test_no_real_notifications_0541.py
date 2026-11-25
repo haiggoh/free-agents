@@ -32,7 +32,7 @@ SHIM_LOG = (Path(os.environ["FA_NOTIFY_SHIM_DIR"]) / "calls.log"
             if os.environ.get("FA_NOTIFY_SHIM_DIR")
             else Path("/tmp/fa0541-noop-bin/calls.log"))
 # Window openers keep their osascript but MUST call the sink check first (R14).
-WINDOW_OPENERS = ("csl", "local-watch.sh", "new-local-window.sh")
+WINDOW_OPENERS = ("csl", "local-watch.sh", "new-local-window.sh", "fa-takeover")
 # guard-own-endpoint.py never notifies: its occurrences are LAUNCH-ROUTE DETECTION patterns
 # and self-test inputs (it flags kill/proxy commands wrapped in osascript; a notification is
 # not in it). Allow-listed with this reason per the plan's scan rule.

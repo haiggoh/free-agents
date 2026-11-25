@@ -56,7 +56,9 @@ def run_hook(pl, env, monkeypatch):
 def base_env(tmp_path):
     return {"HOME": str(tmp_path), "FA_TAKEOVER_DIR": str(tmp_path / "takeovers"),
             "ANTHROPIC_BASE_URL": "https://llmgw.example/v1",
-            "FA_SECRET_SCANNER": str(REPO / "tests" / "fixtures" / "stub_redact_secret.py")}
+            "FA_SECRET_SCANNER": str(REPO / "tests" / "fixtures" / "stub_redact_secret.py"),
+            # R4: pin the MANUAL path in the Task-1 tests — auto-launch off via env override
+            "FA_AUTO_TAKEOVER": "0"}
 
 
 def packages(tmp_path):

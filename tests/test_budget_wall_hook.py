@@ -47,7 +47,9 @@ def base_env(tmp_path):
     # FA_SECRET_SCANNER = the hermetic stub (scan is mandatory since the PR #7 review)
     return {"HOME": str(tmp_path), "FA_TAKEOVER_DIR": str(tmp_path / "takeovers"),
             "ANTHROPIC_BASE_URL": "https://llmgw.example/v1",
-            "FA_SECRET_SCANNER": str(Path(__file__).parent / "fixtures" / "stub_redact_secret.py")}
+            "FA_SECRET_SCANNER": str(Path(__file__).parent / "fixtures" / "stub_redact_secret.py"),
+            # R4: these pre-R4 tests pin the MANUAL path — auto-launch off via the env override
+            "FA_AUTO_TAKEOVER": "0"}
 
 
 def packages(tmp_path):

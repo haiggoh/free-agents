@@ -22,11 +22,14 @@ import shlex
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import effort_resolve
 import fa_capture
 import fa_transcript
+import session_menu_state as sms
 # Route resolution and the external secret scanner live in fa_capture (the hook imports
 # them from there too); re-exported here so existing callers/tests keep working.
 from fa_capture import Route, external_secret_scanner, resolve_takeover_route  # noqa: F401
@@ -37,6 +40,12 @@ EXIT_OK, EXIT_USAGE, EXIT_REFUSED, EXIT_NOT_FOUND, EXIT_NOT_DELIVERED, EXIT_NO_T
 
 LAUNCH_PROMPT = ("Read {handoff} first and follow it exactly: adopt its standing rules, "
                  "produce the reconciliation, then wait.")
+
+# D3/D6: the AUTO successor's initial prompt leads with the source session's topic (D9) and
+# drops plan mode. The `session <8>` fallback renders WITHOUT quotes (see _auto_prompt).
+AUTO_LAUNCH_PROMPT = ('Continue "{topic}" — read {handoff} first and follow it exactly: '
+                      'adopt its standing rules for the whole session, write the reconciliation, '
+                      'then continue autonomously from its Next action.')
 
 
 def _root() -> Path:
@@ -135,6 +144,127 @@ def cmd_launch(args) -> int:
     return subprocess.run(cmd).returncode
 
 
+def _menu_config_dir() -> Path:
+    return Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR)
+
+
+def _auto_prompt(topic: str, handoff: Path) -> str:
+    if topic.startswith("session "):
+        return AUTO_LAUNCH_PROMPT.replace('"{topic}"', "{topic}").format(topic=topic, handoff=handoff)
+    return AUTO_LAUNCH_PROMPT.format(topic=topic, handoff=handoff)
+
+
+def _open_terminal_window(argv: list) -> None:
+    """The ONE window-open path: with FA_NOTIFY_SINK set, append {"kind":"window","argv":...}
+    to the sink (the test fence) and return; otherwise open a REAL Terminal window via
+    osascript (a launchd watcher has no TTY — launch-remote-window.sh refuses headless)."""
+    sink = os.environ.get("FA_NOTIFY_SINK") or None  # an EMPTY sink is unset (env -i passthrough)
+    if sink is not None:
+        parent = Path(sink).parent
+        if not parent.is_dir():
+            raise SystemExit(f"fa-takeover: FA_NOTIFY_SINK={sink!r} — its directory does not exist")
+        with open(sink, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"kind": "window", "argv": argv}) + "\n")
+        return
+    script = " ".join(shlex.quote(c) for c in argv)
+    esc = script.replace("\\", "\\\\").replace('"', '\\"')
+    subprocess.run(["osascript", "-e", f'tell application "Terminal" to do script "{esc}"'], check=False)
+    subprocess.run(["osascript", "-e", 'tell application "Terminal" to activate'], check=False)
+
+
+def cmd_auto(args) -> int:
+    root = _root()
+    pkg_dir = root / args.takeover_id
+    if not pkg_dir.is_dir():
+        print(f"fa-takeover: no takeover package {args.takeover_id!r} under {root}", file=sys.stderr)
+        return EXIT_NOT_FOUND
+    manifest = json.loads((pkg_dir / "manifest.json").read_text(encoding="utf-8"))
+    sup = fa_capture.superseded_by(root, args.takeover_id)
+    if sup:
+        print(f"fa-takeover: {args.takeover_id} was superseded by {sup} — auto-launch the newest package",
+              file=sys.stderr)
+        return EXIT_REFUSED
+    try:
+        enabled = sms.auto_takeover_enabled(config_dir=_menu_config_dir())
+    except ValueError as e:
+        print(f"fa-takeover: {e}", file=sys.stderr)  # an invalid FA_AUTO_TAKEOVER aborts loudly
+        return EXIT_REFUSED
+    if not enabled:
+        print(f"fa-takeover: auto-launch off (csl) — the auto_takeover setting is OFF; "
+              f"manual: fa-takeover launch {args.takeover_id}", file=sys.stderr)
+        return EXIT_REFUSED
+    source_sid = (manifest.get("source") or {}).get("session_id") or "unknown"
+    launched = root / ".launched"
+    try:
+        launched.mkdir(parents=True, exist_ok=True)
+        os.chmod(launched, 0o700)
+        fd = os.open(str(launched / source_sid), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(args.takeover_id + "\n")
+    except FileExistsError:
+        print(f"fa-takeover: already launched for session {str(source_sid)[:8]} "
+              f"— one successor per source session", file=sys.stderr)
+        return EXIT_REFUSED
+    route = manifest["dest"]["route"]
+    effort = args.effort or effort_resolve._last_launch(route) or "max"
+    handoff = pkg_dir / "handoff.md"
+    topic = fa_capture.source_topic(manifest["source"]["transcript_path"], source_sid)
+    argv = [os.environ.get("FA_TAKEOVER_LAUNCHER") or str(DEFAULT_LAUNCHER),
+            route, "--effort", effort, "--prompt", _auto_prompt(topic, handoff), "--"]
+    try:
+        _open_terminal_window(argv)  # no --permission-mode plan on the AUTO path (D6)
+    except SystemExit:
+        raise
+    except Exception as e:
+        try:
+            (launched / source_sid).unlink()  # release the claim: nothing was launched
+        except OSError:
+            pass
+        print(f"fa-takeover: window open failed: {e}", file=sys.stderr)
+        return EXIT_REFUSED
+    launch = {"launched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+              "route": route, "requested_route": route, "effort": effort, "window": "terminal",
+              "verify": "pending", "successor_session_id": None, "actual_model": "unverified"}
+    lp = pkg_dir / "launch.json"
+    fa_capture._write_file_durable(lp, json.dumps(launch, indent=2, sort_keys=True) + "\n")
+    os.chmod(lp, 0o600)
+    if os.environ.get("FA_TAKEOVER_DETACHED_VERIFY", "1") != "0":
+        # verification runs DETACHED so the watcher returns immediately; it writes its
+        # result back into launch.json (cmd_verify -> _record_launch)
+        log = open(pkg_dir / "verify.log", "a", encoding="utf-8")
+        try:
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "verify",
+                              args.takeover_id, "--timeout", "900"],
+                             start_new_session=True, stdout=log, stderr=log)
+        finally:
+            log.close()
+    print(f"fa-takeover: auto successor launched ({route}) for session {str(source_sid)[:8]} "
+          f"— verify: fa-takeover verify {args.takeover_id}")
+    return EXIT_OK
+
+
+def _record_launch(pkg_dir: Path, succ, read_line, records) -> None:
+    """D10/D11: for an auto-launched package, record the verification outcome, the successor
+    session id, and the ACTUAL model from the successor transcript's identity marker (never
+    assumed from the requested route) into launch.json."""
+    lp = pkg_dir / "launch.json"
+    if not lp.exists():
+        return
+    try:
+        lj = json.loads(lp.read_text(encoding="utf-8"))
+    except Exception:
+        lj = {}
+    lj["verify"] = "DELIVERED+READ" if (succ and read_line is not None) else "timeout"
+    lj["successor_session_id"] = Path(succ).stem if succ else None
+    mk = fa_transcript.identity_marker(records) if succ else None
+    lj["actual_model"] = mk.model if (mk and mk.model) else "unverified"
+    try:
+        fa_capture._write_file_durable(lp, json.dumps(lj, indent=2, sort_keys=True) + "\n")
+        os.chmod(lp, 0o600)
+    except OSError:
+        pass
+
+
 def _successor_transcript(handoff_path: str, source_path: str):
     """The NEWEST transcript whose first genuine instruction names the handoff path
     (final review finding 5: an abandoned earlier launch must not win over the newest).
@@ -184,16 +314,16 @@ def cmd_verify(args) -> int:
         if succ or time.monotonic() >= deadline:
             break
         time.sleep(2)
-    if not succ:
-        print("DELIVERED: no")
-        return EXIT_NOT_DELIVERED
-    print(f"DELIVERED: yes ({succ})")
-
-    records, _malformed = fa_transcript.load_records(succ)
+    records = fa_transcript.load_records(succ)[0] if succ else []
     read_line = None
     for ln, _tool_use_id, content in fa_transcript.tool_result_texts(records):
         if nonce_line in content:
             read_line = ln  # the nonce entered the model's context via a tool_result
+    _record_launch(pkg_dir, succ, read_line, records)
+    if not succ:
+        print("DELIVERED: no")
+        return EXIT_NOT_DELIVERED
+    print(f"DELIVERED: yes ({succ})")
     if read_line is None:
         print("READ: no")
         return EXIT_NOT_DELIVERED
@@ -247,6 +377,10 @@ def cmd_show(args) -> int:
         return EXIT_NOT_FOUND
     print((pkg_dir / "manifest.json").read_text(encoding="utf-8"))
     print(f"handoff: {pkg_dir / 'handoff.md'}")
+    lp = pkg_dir / "launch.json"
+    if lp.exists():
+        print("launch:")
+        print(lp.read_text(encoding="utf-8"))
     return EXIT_OK
 
 
@@ -258,7 +392,10 @@ def build_parser() -> argparse.ArgumentParser:
                     "and reading. Exit codes: 0 ok, 2 usage, 3 refused, 4 not found, "
                     "5 not delivered/not read, 6 needs a TTY.",
         epilog="Env: FA_TAKEOVER_DIR (state root override; invalid aborts loudly), "
-               "FA_TAKEOVER_LAUNCHER, FA_TAKEOVER_ROUTE, XDG_STATE_HOME.")
+               "FA_TAKEOVER_LAUNCHER, FA_TAKEOVER_ROUTE, XDG_STATE_HOME, "
+               "FA_NOTIFY_SINK (record window opens instead of opening one), "
+               "FA_TAKEOVER_DETACHED_VERIFY=0 (skip the detached verify spawn), "
+               "LA_SESSION_MENU_CONFIG_DIR, FA_AUTO_TAKEOVER (0/1; anything else aborts loudly).")
     sub = p.add_subparsers(dest="command", required=True)
 
     c = sub.add_parser("capture", help="build a takeover package from SESSION_ID or a transcript path")
@@ -282,6 +419,13 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("takeover_id")
     lp.add_argument("--effort", default=None, help="effort level for the successor (default: max)")
     lp.set_defaults(func=cmd_launch)
+
+    a = sub.add_parser("auto", help="deterministic auto successor: opens a real Terminal window "
+                                   "(sink-recorded when FA_NOTIFY_SINK is set); one per source session")
+    a.add_argument("takeover_id")
+    a.add_argument("--effort", default=None,
+                   help="effort level (default: the route's recorded last-launch effort, else max)")
+    a.set_defaults(func=cmd_auto)
 
     v = sub.add_parser("verify", help="prove DELIVERED / READ / RECONCILED for a package")
     v.add_argument("takeover_id")
