@@ -49,7 +49,10 @@ class Server:
         # PYTEST_CURRENT_TEST in a child makes NiceGUI enter ITS test mode (KeyError
         # NICEGUI_SCREEN_TEST_PORT): the server under test must see a production env.
         e = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
-        e.update({"HOME": self.tmp.name, "LA_SESSION_MENU_CONFIG_DIR": self.tmp.name})
+        e.update({"HOME": self.tmp.name, "LA_SESSION_MENU_CONFIG_DIR": self.tmp.name,
+                  # 0.63.2's conftest points CLAUDE_CONFIG_DIR at a per-test temp dir; the server's
+                  # Claude config must follow ITS sandboxed HOME, where these tests read it back
+                  "CLAUDE_CONFIG_DIR": str(Path(self.tmp.name) / ".claude")})
         e.update(env or {})
         self.proc = subprocess.Popen([sys.executable, str(MAIN), "--browser", "--port",
                                       str(self.port), *extra], env=e, cwd=self.tmp.name,
