@@ -232,3 +232,11 @@ receiving harness reporting, and the session is marked with
 `CLAUDE_IS_REMOTE_API=true` (distinct from `CLAUDE_IS_LOCAL`).
 
 For anything confidential, use a local session instead.
+
+### Mid-stream provider cuts
+
+If the provider closes the stream mid-response (NVIDIA NIM does this after ~300 s of silence,
+typically while buffering one large tool call), the proxy now ends the turn VALIDLY with a
+`[free-agents] The provider closed this response mid-stream …` hint instead of a 500 — the
+partial text is kept and the next message carries the hint. Write files over ~6,000 characters
+in parts (first Write, then append via Edit), and emit brief visible progress during long work.

@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [0.63.6] — 2026-11-26
+
+### Fixed — a mid-stream provider cut ends the turn cleanly (R3)
+- Cause: NVIDIA NIM delivers a tool call's arguments only when the whole call is complete and
+  closes connections silent for ~300 s, so one large Write/Edit was lost as a 500
+  "API Error: Server error mid-response" and the partial turn was discarded.
+- Now the proxy ends the Anthropic stream VALIDLY: partial text stays, a `[free-agents]` hint
+  text block says what happened and what to do, and the stream closes with
+  `stop_reason: end_turn` — no 500, no lost turn; the next request carries the hint. No retry
+  (the same oversized call would be cut again). Classification is by stream content — SPLIT
+  hint when the stream died during/after reasoning, GENERIC otherwise.
+- Prevention shipped in 0.63.3 (system prompt: write files over ~6,000 chars in parts) plus the
+  2026-11-25 addendum: emit brief visible progress during long work — long silent stretches are
+  both provider-cut and falsely reported as a wedge by the local watchdog.
+
+
 ## [0.63.5] — 2026-11-26
 
 ### Fixed — quota refunds settle the exact reservation in its own TPM window and UTC day
