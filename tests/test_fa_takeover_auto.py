@@ -303,6 +303,22 @@ def test_generic_username_title_is_not_surfaced(tmp_path, monkeypatch):
     argv2 = win_argv(sink2)
     prompt2 = argv2[argv2.index("--prompt") + 1]
     assert f'Continue "Fix {user} auth" — ' == prompt2[: len(f'Continue "Fix {user} auth" — ')]
+    # exact-match boundary: "<user>-05 notes" is NOT a whole-string match -> kept intact
+    tr3 = tmp_path / "boundary.jsonl"
+    tr3.write_text(json.dumps({"type": "user", "sessionId": "sess-bw", "customTitle": f"{user}-05 notes",
+                               "message": {"role": "user", "content": "keep going"}}) + "\n"
+                   + json.dumps({"type": "assistant", "sessionId": "sess-bw", "isApiErrorMessage": True,
+                                 "apiErrorStatus": 422,
+                                 "message": {"role": "assistant", "content": [{"type": "text",
+                                     "text": "API Error: 422 Budget has been exceeded!"}]}}) + "\n")
+    pkg3, _r3 = make_package(tmp_path / "bd", transcript=tr3)
+    sink3 = tmp_path / "sink3.jsonl"
+    auto_env(tmp_path, monkeypatch, sink3)
+    monkeypatch.setenv("FA_TAKEOVER_DIR", str(tmp_path / "bd" / "takeovers"))
+    assert ft.main(["auto", pkg3.takeover_id]) == 0
+    argv3 = win_argv(sink3)
+    prompt3 = argv3[argv3.index("--prompt") + 1]
+    assert prompt3.startswith(f'Continue "{user}-05 notes" — ')
 
 
 # --- D9/D10: no launch-time name; session-title-prefix untouched --------------------

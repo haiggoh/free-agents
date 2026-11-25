@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "bin"))
 FIX = REPO / "tests" / "fixtures" / "transcripts"
@@ -148,6 +150,26 @@ def test_runner_fails_loudly_when_plugin_missing(tmp_path):
                                plugin=tmp_path / "no-such-plugin")
     assert r.returncode != 0
     assert "free-agents" in (r.stderr + r.stdout)
+
+
+def test_watcher_chain_imports_under_python39():
+    """The launchd chain runs under /usr/bin/python3 (3.9 on macOS): every module the
+    watcher path imports must import cleanly there (the PEP 604 fix). Skips off-mac."""
+    py39 = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else None
+    if not py39:
+        pytest.skip("no /usr/bin/python3")
+    ver = subprocess.run([py39, "--version"], capture_output=True, text=True).stdout
+    mods = ["fa_notify", "fa_transcript", "fa_capture", "session_menu_state",
+            "effort_resolve", "takeover_watch"]
+    code = ("import sys, importlib.util; sys.path.insert(0, %r); " % str(REPO / "bin")
+            + "".join(f"import {m}; " for m in mods)
+            # last-effort.py has a hyphen: loaded via SourceFileLoader, like effort_resolve does
+            + "spec = importlib.util.spec_from_file_location('last_effort', %r); "
+              "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+              % str(REPO / "bin" / "last-effort.py")
+            + "print('ok')")
+    r = subprocess.run([py39, "-c", code], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and "ok" in r.stdout, (ver, r.stdout, r.stderr)
 
 
 def test_version_surfaces_agree():
