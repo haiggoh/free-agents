@@ -127,6 +127,15 @@ class OffloadReportingDocs(unittest.TestCase):
         self.assertIn("QC before claiming done", notes)
         self.assertIn("OPTIONAL", notes)
 
+    def test_remote_system_prompt_pins_the_split_write_rule(self):
+        # R1-B (waypoint free-agents-server-error-mid): the free sessions' own prompt must
+        # carry the split-large-writes rule — NVIDIA NIM buffers tool-call arguments into one
+        # final chunk and cuts ~300 s-silent connections, so one oversized Write is lost.
+        raw = (ROOT / "config" / "remote-agent-system-prompt.txt").read_text(encoding="utf-8")
+        self.assertIn("more than about 6,000 characters", raw)
+        self.assertIn("Write the first section (under 6,000 characters), then append each further section", raw)
+        self.assertIn("Never retry the same oversized call after that error", raw)
+
 
 class InterceptRoutingTests(unittest.TestCase):
     def setUp(self):
