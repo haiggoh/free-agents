@@ -844,6 +844,123 @@ def test_cloud_route_switch_writes_settings_env(browser, tmp_path):
         assert srv.stop() == []
 
 
+def _wait_store(store: Path, pick, before, timeout=10):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if store.exists():
+            val = pick(json.loads(store.read_text()))
+            if val != before:
+                return val
+        time.sleep(0.1)
+    return before
+
+
+def test_rate_limiter_new_knob_rows_persist(browser, tmp_path):
+    # 0.63.x parity (main's new csl rows after the rebase): a cycle knob (Fast lane, key n) and
+    # the plain on/off row (Dispatch boost, key m) write the SAME store csl writes
+    srv = Server()
+    try:
+        store = Path(srv.tmp.name) / "session-menu.local.json"
+        page = browser.new_page()
+        page.goto(f"{srv.url}rate_limiter")
+        fast = page.locator('[data-action="RateLimiterScreen.n"]')
+        fast.wait_for(timeout=15000)
+        fast.locator(".cycle-right").click()
+        got = _wait_store(store, lambda d: d.get("rate_limiter", {}).get("fast_lane"), None)
+        assert got not in (None, "off"), f"Fast lane did not persist a new value: {got!r}"
+        page.get_by_text("Dispatch boost: on", exact=False).first.click()
+        flipped = _wait_store(store, lambda d: d.get("rate_limiter", {}).get("dispatch_boost"), None)
+        assert flipped is False, f"Dispatch boost (default on) did not flip to off: {flipped!r}"
+    finally:
+        assert srv.stop() == []
+
+
+def test_rate_limiter_priority_lane_row_dispatches_lane_toggle(browser, tmp_path):
+    # main a826661: "Toggle priority lane for THIS session" runs rate_limiter.py lane-toggle
+    stub = tmp_path / "lane.json"
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}rate_limiter")
+        page.get_by_text("Toggle priority lane for THIS session", exact=False).first.click()
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), "the priority-lane row dispatched nothing"
+        argv = json.loads(stub.read_text())["argv"]
+        assert argv[0] == "python3" and argv[1].endswith("bin/rate_limiter.py"), argv
+        assert argv[2:] == ["lane-toggle", "--user-approved"], argv
+    finally:
+        assert srv.stop() == []
+
+
+def test_large_context_only_filter_applies_to_the_remote_list(browser, tmp_path):
+    # main 0f96d19 (0.62.0 C9): "Large context only (>256k)" defaults ON and hides rows whose
+    # KNOWN context is <= 262144; turning it OFF shows them again (csl's visible_agents)
+    limits = json.loads((ROOT / "config/provider-limits.json").read_text())
+    for mid, ctx in (("test/small-ctx", 131072), ("test/large-ctx", 1048576)):
+        limits["models"][f"nvidia:{mid}"] = {"context": ctx, "max_output": None, "released": None,
+                                             "broken": None, "source": "test fixture (pinned)",
+                                             "reason": "test fixture: only context is known"}
+    lim = tmp_path / "provider-limits.json"
+    lim.write_text(json.dumps(limits))
+    stub = tmp_path / "remote-session.sh"
+    stub.write_text("#!/usr/bin/env bash\n"
+                    "if [ \"$1\" = \"--inventory\" ]; then\n"
+                    "  printf 'agent-small\\tnvidia\\tAgent Small\\tstandard\\t0\\t1\\t0\\ttest/small-ctx\\n'\n"
+                    "  printf 'agent-large\\tnvidia\\tAgent Large\\tstandard\\t0\\t1\\t0\\ttest/large-ctx\\n'\n"
+                    "fi\n")
+    stub.chmod(0o755)
+    srv = Server(env={"CSL_REMOTE_LAUNCHER": str(stub), "FA_PROVIDER_LIMITS": str(lim)})
+
+    def listed():
+        page.goto(f"{srv.url}remote")
+        page.get_by_text("Choose model", exact=False).first.click()
+        page.locator('[data-group="nvidia"]').first.click()
+        page.wait_for_selector("text=Agent Large", timeout=20000)
+        return sorted(x.get_attribute("data-model") for x in page.locator("[data-model]").all())
+    try:
+        page = browser.new_page()
+        assert listed() == ["test/large-ctx"], "default ON must hide the 128k row"
+        page.goto(f"{srv.url}remote_filters")
+        page.locator(".cycle-row", has_text="Large context only").locator(".cycle-value").click()
+        store = Path(srv.tmp.name) / "session-menu.local.json"
+        off = _wait_store(store, lambda d: d.get("remote_filters", {}).get("large_context_only"), True)
+        assert off is False, f"the toggle did not persist OFF: {off!r}"
+        assert listed() == ["test/large-ctx", "test/small-ctx"], "OFF must show the 128k row again"
+    finally:
+        assert srv.stop() == []
+
+
+def test_remote_row_infobox_is_csls_info_text_with_limits(browser, tmp_path):
+    # main 0f96d19 (0.62.0 C8): csl's remote infobox carries the provider-limits facts; the
+    # GUI's hover box must be the screen's OWN info_text, not a hand-rolled summary
+    limits = json.loads((ROOT / "config/provider-limits.json").read_text())
+    limits["models"]["nvidia:test/large-ctx"] = {
+        "context": 1048576, "max_output": 32768, "released": None, "broken": None,
+        "source": "test fixture (pinned)", "reason": "test fixture: release/broken unknown"}
+    lim = tmp_path / "provider-limits.json"
+    lim.write_text(json.dumps(limits))
+    stub = tmp_path / "remote-session.sh"
+    stub.write_text("#!/usr/bin/env bash\n"
+                    "if [ \"$1\" = \"--inventory\" ]; then\n"
+                    "  printf 'agent-large\\tnvidia\\tAgent Large\\tstandard\\t0\\t1\\t0\\ttest/large-ctx\\n'\n"
+                    "fi\n")
+    stub.chmod(0o755)
+    srv = Server(env={"CSL_REMOTE_LAUNCHER": str(stub), "FA_PROVIDER_LIMITS": str(lim)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}remote")
+        page.get_by_text("Choose model", exact=False).first.click()
+        page.locator('[data-group="nvidia"]').first.click()
+        page.locator('[data-model="test/large-ctx"]').first.hover()
+        page.wait_for_selector("#infobox:has-text('Context: 1,048,576')", timeout=10000)
+        text = page.inner_text("#infobox")
+        assert "Max output: 32,768" in text and "Requests/min:" in text, text
+    finally:
+        assert srv.stop() == []
+
+
 def test_remote_filter_applies_to_the_remote_list(browser, tmp_path):
     # 2026-11-22 parity: the RemoteFiltersScreen cycles must APPLY — a trial agent is
     # visible on /remote, hidden after "Limited trials: HIDDEN" is chosen, back on re-show

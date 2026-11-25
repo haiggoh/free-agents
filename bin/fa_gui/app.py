@@ -1054,7 +1054,7 @@ def build() -> None:
                                     row = ui.label(f"    {name}  ·  {mid}").classes("menu-item model-row")
                                     row.props["data-model"] = mid
                                     row.on("click", lambda m=mid, d=mdl: do_launch(m, d))
-                                    row.on("mouseenter", lambda d=mdl: info.set_text(_info_text(d)))
+                                    row.on("mouseenter", lambda d=mdl: info.set_text(_lane_info(d)))
                         if target == "local":
                             for alias in list(pc.MISSING_MODELS):
                                 if query and query.lower() not in alias.lower():
@@ -1067,6 +1067,25 @@ def build() -> None:
                                    if target == "local" else
                                    "No models — every provider needs an API key (open API keys)")
                             ui.label(msg).props('class="empty-state"')
+
+                def _lane_info(mdl) -> str:
+                    # csl parity (main 0.62.0 C8): the hover box IS the lane screen's own
+                    # info_text (notes, thinking constraint, provider-limits facts, context) —
+                    # one source for both frontends. The lane data can land after this page's
+                    # screen was built, so an alias the screen does not know yet gets a fresh
+                    # screen from the current cache; _info_text is only the last resort.
+                    alias = getattr(mdl, "alias", "")
+
+                    def knows(s) -> bool:
+                        return bool(alias) and (alias in (getattr(s, "models", None) or {}) or any(
+                            getattr(a, "alias", "") == alias for a in (getattr(s, "agents", None) or [])))
+                    s_ = scr
+                    if hasattr(s_, "info_text") and alias and not knows(s_):
+                        s_ = pc.build_screen(m.Nav(target, m.HOME_OWNED), get_settings(), loader.cache,
+                                             savers=settings_state.get('savers')).screen
+                    if hasattr(s_, "info_text") and knows(s_):
+                        return s_.info_text(alias)
+                    return _info_text(mdl)
 
                 def _info_text(mdl) -> str:
                     # the floating infobox content, like csl's model info box
