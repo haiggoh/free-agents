@@ -228,6 +228,49 @@ def test_launchd_status_tool_row_dispatches_backend_argv(browser, tmp_path):
         assert srv.stop() == []
 
 
+def _launchd_confirm(browser, tmp_path, row: str, verb: str, answer: str):
+    # csl parity (bin/session_picker.py prompt:rt-launchd-*): the install/uninstall rows confirm
+    # first; Yes runs manage-backend.py launchd <verb>, No runs nothing and says so
+    stub = tmp_path / f"launchd-{verb}.json"
+    srv = Server(env={"FA_GUI_LAUNCH_STUB": str(stub)})
+    try:
+        page = browser.new_page()
+        page.goto(f"{srv.url}runtime_launchd")
+        page.get_by_text(row, exact=False).first.click()
+        page.wait_for_selector(".q-dialog", timeout=10000)
+        text = page.locator(".q-dialog").inner_text()
+        assert f"{'Install' if verb == 'install' else 'Remove'} the weekly LaunchAgent update check?" in text, text
+        assert "A per-user launchd job that checks for backend updates once a week." in text, text
+        assert not stub.exists(), "opening the prompt must not run anything"
+        page.locator(".q-dialog button", has_text=answer).click()
+        if answer == "No":
+            page.wait_for_selector("text=launchd unchanged — nothing was run", timeout=10000)
+            time.sleep(1.0)
+            assert not stub.exists(), "No must not dispatch"
+            return None
+        deadline = time.time() + 10
+        while time.time() < deadline and not stub.exists():
+            time.sleep(0.1)
+        assert stub.exists(), f"launchd {verb} confirm did not dispatch"
+        return json.loads(stub.read_text())["argv"]
+    finally:
+        assert srv.stop() == []
+
+
+def test_launchd_install_confirm_dispatches_backend_argv(browser, tmp_path):
+    argv = _launchd_confirm(browser, tmp_path, "Install the weekly check (LaunchAgent)", "install", "Yes")
+    assert argv is not None and argv[2:] == ["--backend", "rapid-mlx", "launchd", "install"], argv
+
+
+def test_launchd_uninstall_confirm_dispatches_backend_argv(browser, tmp_path):
+    argv = _launchd_confirm(browser, tmp_path, "Uninstall the weekly check", "uninstall", "Yes")
+    assert argv is not None and argv[2:] == ["--backend", "rapid-mlx", "launchd", "uninstall"], argv
+
+
+def test_launchd_confirm_no_dispatches_nothing(browser, tmp_path):
+    assert _launchd_confirm(browser, tmp_path, "Install the weekly check (LaunchAgent)", "install", "No") is None
+
+
 def test_catalog_page_adds_and_removes_overlay_row(browser, tmp_path):
     # Task 4 delivery-shaped: the /catalog screen writes the overlay store through
     # catalog_overlay's validated path; the store file (fixture, not the real one)

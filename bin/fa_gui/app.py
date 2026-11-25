@@ -58,6 +58,13 @@ def prompt_payload(target: str, scr) -> dict | None:
     if target == "prompt:oneshot":
         # csl's one-shot field: the lowkey screen turns the text into a --prompt launch
         return {"kind": "input", "prompt": "One-shot prompt:"}
+    if target in ("prompt:rt-launchd-install", "prompt:rt-launchd-uninstall"):
+        # csl's confirm (session_picker.py prompt:rt-launchd-*): same question + detail line
+        verb = "Install" if target.endswith("-install") else "Remove"
+        return {"kind": "confirm-launchd",
+                "prompt": f"{verb} the weekly LaunchAgent update check?",
+                "detail": "A per-user launchd job that checks for backend updates once a week.",
+                "target": "tool:" + target.split(":", 1)[1]}
     if target == "prompt:rl-reset":
         # csl's confirm: the shared rate-limiter state file is deleted once per prompt
         return {"kind": "confirm-rl-reset",
@@ -112,6 +119,12 @@ def _confirm_prompt(scr, target: str, st: dict, dlg) -> None:
             argv = pc.tool_argv(pending, _runtime_backend(), _settings_state.get("last_scr"))
             if argv:
                 st["launch_req"](m.LaunchRequest("tool", ["tool", *argv], {}, ""))
+    elif target in ("prompt:rt-launchd-install", "prompt:rt-launchd-uninstall"):
+        # csl's confirm: install/remove the weekly LaunchAgent update check
+        _p = prompt_payload(target, scr)
+        _argv = pc.tool_argv(_p["target"], _runtime_backend(), _settings_state.get("last_scr")) if _p else None
+        if _argv and st.get("launch_req"):
+            st["launch_req"](m.LaunchRequest("tool", ["tool", *_argv], {}, ""))
     elif target == "prompt:rl-reset":
         # csl's reset: delete the shared rate-limiter state file (same command the TUI runs)
         if st.get("launch_req"):
@@ -1231,6 +1244,19 @@ def build() -> None:
                 if payload and payload.get("kind") == "confirm-rl-reset":
                     _ui.label(payload["prompt"])
                     _ui.label("Every free-API lane forgets its recorded request history and cooldowns.")
+                elif payload and payload.get("kind") == "confirm-launchd":
+                    _ui.label(payload["prompt"])
+                    _ui.label(payload["detail"])
+
+                    def _launchd_no():
+                        # csl's No: nothing runs, and the screen says so
+                        _ui.notify("launchd unchanged — nothing was run")
+                        dlg.close()
+                    with _ui.row():
+                        _ui.button("Yes", on_click=lambda: _confirm_prompt(scr, target, _st, dlg))
+                        _ui.button("No", on_click=_launchd_no)
+                    dlg.open()
+                    return
                 elif payload and payload.get("kind") == "input":
                     # typed prompt (prompt:session / prompt:oneshot / prompt:keys:key):
                     # Yes validates exactly like csl and applies the value
