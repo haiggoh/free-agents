@@ -1101,6 +1101,7 @@ class Picker(App):
             remote_temperature=state.temperature.get("remote_api_session", sms.DEFAULT_TEMPERATURE["remote_api_session"]),
             lowkey_temperature=state.temperature.get("lowkey", sms.DEFAULT_TEMPERATURE["lowkey"]),
             thinking_session=state.thinking_session,
+            auto_takeover=state.auto_takeover,
             rate_limiter=dict(state.rate_limiter),
             memguard=dict(state.memguard),
             local_registry=dict(state.local_registry),   # 0.55.8 Task 8: the migrated section
@@ -1116,6 +1117,7 @@ class Picker(App):
             on_effort_saved=self._save_effort,
             on_temperature_saved=self._save_temperature,
             on_thinking_saved=self._save_thinking,
+            on_auto_takeover_saved=self._save_auto_takeover,
             hidden_providers=list(state.hidden_providers),
             on_hidden_providers_saved=self._save_hidden_providers,
             lowkey_remote_filters=bool(state.lowkey_filters.get("remote_filters", False)),
@@ -1176,6 +1178,11 @@ class Picker(App):
 
     def _save_thinking(self, value):
         warning = sms.save_thinking_session(self._config_dir(), value)
+        if warning and warning not in self.state_warnings:
+            self.state_warnings.append(warning)
+
+    def _save_auto_takeover(self, value):
+        warning = m.save_auto_takeover_with_watch(self._config_dir(), value)
         if warning and warning not in self.state_warnings:
             self.state_warnings.append(warning)
 

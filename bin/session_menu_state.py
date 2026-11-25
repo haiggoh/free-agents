@@ -42,11 +42,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCHEMA_VERSION = 11
-READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+SCHEMA_VERSION = 12
+READABLE_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 SECTIONS = ("schema_version", "effort", "rate_limiter", "last_launched", "last_launched_tier", "last_launched_mode", "temperature",
             "intercept_agents", "memguard", "thinking", "hidden_providers", "lowkey_filters",
-            "local_registry", "remote_filters")
+            "local_registry", "remote_filters", "auto_takeover")
 # Roster tier of the last-launched REMOTE alias, so "Go last" can add --include-trials without a
 # 5.7 s inventory call. Optional in schema 2; absent = unknown (treated as not a trial).
 TIERS = ("local", "renewing_free", "trial", "paid", "consumer_web", "unknown",
@@ -222,6 +222,8 @@ class State:
     lowkey_filters: dict = field(default_factory=dict)
     # 0.62.0 C9: Remote-screen filter toggles; large_context_only defaults ON (user 2026-11-22)
     remote_filters: dict = field(default_factory=lambda: {"large_context_only": True})
+    # 0.64.0 R4 (D4): auto-launch a free successor after a budget wall — default ON (schema 12).
+    auto_takeover: bool = True
     warnings: list = field(default_factory=list)
 
 
@@ -339,6 +341,8 @@ def _parse(raw: bytes) -> tuple:
         raise ValueError("local_registry needs schema_version 10")
     if doc["schema_version"] < 11 and "remote_filters" in doc:
         raise ValueError("remote_filters needs schema_version 11")
+    if doc["schema_version"] < 12 and "auto_takeover" in doc:
+        raise ValueError("auto_takeover needs schema_version 12")
     memguard = doc.get("memguard", {})
     if not isinstance(memguard, dict):
         raise ValueError("preference sections must be JSON objects")
@@ -371,6 +375,9 @@ def _parse(raw: bytes) -> tuple:
         remote_filters = {}
     if not isinstance(remote_filters, dict) or not all(isinstance(v, bool) for v in remote_filters.values()):
         raise ValueError("remote_filters must be a JSON object of booleans")
+    auto_takeover = doc.get("auto_takeover", True)
+    if not isinstance(auto_takeover, bool):
+        raise ValueError("auto_takeover must be true or false")
     effort = doc.get("effort", {})
     limiter = doc.get("rate_limiter", {})
     last = doc.get("last_launched", {})
@@ -411,7 +418,7 @@ def _parse(raw: bytes) -> tuple:
             raise ValueError(f"{lane} last launched mode must be convo or oneshot")
         last[f"{lane}:mode"] = mode
     return (effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden,
-            lowkey_filters, local_registry, remote_filters)
+            lowkey_filters, local_registry, remote_filters, auto_takeover)
 
 
 def _read(path: Path) -> tuple | None:
@@ -444,7 +451,7 @@ def load(config_dir: Path | str | None = None) -> State:
         return state
     if found:
         (effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden,
-         lowkey_filters, local_registry, remote_filters) = found
+         lowkey_filters, local_registry, remote_filters, auto_takeover) = found
         state.effort.update(effort)
         state.rate_limiter = dict(limiter)
         state.last_launched = {k: v for k, v in last.items() if ":" not in k}
@@ -458,6 +465,7 @@ def load(config_dir: Path | str | None = None) -> State:
         state.local_registry.update(local_registry)
         state.lowkey_filters.update(lowkey_filters)
         state.remote_filters.update(remote_filters)
+        state.auto_takeover = auto_takeover
     return state
 
 
@@ -562,7 +570,7 @@ def _write(config_dir: Path, doc: dict) -> None:
 
 def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking=None,
          hidden_providers=None, lowkey_filters=None, local_registry=None,
-         remote_filters=None) -> dict:
+         remote_filters=None, auto_takeover=None) -> dict:
     doc = {"schema_version": SCHEMA_VERSION, "effort": effort, "rate_limiter": limiter,
            "last_launched": {k: v for k, v in last.items() if ":" not in k},
            "temperature": temperature,
@@ -587,6 +595,8 @@ def _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinkin
         doc["local_registry"] = dict(local_registry)
     if remote_filters:
         doc["remote_filters"] = dict(remote_filters)
+    if auto_takeover is not None:
+        doc["auto_takeover"] = bool(auto_takeover)
     return doc
 
 
@@ -602,7 +612,8 @@ def save_remote_filters(config_dir: Path | str, key: str, value: bool) -> str | 
 
 def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinking=None,
             mutate_hidden=None, mutate_lowkey_filters=None,
-            mutate_local_registry=None, mutate_remote_filters=None) -> str | None:
+            mutate_local_registry=None, mutate_remote_filters=None,
+            mutate_auto_takeover=None) -> str | None:
     """Apply `mutate(effort, limiter, last_launched, temperature)` (or one of the section hooks)
     under the lock. Returns a warning or None.
 
@@ -629,16 +640,18 @@ def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinkin
                 pass
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters = found
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters, auto_takeover = found
             else:
-                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters = \
-                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, [], {}, {}, {}
+                effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters, auto_takeover = \
+                    {}, {}, {}, {}, DEFAULT_INTERCEPT_AGENTS, {}, {}, [], {}, {}, {}, True
             if mutate_hidden is not None:
                 mutate_hidden(hidden)
             elif mutate_lowkey_filters is not None:
                 mutate_lowkey_filters(lowkey_filters)
             elif mutate_remote_filters is not None:
                 mutate_remote_filters(remote_filters)
+            elif mutate_auto_takeover is not None:
+                auto_takeover = mutate_auto_takeover(auto_takeover)
             elif mutate_local_registry is not None:
                 mutate_local_registry(local_registry)
             elif mutate_thinking is not None:
@@ -647,7 +660,7 @@ def _update(config_dir: Path | str, mutate, mutate_memguard=None, mutate_thinkin
                 mutate_memguard(memguard)
             else:
                 mutate(effort, limiter, last, temperature)
-            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters)
+            doc = _doc(effort, limiter, last, temperature, intercept_agents, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters, auto_takeover=auto_takeover)
             _write(config_dir, doc)
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
@@ -804,16 +817,36 @@ def save_intercept_agents(config_dir: Path | str, value: str) -> str | None:
         with _locked(config_dir):
             found = _read(config_dir / PREFS_NAME)
             if found:
-                effort, limiter, last, temperature, _, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters = found
+                effort, limiter, last, temperature, _, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters, auto_takeover = found
             else:
-                effort, limiter, last, temperature, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters = {}, {}, {}, {}, {}, {}, [], {}, {}, {}
-            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters))
+                effort, limiter, last, temperature, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters, auto_takeover = {}, {}, {}, {}, {}, {}, [], {}, {}, {}, True
+            _write(config_dir, _doc(effort, limiter, last, temperature, value, memguard, thinking, hidden, lowkey_filters, local_registry, remote_filters, auto_takeover=auto_takeover))
     except ValueError as exc:
         return f"{exc}; not saved (file left untouched), the choice applies to this run only"
     except OSError as exc:
         code = errno.errorcode.get(exc.errno, "error") if exc.errno else "error"
         return f"could not save preferences ({code}); the choice applies to this run only"
     return None
+
+
+def save_auto_takeover(config_dir: Path | str, value: bool) -> str | None:
+    """Persist the auto-takeover opt-out (0.64.0 R4 D4, schema 12 section auto_takeover)."""
+    if not isinstance(value, bool):
+        raise ValueError("auto_takeover must be true or false")
+    return _update(config_dir, None, mutate_auto_takeover=lambda _cur: value)
+
+
+def auto_takeover_enabled(env: "dict | None" = None, config_dir=REPO_CONFIG_DIR) -> bool:
+    """FA_AUTO_TAKEOVER ("1"/"0") wins; any other set value raises loudly; else the stored
+    value. An EMPTY value is unset (env -i passthrough), like the FA_NOTIFY_SINK rule."""
+    raw = (os.environ if env is None else env).get("FA_AUTO_TAKEOVER")
+    if raw is not None and raw != "":
+        if raw == "1":
+            return True
+        if raw == "0":
+            return False
+        raise ValueError(f"FA_AUTO_TAKEOVER must be 0 or 1, got {raw!r}")
+    return load(config_dir).auto_takeover
 
 
 def main(argv: list[str]) -> int:
@@ -932,6 +965,7 @@ def main(argv: list[str]) -> int:
                           "temperature": state.temperature,
                           "intercept_agents": state.intercept_agents,
                           "memguard": state.memguard,
+                          "auto_takeover": state.auto_takeover,
                           "thinking_session": state.thinking_session}, indent=2))
     return 0
 

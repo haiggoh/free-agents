@@ -794,6 +794,9 @@ class Settings:
     # launchers apply via LA_THINKING_OVERRIDE (model constraints may override it, and the info
     # box says so). Persisted by the Picker through on_thinking_saved -> sms.save_thinking_session.
     thinking_session: bool | None = None
+    # 0.64.0 R4 (D4): auto-launch a free successor after a budget wall — default ON.
+    # Persisted via on_auto_takeover_saved -> save_auto_takeover_with_watch.
+    auto_takeover: bool = True
     rate_limiter: dict = field(default_factory=dict)
     # 0.50.0 (api-keys-provider-hide-toggle): provider slugs hidden from the remote
     # choose-model list; persisted via on_hidden_providers_saved. Keys stay on disk.
@@ -839,6 +842,7 @@ class Settings:
     on_temperature_saved: Callable[[str, str], object] | None = None
     # Called with (bool | None) when the user changes the session thinking toggle; persists it.
     on_thinking_saved: Callable[[bool | None], object] | None = None
+    on_auto_takeover_saved: Callable[[bool], object] | None = None
     # Last launched model per lane (for R15: remember last launched)
     last_launched_model: dict = field(default_factory=lambda: {
         "local_session": None,
@@ -1135,6 +1139,56 @@ def _toggle(s, attr):
     return (False, True), (lambda: getattr(s, attr)), (lambda v: setattr(s, attr, v))
 
 
+def takeover_watch_module():
+    """Lazy import of bin/takeover_watch.py (R4 Task 4 ships it); None until then — the
+    settings row then shows the agent state as n/a instead of failing the whole screen."""
+    try:
+        import importlib
+        return importlib.import_module("takeover_watch")
+    except Exception:
+        return None
+
+
+def _takeover_watch_state_label() -> str:
+    tw = takeover_watch_module()
+    if tw is None:
+        return "n/a"
+    try:
+        st = tw.status()
+    except Exception:
+        return "unknown"
+    if st.get("loaded"):
+        return "loaded"
+    if st.get("installed"):
+        return "installed"
+    return "not installed"
+
+
+def save_auto_takeover_with_watch(config_dir, value: bool) -> str | None:
+    """Persist the opt-out AND install/uninstall the launchd watch agent with it, so the
+    settings row shows the agent's real resulting state (no-hidden-changes)."""
+    warning = sms.save_auto_takeover(config_dir, value)
+    tw = takeover_watch_module()
+    if tw is not None:
+        try:
+            (tw.install() if value else tw.uninstall())
+        except Exception as exc:
+            if warning is None:
+                warning = f"takeover watch agent: {exc}"
+    return warning
+
+
+def _auto_takeover_setting(s: Settings):
+    def put(v):
+        s.auto_takeover = v
+        if s.on_auto_takeover_saved:
+            s.on_auto_takeover_saved(v)
+    label = (f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Auto-launch a free successor after a "
+             f"budget wall: {'ON' if s.auto_takeover else 'OFF'} "
+             f"(agent: {_takeover_watch_state_label()})")
+    return setting("f", label, (False, True), lambda: s.auto_takeover, put, labels=("OFF", "ON"))
+
+
 def _common_toggles(s: Settings, include_watcher: bool):
     acts = [
         setting("a", f"{ec.EMOJI_AUTO_MODE_STR} Auto-mode: {AUTO_MODE_LABELS[s.auto_mode]}",
@@ -1157,6 +1211,8 @@ def _common_toggles(s: Settings, include_watcher: bool):
         # submenu (FilterSubmenuTests) — keep this row off both.
         setting("d", f"{ec.gap(ec.EMOJI_BLOCK_STR)}Always block Github releases in \"blind-trust\" mode: {'ON' if s.deny_gh_release else 'OFF'}",
                 *_toggle(s, "deny_gh_release"), labels=("OFF", "ON")),
+        # 0.64.0 R4 (D4): the auto-successor opt-out — key 'f' is free on both lane screens.
+        _auto_takeover_setting(s),
     ]
     if include_watcher:
         acts.append(setting("w", f"{ec.EMOJI_WATCHER_STR} Watcher: {'ON' if s.watcher else 'OFF'}",

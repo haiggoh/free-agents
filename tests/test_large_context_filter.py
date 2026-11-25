@@ -116,10 +116,11 @@ class LargeContextFilterTests(_Case):
         self.assertIsNone(warn, warn)
         shown = [a.alias for a in self.m.visible_agents(s, agents)]
         self.assertIn("groq-small", shown, "toggling OFF shows the 131k row")
-        # persisted across a restart: the saved v11 file carries remote_filters
+        # persisted across a restart: the saved file carries remote_filters (schema 12
+        # since 0.64.0 R4 adds the auto_takeover section)
         saved = json.loads((Path(self.env["FREE_AGENTS_CONFIG_DIR"])
                             / "session-menu.local.json").read_text())
-        self.assertEqual(saved.get("schema_version"), 11)
+        self.assertEqual(saved.get("schema_version"), 12)
         self.assertEqual(saved.get("remote_filters", {}).get("large_context_only"), False)
 
 
