@@ -40,8 +40,11 @@ class LargeContextToggleDefaultNone(unittest.TestCase):
         row = next(a for a in scr.actions() if a.key == "d")
         row.run()                                   # must not raise TypeError
         self.assertIs(s.remote_filters["large_context_only"], True)
-        self.assertIs(sms.load(sms.config_dir()).remote_filters.get("large_context_only"), True,
-                      "the toggle must persist to the session-menu store")
+        self.assertIs(sms.load(sms.config_dir()).remote_filters.get("large_context_only"), True)
+        row = next(a for a in scr.actions() if a.key == "d")
+        row.run()                                   # toggle back: persisted False must be observable (store default is True)
+        self.assertIs(sms.load(sms.config_dir()).remote_filters.get("large_context_only"), False,
+                      "the persisted toggle must be observable (False != the on-disk default True)")
 
 
 if __name__ == "__main__":

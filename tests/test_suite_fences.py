@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -50,12 +51,46 @@ class LastEffortFence(unittest.TestCase):
         stored = json.loads(Path(str(fence)).read_text())
         self.assertEqual(stored.get("fence-probe-alias"), "high")
 
+    def test_sessionfinish_fails_the_run_when_the_repo_effort_file_changed(self):
+        # R2 FAIL half: conftest.pytest_sessionfinish must set exitstatus=1 if the checkout's
+        # config/remote-last-effort.local.json changed during the run. Exercised in-process:
+        # control first (file absent -> untouched), then a planted write -> exitstatus 1.
+        # The file is unlinked in finally before this test ends, and every worker's
+        # sessionfinish runs only after all tests, so no cross-worker race.
+        # the live conftest plugin module (tests/ is not on sys.path, so `import conftest`
+        # fails — find the already-loaded module by its file instead of re-executing it)
+        cf = next(m for m in sys.modules.values()
+                  if getattr(m, "__file__", None)
+                  and Path(m.__file__).resolve() == (ROOT / "tests" / "conftest.py").resolve())
+        self.assertFalse(REPO_EFFORT_FILE.exists(), "worktree config/ effort file must be absent")
+
+        class _S:
+            exitstatus = 0
+        s = _S()
+        cf.pytest_sessionfinish(s, 0)
+        self.assertEqual(s.exitstatus, 0, "control: unchanged file must not fail the run")
+
+        REPO_EFFORT_FILE.write_text('{"probe": true}\n')
+        try:
+            s2 = _S()
+            cf.pytest_sessionfinish(s2, 0)
+            self.assertEqual(s2.exitstatus, 1,
+                             "a changed repo effort file must FAIL the session (exitstatus=1)")
+        finally:
+            REPO_EFFORT_FILE.unlink(missing_ok=True)
+
 
 class BackendUpgradesFence(unittest.TestCase):
     def test_conftest_points_the_upgrade_state_at_a_sandbox(self):
         bu = _load_backend_upgrades()
         self.assertNotEqual(bu.state_path().resolve(), REAL_UPGRADES.resolve(),
                             "conftest must force LA_BACKEND_UPGRADES_STATE to a sandbox")
+        # positive control: with the fence env set, the real writer must succeed INTO the
+        # fence file (the tripwire must not false-positive on the sandboxed path)
+        bu.save_state({"probe": "ok"})
+        stored = json.loads(Path(os.environ["LA_BACKEND_UPGRADES_STATE"]).read_text())
+        self.assertEqual(stored.get("probe"), "ok",
+                         "save_state must succeed into the fenced sandbox, not trip")
 
     def test_an_in_process_write_to_the_real_file_trips_before_writing(self):
         # RED-safe: only call the writer once the tripwire is known to be installed — without it
@@ -75,6 +110,21 @@ class BackendUpgradesFence(unittest.TestCase):
         self.assertIn("backend-upgrades", str(cm.exception))
         after = REAL_UPGRADES.stat().st_mtime_ns if REAL_UPGRADES.exists() else None
         self.assertEqual(after, before, "the tripwire must fire BEFORE the real file is touched")
+        # direct trips, independent of save_state's write order: the real .tmp sibling via
+        # write_text, and a replace() whose TARGET is the real file — both must raise first
+        with self.assertRaises(AssertionError) as cm2:
+            REAL_UPGRADES.with_suffix(".tmp").write_text("{}")
+        self.assertIn("backend-upgrades", str(cm2.exception))
+        fd, src = tempfile.mkstemp(prefix="fa-trip-src-")
+        os.close(fd)
+        try:
+            with self.assertRaises(AssertionError) as cm3:
+                Path(src).replace(REAL_UPGRADES)
+            self.assertIn("backend-upgrades", str(cm3.exception))
+        finally:
+            os.unlink(src)
+        after2 = REAL_UPGRADES.stat().st_mtime_ns if REAL_UPGRADES.exists() else None
+        self.assertEqual(after2, before, "direct .tmp/replace trips must also fire BEFORE any write")
 
 
 if __name__ == "__main__":
