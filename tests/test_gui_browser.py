@@ -959,7 +959,7 @@ def test_large_context_only_filter_applies_to_the_remote_list(browser, tmp_path)
         assert srv.stop() == []
 
 
-def test_remote_row_infobox_is_csls_info_text_with_limits(browser, tmp_path):
+def test_remote_row_infobox_is_csls_info_text_with_limits(browser, tmp_path, monkeypatch):
     # main 0f96d19 (0.62.0 C8): csl's remote infobox carries the provider-limits facts; the
     # GUI's hover box must be the screen's OWN info_text, not a hand-rolled summary
     limits = json.loads((ROOT / "config/provider-limits.json").read_text())
@@ -984,6 +984,18 @@ def test_remote_row_infobox_is_csls_info_text_with_limits(browser, tmp_path):
         page.wait_for_selector("#infobox:has-text('Context: 1,048,576')", timeout=10000)
         text = page.inner_text("#infobox")
         assert "Max output: 32,768" in text and "Requests/min:" in text, text
+        # EQUAL to csl's own info_text for that row (QC R4.5: a substring check let
+        # "info_text + extra" pass) — built in-process from the same fixtures and store
+        monkeypatch.setenv("FA_PROVIDER_LIMITS", str(lim))
+        monkeypatch.setenv("CSL_REMOTE_LAUNCHER", str(stub))
+        monkeypatch.syspath_prepend(str(ROOT / "bin"))
+        import picker_core as pc
+        import session_picker_model as m
+        s = pc.build_settings(None, pc.Savers(Path(srv.tmp.name)))
+        scr = pc.build_screen(m.Nav("remote", m.HOME_OWNED), s,
+                              {"remote": pc.load_remote_agents()}).screen
+        expected = scr.info_text("agent-large")
+        assert " ".join(text.split()) == " ".join(expected.split()), (text, expected)
     finally:
         assert srv.stop() == []
 
