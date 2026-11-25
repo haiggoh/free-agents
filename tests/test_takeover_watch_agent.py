@@ -116,10 +116,12 @@ def test_install_uninstall_idempotent(tmp_path, monkeypatch):
     plist = home / "Library" / "LaunchAgents" / f"{LABEL}.plist"
     assert tw.install() == 0
     assert plist.is_file()
+    assert plist.stat().st_mode & 0o777 == 0o644
     first = plist.read_text()
-    assert any("bootstrap" in c for c in stub_calls(tmp_path))
-    assert tw.install() == 0          # idempotent: same content, no error
+    assert sum("bootstrap" in c for c in stub_calls(tmp_path)) == 1
+    assert tw.install() == 0          # idempotent: same content, NO second bootstrap
     assert plist.read_text() == first
+    assert sum("bootstrap" in c for c in stub_calls(tmp_path)) == 1
     st = tw.status()
     assert st["installed"] is True and st["loaded"] is True and st["plist"] == str(plist)
     assert tw.uninstall() == 0
@@ -127,6 +129,36 @@ def test_install_uninstall_idempotent(tmp_path, monkeypatch):
     assert any("bootout" in c for c in stub_calls(tmp_path))
     assert tw.uninstall() == 0        # second uninstall: still exit 0
     assert tw.status()["installed"] is False
+
+
+def test_install_writes_runner_shim_portable(tmp_path, monkeypatch):
+    """M2: the runner shim itself is the portability contract — existence, mode, content,
+    and NO version segment in it or in the rendered plist."""
+    assert tw is not None, "bin/takeover_watch.py missing"
+    watcher_env(tmp_path, monkeypatch)
+    import re as _re
+    root = tmp_path / "takeovers"
+    assert tw.install() == 0
+    runner = root.parent / tw.RUNNER_NAME
+    assert runner.is_file() and runner.stat().st_mode & 0o777 == 0o755
+    content = runner.read_text()
+    assert content == tw.RUNNER_TEMPLATE
+    assert "free-agents-resolve.sh" in content
+    assert "--pending --from-watcher" in content
+    assert not _re.search(r"\d+\.\d+\.\d+", content), "version segment in runner shim"
+    assert not _re.search(r"\d+\.\d+\.\d+", (tmp_path / "Library" / "LaunchAgents"
+                                 / f"{LABEL}.plist").read_text()), "version in plist"
+
+
+def test_dry_run_uninstall_keeps_existing_files(tmp_path, monkeypatch):
+    assert tw is not None, "bin/takeover_watch.py missing"
+    watcher_env(tmp_path, monkeypatch)
+    assert tw.install() == 0
+    plist = tmp_path / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+    before = stub_calls(tmp_path)
+    assert tw.uninstall(dry_run=True) == 0
+    assert plist.is_file(), "dry-run must not remove the plist"
+    assert stub_calls(tmp_path) == before, "dry-run must not call launchctl"
 
 
 def test_dry_run_writes_nothing_and_calls_no_launchctl(tmp_path, monkeypatch):
@@ -206,13 +238,47 @@ def test_fresh_partial_payload_is_left_in_place(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdout", out)
     assert bwc.main(["--pending", "--from-watcher"]) == 0
     assert f.exists(), "fresh partial payload must be LEFT in place"
-    assert not list((tmp_path / "takeovers" / ".failed").glob("*")) if (tmp_path / "takeovers" / ".failed").exists() else True
+    failed_dir = tmp_path / "takeovers" / ".failed"
+    assert not failed_dir.exists() or not list(failed_dir.glob("*")), "no .failed entry yet"
+    # a 5-minute-old partial is still in the leave-in-place band (30 s .. 10 min)
+    mid = 5 * 60
+    os.utime(f, (time.time() - mid, time.time() - mid))
+    assert bwc.main(["--pending", "--from-watcher"]) == 0
+    assert f.exists(), "mid-age partial must also be left in place"
     # the same file, 11 minutes old -> parked in .failed/
     old = 11 * 60
     os.utime(f, (time.time() - old, time.time() - old))
     assert bwc.main(["--pending", "--from-watcher"]) == 0
     assert not f.exists()
-    assert list((tmp_path / "takeovers" / ".failed").glob("1.json"))
+    assert list(failed_dir.glob("1.json"))
+
+
+def test_partial_completed_midwrite_is_packaged(tmp_path, monkeypatch):
+    """RF1 positive control: a spool file COMPLETED during the retry window must be
+    re-read and packaged — proves the retry, not just the never-unlink."""
+    import threading
+    watcher_env(tmp_path, monkeypatch, sink=tmp_path / "sink.jsonl",
+                extra={"FA_AUTO_TAKEOVER": "0", "ANTHROPIC_BASE_URL": "https://llmgw.example/v1"})
+    full = json.dumps(_payload())
+    cut = len(full) // 2
+    f = _spool(tmp_path)
+    f.write_text("#fa-endpoint https://llmgw.example/v1\n" + full[:cut])  # partial JSON
+
+    def complete():
+        time.sleep(1.0)  # the "spool hook" finishes writing mid-retry
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(full[cut:])
+
+    t = threading.Thread(target=complete)
+    t.start()
+    import io
+    monkeypatch.setattr("sys.stdout", io.StringIO())
+    try:
+        assert bwc.main(["--pending", "--from-watcher"]) == 0
+    finally:
+        t.join()
+    assert len(list((tmp_path / "takeovers").glob("tk-*"))) == 1, "completed mid-write spool packaged"
+    assert not f.exists(), "consumed after successful parse"
 
 
 def test_two_workers_race_one_launch(tmp_path):
@@ -231,17 +297,29 @@ def test_two_workers_race_one_launch(tmp_path):
     stub = tmp_path / "stub-launcher"
     stub.write_text("#!/usr/bin/env bash\nexit 0\n")
     stub.chmod(0o755)
+    # the two legs named in Review Focus 3: the SessionStart hook (--pending) and the
+    # launchd watcher (--pending --from-watcher) on the same payload at the same moment
     procs = [subprocess.Popen([sys.executable, str(REPO / "bin" / "budget-wall-capture.py"),
+                               "--pending"],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env),
+             subprocess.Popen([sys.executable, str(REPO / "bin" / "budget-wall-capture.py"),
                                "--pending", "--from-watcher"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
-             for _ in range(2)]
-    rcs = [p.wait(timeout=60) for p in procs]
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)]
+    outs = [p.communicate(timeout=60)[0].decode() for p in procs]
+    rcs = [p.returncode for p in procs]
     assert rcs == [0, 0], rcs
     root = tmp_path / "takeovers"
     assert len(list(root.glob("tk-*"))) == 1
     assert len(list((root / ".launched").glob("*"))) == 1
     wins = [r for r in _sink_records(tmp_path) if r.get("kind") == "window"]
     assert len(wins) == 1
+    # exactly ONE notice across both legs: a systemMessage on the SessionStart leg's stdout
+    # OR a fa_notify sink record on the watcher leg — never both, never two
+    json_notices = sum(len(json.loads(txt)["systemMessage"].splitlines())
+                       for txt in outs if "systemMessage" in txt)
+    sink_notices = [r for r in _sink_records(tmp_path)
+                    if r.get("kind") != "window" and "budget wall" in r.get("text", "")]
+    assert json_notices + len(sink_notices) == 1, (json_notices, sink_notices)
 
 
 def test_watcher_respects_opt_out_each_run(tmp_path, monkeypatch):
@@ -264,4 +342,33 @@ def test_watcher_respects_opt_out_each_run(tmp_path, monkeypatch):
     assert [x for x in _sink_records(tmp_path) if x.get("kind") == "window"] == []
     notifies = [x for x in _sink_records(tmp_path) if x.get("kind") != "window"]
     assert any("auto-launch off" in x.get("text", "") for x in notifies), notifies
+    # watcher stdout is plain lines (-> watch.log), never a systemMessage JSON object
+    assert "systemMessage" not in r.stdout
+
+
+def test_stored_setting_is_load_bearing(tmp_path, monkeypatch):
+    """RF4 negative control: with the env unset, a STORED ON opens the window — and flipping
+    the stored setting to OFF between two in-process runs must stop the second launch."""
+    import io
+    import session_menu_state as sms
+    cfg = tmp_path / "cfg"
+    assert sms.save_auto_takeover(cfg, True) is None
+    watcher_env(tmp_path, monkeypatch, sink=tmp_path / "sink.jsonl",
+                extra={"ANTHROPIC_BASE_URL": "https://llmgw.example/v1",
+                       "LA_SESSION_MENU_CONFIG_DIR": str(cfg)})
+    monkeypatch.delenv("FA_AUTO_TAKEOVER", raising=False)
+
+    def run_once(name, pl):
+        _spool(tmp_path, name, pl)
+        monkeypatch.setattr("sys.stdout", io.StringIO())
+        assert bwc.main(["--pending", "--from-watcher"]) == 0
+
+    run_once("1.json", _payload(sid="sess-a"))   # stored ON -> auto launches
+    wins = [x for x in _sink_records(tmp_path) if x.get("kind") == "window"]
+    assert len(wins) == 1, "stored ON must open the window (env unset)"
+    assert sms.save_auto_takeover(cfg, False) is None  # user turns it OFF mid-stream
+    run_once("2.json", _payload(sid="sess-b"))  # re-read every run -> packaged, NO window
+    assert len(list((tmp_path / "takeovers").glob("tk-*"))) == 2
+    wins = [x for x in _sink_records(tmp_path) if x.get("kind") == "window"]
+    assert len(wins) == 1, "second run must not open another window"
 
