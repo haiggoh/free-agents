@@ -28,9 +28,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Extended stub: health always; /v1/messages answers 200 unless ctrl/<port>.failcode
-# exists (its content is the HTTP code); ctrl/<port>.slow holds seconds to sleep BEFORE
-# binding while logging every second (progress-based readiness must not abort it).
+# Extended stub: health always unless ctrl/<port>.nohealth exists; /v1/messages answers
+# 200 unless ctrl/<port>.failcode (one-shot, its content is the HTTP code) or
+# ctrl/<port>.failalways (persistent) exists; ctrl/<port>.slow holds seconds to sleep
+# BEFORE binding while logging every second (progress-based readiness must not abort it).
 # At startup it records its env knob and copies its config into ctrl/.
 STUB = """#!/usr/bin/env python3
 import http.server, json, os, shutil, signal, sys, time
@@ -75,15 +76,24 @@ signal.signal(signal.SIGTERM, _on_term)
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health/liveliness":
+            if os.path.exists(os.path.join(ctrl, f"{port}.nohealth")):
+                # R1-C root-cause knob: drop the connection (curl rc 52) so health counts
+                # as SILENT — a 500 would still be an answered probe under `curl -s`.
+                self.close_connection = True
+                return
             self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
         else:
             self.send_response(404); self.end_headers()
     def do_POST(self):
         self.rfile.read(int(self.headers.get("content-length", 0)))
         fp = os.path.join(ctrl, f"{port}.failcode")
-        # one-shot: the failure applies to the FIRST request only (models "the route died
-        # once, then answered"), so the dead-route probe can fail and the swap still lands
-        if os.path.exists(fp):
+        fa = os.path.join(ctrl, f"{port}.failalways")
+        # one-shot: failcode applies to the FIRST request only (models "the route died
+        # once, then answered"), so the dead-route probe can fail and the swap still lands;
+        # failalways persists (live-probe-failure / revert tests)
+        if os.path.exists(fa):
+            code = int(open(fa).read().strip())
+        elif os.path.exists(fp):
             code = int(open(fp).read().strip())
             os.unlink(fp)
         else:
@@ -294,16 +304,48 @@ class SwapPreflightBucketTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         self.assertIn("paid_only", r.stderr + r.stdout, "the paid-only target must be labelled")
 
-    def test_skip_override_env_is_gone(self):
+    def test_reachable_model_still_aborts_when_scratch_health_is_silent(self):
+        # R1-C root cause, pinned (2026-11-21 symptom): the scratch proxy's /health never
+        # answers but /v1/messages answers 200 — the no-progress ready window aborts although
+        # the target is reachable. waypoint swap-model-preflight-rate carries the repro.
+        port, pid = self.start_old_session()
+        self.age_log(port)
+        ctrl = self.root / 'ctrl'
+        for p in range(47201, 47221):   # the SWAP SCRATCH band is MAX+1..+20
+            if p != port:
+                (ctrl / f"{p}.nohealth").write_text("1")
+        r = self.swap(port, self.ALIAS_TO, extra_env={"LA_SWAP_TEST_FAST": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("did not become ready", r.stdout + r.stderr)
+        # nothing changed: the live pid is untouched
+        self.assertEqual(int((self.rundir / f'proxy-{port}.pid').read_text().split()[0]), pid)
+
+    def test_skip_override_skips_scratch_preflight_only(self):
+        # R1-C/D3: LA_SWAP_SKIP_PREFLIGHT=1 is a documented permanent opt-in hatch: NO scratch
+        # proxy starts, but the live probe + auto-revert still run and the swap lands.
         port, pid = self.start_old_session()
         self.age_log(port)
         r = self.swap(port, self.ALIAS_TO, extra_env={"LA_SWAP_SKIP_PREFLIGHT": "1"})
         self.assertEqual(r.returncode, 0, r.stderr)
-        # the pre-flight STILL ran: a scratch proxy recorded its env
         envs, _cfgs = self._scratch_recordings()
         scratch_envs = [v for k, v in envs.items() if k != str(port)]
-        self.assertTrue(scratch_envs, "LA_SWAP_SKIP_PREFLIGHT=1 must not skip the pre-flight")
-        self.assertIn("PREFLIGHT ok", r.stdout)
+        self.assertEqual(scratch_envs, [], "with the override set NO scratch proxy may start")
+        self.assertIn("skipped", (r.stdout + r.stderr).lower())
+        self.assertIn("live probe", r.stdout)   # the live probe still ran
+        self.assertNotEqual(int((self.rundir / f'proxy-{port}.pid').read_text().split()[0]), pid)
+
+    def test_skip_override_still_reverts_when_live_probe_fails(self):
+        # the hatch skips only the SCRATCH pre-flight; a failing LIVE probe still auto-reverts.
+        port, pid = self.start_old_session()
+        self.age_log(port)
+        ctrl = self.root / 'ctrl'
+        (ctrl / f"{port}.failalways").write_text("410")   # the LIVE port fails every probe
+        r = self.swap(port, self.ALIAS_TO, extra_env={"LA_SWAP_SKIP_PREFLIGHT": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("live probe", r.stdout)
+        # reverted: the live config is back to the old model
+        yaml = (self.rundir / f'proxy-{port}.yaml').read_text()
+        self.assertIn("nemotron", yaml, "auto-revert must restore the old model's config")
 
 
 if __name__ == "__main__":

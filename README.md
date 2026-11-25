@@ -1280,6 +1280,8 @@ that isn't explicitly allowlisted would prompt. To make MCP tools work without p
 
 **Remote free-API sessions** (`csl remote` / `remote-session.sh`):
 - `--enable-mcp` flag or `LA_REMOTE_ENABLE_MCP=1`
+- `LA_SWAP_SKIP_PREFLIGHT=1` — opt-in escape hatch for `--swap-model`: skips the scratch
+  pre-flight probe only; the live probe and auto-revert still run
 - `csl` Remote lane: press `m` to toggle MCPs (works in ALL auto-mode states including blind-trust)
 
 **How it works:** A master allowlist (`~/.claude/launch-profiles/allowlist-master.json`; when absent,

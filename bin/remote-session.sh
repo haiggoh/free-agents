@@ -21,6 +21,8 @@
 #                                         # port; backs up and reverts on any failure; refuses
 #                                         # a session that answered recently unless --force;
 #                                         # also refuses a retired (410 EOL) target id (0.49.3)
+#                                         # LA_SWAP_SKIP_PREFLIGHT=1 skips the scratch pre-flight
+#                                         # (documented opt-in hatch; live probe + revert still run)
 #   remote-session.sh --include-trials     # also offer trial-tier (non-free) agents
 #   remote-session.sh --models <alias>     # list catalog IDs, pricing and tool metadata (GET only)
 #   remote-session.sh <alias> --remote-model <id> # explicitly choose the upstream model
@@ -1572,6 +1574,11 @@ swap_model() { # swap_model <port> <alias> [force]
     if [[ "$live_probe" != "PREFLIGHT ok" && "$target_tier" == "paid_only" ]]; then
         echo "remote-session: --swap-model: current route on :$port is dead ($live_probe) — allowing the paid_only target $alias (labelled)." >&2
     fi
+    if [[ -n "${LA_SWAP_SKIP_PREFLIGHT:-}" ]]; then
+        # Documented permanent opt-in escape hatch (user decision 2026-11-24, R1-C): skip the
+        # scratch pre-flight; the live probe + auto-revert below still run.
+        echo "remote-session: --swap-model: LA_SWAP_SKIP_PREFLIGHT set — scratch pre-flight skipped; live probe + revert still run." >&2
+    else
     scratch="$(swap_scratch_port)" || return 1
     scratch_cfg="$RUNDIR/swap-scratch-$port.yaml"; scratch_log="$RUNDIR/swap-scratch-$port.log"
     scratch_pidf="$RUNDIR/swap-scratch-$port.pid"
@@ -1598,6 +1605,7 @@ swap_model() { # swap_model <port> <alias> [force]
         *) echo "remote-session: --swap-model: pre-flight $verdict -> ABORT, nothing changed." >&2
            return 1 ;;
     esac
+    fi
 
     # --- THE SWAP: backup, rewrite the SAME path (teardown keys on it), relaunch ------------
     local stamp bak newpid probe2
