@@ -55,7 +55,10 @@ class RemoteSessionTests(unittest.TestCase):
                     'config/emoji.sh', 'config/dispatch-preferences.json',
                     'config/broken-nvidia-models.json',
                     'bin/session-fallbacks.py', 'bin/fa_tls.py',   # 0.54.0: anthropic-route.py imports it
-                    'bin/fa_pre_trust.py'):   # 0.59.0: pre-trust helper under test
+                    'bin/fa_pre_trust.py',   # 0.59.0: pre-trust helper under test
+                    # 0.63.3 R1-A: effort_resolve.py resolves the config dir through
+                    # session_menu_state.config_dir() — the fixture root must carry it.
+                    'bin/session_menu_state.py'):
             shutil.copy2(ROOT / rel, self.root / rel)
         source = (self.root / 'bin/remote-session.sh').read_text()
         (self.root / 'bin/library.sh').write_text(source.split('# ---- argument parsing')[0])
