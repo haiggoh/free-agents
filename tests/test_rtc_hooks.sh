@@ -33,6 +33,7 @@ done
 #     a green gate while covering nothing — the exact shape rtc-ship.sh exists to prevent.
 export FA_LITELLM_PY="$TMP/no-such-litellm-python"
 export FA_PICKER_PY="$TMP/no-such-picker-python"
+export FA_GUI_PY="$TMP/no-such-gui-python"
 out=$("$ROOT/.rtc/pre-flight.sh" 2>&1); rc=$?
 is "pre-flight FAILS when a venv is missing" "1" "$rc"
 has "and names the missing interpreter" "$out" "no-such-litellm-python"
@@ -54,7 +55,7 @@ echo "3 passed in 0.01s"
 exit "${STUB_RC:-0}"
 STUB
 chmod +x "$stub"
-ARGS_FILE="$TMP/args" FA_LITELLM_PY="$stub" FA_PICKER_PY="$stub" \
+ARGS_FILE="$TMP/args" FA_LITELLM_PY="$stub" FA_PICKER_PY="$stub" FA_GUI_PY="$stub" \
   "$ROOT/.rtc/pre-flight.sh" >"$TMP/pre-ok" 2>&1
 is "pre-flight passes when both gates pass" "0" "$?"
 has "and reports the suite it ran" "$(cat "$TMP/pre-ok")" "litellm:"
@@ -63,8 +64,10 @@ args=$(cat "$TMP/args")
 has "the LiteLLM gate gets its three contract files" "$args" "tests/test_litellm_contract.py"
 has "the LiteLLM gate gets the anthropic route test" "$args" "tests/test_anthropic_route.py"
 has "the picker gate gets the pty pilot" "$args" "tests/test_session_picker_pty.py"
+has "and the gui suite too" "$(cat "$TMP/pre-ok")" "gui:"
+has "the gui gate gets the browser tests" "$args" "tests/test_gui_browser.py"
 
-ARGS_FILE="$TMP/args2" STUB_RC=1 FA_LITELLM_PY="$stub" FA_PICKER_PY="$stub" \
+ARGS_FILE="$TMP/args2" STUB_RC=1 FA_LITELLM_PY="$stub" FA_PICKER_PY="$stub" FA_GUI_PY="$stub" \
   "$ROOT/.rtc/pre-flight.sh" >"$TMP/pre-bad" 2>&1
 is "pre-flight FAILS when a gate fails" "1" "$?"
 has "and says the gate failed" "$(cat "$TMP/pre-bad")" "FAILED"
