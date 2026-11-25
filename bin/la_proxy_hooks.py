@@ -760,7 +760,9 @@ def _midstream_tail(state: _StreamState, exc: BaseException, silence_s: float) -
                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
                    "usage": {"output_tokens": state.output_tokens}})
     events.append({"type": "message_stop"})
-    return [("data: " + json.dumps(e) + "\n\n").encode() for e in events]
+    # full SSE framing — `event: <type>` AND `data: {...}` — what the Anthropic SDK expects;
+    # a bare data: line made the real CLI fall back to a non-streaming retry
+    return [f"event: {e['type']}\ndata: {json.dumps(e)}\n\n".encode() for e in events]
 
 
 class _ZeroChunkGuard:
