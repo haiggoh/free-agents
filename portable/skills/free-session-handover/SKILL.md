@@ -66,8 +66,7 @@ for the whole session, then continue autonomously from its Next action."*
      real window opens when run in Terminal.app and it REFUSES headless from an agent Bash tool;
    - when the agent shell has no TTY, drive a REAL window via
      `~/.claude/scripts/sudo-in-terminal.sh --command "launch-remote-window.sh <alias>
-     --prompt 'Read <handoff.md> first…' --effort <level>" --verify '<LISTEN on 4141-4151>'
-     --label '<t>'` (verify = port/LISTEN; `pgrep -f` matches the driver's own argv);
+     --prompt 'Read <handoff.md> first…' --effort <level>" --verify "curl -s -o /dev/null -w '%{http_code}' 127.0.0.1:<port>/health/liveliness" --label '<t>'` (verify = HTTP 200 on a NEW port in 4141-4151; never a listener listing);
    - omitting `--effort` uses the saved lane default — never an unset default when the
      saved one is higher;
    - **invoking this skill IS the launch authorization** — name concerns (blind-trust, branch

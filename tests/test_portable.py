@@ -72,6 +72,16 @@ def test_host_to_portable_file_set_is_pinned():
     assert not (PORTABLE / "bin").exists(), "host-only bin/ must stay out of the guidance package"
 
 
+def test_handover_skill_verify_predicate_is_curl_liveliness():
+    """waypoint free-session-handover-launch: the --verify in the handover skill must be an
+    HTTP probe (curl .../health/liveliness = 200 on a NEW port in 4141-4151), never a
+    listener listing — the sandboxed shell cannot see listeners."""
+    text = (ROOT / "skills" / "free-session-handover" / "SKILL.md").read_text(encoding="utf-8")
+    assert "curl -s -o /dev/null -w '%{http_code}' 127.0.0.1:<port>/health/liveliness" in text
+    assert "LISTEN on 4141-4151" not in text
+    assert "netstat" not in text and "lsof" not in text
+
+
 def test_portable_closure_complete_and_no_escapes():
     assert PORTABLE.is_dir(), "portable/ must exist (run scripts/build-portable.py)"
     for p in sorted(PORTABLE.rglob("*")):
