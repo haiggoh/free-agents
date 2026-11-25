@@ -311,6 +311,45 @@ class GrantTimingTests(unittest.TestCase):
                       "an entry one second inside the bound survives")
         self.assertIn("new", mod._CALL_BOOKED)
 
+    def test_success_hook_resolves_the_booking_provider(self):
+        # MEASURED (contract probe 2026-11-25): the success event reports the RESOLVED
+        # model ('openai/gpt-oss-120b' for a groq/openai/... deployment), so the old
+        # _bucket_for() lookup found no limits entry and the settle never ran. The
+        # pre-call must hand the success hook the provider it booked under.
+        mod = self.mod
+        import litellm  # noqa: F401  (the hook import path needs it registered)
+
+        class GroqBucket:
+            def __init__(self):
+                self.success = None
+
+            def model_cooling(self, model):
+                return 0.0
+
+            async def aacquire_grant(self, **kw):
+                return 0.0, _receipt("b" * 32, 2000, 1000.0)
+
+            def note_success(self, model=None, tokens_used=None, receipt=None):
+                self.success = (model, tokens_used, receipt)
+
+        bucket = GroqBucket()
+        hooks = mod.LAProxyHooks()
+        hooks._bucket = None
+        hooks._buckets = {"groq": bucket}
+        pre = {"model": "groq/openai/gpt-oss-120b", "max_tokens": 2000,
+               "litellm_call_id": "c-P", "messages": [{"role": "user", "content": "hi"}]}
+        asyncio.run(hooks.async_pre_call_deployment_hook(pre, None))
+        # the success event sees the RESOLVED model, without the vendor prefix
+        post = {"model": "openai/gpt-oss-120b", "litellm_call_id": "c-P"}
+        asyncio.run(hooks.async_log_success_event(
+            post, {"usage": {"prompt_tokens": 1000, "completion_tokens": 250}}, 0, 1))
+        self.assertIsNotNone(bucket.success,
+                             "the settle must run even though the resolved model "
+                             "names a provider with no limits entry")
+        self.assertEqual(bucket.success[2].n, 2000)
+        self.assertEqual(bucket.success[1], 1250)
+
+
 class WinnerReceiptTests(unittest.TestCase):
     """The granting poll books the WINNER's own estimate and hands the winner its
     receipt through the shared state (both limiter classes)."""

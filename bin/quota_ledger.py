@@ -30,6 +30,10 @@ from pathlib import Path
 
 WINDOW_SECONDS = 60.0
 SETTLED_TTL = WINDOW_SECONDS + 86400.0   # a settled id is remembered a TPM window + 1 day
+# API marker (0.63.4): la_proxy_hooks compares this figure in the LOADED module against
+# the on-disk source at proxy startup and warns when the loaded code predates receipts
+# (its wholesale sidecar rewrites drop receipt ids until the proxy is restarted).
+RECEIPTS_API = 1
 
 
 @dataclasses.dataclass(frozen=True)

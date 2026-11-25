@@ -96,6 +96,8 @@ class Upstream:
         self.requests, self.status, self.body = [], 200, None
         self.path_status = {}  # per-path override, so one path can 429 while another stays healthy
         self.queue = []        # statuses for the NEXT requests, consumed in order (then the defaults)
+        self.chat_usage = None  # planted usage for chat replies (None = the 1+1 default)
+        self.delay = 0.0        # seconds to park EVERY request (overlapping-order tests)
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -103,6 +105,9 @@ class Upstream:
                 raw = self.rfile.read(int(self.headers.get("content-length", 0)))
                 body = json.loads(raw or b"{}")
                 outer.requests.append({"path": self.path, "body": body})
+                usage, delay = outer.chat_usage, outer.delay   # snapshot BEFORE parking
+                if delay:
+                    time.sleep(delay)
                 status = (outer.queue.pop(0) if outer.queue
                           else outer.path_status.get(self.path, outer.status))
                 if status != 200:
@@ -117,9 +122,15 @@ class Upstream:
                                   'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{}}',
                                   'data: [DONE]')
                     else:
-                        events = ('data: {"id":"c1","object":"chat.completion.chunk",'
-                                  '"choices":[{"index":0,"delta":{"content":"PONG"}}]}',
-                                  'data: [DONE]')
+                        events = ['data: {"id":"c1","object":"chat.completion.chunk",'
+                                  '"choices":[{"index":0,"delta":{"content":"PONG"}}]}']
+                        if usage:
+                            # the final chunk carries the usage, as providers do; without
+                            # it a streamed reply has NO usage for the success hook
+                            events.append('data: {"id":"c1","object":"chat.completion.chunk",'
+                                          '"choices":[],"usage":' + json.dumps(usage) + '}')
+                        events.append('data: [DONE]')
+                        events = tuple(events)
                     for e in events:
                         self.wfile.write(e.encode() + b"\n\n")
                     return
@@ -128,10 +139,14 @@ class Upstream:
                                       "content": [{"type": "text", "text": "PONG"}], "stop_reason": "end_turn",
                                       "stop_sequence": None, "usage": {"input_tokens": 1, "output_tokens": 1}}).encode()
                 else:
-                    out = json.dumps({"id": "c1", "object": "chat.completion", "created": 1, "model": "x",
-                                      "service_tier": "on_demand", "choices": [{"index": 0, "finish_reason": "stop",
-                                                   "message": {"role": "assistant", "content": "PONG"}}],
-                                      "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
+                    payload = {"id": "c1", "object": "chat.completion", "created": 1, "model": "x",
+                               "service_tier": "on_demand", "choices": [{"index": 0, "finish_reason": "stop",
+                                            "message": {"role": "assistant", "content": "PONG"}}]}
+                    if usage is None:      # the fixture default: a small usage, as most providers send
+                        payload["usage"] = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+                    elif usage:            # planted usage; {} plants NO usage key (discriminant)
+                        payload["usage"] = usage
+                    out = json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("content-type", "application/json")
                 self.send_header("content-length", str(len(out)))
@@ -506,6 +521,197 @@ class LiteLLMContract(unittest.TestCase):
                 return r.status, r.read().decode()
         except urllib.error.HTTPError as e:
             return e.code, (e.read() or b"").decode()
+
+
+@unittest.skipUnless(LITELLM_PY.exists(), "no LiteLLM install at LA_LITELLM_PY / the pipx venv")
+class TpmReceiptContract(unittest.TestCase):
+    """Task 3 (0.63.4): the whole receipts chain over the REAL LiteLLM /v1/messages
+    route — book at the grant, usage from the response, settle to EXACTLY the real
+    usage in the sidecar — on a TPM-limited provider (groq, tpm 8000 in a TEMP limits
+    file; the repo's own file is never touched). Own proxy instance: the shared
+    LiteLLMContract harness runs with the hooks' limiter disabled."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.up = Upstream()
+        cls.tmp = tempfile.TemporaryDirectory()
+        d = Path(cls.tmp.name)
+        limits = json.loads((ROOT / "config" / "provider-limits.json").read_text())
+        limits["providers"]["groq"]["tpm"] = 8000     # the test's own figure, pinned here
+        (d / "limits.json").write_text(json.dumps(limits))
+        os.symlink(ROOT / "bin/la_proxy_hooks.py", d / "la_proxy_hooks.py")
+        cfg = d / "proxy.yaml"
+        cfg.write_text("model_list:\n"
+                       "  - model_name: tpm-route\n    litellm_params:\n"
+                       "      model: groq/openai/gpt-oss-120b\n"
+                       f"      api_key: sk-fixture\n      api_base: {cls.up.base}\n"
+                       "litellm_settings:\n  drop_params: true\n"
+                       "  use_chat_completions_url_for_anthropic_messages: true\n"
+                       "  disable_anthropic_gemini_context_caching_transform: true\n"
+                       "  callbacks: [la_proxy_hooks.proxy_hooks]\n"
+                       f"general_settings:\n  master_key: {MASTER}\n")
+        cls.limiter_dir = d / "limiter"
+        cls.quota_path = cls.limiter_dir / "groq.state.quota"
+        cls.port = free_port()
+        env = {k: v for k, v in os.environ.items() if not k.startswith("LA_NVIDIA_")}
+        env.update(FA_PROVIDER_LIMITS=str(d / "limits.json"),
+                   FA_LIMITER_DIR=str(cls.limiter_dir),
+                   LA_PROXY_HOOKS_RATE_LIMIT="1",
+                   FREE_AGENTS_CONFIG_DIR=str(d / "session-menu"),
+                   LITELLM_LOCAL_MODEL_COST_MAP="True")
+        (d / "session-menu").mkdir()
+        cls.log = open(d / "proxy.log", "w")
+        cls.proc = subprocess.Popen([str(LITELLM_PY), str(ROOT / "bin/litellm-with-trust.py"),
+                                     "--config", str(cfg), "--port", str(cls.port)],
+                                    stdout=cls.log, stderr=subprocess.STDOUT, env=env, cwd=d)
+        deadline = time.time() + 120 * loadscale.current_scale()
+        while time.time() < deadline:
+            if cls.proc.poll() is not None:
+                raise RuntimeError("proxy died at startup:\n" + (d / "proxy.log").read_text()[-3000:])
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{cls.port}/health/liveliness",
+                                       timeout=2 * loadscale.current_scale())
+                return
+            except Exception:
+                time.sleep(1)
+        raise RuntimeError("proxy not ready in 120s")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.terminate()
+        try:
+            cls.proc.wait(10)
+        except subprocess.TimeoutExpired:
+            cls.proc.kill()
+        cls.log.close()
+        cls.up.server.shutdown()
+        if os.environ.get("LA_CONTRACT_KEEP_LOG"):
+            print((Path(cls.tmp.name) / "proxy.log").read_text()[-6000:])
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        self.up.requests.clear()
+        self.up.status, self.up.body = 200, None
+        self.up.path_status = {}
+        self.up.chat_usage = None
+        self.up.delay = 0.0
+        # ONE proxy (and one sidecar) serves the whole class: assert DELTAS against
+        # this snapshot, not absolute totals — unittest runs the methods in one
+        # shared limiter state (measured: a sibling test's booking leaked in).
+        q0 = self._quota() if self.quota_path.exists() else {"day": {"tokens": 0, "requests": 0},
+                                                             "settled": {}}
+        self._day0 = q0["day"]["tokens"]
+        self._req0 = q0["day"]["requests"]
+        self._settled0 = set(q0.get("settled", {}))
+        self._t0 = time.time()
+
+    def msg(self, model, **extra):
+        return {"model": model, "max_tokens": 64, "messages": [{"role": "user", "content": "hi"}], **extra}
+
+    def post(self, body):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/v1/messages", data=json.dumps(body).encode(), method="POST",
+            headers={"x-api-key": MASTER, "content-type": "application/json",
+                     "anthropic-version": "2023-06-01"})
+        try:
+            with urllib.request.urlopen(req, timeout=60 * loadscale.current_scale()) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    def post_stream(self, body):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/v1/messages", data=json.dumps(body).encode(), method="POST",
+            headers={"x-api-key": MASTER, "content-type": "application/json",
+                     "anthropic-version": "2023-06-01"})
+        try:
+            with urllib.request.urlopen(req, timeout=60 * loadscale.current_scale()) as r:
+                return r.status, r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, (e.read() or b"").decode()
+
+    def _quota(self):
+        return read_json_with_retry(self.quota_path)
+
+    def _quota_eventually(self, want_day_delta, want_settled, timeout=20.0):
+        """The success callback fires AFTER the response reaches the client, so the
+        sidecar read races the settle — poll for the DELTA against this test's
+        snapshot (a plain sleep would flake exactly when the gate loads the box)."""
+        deadline = time.time() + timeout * loadscale.current_scale()
+        last = None
+        while time.time() < deadline:
+            q = self._quota()
+            last = q
+            new_settled = len(set(q.get("settled", {})) - self._settled0)
+            if (q["day"]["tokens"] - self._day0 == want_day_delta
+                    and new_settled >= want_settled):
+                return q
+            time.sleep(0.2)
+        raise AssertionError(
+            f"sidecar never settled to day-delta={want_day_delta} "
+            f"with {want_settled} newly settled receipt(s) within {timeout}s "
+            f"[snapshot: day0={self._day0} req0={self._req0} settled0={sorted(self._settled0)}]: {last}")
+
+    def test_tpm_route_settles_exact_receipt_over_http(self):
+        self.up.chat_usage = {"prompt_tokens": 1000, "completion_tokens": 250,
+                              "total_tokens": 1250}
+        status, body = self.post(self.msg("tpm-route", max_tokens=2000))
+        self.assertEqual(status, 200, body)
+        self.assertTrue(self.up.requests, "no upstream request was captured")
+        status2, raw = self.post_stream(self.msg("tpm-route", max_tokens=2000, stream=True))
+        self.assertEqual(status2, 200, raw)
+        self.assertIn("PONG", raw)
+        # Two bookings (one per grant) + two settles (one per success callback): the
+        # sidecar must hold EXACTLY the real usage — booked-minus-refunded, whichever
+        # way the estimate erred. Missing usage, a callback that never ran or a skipped
+        # case all leave the estimates unrefunded and fail this assert by name.
+        q = self._quota_eventually(2500, 2)
+        self.assertEqual(q["day"]["requests"] - self._req0, 2)
+        # each settled stamp holds exactly that request's real usage
+        stamps = [s for s in q["tpm"]["stamps"] if s["t"] >= self._t0]
+        self.assertEqual(sum(s["n"] for s in stamps), 2500)
+        for r in self.up.requests:
+            leaked = [k for k in r["body"] if str(k).startswith("_la_")]
+            self.assertEqual(leaked, [], f"private keys forwarded upstream: {leaked}")
+
+    def test_two_overlapping_requests_out_of_order_over_http(self):
+        # A parks 3 s inside the delayed upstream; B is fired 0.6 s later with no delay
+        # and settles FIRST. Each request settles its OWN receipt: the sidecar ends at
+        # exactly the sum of the real usages, whichever order the settles ran.
+        self.up.delay = 3.0
+        self.up.chat_usage = {"prompt_tokens": 1000, "completion_tokens": 250,
+                              "total_tokens": 1250}
+        results = {}
+
+        def a_call():
+            results["a"] = self.post(self.msg("tpm-route", max_tokens=2000))
+
+        t = threading.Thread(target=a_call)
+        t.start()
+        time.sleep(0.6)                    # A is parked in the delayed upstream
+        self.up.delay = 0.0
+        self.up.chat_usage = {"prompt_tokens": 200, "completion_tokens": 100,
+                              "total_tokens": 300}
+        results["b"] = self.post(self.msg("tpm-route", max_tokens=2000))
+        t.join(30)
+        self.assertEqual(results["b"][0], 200, results["b"])
+        self.assertEqual(results["a"][0], 200, results["a"])
+        q = self._quota_eventually(1250 + 300, 2)
+        self.assertEqual(q["day"]["requests"] - self._req0, 2)
+        stamps = [s for s in q["tpm"]["stamps"] if s["t"] >= self._t0]
+        self.assertEqual(sum(s["n"] for s in stamps), 1250 + 300)
+
+    def test_no_private_keys_upstream_over_http(self):
+        # The 0.63.1 rule re-asserted on the receipt routes: nothing internal may ride
+        # to the provider, on any provider.
+        self.up.chat_usage = {"prompt_tokens": 10, "completion_tokens": 5,
+                              "total_tokens": 15}
+        status, body = self.post(self.msg("tpm-route"))
+        self.assertEqual(status, 200, body)
+        self.assertTrue(self.up.requests, "no upstream request was captured")
+        for r in self.up.requests:
+            leaked = [k for k in r["body"] if str(k).startswith("_la_")]
+            self.assertEqual(leaked, [], f"private keys forwarded upstream: {leaked}")
 
 
 if __name__ == "__main__":

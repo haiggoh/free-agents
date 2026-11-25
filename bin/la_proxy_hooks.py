@@ -529,7 +529,50 @@ except ValueError:
           "using 300 s for the booking bound", file=sys.stderr)
 _RECORD_BOUND = 2.0 * (float(MAX_WAIT_S) + STREAM_TIMEOUT_S)
 
+
+def _repo_version() -> str:
+    """The repo's VERSION file (one line), or 'receipt' when it cannot be read."""
+    try:
+        return (_BIN.parent / "VERSION").read_text().strip() or "receipt"
+    except OSError:
+        return "receipt"
+
+
+def _disk_receipts_api(path: Path) -> int:
+    """The RECEIPTS_API marker in the ON-DISK source (parsed, never executed — the
+    file may be a different version than the loaded module). No marker -> 0."""
+    try:
+        m = re.search(r"^RECEIPTS_API\s*=\s*(\d+)", path.read_text(), re.M)
+        return int(m.group(1)) if m else 0
+    except OSError:
+        return 0
+
+
+def _warn_pre_receipt_limiter(loaded: dict | None = None, version: str | None = None) -> None:
+    """ONE launch-time line per stale module: this process LOADED pre-receipt limiter or
+    ledger code while the on-disk source has the receipts API (the proxy started before
+    an update). The loaded code's wholesale sidecar rewrites drop receipt ids, so exact
+    quota receipts stay wrong until the proxy is restarted — say so, and NEVER restart
+    anything here (a restart would kill the sessions on that proxy)."""
+    levels = loaded if loaded is not None else {
+        name: int(getattr(sys.modules.get(name), "RECEIPTS_API", 0) or 0)
+        for name in ("quota_ledger", "rate_limiter")}
+    for name, have in levels.items():
+        disk = _disk_receipts_api(_BIN / f"{name}.py")
+        if disk > have:
+            v = version or _repo_version()
+            print(f"free-agents: this proxy runs pre-{v} limiter code — restart it to "
+                  f"get exact quota receipts ({name}: loaded {have}, on disk {disk})",
+                  file=sys.stderr)
+
+
+_warn_pre_receipt_limiter()   # launch-time check; silent when loaded == on-disk
+
 _CALL_BOOKED: dict[str, Receipt] = {}
+# 0.63.4: the provider the pre-call booked under, by call id. The SUCCESS event reports
+# the RESOLVED model ('openai/...' for a groq/openai/... deployment), so re-deriving the
+# provider there finds no limits entry and the settle never runs (measured 2026-11-25).
+_CALL_PROVIDER: dict[str, str] = {}
 
 
 def _now() -> float:
@@ -540,9 +583,20 @@ def _book_call(kwargs: dict, receipt) -> None:
     now = _now()
     for k in [k for k, r in _CALL_BOOKED.items() if now - r.at > _RECORD_BOUND]:
         _CALL_BOOKED.pop(k, None)
+        _CALL_PROVIDER.pop(k, None)
     call_id = str((kwargs or {}).get("litellm_call_id") or "")
     if call_id and receipt is not None:
         _CALL_BOOKED[call_id] = receipt
+
+
+def _note_call_provider(kwargs: dict, provider: str) -> None:
+    call_id = str((kwargs or {}).get("litellm_call_id") or "")
+    if call_id and provider:
+        _CALL_PROVIDER[call_id] = provider
+
+
+def _take_call_provider(kwargs: dict):
+    return _CALL_PROVIDER.pop(str((kwargs or {}).get("litellm_call_id") or ""), None) or None
 
 
 def _take_booked(kwargs: dict):
@@ -896,6 +950,9 @@ class LAProxyHooks(CustomLogger):
                         tokens=0)
                 if receipt is not None:
                     _book_call(kwargs, receipt)      # only AFTER the grant (0.63.3)
+                    # the provider the settle must resolve this receipt against: the
+                    # success event only knows the RESOLVED model (0.63.4, measured)
+                    _note_call_provider(kwargs, _provider_of(kwargs))
             except Exception as exc:
                 from rate_limiter import RateLimitTimeout
                 if not isinstance(exc, RateLimitTimeout):
@@ -978,7 +1035,15 @@ class LAProxyHooks(CustomLogger):
         """A COMPLETED request (0.40.0): clear that model's cooldown entry and reset the
         global backoff counter. These are the only resets -- an expired pause clears
         nothing, or a model throttled for hours retried at base cooldown forever."""
-        bucket = self._bucket_for(kwargs or {})
+        # 0.63.4: the success event reports the RESOLVED model ('openai/...' for a
+        # groq/openai/... deployment), so the plain _bucket_for() lookup here found no
+        # limits entry and the settle never ran (measured 2026-11-25: bookings stayed
+        # unrefunded over the real route). Resolve the bucket from the provider the
+        # pre-call booked under, falling back to the old lookup.
+        prov = _take_call_provider(kwargs or {})
+        bucket = self._buckets.get(prov) if prov else None
+        if bucket is None:
+            bucket = self._bucket_for(kwargs or {})
         if bucket is None:
             return
         # 0.62.3 review fix: reconcile booked-vs-used in the quota sidecar when the response

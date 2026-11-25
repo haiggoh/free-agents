@@ -117,6 +117,8 @@ DEFAULT_MAX_WAIT = 300.0              # Queue bound (0.20.11 documented 300; cod
 # derives its booking-record bound from this — ONE source of truth for the longest a live
 # request can sit in the queue.
 STRETCHED_WAIT_CAP = 1800.0
+# API marker (0.63.4): see quota_ledger.RECEIPTS_API — the launch-time mixed-version check.
+RECEIPTS_API = 1
 
 # The saved picker key "cooldown" is the BASE cooldown (kept under its old name so saved
 # files from before the backoff stay valid).
