@@ -29,5 +29,20 @@ class LargeContextToggle(unittest.TestCase):
         self.assertIs(sms.load(sms.config_dir()).remote_filters.get("large_context_only"), True)
 
 
+class LargeContextToggleDefaultNone(unittest.TestCase):
+    def test_toggle_with_default_settings_remote_filters_none(self):
+        # Settings.remote_filters defaults to None in memory (session_picker_model.py:769;
+        # the on-disk store defaults to {"large_context_only": True}). The real csl hits the
+        # None shape on first toggle — found via test_hotkey_shift_0540 in the full gate.
+        s = m.Settings()
+        self.assertIsNone(s.remote_filters)
+        scr = m.RemoteFiltersScreen(s)
+        row = next(a for a in scr.actions() if a.key == "d")
+        row.run()                                   # must not raise TypeError
+        self.assertIs(s.remote_filters["large_context_only"], True)
+        self.assertIs(sms.load(sms.config_dir()).remote_filters.get("large_context_only"), True,
+                      "the toggle must persist to the session-menu store")
+
+
 if __name__ == "__main__":
     unittest.main()
