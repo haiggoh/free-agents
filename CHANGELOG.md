@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.63.3] — 2026-11-25
+
+### Fixed
+- One call-time config-dir resolver (`session_menu_state.config_dir()`): `FREE_AGENTS_CONFIG_DIR`
+  is the canonical name and `LA_SESSION_MENU_CONFIG_DIR` an alias that must agree when both are
+  set (different resolved paths abort loudly naming both). Every reader (the `load()` default,
+  all CLI branches, `effort_resolve`, `rate_limiter`, `session_picker`) goes through it; the old
+  import-time `REPO_CONFIG_DIR` split-brain is gone. New CLI subcommand: `config-dir`.
+- Test isolation (user decision D2): an autouse fixture forces the config dir to a fresh per-test
+  temp dir for every test; HOME is deliberately not faked (42 of 64 HOME-touching test files read
+  the real HOME on purpose: venvs, `~/.local/bin/pytest`).
+- `model-facts.py`: a provider catalog `created` identical across ALL its models, or any value
+  before 2015, is now "unknown" (`released: null`) — 32 bogus "1993-04-26" entries nulled in
+  `config/provider-limits.json`.
+- `--swap-model`: new documented permanent opt-in hatch `LA_SWAP_SKIP_PREFLIGHT=1` skips the
+  scratch pre-flight only; the live probe and auto-revert still run. Root cause pinned by test:
+  the scratch pre-flight still aborts a reachable model when its health endpoint stays silent
+  (waypoint `swap-model-preflight-rate`).
+- Handover skill: `--verify` is now an HTTP probe (`curl -s -o /dev/null -w '%{http_code}'
+  127.0.0.1:<port>/health/liveliness` = 200 on a NEW port in 4141-4151), never a listener
+  listing; `portable/` regenerated via `scripts/build-portable.py`.
+
+### Test hygiene
+- The 2026-11-22 gate-load flakes are marked `load_sensitive` (deselected by the gate's
+  `-m 'not load_sensitive'`, still executed under `-m load_sensitive`):
+  `test_memguard_inject.py::test_8_keybindings_remap`;
+  `test_setup_api_keys.py::test_reject_multiline_commands_quotes_and_bad_account_id`,
+  `test_multiline_paste_is_rejected_and_trailing_clipboard_newline_is_accepted`,
+  `test_bracketed_paste_advances_without_enter_and_returns_to_picker`;
+  `test_rate_limiter_mixed.py::MixedWriterProcessTests`; module `test_prefill_measure.py`.
+  The shell-suite runner now scales its per-suite timeout by machine load instead of a fixed 600 s.
+- Remote-agent system prompt carries the split-large-writes rule verbatim (one tool call over
+  ~6,000 chars can be lost to the provider's ~300 s idle cut — write in parts, never retry the
+  oversized call). Live effect check 2026-11-25 (probe, rule ON vs OFF, 2 NVIDIA requests):
+  inconclusive — neither arm emitted a tool call; ON deliberated 2610 s / 3928 reasoning chunks
+  vs OFF 371 s / 316. Shipped as cheap prevention; R3 (clean mid-stream end + hint) is the backstop.
+- Salvaged from unmerged branches (batch D): the 0.61.0 fairness-plan status flip and two 0.55.6
+  ship receipts. A note under 0.57.0 records that 0.56.14/0.56.15/0.56.16 shipped untagged inside
+  v0.57.0 (history not rewritten).
+- `session_picker.py` was touched minimally (resolver call only); the NiceGUI branch overlaps that
+  surface and is unaffected.
+
 ## [0.63.2] — 2026-11-24
 
 ### Fixed — hotfix: a model that never answers fails over instead of hanging the session
