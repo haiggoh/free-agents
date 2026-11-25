@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -52,7 +53,10 @@ def load_local_models() -> list[m.LocalModel]:
             models.append(m.LocalModel(alias=parts[0], backend=parts[1], effort=parts[2],
                                        roles=parts[3], family=parts[4] if len(parts) > 4 else "",
                                        auto_scanned=auto,
-                                       folder=(parts[4] if auto and len(parts) > 4 else "")))
+                                       folder=(parts[4] if auto and len(parts) > 4 else ""),
+                                       # 2026-11-22 hotfix: columns 6-7; absent on older csl
+                                       context=(int(parts[5]) if len(parts) > 6 and parts[5].isdigit() else None),
+                                       subdir=(parts[6] if len(parts) > 6 else "")))
     # REPLACE, never append: the inventory is loaded more than once per picker run (startup
     # prefetch, then again after a registration), and appending double-counted every model.
     MISSING_MODELS[:] = missing
@@ -106,7 +110,42 @@ def load_remote_agents() -> list[m.RemoteAgent]:
             agents.append(m.RemoteAgent(p[0], p[1], p[2], p[3], local_capable=p[4] == "1",
                                         has_key=p[5] == "1", broken=len(p) >= 7 and p[6] == "1",
                                         model_id=p[7] if len(p) == 8 else ""))
+    # 0.62.0 C8/C10: attach the provider-limits facts (context / max_output) to each row
+    _attach_limits_facts(agents)
     return agents
+
+
+def _attach_limits_facts(agents) -> None:
+    """Attach context / max_output to each roster row from Limits.model() — snapshot plus the
+    RUNTIME layers (HF cache, roster window). Cache-only: a render never waits on the network.
+    Re-run after a roster warm-up so the filter and infobox see the freshly fetched facts."""
+    try:
+        import provider_limits as _pl
+        _limits = _pl.load()
+        for a in agents:
+            f = _limits.model(a.provider, a.model_id) if a.model_id else None
+            if f is not None:
+                a.context = f.context
+                a.max_output = f.max_output
+    except Exception:
+        pass
+
+
+def _roster_warm_groups(agents) -> dict:
+    """{provider: [model ids]} for the roster rows' HF warm-up (fix/runtime-model-facts, F4: the
+    warm-up used to run only when a provider's live CATALOG was opened, so the roster aliases
+    people actually launch never gained context). HF-shaped ids only ("owner/name"), each once,
+    roster order kept."""
+    groups: dict = {}
+    for a in agents:
+        mid = getattr(a, "model_id", "") or ""
+        prov = getattr(a, "provider", "") or ""
+        if "/" not in mid or not prov:
+            continue
+        ids = groups.setdefault(prov, [])
+        if mid not in ids:
+            ids.append(mid)
+    return groups
 
 
 _FOOTPRINT = None
@@ -145,15 +184,32 @@ def _memoized_verdict(name, model_id, compute):
 
 
 def catalog_local_capable(provider, model_id):
-    """True when a live-catalog row would fit THIS device at >=4-bit (the filter hides it).
+    """True when a live-catalog row is in the LOCAL capability class of THIS device (the
+    "Locally-runnable models" filter hides it by default).
 
-    User rule 2026-10-20: hidden when downloadable weights exist that fit the device at
-    4-bit quantization or finer; 2/3-bit-only fits stay visible (edge cases). The budget
-    comes from the device itself (75% of unified RAM / 90% of CUDA VRAM), never a
-    hardcoded size. Runs while the accordion regroups, so it must never wait on the
-    network: it reads the Hugging Face count only from the cache that load_remote_catalog
-    warmed, then falls back to the count in the id. An unknown verdict stays visible
-    (fail-open)."""
+    WHY THIS FILTER EXISTS — the user's reasoning, settled 2026-11-23; do NOT relitigate it:
+      * There is a capability GAP between models this hardware can run locally and the much
+        larger models reachable over a remote API. A remote session should not accidentally
+        pick a model on the same level as the local ones: such a model is usually less capable
+        than the larger remote models, so the larger ones are preferred for the remote lane,
+        unless the user explicitly opts out of the filter (toggle "Locally-runnable models").
+      * It is a CAPABILITY-CLASS line, not an availability check. Whether a local build of THIS
+        model exists (an MLX build on a Mac, GGUF/AWQ on CUDA) does NOT matter: even if that
+        particular model cannot be obtained locally, it is still local-class. Do not add a
+        build/format/download-existence check.
+      * The line comes from the DETECTED hardware (bin/la-hw-detect.sh via
+        estimate-model-footprint's device budget): memory x the usable share — 75% of unified
+        RAM (Mac/mlx: 128 GB detected -> 96 GB usable; the rest holds macOS, the GPU working set
+        and the KV cache) or 90% of VRAM (cuda/rocm). A model whose >=4-bit weights fit that
+        budget is local-class. Never a hardcoded size.
+      * GREY ZONE (intended exception): models near the line that MAY run locally but not
+        reliably stay VISIBLE — 2/3-bit-only fits, and remote models matched to the local
+        acquisition catalogue ("potentially-local-capable") — because where reliable local
+        operation ends has not been pinned down. That uncertainty, not "the weights are not on
+        disk", is the reason they stay visible.
+    Runs while the accordion regroups, so it must never wait on the network: it reads the Hugging
+    Face count only from the warmed cache, then falls back to the count in the id. An unknown
+    verdict stays visible (fail-open)."""
     def compute():
         try:
             # 0.52.1: the count comes from model_param_count FIRST (PARAM_COUNT_OVERRIDES +
@@ -244,12 +300,26 @@ def model_param_count(provider, model_id):
             fp = _footprint()
             total = fp.parse_params(model_id)["total_b"]
             if total is None:
-                total, _repo = fp.hf_total_params(model_id, offline=True)
+                total, _repo = fp.hf_total_params(model_id, offline=True, lane="remote")
                 total = round(total / 1e9, 1) if total else None   # HF counts raw params
             return float(total) if total else None
         except Exception:
             return None
     return _memoized_verdict("params", model_id, compute)
+
+
+def model_context_window(provider, model_id):
+    """Context window in tokens, or None when unknown (2026-11-22 hotfix).
+
+    Same offline rule as model_param_count: the HF cache ONLY — a render never waits on the
+    network. Provider-independent: any provider's id that resolves to the same HF repo shares
+    the answer (hf_context is keyed by model id)."""
+    def compute():
+        try:
+            return _footprint().hf_context(model_id)
+        except Exception:
+            return None
+    return _memoized_verdict("ctx", model_id, compute)
 
 
 def catalog_model_old(provider, model_id):
@@ -280,24 +350,89 @@ def _patchable(name):
             return f
     return globals()[name]
 
-def _warm_hf_cache(model_ids):
-    """Fill the HF cache (parameter count + createdAt date) for catalog ids (loader thread).
+def _warm_order(provider: str, ids: list) -> list:
+    """0.55.8 Task 2 (0541 plan Item A): unsized ids first — ids whose name states no
+    parameter count go to the front; catalog order is kept within each half."""
+    unsized, sized = [], []
+    for mid in ids:
+        try:
+            if model_param_count(provider, mid) is None:
+                unsized.append(mid)
+            else:
+                sized.append(mid)
+        except Exception:
+            unsized.append(mid)
+    return unsized + sized
 
-    Every id is warmed up to the per-provider cap: the age filter needs a date for sized
-    ids too, not only for the ones that state no count. Fresh entries answer from the
-    cache and cost no network."""
+
+def _hf_warm_workers() -> int:
+    """LA_PICKER_HF_WARM_WORKERS, int 1-8, default 4. A SET but invalid value shows one error
+    status line and falls back to serial — never a silent default."""
+    raw = os.environ.get("LA_PICKER_HF_WARM_WORKERS", "4")
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 0
+    if not 1 <= n <= 8:
+        print(f"session-picker: LA_PICKER_HF_WARM_WORKERS={raw!r} invalid (want int 1-8); "
+              "warming serially", file=sys.stderr)
+        return 1
+    return n
+
+
+def _warm_hf_cache(provider, model_ids, stop=None):
+    """Fill the HF cache (parameter count + createdAt date) for catalog ids.
+
+    0.55.8 Task 2 (0541 plan Item A): unsized ids first (_warm_order), a bounded worker
+    pool (HF_WARM_WORKERS), and the ids NOT yet attempted when `stop` is set are RETURNED
+    so the exit hand-off can spawn the finisher for them (R2/R5)."""
     try:
         fp = _footprint()
     except Exception:
-        return
-    for mid in model_ids:
-        fp.hf_total_params(mid, timeout=4.0)
+        return list(model_ids)
+    ids = _warm_order(provider, list(model_ids))
+    attempted = set()
+    lock = threading.Lock()
+    if stop is None:
+        stop = threading.Event()
+
+    def work(mid):
+        with lock:
+            attempted.add(mid)
+        if stop.is_set():
+            return
+        try:
+            fp.hf_total_params(mid, timeout=4.0, lane="remote")
+        except Exception:
+            pass
+        try:
+            # 2026-11-22 hotfix: warm the context window with the same entry (config.json fetch)
+            fp.hf_total_params(mid, timeout=4.0, lane="remote")
+        except Exception:
+            pass
         # A verdict computed while the cache was still cold (fail-open) must not outlive
-        # the warm-up: the first paint often hydrates DISK rows before the fetch lands
-        # (review finding 1, 2026-10-28).
-        _VERDICT_MEMO.pop(("old", mid), None)
-        _VERDICT_MEMO.pop(("cap", mid), None)
-        _VERDICT_MEMO.pop(("params", mid), None)
+        # the warm-up (review finding 1, 2026-10-28).
+        for k in ("old", "cap", "params", "ctx"):
+            _VERDICT_MEMO.pop((k, mid), None)
+
+    workers = min(_hf_warm_workers(), max(1, len(ids)))
+    if workers <= 1:
+        for mid in ids:
+            if stop.is_set():
+                break
+            work(mid)
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(work, mid) for mid in ids]
+            for f in futures:
+                if stop.is_set():
+                    break
+                try:
+                    f.result(timeout=0.1)
+                except Exception:
+                    pass
+    return [mid for mid in ids if mid not in attempted]
 
 
 def load_remote_catalog(kind):
@@ -406,6 +541,8 @@ def load_versions(kind: str) -> list[m.VersionEntry]:
 TOOLS = {
     "tool:keys": lambda: ["python3", str(REPO / "install/setup-api-keys.py")],
     "tool:rl-status": lambda: ["python3", str(BIN / "rate_limiter.py"), "status"],
+    "tool:rl-lane": lambda: ["python3", str(BIN / "rate_limiter.py"), "lane-toggle",
+                             "--user-approved"],
     "tool:report": lambda: ["bash", str(BIN / "local-capable-filter.sh"), "--report",
                             str(REPO / "config/local-capable-remote-models.psv"), "--roster",
                             str(REPO / "config/remote-agents.sh")],
@@ -519,6 +656,8 @@ def build_settings(flags: "argparse.Namespace | None", savers: Savers,
         thinking_session=state.thinking_session,
         rate_limiter=dict(state.rate_limiter),
         memguard=dict(state.memguard),
+        local_registry=dict(state.local_registry),   # 0.55.8 Task 8: the migrated section
+        remote_filters=dict(state.remote_filters),   # 0.62.0 C9: schema-11 section
         auto_mode=int(env.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
         telemetry=env.get("CSL_TELEMETRY", "0") == "1",
         stop_hook=env.get("CSL_STOP_HOOK", "0") == "1",
@@ -543,9 +682,11 @@ def build_settings(flags: "argparse.Namespace | None", savers: Savers,
         last_launched_model={"local_session": None, "remote_api_session": None, "lowkey": None,
                              **state.last_launched},
         last_launched_tier=dict(state.last_launched_tier),
+        last_launched_mode=dict(state.last_launched_mode),
         on_last_launched=savers.last_launched,
         catalog_local_capable=catalog_local_capable,
         model_param_count=model_param_count,
+        model_context_window=model_context_window,
         catalog_model_old=catalog_model_old,
     )
 
