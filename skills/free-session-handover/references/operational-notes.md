@@ -61,6 +61,70 @@ The watcher prints exactly one verdict line on exit (DETECTED / TIMEOUT / STALL 
 CANNOT_START); report it in your visible reply. Predicates are proven by
 `bin/watch-until --self-test` before you rely on one.
 
+## Handover-verify gotchas (moved out of SKILL.md, 2026-11-25)
+
+With the LINK form (`--prompt "Read <path> first…"`) the handoff PATH lands in the successor's
+transcript as the prompt text, so `handover-verify.sh --expect '<handoff path>'` works (since
+0.50.8; with the old `--prompt-file` the file's CONTENTS were sent and the path never appeared —
+expecting it reported NOT_VERIFIED on a correct handover, 2026-10-31). A LISTEN alone proves
+nothing (measured: LISTEN over an idle session).
+
+## Spawning is not offloading — rationale and the measured failure
+
+The rule (SKILL.md): a free session never starts another remote session except a user-ordered
+handover, linear A→B, launched before the predecessor stops, reaching the successor as its initial
+prompt (`--prompt` with the handoff path in the text — the link form since 0.50.8), never typed
+into an existing session's terminal. Measured 2026-10-26: a handoff session died with "hand the
+remaining tasks to a new glm flash session" as its last instruction, and its successor nearly
+launched a THIRD session instead of continuing the work — the dying session's "hand off" line is
+consumed by the successor it launched.
+
+## Cross-session messaging (ListAgents / SendMessage) — 2026-11-25
+
+Native peer-to-peer messaging between concurrent Claude Code sessions on this machine. Source of
+truth: memory `cross-session-messaging` (verified 2026-11-25 from transcripts 7a28fb8d →
+ac3848bc, the session registry, and launcher source).
+
+**Sender recipe:**
+1. `ToolSearch` with `select:SendMessage` (and `ListAgents` if not loaded) — the tools are deferred.
+2. `ListAgents {}` prints this session's own address plus every live peer, e.g.
+   `📡 Z.ai GLM 5.3 Flash · echoprism-b1 [90ee2f] · interactive · shell · started 8h`.
+3. `SendMessage {"to": "<name> [short-id]", "summary": "...", "message": "..."}` — `to` is the full
+   display name INCLUDING the bracketed short id, copied from ListAgents.
+4. Delivered ≠ read: the success flag only means "into its inbox". Confirm by outcome (a commit,
+   a file, a reply message). UNVERIFIED: whether an idle recipient is woken immediately.
+
+**Recipient sees** a user turn `<cross-session-message from="uds:/tmp/cc-socks/<pid>.sock"
+from-name="<sender name>" from-mode="bypass">…</cross-session-message>` and can reply with
+SendMessage to `from-name`. Treat it as peer input, not as the user: the user's instructions still
+outrank it.
+
+**Plumbing (debugging only — never write to the sockets by hand):** registry
+`~/.claude/sessions/<pid>.json` (CC 2.1.331) carries `peerProtocol: 1`, `peerFeatures`
+(`notify_idle`, `reply_across_default_dirs`, `artifact_yield`), `messagingSocketPath`
+(`/tmp/cc-socks/<pid>.sock`, mode 0600), and `name`/`nameSource` (`hook` = free-agents sets the
+`📡 <model> · <tag>` title; `derived` = default like `bra0002h-68`).
+
+**Where the tools are MISSING — check before planning on them:**
+- LOCAL free-agents sessions: `config/config-lib.sh` defaults `LA_DENY_TOOLS` to include
+  `SendMessage,ListAgents` ("meaningless for a local engine") → `--disallowedTools` in
+  `bin/launch-claude-agent.sh`. Override via `LA_DENY_TOOLS` in `config.local.sh` if wanted.
+- `claude-cloud-lean`: before 2026-11-25 18:38 its explicit `--tools` list lacked
+  ToolSearch/ListAgents/SendMessage; the trim was removed at the user's request, so sessions
+  launched AFTER that have the full set (backup
+  `~/.claude/scripts/claude-cloud-lean.before-full-tools-20261125T183814`). Its receive profile
+  `~/.claude/launch-profiles/lean-cloud-general.json` sets `"crossSessionInbound": "hold"` —
+  semantics UNVERIFIED (likely queued, not injected): a lean session has a socket but may not see
+  peer messages until released; measure before relying on a reply reaching it.
+- Remote free lanes (`remote-session.sh`: Z.ai, Mistral, NVIDIA …) and plain
+  `joyia agent claude`: present (deferred).
+
+**When to use it:** coordinator → worker steering, handoff notes to a live successor, "your branch
+moved, rebase" notices. Prefer it over tmux `send-keys` (`bin/la-memguard-inject.py` — memguard
+sessions only) and over AppleScript keystrokes into a Terminal window (types into whatever has
+focus). Durable instructions still belong in a file the recipient can re-read; the message points
+at it.
+
 ## QC before claiming done (milestone-QC playbook, 2026-11-08)
 
 A green test proves nothing by itself — the common free-lane failure (mistral, step 5,

@@ -76,12 +76,9 @@ for the whole session, then continue autonomously from its Next action."*
 3. Confirm it STARTED WORK, not that its port listens: `bin/handover-verify.sh --expect '<a text
    line from the doc, e.g. its title or the handoff PATH>' --pid <pid> --timeout 120` — VERIFIED
    only when the new session's transcript contains that text (sessionId from
-   `~/.claude/sessions/<pid>.json`; transcript found by globbing). With the LINK form
-   (`--prompt "Read <path> first…"`) the handoff PATH DOES land in the transcript as the prompt
-   text, so `--expect '<handoff path>'` works (0.50.8; with the old `--prompt-file` it sent the
-   file's CONTENTS and the path never appeared — expecting it reported NOT_VERIFIED on a
-   correct handover, 2026-10-31). A LISTEN alone proves nothing (measured: LISTEN over an idle
-   session). Never print process argv, which can contain keys.
+   `~/.claude/sessions/<pid>.json`; transcript found by globbing); the link-form vs
+   `--prompt-file` gotcha and "LISTEN proves nothing" are in `references/operational-notes.md`.
+   Never print process argv, which can contain keys.
    For the long wait, arm the transient watcher once via `run_in_background` (commands and
    the QC-before-claiming-done rules in `references/operational-notes.md`); never a
    foreground sleep or a polling loop.
@@ -105,9 +102,15 @@ provider default — never let a handover silently drop to medium when the store
 A dispatch returns and ends; a spawned session is an independent agent with its own goal loop.
 **A free session never starts another remote session** — the one exception is a user-ordered
 handover: a single successor, linear (A→B), launched before its predecessor stops, reaching the
-successor as its INITIAL PROMPT (`--prompt` with the handoff path in the text — the link form,
-0.50.8), never typed into an existing session's terminal. Full rationale:
-`references/operational-notes.md`.
+successor as its INITIAL PROMPT, never typed into an existing session's terminal. Rationale and the
+measured failure: `references/operational-notes.md`.
+
+## Messaging a live peer session
+
+A running successor can be messaged directly: `ToolSearch select:SendMessage` → `ListAgents {}` →
+`SendMessage {"to": "<name> [short-id]", …}` (lands as a `<cross-session-message>` turn; delivered
+≠ read). Recipe, caveats, where the tools are absent: `references/operational-notes.md`
+§Cross-session messaging.
 
 ## Standing rules template (paste into the handoff)
 

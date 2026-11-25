@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.63.6] — 2026-11-26
+
+### Changed
+- `free-session-handover` documents native cross-session messaging: a lean recipe in SKILL.md
+  (`ToolSearch select:SendMessage` → `ListAgents {}` → `SendMessage {"to": "<name> [short-id]", …}`)
+  and full detail in `references/operational-notes.md` — recipient view, registry/socket plumbing,
+  where the tools are absent (local `LA_DENY_TOOLS` sessions, lean profiles with
+  `crossSessionInbound: "hold"`), delivered ≠ read, and when to prefer a message over a file.
+  Source of truth: memory `cross-session-messaging` (verified 2026-11-25). SKILL.md stays within its
+  word budget: incident detail moved to references/.
+
 
 ## [0.63.5] — 2026-11-26
 
