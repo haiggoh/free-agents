@@ -72,6 +72,12 @@ class TailTests(unittest.TestCase):
         self.assertEqual(st.open_block_index, 0)
         self.assertEqual(st.next_index, 1)
 
+    def test_note_carries_output_tokens_from_message_delta(self):
+        st = hooks._StreamState()
+        hooks._note({"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+                     "usage": {"output_tokens": 99}}, st)
+        self.assertEqual(st.output_tokens, 99)
+
 
 if __name__ == "__main__":
     unittest.main()
