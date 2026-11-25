@@ -74,6 +74,16 @@ class GrantTimingTests(unittest.TestCase):
         os.environ.pop("LA_PROXY_FALLBACK_NAMES", None)
         self.addCleanup(os.environ.pop, "LA_PROXY_FALLBACK_NAMES", None)
         self.mod._CALL_BOOKED.clear()
+        # Hermetic regardless of worker state: the pre-call consults the machine-wide
+        # bucket via stretched_wait(), and conftest's sandbox vars can be gone by then
+        # (a leaking sibling test pops LA_NVIDIA_THROTTLE_STATE — see waypoint). Point
+        # them at THIS test's temp dir; patch.dict restores on exit.
+        self._env = unittest.mock.patch.dict(os.environ, {
+            "LA_NVIDIA_THROTTLE_STATE": os.path.join(self.tmp.name, "throttle.json"),
+            "FA_LIMITER_DIR": os.path.join(self.tmp.name, "limiter"),
+        })
+        self._env.start()
+        self.addCleanup(self._env.stop)
 
     def _hooks_with(self, bucket):
         hooks = self.mod.LAProxyHooks()
@@ -317,7 +327,6 @@ class GrantTimingTests(unittest.TestCase):
         # _bucket_for() lookup found no limits entry and the settle never ran. The
         # pre-call must hand the success hook the provider it booked under.
         mod = self.mod
-        import litellm  # noqa: F401  (the hook import path needs it registered)
 
         class GroqBucket:
             def __init__(self):

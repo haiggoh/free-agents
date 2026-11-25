@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.63.4] — 2026-11-25
+
+### Fixed — quota refunds settle the exact reservation in its own TPM window and UTC day
+- Affects TPM-limited providers (Mistral 40k, Groq 8k); NVIDIA is RPM-only by default and
+  unaffected. `QuotaLedger.book()` now mints a Receipt (id, n, at, day, week) and
+  `settle(receipt, used)` reconciles exactly that reservation — its own TPM stamp (while
+  inside the 60 s window), its own UTC day and ISO week — idempotently. The old
+  `refund()` rolled day/week first and then subtracted from the NEWEST stamp: a refund
+  after UTC midnight debited the new day, and interleaved requests refunded each other's
+  stamps. Receipts whose sidecar record an old proxy wiped are Policy U: only the still
+  matching period counters are refunded, never another stamp. `refund()` is deprecated
+  and raises when called from the limiter.
+- Bookings now live as long as the request: the proxy records the receipt only AFTER the
+  limiter grants, the granting poll books the WINNER's own estimate for queue handoffs
+  (previously a request granted by another poller was never booked at all), the failure
+  callback drops only its own registry entry, and the safety prune derives from the real
+  request-lifetime bound (2 × (stretched-wait cap 1800 s + stream timeout 300 s)) instead
+  of a fixed 600 s TTL — slow queues and long streams no longer lose their over-estimate
+  refund.
+- Also fixed en route: the success-side reconcile had never actually run over HTTP — the
+  success event reports the RESOLVED model (`openai/…` for a `groq/openai/…` deployment),
+  which resolved to no limiter and early-returned before the settle (measured on the real
+  route: two bookings, zero settles). The pre-call now hands the success hook the
+  provider it booked under.
+- Old proxies keep the old accounting until restarted; a proxy whose LOADED limiter or
+  ledger predates the receipts API while the on-disk source has it now prints one
+  launch-time line (`free-agents: this proxy runs pre-<version> limiter code — restart it
+  to get exact quota receipts`). It never restarts anything itself.
+- Proven over the real LiteLLM `/v1/messages` route against a TPM-limited stub upstream
+  (`tests/test_litellm_contract.py::TpmReceiptContract`): non-stream + stream + two
+  overlapping requests completing out of order all settle the sidecar to EXACTLY the real
+  usage, per receipt.
+
 ## [0.63.3] — 2026-11-25
 
 ### Fixed
