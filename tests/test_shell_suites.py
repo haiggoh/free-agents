@@ -17,8 +17,18 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import loadscale  # noqa: E402
+
 TESTS = Path(__file__).resolve().parent
 SUITES = sorted(str(p) for p in TESTS.glob("test_*.sh"))
+
+
+def _suite_timeout() -> int:
+    """Per-suite wall-clock budget scaled by current load: the fixed 600 s flaked under the
+    gate's 12-way parallel load on a shared box (2026-11-22: test_backend_bin_health.sh and
+    test_version_consistency.sh hit subprocess timeout). scale_for clamps at 8x."""
+    return int(600 * loadscale.current_scale())
 
 # Shell suites and modules that drive real processes / ports / PTY / pbcopy and flaked
 # repeatedly in full gate runs on a loaded shared box (2026-11-12: la_evict, la_reboot,
@@ -44,7 +54,7 @@ _PARAMS = [
 
 @pytest.mark.parametrize("suite", _PARAMS)
 def test_shell_suite(suite: str):
-    r = subprocess.run(["bash", suite], capture_output=True, text=True, timeout=600)
+    r = subprocess.run(["bash", suite], capture_output=True, text=True, timeout=_suite_timeout())
     assert r.returncode == 0, (
         f"{Path(suite).name} failed:\n"
         f"{r.stdout[-4000:]}\n{r.stderr[-2000:]}"
@@ -71,3 +81,10 @@ def test_heavy_suites_and_modules_are_deselected_by_the_gate_marker():
     for hid in heavy_ids:
         assert hid in everything, \
             f"control: {hid} must collect WITHOUT the mark, else the deselect assertion is vacuous"
+
+
+def test_suite_timeout_scales_with_load(monkeypatch):
+    monkeypatch.setattr(loadscale, "load_avg1", lambda: 1.0)
+    assert _suite_timeout() == 600
+    monkeypatch.setattr(loadscale, "load_avg1", lambda: 16.0)
+    assert _suite_timeout() == 600 * 8   # scale_for clamps at 8x

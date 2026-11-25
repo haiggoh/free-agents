@@ -32,6 +32,7 @@ LOAD_SENSITIVE_MODULES = [
     "test_venv_durability.py",
     "test_venv_health.py",
     "test_venv_claims_bottle_backends.py",
+    "test_prefill_measure.py",  # 2026-11-22 gate-load flake: real claude -p via a lane proxy
 ]
 
 
@@ -117,12 +118,38 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
         # gate deselects exactly this test — NOT the whole module, the rest still gates.
         out = self._collect("-m", "load_sensitive", "test_memguard_inject.py")
         names = {line.split("::")[-1].split("[")[0] for line in out.splitlines() if "::" in line}
-        self.assertEqual(names, {"test_late_restore_is_waited_for_and_never_restashed"}, out[:400])
+        self.assertEqual(names, {"test_late_restore_is_waited_for_and_never_restashed",
+                                 "test_8_keybindings_remap"}, out[:400])  # 2026-11-22 flake added
         out2 = self._collect("-m", "not load_sensitive", "test_memguard_inject.py")
         modules = {line.split("::")[0].split("/")[-1] for line in out2.splitlines() if "::" in line}
         self.assertIn("test_memguard_inject.py", modules, "the rest of the module must still collect")
         names2 = {line.split("::")[-1].split("[")[0] for line in out2.splitlines() if "::" in line}
         self.assertNotIn("test_late_restore_is_waited_for_and_never_restashed", names2)
+
+    def test_2026_11_22_gate_load_flakes_are_marked(self):
+        # Flaked in the 2026-11-22 loaded gate (waypoint full-suite-load-flakes-seen; each passes
+        # alone): individually marked so the gate deselects exactly these, not their modules.
+        # Mutation check: unmark one of these -> this test goes RED.
+        marked = {
+            "test_memguard_inject.py": ["test_8_keybindings_remap"],
+            "test_setup_api_keys.py": [
+                "test_reject_multiline_commands_quotes_and_bad_account_id",
+                "test_multiline_paste_is_rejected_and_trailing_clipboard_newline_is_accepted",
+                "test_bracketed_paste_advances_without_enter_and_returns_to_picker",
+            ],
+            "test_rate_limiter_mixed.py": ["test_old_and_new_processes_share_one_file"],
+        }
+        for mod, names in marked.items():
+            out = self._collect("-m", "load_sensitive", mod)
+            ids = {line.split("::")[-1].split("[")[0] for line in out.splitlines() if "::" in line}
+            for n in names:
+                self.assertIn(n, ids, f"{mod}::{n} not collected under -m load_sensitive: {out[:300]}")
+            out2 = self._collect("-m", "not load_sensitive", mod)
+            ids2 = {line.split("::")[-1].split("[")[0] for line in out2.splitlines() if "::" in line}
+            mods2 = {line.split("::")[0].split("/")[-1] for line in out2.splitlines() if "::" in line}
+            for n in names:
+                self.assertNotIn(n, ids2, f"{mod}::{n} still collected under 'not load_sensitive'")
+            self.assertIn(mod, mods2, f"the rest of {mod} must still collect under the gate expression")
 
 
 class LimiterKnobDefaultTests(unittest.TestCase):
