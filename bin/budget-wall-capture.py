@@ -31,8 +31,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
+import emoji_constants
 import fa_capture
 import fa_transcript
+
+# D2: every notice line carries the free-agents mark (📡), never cost-tracker's 💸.
+NOTICE_PREFIX = f"{emoji_constants.SESSION_EMOJI_FREE_API_STR} free-agents: budget wall — "
 
 USAGE = ("budget-wall-capture.py — budget-wall takeover capture (worker; runs at SessionStart "
          "via --pending because the StopFailure window is ~100 ms — measured). "
@@ -53,22 +57,24 @@ def _log(root: Path, msg: str) -> None:
         pass
 
 
-def _route_alias() -> str:
-    try:
-        return fa_capture.resolve_takeover_route(os.environ.get("FA_TAKEOVER_ROUTE") or None).alias
-    except Exception:
-        return "?"
-
-
 _MESSAGES: list = []  # flushed as ONE hook JSON object (two objects on stdout = unparseable)
+_SEEN: set = set()    # D1: identical lines within one run emit once (order preserved)
+
+
+def _notice(session_id, state: str, ref: str, next_step: str) -> str:
+    return f"{NOTICE_PREFIX}{state} ({ref}) for session {str(session_id)[:8]}. {next_step}"
 
 
 def _emit(root: Path, line: str) -> None:
     _log(root, line)
+    if line in _SEEN:
+        return
+    _SEEN.add(line)
     _MESSAGES.append(line)
 
 
 def _flush() -> None:
+    _SEEN.clear()
     if not _MESSAGES:
         return
     text = "\n".join(_MESSAGES)
@@ -207,8 +213,8 @@ def _capture_from(raw: str, endpoint: str) -> str:
             pass
         return "error"
     if not transcript_path:
-        _emit(root, "💸 free-agents: budget wall — capture refused (transcript_missing). "
-                    "Nothing was launched. See hook.log for why.")
+        _emit(root, _notice(session_id, "capture refused", "transcript_missing",
+                            "Nothing was launched. See hook.log for why."))
         _log(root, f"budget-wall-capture: payload for session {session_id} has no transcript_path")
         return "done"
     seen_dir = root / ".seen"
@@ -219,15 +225,10 @@ def _capture_from(raw: str, endpoint: str) -> str:
         os.chmod(seen_dir, 0o700)
         fd = os.open(str(seen), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
-        prior = seen.read_text(encoding="utf-8").strip()
-        if prior.startswith("refused:"):
-            _emit(root, f"💸 free-agents: budget wall — capture refused ({prior[8:]}). "
-                        f"Nothing was launched. See hook.log for why.")
-        elif prior:
-            _emit(root, f"💸 free-agents: budget wall — takeover package ready "
-                        f"({_route_alias()}). Nothing was launched. "
-                        f"Run: fa-takeover launch {prior}")
-        # empty claim = another session is capturing this wall right now: say nothing
+        # D1: an already-claimed wall emits NOTHING on stdout — the old code re-emitted the
+        # ready/refused line for EVERY further spooled payload of the same wall (hook.log only).
+        # An empty claim = another session is capturing this wall right now: say nothing.
+        _log(root, f"already claimed {seen.name}")
         return "done"
     except Exception as e:
         _log(root, f"budget-wall-capture: cannot claim {seen}: {e!r}")
@@ -241,6 +242,7 @@ def _capture_from(raw: str, endpoint: str) -> str:
         route = fa_capture.resolve_takeover_route(os.environ.get("FA_TAKEOVER_ROUTE") or None)
         reason = (f"budget wall — API error at transcript line "
                   f"{err_line if err_line is not None else 'stop'} (session {session_id})")
+        old = fa_capture.latest_package_for_session(root, session_id)  # before writing: newest wins
         pkg = fa_capture.build_package(
             transcript_path, cwd=payload.get("cwd") or os.getcwd(),
             dest_route=route.alias, dest_window_tokens=route.window_tokens,
@@ -248,16 +250,21 @@ def _capture_from(raw: str, endpoint: str) -> str:
             reason=reason, scanner=fa_capture.require_scanner(), allow_findings=False)
         out = fa_capture.write_package(pkg, root)
         _settle(pkg.takeover_id)
-        _emit(root, f"💸 free-agents: budget wall — takeover package ready "
-                    f"({route.alias}). Nothing was launched. "
-                    f"Run: fa-takeover launch {pkg.takeover_id}")
+        if old and old != pkg.takeover_id:
+            fa_capture.mark_superseded(root, old, pkg.takeover_id)
+        _emit(root, _notice(session_id, "takeover package ready", route.alias,
+                            f"Nothing was launched. Run: fa-takeover launch {pkg.takeover_id}"))
         _log(root, f"package: {out}")
         return "done"
     except fa_capture.CaptureRefused as e:
         _settle(f"refused:{e.code}")
         _log(root, f"budget-wall-capture: refused ({e.code}): {e.message}")
-        _emit(root, f"💸 free-agents: budget wall — capture refused ({e.code}). "
-                    f"Nothing was launched. See hook.log for why.")
+        hint = ""
+        if e.code == "secret_findings":
+            # Review Focus 5: the refusal names the manual override, never a silent dead end
+            hint = f" Manual override: fa-takeover capture {str(session_id)[:8]} --allow-findings."
+        _emit(root, _notice(session_id, "capture refused", e.code,
+                            f"Nothing was launched.{hint} See hook.log for why."))
         return "done"
     except Exception as e:
         _log(root, f"budget-wall-capture: exception: {e!r}")

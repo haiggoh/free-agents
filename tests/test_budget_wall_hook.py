@@ -99,7 +99,11 @@ def test_idempotent_second_fire(tmp_path, monkeypatch):
     rc2, out2 = run_hook(payload(), env, monkeypatch)
     assert rc1 == rc2 == 0
     assert len(packages(tmp_path)) == 1  # one package per (session_id, error line)
-    assert json.loads(out1)["systemMessage"] == json.loads(out2)["systemMessage"]
+    # D1 (R4): the second fire of an already-claimed wall is SILENT on stdout — the old
+    # equality asserted the duplication bug itself. Pinned properly in
+    # tests/test_budget_wall_notices.py::test_already_claimed_wall_is_silent.
+    assert json.loads(out1)["systemMessage"]
+    assert out2 == ""
 
 
 def test_exception_fails_open(tmp_path, monkeypatch):

@@ -117,6 +117,11 @@ def cmd_launch(args) -> int:
         return EXIT_NOT_FOUND
     manifest = json.loads((pkg_dir / "manifest.json").read_text(encoding="utf-8"))
     handoff = pkg_dir / "handoff.md"
+    sup = fa_capture.superseded_by(root, args.takeover_id)
+    if sup:
+        print(f"fa-takeover: {args.takeover_id} was superseded by {sup} "
+              f"(a newer wall of the same session) — launch {sup} instead", file=sys.stderr)
+        return EXIT_NOT_FOUND
     route = manifest["dest"]["route"]
     effort = args.effort or "max"
     launcher = os.environ.get("FA_TAKEOVER_LAUNCHER") or str(DEFAULT_LAUNCHER)
@@ -220,12 +225,14 @@ def cmd_list(args) -> int:
     for d in sorted(root.glob("tk-*")):
         if not d.is_dir():
             continue
+        sup = fa_capture.superseded_by(root, d.name)
+        tag = f"\t(superseded by {sup})" if sup else ""
         try:
             m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
             rows.append(f"{m['takeover_id']}\t{m.get('created_at', '?')}\t"
-                        f"{m['dest']['route']}\t{m.get('reason', '')[:80]}")
+                        f"{m['dest']['route']}\t{m.get('reason', '')[:80]}{tag}")
         except Exception:
-            rows.append(f"{d.name}\t(unreadable manifest)")
+            rows.append(f"{d.name}\t(unreadable manifest){tag}")
 
     print("\n".join(rows) if rows else "fa-takeover: no takeover packages")
     return EXIT_OK

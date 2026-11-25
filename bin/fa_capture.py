@@ -505,6 +505,46 @@ def write_package(pkg: Package, root) -> Path:
     return target
 
 
+def mark_superseded(root, old_id: str, new_id: str) -> None:
+    """Write <root>/<old_id>/SUPERSEDED containing new_id — atomic (temp + rename), 0600."""
+    d = Path(root) / old_id
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / f".SUPERSEDED.tmp-{secrets.token_hex(4)}"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(new_id + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, d / "SUPERSEDED")
+
+
+def superseded_by(root, tk_id: str):
+    """The id of the package that superseded tk_id, or None."""
+    try:
+        return (Path(root) / tk_id / "SUPERSEDED").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def latest_package_for_session(root, session_id: str):
+    """Newest non-superseded tk-* package whose manifest source.session_id matches, or None."""
+    root = Path(root)
+    best, best_mtime = None, -1.0
+    for d in root.glob("tk-*"):
+        if not d.is_dir() or superseded_by(root, d.name):
+            continue
+        try:
+            m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (m.get("source") or {}).get("session_id") != session_id:
+            continue
+        mt = d.stat().st_mtime
+        if mt > best_mtime:
+            best, best_mtime = d.name, mt
+    return best
+
+
 def _main(argv):
     if any(a in ("-h", "--help") for a in argv):
         print("fa_capture.py — capture-package builder library (used by bin/fa-takeover).")
