@@ -49,8 +49,8 @@ class LedgerTests(unittest.TestCase):
 
     def test_tpm_window_rolls(self):
         led = self.led(tpm=8000)
-        self.assertEqual(led.book(6000, self.clock.now), 0.0 or None
-                         if False else None)  # book() returns None; room() is the waiter
+        receipt = led.book(6000, self.clock.now)   # 0.63.3: book() returns the Receipt
+        self.assertEqual(receipt.n, 6000)
         wait = led.room(3000, self.clock.now)
         self.assertGreater(wait, 0.0, "second 3000 tokens must wait for tpm room")
         self.clock.now += 61.0

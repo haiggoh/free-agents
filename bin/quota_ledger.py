@@ -19,14 +19,37 @@ Environment: none (path is a constructor arg).
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import datetime
 import fcntl
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 
 WINDOW_SECONDS = 60.0
+SETTLED_TTL = WINDOW_SECONDS + 86400.0   # a settled id is remembered a TPM window + 1 day
+
+
+@dataclasses.dataclass(frozen=True)
+class Receipt:
+    """Identity of ONE reservation: book() mints it, settle() reconciles only it."""
+
+    id: str          # uuid4 hex
+    n: int           # tokens booked (the estimate)
+    at: float        # booking time (epoch seconds)
+    day: str         # "YYYY-MM-DD" UTC of the booking
+    week: str        # ISO "YYYY-Www" of the booking
+
+    def to_json(self) -> dict:
+        return {"id": self.id, "n": self.n, "at": self.at,
+                "day": self.day, "week": self.week}
+
+    @staticmethod
+    def from_json(d: dict) -> "Receipt":
+        return Receipt(id=str(d["id"]), n=int(d["n"]), at=float(d["at"]),
+                       day=str(d["day"]), week=str(d["week"]))
 
 
 def _utc_day(now: float) -> str:
@@ -57,7 +80,8 @@ def _empty() -> dict:
                     "limit_rpd": None, "limit_tpd": None, "remaining_requests": None},
             "week": {"key": None, "requests": 0, "tokens": 0,
                      "limit_rpw": None, "limit_tpdw": None},
-            "exhausted": {"tpm": 0.0, "day": 0.0, "week": 0.0}}
+            "exhausted": {"tpm": 0.0, "day": 0.0, "week": 0.0},
+            "settled": {}}
 
 
 class QuotaLedger:
@@ -92,6 +116,9 @@ class QuotaLedger:
         for k in base:
             if isinstance(st.get(k), dict):
                 base[k].update(st[k])
+        for k, v in st.items():          # keys a FUTURE writer added: we are its old reader
+            if k not in base and isinstance(v, dict):
+                base[k] = v
         return base
 
     def _save(self, fd, st: dict) -> None:
@@ -155,13 +182,19 @@ class QuotaLedger:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def book(self, tokens: int, now: float) -> None:
+    def book(self, tokens: int, now: float) -> Receipt:
+        """Reserve `tokens` for one request; returns the request's Receipt — the
+        ONLY identity settle() reconciles against (0.63.3)."""
         fd = self._locked()
         try:
             st = self._load(fd)
             self._rollover(st, now)
+            self._prune_settled(st, now)
+            receipt = Receipt(id=uuid.uuid4().hex, n=int(tokens), at=float(now),
+                              day=_utc_day(now), week=_utc_week(now))
             if self.limits.tpm:
-                st["tpm"]["stamps"].append({"t": now, "n": int(tokens)})
+                st["tpm"]["stamps"].append({"t": now, "n": int(tokens),
+                                            "id": receipt.id})
             st["day"]["requests"] += 1
             st["day"]["tokens"] += int(tokens)
             if st["day"]["remaining_requests"] is not None:
@@ -169,13 +202,84 @@ class QuotaLedger:
             st["week"]["requests"] += 1
             st["week"]["tokens"] += int(tokens)
             self._save(fd, st)
+            return receipt
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    @staticmethod
+    def _prune_settled(st: dict, now: float) -> None:
+        settled = st.get("settled")
+        if isinstance(settled, dict):
+            stale = [k for k, v in settled.items()
+                     if now - float(v) > SETTLED_TTL]
+            for k in stale:
+                settled.pop(k, None)
+
+    def settle(self, receipt: Receipt, used: int | None, now: float) -> str:
+        """Reconcile EXACTLY the reservation `receipt` was booked as (idempotent).
+
+        used None -> "no-usage" (absent usage is never treated as zero). used above
+        the estimate books the difference as extra usage ("over"). Otherwise the
+        over-estimate is refunded from the receipt's OWN stamp (while inside the
+        TPM window) and from the day/week counters ONLY while they are still the
+        booking's period. A receipt whose stamp is gone (pruned by an old sidecar
+        writer, or aged out of the window) refunds only the matching period
+        counters and reads "unknown" — never another stamp (Policy U). Returns
+        "settled" | "already" | "unknown" | "over" | "no-usage".
+        """
+        fd = self._locked()
+        try:
+            st = self._load(fd)
+            self._rollover(st, now)
+            self._prune_settled(st, now)
+            if used is None:
+                return "no-usage"
+            settled = st.setdefault("settled", {})
+            if str(receipt.id) in settled:
+                return "already"
+            used = int(used)
+            tpm_active = bool(self.limits.tpm)
+            target = None
+            if tpm_active:
+                for s in st["tpm"]["stamps"]:
+                    if (s.get("id") == receipt.id
+                            and now - float(s.get("t", 0.0)) < WINDOW_SECONDS):
+                        target = s
+                        break
+            diff = int(receipt.n) - used
+            if diff < 0:
+                extra = -diff                 # usage above the estimate is real spend
+                st["day"]["tokens"] += extra
+                st["week"]["tokens"] += extra
+                if tpm_active:
+                    st["tpm"]["stamps"].append({"t": now, "n": extra})
+                outcome = "over"
+            else:
+                if target is not None:
+                    target["n"] = max(0, int(target.get("n", 0)) - diff)
+                if st["day"]["key"] == receipt.day:
+                    st["day"]["tokens"] = max(0, st["day"]["tokens"] - diff)
+                if st["week"]["key"] == receipt.week:
+                    st["week"]["tokens"] = max(0, st["week"]["tokens"] - diff)
+                # a missing stamp is Policy U only when a stamp was expected at all
+                outcome = "unknown" if (tpm_active and target is None) else "settled"
+            settled[str(receipt.id)] = float(now)
+            self._save(fd, st)
+            return outcome
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
     def refund(self, n: int, now: float) -> None:
-        """Give back `n` tokens (booked estimate was too high); day/week counters, and the
-        newest tpm stamp."""
+        """DEPRECATED (0.63.3): refunds the NEWEST stamp — the exact defect receipts
+        replace. Kept for the existing ledger tests and external callers; a call
+        from rate_limiter is a regression and raises."""
+        import inspect
+        caller = inspect.stack()[1].frame.f_globals.get("__name__", "")
+        if caller.split(".")[-1] == "rate_limiter":
+            raise RuntimeError(
+                "quota_ledger.refund() is deprecated: settle(receipt, used) instead")
         fd = self._locked()
         try:
             st = self._load(fd)
