@@ -88,3 +88,7 @@ def test_suite_timeout_scales_with_load(monkeypatch):
     assert _suite_timeout() == 600
     monkeypatch.setattr(loadscale, "load_avg1", lambda: 16.0)
     assert _suite_timeout() == 600 * 8   # scale_for clamps at 8x
+    # M1 dispatch: the value test alone does not prove the runner USES it — pin the wiring
+    # so a mutation back to a constant timeout=600 goes red.
+    src = Path(__file__).read_text(encoding="utf-8")
+    assert "timeout=_suite_timeout()" in src, "test_shell_suite must pass the scaled timeout"

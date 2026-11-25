@@ -87,6 +87,15 @@ class CreatedSentinelTests(unittest.TestCase):
         self.assertIsNone(models["z-ai/glm-5.3-flash"]["released"])
         self.assertEqual(models["other/model"]["released"], "2024-06-01")
 
+    def test_modern_constant_created_across_all_models_is_unknown(self):
+        # Isolates the sentinel rule from the pre-2015 rule (M1 dispatch): a MODERN constant
+        # shared by all models is still a sentinel — deleting the sentinel branch must turn
+        # THIS red, which the 1993-based fixtures cannot do (pre-2015 nulls them anyway).
+        models = self._models(_catalog_doc({"z-ai/glm-5.3-flash": EPOCH_2024_06_01,
+                                            "other/model": EPOCH_2024_06_01}))
+        self.assertIsNone(models["z-ai/glm-5.3-flash"]["released"])
+        self.assertIsNone(models["other/model"]["released"])
+
     def test_distinct_real_dates_are_kept(self):
         models = self._models(_catalog_doc({"a/one": EPOCH_2024_06_01,
                                             "b/two": EPOCH_2025_01_15}))

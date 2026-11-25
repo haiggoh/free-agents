@@ -8,6 +8,7 @@ IMPORT while rate_limiter / session_picker read the LA_ name per call — so a t
 that set the env after import silently still used the real ~/.claude dir.
 """
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -49,6 +50,11 @@ def test_only_alias_set_wins(monkeypatch, tmp_path):
     d = tmp_path / "alias"
     monkeypatch.setenv(ALIAS, str(d))
     assert sms.config_dir() == d
+    # outcome, not just the resolver: load() with no arg must READ through the alias
+    d.mkdir()
+    (d / sms.PREFS_NAME).write_text('{"schema_version": 11, "effort": {"local_session": "low"}}',
+                                   encoding="utf-8")
+    assert sms.load().effort["local_session"] == "low"
 
 
 def test_both_set_same_dir_different_spelling_ok(monkeypatch, tmp_path):
@@ -92,14 +98,18 @@ def test_resolution_is_call_time_not_import_time(monkeypatch, tmp_path):
 
 def test_no_reader_bypasses_the_resolver():
     """Guard: no bin/*.py outside session_menu_state.py may read either env name
-    directly (the fixture copy under tests/fixtures is frozen old code, excluded)."""
+    directly, in ANY spelling (os.environ.get / os.getenv / os.environ[...]) — the
+    fixture copy under tests/fixtures is frozen old code, excluded. M1 dispatch found
+    the literal-only scan evadable via os.getenv; this regex closes it."""
+    direct = re.compile(
+        r'os\.(?:environ\.get|getenv)\s*\(\s*["\'](?:' + CANON + r'|' + ALIAS + r')["\']'
+        r'|os\.environ\s*\[\s*["\'](?:' + CANON + r'|' + ALIAS + r')["\']')
     offenders = []
     for py in (ROOT / "bin").glob("*.py"):
         if py.name == "session_menu_state.py":
             continue
         for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
-            if (f'os.environ.get("{CANON}")' in line or f'os.environ.get("{ALIAS}")' in line
-                    or f"os.environ[{CANON!r}]" in line or f"os.environ[{ALIAS!r}]" in line):
+            if direct.search(line):
                 offenders.append(f"{py.name}:{i}")
     assert offenders == [], f"direct env reads bypass the resolver: {offenders}"
 
@@ -139,6 +149,8 @@ def test_autouse_fixture_sandboxes_config_dir(tmp_path):
 
 
 def test_conftest_does_not_fake_home():
-    """D2: the config-dir sandbox is config-dir ONLY — conftest must not set HOME."""
+    """D2: the config-dir sandbox is config-dir ONLY — conftest must not set HOME by any
+    API (monkeypatch.setenv("HOME", …) or a direct os.environ["HOME"] = …)."""
     conftest_src = (ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
-    assert 'setenv("HOME"' not in conftest_src and "setenv('HOME'" not in conftest_src
+    home_set = re.compile(r'(?:setenv\s*\(\s*|environ\s*\[\s*)["\']HOME["\']')
+    assert not home_set.search(conftest_src), "conftest must not set HOME"

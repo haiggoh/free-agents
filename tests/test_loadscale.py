@@ -85,6 +85,18 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
         collected = {line.split("::")[0].split("/")[-1] for line in out.splitlines() if "::" in line}
         self.assertEqual(collected, set(LOAD_SENSITIVE_MODULES),
                          f"marked-collect mismatch; raw head: {out[:400]}")
+        # M1 dispatch: a filename-set match only proves >=1 marked item per module. The mark
+        # must cover EVERY item: per-module counts with and without -m must be equal.
+        plain = self._collect(*LOAD_SENSITIVE_MODULES)
+        def counts(text):
+            c = {}
+            for line in text.splitlines():
+                if "::" in line:
+                    m = line.split("::")[0].split("/")[-1]
+                    c[m] = c.get(m, 0) + 1
+            return c
+        self.assertEqual(counts(plain), counts(out),
+                         "every item of each LOAD_SENSITIVE_MODULES module must carry the mark")
 
     def test_not_load_sensitive_deselects_all_of_them(self):
         out = self._collect("-m", "not load_sensitive", *LOAD_SENSITIVE_MODULES, "test_loadscale.py")
@@ -150,6 +162,18 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
             for n in names:
                 self.assertNotIn(n, ids2, f"{mod}::{n} still collected under 'not load_sensitive'")
             self.assertIn(mod, mods2, f"the rest of {mod} must still collect under the gate expression")
+
+    def test_marked_2026_11_22_flakes_pass_when_run_explicitly(self):
+        # M1 dispatch: collect-only proves the mark, not the pass. Actually RUN the marked
+        # tests under -m load_sensitive (they passed in isolation on 2026-11-22; marked must
+        # not mean silently skipped or broken).
+        mods = ["test_memguard_inject.py", "test_setup_api_keys.py",
+                "test_rate_limiter_mixed.py", "test_prefill_measure.py"]
+        r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-m", "load_sensitive",
+                            "-p", "no:cacheprovider", *mods],
+                           capture_output=True, text=True, cwd=self.HERE, timeout=900)
+        self.assertEqual(r.returncode, 0, r.stdout[-2000:] + r.stderr[-2000:])
+        self.assertIn("passed", r.stdout.splitlines()[-1])
 
 
 class LimiterKnobDefaultTests(unittest.TestCase):
