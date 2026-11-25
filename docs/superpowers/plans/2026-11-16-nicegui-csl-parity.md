@@ -1,5 +1,12 @@
 # NiceGUI csl-parity implementation plan (feat/nicegui-frontend)
 
+**Status:** completed
+
+> Continued and closed by `~/.claude/plans/2026-11-24-fa-nicegui-wip-fix-rebase-parity-finish.md`
+> (2026-11-25: WIP launchd confirm finished, branch rebased onto main 0.63.2 at 3368b20, main's new
+> csl rows ported, residual rows closed). Open beyond it: the launch hand-off (design plan Task 10,
+> gate G3-launch) and the key-remove design question (gate G4-keys-remove).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans (native execution).
 > Steps use checkbox syntax.
 
@@ -23,7 +30,7 @@ pytest + Playwright GUI tests (`tests/test_gui_*.py`).
 ## Global Constraints
 
 - Work ONLY on `feat/nicegui-frontend` in `~/ClaudeWorkspace/.wt/fa-nicegui` (rebased onto
-  main 0.59.3 at b2e581f; re-check origin/main before each ship).
+  main 0.63.2 at 3368b20 on 2026-11-25; was 0.59.3 at b2e581f; re-check origin/main before each ship).
 - csl behavior is UNCHANGED: the GUI adapts csl's model; shared code changes must keep
   `tests/test_picker_*.py` / `tests/test_session_picker_pty.py` green.
 - TDD per screen: a Playwright/browser test that drives the real route (`tests/test_gui_browser.py`

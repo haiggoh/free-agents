@@ -1,6 +1,6 @@
 # csl ↔ NiceGUI parity inventory (2026-11-16, corrected 2026-11-16 after live probing)
 
-Measured on branch `feat/nicegui-frontend` (rebased onto main 0.59.3, commit b2e581f).
+Measured on branch `feat/nicegui-frontend` (rebased onto main 0.63.2, commit 3368b20, on 2026-11-25; first inventory was on 0.59.3, b2e581f).
 Sources: csl screens = `class *Screen` in `bin/session_picker_model.py` + all `nav_target=`
 values; GUI = `bin/fa_gui/app.py`.
 
