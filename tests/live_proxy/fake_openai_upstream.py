@@ -26,14 +26,19 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-MODES = ("ok", "die", "die0", "die1", "dier", "r429", "hang")
+MODES = ("ok", "die", "die0", "die1", "dier", "r429", "hang", "toolburst", "toolcut")
 
 
-def chunk(content=None, finish=None):
+def chunk(content=None, finish=None, reasoning=None, tool_calls=None):
+    delta = {}
+    if content:
+        delta["content"] = content
+    if reasoning:
+        delta["reasoning_content"] = reasoning
+    if tool_calls:
+        delta["tool_calls"] = tool_calls
     d = {"id": "x", "object": "chat.completion.chunk", "created": 1, "model": "fake",
-         "choices": [{"index": 0,
-                      "delta": ({"content": content} if content else {}),
-                      "finish_reason": finish}]}
+         "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
     return ("data: " + json.dumps(d) + "\n\n").encode()
 
 
@@ -42,24 +47,34 @@ class H(BaseHTTPRequestHandler):
         pass
 
     def _mode(self):
+        """(mode, silence_s) — the control file may carry '<mode> <silence_s>' (R3 Task 1);
+        default silence is 2 s."""
         mode = ARGS.mode
+        silence = 2.0
         try:
             override = Path(ARGS.log + ".mode").read_text().strip()
             if override:
-                mode = override
+                parts = override.split()
+                mode = parts[0]
+                if len(parts) > 1:
+                    silence = float(parts[1])
         except OSError:
             pass
-        return mode
+        return mode, silence
 
     def do_POST(self):
         import time
         n = int(self.headers.get("content-length", 0))
         body = json.loads(self.rfile.read(n) or b"{}")
-        mode = self._mode()
+        mode, silence = self._mode()
         import time as _t
         open(ARGS.log, "a").write(json.dumps(
             {"ts": _t.time(), "path": self.path, "stream": body.get("stream"), "mode": mode,
-             "model": body.get("model")}) + "\n")
+             "model": body.get("model"),
+             # R3 Task 1: did this request carry the [free-agents] mid-stream hint? (content only,
+             # never headers — the no-secrets-in-logs rule)
+             "has_hint": any("[free-agents] The provider closed" in str(m.get("content"))
+                             for m in (body.get("messages") or []))}) + "\n")
         if mode == "hang":
             time.sleep(60)
             return
@@ -105,6 +120,28 @@ class H(BaseHTTPRequestHandler):
             import socket
             self.connection.shutdown(socket.SHUT_RDWR)
             self.connection.close()
+            return
+        if mode in ("toolburst", "toolcut"):
+            # R3 Task 1: the two NIM shapes — N reasoning chunks, silence S, then ONE tool_call
+            # chunk carrying the FULL arguments (toolburst, finish_reason tool_calls) or a hard
+            # close with no finish (toolcut).
+            for _i in range(3):
+                self.wfile.write(chunk(reasoning="think"))
+                self.wfile.flush()
+                time.sleep(0.05)
+            time.sleep(silence)
+            if mode == "toolcut":
+                import socket
+                self.connection.shutdown(socket.SHUT_RDWR)
+                self.connection.close()
+                return
+            args = json.dumps({"file_path": "/tmp/probe.md", "content": "x" * 8000})
+            self.wfile.write(chunk(tool_calls=[{
+                "index": 0, "id": "call_1", "type": "function",
+                "function": {"name": "Write", "arguments": args}}]))
+            self.wfile.write(chunk(finish="tool_calls"))
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
             return
         self.wfile.write(chunk(content="po"))
         self.wfile.flush()
