@@ -210,6 +210,18 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(led.settle(a, 1250, 110.0), "already")
         self.assertEqual(led.snapshot(110.0), st0)
 
+    def test_refund_raises_when_called_from_rate_limiter(self):
+        # The deprecation guard reads the CALLER FRAME's __name__ (inspect.stack), so
+        # the honest probe is a frame whose globals really say rate_limiter — an exec
+        # with a globals dict, not a fake entry in sys.modules.
+        led = self.led()
+        with self.assertRaises(RuntimeError) as cm:
+            exec("led.refund(100, 100.0)", {"__name__": "rate_limiter", "led": led})
+        self.assertIn("deprecated", str(cm.exception))
+        # any other caller still gets the deprecated-but-working behaviour
+        led.book(500, 100.0)
+        led.refund(100, 110.0)          # no raise outside rate_limiter
+
     def test_no_tpm_provider_settles_from_period_counters(self):
         # NVIDIA default lane: tpm=None writes NO stamp; the receipt still settles
         # from day/week (a missing stamp is Policy U only when tpm is ACTIVE).

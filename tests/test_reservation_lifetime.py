@@ -14,6 +14,12 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+try:
+    import litellm  # noqa: F401
+    HAVE_LITELLM = True
+except Exception:
+    HAVE_LITELLM = False
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "bin"))
 _spec = importlib.util.spec_from_file_location("provider_limits", REPO / "bin" / "provider_limits.py")
@@ -118,6 +124,7 @@ class GrantTimingTests(unittest.TestCase):
         self.assertEqual(got.id, rec.id)
         _assert_no_la_keys(kwargs)
 
+    @unittest.skipUnless(HAVE_LITELLM, "litellm absent: run under the LiteLLM pipx venv")
     def test_timeout_denial_leaves_no_booking(self):
         mod = self.mod
         import litellm
