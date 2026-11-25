@@ -92,17 +92,29 @@ class ReceiptTests(unittest.TestCase):
         led = self.led()
         a = led.book(1000, 0.0)
         led.book(2000, 70.0)
-        # A's stamp is 71 s old: outside the 60 s TPM window -> stamp part unknown,
-        # but the UTC day/week still match -> those counters are refunded.
-        self.assertEqual(led.settle(a, 125, 71.0), "unknown")
+        # A's stamp is 71 s old: outside the 60 s TPM window -> the STAMP part is
+        # unknown (never touches B's stamp), but the ledger knows the receipt, and
+        # the UTC day/week still match -> those counters are refunded ("settled").
+        self.assertEqual(led.settle(a, 125, 71.0), "settled")
         self.assertEqual(self._tpm_used(led, 71.0), 2000)   # B's stamp untouched
         snap = led.snapshot(71.0)
         self.assertEqual(snap["day"]["tokens"], 3000 - 875)
         self.assertEqual(snap["week"]["tokens"], 3000 - 875)
-        # even an unknown outcome is booked as settled: a second call changes nothing
+        # idempotent: a second call changes nothing
         st0 = snap
         self.assertEqual(led.settle(a, 125, 71.0), "already")
         self.assertEqual(led.snapshot(71.0), st0)
+
+    def test_settle_after_stamp_expiry_still_settles(self):
+        # The long-stream case at ledger level: the receipt record outlives the
+        # 60 s stamp window, so a settle 2000 s later still reads "settled" and
+        # refunds the period counters (the stamp part is simply gone).
+        led = self.led()
+        a = led.book(1000, 0.0)
+        self.assertEqual(led.settle(a, 125, 2000.0), "settled")
+        snap = led.snapshot(2000.0)
+        self.assertEqual(snap["day"]["tokens"], 125)        # 1000 - 875, no clamp needed
+        self.assertEqual(self._tpm_used(led, 2000.0), 0)
 
     def test_settle_keeps_original_utc_period(self):
         led = self.led()
@@ -147,6 +159,7 @@ class ReceiptTests(unittest.TestCase):
         for s in st["tpm"]["stamps"]:
             s.pop("id", None)
         st.pop("settled", None)
+        st.pop("receipts", None)          # 0.62.0-0.63.2 writers drop BOTH new keys
         with open(path, "w") as f:
             json.dump(st, f)
         self.assertEqual(led.settle(a, 125, 130.0), "unknown")

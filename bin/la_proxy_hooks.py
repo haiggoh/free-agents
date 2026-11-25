@@ -499,29 +499,55 @@ BRIDGE_SHIM_STATE = ""   # "" until the first install; then installed | upstream
 _CALL_429_RECORDS: dict[str, dict] = {}   # litellm_call_id -> {"retry_after": seconds, "at": t}
 _RECORD_TTL = 600.0
 
-# 0.63.1 hotfix: tokens booked at pre-call, by litellm_call_id, for the success hook. NEVER in
-# the request kwargs: LiteLLM forwards unknown kwargs upstream and NVIDIA NIM 400s every request
-# on them (0.62.3 put `_la_booked_tokens` there). Entries expire like _CALL_429_RECORDS.
-_CALL_BOOKED: dict[str, int] = {}
-_CALL_BOOKED_AT: dict[str, float] = {}
+# 0.63.3: the grant-time booking's RECEIPT, by litellm_call_id, for the success hook —
+# settle(receipt, used) reconciles exactly that reservation. NEVER in the request kwargs:
+# LiteLLM forwards unknown kwargs upstream and NVIDIA NIM 400s every request on them
+# (0.62.3 put `_la_booked_tokens` there). A receipt lives exactly as long as its request:
+# the failure callback pops it (the sidecar booking STAYS — the provider may have counted
+# the tokens), and the prune below only drops entries no live request can still own.
+from quota_ledger import Receipt
+
+# The longest a live request can hold a booking: the patient-tier queue cap plus the stream
+# silence timeout, doubled as the safety factor for callbacks that never fire. Both derive
+# from their real sources — the limiter's stretched-wait cap (ONE source of truth, shared
+# with stretched_wait()) and the LA_STREAM_TIMEOUT default remote-session.sh bakes into the
+# proxy YAML. An OLD rate_limiter running next to this hook (mixed fleet) has neither
+# constant: fall back to the documented figures rather than refuse to start — the bound
+# caps memory, it is never a correctness tool.
+try:
+    from rate_limiter import STRETCHED_WAIT_CAP as MAX_WAIT_S
+except ImportError:                                        # mixed fleet, pre-receipt limiter
+    MAX_WAIT_S = 1800.0
+    print("la_proxy_hooks: rate_limiter has no STRETCHED_WAIT_CAP (pre-receipt limiter?); "
+          "using 1800 s for the booking bound", file=sys.stderr)
+_raw_stream_timeout = os.environ.get("LA_STREAM_TIMEOUT")
+try:
+    STREAM_TIMEOUT_S = float(_raw_stream_timeout or 300.0)   # "0" (disabled) -> 0: bound 2x queue
+except ValueError:
+    STREAM_TIMEOUT_S = 300.0
+    print(f"la_proxy_hooks: LA_STREAM_TIMEOUT='{_raw_stream_timeout}' is not a number; "
+          "using 300 s for the booking bound", file=sys.stderr)
+_RECORD_BOUND = 2.0 * (float(MAX_WAIT_S) + STREAM_TIMEOUT_S)
+
+_CALL_BOOKED: dict[str, Receipt] = {}
 
 
-def _book_call(kwargs: dict, tokens: int) -> None:
-    import time
-    now = time.time()
-    for k in [k for k, t in _CALL_BOOKED_AT.items() if now - t > _RECORD_TTL]:
+def _now() -> float:
+    return time.time()
+
+
+def _book_call(kwargs: dict, receipt) -> None:
+    now = _now()
+    for k in [k for k, r in _CALL_BOOKED.items() if now - r.at > _RECORD_BOUND]:
         _CALL_BOOKED.pop(k, None)
-        _CALL_BOOKED_AT.pop(k, None)
     call_id = str((kwargs or {}).get("litellm_call_id") or "")
-    if call_id:
-        _CALL_BOOKED[call_id] = int(tokens)
-        _CALL_BOOKED_AT[call_id] = now
+    if call_id and receipt is not None:
+        _CALL_BOOKED[call_id] = receipt
 
 
-def _take_booked(kwargs: dict) -> int:
+def _take_booked(kwargs: dict):
     call_id = str((kwargs or {}).get("litellm_call_id") or "")
-    _CALL_BOOKED_AT.pop(call_id, None)
-    return int(_CALL_BOOKED.pop(call_id, 0) or 0)
+    return _CALL_BOOKED.pop(call_id, None)
 
 
 def _record_call_rate_limited(call_id: str, retry_after: float | None) -> None:
@@ -846,12 +872,12 @@ class LAProxyHooks(CustomLogger):
                 from rate_limiter import _max_wait, stretched_wait, RateLimitTimeout
                 # 0.62.3 review fix: pass tokens= so the quota sidecar (tpm/tpd) actually
                 # books this request — 0.62.0 granted with tokens=0 (TPM accounting was
-                # limiter-API-only). The booked amount is kept by call id (_book_call) for the
-                # success hook -- never in kwargs, which LiteLLM forwards upstream (0.63.1).
+                # limiter-API-only). 0.63.3: the grant returns the reservation's Receipt,
+                # recorded here — AFTER the grant, never before — by call id for the
+                # success hook. Never in kwargs, which LiteLLM forwards upstream (0.63.1).
                 booked = _estimate_tokens(kwargs)
-                _book_call(kwargs, booked)
                 try:
-                    waited = await bucket.aacquire(
+                    waited, receipt = await bucket.aacquire_grant(
                         model=str(kwargs.get("model") or ""),
                         max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
                         tokens=booked, kind=_request_kind(kwargs))
@@ -862,13 +888,14 @@ class LAProxyHooks(CustomLogger):
                     # provider has not rejected yet): acquire on rpm alone and book nothing —
                     # the upstream 400 must answer and teach the real cap (fix 4), not a
                     # self-raised 429.
-                    _book_call(kwargs, 0)
                     print(f"la_proxy_hooks: estimated {booked} tokens never fit tpm; "
                           "acquiring on rpm alone", file=sys.stderr)
-                    waited = await bucket.aacquire(
+                    waited, receipt = await bucket.aacquire_grant(
                         model=str(kwargs.get("model") or ""),
                         max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
                         tokens=0)
+                if receipt is not None:
+                    _book_call(kwargs, receipt)      # only AFTER the grant (0.63.3)
             except Exception as exc:
                 from rate_limiter import RateLimitTimeout
                 if not isinstance(exc, RateLimitTimeout):
@@ -888,6 +915,10 @@ class LAProxyHooks(CustomLogger):
         return normalize_nvidia_kwargs(kwargs) if _is_nvidia(kwargs) else changed
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        # 0.63.3: this call's reservation leaves the registry on ANY failure — no settle.
+        # A failed call's sidecar booking STAYS (the provider may have counted its tokens);
+        # only the receipt reference is dropped, so a recycled call id can never settle it.
+        _take_booked(kwargs or {})
         # fix 4, any provider: a 400 naming the provider's max_tokens cap is remembered, so the
         # router's BadRequest retry and every later request go out clamped to it.
         cap = learn_output_cap(kwargs or {})
@@ -964,12 +995,9 @@ class LAProxyHooks(CustomLogger):
                         + int(getattr(usage, "completion_tokens", 0) or 0)
             except (TypeError, ValueError):
                 used = None
-        try:
-            booked = _take_booked(kwargs or {})
-        except (TypeError, ValueError):
-            booked = 0
+        receipt = _take_booked(kwargs or {})
         bucket.note_success(str((kwargs or {}).get("model") or ""),
-                            tokens_used=used, booked=booked)
+                            tokens_used=used, receipt=receipt)
 
     async def async_pre_request_hook(self, model, messages, kwargs):
         # fix 7, native Anthropic lane only (LA_PASSTHROUGH_MODELS set): fold per-turn effort into

@@ -101,6 +101,8 @@ import sys
 import time
 from pathlib import Path
 
+from quota_ledger import Receipt
+
 DEFAULT_STATE = Path.home() / ".claude" / "free-agents" / ".nvidia_throttle_state"
 WINDOW_SECONDS = 60.0
 DEFAULT_BUCKET_CAPACITY = 6  # Small capacity for smooth limiting
@@ -111,6 +113,10 @@ DEFAULT_429_MAX_COOLDOWN = 300.0      # Max cooldown seconds (was 120 max_wait)
 DEFAULT_429_BACKOFF_MULTIPLIER = 2.0  # Exponential backoff multiplier
 DEFAULT_429_MAX_RETRIES = 5           # Max retry attempts before giving up
 DEFAULT_MAX_WAIT = 300.0              # Queue bound (0.20.11 documented 300; code kept 120 until 0.22.0)
+# The patient-tier ceiling on a load-stretched wait (stretched_wait's cap). la_proxy_hooks
+# derives its booking-record bound from this — ONE source of truth for the longest a live
+# request can sit in the queue.
+STRETCHED_WAIT_CAP = 1800.0
 
 # The saved picker key "cooldown" is the BASE cooldown (kept under its old name so saved
 # files from before the backoff stay valid).
@@ -258,13 +264,16 @@ def _prune_waiters(waiters: dict, now: float, ttl: float) -> int:
 
 
 def _register_waiter(waiters: dict, token: str, owner: str, cls: str, kind: str,
-                     model, now: float) -> None:
+                     model, now: float, tokens: int = 0) -> None:
     """Register or heartbeat one waiter. `arrived` is set once and never resets; every
-    call refreshes last_seen (the heartbeat that survives long cooldowns)."""
+    call refreshes last_seen (the heartbeat that survives long cooldowns). `tokens` is
+    the caller's estimate, recorded ONCE ("tok") so the granting poll can book the
+    WINNER's quota and mint its receipt (0.63.3); a heartbeat never overwrites it."""
     w = waiters.get(token)
     if w is None:
         waiters[token] = {"owner": owner, "arrived": now, "last_seen": now,
-                          "class": cls, "kind": kind, "model": model or ""}
+                          "class": cls, "kind": kind, "model": model or "",
+                          "tok": int(tokens)}
     else:
         w["last_seen"] = now
         w["class"] = cls
@@ -484,9 +493,23 @@ def _quota_wait(quota, now: float, tokens: int) -> float:
     return quota.room(int(tokens), now)
 
 
-def _quota_book(quota, now: float, tokens: int) -> None:
-    if quota is not None and tokens:
-        quota.book(int(tokens), now)
+def _quota_book(quota, now: float, tokens: int):
+    """Book tokens in the sidecar at the grant instant; returns the reservation's
+    Receipt (None when this provider has no sidecar). A 0-token grant still books:
+    the request counts, and its receipt settles the real usage later (0.63.3)."""
+    if quota is None:
+        return None
+    return quota.book(int(tokens), now)
+
+
+def _book_winner(lim, w: dict, now: float) -> None:
+    """Grant-time quota booking for a queue handoff: the WINNER's estimate (recorded
+    at registration as "tok") is booked and its receipt rides in the waiter entry
+    ("rcp") until the winner acks its next poll (0.63.3). Without a sidecar this
+    records nothing, exactly as before receipts existed."""
+    r = _quota_book(lim.quota, now, int(w.get("tok") or 0))
+    if r is not None:
+        w["rcp"] = r.to_json()
 
 
 def _cool_model(models: dict, model: str, now: float, retry_after: float | None,
@@ -547,6 +570,7 @@ class SmoothTokenBucket:
         self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}, live-editable
         self._waiters: dict = {}          # fairness queue (same schema as the window's)
         self._deficit: dict = {}          # deficit policy residuals
+        self._grant_receipts: dict = {}   # 0.63.3: token -> Receipt, born at the grant
         self._grants: list = []           # rolling 60s grant log; feeds the lane share cap
         self._load()
 
@@ -663,7 +687,8 @@ class SmoothTokenBucket:
 
             if now < self._cooldown_until:
                 if token is not None:
-                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now,
+                                     tokens=tokens)
                 self._save_state(fd)
                 return self._cooldown_until - now
 
@@ -672,7 +697,8 @@ class SmoothTokenBucket:
                 # L1 (0.62.0): a cooling model never gets a token — the request waits in
                 # the queue (registered waiter, heartbeats continue) instead of firing.
                 if token is not None:
-                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now,
+                                     tokens=tokens)
                 self._save_state(fd)
                 return model_wait
 
@@ -682,7 +708,8 @@ class SmoothTokenBucket:
             if qwait > 0:
                 # C2: a sidecar dimension lacks room — wait WITHOUT consuming a main token
                 if token is not None:
-                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now,
+                                     tokens=tokens)
                 self._save_state(fd)
                 return qwait
 
@@ -704,7 +731,10 @@ class SmoothTokenBucket:
             # a granted entry means our token was already booked for us by the granting poll
             own_w = self._waiters.get(token)
             if own_w is not None and "granted" in own_w:
+                rcp = own_w.get("rcp")     # the granting poll's receipt for OUR estimate
                 self._waiters.pop(token, None)
+                if rcp:
+                    self._grant_receipts[token] = Receipt.from_json(rcp)
                 self._save_state(fd)
                 return 0.0
 
@@ -716,12 +746,13 @@ class SmoothTokenBucket:
                     self._waiters.pop(token, None)
                     self._tokens -= cost
                     self._grants.append({"t": now, "o": owner, "c": cls, "k": _kind()})
-                    _quota_book(self.quota, now, tokens)
+                    self._grant_receipts[token] = _quota_book(self.quota, now, tokens)
                     self._consecutive_429s = 0
                     self._last_429_time = 0.0
                     self._save_state(fd)
                     return 0.0
-                _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                _register_waiter(self._waiters, token, owner, cls, wkind, model, now,
+                                 tokens=tokens)
                 self._save_state(fd)
                 return max(1e-3, need_seconds())
 
@@ -745,9 +776,11 @@ class SmoothTokenBucket:
                         self._tokens -= w_cost
                         self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", cls),
                                  "k": w.get("kind", "interactive")})
-                        _quota_book(self.quota, now, tokens)
+                        # the WINNER's estimate is booked; its own ack delivers the receipt
+                        _book_winner(self, w, now)
                         w["granted"] = now
-                        _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                        _register_waiter(self._waiters, token, owner, cls, wkind, model, now,
+                                         tokens=tokens)
                         self._consecutive_429s = 0
                         self._last_429_time = 0.0
                         self._save_state(fd)
@@ -756,12 +789,15 @@ class SmoothTokenBucket:
                     self._tokens -= w_cost
                     self._grants.append({"t": now, "o": w["owner"], "c": w.get("class", "normal"),
                                  "k": w.get("kind", "interactive")})
+                    _book_winner(self, w, now)
                     w["granted"] = now
-                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+                    _register_waiter(self._waiters, token, owner, cls, wkind, model, now,
+                                     tokens=tokens)
                     self._save_state(fd)
                     return max(1e-3, need_seconds())
 
-            _register_waiter(self._waiters, token, owner, cls, wkind, model, now)
+            _register_waiter(self._waiters, token, owner, cls, wkind, model, now,
+                             tokens=tokens)
             self._save_state(fd)
             return max(1e-3, need_seconds())
         finally:
@@ -899,10 +935,11 @@ class SmoothTokenBucket:
             os.close(fd)
 
     def note_success(self, model: str | None = None, tokens_used: int | None = None,
-                     booked: int = 0) -> None:
+                     receipt=None) -> None:
         """A completed request: clear that model's entry and reset the global counter.
-        0.62.0 C2: when the real usage is known, refund (booked - tokens_used) in the
-        quota sidecar."""
+        0.63.3: reconcile the request's OWN reservation — settle(receipt, tokens_used)
+        refunds its over-estimate in the receipt's own stamp/day/week (idempotently);
+        receipt=None (or no sidecar) writes nothing to the ledger."""
         fd = self._locked()
         try:
             now = self._clock()
@@ -915,8 +952,13 @@ class SmoothTokenBucket:
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
-        if self.quota is not None and tokens_used is not None and booked > tokens_used:
-            self.quota.refund(booked - tokens_used, self._clock())
+        if self.quota is not None and receipt is not None:
+            self.quota.settle(receipt, tokens_used, self._clock())
+
+    def _take_grant_receipt(self, token: str):
+        """Pop the Receipt born at THIS token's grant (None when the grant carried no
+        sidecar booking). One-shot: the acquire loop takes it on success."""
+        return self._grant_receipts.pop(token, None)
 
     def note_quota_headers(self, headers) -> None:
         """0.62.0 C2: adopt x-ratelimit-* headers into the sidecar (they override local)."""
@@ -942,6 +984,7 @@ class SmoothTokenBucket:
 
     def _release(self, token: str) -> None:
         """Deregister one waiter (the timeout/exception path); a no-op when absent."""
+        self._grant_receipts.pop(token, None)   # a receipt never taken dies with the wait
         fd = self._locked()
         try:
             now = self._clock()
@@ -957,6 +1000,15 @@ class SmoothTokenBucket:
                 tokens: int = 0) -> float:
         """Block until a token is taken; every sleep is clamped to waiter_poll_seconds so a
         long machine-wide cooldown never stops the queue heartbeats (same as the window)."""
+        waited, _rc = self.acquire_grant(max_wait=max_wait, priority=priority, kind=kind,
+                                         model=model, tokens=tokens)
+        return waited
+
+    def acquire_grant(self, max_wait: float | None = None, priority: bool | None = None,
+                      kind: str | None = None, model: str | None = None,
+                      tokens: int = 0):
+        """acquire(), returning (seconds waited, the reservation's Receipt | None) —
+        the receipt a success settles against (0.63.3)."""
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())
@@ -966,7 +1018,7 @@ class SmoothTokenBucket:
                 need = self.try_acquire(priority=priority, token=token, kind=kind,
                                         model=model, tokens=tokens)
                 if need == 0.0:
-                    return waited
+                    return waited, self._take_grant_receipt(token)
                 if need == float("inf"):
                     raise RateLimitTimeout(
                         f"ineligible: {tokens} tokens can never fit this provider's limits")
@@ -981,6 +1033,15 @@ class SmoothTokenBucket:
     async def aacquire(self, max_wait: float | None = None, priority: bool | None = None,
                        kind: str | None = None, model: str | None = None,
                        tokens: int = 0) -> float:
+        waited, _rc = await self.aacquire_grant(max_wait=max_wait, priority=priority,
+                                                kind=kind, model=model, tokens=tokens)
+        return waited
+
+    async def aacquire_grant(self, max_wait: float | None = None,
+                             priority: bool | None = None, kind: str | None = None,
+                             model: str | None = None, tokens: int = 0):
+        """aacquire(), returning (seconds waited, the reservation's Receipt | None) —
+        the receipt a success settles against (0.63.3)."""
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())
@@ -990,7 +1051,7 @@ class SmoothTokenBucket:
                 need = self.try_acquire(priority=priority, token=token, kind=kind,
                                         model=model, tokens=tokens)
                 if need == 0.0:
-                    return waited
+                    return waited, self._take_grant_receipt(token)
                 if need == float("inf"):
                     raise RateLimitTimeout(
                         f"ineligible: {tokens} tokens can never fit this provider's limits")
@@ -1057,6 +1118,7 @@ class SlidingWindowLimiter:
         self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}
         self._waiters: dict = {}          # fairness queue: token -> waiter entry
         self._deficit: dict = {}          # deficit policy: owner -> residual seconds
+        self._grant_receipts: dict = {}   # 0.63.3: token -> Receipt, born at the grant
 
     def _locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -1182,7 +1244,8 @@ class SlidingWindowLimiter:
             if now < cooldown_until:
                 if token is not None:
                     # no grants during a machine-wide pause, but the heartbeat continues
-                    _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                    _register_waiter(waiters, token, owner, cls, wkind, model, now,
+                                     tokens=tokens)
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return cooldown_until - now
 
@@ -1191,7 +1254,8 @@ class SlidingWindowLimiter:
                 # L1 (0.62.0): a cooling model never gets a stamp — the request waits in
                 # the queue (registered waiter, heartbeats continue) instead of firing.
                 if token is not None:
-                    _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                    _register_waiter(waiters, token, owner, cls, wkind, model, now,
+                                     tokens=tokens)
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return model_wait
 
@@ -1201,7 +1265,8 @@ class SlidingWindowLimiter:
             if qwait > 0:
                 # C2: a sidecar dimension lacks room — wait WITHOUT consuming a stamp
                 if token is not None:
-                    _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                    _register_waiter(waiters, token, owner, cls, wkind, model, now,
+                                     tokens=tokens)
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return qwait
 
@@ -1224,7 +1289,10 @@ class SlidingWindowLimiter:
             # a granted entry means our slot was already booked for us by the granting poll
             own_w = waiters.get(token)
             if own_w is not None and "granted" in own_w:
+                rcp = own_w.get("rcp")     # the granting poll's receipt for OUR estimate
                 waiters.pop(token, None)
+                if rcp:
+                    self._grant_receipts[token] = Receipt.from_json(rcp)
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return 0.0
 
@@ -1234,12 +1302,13 @@ class SlidingWindowLimiter:
                 if capacity_free:
                     waiters.pop(token, None)
                     stamps.append(_stamp(now, owner))
-                    _quota_book(self.quota, now, tokens)
+                    self._grant_receipts[token] = _quota_book(self.quota, now, tokens)
                     self._consecutive_429s = 0
                     self._last_429_time = 0.0
                     self._write(fd, stamps, cooldown_until, 0, 0.0, models)
                     return 0.0
-                _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                _register_waiter(waiters, token, owner, cls, wkind, model, now,
+                                 tokens=tokens)
                 self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                 return need_seconds()
 
@@ -1263,21 +1332,26 @@ class SlidingWindowLimiter:
                         # L5 (0.62.0): serve the WINNER (book it as granted) and keep the
                         # caller's queue age — popping the winner stole its `arrived`.
                         stamps.append(_stamp(now, w["owner"]))
-                        _quota_book(self.quota, now, tokens)
+                        # the WINNER's estimate is booked; its own ack delivers the receipt
+                        _book_winner(self, w, now)
                         w["granted"] = now
-                        _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                        _register_waiter(waiters, token, owner, cls, wkind, model, now,
+                                         tokens=tokens)
                         self._consecutive_429s = 0
                         self._last_429_time = 0.0
                         self._write(fd, stamps, cooldown_until, 0, 0.0, models)
                         return need_seconds()
                     # book the slot under the WINNER's owner; the winner acks on its next poll
                     stamps.append(_stamp(now, w["owner"]))
+                    _book_winner(self, w, now)
                     w["granted"] = now
-                    _register_waiter(waiters, token, owner, cls, wkind, model, now)
+                    _register_waiter(waiters, token, owner, cls, wkind, model, now,
+                                     tokens=tokens)
                     self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
                     return need_seconds()
 
-            _register_waiter(waiters, token, owner, cls, wkind, model, now)
+            _register_waiter(waiters, token, owner, cls, wkind, model, now,
+                             tokens=tokens)
             self._write(fd, stamps, cooldown_until, consecutive_429s, last_429_time, models)
             return need_seconds()
         finally:
@@ -1345,12 +1419,13 @@ class SlidingWindowLimiter:
             os.close(fd)
 
     def note_success(self, model: str | None = None, tokens_used: int | None = None,
-                     booked: int = 0) -> None:
+                     receipt=None) -> None:
         """A completed request: clear that model's cooldown entry, and reset the global
         backoff counter. The ONLY resets (0.40.0) — an expired pause no longer clears
         anything, or a model throttled for hours retried at base cooldown forever.
-        0.62.0 C2: when the real usage is known, refund (booked - tokens_used) in the
-        quota sidecar."""
+        0.63.3: reconcile the request's OWN reservation — settle(receipt, tokens_used)
+        refunds its over-estimate in the receipt's own stamp/day/week (idempotently);
+        receipt=None (or no sidecar) writes nothing to the ledger."""
         fd = self._locked()
         try:
             now = self._clock()
@@ -1361,8 +1436,13 @@ class SlidingWindowLimiter:
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
-        if self.quota is not None and tokens_used is not None and booked > tokens_used:
-            self.quota.refund(booked - tokens_used, self._clock())
+        if self.quota is not None and receipt is not None:
+            self.quota.settle(receipt, tokens_used, self._clock())
+
+    def _take_grant_receipt(self, token: str):
+        """Pop the Receipt born at THIS token's grant (None when the grant carried no
+        sidecar booking). One-shot: the acquire loop takes it on success."""
+        return self._grant_receipts.pop(token, None)
 
     def note_quota_headers(self, headers) -> None:
         """0.62.0 C2: adopt x-ratelimit-* headers into the sidecar (they override local)."""
@@ -1388,6 +1468,7 @@ class SlidingWindowLimiter:
 
     def _release(self, token: str) -> None:
         """Deregister one waiter (the timeout/exception path); a no-op when absent."""
+        self._grant_receipts.pop(token, None)   # a receipt never taken dies with the wait
         fd = self._locked()
         try:
             now = self._clock()
@@ -1407,6 +1488,15 @@ class SlidingWindowLimiter:
         heartbeats it on every poll; every sleep is clamped to waiter_poll_seconds, so a long
         machine-wide cooldown (max_cooldown up to 900s) never stops the heartbeats and the
         waiter never loses its queue position to the stale-waiter TTL."""
+        waited, _rc = self.acquire_grant(max_wait=max_wait, priority=priority, kind=kind,
+                                         model=model, tokens=tokens)
+        return waited
+
+    def acquire_grant(self, max_wait: float | None = None, priority: bool | None = None,
+                      kind: str | None = None, model: str | None = None,
+                      tokens: int = 0):
+        """acquire(), returning (seconds waited, the reservation's Receipt | None) —
+        the receipt a success settles against (0.63.3)."""
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())
@@ -1416,7 +1506,7 @@ class SlidingWindowLimiter:
                 need = self.try_acquire(priority=priority, token=token, kind=kind,
                                         model=model, tokens=tokens)
                 if need == 0.0:
-                    return waited
+                    return waited, self._take_grant_receipt(token)
                 if need == float("inf"):
                     raise RateLimitTimeout(
                         f"ineligible: {tokens} tokens can never fit this provider's limits")
@@ -1432,6 +1522,15 @@ class SlidingWindowLimiter:
                        kind: str | None = None, model: str | None = None,
                        tokens: int = 0) -> float:
         """Async twin of acquire() -- sleeps without blocking the proxy's event loop."""
+        waited, _rc = await self.aacquire_grant(max_wait=max_wait, priority=priority,
+                                                kind=kind, model=model, tokens=tokens)
+        return waited
+
+    async def aacquire_grant(self, max_wait: float | None = None,
+                             priority: bool | None = None, kind: str | None = None,
+                             model: str | None = None, tokens: int = 0):
+        """aacquire(), returning (seconds waited, the reservation's Receipt | None) —
+        the receipt a success settles against (0.63.3)."""
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())
@@ -1441,7 +1540,7 @@ class SlidingWindowLimiter:
                 need = self.try_acquire(priority=priority, token=token, kind=kind,
                                         model=model, tokens=tokens)
                 if need == 0.0:
-                    return waited
+                    return waited, self._take_grant_receipt(token)
                 if need == float("inf"):
                     raise RateLimitTimeout(
                         f"ineligible: {tokens} tokens can never fit this provider's limits")

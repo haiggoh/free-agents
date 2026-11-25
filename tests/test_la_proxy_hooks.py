@@ -760,15 +760,15 @@ class GrantPathTests(unittest.TestCase):
         hooks._bucket = SlidingWindowLimiter(os.path.join(self.dir.name, "s"), rpm=40)
         return hooks
 
-    def test_hook_passes_model_to_aacquire(self):
+    def test_hook_passes_model_to_aacquire_grant(self):
         hooks = self._hooks()
         seen = {}
 
-        async def fake_aacquire(**kw):
+        async def fake_aacquire_grant(**kw):
             seen.update(kw)
-            return 0.0
+            return 0.0, None                      # 0.63.3: (waited, receipt)
 
-        hooks._bucket.aacquire = fake_aacquire
+        hooks._bucket.aacquire_grant = fake_aacquire_grant
         asyncio.run(hooks.async_pre_call_deployment_hook({"model": "nvidia_nim/m1"}, None))
         self.assertEqual(seen.get("model"), "nvidia_nim/m1", seen)
 
@@ -780,7 +780,7 @@ class GrantPathTests(unittest.TestCase):
         async def boom(**kw):
             raise RateLimitTimeout("no NVIDIA slot within 300s")
 
-        hooks._bucket.aacquire = boom
+        hooks._bucket.aacquire_grant = boom
         with self.assertRaises(litellm.RateLimitError) as cm:
             asyncio.run(hooks.async_pre_call_deployment_hook({"model": "nvidia_nim/m1"}, None))
         self.assertTrue(getattr(cm.exception, "la_self_raised", False),
@@ -790,12 +790,15 @@ class GrantPathTests(unittest.TestCase):
 class TokensBookingTests(unittest.TestCase):
     """0.62.3 review fix: the proxy hook books tokens= at grant time and reconciles
     booked-vs-used on success (0.62.0 granted with tokens=0 — TPM accounting was
-    limiter-API-only — and never refunded the estimate)."""
+    limiter-API-only — and never refunded the estimate). 0.63.3: the grant returns
+    the reservation's Receipt; the hook records it by call id and hands it to
+    note_success(receipt=) — the settle reconciles exactly that reservation."""
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.mod = load_hooks()
+        self.mod._CALL_BOOKED.clear()
         self.hooks = self.mod.LAProxyHooks()
         self.hooks._bucket = None
 
@@ -808,12 +811,17 @@ class TokensBookingTests(unittest.TestCase):
             def model_cooling(self, model):
                 return 0.0
 
-            async def aacquire(self, **kw):
+            async def aacquire_grant(self, **kw):
                 self.acquire_kwargs = kw
-                return 0.0
+                import time as _t
+                import uuid as _u
+                from quota_ledger import Receipt
+                rec = Receipt(id=_u.uuid4().hex, n=int(kw.get("tokens") or 0),
+                              at=_t.time(), day="1970-01-01", week="1970-W01")
+                return 0.0, rec
 
-            def note_success(self, model=None, tokens_used=None, booked=0):
-                self.success = (model, tokens_used, booked)
+            def note_success(self, model=None, tokens_used=None, receipt=None):
+                self.success = (model, tokens_used, receipt)
         return FakeBucket()
 
     def test_pre_call_books_estimated_tokens(self):
@@ -822,11 +830,12 @@ class TokensBookingTests(unittest.TestCase):
         kwargs = {"model": "nvidia_nim/acme/x", "max_tokens": 1000, "litellm_call_id": "c-1",
                   "messages": [{"role": "user", "content": "hi " * 100}]}
         asyncio.run(self.hooks.async_pre_call_deployment_hook(kwargs, None))
-        self.assertIsNotNone(b.acquire_kwargs, "aacquire must be called")
+        self.assertIsNotNone(b.acquire_kwargs, "aacquire_grant must be called")
         booked = b.acquire_kwargs.get("tokens", 0)
         self.assertGreaterEqual(booked, 1000, f"tokens= must cover max_tokens, got {booked}")
-        self.assertEqual(self.mod._CALL_BOOKED.get("c-1"), booked,
-                         "the booked amount is kept by call id for the success hook")
+        got = self.mod._CALL_BOOKED.get("c-1")
+        self.assertIsNotNone(got, "the grant's Receipt is kept by call id for the success hook")
+        self.assertEqual(got.n, booked, "the receipt records the booked estimate")
 
     def test_booked_tokens_never_reach_the_upstream_request(self):
         # 0.63.1 hotfix: 0.62.3 put `_la_booked_tokens` INTO the request kwargs; LiteLLM forwarded
@@ -854,14 +863,16 @@ class TokensBookingTests(unittest.TestCase):
                          f"X-LA-Agent must map to kind=agent, got {b.acquire_kwargs}")
 
     def test_success_reconciles_booked_vs_used(self):
+        from quota_ledger import Receipt
         b = self._fake_bucket()
         self.hooks._bucket = b
-        self.mod._CALL_BOOKED["c-3"] = 1250
+        rec = Receipt(id="ab" * 16, n=1250, at=1.0, day="1970-01-01", week="1970-W01")
+        self.mod._CALL_BOOKED["c-3"] = rec
         kwargs = {"model": "nvidia_nim/acme/x", "litellm_call_id": "c-3"}
         resp = {"usage": {"prompt_tokens": 1000, "completion_tokens": 250}}
         asyncio.run(self.hooks.async_log_success_event(kwargs, resp, 0, 1))
-        self.assertEqual(b.success, ("nvidia_nim/acme/x", 1250, 1250),
-                         f"note_success must get tokens_used=1250, booked=1250, got {b.success}")
+        self.assertEqual(b.success, ("nvidia_nim/acme/x", 1250, rec),
+                         f"note_success must get tokens_used=1250 and the receipt, got {b.success}")
         self.assertNotIn("c-3", self.mod._CALL_BOOKED, "the success hook pops its entry")
 
 

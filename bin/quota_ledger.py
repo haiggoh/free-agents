@@ -81,7 +81,8 @@ def _empty() -> dict:
             "week": {"key": None, "requests": 0, "tokens": 0,
                      "limit_rpw": None, "limit_tpdw": None},
             "exhausted": {"tpm": 0.0, "day": 0.0, "week": 0.0},
-            "settled": {}}
+            "settled": {},
+            "receipts": {}}
 
 
 class QuotaLedger:
@@ -192,6 +193,12 @@ class QuotaLedger:
             self._prune_settled(st, now)
             receipt = Receipt(id=uuid.uuid4().hex, n=int(tokens), at=float(now),
                               day=_utc_day(now), week=_utc_week(now))
+            # The receipt RECORD is what distinguishes "our booking, stamp expired"
+            # (settle -> settled, day/week only) from a receipt this file never knew
+            # (an old sidecar writer dropped it — Policy U -> unknown). Old writers
+            # drop the whole receipts key; the stamps' ids survive inside their list.
+            st["receipts"][receipt.id] = {"n": receipt.n, "at": receipt.at,
+                                          "day": receipt.day, "week": receipt.week}
             if self.limits.tpm:
                 st["tpm"]["stamps"].append({"t": now, "n": int(tokens),
                                             "id": receipt.id})
@@ -209,12 +216,17 @@ class QuotaLedger:
 
     @staticmethod
     def _prune_settled(st: dict, now: float) -> None:
-        settled = st.get("settled")
-        if isinstance(settled, dict):
-            stale = [k for k, v in settled.items()
-                     if now - float(v) > SETTLED_TTL]
-            for k in stale:
-                settled.pop(k, None)
+        for key in ("settled", "receipts"):
+            d = st.get(key)
+            if isinstance(d, dict):
+                if key == "settled":
+                    stale = [k for k, v in d.items()
+                             if now - float(v) > SETTLED_TTL]
+                else:
+                    stale = [k for k, v in d.items()
+                             if now - float(v.get("at", 0.0)) > SETTLED_TTL]
+                for k in stale:
+                    d.pop(k, None)
 
     def settle(self, receipt: Receipt, used: int | None, now: float) -> str:
         """Reconcile EXACTLY the reservation `receipt` was booked as (idempotent).
@@ -240,6 +252,7 @@ class QuotaLedger:
                 return "already"
             used = int(used)
             tpm_active = bool(self.limits.tpm)
+            known = str(receipt.id) in st.get("receipts", {})
             target = None
             if tpm_active:
                 for s in st["tpm"]["stamps"]:
@@ -262,8 +275,10 @@ class QuotaLedger:
                     st["day"]["tokens"] = max(0, st["day"]["tokens"] - diff)
                 if st["week"]["key"] == receipt.week:
                     st["week"]["tokens"] = max(0, st["week"]["tokens"] - diff)
-                # a missing stamp is Policy U only when a stamp was expected at all
-                outcome = "unknown" if (tpm_active and target is None) else "settled"
+                # Policy U: this file never knew the receipt (an old sidecar writer
+                # dropped the receipts record). An expired stamp alone is NOT unknown —
+                # the receipt record survives it (long streams settle this way).
+                outcome = "unknown" if not known else "settled"
             settled[str(receipt.id)] = float(now)
             self._save(fd, st)
             return outcome
