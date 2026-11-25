@@ -13,7 +13,7 @@ Usage:
       explicit | saved-lane | last-launch | provider-default.
 
 Environment:
-  FREE_AGENTS_CONFIG_DIR   session-menu dir (default ~/.claude/free-agents/session-menu)
+  FREE_AGENTS_CONFIG_DIR   session-menu dir, canonical (alias LA_SESSION_MENU_CONFIG_DIR must agree when both set; default ~/.claude/free-agents/session-menu)
   LA_LAST_EFFORT_FILE      last-effort state file override (see bin/last-effort.py)
 An invalid --explicit LEVEL aborts with ValueError naming it (exit 2 with the message on
 stderr). A missing/corrupt state file fails OPEN (falls through to the next layer).
@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -50,10 +49,8 @@ def effort_to_reasoning(level):
 def _config_dir(config_dir=None) -> Path:
     if config_dir is not None:
         return Path(config_dir)
-    env = os.environ.get("FREE_AGENTS_CONFIG_DIR")
-    if env:
-        return Path(env)
-    return Path.home() / ".claude" / "free-agents" / "session-menu"
+    import session_menu_state as sms   # ONE resolver for every reader (R1-A, 0.63.3)
+    return sms.config_dir()
 
 
 def saved_effort(config_dir=None, lane: str = "remote_api_session") -> str | None:

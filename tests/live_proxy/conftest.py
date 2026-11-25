@@ -11,7 +11,7 @@ serial with generous timeouts. (The var is FA_*, not LA_*: tests/conftest.py scr
 inherited LA_* before collection, and a gate knob must survive that scrub.)
 
 SANDBOX: every child gets its own tmp dir and explicit state env
-(LA_NVIDIA_THROTTLE_STATE / FA_LIMITER_DIR / LA_SESSION_MENU_CONFIG_DIR under it). A test
+(LA_NVIDIA_THROTTLE_STATE / FA_LIMITER_DIR / FREE_AGENTS_CONFIG_DIR under it). A test
 or child that can resolve the REAL ~/.claude/free-agents state is a bug (plan rule 8);
 the self-check test_rig_never_uses_live_state asserts on the dumped child env.
 """
@@ -127,7 +127,7 @@ class LiveProxy:
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "LA_NVIDIA_THROTTLE_STATE": str(tmp / "state"),
             "FA_LIMITER_DIR": str(tmp / "limiter"),
-            "LA_SESSION_MENU_CONFIG_DIR": str(tmp / "menu"),
+            "FREE_AGENTS_CONFIG_DIR": str(tmp / "menu"),
             "PYTHONPATH": str(BIN) + os.pathsep + env.get("PYTHONPATH", ""),
         })
         if extra_env:

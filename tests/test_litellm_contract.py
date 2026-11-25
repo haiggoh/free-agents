@@ -402,7 +402,7 @@ class LiteLLMContract(unittest.TestCase):
         cfg_home.mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith("LA_NVIDIA_")}
         env.update(LA_PROXY_HOOKS_RATE_LIMIT="1",
-                   LA_SESSION_MENU_CONFIG_DIR=str(cfg_home),
+                   FREE_AGENTS_CONFIG_DIR=str(cfg_home),
                    LA_NVIDIA_MODE=mode,
                    # CONTENTION PIN (2026-10-25, the fa-gate-test-flakes pattern): the bucket
                    # refills at rpm/60 tokens/s. At the default 40 that is ~0.67 tokens/s, so

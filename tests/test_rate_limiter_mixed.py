@@ -16,6 +16,8 @@ import unittest.mock
 import uuid
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 BIN = REPO / "bin"
 BASE = "6a7cfd7"          # branch point: the old module
@@ -75,7 +77,7 @@ class MixedWriterSchemaTests(unittest.TestCase):
                if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
         cfg = tempfile.TemporaryDirectory()
         self.addCleanup(cfg.cleanup)
-        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg.name
+        env["FREE_AGENTS_CONFIG_DIR"] = cfg.name
         patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -128,6 +130,7 @@ class MixedWriterSchemaTests(unittest.TestCase):
 
 
 class MixedWriterProcessTests(unittest.TestCase):
+    pytestmark = pytest.mark.load_sensitive  # spawns real mp.Process workers; flaked under gate load 2026-11-22 (passes alone)
     """Cross-process: old and new workers hammer one file; old invariant (never overspend)
     holds, no worker crashes, and the new registry survives."""
 
@@ -178,7 +181,7 @@ class ObservabilityCliTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
         env["LA_NVIDIA_THROTTLE_STATE"] = os.path.join(self.tmp.name, "s")
-        env["LA_SESSION_MENU_CONFIG_DIR"] = self.tmp.name
+        env["FREE_AGENTS_CONFIG_DIR"] = self.tmp.name
         self.env = env
 
     def run_cli(self, *args, **kw):

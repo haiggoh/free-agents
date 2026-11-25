@@ -73,7 +73,7 @@ Environment:
   LA_NVIDIA_429_MAX_COOLDOWN  max cooldown seconds (cap for exponential backoff, default 300)
   LA_NVIDIA_429_BACKOFF_MULTIPLIER  exponential backoff multiplier (default 2.0)
   LA_NVIDIA_429_MAX_RETRIES   max retry attempts before giving up (default 5)
-  LA_SESSION_MENU_CONFIG_DIR  where the saved picker settings live (default: ~/.claude/free-agents/session-menu/)
+  FREE_AGENTS_CONFIG_DIR  where the saved picker settings live (alias: LA_SESSION_MENU_CONFIG_DIR; both set must agree; default: ~/.claude/free-agents/session-menu/)
   LA_NVIDIA_POLICY            grant policy: aging (default) | deficit | legacy (kill-switch)
   LA_NVIDIA_TIER1_SECONDS     aging tier 1 threshold seconds (default 45)
   LA_NVIDIA_TIER2_SECONDS     aging tier 2 threshold seconds (default 150)
@@ -141,10 +141,10 @@ def _saved_settings() -> dict:
 
     Read-only and fail-open to defaults: a proxy must never stop because a preference
     file is broken. session_menu_state validates types and ranges before returning."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import session_menu_state as sms
+    cfg = sms.config_dir()   # loud abort on a conflicting env pair — OUTSIDE the fail-open try
     try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        import session_menu_state as sms
-        cfg = os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR
         return sms.load(cfg).rate_limiter
     except Exception:
         return {}
@@ -181,12 +181,10 @@ _SETTINGS_CACHE = {}
 def _saved_settings_cached() -> dict:
     """_saved_settings() behind an mtime-keyed cache: one stat() per call instead of a
     read+parse, so the hot grant path can re-read saved settings (hot reload) cheaply."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import session_menu_state as sms
+    cfg = sms.config_dir()   # loud abort on a conflicting env pair — OUTSIDE the fail-open try
     try:
-        cfg = os.environ.get("LA_SESSION_MENU_CONFIG_DIR")
-        if not cfg:
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            import session_menu_state as sms
-            cfg = sms.REPO_CONFIG_DIR
         p = Path(cfg) / "session-menu.local.json"
         st = p.stat()
         key = (str(p), st.st_mtime_ns, st.st_size)

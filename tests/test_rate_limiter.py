@@ -181,7 +181,7 @@ class SavedSettingsTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.cfg = Path(self.tmp.name)
         self.env = {k: v for k, v in os.environ.items() if not k.startswith("LA_NVIDIA_")}
-        self.env["LA_SESSION_MENU_CONFIG_DIR"] = str(self.cfg)
+        self.env["FREE_AGENTS_CONFIG_DIR"] = str(self.cfg)
         self.state = os.path.join(self.tmp.name, "state")
 
     def save(self, doc):
@@ -251,7 +251,7 @@ class PerModelCooldownTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if not k.startswith("LA_NVIDIA_")}
         cfg_dir = tempfile.TemporaryDirectory()
         self.addCleanup(cfg_dir.cleanup)
-        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg_dir.name
+        env["FREE_AGENTS_CONFIG_DIR"] = cfg_dir.name
         patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -545,7 +545,7 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as cfg:
             with unittest.mock.patch.dict(os.environ, {
                     "LA_NVIDIA_THROTTLE_STATE": self.path, "LA_LIMITER_OWNER": "sess-A",
-                    "LA_SESSION_MENU_CONFIG_DIR": cfg}):
+                    "FREE_AGENTS_CONFIG_DIR": cfg}):
                 with open(self.path, "w") as f:
                     json.dump({"stamps": [], "limit": 40}, f)
                 import contextlib
@@ -570,7 +570,7 @@ class OwnerAttributionPriorityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as cfg:
             with unittest.mock.patch.dict(os.environ, {
                     "LA_NVIDIA_THROTTLE_STATE": self.path, "LA_LIMITER_OWNER": "sess-A",
-                    "LA_SESSION_MENU_CONFIG_DIR": cfg}):
+                    "FREE_AGENTS_CONFIG_DIR": cfg}):
                 with open(self.path, "w") as f:
                     json.dump({"stamps": [], "limit": 40}, f)
                 rc = rl.main(["lane-toggle"])
@@ -614,7 +614,7 @@ class WaiterQueueTests(unittest.TestCase):
                if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
         cfg = tempfile.TemporaryDirectory()
         self.addCleanup(cfg.cleanup)
-        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg.name
+        env["FREE_AGENTS_CONFIG_DIR"] = cfg.name
         patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -883,7 +883,7 @@ class DeficitPolicyTests(unittest.TestCase):
                if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
         cfg = tempfile.TemporaryDirectory()
         self.addCleanup(cfg.cleanup)
-        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg.name
+        env["FREE_AGENTS_CONFIG_DIR"] = cfg.name
         patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -998,7 +998,7 @@ class BucketFairnessTests(unittest.TestCase):
                if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
         cfg = tempfile.TemporaryDirectory()
         self.addCleanup(cfg.cleanup)
-        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg.name
+        env["FREE_AGENTS_CONFIG_DIR"] = cfg.name
         env["LA_LIMITER_RESERVE"] = "0.2"
         patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
@@ -1105,7 +1105,7 @@ class HotSettingsTests(unittest.TestCase):
         self.cfg = Path(self.tmp.name)
         env = {k: v for k, v in os.environ.items()
                if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
-        env["LA_SESSION_MENU_CONFIG_DIR"] = str(self.cfg)
+        env["FREE_AGENTS_CONFIG_DIR"] = str(self.cfg)
         patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)

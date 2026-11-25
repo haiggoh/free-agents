@@ -43,7 +43,7 @@ class StrayPDriver(unittest.TestCase):
         # never the user's real ~/.claude (this probe once removed a real setting).
         cfg = tempfile.mkdtemp(prefix="fa-stray-p-claude-")
         self.addCleanup(shutil.rmtree, cfg, True)
-        env = dict(os.environ, LA_SESSION_MENU_CONFIG_DIR=str(ROOT / "tests"), CLAUDE_CONFIG_DIR=cfg)
+        env = dict(os.environ, FREE_AGENTS_CONFIG_DIR=str(ROOT / "tests"), CLAUDE_CONFIG_DIR=cfg)
         env.pop("TERM_PROGRAM", None)
         if term_program:
             env["TERM_PROGRAM"] = term_program

@@ -17,11 +17,15 @@ import time
 import unittest
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / "bin" / "fa-prefill-measure.py"
 spec = importlib.util.spec_from_file_location("fa_prefill_measure", TOOL)
 fpm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fpm)
+
+pytestmark = pytest.mark.load_sensitive  # launches real claude -p through a lane proxy (subprocess); flaked under gate load 2026-11-22
 
 CANNED_RESULT = {
     "type": "result",

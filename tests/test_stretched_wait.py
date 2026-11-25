@@ -53,7 +53,7 @@ class StretchedWaitTests(unittest.TestCase):
         self.env = {"FA_PROVIDER_LIMITS": str(self.limits_path),
                     "FA_LIMITER_DIR": str(self.limiter_dir),
                     "LA_NVIDIA_THROTTLE_STATE": str(Path(self.tmp.name) / "nvidia-state"),
-                    "LA_SESSION_MENU_CONFIG_DIR": str(Path(self.tmp.name) / "menu"),
+                    "FREE_AGENTS_CONFIG_DIR": str(Path(self.tmp.name) / "menu"),
                     "LA_NVIDIA_MODE": "sliding_window"}
         self.patcher = unittest.mock.patch.dict(os.environ, self.env, clear=False)
         self.patcher.start()
@@ -102,7 +102,7 @@ class LoadDetectedTests(unittest.TestCase):
         self.env = {"FA_PROVIDER_LIMITS": str(self.limits_path),
                     "FA_LIMITER_DIR": str(self.limiter_dir),
                     "LA_NVIDIA_THROTTLE_STATE": str(Path(self.tmp.name) / "nvidia-state"),
-                    "LA_SESSION_MENU_CONFIG_DIR": str(Path(self.tmp.name) / "menu"),
+                    "FREE_AGENTS_CONFIG_DIR": str(Path(self.tmp.name) / "menu"),
                     "LA_NVIDIA_MODE": "sliding_window"}
         self.patcher = unittest.mock.patch.dict(os.environ, self.env, clear=False)
         self.patcher.start()

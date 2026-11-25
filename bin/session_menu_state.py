@@ -4,9 +4,10 @@
 Stores ONLY confirmed menu choices (effort per lane, NVIDIA rate-limiter settings, the alias each
 lane last STARTED) in a user-owned persistent location. No secrets, paths or history.
 
-The config dir is resolved per free-agents-resolve.sh pattern:
-  1. $FREE_AGENTS_CONFIG_DIR environment variable (developer override)
-  2. ~/.claude/free-agents/session-menu/ (default persistent location)
+The config dir is resolved AT CALL TIME by config_dir() (0.63.3):
+  1. $FREE_AGENTS_CONFIG_DIR (canonical developer override)
+  2. $LA_SESSION_MENU_CONFIG_DIR (alias; both set must AGREE or abort loudly)
+  3. ~/.claude/free-agents/session-menu/ (default persistent location)
 
 Schema 2 (0.22.0) adds `last_launched`. A schema-1 file loads unchanged and is migrated only by
 the next confirmed write, which keeps every validated effort and rate-limiter value. A file with
@@ -145,16 +146,56 @@ def _validate_thinking(values: dict) -> None:
 # A launcher alias: what csl / remote-session.sh / lowkey accept as a model name.
 _ALIAS_RE = __import__("re").compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}")
 
-# Resolve the session menu config directory for this installation.
-# Priority: environment variable > plugin cache location > source checkout.
-# The config dir uses a user-owned persistent location so state survives plugin updates.
-_FREE_AGENTS_CONFIG_DIR_ENV = os.environ.get("FREE_AGENTS_CONFIG_DIR")
-if _FREE_AGENTS_CONFIG_DIR_ENV:
-    REPO_CONFIG_DIR = Path(_FREE_AGENTS_CONFIG_DIR_ENV)
-else:
-    # Default to user-owned location for persistent state across plugin versions
-    # Using "free-agents" directory name since the plugin is now named free-agents
-    REPO_CONFIG_DIR = Path.home() / ".claude" / "free-agents" / "session-menu"
+# Config-dir resolution (0.63.3, R1-A): ONE canonical name, resolved AT CALL TIME.
+# Canonical: $FREE_AGENTS_CONFIG_DIR. Alias: $LA_SESSION_MENU_CONFIG_DIR (kept for
+# compatibility; when BOTH are set they must resolve to the same path or abort loudly).
+# The old split-brain — REPO_CONFIG_DIR fixed at import while rate_limiter/session_picker
+# read the alias per call — is gone: every reader calls config_dir() at call time.
+CONFIG_DIR_ENV = "FREE_AGENTS_CONFIG_DIR"
+CONFIG_DIR_ENV_ALIAS = "LA_SESSION_MENU_CONFIG_DIR"
+
+
+class ConfigDirConflict(RuntimeError):
+    """Both config-dir env vars are set and resolve to different paths."""
+
+
+def default_config_dir() -> Path:
+    """User-owned persistent location (survives plugin updates)."""
+    return Path.home() / ".claude" / "free-agents" / "session-menu"
+
+
+def config_dir() -> Path:
+    """Resolve the session-menu config dir at CALL time.
+
+    Neither var set -> default_config_dir(). Exactly one set -> that dir.
+    Both set -> must resolve to the same path, else ConfigDirConflict naming both.
+    """
+    canonical = os.environ.get(CONFIG_DIR_ENV)
+    alias = os.environ.get(CONFIG_DIR_ENV_ALIAS)
+    if canonical and alias:
+        a, b = Path(canonical), Path(alias)
+        if a.expanduser().resolve() != b.expanduser().resolve():
+            raise ConfigDirConflict(
+                f"{CONFIG_DIR_ENV}={canonical!r} and {CONFIG_DIR_ENV_ALIAS}={alias!r} "
+                f"resolve to different paths ({a.resolve()} != {b.resolve()}); unset one")
+        return a
+    if canonical:
+        return Path(canonical)
+    if alias:
+        return Path(alias)
+    return default_config_dir()
+
+
+# Backward-compatible import-time snapshot of the NAME only. Never read this in new
+# code — call config_dir() at call time so launchers/tests that set the env after
+# import are honored (the R1-A split-brain fix). A conflicting env pair does NOT abort
+# the import; the conflict raises loudly at the first real config_dir() call.
+try:
+    REPO_CONFIG_DIR = config_dir()
+except ConfigDirConflict:
+    REPO_CONFIG_DIR = default_config_dir()
+# Alias usable inside functions whose `config_dir` parameter shadows the function name.
+_config_dir_calltime = config_dir
 
 
 @dataclass
@@ -392,9 +433,9 @@ def _read(path: Path) -> tuple | None:
     return _parse(raw)
 
 
-def load(config_dir: Path | str = REPO_CONFIG_DIR) -> State:
+def load(config_dir: Path | str | None = None) -> State:
     """Read-only: never creates the file or the lock."""
-    config_dir = Path(config_dir)
+    config_dir = Path(config_dir) if config_dir is not None else _config_dir_calltime()
     state = State()
     try:
         found = _read(config_dir / PREFS_NAME)
@@ -444,7 +485,7 @@ def migrate_old_config() -> bool:
     if old_file is None:
         return False
 
-    new_config_dir = REPO_CONFIG_DIR
+    new_config_dir = _config_dir_calltime()
     new_file = new_config_dir / PREFS_NAME
 
     if new_file.exists():
@@ -793,6 +834,7 @@ def main(argv: list[str]) -> int:
     st.add_argument("lane", choices=list(ALLOWED_TEMPERATURE))
     st.add_argument("value")
     sub.add_parser("show", help="print the effective state as JSON")
+    sub.add_parser("config-dir", help="print the resolved config dir (call-time resolution)")
     sub.add_parser("memguard-env", help="print the memory-guard settings as shell-safe "
                                         "NAME=value lines (the launchers source them)")
     ia = sub.add_parser("set-intercept", help="persist intercept agents toggle")
@@ -811,7 +853,7 @@ def main(argv: list[str]) -> int:
 
     if args.cmd == "set":
         try:
-            warning = save_effort(REPO_CONFIG_DIR, args.lane, args.value)
+            warning = save_effort(_config_dir_calltime(), args.lane, args.value)
         except ValueError as exc:
             print(f"session_menu_state: {exc}", file=sys.stderr)
             return 2
@@ -821,7 +863,7 @@ def main(argv: list[str]) -> int:
         return 0
     if args.cmd == "set-temp":
         try:
-            warning = save_temperature(REPO_CONFIG_DIR, args.lane, args.value)
+            warning = save_temperature(_config_dir_calltime(), args.lane, args.value)
         except ValueError as exc:
             print(f"session_menu_state: {exc}", file=sys.stderr)
             return 2
@@ -831,7 +873,7 @@ def main(argv: list[str]) -> int:
         return 0
     if args.cmd == "set-intercept":
         try:
-            warning = save_intercept_agents(REPO_CONFIG_DIR, args.value)
+            warning = save_intercept_agents(_config_dir_calltime(), args.value)
         except ValueError as exc:
             print(f"session_menu_state: {exc}", file=sys.stderr)
             return 2
@@ -842,7 +884,7 @@ def main(argv: list[str]) -> int:
     if args.cmd == "set-thinking":
         value = {"true": True, "false": False, "default": None}[args.value]
         try:
-            warning = save_thinking_session(REPO_CONFIG_DIR, value)
+            warning = save_thinking_session(_config_dir_calltime(), value)
         except ValueError as exc:
             print(f"session_menu_state: {exc}", file=sys.stderr)
             return 2
@@ -852,12 +894,12 @@ def main(argv: list[str]) -> int:
         return 0
     if args.cmd == "kv-set":
         try:
-            current = dict(load(REPO_CONFIG_DIR).memguard["kv_dtype"])
+            current = dict(load(_config_dir_calltime()).memguard["kv_dtype"])
             if args.value == "auto":
                 current.pop(args.alias, None)
             else:
                 current[args.alias] = args.value
-            warning = save_memguard(REPO_CONFIG_DIR, {"kv_dtype": current})
+            warning = save_memguard(_config_dir_calltime(), {"kv_dtype": current})
         except ValueError as exc:
             print(f"session_menu_state: {exc}", file=sys.stderr)
             return 2
@@ -865,7 +907,10 @@ def main(argv: list[str]) -> int:
             print(f"session_menu_state: warning: {warning}", file=sys.stderr)
             return 1
         return 0
-    state = load(REPO_CONFIG_DIR)
+    if args.cmd == "config-dir":
+        print(_config_dir_calltime())
+        return 0
+    state = load(_config_dir_calltime())
     for warning in state.warnings:
         print(f"session_menu_state: warning: {warning}", file=sys.stderr)
     if args.cmd == "memguard-env":
@@ -892,4 +937,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except ConfigDirConflict as exc:
+        print(f"session_menu_state: {exc}", file=sys.stderr)
+        sys.exit(2)

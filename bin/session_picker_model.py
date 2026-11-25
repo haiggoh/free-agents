@@ -2390,7 +2390,7 @@ class RemoteFiltersScreen(Screen):
         """0.62.0 C9: persist a remote_filters toggle (schema 11) and regroup the list."""
         self.settings.remote_filters[key] = bool(v)
         import session_menu_state as _sms
-        _sms.save_remote_filters(_sms.REPO_CONFIG_DIR, key, bool(v))
+        _sms.save_remote_filters(_sms.config_dir(), key, bool(v))
         self._regroup()                       # this IS the remote filters screen's list owner
         self._regroup_remote_if_loaded()
 

@@ -13,6 +13,8 @@ import time
 import unittest
 from unittest.mock import patch
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "install/setup-api-keys.py"
 spec = importlib.util.spec_from_file_location("setup_api_keys", SCRIPT)
@@ -109,6 +111,7 @@ class SetupTests(unittest.TestCase):
                     store.save_new(name, "fixture-value")
         self.assertEqual(outside.read_text(), "original")
 
+    @pytest.mark.load_sensitive  # PTY paste; flaked in a loaded gate run 2026-11-22 (passes alone)
     def test_reject_multiline_commands_quotes_and_bad_account_id(self):
         for value in ("", "abc\nxyz", "export KEY=abc", "Bearer abc", '"abc"', "abc\x1b[1m", "üabc"):
             with self.subTest(value=value), self.assertRaises(setup.StoreError):
@@ -262,6 +265,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((self.keys / "mistral").read_bytes(), key + b"\n")
         self.assertEqual((self.keys / "siliconflow").read_bytes(), b"second-fixture\n")
 
+    @pytest.mark.load_sensitive  # PTY paste; flaked in a loaded gate run 2026-11-22 (passes alone)
     def test_multiline_paste_is_rejected_and_trailing_clipboard_newline_is_accepted(self):
         with self.terminal("mistral") as (fd, expect, output):
             expect(b"Finish:")
@@ -311,6 +315,7 @@ class SetupTests(unittest.TestCase):
                 store.save_new("github-models", "fixture-value")
         self.assertFalse(self.keys.exists())
 
+    @pytest.mark.load_sensitive  # PTY paste; flaked in a loaded gate run 2026-11-22 (passes alone)
     def test_bracketed_paste_advances_without_enter_and_returns_to_picker(self):
         import pty
         pid, fd = pty.fork()
