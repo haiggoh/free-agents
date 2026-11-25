@@ -27,6 +27,29 @@ class BuildSettings(unittest.TestCase):
             self.assertEqual(s.local_effort, "high", "the store's effort must be read")
 
 
+class RemoteFiltersSaveThroughSavers(unittest.TestCase):
+    def test_large_context_toggle_lands_in_the_savers_dir_not_repo_config(self):
+        # main 0.62.0 C9 wrote remote_filters straight to sms.REPO_CONFIG_DIR, the only setting
+        # that bypassed the injected saver: with LA_SESSION_MENU_CONFIG_DIR (GUI, tests) the
+        # read and the write landed in DIFFERENT dirs and the toggle never stuck
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as repo:
+            cfg = Path(d)
+            with mock.patch.object(sms, "REPO_CONFIG_DIR", Path(repo)):
+                s = pc.build_settings(None, pc.Savers(cfg))
+                scr = pc.build_screen(m.Nav("remote_filters", m.HOME_OWNED), s, {}).screen
+                row = next(a for a in scr.actions() if a.key == "d")
+                self.assertTrue(row.put, "the Large-context row must be a typed setting")
+                row.put(False)
+                self.assertIs(sms.load(cfg).remote_filters.get("large_context_only"), False,
+                              "toggle not in the savers dir")
+                # csl's route (Enter -> run()): main 0.62.0-0.63.2 raised AttributeError here
+                # ('RemoteFiltersScreen' has no '_regroup') right after saving
+                row.run()
+            stored = sms.load(cfg).remote_filters
+            self.assertIs(stored.get("large_context_only"), True, "run() must toggle it back on")
+            self.assertEqual(list(Path(repo).iterdir()), [], "REPO_CONFIG_DIR must stay untouched")
+
+
 class SaversMerge(unittest.TestCase):
     def test_two_frontends_field_level_merge(self):
         with tempfile.TemporaryDirectory() as d:

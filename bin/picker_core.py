@@ -637,6 +637,13 @@ class Savers:
             warning = f"{exc}; not saved"
         self._warn(warning)
 
+    def remote_filters(self, key, value):          # schema-11 section (main 0.62.0 C9)
+        try:
+            warning = sms.save_remote_filters(self.config_dir, key, value)
+        except ValueError as exc:
+            warning = f"{exc}; not saved"
+        self._warn(warning)
+
 
 def build_settings(flags: "argparse.Namespace | None", savers: Savers,
                    env: "dict | None" = None) -> m.Settings:
@@ -658,6 +665,7 @@ def build_settings(flags: "argparse.Namespace | None", savers: Savers,
         memguard=dict(state.memguard),
         local_registry=dict(state.local_registry),   # 0.55.8 Task 8: the migrated section
         remote_filters=dict(state.remote_filters),   # 0.62.0 C9: schema-11 section
+        on_remote_filters_saved=savers.remote_filters,
         auto_mode=int(env.get("CSL_AUTO_MODE_STATE", "0") or 0) % 3,
         telemetry=env.get("CSL_TELEMETRY", "0") == "1",
         stop_hook=env.get("CSL_STOP_HOOK", "0") == "1",

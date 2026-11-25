@@ -850,6 +850,8 @@ class Settings:
     on_hidden_providers_saved: Callable[[list], object] | None = None
     # Called with (key, bool) when a lowkey picker toggle changes; persists it (0.54.0).
     on_lowkey_filters_saved: Callable[[str, bool], object] | None = None
+    # Called with (key, bool) when a Remote-filters toggle changes (schema 11 remote_filters).
+    on_remote_filters_saved: Callable[[str, bool], object] | None = None
     # 0.51.0: transient visible confirmation (toast) when a screen saves state — e.g. the
     # hide/show toggle. Wired to the app's notify; looked up at CALL time so tests can spy.
     on_flash: Callable[[str], object] | None = None
@@ -2419,9 +2421,17 @@ class RemoteFiltersScreen(Screen):
     def _put_remote_filter(self, key, v):
         """0.62.0 C9: persist a remote_filters toggle (schema 11) and regroup the list."""
         self.settings.remote_filters[key] = bool(v)
-        import session_menu_state as _sms
-        _sms.save_remote_filters(_sms.REPO_CONFIG_DIR, key, bool(v))
-        self._regroup()                       # this IS the remote filters screen's list owner
+        # Persist through the injected saver like every other setting, so the write lands in
+        # the same dir the store is READ from (LA_SESSION_MENU_CONFIG_DIR / the GUI's Savers);
+        # the direct REPO_CONFIG_DIR write stays as the fallback for an unwired Settings.
+        if self.settings.on_remote_filters_saved:
+            self.settings.on_remote_filters_saved(key, bool(v))
+        else:
+            import session_menu_state as _sms
+            _sms.save_remote_filters(_sms.REPO_CONFIG_DIR, key, bool(v))
+        # No self._regroup() here: this screen owns no list (that method is RemoteScreen's; the
+        # call raised AttributeError after every save, 0.62.0-0.63.2). The Remote list
+        # regroups from settings.remote_filters when it is next shown.
         self._regroup_remote_if_loaded()
 
     def _regroup_remote_if_loaded(self):
