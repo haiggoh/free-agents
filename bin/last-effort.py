@@ -19,6 +19,8 @@ Environment:
 A corrupt or unreadable state file fails OPEN (prints nothing / keeps the old data on set only
 when parseable) — it must never break a launch.
 """
+from __future__ import annotations  # 3.9-safe (loaded under /usr/bin/python3 in launchd chains)
+
 import argparse
 import json
 import os

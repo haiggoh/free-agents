@@ -247,7 +247,7 @@ network is covered in [A local session that is actually local](#a-local-session-
 Turns are slower than a remote API. Apple Silicon is the reference platform; NVIDIA and CPU-only
 Linux are the same idea on other backends ([docs/CUDA.md](docs/CUDA.md)).
 
-## Budget-wall takeover (0.60.0)
+## Budget-wall takeover (0.60.0, auto-launch 0.64.0)
 
 When a paid session hits the JoyIA budget wall, the session dies — and until now nothing captured
 its context, because the handover skills need a working model on the outgoing side. 0.60.0 adds a
@@ -268,7 +268,14 @@ its context, because the handover skills need a working model on the outgoing si
   A payload whose capture crashed is kept in `takeovers/.failed/`.
 - The successor route defaults to the first live alias of `config/session-preferences.json`
   (the measured full-session order); `FA_TAKEOVER_ROUTE` / `--route` override it.
-- It **never launches anything by itself**. You do: `bin/fa-takeover launch <id>` runs
+- One notice per wall, marked 📡; repeat walls of one session supersede (newest package wins).
+- Since 0.64.0 a free successor launches **automatically** in its own Terminal window
+  (`fa-takeover auto`), and a launchd agent (`com.haiggoh.free-agents.takeover-watch`,
+  WatchPaths on the takeover `.pending/` dir) reacts to the spool immediately. One successor
+  per source session, ever; plan mode is dropped on the auto path only. Turn it off in csl
+  settings (key `f` on a lane screen: "📡 Auto-launch a free successor after a budget wall")
+  or with `FA_AUTO_TAKEOVER=0`; remove the agent with `python3 bin/takeover_watch.py uninstall`.
+- Manual launch still works: `bin/fa-takeover launch <id>` runs
   `launch-remote-window.sh <route> --effort max --prompt "Read <handoff.md> first …" -- --permission-mode plan`
   in a real Terminal window. `bin/fa-takeover verify <id>` then proves DELIVERED (the successor's
   first instruction names the handoff), READ (the package nonce appears in a tool_result, so the

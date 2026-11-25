@@ -1186,7 +1186,8 @@ def _auto_takeover_setting(s: Settings):
     label = (f"{ec.gap(ec.SESSION_EMOJI_FREE_API_STR)}Auto-launch a free successor after a "
              f"budget wall: {'ON' if s.auto_takeover else 'OFF'} "
              f"(agent: {_takeover_watch_state_label()})")
-    return setting("f", label, (False, True), lambda: s.auto_takeover, put, labels=("OFF", "ON"))
+    # key 'i': free on both lane screens and not a filter-submenu key (h/f/u/x are reserved)
+    return setting("i", label, (False, True), lambda: s.auto_takeover, put, labels=("OFF", "ON"))
 
 
 def _common_toggles(s: Settings, include_watcher: bool):
@@ -1211,7 +1212,7 @@ def _common_toggles(s: Settings, include_watcher: bool):
         # submenu (FilterSubmenuTests) — keep this row off both.
         setting("d", f"{ec.gap(ec.EMOJI_BLOCK_STR)}Always block Github releases in \"blind-trust\" mode: {'ON' if s.deny_gh_release else 'OFF'}",
                 *_toggle(s, "deny_gh_release"), labels=("OFF", "ON")),
-        # 0.64.0 R4 (D4): the auto-successor opt-out — key 'f' is free on both lane screens.
+        # 0.64.0 R4 (D4): the auto-successor opt-out (key 'i' — 'f' belongs to the filter submenu).
         _auto_takeover_setting(s),
     ]
     if include_watcher:

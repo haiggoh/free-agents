@@ -1,5 +1,20 @@
 # Changelog
 
+
+
+## [0.64.0] — 2026-11-25
+
+### Added — a budget-walled session is announced once (📡) and continued automatically by a free successor
+- One notice per wall, carrying the free-agents mark 📡 (no more 💸 from this path, no more duplicate lines per wall). Repeat walls of one session build a new package and supersede the older one — `fa-takeover list` marks it, `launch` refuses it with a pointer to the newest.
+- After a budget kill, a free successor now opens automatically in its own Terminal window (`fa-takeover auto`): deterministic, no LLM in the trigger path, one successor per source session ever. Plan mode is dropped on the AUTO path only — the successor reconciles, then continues autonomously; manual `fa-takeover launch` keeps plan mode and the wait contract. The successor's first prompt leads with the source session's topic (a generic `<username>-xx` title is never surfaced). `launch.json` records the requested route vs the model the successor actually ran, read from its transcript identity marker (`fa-takeover show` prints both).
+- A launchd agent (`com.haiggoh.free-agents.takeover-watch`, WatchPaths on the takeover `.pending/` dir, `RunAtLoad` drains a backlog) runs the capture worker the moment a wall is spooled instead of at the next SessionStart. Spool files caught mid-write are retried and left in place; only ≥10-minute-old unparseable ones move to `.failed/`. The opt-out is re-read on every run.
+- Opt-out: csl lane-screen settings row (key `f`, "📡 Auto-launch a free successor after a budget wall: ON/OFF") — the row also shows the watch agent's real state, and toggling installs/uninstalls the agent (`bin/takeover_watch.py install|uninstall|status`, `--dry-run` supported). Env override `FA_AUTO_TAKEOVER=0|1`; any other value aborts loudly. New `auto_takeover` prefs section (schema 12).
+- Secret-scan refusals now name the manual override: `fa-takeover capture <session> --allow-findings`.
+- `bin/fa_notify.py` and `bin/last-effort.py` are Python 3.9-safe again (`from __future__ import annotations`) — launchd runs hooks under /usr/bin/python3, where the PEP 604 annotations crashed the watcher's notify path.
+
+### Tests
+- New suites: `tests/test_budget_wall_notices.py`, `tests/test_auto_takeover_setting.py`, `tests/test_fa_takeover_auto.py`, `tests/test_takeover_watch_agent.py`, `tests/test_budget_wall_auto_delivery.py` — the last is a hermetic end-to-end (real spool hook, then the generated runner shim under `env -i` with the plist's PATH, exactly as launchd runs it).
+
 ## [0.63.7] — 2026-11-26
 
 ### Changed

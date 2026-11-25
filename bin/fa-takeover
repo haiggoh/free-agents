@@ -2,7 +2,8 @@
 """fa-takeover — deterministic budget-wall takeover CLI (plan v2 Task 1.3).
 
 Subcommands: capture SESSION_ID|TRANSCRIPT --route ALIAS [--cwd DIR] [--allow-findings]
-[--dry-run] [--json] [--scan] · launch TAKEOVER_ID [--effort LEVEL] · verify TAKEOVER_ID
+[--dry-run] [--json] [--scan] · launch TAKEOVER_ID [--effort LEVEL] · auto TAKEOVER_ID
+[--effort LEVEL] (deterministic auto successor) · verify TAKEOVER_ID
 [--timeout SECS] · list · show TAKEOVER_ID
 
 Exit codes: 0 ok · 2 usage · 3 refused (CaptureRefused) · 4 not found · 5 not

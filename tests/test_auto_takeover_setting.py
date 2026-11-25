@@ -63,7 +63,7 @@ def test_env_override_and_invalid_env_raises(tmp_path):
     assert sms.save_auto_takeover(tmp_path, True) is None
     assert sms.auto_takeover_enabled(env={"FA_AUTO_TAKEOVER": "0"}, config_dir=tmp_path) is False
     assert sms.auto_takeover_enabled(env={"FA_AUTO_TAKEOVER": "1"}, config_dir=tmp_path) is True
-    # an EMPTY value is unset (env -i passthrough), like the FA_NOTIFY_SINK rule
+    # an EMPTY value is unset (empty-environment passthrough), like the FA_NOTIFY_SINK rule
     assert sms.auto_takeover_enabled(env={"FA_AUTO_TAKEOVER": ""}, config_dir=tmp_path) is True
     with pytest.raises(ValueError, match="FA_AUTO_TAKEOVER must be 0 or 1"):
         sms.auto_takeover_enabled(env={"FA_AUTO_TAKEOVER": "yes"}, config_dir=tmp_path)
@@ -93,13 +93,13 @@ def test_settings_row_renders_and_toggles():
     saved = []
     s.on_auto_takeover_saved = saved.append
     lane = m.RemoteScreen(s, _remote_agents(), owner=m.HOME_OWNED)
-    row = {a.key: a for a in lane.actions()}["f"]
+    row = {a.key: a for a in lane.actions()}["i"]
     assert row.step is not None, "the auto-launch row is a settings row"
     assert "Auto-launch a free successor" in row.label
     assert "ON" in row.label and "agent:" in row.label  # default ON + agent state shown
     row.step(+1)
     assert s.auto_takeover is False and saved == [False]
-    row2 = {a.key: a for a in lane.actions()}["f"]
+    row2 = {a.key: a for a in lane.actions()}["i"]
     assert "OFF" in row2.label
     row2.step(+1)
     assert s.auto_takeover is True and saved == [False, True]
@@ -109,7 +109,7 @@ def test_row_label_uses_emoji_constant_not_literal():
     import emoji_constants as ec
     import session_picker_model as m
     lane = m.RemoteScreen(m.Settings(), _remote_agents(), owner=m.HOME_OWNED)
-    label = {a.key: a for a in lane.actions()}["f"].label
+    label = {a.key: a for a in lane.actions()}["i"].label
     assert ec.SESSION_EMOJI_FREE_API_STR in label
     # the label is built from the constant: the literal mark must not appear twice
     assert label.count(ec.SESSION_EMOJI_FREE_API_STR) == 1
@@ -123,7 +123,7 @@ def test_row_shows_watch_agent_state(monkeypatch):
             return {"installed": True, "loaded": True, "plist": "/tmp/x.plist"}
     monkeypatch.setattr(m, "takeover_watch_module", lambda: FakeWatch())
     lane = m.RemoteScreen(m.Settings(), _remote_agents(), owner=m.HOME_OWNED)
-    label = {a.key: a for a in lane.actions()}["f"].label
+    label = {a.key: a for a in lane.actions()}["i"].label
     assert "agent: loaded" in label
 
 

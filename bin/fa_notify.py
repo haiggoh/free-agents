@@ -10,6 +10,8 @@ the variable: an override that cannot work must never fall through to a real not
 
 CLI: fa_notify.py <title> <text> [--caller PATH]   (--help shows this; unknown flags exit 2)
 """
+from __future__ import annotations  # 3.9-safe (launchd runs hooks under /usr/bin/python3)
+
 import json
 import os
 import subprocess
