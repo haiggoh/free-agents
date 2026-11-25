@@ -104,6 +104,6 @@ mkdir -p -m 700 "$SB/api_keys"
 echo "picker sandbox: $SB   (calls.log records what would have run)" >&2
 
 CSL_SELF="$SB/csl" LA_DOWNLOADER="$SB/download-models.sh" LA_MANAGE_BACKEND="$SB/manage-backend" \
-CSL_REMOTE_LAUNCHER="$SB/remote-session.sh" LA_SESSION_MENU_CONFIG_DIR="$SB/cfg" \
+CSL_REMOTE_LAUNCHER="$SB/remote-session.sh" FREE_AGENTS_CONFIG_DIR="$SB/cfg" \
 LA_NVIDIA_THROTTLE_STATE="$SB/limiter-state.json" LA_API_KEYS_DIR="$SB/api_keys" \
   exec "$ROOT/bin/session-picker" "$start"

@@ -24,14 +24,17 @@ ALIAS = "LA_SESSION_MENU_CONFIG_DIR"
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch, tmp_path):
-    """Isolate every test from the real env AND the real HOME (default dir)."""
-    monkeypatch.delenv(CANON, raising=False)
+    """Isolate from the real env and the real HOME. The CANONICAL var is left as the
+    conftest autouse fixture set it (its per-test sandbox IS the isolation) — tests that
+    need it unset delenv it explicitly. The alias is removed so one-name tests cannot
+    trip the both-set conflict."""
     monkeypatch.delenv(ALIAS, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     return tmp_path
 
 
-def test_neither_set_uses_default_under_home():
+def test_neither_set_uses_default_under_home(monkeypatch):
+    monkeypatch.delenv(CANON, raising=False)
     assert sms.config_dir() == Path.home() / ".claude" / "free-agents" / "session-menu"
 
 
@@ -42,6 +45,7 @@ def test_only_canonical_set_wins(monkeypatch, tmp_path):
 
 
 def test_only_alias_set_wins(monkeypatch, tmp_path):
+    monkeypatch.delenv(CANON, raising=False)
     d = tmp_path / "alias"
     monkeypatch.setenv(ALIAS, str(d))
     assert sms.config_dir() == d
@@ -75,7 +79,8 @@ def test_resolution_is_call_time_not_import_time(monkeypatch, tmp_path):
     override.mkdir()
     (override / sms.PREFS_NAME).write_text('{"schema_version": 11, "effort": {"local_session": "max"}}',
                                            encoding="utf-8")
-    # import already happened (module-level import above) with neither var set:
+    # import already happened (module-level import above); with the canonical var unset:
+    monkeypatch.delenv(CANON, raising=False)
     assert sms.config_dir() == real
     monkeypatch.setenv(CANON, str(override))
     assert sms.config_dir() == override                      # call-time, not import-time
@@ -122,3 +127,18 @@ def test_cli_help_lists_config_dir():
                          capture_output=True, text=True)
     assert out.returncode == 0
     assert "config-dir" in out.stdout
+
+
+def test_autouse_fixture_sandboxes_config_dir(tmp_path):
+    """The conftest autouse fixture (D2): inside any test the canonical var points at a
+    per-test temp dir, the alias is unset, and the resolver returns the sandbox."""
+    env_dir = Path(os.environ["FREE_AGENTS_CONFIG_DIR"])
+    assert env_dir.is_relative_to(tmp_path)          # per-test dir from the conftest fixture
+    assert "LA_SESSION_MENU_CONFIG_DIR" not in os.environ
+    assert sms.config_dir() == env_dir               # the resolver sees the sandbox
+
+
+def test_conftest_does_not_fake_home():
+    """D2: the config-dir sandbox is config-dir ONLY — conftest must not set HOME."""
+    conftest_src = (ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
+    assert 'setenv("HOME"' not in conftest_src and "setenv('HOME'" not in conftest_src

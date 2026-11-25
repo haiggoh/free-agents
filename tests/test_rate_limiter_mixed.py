@@ -75,7 +75,7 @@ class MixedWriterSchemaTests(unittest.TestCase):
                if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
         cfg = tempfile.TemporaryDirectory()
         self.addCleanup(cfg.cleanup)
-        env["LA_SESSION_MENU_CONFIG_DIR"] = cfg.name
+        env["FREE_AGENTS_CONFIG_DIR"] = cfg.name
         patcher = unittest.mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -178,7 +178,7 @@ class ObservabilityCliTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith("LA_NVIDIA_") and not k.startswith("LA_LIMITER_")}
         env["LA_NVIDIA_THROTTLE_STATE"] = os.path.join(self.tmp.name, "s")
-        env["LA_SESSION_MENU_CONFIG_DIR"] = self.tmp.name
+        env["FREE_AGENTS_CONFIG_DIR"] = self.tmp.name
         self.env = env
 
     def run_cli(self, *args, **kw):

@@ -69,6 +69,14 @@ os.environ["LA_HF_ROUTER_URL"] = "http://127.0.0.1:9/v1/models"   # the router c
 os.environ["FA_LIMITER_DIR"] = str(
     Path(_tempfile.mkdtemp(prefix="fa-limiterdir-test-")) / f"limiter{_worker}")
 
+# 0.63.3 (R1-A/D2): run-level sandbox for the session-menu config dir. FORCED like the
+# fences above (an inherited override may point at the real dir); the per-test autouse
+# fixture below overrides it with a per-test dir. The LA_SESSION_MENU_CONFIG_DIR alias is
+# scrubbed with the other LA_* vars at the top of this file, so only the canonical name
+# is set here.
+os.environ["FREE_AGENTS_CONFIG_DIR"] = str(
+    Path(_tempfile.mkdtemp(prefix="fa-configdir-test-")) / f"session-menu{_worker}")
+
 # 0.55.8 Task 0 (R1, 0541 plan Item H): no test may post a real notification or open a
 # window. One shim dir with no-op osascript/terminal-notifier/afplay/say/open stubs + a
 # session FA_NOTIFY_SINK; the CONTROLLER creates them once (pytest_configure, not a worker)
@@ -141,6 +149,17 @@ def _sandbox_claude_config_dir(tmp_path_factory, monkeypatch):
     or a live Claude Code session saving model/effort/theme mid-gate (2026-11-24: 2 of 3 ship
     gates failed that way)."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path_factory.mktemp("claude-config")))
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_free_agents_config_dir(tmp_path, monkeypatch):
+    """0.63.3 (R1-A, user decision D2): EVERY test runs with the free-agents session-menu
+    config dir sandboxed — FREE_AGENTS_CONFIG_DIR forced to a fresh per-test temp dir and
+    the LA_SESSION_MENU_CONFIG_DIR alias removed, so a test that sets one name cannot trip
+    the both-set conflict. Config-dir isolation ONLY: HOME is not faked (D2 — 42 of 64
+    HOME-touching test files read the real HOME on purpose: venvs, ~/.local/bin/pytest)."""
+    monkeypatch.delenv("LA_SESSION_MENU_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("FREE_AGENTS_CONFIG_DIR", str(tmp_path / "fa-config"))
 
 
 def _snapshot():

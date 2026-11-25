@@ -102,7 +102,7 @@ class _StubbedEnv(unittest.TestCase):
                     "LA_DOWNLOADER": str(stubs / "download-models.sh"),
                     "LA_URL_OPENER": str(stubs / "url-opener"),
                     "LA_API_KEYS_DIR": str(self.keys),
-                    "LA_SESSION_MENU_CONFIG_DIR": str(self.cfg),
+                    "FREE_AGENTS_CONFIG_DIR": str(self.cfg),
                     "LA_THEME_CONFIG_DIR": str(self.themes),
                     # Catalog rows never reach Hugging Face from a test, nor its real cache.
                     "LA_PICKER_HF_LOOKUP": "0",

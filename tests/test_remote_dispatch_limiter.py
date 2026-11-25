@@ -84,7 +84,7 @@ class Base(unittest.TestCase):
         (self.keys / "nvidia").write_text("nvapi-TESTKEY\n")
         self.env = {"LA_NVIDIA_THROTTLE_STATE": str(self.state), "LA_API_KEYS_DIR": str(self.keys),
                     "LA_NVIDIA_RPM": "2", "LA_NVIDIA_MAX_WAIT": "0",
-                    "LA_SESSION_MENU_CONFIG_DIR": str(t / "menu")}
+                    "FREE_AGENTS_CONFIG_DIR": str(t / "menu")}
         self._old = {k: os.environ.get(k) for k in list(self.env) + ["NVIDIA_API_KEY", "LA_REMOTE_RATE_LIMIT"]}
         os.environ.update(self.env)
         os.environ.pop("NVIDIA_API_KEY", None)

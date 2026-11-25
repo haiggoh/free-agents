@@ -133,7 +133,7 @@ class LocalRowPilot(PilotCase):
                                   if ol.get_option_at_index(j).id == f"a:{idx}")
             await h.press("y")
             await h.pilot.pause(0.4)
-            doc = json.loads((Path(os.environ["LA_SESSION_MENU_CONFIG_DIR"]) /
+            doc = json.loads((Path(os.environ["FREE_AGENTS_CONFIG_DIR"]) /
                               "session-menu.local.json").read_text())
             self.assertIn("local_registry", doc, "the new section is written")
             self.assertIn("auto_sync", doc.get("local_registry", {}), doc)
@@ -143,7 +143,7 @@ class LocalRowPilot(PilotCase):
 def _use_cfg(case):
     import json as _json
     import os
-    cfg = Path(case.env["LA_SESSION_MENU_CONFIG_DIR"])
+    cfg = Path(case.env["FREE_AGENTS_CONFIG_DIR"])
     def _restore():
         pass
     return _restore

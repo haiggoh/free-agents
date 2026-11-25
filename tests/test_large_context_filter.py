@@ -56,7 +56,7 @@ class _Case(PilotCase):
         stub = Path(self.env["CSL_REMOTE_LAUNCHER"])
         stub.write_text(stub.read_text().replace(REMOTE_INV, INV))
         stub.chmod(0o755)
-        (Path(self.env["LA_SESSION_MENU_CONFIG_DIR"]).parent / "provider-limits.json")
+        (Path(self.env["FREE_AGENTS_CONFIG_DIR"]).parent / "provider-limits.json")
         self.limits = Path(self.tmp.name) / "provider-limits.json"
         self.limits.write_text(json.dumps(LIMITS))
         os.environ["FA_PROVIDER_LIMITS"] = str(self.limits)
@@ -83,7 +83,7 @@ class LargeContextFilterTests(_Case):
 
     def test_migrated_v10_file_also_defaults_on(self):
         # a v10 file (no remote_filters section) migrates to large_context_only=True
-        cfg = Path(self.env["LA_SESSION_MENU_CONFIG_DIR"])
+        cfg = Path(self.env["FREE_AGENTS_CONFIG_DIR"])
         (cfg / "session-menu.local.json").write_text(json.dumps({"schema_version": 10}))
         async def s(app, pilot, h):
             await h.press("c")                    # expand the model list
@@ -111,13 +111,13 @@ class LargeContextFilterTests(_Case):
         # flip it (the same write the 'd' key performs) and persist
         import session_menu_state as sms
         s.remote_filters["large_context_only"] = False
-        warn = sms.save_remote_filters(Path(self.env["LA_SESSION_MENU_CONFIG_DIR"]),
+        warn = sms.save_remote_filters(Path(self.env["FREE_AGENTS_CONFIG_DIR"]),
                                        "large_context_only", False)
         self.assertIsNone(warn, warn)
         shown = [a.alias for a in self.m.visible_agents(s, agents)]
         self.assertIn("groq-small", shown, "toggling OFF shows the 131k row")
         # persisted across a restart: the saved v11 file carries remote_filters
-        saved = json.loads((Path(self.env["LA_SESSION_MENU_CONFIG_DIR"])
+        saved = json.loads((Path(self.env["FREE_AGENTS_CONFIG_DIR"])
                             / "session-menu.local.json").read_text())
         self.assertEqual(saved.get("schema_version"), 11)
         self.assertEqual(saved.get("remote_filters", {}).get("large_context_only"), False)

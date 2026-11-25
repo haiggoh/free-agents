@@ -7,7 +7,7 @@ That file is written by several entry points, may be read while another picker w
 and must never leak, clobber, or silently fall back to a second store. Each test names
 the production change that would make it fail.
 
-Tests can override the config directory via LA_SESSION_MENU_CONFIG_DIR environment variable.
+Tests can override the config directory via FREE_AGENTS_CONFIG_DIR environment variable.
 """
 import json
 import multiprocessing
