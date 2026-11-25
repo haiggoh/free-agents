@@ -29,6 +29,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
@@ -41,8 +42,22 @@ NOTICE_PREFIX = f"{emoji_constants.SESSION_EMOJI_FREE_API_STR} free-agents: budg
 
 USAGE = ("budget-wall-capture.py — budget-wall takeover capture (worker; runs at SessionStart "
          "via --pending because the StopFailure window is ~100 ms — measured). "
-         "Usage: python3 budget-wall-capture.py [--help] [--pending]   "
+         "Usage: python3 budget-wall-capture.py [--help] [--pending] [--from-watcher]   "
+         "  --from-watcher  with --pending: notices go to fa_notify + hook.log, not a systemMessage "
+         "(the launchd WatchPaths agent, takeover_watch.py, runs this)   "
          "Env: FA_TAKEOVER_DIR, FA_TAKEOVER_ROUTE, FA_TAKEOVER_ALLOW_LOOPBACK, ANTHROPIC_BASE_URL.")
+
+_FROM_WATCHER = False  # set by main() when --from-watcher is passed
+
+
+def _try_parse_spool(f: Path):
+    """(endpoint, raw) when the spool file parses as JSON, else None (partial write)."""
+    try:
+        endpoint, raw = _parse_spool(f.read_text(encoding="utf-8"))
+        json.loads(raw)
+        return endpoint, raw
+    except Exception:
+        return None
 
 
 def _is_loopback(url: str) -> bool:
@@ -72,21 +87,35 @@ def _emit(root: Path, line: str) -> None:
         return
     _SEEN.add(line)
     _MESSAGES.append(line)
+    if _FROM_WATCHER:
+        # the watcher has no session to show a systemMessage — notify + hook.log carry it
+        try:
+            import fa_notify
+            fa_notify.notify("free-agents: budget wall", line, caller="budget-wall-capture.py")
+        except Exception:
+            pass
 
 
 def _flush() -> None:
     _SEEN.clear()
     if not _MESSAGES:
         return
-    text = "\n".join(_MESSAGES)
-    _MESSAGES.clear()
-    try:
-        print(json.dumps({"systemMessage": text}))
-    except Exception:
+    if _FROM_WATCHER:
+        for line in _MESSAGES:  # plain lines -> the agent's watch.log
+            try:
+                print(line)
+            except Exception:
+                pass
+    else:
+        text = "\n".join(_MESSAGES)
         try:
-            print(text, file=sys.stderr)
+            print(json.dumps({"systemMessage": text}))
         except Exception:
-            pass  # the engine's pipes are gone; the hook.log lines are the record
+            try:
+                print(text, file=sys.stderr)
+            except Exception:
+                pass  # the engine's pipes are gone; the hook.log lines are the record
+    _MESSAGES.clear()
 
 
 SPOOL_ENDPOINT = "#fa-endpoint "
@@ -112,11 +141,13 @@ def main(argv=None) -> int:
     if any(a in ("-h", "--help") for a in argv):
         print(USAGE)
         return 0
-    unknown = [a for a in argv if a != "--pending"]
+    unknown = [a for a in argv if a not in ("--pending", "--from-watcher")]
     if unknown:
         print(f"budget-wall-capture.py: unknown argument: {unknown[0]}", file=sys.stderr)
         print(USAGE, file=sys.stderr)
         return 2
+    global _FROM_WATCHER
+    _FROM_WATCHER = "--from-watcher" in argv
     if "--pending" in argv:
         # SessionStart mode: process every spooled StopFailure payload (full time here)
         try:
@@ -137,10 +168,32 @@ def main(argv=None) -> int:
         pending = root / ".pending"
         if pending.is_dir():
             for f in sorted(pending.glob("*.json")):
-                try:
-                    endpoint, raw = _parse_spool(f.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
+                parsed = _try_parse_spool(f)
+                if parsed is None:
+                    # Review Focus 1: WatchPaths fires on CREATE — the spool hook may still be
+                    # writing. A FRESH partial is retried briefly, then LEFT in place (never
+                    # unlinked); only an ANCIENT (>= 10 min) unparseable file moves to .failed/.
+                    age = time.time() - f.stat().st_mtime
+                    if age < 30:
+                        deadline = time.time() + 5
+                        while time.time() < deadline:
+                            time.sleep(0.5)
+                            parsed = _try_parse_spool(f)
+                            if parsed is not None:
+                                break
+                    if parsed is None:
+                        if age >= 600:
+                            try:
+                                failed = root / ".failed"
+                                failed.mkdir(parents=True, exist_ok=True)
+                                os.chmod(failed, 0o700)
+                                f.rename(failed / f.name)
+                                _log(root, f"budget-wall-capture: unparseable spool parked at "
+                                           f"{failed / f.name}")
+                            except Exception:
+                                pass
+                        continue
+                endpoint, raw = parsed
                 status = _capture_from(raw, endpoint)
                 try:
                     if status == "error":
@@ -289,9 +342,12 @@ def _capture_from(raw: str, endpoint: str) -> str:
             _emit(root, _notice(session_id, "successor launched", route.alias,
                                 f"Verify: fa-takeover verify {pkg.takeover_id}"))
         else:
-            extra = f" ({auto_err} — see hook.log)" if auto_err else ""
+            if auto_err:
+                extra = f"{auto_err} — see hook.log"
+            else:
+                extra = "auto-launch off (csl)"
             _emit(root, _notice(session_id, "takeover package ready", route.alias,
-                                f"Nothing was launched{extra}. "
+                                f"Nothing was launched ({extra}). "
                                 f"Run: fa-takeover launch {pkg.takeover_id}"))
         _log(root, f"package: {out}")
         return "done"
