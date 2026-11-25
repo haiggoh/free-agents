@@ -106,7 +106,10 @@ def fetch(provider_ids, out_path):
         # same timestamp — it surfaced as released "1993-04-26"), and anything before 2015 is
         # bogus: both mean "unknown" (released None). Waypoint model-facts-py-nvidia-catalog.
         vals = {v for v in created_raw.values() if v is not None}
-        sentinel = next(iter(vals)) if len(vals) == 1 and len(entry["models"]) > 1 else None
+        # sentinel only when EVERY model carries the SAME non-None created (code-review
+        # 0.63.3: one genuine per-model date among missing fields must NOT be nulled)
+        n_non_none = sum(1 for v in created_raw.values() if v is not None)
+        sentinel = next(iter(vals)) if len(vals) == 1 and n_non_none == len(entry["models"]) > 1 else None
         for mid, created in created_raw.items():
             if created is not None and (created < PRE_2015_EPOCH or created == sentinel):
                 created = None

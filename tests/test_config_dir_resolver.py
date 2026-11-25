@@ -148,6 +148,19 @@ def test_autouse_fixture_sandboxes_config_dir(tmp_path):
     assert sms.config_dir() == env_dir               # the resolver sees the sandbox
 
 
+def test_limiter_raises_conflict_instead_of_swallowing(monkeypatch, tmp_path):
+    """code-review 0.63.3 (important): the limiter's fail-open `except Exception: return {}`
+    must NOT swallow ConfigDirConflict — a conflicting env pair aborts loudly here too,
+    never silently falls back to built-in defaults."""
+    import rate_limiter as rl
+    monkeypatch.setenv(CANON, str(tmp_path / "a"))
+    monkeypatch.setenv(ALIAS, str(tmp_path / "b"))
+    with pytest.raises(sms.ConfigDirConflict):
+        rl._saved_settings()
+    with pytest.raises(sms.ConfigDirConflict):
+        rl._saved_settings_cached()
+
+
 def test_conftest_does_not_fake_home():
     """D2: the config-dir sandbox is config-dir ONLY — conftest must not set HOME by any
     API (monkeypatch.setenv("HOME", …) or a direct os.environ["HOME"] = …)."""

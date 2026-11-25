@@ -150,6 +150,9 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
                 "test_bracketed_paste_advances_without_enter_and_returns_to_picker",
             ],
             "test_rate_limiter_mixed.py": ["test_old_and_new_processes_share_one_file"],
+            # this test spawns a nested pytest over the flaked files — it must itself be
+            # deselected by the gate (code-review 0.63.3): never run inside the loaded gate
+            "test_loadscale.py": ["test_marked_2026_11_22_flakes_pass_when_run_explicitly"],
         }
         for mod, names in marked.items():
             out = self._collect("-m", "load_sensitive", mod)
@@ -163,6 +166,7 @@ class LoadSensitiveMarkerTests(unittest.TestCase):
                 self.assertNotIn(n, ids2, f"{mod}::{n} still collected under 'not load_sensitive'")
             self.assertIn(mod, mods2, f"the rest of {mod} must still collect under the gate expression")
 
+    @pytest.mark.load_sensitive  # nested pytest over the flaked files — gate must deselect this
     def test_marked_2026_11_22_flakes_pass_when_run_explicitly(self):
         # M1 dispatch: collect-only proves the mark, not the pass. Actually RUN the marked
         # tests under -m load_sensitive (they passed in isolation on 2026-11-22; marked must

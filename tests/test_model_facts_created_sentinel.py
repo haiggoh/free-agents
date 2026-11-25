@@ -96,6 +96,15 @@ class CreatedSentinelTests(unittest.TestCase):
         self.assertIsNone(models["z-ai/glm-5.3-flash"]["released"])
         self.assertIsNone(models["other/model"]["released"])
 
+    def test_single_model_with_created_keeps_date_when_others_lack_it(self):
+        # code-review nit: the sentinel must require the constant on EVERY model, not merely
+        # be the only non-None value — otherwise one genuine per-model date gets nulled.
+        doc = {"data": [{"id": "a/real-date", "created": EPOCH_2024_06_01, "context_window": 1},
+                        {"id": "b/no-date", "context_window": 1}]}
+        models = self._models(doc)
+        self.assertEqual(models["a/real-date"]["released"], "2024-06-01")
+        self.assertIsNone(models["b/no-date"]["released"])
+
     def test_distinct_real_dates_are_kept(self):
         models = self._models(_catalog_doc({"a/one": EPOCH_2024_06_01,
                                             "b/two": EPOCH_2025_01_15}))
