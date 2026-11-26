@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.63.4] — 2026-11-26
+
+### Fixed
+- csl crash when toggling Remote filters › "Large context only" (0.62.0-0.63.3): `_put_remote_filter`
+  called `self._regroup()`, a method only `RemoteScreen` has, so every toggle raised `AttributeError`
+  right after the save. The save path is unchanged; the call is gone. A second crash behind it on the
+  default shape: in-memory `Settings.remote_filters` defaults to `None`, so the first assignment
+  raised `TypeError` — the writer now initializes the dict, matching every reader's
+  `(s.remote_filters or {})` idiom.
+
+### Test hygiene
+- The suite can no longer write live state. conftest forces `LA_LAST_EFFORT_FILE` and
+  `LA_BACKEND_UPGRADES_STATE` to per-xdist-worker temp paths (re-asserted per test by an autouse
+  fixture) and installs a tripwire on `Path.write_text`/`Path.replace` that fails any in-process write
+  to the real `~/.claude/free-agents/backend-upgrades.json` (or its `.tmp`) before it happens.
+  `pytest_sessionfinish` fails the run if the checkout's `config/remote-last-effort.local.json` was
+  created during the run; when the file already existed at import (the canonical checkout's live
+  store), a mid-run change is report-only, so a live csl no longer fails the gate.
+
 ## [0.63.3] — 2026-11-25
 
 ### Fixed
