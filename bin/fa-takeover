@@ -146,7 +146,8 @@ def cmd_launch(args) -> int:
 
 
 def _menu_config_dir() -> Path:
-    return Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR") or sms.REPO_CONFIG_DIR)
+    # R1-A: ONE call-time resolver (canonical FREE_AGENTS_CONFIG_DIR; conflicting pair aborts loudly)
+    return sms.config_dir()
 
 
 def _auto_prompt(topic: str, handoff: Path) -> str:

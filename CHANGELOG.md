@@ -1,7 +1,5 @@
 # Changelog
 
-
-
 ## [0.64.0] — 2026-11-25
 
 ### Added — a budget-walled session is announced once (📡) and continued automatically by a free successor

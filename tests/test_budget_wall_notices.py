@@ -185,4 +185,21 @@ def test_refusal_notice_names_override(tmp_path, monkeypatch):
     assert packages(tmp_path) == []
     (line,) = msg_lines(out)
     assert "secret_findings" in line
-    assert "fa-takeover capture" in line and "--allow-findings" in line
+    # the override must carry the FULL session id — _find_transcript resolves exact filenames only
+    assert "fa-takeover capture sess-secret --allow-findings" in line
+
+
+def test_notice_says_refused_when_auto_on_but_claimed(tmp_path, monkeypatch):
+    # code-review (important): auto ON + launch refused (one-successor claim held) must NOT
+    # tell the user "auto-launch off (csl)" — the real reason is in hook.log
+    (tmp_path / "takeovers" / ".launched").mkdir(parents=True)
+    (tmp_path / "takeovers" / ".launched" / "sess-bw").write_text("1")  # claim held
+    env = base_env(tmp_path)
+    env["FA_AUTO_TAKEOVER"] = "1"
+    rc, out = run_hook(payload(transcript=FIX / "budget_wall.jsonl", sid="sess-bw"),
+                       env, monkeypatch)
+    assert rc == 0
+    (line,) = msg_lines(out)
+    assert "Nothing was launched" in line
+    assert "auto-launch refused (see hook.log)" in line, line
+    assert "off (csl)" not in line, line

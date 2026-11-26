@@ -17,7 +17,6 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 ## Current released version
 
 
-
 `0.64.0`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.

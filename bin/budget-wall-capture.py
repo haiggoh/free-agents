@@ -344,6 +344,10 @@ def _capture_from(raw: str, endpoint: str) -> str:
         else:
             if auto_err:
                 extra = f"{auto_err} — see hook.log"
+            elif auto_enabled:
+                # code-review (important): auto is ON but the launch was refused (claim held,
+                # superseded, window-open failure, timeout) — never blame the csl setting
+                extra = "auto-launch refused (see hook.log)"
             else:
                 extra = "auto-launch off (csl)"
             _emit(root, _notice(session_id, "takeover package ready", route.alias,
@@ -357,7 +361,7 @@ def _capture_from(raw: str, endpoint: str) -> str:
         hint = ""
         if e.code == "secret_findings":
             # Review Focus 5: the refusal names the manual override, never a silent dead end
-            hint = f" Manual override: fa-takeover capture {str(session_id)[:8]} --allow-findings."
+            hint = f" Manual override: fa-takeover capture {session_id} --allow-findings."
         _emit(root, _notice(session_id, "capture refused", e.code,
                             f"Nothing was launched.{hint} See hook.log for why."))
         return "done"

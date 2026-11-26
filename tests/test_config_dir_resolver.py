@@ -105,7 +105,11 @@ def test_no_reader_bypasses_the_resolver():
         r'os\.(?:environ\.get|getenv)\s*\(\s*["\'](?:' + CANON + r'|' + ALIAS + r')["\']'
         r'|os\.environ\s*\[\s*["\'](?:' + CANON + r'|' + ALIAS + r')["\']')
     offenders = []
-    for py in (ROOT / "bin").glob("*.py"):
+    scripts = list((ROOT / "bin").glob("*.py")) + [
+        p for p in (ROOT / "bin").iterdir()
+        if p.is_file() and not p.suffix and "python" in p.read_text(encoding="utf-8", errors="replace")[:200]
+    ]
+    for py in scripts:
         if py.name == "session_menu_state.py":
             continue
         for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
