@@ -70,6 +70,20 @@ def test_hook_reraises_when_no_message_start():
         _run_hook(chunks, RuntimeError("cut"))
 
 
+def test_hook_no_tail_after_message_stop():
+    # R3 review (important): a read error AFTER a complete message must not append a
+    # second content block + message_stop (invalid stream) — the hook just returns.
+    chunks = [
+        b'event: message_start\ndata: {"type": "message_start", "message": {"usage": {"input_tokens": 5}}}\n\n',
+        b'event: content_block_start\ndata: {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}\n\n',
+        b'event: content_block_delta\ndata: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hi"}}\n\n',
+        b'event: message_delta\ndata: {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 3}}\n\n',
+        b'event: message_stop\ndata: {"type": "message_stop"}\n\n',
+    ]
+    out = _run_hook(chunks, RuntimeError("truncated body after finish"))
+    assert out == chunks, f"no tail may follow a message_stop: {out}"
+
+
 def _texts(events):
     return "".join(e.get("delta", {}).get("text") or ""
                    for e in events if e.get("type") == "content_block_delta")

@@ -685,6 +685,7 @@ class _StreamState:
     saw_text = False
     input_tokens = None
     output_tokens = 0
+    saw_message_stop = False
     last_chunk_at = 0.0
 
     def __init__(self, **kw):
@@ -736,6 +737,8 @@ def _note(chunk, st: _StreamState) -> None:
         u = ev.get("usage") or {}
         if isinstance(u.get("output_tokens"), int):
             st.output_tokens = u["output_tokens"]
+    elif t == "message_stop":
+        st.saw_message_stop = True   # R3 review: never append a tail after a closed message
 
 
 def _midstream_tail(state: _StreamState, exc: BaseException, silence_s: float) -> list[bytes]:
@@ -1290,6 +1293,12 @@ class LAProxyHooks(CustomLogger):
             # same oversized call would be cut again (plan D1). The yielded==0 paths above and
             # below are unchanged.
             if st.saw_message_start:
+                if st.saw_message_stop:
+                    # R3 review (important): the message was already closed — appending a tail
+                    # would emit a duplicate message_stop and an invalid stream. Just end.
+                    print(f"la_proxy_hooks: read error after a COMPLETE message "
+                          f"({type(exc).__name__}) — ending without a tail", file=sys.stderr)
+                    return
                 tail = _midstream_tail(st, exc, time.time() - st.last_chunk_at)
                 for ev in tail:
                     yield ev

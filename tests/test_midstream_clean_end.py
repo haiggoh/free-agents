@@ -78,6 +78,12 @@ class TailTests(unittest.TestCase):
                      "usage": {"output_tokens": 99}}, st)
         self.assertEqual(st.output_tokens, 99)
 
+    def test_note_marks_message_stop(self):
+        st = hooks._StreamState(saw_message_start=True)
+        self.assertFalse(st.saw_message_stop)
+        hooks._note({"type": "message_stop"}, st)
+        self.assertTrue(st.saw_message_stop)
+
 
 if __name__ == "__main__":
     unittest.main()
