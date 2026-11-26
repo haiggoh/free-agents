@@ -301,8 +301,8 @@ def _capture_from(raw: str, endpoint: str) -> str:
         # auto path LOUDLY (hook.log + notice) and never falls through to enabled.
         try:
             import session_menu_state
-            cfg_dir = Path(os.environ.get("LA_SESSION_MENU_CONFIG_DIR")
-                           or session_menu_state.REPO_CONFIG_DIR)
+            # R1-A: ONE call-time resolver (canonical FREE_AGENTS_CONFIG_DIR, alias agrees or aborts)
+            cfg_dir = session_menu_state.config_dir()
             auto_enabled = session_menu_state.auto_takeover_enabled(config_dir=cfg_dir)
             auto_err = None
         except ValueError as e:
