@@ -499,7 +499,7 @@ BRIDGE_SHIM_STATE = ""   # "" until the first install; then installed | upstream
 _CALL_429_RECORDS: dict[str, dict] = {}   # litellm_call_id -> {"retry_after": seconds, "at": t}
 _RECORD_TTL = 600.0
 
-# 0.63.3: the grant-time booking's RECEIPT, by litellm_call_id, for the success hook —
+# 0.63.4: the grant-time booking's RECEIPT, by litellm_call_id, for the success hook —
 # settle(receipt, used) reconciles exactly that reservation. NEVER in the request kwargs:
 # LiteLLM forwards unknown kwargs upstream and NVIDIA NIM 400s every request on them
 # (0.62.3 put `_la_booked_tokens` there). A receipt lives exactly as long as its request:
@@ -572,7 +572,7 @@ _CALL_BOOKED: dict[str, Receipt] = {}
 # 0.63.4: the provider the pre-call booked under, by call id. The SUCCESS event reports
 # the RESOLVED model ('openai/...' for a groq/openai/... deployment), so re-deriving the
 # provider there finds no limits entry and the settle never runs (measured 2026-11-25).
-_CALL_PROVIDER: dict[str, str] = {}
+_CALL_PROVIDER: dict[str, tuple] = {}   # litellm_call_id -> (provider, at)
 
 
 def _now() -> float:
@@ -583,6 +583,9 @@ def _book_call(kwargs: dict, receipt) -> None:
     now = _now()
     for k in [k for k, r in _CALL_BOOKED.items() if now - r.at > _RECORD_BOUND]:
         _CALL_BOOKED.pop(k, None)
+    # prune the provider notes by their OWN timestamps: a failed call pops its
+    # _CALL_BOOKED entry early, so its _CALL_PROVIDER entry must not leak
+    for k in [k for k, v in _CALL_PROVIDER.items() if now - float(v[1]) > _RECORD_BOUND]:
         _CALL_PROVIDER.pop(k, None)
     call_id = str((kwargs or {}).get("litellm_call_id") or "")
     if call_id and receipt is not None:
@@ -592,11 +595,12 @@ def _book_call(kwargs: dict, receipt) -> None:
 def _note_call_provider(kwargs: dict, provider: str) -> None:
     call_id = str((kwargs or {}).get("litellm_call_id") or "")
     if call_id and provider:
-        _CALL_PROVIDER[call_id] = provider
+        _CALL_PROVIDER[call_id] = (provider, _now())
 
 
 def _take_call_provider(kwargs: dict):
-    return _CALL_PROVIDER.pop(str((kwargs or {}).get("litellm_call_id") or ""), None) or None
+    v = _CALL_PROVIDER.pop(str((kwargs or {}).get("litellm_call_id") or ""), None)
+    return (v[0] if v else None) or None
 
 
 def _take_booked(kwargs: dict):
@@ -926,15 +930,26 @@ class LAProxyHooks(CustomLogger):
                 from rate_limiter import _max_wait, stretched_wait, RateLimitTimeout
                 # 0.62.3 review fix: pass tokens= so the quota sidecar (tpm/tpd) actually
                 # books this request — 0.62.0 granted with tokens=0 (TPM accounting was
-                # limiter-API-only). 0.63.3: the grant returns the reservation's Receipt,
+                # limiter-API-only). 0.63.4: the grant returns the reservation's Receipt,
                 # recorded here — AFTER the grant, never before — by call id for the
                 # success hook. Never in kwargs, which LiteLLM forwards upstream (0.63.1).
                 booked = _estimate_tokens(kwargs)
+                # mixed fleet: a proxy whose LOADED limiter predates receipts has no
+                # aacquire_grant — fall back to the old float API (old accounting, no
+                # receipt; the startup warning already said to restart it)
+                grant_api = getattr(bucket, "aacquire_grant", None)
                 try:
-                    waited, receipt = await bucket.aacquire_grant(
-                        model=str(kwargs.get("model") or ""),
-                        max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
-                        tokens=booked, kind=_request_kind(kwargs))
+                    if grant_api is not None:
+                        waited, receipt = await grant_api(
+                            model=str(kwargs.get("model") or ""),
+                            max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
+                            tokens=booked, kind=_request_kind(kwargs))
+                    else:
+                        waited = await bucket.aacquire(
+                            model=str(kwargs.get("model") or ""),
+                            max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
+                            tokens=booked, kind=_request_kind(kwargs))
+                        receipt = None
                 except RateLimitTimeout as exc:
                     if "ineligible" not in str(exc):
                         raise
@@ -944,12 +959,19 @@ class LAProxyHooks(CustomLogger):
                     # self-raised 429.
                     print(f"la_proxy_hooks: estimated {booked} tokens never fit tpm; "
                           "acquiring on rpm alone", file=sys.stderr)
-                    waited, receipt = await bucket.aacquire_grant(
-                        model=str(kwargs.get("model") or ""),
-                        max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
-                        tokens=0)
+                    if grant_api is not None:
+                        waited, receipt = await grant_api(
+                            model=str(kwargs.get("model") or ""),
+                            max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
+                            tokens=0)
+                    else:
+                        waited = await bucket.aacquire(
+                            model=str(kwargs.get("model") or ""),
+                            max_wait=stretched_wait(_provider_of(kwargs), _max_wait(None)),
+                            tokens=0)
+                        receipt = None
                 if receipt is not None:
-                    _book_call(kwargs, receipt)      # only AFTER the grant (0.63.3)
+                    _book_call(kwargs, receipt)      # only AFTER the grant (0.63.4)
                     # the provider the settle must resolve this receipt against: the
                     # success event only knows the RESOLVED model (0.63.4, measured)
                     _note_call_provider(kwargs, _provider_of(kwargs))
@@ -972,10 +994,12 @@ class LAProxyHooks(CustomLogger):
         return normalize_nvidia_kwargs(kwargs) if _is_nvidia(kwargs) else changed
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
-        # 0.63.3: this call's reservation leaves the registry on ANY failure — no settle.
+        # 0.63.4: this call's reservation leaves the registry on ANY failure — no settle.
         # A failed call's sidecar booking STAYS (the provider may have counted its tokens);
-        # only the receipt reference is dropped, so a recycled call id can never settle it.
+        # only the receipt reference (and its provider note) is dropped, so a recycled
+        # call id can never settle it.
         _take_booked(kwargs or {})
+        _take_call_provider(kwargs or {})
         # fix 4, any provider: a 400 naming the provider's max_tokens cap is remembered, so the
         # router's BadRequest retry and every later request go out clamped to it.
         cap = learn_output_cap(kwargs or {})
@@ -1061,8 +1085,12 @@ class LAProxyHooks(CustomLogger):
             except (TypeError, ValueError):
                 used = None
         receipt = _take_booked(kwargs or {})
-        bucket.note_success(str((kwargs or {}).get("model") or ""),
-                            tokens_used=used, receipt=receipt)
+        model = str((kwargs or {}).get("model") or "")
+        if hasattr(bucket, "aacquire_grant"):
+            bucket.note_success(model, tokens_used=used, receipt=receipt)
+        else:
+            # pre-receipt limiter (mixed fleet): old signature — booked=0 writes nothing
+            bucket.note_success(model, tokens_used=used, booked=0)
 
     async def async_pre_request_hook(self, model, messages, kwargs):
         # fix 7, native Anthropic lane only (LA_PASSTHROUGH_MODELS set): fold per-turn effort into

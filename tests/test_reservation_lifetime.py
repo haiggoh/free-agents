@@ -278,14 +278,47 @@ class GrantTimingTests(unittest.TestCase):
         hooks._bucket = None
         mod._CALL_BOOKED["f-A"] = _receipt("a" * 32, 500, 1.0)
         mod._CALL_BOOKED["f-B"] = _receipt("b" * 32, 900, 2.0)
+        mod._CALL_PROVIDER["f-A"] = ("nvidia", 1.0)
+        mod._CALL_PROVIDER["f-B"] = ("nvidia", 2.0)
         asyncio.run(hooks.async_log_failure_event(
             {"model": "nvidia_nim/x", "litellm_call_id": "f-A",
              "exception": RuntimeError("upstream died")}, None, None, None))
         self.assertNotIn("f-A", mod._CALL_BOOKED, "the failed call's entry is dropped")
         self.assertIn("f-B", mod._CALL_BOOKED, "an in-flight call's entry is intact")
+        self.assertNotIn("f-A", mod._CALL_PROVIDER,
+                         "the provider note goes too — otherwise failed calls leak it forever")
+        self.assertIn("f-B", mod._CALL_PROVIDER)
         # no settle happened: the failed call's reservation STAYS booked in the
         # sidecar (the provider may have counted it) — the registry pop is the
         # only effect, so there is nothing further to assert here by design.
+
+    def test_old_limiter_mixed_fleet_falls_back_without_crashing(self):
+        # A proxy whose LOADED limiter predates receipts (no aacquire_grant, old
+        # note_success signature) must keep working with old accounting — the
+        # startup warning says so, the request path must not 500.
+        mod = self.mod
+
+        class OldBucket:                      # pre-receipt limiter API only
+            def model_cooling(self, model):
+                return 0.0
+
+            async def aacquire(self, **kw):   # old API: returns float, no receipt
+                return 0.0
+
+            def note_success(self, model=None, tokens_used=None, booked=0):
+                self.success = (model, tokens_used, booked)
+
+        bucket = OldBucket()
+        hooks = mod.LAProxyHooks()
+        hooks._bucket = bucket
+        kwargs = {"model": "nvidia_nim/acme/x", "max_tokens": 700,
+                  "litellm_call_id": "c-OLD", "messages": [{"role": "user", "content": "hi"}]}
+        asyncio.run(hooks.async_pre_call_deployment_hook(kwargs, None))   # must not raise
+        self.assertNotIn("c-OLD", mod._CALL_BOOKED, "no receipt on the old limiter")
+        asyncio.run(hooks.async_log_success_event(
+            {"model": "nvidia_nim/acme/x", "litellm_call_id": "c-OLD"},
+            {"usage": {"prompt_tokens": 100, "completion_tokens": 25}}, 0, 1))
+        self.assertEqual(bucket.success[2], 0, "old signature: booked=0 -> no ledger write")
 
     def test_bound_prunes_only_dead_entries(self):
         mod = self.mod
