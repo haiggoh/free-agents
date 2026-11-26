@@ -330,11 +330,11 @@ def test_watcher_respects_opt_out_each_run(tmp_path, monkeypatch):
     assert sms.save_auto_takeover(cfg, False) is None
     watcher_env(tmp_path, monkeypatch, sink=tmp_path / "sink.jsonl",
                 extra={"ANTHROPIC_BASE_URL": "https://llmgw.example/v1",
-                       "LA_SESSION_MENU_CONFIG_DIR": str(cfg)})
+                       "FREE_AGENTS_CONFIG_DIR": str(cfg)})
     monkeypatch.delenv("FA_AUTO_TAKEOVER", raising=False)
     _spool(tmp_path)
     # FA_AUTO_TAKEOVER="" = unset, so the STORED setting (OFF) is what the watcher reads
-    r = _run_watcher_subprocess(tmp_path, env_extra={"LA_SESSION_MENU_CONFIG_DIR": str(cfg),
+    r = _run_watcher_subprocess(tmp_path, env_extra={"FREE_AGENTS_CONFIG_DIR": str(cfg),
                                                       "FA_AUTO_TAKEOVER": ""})
     assert r.returncode == 0
     root = tmp_path / "takeovers"
@@ -355,7 +355,7 @@ def test_stored_setting_is_load_bearing(tmp_path, monkeypatch):
     assert sms.save_auto_takeover(cfg, True) is None
     watcher_env(tmp_path, monkeypatch, sink=tmp_path / "sink.jsonl",
                 extra={"ANTHROPIC_BASE_URL": "https://llmgw.example/v1",
-                       "LA_SESSION_MENU_CONFIG_DIR": str(cfg)})
+                       "FREE_AGENTS_CONFIG_DIR": str(cfg)})
     monkeypatch.delenv("FA_AUTO_TAKEOVER", raising=False)
 
     def run_once(name, pl):

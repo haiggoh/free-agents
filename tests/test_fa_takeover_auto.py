@@ -65,7 +65,7 @@ def auto_env(tmp_path, monkeypatch, sink, *, auto: "str | None" = "1", config_di
     else:
         env["FA_AUTO_TAKEOVER"] = auto
     if config_dir is not None:
-        env["LA_SESSION_MENU_CONFIG_DIR"] = str(config_dir)
+        env["FREE_AGENTS_CONFIG_DIR"] = str(config_dir)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     stub = tmp_path / "stub-launcher"
