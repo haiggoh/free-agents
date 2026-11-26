@@ -268,7 +268,7 @@ def _register_waiter(waiters: dict, token: str, owner: str, cls: str, kind: str,
     """Register or heartbeat one waiter. `arrived` is set once and never resets; every
     call refreshes last_seen (the heartbeat that survives long cooldowns). `tokens` is
     the caller's estimate, recorded ONCE ("tok") so the granting poll can book the
-    WINNER's quota and mint its receipt (0.63.3); a heartbeat never overwrites it."""
+    WINNER's quota and mint its receipt (0.63.4); a heartbeat never overwrites it."""
     w = waiters.get(token)
     if w is None:
         waiters[token] = {"owner": owner, "arrived": now, "last_seen": now,
@@ -496,7 +496,7 @@ def _quota_wait(quota, now: float, tokens: int) -> float:
 def _quota_book(quota, now: float, tokens: int):
     """Book tokens in the sidecar at the grant instant; returns the reservation's
     Receipt (None when this provider has no sidecar). A 0-token grant still books:
-    the request counts, and its receipt settles the real usage later (0.63.3)."""
+    the request counts, and its receipt settles the real usage later (0.63.4)."""
     if quota is None:
         return None
     return quota.book(int(tokens), now)
@@ -505,7 +505,7 @@ def _quota_book(quota, now: float, tokens: int):
 def _book_winner(lim, w: dict, now: float) -> None:
     """Grant-time quota booking for a queue handoff: the WINNER's estimate (recorded
     at registration as "tok") is booked and its receipt rides in the waiter entry
-    ("rcp") until the winner acks its next poll (0.63.3). Without a sidecar this
+    ("rcp") until the winner acks its next poll (0.63.4). Without a sidecar this
     records nothing, exactly as before receipts existed."""
     r = _quota_book(lim.quota, now, int(w.get("tok") or 0))
     if r is not None:
@@ -570,7 +570,7 @@ class SmoothTokenBucket:
         self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}, live-editable
         self._waiters: dict = {}          # fairness queue (same schema as the window's)
         self._deficit: dict = {}          # deficit policy residuals
-        self._grant_receipts: dict = {}   # 0.63.3: token -> Receipt, born at the grant
+        self._grant_receipts: dict = {}   # 0.63.4: token -> Receipt, born at the grant
         self._grants: list = []           # rolling 60s grant log; feeds the lane share cap
         self._load()
 
@@ -937,7 +937,7 @@ class SmoothTokenBucket:
     def note_success(self, model: str | None = None, tokens_used: int | None = None,
                      receipt=None) -> None:
         """A completed request: clear that model's entry and reset the global counter.
-        0.63.3: reconcile the request's OWN reservation — settle(receipt, tokens_used)
+        0.63.4: reconcile the request's OWN reservation — settle(receipt, tokens_used)
         refunds its over-estimate in the receipt's own stamp/day/week (idempotently);
         receipt=None (or no sidecar) writes nothing to the ledger."""
         fd = self._locked()
@@ -1008,7 +1008,7 @@ class SmoothTokenBucket:
                       kind: str | None = None, model: str | None = None,
                       tokens: int = 0):
         """acquire(), returning (seconds waited, the reservation's Receipt | None) —
-        the receipt a success settles against (0.63.3)."""
+        the receipt a success settles against (0.63.4)."""
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())
@@ -1041,7 +1041,7 @@ class SmoothTokenBucket:
                              priority: bool | None = None, kind: str | None = None,
                              model: str | None = None, tokens: int = 0):
         """aacquire(), returning (seconds waited, the reservation's Receipt | None) —
-        the receipt a success settles against (0.63.3)."""
+        the receipt a success settles against (0.63.4)."""
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())
@@ -1118,7 +1118,7 @@ class SlidingWindowLimiter:
         self._owners: dict = {}           # 0.50.1: per-owner {priority, rpm_scale}
         self._waiters: dict = {}          # fairness queue: token -> waiter entry
         self._deficit: dict = {}          # deficit policy: owner -> residual seconds
-        self._grant_receipts: dict = {}   # 0.63.3: token -> Receipt, born at the grant
+        self._grant_receipts: dict = {}   # 0.63.4: token -> Receipt, born at the grant
 
     def _locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -1423,7 +1423,7 @@ class SlidingWindowLimiter:
         """A completed request: clear that model's cooldown entry, and reset the global
         backoff counter. The ONLY resets (0.40.0) — an expired pause no longer clears
         anything, or a model throttled for hours retried at base cooldown forever.
-        0.63.3: reconcile the request's OWN reservation — settle(receipt, tokens_used)
+        0.63.4: reconcile the request's OWN reservation — settle(receipt, tokens_used)
         refunds its over-estimate in the receipt's own stamp/day/week (idempotently);
         receipt=None (or no sidecar) writes nothing to the ledger."""
         fd = self._locked()
@@ -1496,7 +1496,7 @@ class SlidingWindowLimiter:
                       kind: str | None = None, model: str | None = None,
                       tokens: int = 0):
         """acquire(), returning (seconds waited, the reservation's Receipt | None) —
-        the receipt a success settles against (0.63.3)."""
+        the receipt a success settles against (0.63.4)."""
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())
@@ -1530,7 +1530,7 @@ class SlidingWindowLimiter:
                              priority: bool | None = None, kind: str | None = None,
                              model: str | None = None, tokens: int = 0):
         """aacquire(), returning (seconds waited, the reservation's Receipt | None) —
-        the receipt a success settles against (0.63.3)."""
+        the receipt a success settles against (0.63.4)."""
         limit = _max_wait(max_wait)
         waited = 0.0
         token = _waiter_token(_owner())

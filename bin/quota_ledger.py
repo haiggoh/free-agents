@@ -189,7 +189,7 @@ class QuotaLedger:
 
     def book(self, tokens: int, now: float) -> Receipt:
         """Reserve `tokens` for one request; returns the request's Receipt — the
-        ONLY identity settle() reconciles against (0.63.3)."""
+        ONLY identity settle() reconciles against (0.63.4)."""
         fd = self._locked()
         try:
             st = self._load(fd)
@@ -291,7 +291,7 @@ class QuotaLedger:
             os.close(fd)
 
     def refund(self, n: int, now: float) -> None:
-        """DEPRECATED (0.63.3): refunds the NEWEST stamp — the exact defect receipts
+        """DEPRECATED (0.63.4): refunds the NEWEST stamp — the exact defect receipts
         replace. Kept for the existing ledger tests and external callers; a call
         from rate_limiter is a regression and raises."""
         import inspect
