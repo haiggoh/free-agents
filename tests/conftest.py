@@ -231,6 +231,7 @@ def _snapshot_repo_effort():
 
 
 _REPO_EFFORT_BEFORE = _snapshot_repo_effort()
+_REPO_EFFORT_EXISTED_AT_IMPORT = _REPO_EFFORT_FILE.exists()
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -245,15 +246,22 @@ def pytest_sessionfinish(session, exitstatus):
               "sandboxed, so this is most likely your own edit or a live Claude Code session; "
               "it does not fail the run.")
     if _snapshot_repo_effort() != _REPO_EFFORT_BEFORE:
-        # F1.2: FAIL (unlike the settings.json note above) — a change to this file during
-        # the run means a test wrote the checkout's config/ effort store; conftest forces
-        # LA_LAST_EFFORT_FILE to a sandbox. The only benign writer is a live csl running
-        # in the CANONICAL checkout, never one started from this worktree's suite.
-        print(f"\nFAILED: {_REPO_EFFORT_FILE} changed during this run — a test wrote the "
-              "checkout's config/ effort store; conftest forces LA_LAST_EFFORT_FILE to a "
-              "sandbox (F1.2). (A live csl in the canonical checkout is the only benign "
-              "writer of that file.)")
-        session.exitstatus = 1
+        if _REPO_EFFORT_EXISTED_AT_IMPORT:
+            # REPORT, never fail (same policy as the settings.json NOTE above): the file
+            # existed at import, so in the CANONICAL checkout it is the user's live effort
+            # store (config/*.local.* is gitignored) and a live csl may legitimately
+            # rewrite it mid-run.
+            print(f"\nNOTE: {_REPO_EFFORT_FILE} changed during this run, but it existed at "
+                  "import — in the canonical checkout that is the live effort store and a "
+                  "live csl is the benign writer; not failing the run.")
+        else:
+            # FAIL: the file did not exist at import, so a change means a test created it —
+            # a leak into the checkout's config/ (bin/last-effort.py's default target).
+            print(f"\nFAILED: {_REPO_EFFORT_FILE} changed during this run — a test wrote the "
+                  "checkout's config/ effort store; conftest forces LA_LAST_EFFORT_FILE to a "
+                  "sandbox (F1.2).")
+            if session.exitstatus == 0:
+                session.exitstatus = 1
     shim_log = Path(os.environ.get("FA_NOTIFY_SHIM_DIR", "")) / "calls.log"
     calls = []
     try:

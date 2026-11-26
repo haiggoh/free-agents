@@ -52,32 +52,44 @@ class LastEffortFence(unittest.TestCase):
         self.assertEqual(stored.get("fence-probe-alias"), "high")
 
     def test_sessionfinish_fails_the_run_when_the_repo_effort_file_changed(self):
-        # R2 FAIL half: conftest.pytest_sessionfinish must set exitstatus=1 if the checkout's
-        # config/remote-last-effort.local.json changed during the run. Exercised in-process:
-        # control first (file absent -> untouched), then a planted write -> exitstatus 1.
-        # The file is unlinked in finally before this test ends, and every worker's
-        # sessionfinish runs only after all tests, so no cross-worker race.
-        # the live conftest plugin module (tests/ is not on sys.path, so `import conftest`
-        # fails — find the already-loaded module by its file instead of re-executing it)
-        cf = next(m for m in sys.modules.values()
-                  if getattr(m, "__file__", None)
-                  and Path(m.__file__).resolve() == (ROOT / "tests" / "conftest.py").resolve())
-        self.assertFalse(REPO_EFFORT_FILE.exists(), "worktree config/ effort file must be absent")
-
-        class _S:
-            exitstatus = 0
-        s = _S()
-        cf.pytest_sessionfinish(s, 0)
-        self.assertEqual(s.exitstatus, 0, "control: unchanged file must not fail the run")
-
-        REPO_EFFORT_FILE.write_text('{"probe": true}\n')
+        # R2 FAIL half: conftest.pytest_sessionfinish must set exitstatus=1 if the repo
+        # effort file was CREATED during the run (file absent at import). Exercised
+        # in-process against a per-test TMP path by monkeypatching the live conftest
+        # module's _REPO_EFFORT_FILE/_REPO_EFFORT_BEFORE — never touch the real checkout
+        # path from a test (another xdist worker's sessionfinish could observe it).
+        # The live conftest plugin module: tests/ is not on sys.path, so `import conftest`
+        # fails — find the already-loaded module by its file instead of re-executing it.
+        cf = next((m for m in sys.modules.values()
+                   if getattr(m, "__file__", None)
+                   and Path(m.__file__).resolve() == (ROOT / "tests" / "conftest.py").resolve()),
+                  None)
+        self.assertIsNotNone(cf, "live conftest module not found in sys.modules")
+        tmp = Path(tempfile.mkdtemp(prefix="fa-effort-fence-")) / "remote-last-effort.local.json"
+        orig = (cf._REPO_EFFORT_FILE, cf._REPO_EFFORT_BEFORE, cf._REPO_EFFORT_EXISTED_AT_IMPORT)
+        cf._REPO_EFFORT_FILE, cf._REPO_EFFORT_BEFORE, cf._REPO_EFFORT_EXISTED_AT_IMPORT = tmp, None, False
         try:
+            class _S:
+                exitstatus = 0
+            s = _S()
+            cf.pytest_sessionfinish(s, 0)
+            self.assertEqual(s.exitstatus, 0, "control: unchanged file must not fail the run")
+
+            tmp.write_text('{"probe": true}\n')
             s2 = _S()
             cf.pytest_sessionfinish(s2, 0)
             self.assertEqual(s2.exitstatus, 1,
-                             "a changed repo effort file must FAIL the session (exitstatus=1)")
+                             "a repo effort file CREATED during the run must FAIL the session")
+
+            # report-only branch: file existed at import (canonical checkout's live store)
+            cf._REPO_EFFORT_BEFORE = tmp.read_bytes()
+            cf._REPO_EFFORT_EXISTED_AT_IMPORT = True
+            tmp.write_text('{"probe": "after"}\n')
+            s3 = _S()
+            cf.pytest_sessionfinish(s3, 0)
+            self.assertEqual(s3.exitstatus, 0,
+                             "a PRE-EXISTING live store changing mid-run is report-only, not a failure")
         finally:
-            REPO_EFFORT_FILE.unlink(missing_ok=True)
+            cf._REPO_EFFORT_FILE, cf._REPO_EFFORT_BEFORE, cf._REPO_EFFORT_EXISTED_AT_IMPORT = orig
 
 
 class BackendUpgradesFence(unittest.TestCase):
