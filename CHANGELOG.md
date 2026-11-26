@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.63.4] — 2026-11-25
+## [0.63.5] — 2026-11-26
 
 ### Fixed — quota refunds settle the exact reservation in its own TPM window and UTC day
 - Affects TPM-limited providers (Mistral 40k, Groq 8k); NVIDIA is RPM-only by default and
