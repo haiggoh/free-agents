@@ -63,6 +63,10 @@ class LadderTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        # 0.64.2 gate flake (gw11): runtime facts (roster window / HF footprint) are memoized in
+        # provider_limits module globals for the whole xdist worker; a neighbouring test can
+        # leave them warm, flipping a snapshot-unknown context to a real number.
+        _pl._reset_runtime_caches()
         p = Path(self.tmp.name) / "provider-limits.json"
         p.write_text(json.dumps(LIMITS_DOC))
         self.limits = _pl.load(p)

@@ -22,6 +22,12 @@
   planted positive; teardown leaves another session's proxy and owner record alone, with a
   planted positive; a live lock holder makes allocation fail within its wall-clock cap, an
   invalid `LA_PORT_LOCK_WAIT_S` fails loudly, a dead holder's lock is broken.
+- Tests (suite fence): conftest's per-test fence re-assert now also covers `LA_HF_PARAMS_CACHE` /
+  `LA_HF_API_BASE` / `LA_HF_ROUTER_URL` — HF tests pop them on cleanup, and the session ladder
+  then read the real warm HF cache under `-n 12`, flaking
+  `test_unknown_context_skips_with_reason` (gate, gw11). Covered by
+  `tests/test_live_state_fences_reassert.py` (red before the fix, green after); the ladder
+  test also resets the per-worker runtime-facts memoization in `setUp`.
 
 ## [0.64.1] — 2026-11-27
 

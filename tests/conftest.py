@@ -63,6 +63,9 @@ os.environ["LA_HF_PARAMS_CACHE"] = str(
 # with their own fake server override it; stubs of _hf_get never reach it.
 os.environ["LA_HF_API_BASE"] = "http://127.0.0.1:9"
 os.environ["LA_HF_ROUTER_URL"] = "http://127.0.0.1:9/v1/models"   # the router catalog too
+_HF_PARAMS_FENCE = os.environ["LA_HF_PARAMS_CACHE"]
+_HF_API_BASE_FENCE = os.environ["LA_HF_API_BASE"]
+_HF_ROUTER_FENCE = os.environ["LA_HF_ROUTER_URL"]
 # 0.62.0 (provider buckets): per-PROVIDER buckets live under FA_LIMITER_DIR (default
 # ~/.claude/free-agents/limiter) — the same live-state fence as the NVIDIA file applies:
 # FORCED to a per-worker sandbox, never the real dir.
@@ -182,12 +185,20 @@ def _sandbox_free_agents_config_dir(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reassert_live_state_fences(monkeypatch):
-    """F1: re-assert the run-level LA_LAST_EFFORT_FILE / LA_BACKEND_UPGRADES_STATE fences
-    for EVERY test — a test that sets an override on os.environ directly and pops it on
-    cleanup (test_cycle_ui_0554.py BackendUpgradeToggles) would otherwise leave the fence
-    unset for all later tests in the same xdist worker."""
+    """F1: re-assert the run-level fences for EVERY test — a test that sets an override on
+    os.environ directly and pops it on cleanup (test_cycle_ui_0554.py BackendUpgradeToggles,
+    and the HF tests popping LA_HF_PARAMS_CACHE / LA_HF_API_BASE / LA_HF_ROUTER_URL) would
+    otherwise leave the fence unset for all later tests in the same xdist worker. The HF
+    fences matter because the session ladder resolves a snapshot-unknown context through
+    them (provider_limits._with_runtime_facts "hf" layer); without the fence it reads the
+    REAL warm ~/.cache/free-agents/hf-params.json and a ladder test flakes (0.64.2 gate,
+    gw11: test_unknown_context_skips_with_reason). Proven by
+    tests/test_live_state_fences_reassert.py (red before this fixture covered them)."""
     monkeypatch.setenv("LA_LAST_EFFORT_FILE", _LAST_EFFORT_FENCE)
     monkeypatch.setenv("LA_BACKEND_UPGRADES_STATE", _BACKEND_UPGRADES_FENCE)
+    monkeypatch.setenv("LA_HF_PARAMS_CACHE", _HF_PARAMS_FENCE)
+    monkeypatch.setenv("LA_HF_API_BASE", _HF_API_BASE_FENCE)
+    monkeypatch.setenv("LA_HF_ROUTER_URL", _HF_ROUTER_FENCE)
 
 
 def _snapshot():
