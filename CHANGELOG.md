@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.65.0] — 2026-11-27
+
+### Feature — csl greys out listed-but-unreachable models (R5)
+- A catalog-listed model that does not answer a probe gets a greyed, unselectable row with
+  an inline hint (`· not reachable`), an infobox sentence ("temporarily not reachable — no
+  answer since HH:MM; re-check with …"), and a re-check key. The mark expires and re-probes
+  automatically (TTL ~15 min); "could not send" = unknown, never unreachable.
+- Prevention: the system prompt rule (shipped in 0.63.3) to write large files in parts.
+
+### Fixed — 0.63.7 proxy port-lock race fix (R1)
+- Three `remote-session.sh` launches started in the same second all got the same port.
+  `free_port()` now claims a port atomically under a lock; readiness counts only when
+  this run's proxy owns the listener.
+
 ## [0.64.2] — 2026-11-27
 
 ### Fixed — parallel remote sessions shared one proxy and ran the wrong model
