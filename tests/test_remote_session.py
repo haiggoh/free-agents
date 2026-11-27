@@ -766,18 +766,60 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         rundir = self.root / 'local-agents-remote'
         rundir.mkdir(exist_ok=True)
         self.stub('lsof', '#!/bin/sh\nexit 1\n')                     # every port looks free
-        # each caller holds its claim while it lives, the way a launcher holds its port
-        script = 'source "$1"; p=$(free_port) || exit 1; echo "$p"; sleep 4'
-        procs = [subprocess.Popen(['bash', '-c', script, 'x', str(self.root / 'bin/library.sh')],
-                                  env=self.env, text=True, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE) for _ in range(4)]
-        outs = [p.communicate(timeout=90) for p in procs]
-        ports = [o.strip() for o, _ in outs]
-        self.assertTrue(all(ports), f'every caller got a port: {ports} {[e for _, e in outs]}')
+        # Each caller holds its claim (stays alive) until ALL have answered — a barrier, never a
+        # fixed sleep: on a loaded box the serialized lock queue outlasts any fixed hold, and a
+        # caller that has EXITED rightly frees its port (measured 2026-11-27: a 3-4 s hold read
+        # as duplicates that were correct reuse of a dead owner's port).
+        release = self.root / 'release'
+        script = ('source "$1"; p=$(free_port) || exit 1; echo "$p"; '
+                  'for _ in $(seq 1 900); do [ -e "$2" ] && exit 0; sleep 0.1; done')
+        errs = [open(self.root / f'err.{i}', 'w') for i in range(4)]
+        for e in errs:
+            self.addCleanup(e.close)
+        procs = [subprocess.Popen(['bash', '-c', script, 'x', str(self.root / 'bin/library.sh'),
+                                   str(release)], env=self.env, text=True,
+                                  stdout=subprocess.PIPE, stderr=e) for e in errs]
+        ports = [p.stdout.readline().strip() for p in procs]        # every claimant still alive here
+        release.touch()
+        for p in procs:
+            p.communicate(timeout=120)
+        self.assertTrue(all(ports), f'every caller got a port: {ports} '
+                                    f'{[(self.root / f"err.{i}").read_text()[-300:] for i in range(4)]}')
         self.assertEqual(len(set(ports)), 4, f'concurrent callers must get DISTINCT ports: {ports}')
         for port, p in zip(ports, procs):
             owner = (rundir / f'proxy-{port}.owner').read_text().split()[0]
             self.assertEqual(owner, str(p.pid), 'the claim is written by free_port, naming its caller')
+
+    def test_port_lock_held_by_a_live_launcher_fails_loudly_within_a_wall_clock_cap(self):
+        rundir = self.root / 'local-agents-remote'
+        rundir.mkdir(exist_ok=True)
+        lib = str(self.root / 'bin/library.sh')
+        holder = subprocess.Popen(['sleep', '120'])                 # a launcher stuck in the section
+        self.addCleanup(holder.kill)
+        start = subprocess.run(['bash', '-c', 'source "$1"; _proc_start "$2"', 'x', lib, str(holder.pid)],
+                               env=self.env, text=True, capture_output=True).stdout.strip()
+        lock = rundir / '.port-alloc.lock'
+        lock.mkdir()
+        (lock / 'holder').write_text(f'{holder.pid} {start}\n')
+        def free_port(wait):
+            t0 = time.monotonic()
+            r = subprocess.run(['bash', '-c', 'source "$1"; free_port', 'x', lib],
+                               env=dict(self.env, LA_PORT_LOCK_WAIT_S=wait), text=True,
+                               capture_output=True, timeout=120)
+            return r, time.monotonic() - t0
+        r, took = free_port('2')
+        self.assertNotEqual(r.returncode, 0, 'a live holder is never broken')
+        self.assertIn('port-allocation lock', r.stderr)
+        self.assertIn(str(holder.pid), r.stderr, 'name the launcher that holds the lock')
+        self.assertLess(took, 15, f'the cap is wall-clock seconds, not loop iterations (took {took:.1f}s)')
+        r, _ = free_port('two')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('LA_PORT_LOCK_WAIT_S', r.stderr, 'a set-but-invalid override fails loudly, naming it')
+        # planted positive: a lock whose holder DIED is broken and allocation proceeds
+        (lock / 'holder').write_text('999999 x\n')
+        r, _ = free_port('2')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout.strip(), r'^41\d\d$')
 
     def test_ready_refuses_a_port_answered_by_another_proxy(self):
         # a real foreign listener; curl is stubbed to "answer", like any live proxy would

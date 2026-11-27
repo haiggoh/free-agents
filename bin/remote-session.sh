@@ -38,6 +38,8 @@
 #   LA_REMOTE_MAX_OUTPUT_TOKENS   CLAUDE_CODE_MAX_OUTPUT_TOKENS (default 128000 = Claude Code's own
 #                                 ceiling for the spoofed model; the proxy clamps per provider)
 #   LA_REMOTE_KEEP_PROXY=1        leave the proxy running after the session exits
+#   LA_PORT_LOCK_WAIT_S           seconds to wait for the port-allocation lock held by a
+#                                 concurrent launcher (default 60; whole seconds, else an error)
 #   LA_STREAM_TIMEOUT             seconds a model may stay SILENT before its request fails over
 #                                 to the fallback chain (default 300; 0 disables; time queued in
 #                                 the rate limiter is never counted; invalid = launch refused)
@@ -646,9 +648,13 @@ swap_scratch_port() {
 # picked 4144, two proxies failed to bind, and two sessions ran the third one's model. Picking
 # and claiming now happen under one lock, so a concurrent launcher sees the claim and moves on.
 _alloc_lock() { # mkdir is atomic; the holder record lets a waiter break a lock whose holder died
-    local lock="$RUNDIR/.port-alloc.lock" holder="" i
+    local lock="$RUNDIR/.port-alloc.lock" holder="" wait="${LA_PORT_LOCK_WAIT_S:-60}" deadline
+    [[ "$wait" =~ ^[0-9]+$ ]] || { echo "remote-session: LA_PORT_LOCK_WAIT_S must be whole seconds, got '$wait'" >&2; return 1; }
     [[ -d "$RUNDIR" ]] || { echo "remote-session: runtime dir $RUNDIR missing — cannot allocate a port" >&2; return 1; }
-    for ((i=0; i<300; i++)); do
+    # WALL-CLOCK cap (SECONDS): one liveness check can take over a second on a loaded box
+    # (ps measured 0.3-0.6 s each, 2026-11-27), so an iteration count is not a time limit.
+    deadline=$(( SECONDS + wait ))
+    while :; do
         if mkdir "$lock" 2>/dev/null; then
             echo "$$ $(_proc_start $$)" > "$lock/holder"; return 0
         fi
@@ -656,9 +662,10 @@ _alloc_lock() { # mkdir is atomic; the holder record lets a waiter break a lock 
         if [[ -n "$holder" ]] && ! _owner_alive "$holder"; then
             rm -f "$lock/holder"; rmdir "$lock" 2>/dev/null; continue
         fi
+        (( SECONDS >= deadline )) && break
         sleep 0.1
     done
-    echo "remote-session: port-allocation lock $lock still held after 30s (holder: ${holder:-unknown}); remove it only if no launcher is running" >&2
+    echo "remote-session: port-allocation lock $lock still held after ${wait}s (holder: ${holder:-unknown}); remove it only if no launcher is running" >&2
     return 1
 }
 _alloc_unlock() { rm -f "$RUNDIR/.port-alloc.lock/holder"; rmdir "$RUNDIR/.port-alloc.lock" 2>/dev/null; return 0; }
