@@ -1647,7 +1647,7 @@ class LocalScreen(Screen):
     def _choose_model_label(self):
         return "Choose model…" if not self._choose_model_visible else "Choose model (shown)"
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The info box under the open local list (0.41.0): the readable name over the exact
         alias -- the one `csl <alias>` takes -- and how the model is served."""
         mdl = self.models.get(item_id) if item_id else None
@@ -2201,7 +2201,7 @@ class RemoteScreen(Screen):
         if open_group:
             self.accordion.expand(open_group)
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The info box under the model list: the model's display name, its lane, and its
         short-form note (config/remote-model-notes.json), or a hint when nothing is pointed
         at. Only models get a box — group headers and the no-keys instruction get the hint.
@@ -2683,7 +2683,7 @@ class CloudConfigScreen(Screen):
         if self.settings.on_flash:
             self.settings.on_flash(f"Auto-mode probe: {verdict}" + (f" — {evidence[:80]}" if evidence else ""))
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The three routing modes, each with its one-line contract (plain Action rows pass
         item_id=None, so the box always shows the whole table); the gateway cost box appears
         ONLY when the cached verdict is not-eligible (A3: facts, only for users it applies to)."""
@@ -3519,7 +3519,7 @@ class APIKeysScreen(Screen):
         state = "currently hidden" if hidden else "currently shown"
         return f"{'show' if hidden else 'hide'}:{slug}", f"{verb} {slug} in the choose-model list ({state})"
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The info box under the list: what the highlighted provider needs BEFORE a key works
         (its setup steps, incl. account requirements such as Vercel's credit card) plus the
         registry's measured notes. Shown for a provider row and for its Open/Add items."""
@@ -3705,7 +3705,7 @@ class LowkeyScreen(Screen):
         self._api_by_id = {}                   # item id -> RemoteAgent, built in set_models
         self.set_models(models or [])
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The info box under the list (0.54.0 D3: lowkey is a model-list screen now)."""
         if item_id and item_id in self._api_by_id:
             a = self._api_by_id[item_id]
