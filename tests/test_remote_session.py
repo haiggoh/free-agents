@@ -756,6 +756,76 @@ with open(os.environ['CHILD_ENV_PATH'],'w') as f:
         self.assertEqual(port(f'{owner.pid} {start}'), '4142', 'live owner: 4141 is reserved')
         self.assertEqual(port('999999 x'), '4141', 'dead owner: 4141 is free again')
 
+    # ---- INCIDENT 2026-11-27: three same-second launches (nemotron, mistral-large4, glm53) all
+    # got port 4144 — free_port() checked the port, but the owner record that reserves it was
+    # written seconds later, after the proxy spawned. Two launchers' own proxies failed to bind,
+    # their readiness probe accepted the THIRD one's answer, and two sessions ran GLM under
+    # Nemotron / Le Chonk banners. Each EXIT trap would then have killed that shared proxy.
+
+    def test_parallel_free_port_callers_get_distinct_claimed_ports(self):
+        rundir = self.root / 'local-agents-remote'
+        rundir.mkdir(exist_ok=True)
+        self.stub('lsof', '#!/bin/sh\nexit 1\n')                     # every port looks free
+        # each caller holds its claim while it lives, the way a launcher holds its port
+        script = 'source "$1"; p=$(free_port) || exit 1; echo "$p"; sleep 4'
+        procs = [subprocess.Popen(['bash', '-c', script, 'x', str(self.root / 'bin/library.sh')],
+                                  env=self.env, text=True, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE) for _ in range(4)]
+        outs = [p.communicate(timeout=90) for p in procs]
+        ports = [o.strip() for o, _ in outs]
+        self.assertTrue(all(ports), f'every caller got a port: {ports} {[e for _, e in outs]}')
+        self.assertEqual(len(set(ports)), 4, f'concurrent callers must get DISTINCT ports: {ports}')
+        for port, p in zip(ports, procs):
+            owner = (rundir / f'proxy-{port}.owner').read_text().split()[0]
+            self.assertEqual(owner, str(p.pid), 'the claim is written by free_port, naming its caller')
+
+    def test_ready_refuses_a_port_answered_by_another_proxy(self):
+        # a real foreign listener; curl is stubbed to "answer", like any live proxy would
+        foreign = subprocess.Popen([sys.executable, '-c',
+                                    'import socket,time; s=socket.socket(); s.bind(("127.0.0.1", 0)); '
+                                    's.listen(); print(s.getsockname()[1], flush=True); time.sleep(60)'],
+                                   stdout=subprocess.PIPE, text=True)
+        self.addCleanup(foreign.kill)
+        port = foreign.stdout.readline().strip()
+        ours = subprocess.Popen(['sleep', '60'])                    # our child: alive, NOT listening
+        self.addCleanup(ours.kill)
+        def ready(pid):
+            return subprocess.run(['bash', '-c', 'source "$1"; _wait_proxy_ready "$2" "$3" 3', 'x',
+                                   str(self.root / 'bin/library.sh'), port, str(pid)],
+                                  env=self.env, text=True, capture_output=True, timeout=60)
+        r = ready(ours.pid)
+        self.assertNotEqual(r.returncode, 0, 'another process answering on the port is not OUR proxy')
+        self.assertIn(str(foreign.pid), r.stderr, 'name the process that holds the port')
+        self.assertEqual(ready(foreign.pid).returncode, 0, 'planted positive: our own listener is ready')
+
+    def test_teardown_leaves_a_proxy_owned_by_another_session(self):
+        rundir = self.root / 'local-agents-remote'
+        rundir.mkdir(exist_ok=True)
+        lib = str(self.root / 'bin/library.sh')
+        other = subprocess.Popen(['sleep', '120'])                  # the session that owns the proxy
+        self.addCleanup(other.kill)
+        proxy = subprocess.Popen(['sleep', '120'])
+        self.addCleanup(proxy.kill)
+        (rundir / 'proxy-4144.pid').write_text(str(proxy.pid))
+        start = subprocess.run(['bash', '-c', 'source "$1"; _proc_start "$2"', 'x', lib, str(other.pid)],
+                               env=self.env, text=True, capture_output=True).stdout.strip()
+        self.assertTrue(start)
+        (rundir / 'proxy-4144.owner').write_text(f'{other.pid} {start}\n')
+        stub_ours = '_is_our_proxy() { kill -0 "${1%% *}" 2>/dev/null; }; '
+        r = subprocess.run(['bash', '-c', 'source "$1"; ' + stub_ours + 'stop_one_proxy 4144', 'x', lib],
+                           env=self.env, text=True, capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        time.sleep(0.3)
+        self.assertIsNone(proxy.poll(), "this run's teardown must not stop another session's proxy")
+        self.assertTrue((rundir / 'proxy-4144.owner').exists(), 'and must keep its owner record')
+        self.assertIn(str(other.pid), r.stdout + r.stderr, 'say whose proxy was left running')
+        # planted positive: when THIS run owns the proxy, teardown still stops it
+        r = subprocess.run(['bash', '-c', 'source "$1"; echo "$$ $(_proc_start $$)" > "$2"; ' + stub_ours +
+                            'stop_one_proxy 4144', 'x', lib, str(rundir / 'proxy-4144.owner')],
+                           env=self.env, text=True, capture_output=True)
+        time.sleep(0.3)
+        self.assertIsNotNone(proxy.poll(), 'the owning run still stops its own proxy')
+
     def test_recycled_owner_pid_counts_as_gone(self):
         """A session closed hours ago may have its pid reused by an unrelated process. The owner
         record carries the launcher's START TIME too, so a live pid with another start time is

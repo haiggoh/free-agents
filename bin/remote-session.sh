@@ -641,8 +641,31 @@ swap_scratch_port() {
     return 1
 }
 
+# INCIDENT 2026-11-27: free_port() only CHECKED a port; the owner record that reserves it was
+# written by start_proxy seconds later, after the proxy spawned. Three same-second launches all
+# picked 4144, two proxies failed to bind, and two sessions ran the third one's model. Picking
+# and claiming now happen under one lock, so a concurrent launcher sees the claim and moves on.
+_alloc_lock() { # mkdir is atomic; the holder record lets a waiter break a lock whose holder died
+    local lock="$RUNDIR/.port-alloc.lock" holder="" i
+    [[ -d "$RUNDIR" ]] || { echo "remote-session: runtime dir $RUNDIR missing — cannot allocate a port" >&2; return 1; }
+    for ((i=0; i<300; i++)); do
+        if mkdir "$lock" 2>/dev/null; then
+            echo "$$ $(_proc_start $$)" > "$lock/holder"; return 0
+        fi
+        holder="$(cat "$lock/holder" 2>/dev/null)"
+        if [[ -n "$holder" ]] && ! _owner_alive "$holder"; then
+            rm -f "$lock/holder"; rmdir "$lock" 2>/dev/null; continue
+        fi
+        sleep 0.1
+    done
+    echo "remote-session: port-allocation lock $lock still held after 30s (holder: ${holder:-unknown}); remove it only if no launcher is running" >&2
+    return 1
+}
+_alloc_unlock() { rm -f "$RUNDIR/.port-alloc.lock/holder"; rmdir "$RUNDIR/.port-alloc.lock" 2>/dev/null; return 0; }
+
 free_port() {
     local p
+    _alloc_lock || return 1
     for ((p=LA_REMOTE_PROXY_PORT_MIN; p<=LA_REMOTE_PROXY_PORT_MAX; p++)); do
         # A port is NOT free while the session that owned it still runs, even if its proxy died:
         # that session's ANTHROPIC_BASE_URL still points here, and a new proxy for another
@@ -650,8 +673,12 @@ free_port() {
         if [[ -r "$RUNDIR/proxy-$p.owner" ]] && _owner_alive "$(cat "$RUNDIR/proxy-$p.owner")"; then
             continue
         fi
-        if ! lsof -ti tcp:"$p" >/dev/null 2>&1; then echo "$p"; return 0; fi
+        if ! lsof -ti tcp:"$p" >/dev/null 2>&1; then
+            echo "$$ $(_proc_start $$)" > "$RUNDIR/proxy-$p.owner"   # the CLAIM, still inside the lock
+            _alloc_unlock; echo "$p"; return 0
+        fi
     done
+    _alloc_unlock
     _band_full_report
     echo "remote-session: no free port in ${LA_REMOTE_PROXY_PORT_MIN}-${LA_REMOTE_PROXY_PORT_MAX}" >&2
     echo "remote-session: LA_REMOTE_KEEP_PROXY=1 proxies stay after their session ends; free a port with: $0 --stop <port> (see the per-port report above)" >&2
@@ -726,9 +753,16 @@ _is_our_proxy() { # _is_our_proxy <"pid [start]"> <port> — 0.50.0 F5: a stored
     [[ ( "$cmd" == *litellm* || "$cmd" == *litellm-with-trust* ) && "$cmd" == *"proxy-$port.yaml"* ]]
 }
 
-stop_one_proxy() { # stop_one_proxy <port>
-    local port="${1:-}" pf pid
+stop_one_proxy() { # stop_one_proxy <port> — the EXIT-trap teardown: only the proxy THIS run owns
+    local port="${1:-}" pf pid owner
     [[ -n "$port" ]] || return 0
+    # 2026-11-27: this stopped whatever proxy-<port>.pid named — by PORT. After a port collision
+    # that is ANOTHER session's proxy, and the first session to exit stranded every other one.
+    owner="$(head -1 "$RUNDIR/proxy-$port.owner" 2>/dev/null)"
+    if [[ -n "$owner" && "${owner%% *}" != "$$" ]]; then
+        echo "   proxy    : left running on port $port — it belongs to session pid ${owner%% *}, not this one"
+        return 0
+    fi
     pf="$RUNDIR/proxy-$port.pid"
     pid="$(awk '{print $1}' "$pf" 2>/dev/null)"
     if _is_our_proxy "$(cat "$pf" 2>/dev/null)" "$port"; then
@@ -1334,6 +1368,26 @@ _spawn_proxy_on() { # _spawn_proxy_on <port> <cfg> <log> <prov> -> background pi
     echo $!
 }
 
+# 2026-11-27: the health probe accepted ANY answer on the port, so a launcher whose own proxy
+# had failed to bind attached to another session's proxy and printed "ready" under its own
+# model banner. An answer counts only when this run's child (or its descendant) holds the
+# listener. No visible listener (a stubbed world) keeps the old behaviour.
+_ready_is_ours() { # _ready_is_ours <port> <pid>
+    local l a n foreign=""
+    for l in $(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null); do
+        a="$l"
+        for n in 1 2 3 4 5; do
+            [[ "$a" == "$2" ]] && return 0
+            a="$(ps -o ppid= -p "$a" 2>/dev/null | tr -d ' ')"
+            [[ -n "$a" && "$a" != 0 && "$a" != 1 ]] || break
+        done
+        foreign="$l"
+    done
+    [[ -z "$foreign" ]] && return 0
+    echo "remote-session: port $1 answers, but its listener is pid $foreign, not this run's proxy (pid $2) — another session's proxy holds the port; refusing to attach (inspect: $RUNDIR/proxy-$1.owner)" >&2
+    return 1
+}
+
 _wait_proxy_ready() { # _wait_proxy_ready <port> <pid> <secs> [progress]
     # progress mode (0.62.0 C5): <secs> is the NO-PROGRESS window (default 60); the hard cap
     # is LA_PROXY_READY_CAP (default 420 — cold LiteLLM starts measured ~180-200 s). Progress =
@@ -1347,7 +1401,7 @@ _wait_proxy_ready() { # _wait_proxy_ready <port> <pid> <secs> [progress]
         window_end=$(( start + secs ))
         for i in $(seq 1 "$cap"); do
             if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
-                return 0
+                _ready_is_ours "$port" "$pid"; return $?
             fi
             kill -0 "$pid" 2>/dev/null || {
                 echo "remote-session: proxy died during startup; inspect the private log locally: $RUNDIR/proxy-$port.log" >&2
@@ -1377,7 +1431,7 @@ _wait_proxy_ready() { # _wait_proxy_ready <port> <pid> <secs> [progress]
     local i
     for i in $(seq 1 "$secs"); do
         if curl -s -m 2 "http://127.0.0.1:$port/health/liveliness" >/dev/null 2>&1; then
-            return 0
+            _ready_is_ours "$port" "$pid"; return $?
         fi
         kill -0 "$pid" 2>/dev/null || {
             echo "remote-session: proxy died during startup; inspect the private log locally: $RUNDIR/proxy-$port.log" >&2
