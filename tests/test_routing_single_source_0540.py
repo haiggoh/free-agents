@@ -10,6 +10,8 @@ no longer burns the one allowed paid call.
 """
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -56,6 +58,46 @@ class RoutingBlockTests(unittest.TestCase):
         self.assertIn("model", low)
         # no model NAMES (rosters rot) — point to --list instead
         self.assertIn("--list", block)
+
+    # 2026-11-27 plan-route-guard Task 4: three free routes, named the same way everywhere
+    def test_block_names_three_routes(self):
+        block = offload_routing.routing_block(str(ROOT))
+        for tag in ("free:dispatch", "free:session", "free:handover"):
+            self.assertIn(tag, block, f"routing block must name the {tag} route")
+
+    def test_block_has_no_no_headless_claim(self):
+        # the old block said "no headless form" — false: remote-session.sh forwards `-- -p`
+        self.assertNotIn("no headless", offload_routing.routing_block(str(ROOT)).lower())
+
+    def test_block_headless_form_parses(self):
+        # the block's headless command, verbatim, must be accepted by the REAL parser: with a
+        # missing brief it fails on remote-session.sh's OWN --prompt-file check (so the flag was
+        # consumed by the launcher, not forwarded to claude) and never as "unknown option"
+        block = offload_routing.routing_block(str(ROOT))
+        spans = re.findall(r"`(remote-session\.sh <alias>[^`]*-- -p[^`]*)`", block)
+        self.assertTrue(spans, "block must show the headless `remote-session.sh <alias> … -- -p` form")
+        self.assertIn("< /dev/null", spans[0], "headless form must close stdin (claude waits 3 s)")
+        toks = shlex.split(spans[0])
+        toks = toks[:toks.index("<")] if "<" in toks else toks
+        args = ["nonexistent-alias-x" if t == "<alias>" else
+                "/nonexistent-brief.md" if t.startswith("<") and t.endswith(">") else t
+                for t in toks[1:]]
+        self.assertIn("--", args)
+        self.assertEqual(args[args.index("--") + 1], "-p")
+        home = tempfile.mkdtemp(prefix="fa-routing-home-")
+        self.addCleanup(shutil.rmtree, home, True)
+        r = subprocess.run(["bash", str(ROOT / "bin/remote-session.sh"), "--dry-run", *args],
+                           env={"PATH": os.environ["PATH"], "HOME": home, "LC_ALL": "C"},
+                           capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("--prompt-file: no such file: /nonexistent-brief.md", r.stderr)
+        self.assertNotIn("unknown option", r.stderr)
+
+    def test_block_tells_plans_to_tag_every_task(self):
+        low = offload_routing.routing_block(str(ROOT)).lower()
+        self.assertIn("cloud:<", low)
+        self.assertIn("tool use is never a cloud reason", low)
+        self.assertIn("plan_check 0", low)             # the opt-out is always named
 
     def test_skill_has_no_second_routing_copy(self):
         raw = (ROOT / "skills/offload/SKILL.md").read_text(encoding="utf-8")
@@ -163,8 +205,7 @@ class InterceptRoutingTests(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn(offload_routing.routing_block(str(ROOT)), reason)
         self.assertIn("free-agent-tool.py", reason)           # the dispatch heredoc stays
-        # the free-SESSION route must point at the handover skill, not a headless -p command
-        # (remote-session.sh has no -p/headless flag — waypoint free-agents-paid-session)
+        # never the OLD broken form (-p before the alias); the handover skill stays named
         self.assertNotIn('-p "<brief>"', reason)
         self.assertIn("free-session-handover", reason)
 

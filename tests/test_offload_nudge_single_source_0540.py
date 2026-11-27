@@ -52,6 +52,14 @@ class NudgeSingleSourceTests(unittest.TestCase):
         self.assertIn(offload_routing.routing_block(str(ROOT)), text)
         self.assertIn("FREE ONLY", text)
 
+    def test_nudge_mentions_plans(self):
+        # 2026-11-27 root cause 1: the opening sentence only named Agent calls, so nothing
+        # matched when a PLAN was written — it must cover planning too
+        text = run_nudge({"FA_ROUTE_AGENT": "free-first"})
+        first = text.split("\n", 1)[0].lower()
+        self.assertIn("plan", first)
+        self.assertIn("agent/task/workflow", first)
+
     def test_nudge_names_parallel_fanout_route(self):
         text = run_nudge({"FA_ROUTE_AGENT": "free-first"})
         self.assertIn("dispatching-parallel-agents", text)

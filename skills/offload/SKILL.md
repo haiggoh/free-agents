@@ -42,22 +42,23 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
      NAMES here (rosters rot — point to `bin/free-agent-tool.py --list`). -->
 ## Default routing on a PAID session — decide the route BEFORE the call
 
-1. **Shape test first: text in / text out, or must it read files / run commands?**
-   Text-only → a STATELESS dispatch: `python3 bin/free-agent-tool.py` with
-   `{"prompt": ..., "files": [paths]}` (cannot read the disk; `--list` = preference order).
-   Must read files / run commands → a free SESSION in its own window via free-session-handover:
-   `remote-session.sh <alias> --prompt-file <handoff.md>` (no headless form — the launcher
-   execs an interactive claude). A HANDOVER is always INTERACTIVE.
-2. **Announce the model and route to the user BEFORE offloading** (the tool prints the model it
-   tried on stderr; the result JSON carries `model_used`/`route` — repeat them in your reply).
-   Brief delegates with the `brief-the-delegate` skill; session system prompts:
-   `config/local-agent-system-prompt.txt`, `config/remote-agent-system-prompt.txt`.
-3. **Parallel fan-out** (`superpowers:dispatching-parallel-agents`): independent pieces =
-   several parallel Bash calls (dispatches), or several free sessions.
-4. **A paid subagent only with a stated reason** (security-critical, final check of the free
-   result), and only once the task's OWN free route is exhausted (`"paid_fallback_allowed": true`):
-   exhaustion alone never permits paid; the mark lets the ONE stated-reason call through. A
-   failed dispatch chain is not by itself a reason — try the OTHER free route first.
+1. **Shape test: text in / text out, or must it read files / run commands?** Three free routes:
+   - `free:dispatch` — STATELESS, text only: `python3 bin/free-agent-tool.py` with
+     `{"prompt": ..., "files": [paths]}` (no disk; `--list` = preference order).
+   - `free:session` — files/commands: a headless SESSION, `run_in_background`:
+     `remote-session.sh <alias> --prompt-file <brief.md> -- -p --output-format json < /dev/null`
+     (local: `launch-claude-agent.sh --prompt-file <brief.md> <alias> -- -p …`).
+   - `free:handover` — interactive successor window: `free-session-handover`.
+2. **Plans: tag EVERY task** `free:dispatch|session|handover` or `cloud:<checkable reason>`;
+   tool use is never a cloud reason. Untagged plans are refused (opt out:
+   `cloud_session_env.py set plan_check 0`).
+3. **Announce the model and route to the user BEFORE offloading.** Brief with
+   `brief-the-delegate`; system prompts: `config/local-agent-system-prompt.txt`,
+   `config/remote-agent-system-prompt.txt`. Fan-out: `superpowers:dispatching-parallel-agents`.
+4. **A paid subagent only with a stated reason** (security-critical, final check), once the
+   task's OWN free route is exhausted (`"paid_fallback_allowed": true`):
+   exhaustion alone never permits paid; the mark lets the ONE stated-reason call through.
+   A failed dispatch chain is not by itself a reason — try the OTHER free route first.
 <!-- fa:routing:end -->
 
 ## Reporting background offloads — two visible reports, never thinking-only
