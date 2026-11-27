@@ -42,22 +42,22 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
      NAMES here (rosters rot — point to `bin/free-agent-tool.py --list`). -->
 ## Default routing on a PAID session — decide the route BEFORE the call
 
-1. **Shape test first: text in / text out, or must it read files / run commands?**
-   Text-only → a STATELESS dispatch: `python3 bin/free-agent-tool.py` with
-   `{"prompt": ..., "files": [paths]}` (cannot read the disk; `--list` = preference order).
-   Must read files / run commands → a free SESSION in its own window via free-session-handover:
-   `remote-session.sh <alias> --prompt-file <handoff.md>` (no headless form — the launcher
-   execs an interactive claude). A HANDOVER is always INTERACTIVE.
-2. **Announce the model and route to the user BEFORE offloading** (the tool prints the model it
-   tried on stderr; the result JSON carries `model_used`/`route` — repeat them in your reply).
-   Brief delegates with the `brief-the-delegate` skill; session system prompts:
-   `config/local-agent-system-prompt.txt`, `config/remote-agent-system-prompt.txt`.
-3. **Parallel fan-out** (`superpowers:dispatching-parallel-agents`): independent pieces =
-   several parallel Bash calls (dispatches), or several free sessions.
-4. **A paid subagent only with a stated reason** (security-critical, final check of the free
-   result), and only once the task's OWN free route is exhausted (`"paid_fallback_allowed": true`):
-   exhaustion alone never permits paid; the mark lets the ONE stated-reason call through. A
-   failed dispatch chain is not by itself a reason — try the OTHER free route first.
+1. **Shape test first: text in / text out, or must it read files / run commands?** Text-only →
+   STATELESS dispatch `python3 bin/free-agent-tool.py` (stdin JSON; no disk; `--list` = order).
+   Needs files/tools → a free SESSION in its own window via
+   free-session-handover: `remote-session.sh <alias> --prompt-file <handoff.md>` (interactive only).
+2. **Announce the model and route BEFORE offloading** (stderr/result JSON name model/route —
+   repeat both in your reply). Delegate briefs: `brief-the-delegate` skill.
+3. **Parallel fan-out** (`superpowers:dispatching-parallel-agents`): independent pieces = parallel
+   dispatches or free sessions.
+4. **Paid subagent only with a stated reason**, and only after the task's own free route is
+   exhausted (`"paid_fallback_allowed": true` allows exactly one stated-reason call);
+   exhaustion alone never permits paid — try the OTHER free route first, a failed chain is not a reason.
+5. **Dispatch lanes (2026-11-27):** reasoning models burn the whole `--max-tokens` on thinking —
+   raise budget/timeout first, effort-cap last; roster ids rot — check other providers before
+   assuming local-only; `lowkey` is the csl chat UI, not an agent tool (dispatch:
+   `free-agent-tool.py`; local sessions: `local-session.sh`); headless `claude -p` is fine for
+   offload background work, NEVER for a handover; `la-evict.sh --tier 0` before local launches.
 <!-- fa:routing:end -->
 
 ## Reporting background offloads — two visible reports, never thinking-only
