@@ -29,8 +29,13 @@ actively steers tool-using work away from free lanes.
      three-route model (headless background session for offloading, window only for handover).
    - The block's wording came from a later fix that removed a NON-existent `-p` flag placed
      BEFORE the alias, and over-corrected to "no headless form".
-   - LIVE CHECK (pending at time of writing — result recorded below when it returns): one
-     headless `-p` session on a free NVIDIA model running one git command.
+   - LIVE CHECK (2026-11-27, verified): `remote-session.sh nvidia-mistral-large4 --prompt-file
+     <brief> -- -p --output-format json` → EXIT 0 in 91 s, `num_turns: 2`, result
+     `HEADLESS-OK cc64ec0` = the real `git rev-parse --short HEAD` (the model ran the command).
+     claude warned "no stdin data received in 3s" → the documented form ends with `< /dev/null`.
+   - LOCAL lane (verified): `bin/launch-claude-agent.sh:1024` builds the claude call only from
+     its own flags (usage `<alias> [effort-override]`), so there is NO headless local session
+     today. The `session` route is remote-lane only until that launcher forwards args.
 3. **The tag vocabulary hides the dispatch/session choice.** `local:<role>` /
    `remote:<provider>` name WHERE the model runs, never HOW (dispatch vs session), so "needs
    tools" reads as "not local" and drifts to cloud. `local:` is also wrong for remote free APIs.
@@ -41,8 +46,8 @@ actively steers tool-using work away from free lanes.
    - **dispatch** — one stateless request (`bin/free-agent-tool.py`; text in/out, `files` attached).
    - **session** — a headless free session in the background of THIS window, for multi-step
      tool work while the user stays here (`remote-session.sh <alias> --prompt-file <brief> --
-     -p --output-format json` via `run_in_background`; local lane equivalent per
-     `launch-claude-agent.sh` passthrough — confirmed during planning, not assumed).
+     -p --output-format json < /dev/null` via `run_in_background`; REMOTE lane only today —
+     see "Open for the user").
    - **handover** — an interactive successor in its OWN window that the user types into
      (`free-session-handover` skill; unchanged).
 2. **Plan tags:** `free:dispatch`, `free:session`, `free:handover`, `cloud:<reason>`. No role
@@ -100,6 +105,11 @@ actively steers tool-using work away from free lanes.
 - **Tag shape:** `free:dispatch|session|handover` — CHOSEN (names HOW, so tool work visibly
   maps to `free:session`); flat `free:<role>` — rejected (keeps the dispatch/session ambiguity).
 - **Stronger SessionStart wording only** — rejected: it is still a note at the wrong moment.
+
+## Open for the user
+
+- Local-lane headless session: add argument passthrough to `launch-claude-agent.sh` in THIS
+  change (so `free:session` works on both lanes), or ship remote-only now and waypoint it.
 
 ## Builder's calls (open to correction)
 
