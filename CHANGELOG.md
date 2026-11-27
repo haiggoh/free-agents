@@ -81,6 +81,12 @@
 
 ## [0.63.7] — 2026-11-26
 
+> **Never tagged or released on its own.** This version number sat on `main` for about 90 minutes
+> (PR #12, merged 2026-11-26 21:14 CET, commit `8c110cd`). R4 then rebased onto it and shipped as
+> **v0.64.0**, which carries these commits unchanged (verified: `8c110cd` is an ancestor of `v0.64.0`
+> and `v0.64.1`, and the skill files are byte-identical to `v0.64.1`). Get the change from v0.64.0 or
+> later; there is no `v0.63.7` tag or GitHub release.
+
 ### Changed
 - `free-session-handover` documents native cross-session messaging: a lean recipe in SKILL.md
   (`ToolSearch select:SendMessage` → `ListAgents {}` → `SendMessage {"to": "<name> [short-id]", …}`)
