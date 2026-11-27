@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.64.2] — 2026-11-27
+
+### Fixed — parallel remote sessions shared one proxy and ran the wrong model
+- Three `remote-session.sh` launches started in the same second (`nvidia-nemotron-ultra`,
+  `nvidia-mistral-large4`, `nvidia-glm53`) all got port 4144. `free_port()` only checked a
+  port; the owner record that reserves it was written seconds later, after the proxy spawned.
+  Two proxies failed to bind, and the readiness probe accepted ANY answer on the port, so two
+  launchers printed "ready" under their own model banner while one proxy served GLM 5.3 Flash
+  to all three sessions. Each session's EXIT teardown then stopped that proxy by PORT, so the
+  first session to exit would have stranded the others mid-turn.
+- `free_port()` now picks AND claims a port under one atomic `mkdir` lock. The lock records its
+  holder; a lock whose holder has died is broken; waiting is capped by wall-clock seconds,
+  `LA_PORT_LOCK_WAIT_S` (default 60, whole seconds — any other value is an error).
+- Readiness counts an answer only when this run's proxy (or a child of it) holds the
+  listener. A port answered by another process fails at once and names that pid.
+- Teardown stops only a proxy whose owner record names this launcher, and says whose proxy it
+  left running otherwise.
+- Tests: parallel callers get distinct claimed ports (was `['4141']` four times; a mutant
+  without the claim fails the same way); readiness refuses another process's listener, with a
+  planted positive; teardown leaves another session's proxy and owner record alone, with a
+  planted positive; a live lock holder makes allocation fail within its wall-clock cap, an
+  invalid `LA_PORT_LOCK_WAIT_S` fails loudly, a dead holder's lock is broken.
+
 ## [0.64.1] — 2026-11-27
 
 ### Fixed — hooks crash on macOS's stock Python 3.9
