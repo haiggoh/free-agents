@@ -251,14 +251,24 @@ class RoutingMessage(unittest.TestCase):
     def test_message_offers_dispatch_and_headless_session_commands(self):
         reason = self.deny_reason(FA_ROUTE_SESSION_ALIAS="test-alias-9")
         self.assertIn("free-agent-tool.py", reason)                       # the dispatch heredoc
-        # the free-SESSION route must NOT offer a headless command: remote-session.sh has no
-        # -p/headless flag and execs an interactive claude (waypoint free-agents-paid-session)
+        # never the OLD broken form (-p with the brief as its value, placed before the alias);
+        # the real headless form is `-- -p` AFTER the alias (test below)
         self.assertNotIn('-p "<brief>"', reason)
         self.assertIn("free-session-handover", reason)
         self.assertIn("test-alias-9", reason)  # the alias still appears (in the handover route)
         reason2 = self.deny_reason(FA_ROUTE_SESSION_ALIAS="other-alias-3")  # alias not hardcoded
         self.assertIn("other-alias-3", reason2)
         self.assertNotIn("test-alias-9", reason2)
+
+    def test_session_route_offers_headless_background_form(self):
+        # 2026-11-27 plan-route-guard: remote-session.sh DOES run headless (`-- -p`, verified
+        # live) — the session route offers that background form; the handover skill stays for
+        # an interactive successor window
+        reason = self.deny_reason(FA_ROUTE_SESSION_ALIAS="test-alias-9")
+        self.assertIn("remote-session.sh test-alias-9 --prompt-file <brief.md> -- -p "
+                      "--output-format json < /dev/null", reason)
+        self.assertNotIn("never headless", reason)
+        self.assertIn("free-session-handover", reason)
 
     def test_suggested_prompt_file_flag_is_accepted_by_the_real_parser(self):
         # QC 3b: the nudge suggests --prompt-file — prove the REAL remote-session.sh parser
