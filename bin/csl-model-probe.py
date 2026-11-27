@@ -93,6 +93,61 @@ def classify_send(result, exc) -> str:
     return "unknown"          # 429 throttled, 5xx, anything else: not evidence of unreachable
 
 
+def limiter_gate(provider):
+    """NON-BLOCKING limiter gate for one probe: True when the request may leave for the
+    provider now, False when the bucket refuses (cooling/queue budget) — a refused probe
+    is "unknown", never "unreachable" (the request never left). HIGH priority comes from
+    the caller's environment (LA_LIMITER_PRIORITY=1), never set here."""
+    try:
+        import rate_limiter as rl
+        limiter = rl.get_limiter(provider=provider)
+        return limiter is None or limiter.try_acquire()
+    except Exception:
+        return True            # limiter absent/broken must never invent "unreachable"
+
+
+def send_for_provider(provider, model_id, *, deadline_s=DEFAULT_DEADLINE_S,
+                      max_tokens=PROBE_MAX_TOKENS):
+    """ONE 16-token POST to the provider's chat endpoint. Raises TimeoutError when the
+    provider stays silent past the deadline (that silence IS the unreachable evidence)."""
+    import urllib.request
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import remote_provider_core as rpc
+    p = rpc.get(provider)
+    if p is None:
+        raise ValueError(f"unknown provider {provider!r}")
+    url = p.base().rstrip("/") + (p.chat_path or "/chat/completions")
+    body = json.dumps({"model": model_id, "stream": False, "max_tokens": max_tokens,
+                       "messages": [{"role": "user", "content": "ping"}]}).encode()
+    req = urllib.request.Request(url, data=body, headers={
+        **p.auth_headers(), "Content-Type": "application/json"})
+    import fa_tls
+    with urllib.request.urlopen(req, timeout=max(1, int(deadline_s)),
+                                context=fa_tls.client_context()) as r:
+        return r.status, r.read()[:200]
+
+
+def probe_provider(provider, model_id, *, gate_provider=None,
+                   deadline_s=DEFAULT_DEADLINE_S, clock=time.monotonic):
+    """One probe against the REAL provider plumbing: non-blocking limiter gate (queued
+    time never counts — the clock only runs inside send), then the send."""
+    gate_provider = gate_provider or provider
+    allowed = limiter_gate(gate_provider)
+    start = clock()
+    if not allowed:
+        return {"alias": model_id, "state": "unknown", "why": "not sent (limiter gate)",
+                "queued_s": round(clock() - start, 3)}
+    try:
+        result = send_for_provider(provider, model_id, deadline_s=deadline_s)
+        state = classify_send(result, None)
+    except Exception as exc:
+        state = classify_send(None, exc)
+    elapsed = clock() - start
+    if state == "reachable" and elapsed > deadline_s:
+        state = "unreachable"
+    return {"alias": model_id, "state": state, "elapsed_s": round(elapsed, 3)}
+
+
 def probe_alias(alias, *, send, gate=lambda: True, deadline_s=DEFAULT_DEADLINE_S,
                 clock=time.monotonic):
     """Probe one alias. `gate()` decides whether the request may leave for the provider
