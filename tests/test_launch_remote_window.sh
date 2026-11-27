@@ -99,7 +99,7 @@ assert_grep 'launch-remote-window.sh <alias>' "$(cat "$SKILL")" 'SKILL.md launch
 assert_grep -- '--prompt "Read <handoff.md> first' "$(cat "$SKILL")" 'SKILL.md passes the handoff as --prompt link text'
 if grep -qF -- '--prompt-file <handoff.md>' "$SKILL"; then check 1 'no --prompt-file launch instruction left in SKILL.md'; else check 0 'no --prompt-file launch instruction left in SKILL.md'; fi
 assert_grep -- '--expect' "$(cat "$SKILL")" 'handover-verify note kept'
-assert_grep 'the handoff PATH DOES land in the transcript' "$(cat "$SKILL")" 'verify note explains the link form lands the path in the transcript'
+assert_grep 'the path lands in the successor'"'"'s transcript' "$(cat "$SKILL")" 'verify note explains the link form lands the path in the transcript'
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

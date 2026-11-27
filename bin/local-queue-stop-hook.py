@@ -4,6 +4,9 @@
 Uses the shared queue_replay core for replay/classification and queue_state
 for persistent acknowledgment tracking across transcript lag.
 """
+# A Stop hook runs as bare `python3` — macOS stock 3.9 on many machines; postponed
+# annotations keep `dict | None` signatures from being evaluated (tests/test_hooks_python39.py).
+from __future__ import annotations
 
 import json
 import os

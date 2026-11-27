@@ -15,6 +15,10 @@ is omitted when both paths are paid (the menu opt-out turns that hook off too).
 
 Fail-safe: any error → no output, exit 0. Never break or slow a session start.
 """
+# Hooks run as bare `python3`, which is macOS's stock 3.9 on machines without Homebrew/uv
+# Python: postponed annotations keep `dict | None` from being evaluated (tests/test_hooks_python39.py).
+from __future__ import annotations
+
 import json
 import os
 import sys

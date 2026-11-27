@@ -15,8 +15,14 @@ import hashlib
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any
+
+# The Stop hook imports this module under bare `python3` — macOS stock 3.9 on many
+# machines, where dataclass() has no `slots=` keyword (TypeError at import). Keep slots
+# on 3.10+, drop them on 3.9 (tests/test_hooks_python39.py).
+_SLOTS = {"slots": True} if sys.version_info >= (3, 10) else {}
 
 
 # =============================================================================
@@ -51,7 +57,7 @@ def extract_hashes(texts: list[str]) -> set[str]:
 # OCCURRENCE IDENTITY
 # =============================================================================
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, **_SLOTS)
 class Occurrence:
     """A single queued prompt occurrence with stable identity.
 
@@ -75,7 +81,7 @@ class Occurrence:
         return self.occurrence_id[:8]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, **_SLOTS)
 class DrainEvent:
     """A queue drain event (remove/dequeue/popAll) with optional content."""
     line: int
@@ -83,7 +89,7 @@ class DrainEvent:
     content: str | None
 
 
-@dataclass(slots=True)
+@dataclass(**_SLOTS)
 class QueueGroup:
     """A paired enqueue + drain group representing one occurrence lifecycle."""
     occurrence: Occurrence
@@ -436,7 +442,7 @@ def extract_stdin_hashes(payload: dict[str, Any] | None) -> set[str]:
 # PUBLIC API: Full replay + classification
 # =============================================================================
 
-@dataclass(slots=True)
+@dataclass(**_SLOTS)
 class ReplayResult:
     """Complete result of queue replay and classification."""
     session_id: str

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.64.1] — 2026-11-27
+
+### Fixed — hooks crash on macOS's stock Python 3.9
+- Hooks run as bare `python3`. On a Mac without Homebrew or uv Python, that is
+  `/usr/bin/python3` **3.9.6**. Colleagues' fresh installs showed `SessionStart:startup hook
+  failed — TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'`. The cause was
+  `hooks/offload-nudge.py`'s `dict | None` signature, which is evaluated at import and needs
+  3.10. The Stop hook `bin/local-queue-stop-hook.py` crashed the same way. Its import
+  `bin/queue_replay.py` also used `@dataclass(slots=True)`, which needs 3.10.
+- Fix: `from __future__ import annotations` in the two hook entries. `queue_replay.py` keeps
+  `slots` on 3.10+ and drops it on 3.9 through a version-gated `**_SLOTS`. Non-hook CLIs may
+  still require 3.10+.
+- New barrier `tests/test_hooks_python39.py`, which has two layers:
+  - Static, never skipped: every hooks.json entry, plus every local module it can import
+    (transitively, including imports inside functions), is checked for runtime-evaluated
+    3.10+ constructs. Those are `X | Y` annotations without postponed evaluation,
+    `dataclass(slots=/kw_only=/match_args=)`, `zip(strict=)`, `isinstance(x, A | B)`,
+    `tomllib`, and 3.10+ syntax. A planted-positive control and a non-empty-closure check
+    stop the test from passing vacuously.
+  - Runtime: every hook command is executed under a real 3.9 interpreter in a throwaway HOME
+    and must not print a traceback. It skips only when no 3.9 interpreter exists, and the
+    skip reason says so.
+
 ## [0.64.0] — 2026-11-25
 
 ### Added — a budget-walled session is announced once (📡) and continued automatically by a free successor
