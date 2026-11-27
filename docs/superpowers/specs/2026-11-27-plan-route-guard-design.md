@@ -106,10 +106,12 @@ actively steers tool-using work away from free lanes.
   maps to `free:session`); flat `free:<role>` — rejected (keeps the dispatch/session ambiguity).
 - **Stronger SessionStart wording only** — rejected: it is still a note at the wrong moment.
 
-## Open for the user
+## Decided with the user (2026-11-27)
 
-- Local-lane headless session: add argument passthrough to `launch-claude-agent.sh` in THIS
-  change (so `free:session` works on both lanes), or ship remote-only now and waypoint it.
+- Local-lane headless session is IN this change: `launch-claude-agent.sh <alias> [effort] --
+  <claude args>` forwards everything after `--` to claude (mirroring `remote-session.sh`), so
+  `free:session` means the same on both lanes and the routing block names one form.
+- Design approved.
 
 ## Builder's calls (open to correction)
 
