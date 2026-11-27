@@ -25,6 +25,23 @@ rosters, worked examples and advanced material that used to sit inline.
 - Give enough `--max-tokens`: a big model may think a lot and return a truncated answer that
   looks terse (measured: a 700-token cap cut the reply mid-word).
 - `--dry-run` sends nothing; `--files` needs `--allow-remote-files`.
+- **Reasoning models burn the whole budget on thinking and return NO answer** (measured
+  2026-11-27: mistral-large-4 + step-5-preview on nvidia returned "no answer text" with
+  reasoning_tokens == max_tokens at 2048 AND 8192, at any --reasoning-effort). Fix = generous
+  budget FIRST: `--max-tokens 16384` and enough `--timeout` (they took 360–680 s). Lowering
+  `--reasoning-effort` is the LAST resort — it makes the request cheaper by degrading the answer.
+- **Roster facts rot fast — check other providers before settling for local** (2026-11-27:
+  deepseek on nvidia is EOL and gone entirely; a model listed as local-only in
+  `free-agent-tool.py --list` may exist remotely on another provider — openrouter `:free`,
+  groq, …). Always resolve ids live (`--list` / catalog), never from memory.
+- **lowkey is a stateless dispatch harness, NOT claude-code** (2026-11-27): never use
+  `lowkey-cli.py` to "run a local model session". Local claude-code sessions launch via
+  `local-session.sh` / `csl`; if background local sessions misbehave, launch in a separate
+  Terminal window and monitor with `watch-until`.
+- **Free RAM before big local launches**: a finished local session's server keeps its RAM/port
+  and the next launch fails the RAM preflight — run `bin/la-evict.sh --tier 0` first (standing
+  okay, user 2026-11-27); only override with LA_SKIP_RAM_PREFLIGHT if you know the numbers are
+  wrong.
 
 ## "Remote does NOT mean big"
 

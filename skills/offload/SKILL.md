@@ -58,6 +58,10 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
    result), and only once the task's OWN free route is exhausted (`"paid_fallback_allowed": true`):
    exhaustion alone never permits paid; the mark lets the ONE stated-reason call through. A
    failed dispatch chain is not by itself a reason — try the OTHER free route first.
+   Dispatch-lane notes (2026-11-27): reasoning models may burn the whole --max-tokens on thinking
+   (raise budget/timeout first, --reasoning-effort low last); roster ids rot (check other providers
+   before assuming local-only); lowkey = stateless dispatch ONLY, never a session (local sessions:
+   local-session.sh/csl); la-evict --tier 0 before big local launches.
 <!-- fa:routing:end -->
 
 ## Reporting background offloads — two visible reports, never thinking-only
