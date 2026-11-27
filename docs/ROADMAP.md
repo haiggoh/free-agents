@@ -3,7 +3,7 @@
 `CHANGELOG.md` records what shipped. This file records what is **specced but not shipped**, so a
 planned feature cannot be quietly dropped between releases.
 
-It exists because `0.13.0`'s changelog claimed to "add project-wide changelog and roadmap
+It exists because `0.65.1`'s changelog claimed to "add project-wide changelog and roadmap
 documentation" and only the changelog appeared. The `0.14.0` specification lived entirely outside the
 repository, in a plan file on one machine, while `CHANGELOG.md`'s `[Unreleased]` section sat empty —
 so "did we skip a specced feature?" was not answerable from the repo at all. It is now.
@@ -17,7 +17,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 ## Current released version
 
 
-`0.65.0`. See `CHANGELOG.md`.
+`0.65.1`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.65.1] — 2026-11-28
+
+### Changed
+- Dispatch-lane lessons primed (user corrections, all measured live 2026-11-27): reasoning models on
+  remote dispatch burn the whole `--max-tokens` budget on thinking and return no answer — raise
+  `--max-tokens`/`--timeout` FIRST, `--reasoning-effort low` only as a last resort (the dispatch
+  tool's own no-answer hint now says so); roster ids rot (nvidia deepseek is EOL — check other
+  providers before assuming local-only); `lowkey` is the csl chat UI, not an agent dispatch tool
+  (dispatch via `free-agent-tool.py`; local sessions via `local-session.sh`); headless `claude -p`
+  is legitimate for offload background work, never for a handover; `la-evict.sh --tier 0` before big
+  local launches. Prose in the offload skill routing block (rewritten to fit the 1500-B gate with
+  the new rule included) + in-depth dispatch warnings; machine-local copies in memory
+  [[dispatch-lane-lessons]].
+
 ## [0.65.0] — 2026-11-27
 
 ### Feature — csl greys out listed-but-unreachable models (R5)
