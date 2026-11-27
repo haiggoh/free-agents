@@ -720,6 +720,35 @@ def tier_label(tier: str, provider: str) -> str:
     return "" if tier == "unknown" else tier
 
 
+# --- R5: catalog-listed-but-unreachable models (probe results, expiring marks) --------------
+def _unreachable_marks() -> dict:
+    """The ONE marks reader for the picker (R5): probe results under the R1-A config dir,
+    TTL-expired entries already dropped by the probe module. Never reads the env directly."""
+    try:
+        import importlib
+        import session_menu_state as sms
+        probe = importlib.import_module("csl_model_probe")
+        cfg = sms.config_dir()
+        return probe.load_marks(cfg)
+    except Exception:
+        return {}
+
+
+def unreachable_sentence(mark, key: str = "P") -> str:
+    """The infobox sentence for a marked model (no-hidden-changes: say WHY it is greyed)."""
+    if not isinstance(mark, dict):
+        return ""
+    import datetime as _dt
+    try:
+        since = _dt.datetime.fromtimestamp(float(mark.get("since", 0)), _dt.timezone.utc)
+        hhmm = since.strftime("%H:%M")
+    except (TypeError, ValueError, OSError):
+        hhmm = "??:??"
+    return (f"temporarily not reachable — no answer since {hhmm} UTC; "
+            f"re-check with {key}. Still listed in the catalog, so this mark expires — "
+            f"it never means retired.")
+
+
 # --- settings ----------------------------------------------------------------------------
 AUTO_MODE_LABELS = {0: "blind-trust", 1: "classifier", 2: "off"}
 
@@ -1618,7 +1647,7 @@ class LocalScreen(Screen):
     def _choose_model_label(self):
         return "Choose model…" if not self._choose_model_visible else "Choose model (shown)"
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The info box under the open local list (0.41.0): the readable name over the exact
         alias -- the one `csl <alias>` takes -- and how the model is served."""
         mdl = self.models.get(item_id) if item_id else None
@@ -1944,6 +1973,12 @@ class RemoteScreen(Screen):
             items = [Item(a.alias, self._pin_row_label(prov, a))
                      for a in pinned]
             items += self._catalog_items(prov, pinned)
+            # R5: grey out reachable models per-provider; a mark means the probe
+            # saw the target and it is not reachable. The infobox sentence explains why.
+            marks = _unreachable_marks()
+            items = [Item(a.alias, self._pin_row_label(prov, a) + "  · not reachable"
+                         if marks.get(a.alias) else self._pin_row_label(prov, a))
+                     for a in items]
             # 0.51.0 (user): when local-capable rows ARE shown, they sit at the very BOTTOM
             # of their provider group (by default they are filtered out entirely by
             # _visible — pinned rows get the verdict annotated in the app's _loaded).
@@ -2166,7 +2201,7 @@ class RemoteScreen(Screen):
         if open_group:
             self.accordion.expand(open_group)
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The info box under the model list: the model's display name, its lane, and its
         short-form note (config/remote-model-notes.json), or a hint when nothing is pointed
         at. Only models get a box — group headers and the no-keys instruction get the hint.
@@ -2200,6 +2235,11 @@ class RemoteScreen(Screen):
             note = strip_leading_name(agent.display, note)   # 0.49.3 (H4): no name echo on line 2
         if agent.provider == "nvidia":
             note = (note + " " if note else "") + NVIDIA_MODEL_QUOTA_SHORT
+        # R5: unreachable mark appends its sentence to the infobox
+        marks = _unreachable_marks()
+        mark = marks.get(agent.alias)
+        if mark:
+            notices.append(unreachable_sentence(mark))
         base = f"{agent.display}\n{note}" if note else f"{agent.display}\nNo notes for this model yet."
         # 0.62.0 C8: the limits/quota infobox from provider-limits.json (+ today's usage)
         snap = None
@@ -2274,6 +2314,12 @@ class RemoteScreen(Screen):
         # user 2026-11-09 (ported from the GUI): API keys setup comes BEFORE filter settings,
         # so filter settings lands on the second row together with the NVIDIA rate limiter
         acts.append(Action("y", f"{ec.gap(ec.EMOJI_FILTER_STR)}Filter settings…", lambda: Nav("remote_filters", self.owner), section="settings"))
+        # R5: re-check key for a marked unreachable model (only shows when the selected row is marked)
+        marks = _unreachable_marks()
+        sel = self.accordion.selected_id
+        if False:  # MUTANT: guard removed
+                acts.append(Action("p", f"{ec.gap(ec.EMOJI_REFRESH_STR)}Re-check reachability",
+                                   lambda: self._trigger_recheck(model), section="models"))
         acts += self.nav_actions()
         check_action_table(acts)
         return acts
@@ -2294,6 +2340,20 @@ class RemoteScreen(Screen):
 
     def _cycle_effort(self):
         self._set_effort(_next(effort_choices("remote_api_session"), self.settings.remote_effort))
+
+    def _trigger_recheck(self, model: str):
+        """Re-probe a single model on demand (the re-check key). Runs the probe, updates the
+        mark (or drops it if reachable), and refreshes the screen."""
+        import probe
+        st = probe.probe_provider(model, gate_provider=None, deadline_s=20.0)
+        if st["state"] == "reachable":
+            # drop the mark
+            probe.delete_mark(config_dir=None, alias=model)
+        else:
+            # update the mark with the fresh state (and TTL)
+            import csl_model_probe as probe_mod
+            probe_mod.save_mark(None, model, st["state"], ttl_s=900.0, now=time.time())
+        self._regroup()
 
     def _set_effort(self, value):
         s = self.settings
@@ -2623,7 +2683,7 @@ class CloudConfigScreen(Screen):
         if self.settings.on_flash:
             self.settings.on_flash(f"Auto-mode probe: {verdict}" + (f" — {evidence[:80]}" if evidence else ""))
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The three routing modes, each with its one-line contract (plain Action rows pass
         item_id=None, so the box always shows the whole table); the gateway cost box appears
         ONLY when the cached verdict is not-eligible (A3: facts, only for users it applies to)."""
@@ -3459,7 +3519,7 @@ class APIKeysScreen(Screen):
         state = "currently hidden" if hidden else "currently shown"
         return f"{'show' if hidden else 'hide'}:{slug}", f"{verb} {slug} in the choose-model list ({state})"
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The info box under the list: what the highlighted provider needs BEFORE a key works
         (its setup steps, incl. account requirements such as Vercel's credit card) plus the
         registry's measured notes. Shown for a provider row and for its Open/Add items."""
@@ -3645,7 +3705,7 @@ class LowkeyScreen(Screen):
         self._api_by_id = {}                   # item id -> RemoteAgent, built in set_models
         self.set_models(models or [])
 
-    def info_text(self, item_id: str | None) -> str:
+    def info_text(self, item_id: str | None) -> str:  # R5
         """The info box under the list (0.54.0 D3: lowkey is a model-list screen now)."""
         if item_id and item_id in self._api_by_id:
             a = self._api_by_id[item_id]
