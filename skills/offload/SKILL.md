@@ -39,7 +39,9 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
 <!-- fa:routing:begin — SINGLE SOURCE OF TRUTH for the routing text the hooks emit verbatim.
      0.54.0: hooks/cloud-agent-intercept.py and hooks/offload-nudge.py read this block via
      bin/offload_routing.py; editing it changes the hooks. Keep under 1,500 bytes. No model
-     NAMES here (rosters rot — point to `bin/free-agent-tool.py --list`). -->
+     NAMES here (rosters rot — point to `bin/free-agent-tool.py --list`). Tests pin exact
+     phrases by substring: BEFORE editing, `grep -rn assertIn tests/ | grep -i -e routing -e nudge`
+     for the full list — a line wrap inside a pinned phrase breaks it (2026-11-27). -->
 ## Default routing on a PAID session — decide the route BEFORE the call
 
 1. **Shape test: text in / text out, or must it read files / run commands?** Three free routes:
