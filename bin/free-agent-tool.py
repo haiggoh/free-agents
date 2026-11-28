@@ -548,11 +548,11 @@ def local_fallback_entries(env, role=None) -> list:
 
 def _local_agents_only(env) -> bool:
     """The opt-in setting (0.56.14, user): 'no remote API agents in local sessions' —
-    stored as local_registry['agents_local_only'] in the session settings."""
+    stored as local_registry['agents_local_only'] in the session-menu settings, which live in
+    session_menu_state.config_dir() (NOT CLAUDE_CONFIG_DIR: reading that dir failed open)."""
     try:
         import session_menu_state as sms
-        cfg = env.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
-        return bool(sms.load(Path(cfg)).local_registry.get("agents_local_only"))
+        return bool(sms.load(sms.config_dir()).local_registry.get("agents_local_only"))
     except Exception:
         return False
 
@@ -577,11 +577,22 @@ def availability(entry, env, local_ok=None) -> str:
     return f"unknown kind {entry.get('kind')!r}"
 
 
+class UnknownRole(ValueError):
+    """A caller asked for a role name the roster does not use (a typo)."""
+
+
 def request_role(input_data):
     """The role a request asks for: an explicit "role", else one implied by subagent_type.
-    None (no filter) for general-purpose work, so the plain preference order applies."""
+    None (no filter) for general-purpose work, so the plain preference order applies.
+    An unknown explicit role raises UnknownRole: it would match no entry, so the chain would
+    silently reorder instead of failing (measured 2026-11-26: role=reviewer)."""
     if input_data.get("role"):
-        return input_data["role"]
+        role = input_data["role"]
+        if role not in ROLE_THINKING_DEFAULT:
+            raise UnknownRole(f"role {role!r} is not a dispatch role (valid: "
+                              f"{', '.join(sorted(ROLE_THINKING_DEFAULT))}) — an unknown name "
+                              "matches no entry, so the dispatch chain would silently reorder")
+        return role
     st = input_data.get("subagent_type", "general-purpose")
     return None if st == "general-purpose" else ROLE_MAP.get(st)
 
@@ -1017,7 +1028,12 @@ def run(input_data, env, out_path=None) -> int:
     full_prompt = attach_files(f"{description}\n\n{prompt}" if description else prompt,
                                input_data.get("files"))
     prefs = load_preferences(env)
-    role, avoid = request_role(input_data), input_data.get("avoid_family")
+    try:
+        role = request_role(input_data)
+    except UnknownRole as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return 1
+    avoid = input_data.get("avoid_family")
     families = {e["family"] for e in prefs.get("order", []) if e.get("family")}
     if avoid and prefs.get("order") and avoid not in families:
         # An unknown name is a caller typo (measured 2026-10-29: "zai" for "zhipu"): it matches
@@ -1287,7 +1303,12 @@ def run_background(input_data, env, run_dir, resume=False, extend=None):
             description = (input_data or {}).get("description", "")
             full_prompt = attach_files(f"{description}\n\n{prompt}" if description else prompt,
                                        (input_data or {}).get("files"))
-            role, avoid = request_role(input_data), (input_data or {}).get("avoid_family")
+            try:
+                role = request_role(input_data or {})
+            except UnknownRole as exc:
+                print(json.dumps({"error": str(exc)}), file=sys.stderr)
+                return 2
+            avoid = (input_data or {}).get("avoid_family")
             order, _role_matched, _family_avoided = degraded_candidates(
                 prefs, env, role=role, avoid_family=avoid)
             if not order:

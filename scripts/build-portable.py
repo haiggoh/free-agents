@@ -72,6 +72,7 @@ COPY_FILES = [
     "hooks/knowledge-primer.py",
     "hooks/guard-tool-owned-state.py",
     "hooks/offload-nudge.py",
+    "hooks/plan-route-guard.py",
     "hooks/read-pages-guard.py",
     "hooks/session-title-prefix.py",
     "hooks/transcript-identity.py",

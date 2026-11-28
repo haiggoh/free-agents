@@ -211,7 +211,7 @@
       "note": "0.62.0 C7: free-tier Mistral fallback for dispatch (rpm 2, tpm 40000); spills here when nvidia is saturated. Smoke-tested 2026-11-23 (PONG through the provider bucket)."
     },
     {
-      "id": "groq-qwen32",
+      "id": "groq-gpt-oss-120b",
       "kind": "remote",
       "provider": "groq",
       "model": "openai/gpt-oss-120b",

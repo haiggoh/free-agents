@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.66.1] — 2026-11-28
+
+### Fixed — free-agent-tool dispatch hygiene
+- The "only local agents in local sessions" opt-in (`local_registry.agents_local_only`,
+  0.56.14) is read from the session-menu config dir (`session_menu_state.config_dir()`); it
+  read `CLAUDE_CONFIG_DIR`, so the setting silently failed open to off.
+- An unknown `role` in a dispatch request (e.g. `"reviewer"`; valid: operator, reasoner,
+  utility, validator) is refused with an error naming the valid set — `run` exits 1,
+  `--background` exits 2, nothing is dispatched. It used to match no entry and silently
+  reorder the chain (measured 2026-11-26: a small local model answered a final review).
+- Dispatch lane id `groq-qwen32` renamed `groq-gpt-oss-120b`: it serves GPT-OSS 120B, and
+  probes/logs reporting the id mislabelled it. New invariant test: an id never names a model
+  family its display label does not serve.
+- Tests: `tests/test_free_agent_tool_hygiene.py` (red first).
+- Deferred: the csl-registered local fallback list stays opt-in — its registry reader parses
+  `config.example.sh` in an installed plugin (waypoint `fa-local-fallback-inert`).
+
+## [0.66.0] — 2026-11-28
+
+### Added — plan routing barrier: a paid session cannot write a plan whose tasks lack a route tag
+- New PreToolUse guard `hooks/plan-route-guard.py` on `Write|Edit|MultiEdit` (timeout 5): plan
+  files (`.md` under `docs/superpowers/plans/` or `~/.claude/plans/`, >= 2 Task/Step/Phase
+  headings) must tag every task `free:dispatch|session|handover` (optional `/role`, legacy
+  `local:`/`remote:` accepted) or `cloud:<checkable reason>` (invalid substrings denied);
+  zero-free plans need a valid `Routing:` line. Edits are judged on the RESULTING file.
+  Tags may sit on the heading line or the section's first 3 non-empty lines; a nested
+  Step/Phase inherits the nearest enclosing tagged heading; a tag needs a non-word, non-hyphen
+  left boundary (`toll-free:` is not a tag). The deny message names the offending headings and
+  the opt-out command.
+- New `plan_check` setting (`FA_PLAN_CHECK` in settings.json env, default ON; only "0" is
+  off): `cloud_session_env.py set plan_check {0,1}`, `show` prints `plan_check = ON|OFF`, and
+  a "Plan routing check" toggle row on the cloud config screen.
+- Free sessions (localhost base URL), plan_check=0, a corrupt settings file and any internal
+  error all FAIL OPEN — the guard never blocks on its own failure.
+- The routing block in `skills/offload/SKILL.md` names the three free routes; the local
+  headless form is deliberately absent until Task 3 ships (later release train).
+- Tests: `tests/test_plan_route_guard.py` (28) + `tests/test_plan_check_setting.py` (6),
+  red-first and mutation-checked; routing/nudge/intercept/picker suites stay green.
+
+## [0.65.3] — 2026-11-28
+
+- hermetic test-env fix + dispatch-lane lesson primes (PR#13 bundle)
+
+## [0.65.2] — 2026-11-28
+
+### Fixed — parallel launches no longer race the folder-trust write of `~/.claude.json`
+- `bin/fa_pre_trust.py` derived its temp path from a second-resolution UTC stamp
+  (`<config>.tmp.pre-trust-<stamp>`), so launches in the same second all derived the SAME
+  path. The backup path retried same-second collisions; the temp path did not — one writer
+  failed with `FileExistsError` and its cleanup unlinked another writer's in-flight temp.
+  The temp file is now `tempfile.mkstemp`-created (unique per writer; the original mode is
+  applied with `os.fchmod`, never `open()`+`chmod`), and the whole read-modify-write holds an
+  exclusive `flock` on `<config>.lock`, so concurrent writers can no longer last-write-wins
+  over each other's `projects` keys.
+- Tests: `tests/test_fa_pre_trust_parallel.py` — same-second writers both succeed (was
+  `FileExistsError` exit 4), concurrent writers keep both trust keys (goes red when the
+  flock is mutated out); existing pre-trust, remote-session and launch suites stay green.
+
 ## [0.65.1] — 2026-11-28
 
 - fix(picker): R5 grey-out rebuilt rows from the built Item list — Item.alias crash, 44 tests red on main
@@ -70,7 +128,7 @@
     and must not print a traceback. It skips only when no 3.9 interpreter exists, and the
     skip reason says so.
 
-## [0.64.0] — 2026-11-25
+## [0.64.0] — 2026-11-26
 
 ### Added — a budget-walled session is announced once (📡) and continued automatically by a free successor
 - One notice per wall, carrying the free-agents mark 📡 (no more 💸 from this path, no more duplicate lines per wall). Repeat walls of one session build a new package and supersede the older one — `fa-takeover list` marks it, `launch` refuses it with a pointer to the newest.
