@@ -254,7 +254,9 @@ def main(argv=None):
         # That is not a success: say where the tokens went instead of printing a green tick.
         details = (result.usage or {}).get("completion_tokens_details") or {}
         print("✖ REMOTE %s finished with NO answer text in %.1fs (completion_tokens=%s, "
-              "reasoning_tokens=%s). Raise --max-tokens or lower --reasoning-effort; "
+              "reasoning_tokens=%s). A reasoning model burned the whole budget on thinking: "
+              "raise --max-tokens/--timeout FIRST (measured: needs 16384+/600s+); lower "
+              "--reasoning-effort only as a last resort (degrades the answer); "
               "reasoning so far → %s" % (
                   provider.id, result.elapsed, (result.usage or {}).get("completion_tokens", "?"),
                   details.get("reasoning_tokens", "?"), reasoning_path), file=sys.stderr)

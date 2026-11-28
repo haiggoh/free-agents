@@ -244,6 +244,26 @@ TIMEOUT_TIER_LABELS = {
 }
 
 
+# --- plan routing check (plan-route-guard Task 1) -------------------------------------------
+# FA_PLAN_CHECK in settings.json env: "0" = OFF, anything else (or absent) = ON (default ON).
+# hooks/plan-route-guard.py reads this via plan_check() and fails open when the file is corrupt.
+PLAN_CHECK_ENV_KEY = "FA_PLAN_CHECK"
+PLAN_CHECK_LABELS = {True: "ON — plans need free:/cloud: route tags",
+                     False: "OFF — plan routing not checked"}
+
+
+def plan_check(env: dict | None = None) -> bool:
+    """settings.json env merged over `env` (the registered state is authoritative over a hook's
+    process env); anything but "0" is ON."""
+    merged = dict(env or {})
+    merged.update(_env(_read_json(settings_path())))
+    return merged.get(PLAN_CHECK_ENV_KEY) != "0"
+
+
+def save_plan_check(on: bool) -> Path:
+    return _write_env((PLAN_CHECK_ENV_KEY,), {PLAN_CHECK_ENV_KEY: "1" if on else "0"})
+
+
 def timeout_tier(env: dict | None = None) -> str:
     """The active dispatch timeout tier: settings.json env merged over `env` (the registered
     state is authoritative over a hook's process env); default "balanced"."""
@@ -342,8 +362,9 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("show", help="print plugin status, the current mode and the env keys behind it")
     s = sub.add_parser("set", help="set security_review {0,1,2} or replace_agents {0,1,unset} or "
-                                   "route <path> <mode> or timeout_tier <tier>")
-    s.add_argument("key", choices=["security_review", "replace_agents", "route", "timeout_tier"])
+                                   "route <path> <mode> or timeout_tier <tier> or plan_check {0,1}")
+    s.add_argument("key", choices=["security_review", "replace_agents", "route", "timeout_tier",
+                                   "plan_check"])
     s.add_argument("value", choices=["0", "1", "2", "unset", "agent", "workflow",
                                      "snappy", "balanced", "patient"])
     s.add_argument("extra", nargs="?", default=None,
@@ -358,6 +379,11 @@ def main(argv=None) -> int:
         if a.extra not in ROUTE_MODES:
             p.error(f"route takes a path (agent, workflow) and a mode ({', '.join(ROUTE_MODES)})")
         print(f"updated {save_route(a.value, a.extra)}")
+    elif a.cmd == "set" and a.key == "plan_check":
+        if a.value not in ("0", "1"):
+            p.error("plan_check takes 0 or 1")
+        on = a.value == "1"
+        print(f"updated {save_plan_check(on)}")
     elif a.cmd == "set" and a.key == "replace_agents":
         if a.value not in ("0", "1", "unset"):
             p.error("replace_agents takes 0, 1 or unset")
@@ -382,6 +408,7 @@ def main(argv=None) -> int:
     for path in ROUTE_PATHS:
         print(f"route[{path}] = {route(path)}")
     print(f"timeout_tier = {timeout_tier()}")
+    print(f"plan_check = {'ON' if plan_check() else 'OFF'}")
     return 0
 
 

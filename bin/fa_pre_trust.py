@@ -32,25 +32,30 @@ Exit codes: 0 = trusted (already or now, verified by re-read after 1 s);
             3 = not possible (home folder — its trust is never persisted — or not a
                 directory); 4 = write failed or did not hold.
 
-Write procedure: backup the config (mode 600, `<config>.bak.pre-trust-<UTC-stamp>`,
+Write procedure: the whole read-modify-write holds an exclusive flock on
+`<config>.lock`, and the temp file is mkstemp-created in the same directory (unique per
+writer even in the same second — the old stamp-based temp name collided under parallel
+launches). Then: backup the config (mode 600, `<config>.bak.pre-trust-<UTC-stamp>`,
 keeping the 5 newest of that prefix only) -> load JSON -> set the one field on each
-resolved key preserving all existing fields -> write a temp file in the same directory
-with the original mode -> os.replace -> re-read after VERIFY_DELAY_S and confirm every
-key is true.
+resolved key preserving all existing fields -> write the temp file with the original mode
+-> os.replace -> re-read after VERIFY_DELAY_S and confirm every key is true.
 """
 import argparse
+import fcntl
 import glob
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 
 VERIFY_DELAY_S = 1.0
 BACKUP_PREFIX_SUFFIX = ".bak.pre-trust-"
 TMP_SUFFIX = ".tmp.pre-trust-"
+LOCK_SUFFIX = ".lock"   # flock file next to the config; serializes parallel pre-trust writers
 KEEP_BACKUPS = 5
 # rotation manages ONLY backups this helper created: <cfg>.bak.pre-trust-<UTC-stamp>[-N].
 # Receipt backups from the probe/dogfood (".bak.pre-trust-probe-…" / "-dogfood-…") must
@@ -183,6 +188,19 @@ def pre_trust(target_dir, *, config_path=None, dry_run=False) -> PreTrustResult:
         return PreTrustResult(target, [], False, False, False, None, "not a directory", 3)
 
     keys = resolve_keys(target_dir)
+    # Parallel-launch safety (folder-trust race, seen while shipping 0.64.2): serialize the
+    # whole read-modify-write on an flock next to the config, so concurrent launchers can
+    # neither derive the same temp name nor last-write-wins over each other's keys.
+    lock_fd = os.open(cfg + LOCK_SUFFIX, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        return _pre_trust_locked(target, cfg, keys, dry_run)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+def _pre_trust_locked(target: str, cfg: str, keys: list, dry_run: bool) -> PreTrustResult:
     fresh = not os.path.isfile(cfg)
     if fresh:
         data = {}
@@ -241,11 +259,15 @@ def pre_trust(target_dir, *, config_path=None, dry_run=False) -> PreTrustResult:
         projects[k] = entry
     data["projects"] = projects
 
-    tmp = cfg + TMP_SUFFIX + stamp
+    # mkstemp: a unique tmp per writer even within the same second — the stamp-based name
+    # raced under parallel launches (two launchers derived the identical path, and the
+    # loser's cleanup unlinked the winner's in-flight tmp).
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(cfg),
+                               prefix=os.path.basename(cfg) + TMP_SUFFIX)
     try:
-        # create with the target mode from the first byte — open()+chmod would leave a
-        # world-readable window holding OAuth data (Task 6 review)
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+        # apply the original config mode — mkstemp creates 0600, and open()+chmod would
+        # leave a world-readable window holding OAuth data (Task 6 review)
+        os.fchmod(fd, mode)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             if indent is None:
                 json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
@@ -255,6 +277,10 @@ def pre_trust(target_dir, *, config_path=None, dry_run=False) -> PreTrustResult:
                 f.write("\n")
         os.replace(tmp, cfg)
     except OSError as e:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
         try:
             os.unlink(tmp)
         except OSError:
