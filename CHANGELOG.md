@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.66.1] — 2026-11-28
+
+### Fixed — free-agent-tool dispatch hygiene
+- The "only local agents in local sessions" opt-in (`local_registry.agents_local_only`,
+  0.56.14) is read from the session-menu config dir (`session_menu_state.config_dir()`); it
+  read `CLAUDE_CONFIG_DIR`, so the setting silently failed open to off.
+- An unknown `role` in a dispatch request (e.g. `"reviewer"`; valid: operator, reasoner,
+  utility, validator) is refused with an error naming the valid set — `run` exits 1,
+  `--background` exits 2, nothing is dispatched. It used to match no entry and silently
+  reorder the chain (measured 2026-11-26: a small local model answered a final review).
+- Dispatch lane id `groq-qwen32` renamed `groq-gpt-oss-120b`: it serves GPT-OSS 120B, and
+  probes/logs reporting the id mislabelled it. New invariant test: an id never names a model
+  family its display label does not serve.
+- Tests: `tests/test_free_agent_tool_hygiene.py` (red first).
+- Deferred: the csl-registered local fallback list stays opt-in — its registry reader parses
+  `config.example.sh` in an installed plugin (waypoint `fa-local-fallback-inert`).
+
 ## [0.66.0] — 2026-11-28
 
 ### Added — plan routing barrier: a paid session cannot write a plan whose tasks lack a route tag
