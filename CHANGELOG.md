@@ -70,7 +70,7 @@
     and must not print a traceback. It skips only when no 3.9 interpreter exists, and the
     skip reason says so.
 
-## [0.64.0] — 2026-11-25
+## [0.64.0] — 2026-11-26
 
 ### Added — a budget-walled session is announced once (📡) and continued automatically by a free successor
 - One notice per wall, carrying the free-agents mark 📡 (no more 💸 from this path, no more duplicate lines per wall). Repeat walls of one session build a new package and supersede the older one — `fa-takeover list` marks it, `launch` refuses it with a pointer to the newest.
