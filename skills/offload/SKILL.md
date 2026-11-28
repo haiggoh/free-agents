@@ -47,17 +47,16 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
    Needs files/tools → a free SESSION in its own window via
    free-session-handover: `remote-session.sh <alias> --prompt-file <handoff.md>` (interactive only).
 2. **Announce the model and route BEFORE offloading** (stderr/result JSON name model/route —
-   repeat both in your reply). Delegate briefs: `brief-the-delegate` skill.
+   repeat both in your reply). Delegate briefs: `brief-the-delegate` skill; session prompts:
+   `config/local-agent-system-prompt.txt`, `config/remote-agent-system-prompt.txt`.
 3. **Parallel fan-out** (`superpowers:dispatching-parallel-agents`): independent pieces = parallel
    dispatches or free sessions.
 4. **Paid subagent only with a stated reason**, and only after the task's own free route is
    exhausted (`"paid_fallback_allowed": true` allows exactly one stated-reason call);
    exhaustion alone never permits paid — try the OTHER free route first, a failed chain is not a reason.
-5. **Dispatch lanes (2026-11-27):** reasoning models burn the whole `--max-tokens` on thinking —
-   raise budget/timeout first, effort-cap last; roster ids rot — check other providers before
-   assuming local-only; `lowkey` is the csl chat UI, not an agent tool (dispatch:
-   `free-agent-tool.py`; local sessions: `local-session.sh`); headless `claude -p` is fine for
-   offload background work, NEVER for a handover; `la-evict.sh --tier 0` before local launches.
+5. **Dispatch lanes (2026-11-27):** raise budget/timeout before effort-capping reasoning models;
+   roster ids rot; dispatch = `free-agent-tool.py`, local sessions = `local-session.sh`;
+   headless `claude -p` ok for offload, NEVER a handover; `la-evict.sh --tier 0` first.
 <!-- fa:routing:end -->
 
 ## Reporting background offloads — two visible reports, never thinking-only
