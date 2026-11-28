@@ -17,6 +17,8 @@ Hook I/O: PreToolUse JSON on stdin; deny = the reason on stderr + exit 2.
 """
 from __future__ import annotations   # hooks run as bare python3 (macOS stock 3.9)
 
+PRIMER = "plan_check ON: plan files need a free:/cloud: route tag on every task; opt out: set plan_check 0."
+
 import argparse
 import json
 import os
