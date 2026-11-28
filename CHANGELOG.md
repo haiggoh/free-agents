@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.65.3] — 2026-11-28
+
+- hermetic test-env fix + dispatch-lane lesson primes (PR#13 bundle)
+
 ## [0.65.2] — 2026-11-28
 
 ### Fixed — parallel launches no longer race the folder-trust write of `~/.claude.json`
