@@ -20,6 +20,33 @@ sys.path.insert(0, str(ROOT / "bin"))
 from hermetic_env import FENCE_VARS, hermetic_env  # noqa: E402
 
 
+class _Plant:
+    """Set env vars for the body and RESTORE the prior state on exit.
+
+    A plain os.environ.pop here deletes what conftest force-set for the worker
+    (measured 2026-11-25, R2 gate: popping LA_NVIDIA_THROTTLE_STATE made every
+    later test in the same xdist worker build limiters at the REAL default path
+    and trip the real-state tripwire). Restore, never pop."""
+
+    def __init__(self, **planted):
+        self._planted = planted
+        self._prior = {}
+
+    def __enter__(self):
+        for k, v in self._planted.items():
+            self._prior[k] = os.environ.get(k)
+            os.environ[k] = v
+        return self
+
+    def __exit__(self, *exc):
+        for k, prior in self._prior.items():
+            if prior is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prior
+        return False
+
+
 class NoBareEnvITI(unittest.TestCase):
     def test_no_bare_env_dash_i_outside_the_helper(self):
         offenders = []
@@ -46,9 +73,8 @@ class HelperContractTests(unittest.TestCase):
             self.assertIn(v, h.FENCE_VARS)
 
     def test_child_sees_fence_var_not_parent_secret(self):
-        os.environ["FA_HERMETIC_PROBE_SECRET"] = "leak-me"
-        os.environ["LA_NVIDIA_THROTTLE_STATE"] = "/tmp/fence-probe/throttle.json"
-        try:
+        with _Plant(FA_HERMETIC_PROBE_SECRET="leak-me",
+                    LA_NVIDIA_THROTTLE_STATE="/tmp/fence-probe/throttle.json"):
             env = hermetic_env()
             self.assertEqual(env["LA_NVIDIA_THROTTLE_STATE"], "/tmp/fence-probe/throttle.json")
             self.assertNotIn("FA_HERMETIC_PROBE_SECRET", env)
@@ -57,14 +83,28 @@ class HelperContractTests(unittest.TestCase):
                 env=env, capture_output=True, text=True).stdout.splitlines()
             self.assertIn("/tmp/fence-probe/throttle.json", out)
             self.assertNotIn("leak-me", out)
+
+    def test_fence_test_restores_conftests_forced_sandbox(self):
+        # 2026-11-25 (R2 gate): the fence test POPPED the conftest-forced
+        # LA_NVIDIA_THROTTLE_STATE, so every LATER test in the same xdist worker
+        # built limiters at the REAL default path and tripped the conftest
+        # tripwire ("test opened the REAL limiter state"). The contract: whatever
+        # the worker had before a test runs is still there afterwards.
+        sentinel = "/tmp/fa-hermetic-sentinel/throttle.json"
+        os.environ["LA_NVIDIA_THROTTLE_STATE"] = sentinel
+        try:
+            result = unittest.TestResult()
+            HelperContractTests("test_child_sees_fence_var_not_parent_secret").run(result)
+            self.assertTrue(result.wasSuccessful(),
+                            f"fence test broke under the sentinel: "
+                            f"{result.errors + result.failures}")
         finally:
-            os.environ.pop("FA_HERMETIC_PROBE_SECRET", None)
-            os.environ.pop("LA_NVIDIA_THROTTLE_STATE", None)
+            after = os.environ.get("LA_NVIDIA_THROTTLE_STATE")
+        self.assertEqual(after, sentinel,
+                         "the fence test must RESTORE the worker's var, not pop it")
 
     def test_shell_helper_runs_command_and_omits_empty_fence(self):
-        os.environ["FA_HERMETIC_PROBE_SECRET"] = "leak-me"
-        os.environ.pop("LA_HF_PARAMS_CACHE", None)   # empty must be OMITTED, not passed empty
-        try:
+        with _Plant(FA_HERMETIC_PROBE_SECRET="leak-me", LA_HF_PARAMS_CACHE=""):
             r = subprocess.run(
                 ["bash", "-c",
                  f'source "{ROOT}/tests/lib/hermetic_env.sh"; '
@@ -75,8 +115,6 @@ class HelperContractTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             lines = [line for line in r.stdout.splitlines() if line]
             self.assertEqual(lines, [], f"child must see NEITHER the empty fence var NOR the parent secret: {lines}")
-        finally:
-            os.environ.pop("FA_HERMETIC_PROBE_SECRET", None)
 
 
 if __name__ == "__main__":

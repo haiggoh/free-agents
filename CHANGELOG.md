@@ -22,6 +22,10 @@
 - Tests: `tests/test_plan_route_guard.py` (28) + `tests/test_plan_check_setting.py` (6),
   red-first and mutation-checked; routing/nudge/intercept/picker suites stay green.
 
+## [0.65.3] — 2026-11-28
+
+- hermetic test-env fix + dispatch-lane lesson primes (PR#13 bundle)
+
 ## [0.65.2] — 2026-11-28
 
 ### Fixed — parallel launches no longer race the folder-trust write of `~/.claude.json`
