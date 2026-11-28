@@ -23,6 +23,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -33,10 +34,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # 0.66.2 isolation (waypoint swap-model-preflight-rate): no fixed sandbox ports. The band is
-# derived at setUp from a free contiguous range (probed by bind), and stub cleanup survives a
-# timeout-killed worker: every stub records "<pid> <lstart>" in <tmp>/ctrl/<port>.stub.pid,
-# and the next run's setUpClass (plus atexit) reaps roots whose markers are dead, reused, or
-# orphaned (ppid 1) — never by port, which belongs to whichever run derived it.
+# claimed once per class run from a free contiguous range (bind-probed, recorded as a claim
+# file under a shared flock), and stub cleanup survives a timeout-killed worker: every stub
+# records "<stub pid> <lstart> <owner pid> <owner lstart>" in <tmp>/ctrl/<port>.stub.pid —
+# the OWNER is the pytest worker, because a live stub's own ppid becomes 1 as soon as the
+# launching bash exits, so the stub's ppid can never be the staleness test. The next run's
+# setUpClass (plus atexit) reaps roots whose owner is dead or pid-reused — never by port.
 
 
 def _proc_start(pid):
@@ -45,12 +48,51 @@ def _proc_start(pid):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def _proc_ppid(pid):
-    r = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True)
-    try:
-        return int(r.stdout.strip())
-    except ValueError:
-        return -1
+def _probe_band(lo, count, claims):
+    """Bind-probe [lo, lo+count): None when every port binds free and is unclaimed,
+    else the first port that blocked (claimed or already bound)."""
+    held = []
+    for p in range(lo, lo + count):
+        if any(clo <= p <= chi for clo, chi in claims):
+            for sk in held:
+                sk.close()
+            return p
+        sk = socket.socket()
+        try:
+            sk.bind(("127.0.0.1", p))
+            held.append(sk)
+        except OSError:
+            sk.close()
+            for sk in held:
+                sk.close()
+            return p
+    for sk in held:
+        sk.close()
+    return None
+
+
+def _scan_free_band(count, floor, start, claims):
+    """First free contiguous run of `count` ports; wraps once to `floor` when the initial
+    hint sits too close to 65535 (a hint of 65450 must not fail a box whose whole
+    20000-65414 range is free)."""
+    if start is not None:
+        lo = max(floor, start)
+    else:
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        lo = max(floor, s.getsockname()[1])
+        s.close()
+    first = lo
+    while True:
+        if lo + count > 65535:   # check BEFORE probing: bind() overflows above 65535
+            if first <= floor:
+                raise RuntimeError(f"no contiguous free band of {count} ports in [{floor}, 65535]")
+            lo = first = floor   # wrap once to the floor
+            continue
+        blocked = _probe_band(lo, count, claims)
+        if blocked is None:
+            return lo
+        lo = blocked + 1
 
 
 def _free_band(count, floor=20000, start=None):
@@ -59,35 +101,15 @@ def _free_band(count, floor=20000, start=None):
     Probed by bind, never a fixed range: concurrent runs from other worktrees must not
     collide. `floor` keeps the band clear of the live proxy/local bands; `start` forces the
     search to begin at a chosen port (tests)."""
-    if start is not None:
-        lo = max(floor, start)
-    else:
-        s = socket.socket()
-        s.bind(("127.0.0.1", 0))
-        lo = max(floor, s.getsockname()[1])
-        s.close()
-    while lo + count <= 65535:
-        held = []
-        blocked = None
-        for p in range(lo, lo + count):
-            sk = socket.socket()
-            try:
-                sk.bind(("127.0.0.1", p))
-                held.append(sk)
-            except OSError:
-                sk.close()
-                blocked = p
-                break
-        for sk in held:
-            sk.close()
-        if blocked is None:
-            return lo
-        lo = blocked + 1
-    raise RuntimeError(f"no contiguous free band of {count} ports below 65535")
+    return _scan_free_band(count, floor, start, ())
 
 
 def _reap_stale_stub_roots():
-    """Reap stub proxies leaked by a timeout-killed worker, by marker — never by port."""
+    """Reap stubs leaked by a timeout-killed worker, by marker — never by port.
+
+    A root is stale only when its OWNER (the pytest worker named in the marker) is dead or
+    pid-reused; its still-running stub is then killed and the root removed. A live owner's
+    root is never touched, whatever its stubs' ppid is."""
     base = tempfile.gettempdir()
     by_root = {}
     for marker in glob.glob(os.path.join(base, "fa-swap-test-*", "ctrl", "*.stub.pid")):
@@ -96,24 +118,29 @@ def _reap_stale_stub_roots():
         live = False
         for marker in markers:
             try:
-                # split(None, 1): lstart is multi-word ("Mon Nov 28 11:20:00 2026")
-                parts = Path(marker).read_text().split(None, 1)
-                if len(parts) != 2:
-                    continue
-                pid = int(parts[0])
-                start = parts[1].strip()
-            except (OSError, ValueError):
+                # ";" separated (lstart is multi-word: "Sa. 28 Nov. 13:28:50 2026")
+                text = Path(marker).read_text()
+                if ";" in text:
+                    parts = [p.strip() for p in text.split(";")]
+                    stub_pid, stub_start = int(parts[0]), parts[1]
+                    if len(parts) >= 4 and parts[2]:
+                        owner_pid, owner_start = int(parts[2]), parts[3]
+                    else:   # no owner recorded: the stub owns itself
+                        owner_pid, owner_start = stub_pid, stub_start
+                else:   # legacy space-separated 2-field marker
+                    parts = text.split(None, 1)
+                    stub_pid, stub_start = int(parts[0]), parts[1].strip()
+                    owner_pid, owner_start = stub_pid, stub_start
+            except (OSError, ValueError, IndexError):
                 continue
-            cur = _proc_start(pid)
-            if cur and cur == start:
-                if _proc_ppid(pid) == 1:
-                    try:
-                        os.kill(pid, 9)   # orphaned stub of a dead worker
-                    except OSError:
-                        pass
-                else:
-                    live = True   # another live run owns this root — leave it alone
-                    break
+            if owner_start and _proc_start(owner_pid) == owner_start:
+                live = True   # a live worker owns this root — leave it alone
+                break
+            if stub_start and _proc_start(stub_pid) == stub_start:
+                try:
+                    os.kill(stub_pid, 9)   # leaked stub of a dead worker
+                except OSError:
+                    pass
         if not live:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -134,7 +161,7 @@ def _claim_free_band(count, floor=20000, start=None, tag=""):
         for cf in glob.glob(os.path.join(base, "fa-swap-band-*.json")):
             try:
                 data = json.loads(Path(cf).read_text())
-                if _proc_start(int(data["pid"])) == data["start"]:
+                if data.get("start") and _proc_start(int(data["pid"])) == data["start"]:
                     claims.append((int(data["lo"]), int(data["hi"])))
                 else:
                     os.unlink(cf)   # dead or reused pid — sweep the stale claim
@@ -143,35 +170,7 @@ def _claim_free_band(count, floor=20000, start=None, tag=""):
                     os.unlink(cf)
                 except OSError:
                     pass
-        if start is not None:
-            lo = max(floor, start)
-        else:
-            s = socket.socket()
-            s.bind(("127.0.0.1", 0))
-            lo = max(floor, s.getsockname()[1])
-            s.close()
-        while lo + count <= 65535:
-            held = []
-            blocked = None
-            for p in range(lo, lo + count):
-                if any(clo <= p <= chi for clo, chi in claims):
-                    blocked = p
-                    break
-                sk = socket.socket()
-                try:
-                    sk.bind(("127.0.0.1", p))
-                    held.append(sk)
-                except OSError:
-                    sk.close()
-                    blocked = p
-                    break
-            for sk in held:
-                sk.close()
-            if blocked is None:
-                break
-            lo = blocked + 1
-        else:
-            raise RuntimeError(f"no contiguous free band of {count} ports below 65535")
+        lo = _scan_free_band(count, floor, start, claims)
         Path(os.path.join(base, f"fa-swap-band-{os.getpid()}-{tag or 'main'}.json")).write_text(
             json.dumps({"pid": os.getpid(), "start": _proc_start(os.getpid()),
                         "lo": lo, "hi": lo + count - 1}))
@@ -182,11 +181,18 @@ def _claim_free_band(count, floor=20000, start=None, tag=""):
 
 
 def _release_band_claim(tag=""):
+    """Release our claim under the same flock — an unlink racing a concurrent probe's
+    glob would let the next run derive a band over ours."""
+    base = tempfile.gettempdir()
+    lock_fh = open(os.path.join(base, "fa-swap-band-claim.lock"), "w")
+    fcntl.flock(lock_fh, fcntl.LOCK_EX)
     try:
-        os.unlink(os.path.join(tempfile.gettempdir(),
-                               f"fa-swap-band-{os.getpid()}-{tag or 'main'}.json"))
+        os.unlink(os.path.join(base, f"fa-swap-band-{os.getpid()}-{tag or 'main'}.json"))
     except OSError:
         pass
+    finally:
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
 
 
 def _cleanup_at_exit():
@@ -217,11 +223,15 @@ fast = os.environ.get("LA_SWAP_TEST_FAST") == "1"
 
 os.makedirs(ctrl, exist_ok=True)
 if port is not None:
-    # 0.66.2: record "<pid> <lstart>" so a LATER run can reap this stub if our worker is
-    # timeout-killed (tearDown never runs) — reaped by marker, never by port.
+    # 0.66.2: record "<stub pid> <lstart> <owner pid> <owner lstart>" so a LATER run can
+    # reap this stub if our worker is timeout-killed (tearDown never runs) — by marker,
+    # never by port. The owner is the pytest worker (LA_SWAP_TEST_OWNER): our own ppid
+    # becomes 1 as soon as the launching bash exits, so ppid is never the staleness test.
     _start = subprocess.check_output(["ps", "-o", "lstart=", "-p", str(os.getpid())], text=True).strip()
+    _owner_env = os.environ.get("LA_SWAP_TEST_OWNER", "").split(None, 1)
+    _owner_field = f"{_owner_env[0]};{_owner_env[1]}" if len(_owner_env) == 2 else ";"
     with open(os.path.join(ctrl, f"{port}.stub.pid"), "w") as f:
-        print(f"{os.getpid()} {_start}", file=f)
+        print(f"{os.getpid()};{_start};{_owner_field}", file=f)
 with open(os.path.join(ctrl, f"{port}.env"), "w") as f:
     f.write("LA_PROXY_HOOKS_RATE_LIMIT=" + os.environ.get("LA_PROXY_HOOKS_RATE_LIMIT", "<unset>") + "\\n")
 if cfg:
@@ -344,6 +354,8 @@ class SwapPreflightBucketTests(unittest.TestCase):
         stub.chmod(0o755)
         os.environ["LA_SWAP_TEST_DIR"] = str(self.root / 'ctrl')
         self.addCleanup(os.environ.pop, "LA_SWAP_TEST_DIR", None)
+        os.environ["LA_SWAP_TEST_OWNER"] = f"{os.getpid()} {_proc_start(os.getpid())}"
+        self.addCleanup(os.environ.pop, "LA_SWAP_TEST_OWNER", None)
         self.env = dict(os.environ, HOME=str(self.root / 'home'),
                         TMPDIR=str(self.root), LA_API_KEYS_DIR=str(self.root / 'keys'),
                         PATH=str(self.root / 'stubs') + ':' + os.environ['PATH'],
@@ -569,33 +581,84 @@ class SwapTestIsolationTests(unittest.TestCase):
         finally:
             blocker.close()
 
-    def test_reaper_reaps_dead_and_reused_markers_but_keeps_a_live_run(self):
-        live = subprocess.Popen(["sleep", "30"])
+    def test_reaper_reaps_dead_and_reused_owners_but_never_a_live_run(self):
         dead = subprocess.Popen(["sleep", "0"])
         dead.wait()
-        self.addCleanup(lambda: live.kill() if live.poll() is None else None)
+        stub_dead_owner = subprocess.Popen(["sleep", "30"])   # must be killed
+        stub_reused = subprocess.Popen(["sleep", "30"])        # must be killed (owner pid reused)
+        stub_live = subprocess.Popen(["sleep", "30"])          # must survive
+        for p in (stub_dead_owner, stub_reused, stub_live):
+            self.addCleanup(lambda p=p: p.kill() if p.poll() is None else None)
         base = Path(tempfile.gettempdir())
-        cases = (("dead", dead.pid, "whatever"),
-                 ("reused", os.getpid(), "bogus-lstart"),
-                 ("live", live.pid, _proc_start(live.pid)))
+        cases = (
+            ("dead-owner", f"{stub_dead_owner.pid};{_proc_start(stub_dead_owner.pid)};{dead.pid};whatever"),
+            ("reused-owner", f"{stub_reused.pid};{_proc_start(stub_reused.pid)};{os.getpid()};bogus-lstart"),
+            ("live-owner", f"{stub_live.pid};{_proc_start(stub_live.pid)};{os.getpid()};{_proc_start(os.getpid())}"),
+        )
         roots = {}
-        for name, pid, start in cases:
+        for name, content in cases:
             root = base / f"fa-swap-test-reap-{name}-{os.getpid()}"
             (root / "ctrl").mkdir(parents=True)
-            (root / "ctrl" / "1.stub.pid").write_text(f"{pid} {start}\n")
+            (root / "ctrl" / "1.stub.pid").write_text(content + "\n")
             roots[name] = root
         try:
             _reap_stale_stub_roots()
-            self.assertFalse(roots["dead"].exists(), "dead-pid root must be reaped")
-            self.assertFalse(roots["reused"].exists(), "pid-reused root must be reaped")
-            self.assertTrue(roots["live"].exists(), "a live non-orphan run's root must survive")
-            self.assertIsNone(live.poll(), "the reaper must never kill the live marker's process")
-            os.kill(os.getpid(), 0)
+            self.assertFalse(roots["dead-owner"].exists(), "dead owner's root must be reaped")
+            self.assertIsNotNone(stub_dead_owner.poll(),
+                                 "the leaked stub of a dead owner must be killed")
+            self.assertFalse(roots["reused-owner"].exists(), "pid-reused owner's root must be reaped")
+            self.assertIsNotNone(stub_reused.poll(), "a stub whose owner pid was reused must be killed")
+            self.assertTrue(roots["live-owner"].exists(), "a live owner's root must survive")
+            self.assertIsNone(stub_live.poll(), "the reaper must never kill a live owner's stub")
         finally:
             for r in roots.values():
                 shutil.rmtree(r, ignore_errors=True)
 
-    def test_claim_avoids_live_claims_and_sweeps_dead_ones(self):
+    def test_stub_writes_pid_marker_before_binding(self):
+        d = tempfile.mkdtemp(prefix="fa-swap-test-stub-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        ctrl = os.path.join(d, "ctrl")
+        os.makedirs(ctrl)
+        Path(ctrl, "slow-all").write_text("8")   # stub sleeps 8 s BEFORE binding
+        port = _free_band(1)
+        env = dict(os.environ, LA_SWAP_TEST_DIR=ctrl,
+                   LA_SWAP_TEST_OWNER=f"{os.getpid()} {_proc_start(os.getpid())}")
+        p = subprocess.Popen([sys.executable, "-c", STUB, "--port", str(port)],
+                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(p.kill)
+        marker = Path(ctrl, f"{port}.stub.pid")
+        deadline = time.time() + 5
+        while not marker.exists() and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(marker.exists(), "stub must record its marker at startup, before binding")
+        parts = [p.strip() for p in marker.read_text().split(";")]
+        self.assertEqual(int(parts[0]), p.pid)
+        self.assertEqual(parts[1], _proc_start(p.pid))
+        self.assertEqual(parts[2:], [str(os.getpid()), _proc_start(os.getpid())])
+        s = socket.socket()
+        try:
+            s.connect(("127.0.0.1", port))
+            bound = True
+        except OSError:
+            bound = False
+        finally:
+            s.close()
+        self.assertFalse(bound, "marker must be written before the slow sleep / bind")
+
+    def test_free_band_wraps_when_the_hint_is_near_65535(self):
+        lo = _free_band(8, start=65530)   # 65530+8 > 65535: must wrap to the floor
+        self.assertGreaterEqual(lo, 20000)
+        held = []
+        try:
+            for p in range(lo, lo + 8):
+                sk = socket.socket()
+                sk.bind(("127.0.0.1", p))
+                held.append(sk)
+        finally:
+            for sk in held:
+                sk.close()
+
+    def test_claim_avoids_live_claims_and_sweeps_dead_and_reused_ones(self):
         base = Path(tempfile.gettempdir())
         x = _free_band(1)   # a currently-free anchor port
         live_claim = base / f"fa-swap-band-{os.getpid()}-testlive.json"
@@ -606,6 +669,9 @@ class SwapTestIsolationTests(unittest.TestCase):
         dead_claim = base / f"fa-swap-band-{dead.pid}-testdead.json"
         dead_claim.write_text(json.dumps({"pid": dead.pid, "start": "whatever",
                                            "lo": x + 500, "hi": x + 620}))
+        reused_claim = base / f"fa-swap-band-{os.getpid()}-testreused.json"
+        reused_claim.write_text(json.dumps({"pid": os.getpid(), "start": "bogus",
+                                             "lo": x + 900, "hi": x + 1020}))
         blocker = socket.socket()
         blocker.bind(("127.0.0.1", x))   # bind-probe alone would slide to x+1, INSIDE the claim
         try:
@@ -613,11 +679,30 @@ class SwapTestIsolationTests(unittest.TestCase):
             self.assertFalse(any(x <= p <= x + 120 for p in range(lo, lo + 8)),
                              "a live claim must be avoided even where the ports bind free")
             self.assertFalse(dead_claim.exists(), "a dead pid's claim must be swept")
+            self.assertFalse(reused_claim.exists(), "a pid-reused claim must be swept")
+            lo2 = _claim_free_band(8, start=100, tag="testfloor")
+            self.assertGreaterEqual(lo2, 20000, "the floor must hold even for a low start")
+            _release_band_claim(tag="testfloor")
         finally:
             blocker.close()
             _release_band_claim(tag="testlive2")
             live_claim.unlink(missing_ok=True)
             dead_claim.unlink(missing_ok=True)
+            reused_claim.unlink(missing_ok=True)
+
+    def test_atexit_reaps_stale_roots_in_a_child_process(self):
+        dead = subprocess.Popen(["sleep", "0"])
+        dead.wait()
+        root = Path(tempfile.gettempdir()) / f"fa-swap-test-atexit-{os.getpid()}"
+        (root / "ctrl").mkdir(parents=True)
+        (root / "ctrl" / "1.stub.pid").write_text(f"{dead.pid};whatever;{dead.pid};whatever\n")
+        code = ("import importlib.util as u, sys;"
+                "s = u.spec_from_file_location('t', sys.argv[1]);"
+                "m = u.module_from_spec(s); s.loader.exec_module(m)")
+        r = subprocess.run([sys.executable, "-c", code, str(Path(__file__).resolve())],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(root.exists(), "the child's atexit hook must reap the stale root")
 
     def test_concurrent_claims_are_disjoint(self):
         import threading
@@ -641,6 +726,25 @@ class SwapTestIsolationTests(unittest.TestCase):
                 self.assertFalse(a & b, f"claims {results[i]} and {results[j]} overlap")
         for i in range(4):
             _release_band_claim(tag=f"t{i}")
+
+    def test_concurrent_process_claims_are_disjoint(self):
+        # real multi-process flocking (threads share one pid and one GIL)
+        code = ("import importlib.util as u, sys;"
+                "s = u.spec_from_file_location('t', sys.argv[1]);"
+                "m = u.module_from_spec(s); s.loader.exec_module(m);"
+                "print(m._claim_free_band(50))")
+        procs = [subprocess.Popen([sys.executable, "-c", code, str(Path(__file__).resolve())],
+                                  stdout=subprocess.PIPE, text=True) for _ in range(4)]
+        results = []
+        for p in procs:
+            out, err = p.communicate()
+            self.assertEqual(p.returncode, 0, err)
+            results.append(int(out.strip()))
+        for i in range(4):
+            for j in range(i + 1, 4):
+                a = set(range(results[i], results[i] + 50))
+                b = set(range(results[j], results[j] + 50))
+                self.assertFalse(a & b, f"process claims {results[i]} and {results[j]} overlap")
 
 
 if __name__ == "__main__":
