@@ -2567,6 +2567,11 @@ class CloudConfigScreen(Screen):
                    lambda: self._cycle_route("agent"),
                    step=lambda d: self._cycle_route("agent", d),
                    labels=tuple(cse.ROUTE_LABELS[k] for k in cse.ROUTE_MODES)),
+            setting("n", f"{ec.EMOJI_SHIELD_STR}  Plan routing check: "
+                         f"{cse.PLAN_CHECK_LABELS[cse.plan_check()]}",
+                    (False, True), lambda: cse.plan_check(),
+                    lambda v: cse.save_plan_check(bool(v)),
+                    labels=(cse.PLAN_CHECK_LABELS[False], cse.PLAN_CHECK_LABELS[True])),
             Action("t", f"Dispatch timeout tier (free-agent-tool.py): "
                         f"{cse.TIMEOUT_TIER_LABELS[cse.timeout_tier()]}",
                    lambda: self._cycle_timeout_tier(),
