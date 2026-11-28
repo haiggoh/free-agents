@@ -78,3 +78,18 @@ For the band definition reaching cost-tracker, the user chose **session env + fa
 ## Left to the builder
 
 Exact helper names and file placement; how `_band_full_report` output is condensed for the status line; migration note in CHANGELOG/README for anyone who set `LA_REMOTE_PROXY_PORT_MAX` themselves.
+
+## Builder check (2026-11-28, Nemotron 3 Ultra via free dispatch) — resolutions
+
+No question needed the user; each was answered by the code or settled as a builder's call (marked "call").
+
+1. **`la-session-identity.sh`** runs inside the session, so it reads the exported `LA_REMOTE_PROXY_PORT_MIN/MAX` with the same `4141`/`4170` fallback as cost-tracker (call).
+2. **Helper contract** (call): `config/remote-agents.sh` keeps the MIN/MAX defaults and gains `la_in_proxy_band <port>` (exit 0 inside, 1 outside); every free-agents shell consumer sources it instead of carrying literals.
+3. **`la-evict.sh` is standalone** (call): it sources `config/remote-agents.sh` itself and protects the UNION of the shipped default band and the configured band — eviction never protects fewer ports than today, even under a misconfigured override.
+4. **Condensed status line** (call): ONE line — counts per holder kind (live session / kept proxy, owner gone / unknown) plus the longest-held port; the full per-port report only at the deadline.
+5. **`guard-own-endpoint.py`** is a PreToolUse hook in the session (not inside the proxy) and protects its OWN port from `ANTHROPIC_BASE_URL` plus `LA_GUARD_EXTRA_PORTS`; the band appears only in its PRIMER text → prose update, no Python helper needed.
+6. **Scratch ports** 4171–4190: nothing listens on 4152–4199 (verified 02:5x); swaps are rare and serialized per session, so the scratch range stays 20 (call).
+7. **`LA_REMOTE_KEEP_PROXY=1` proxies whose owner is gone** stay HELD — never reclaimed, never reused (reclaiming = touching a live proxy, an anti-goal). The status line names them ("kept, owner gone") so the user can stop one deliberately (call, forced by the anti-goal).
+8. **Invalid `LA_PORT_QUEUE_WAIT_S`**: exit non-zero with a message naming the variable before any port is touched; never a fallback (already stated above).
+9. **Process tree**: Claude Code spawns the statusline command as its own child, so variables the launcher exports before starting `claude` reach it; the delivery test runs the statusline with the variables set AND unset.
+10. **Code vs prose**: `guard-own-endpoint.py` PRIMER, `bin/fa_capture.py` standing rule 7 and `skills/free-session-handover/SKILL.md` carry the range in prose only; `la-evict.sh` and `la-session-identity.sh` are the code consumers (verified on main e362c76).
