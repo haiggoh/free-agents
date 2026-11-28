@@ -1,9 +1,8 @@
 """free-agent-tool.py hygiene fixes (waypoints fa-local-fallback-inert, free-agent-tool-local-only,
 free-agent-tool-an-invalid, fa-lane-id-groq-qwen32-stale-name).
 
-1. The csl-registered local fallback list (0.56.14) must be ON for a normal CLI call. It was gated
-   on LA_CONFIG_SOURCE, which nothing exports, so it never ran in production; run_background and
-   --list never passed it at all. conftest fences it OFF for the suite (FA_DISPATCH_LOCAL_FALLBACK=0).
+1. (local fallback: deferred — its registry reads config.example.sh in an installed plugin;
+   waypoint fa-local-fallback-inert)
 2. The 'only local agents' opt-in must be read from the session-menu config dir, not CLAUDE_CONFIG_DIR.
 3. An unknown role name is a caller typo: refuse it, never silently reorder the dispatch chain.
 4. A dispatch id must not name a model family its display label does not serve.
@@ -36,53 +35,6 @@ def _prefs(*entries):
 
 REMOTE = {"id": "r1", "kind": "remote", "provider": "gemini", "family": "google",
           "roles": ["operator"], "display": "R1"}
-
-
-class LocalFallbackDefault(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        keys = Path(self.tmp.name) / "keys"
-        keys.mkdir()
-        (keys / "gemini").write_text("k")
-        self.env = {"LA_API_KEYS_DIR": str(keys)}
-        for name, val in (("local_registry_roles", lambda env: {"loc-x": {"operator"}}),
-                          ("local_on_disk", lambda alias: True)):
-            p = mock.patch.object(fat, name, val)
-            p.start()
-            self.addCleanup(p.stop)
-
-    def ids(self, **kw):
-        return [e["id"] for e in fat.candidates(_prefs(REMOTE), self.env, **kw)]
-
-    def test_on_by_default_without_la_config_source(self):
-        # the production shape: no LA_CONFIG_SOURCE, no fence, no explicit kwarg
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("FA_DISPATCH_LOCAL_FALLBACK", None)
-            self.assertEqual(self.ids(), ["r1", "local-loc-x"])
-
-    def test_degraded_candidates_route_gets_it_too(self):
-        # run_background reaches the ladder through degraded_candidates without the kwarg
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("FA_DISPATCH_LOCAL_FALLBACK", None)
-            order, _m, _a = fat.degraded_candidates(_prefs(REMOTE), self.env)
-            self.assertIn("local-loc-x", [e["id"] for e in order])
-
-    def test_env_zero_turns_it_off(self):
-        with mock.patch.dict(os.environ, {"FA_DISPATCH_LOCAL_FALLBACK": "0"}):
-            self.assertEqual(self.ids(), ["r1"])
-
-    def test_explicit_kwarg_wins(self):
-        with mock.patch.dict(os.environ, {"FA_DISPATCH_LOCAL_FALLBACK": "0"}):
-            self.assertEqual(self.ids(local_fallback=True), ["r1", "local-loc-x"])
-        with mock.patch.dict(os.environ, {"FA_DISPATCH_LOCAL_FALLBACK": "1"}):
-            self.assertEqual(self.ids(local_fallback=False), ["r1"])
-
-    def test_invalid_override_fails_loudly_naming_it(self):
-        with mock.patch.dict(os.environ, {"FA_DISPATCH_LOCAL_FALLBACK": "maybe"}):
-            with self.assertRaises(ValueError) as cm:
-                self.ids()
-        self.assertIn("FA_DISPATCH_LOCAL_FALLBACK", str(cm.exception))
 
 
 class LocalOnlyReadsSessionMenuDir(unittest.TestCase):
