@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.65.2] — 2026-11-28
+
+### Fixed — parallel launches no longer race the folder-trust write of `~/.claude.json`
+- `bin/fa_pre_trust.py` derived its temp path from a second-resolution UTC stamp
+  (`<config>.tmp.pre-trust-<stamp>`), so launches in the same second all derived the SAME
+  path. The backup path retried same-second collisions; the temp path did not — one writer
+  failed with `FileExistsError` and its cleanup unlinked another writer's in-flight temp.
+  The temp file is now `tempfile.mkstemp`-created (unique per writer; the original mode is
+  applied with `os.fchmod`, never `open()`+`chmod`), and the whole read-modify-write holds an
+  exclusive `flock` on `<config>.lock`, so concurrent writers can no longer last-write-wins
+  over each other's `projects` keys.
+- Tests: `tests/test_fa_pre_trust_parallel.py` — same-second writers both succeed (was
+  `FileExistsError` exit 4), concurrent writers keep both trust keys (goes red when the
+  flock is mutated out); existing pre-trust, remote-session and launch suites stay green.
+
 ## [0.65.0] — 2026-11-27
 
 ### Feature — csl greys out listed-but-unreachable models (R5)
