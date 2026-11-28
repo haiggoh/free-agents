@@ -179,4 +179,6 @@ def test_version_surfaces_agree():
     rv = re.search(r"^## Current released version\s*\n\s*`(\d+\.\d+\.\d+)`",
                    (REPO / "docs" / "ROADMAP.md").read_text(), re.M).group(1)
     vv = (REPO / "VERSION").read_text().strip()
-    assert mv == cv == rv == vv == "0.65.0", (mv, cv, rv, vv)
+    # the manifest is the authoritative surface; the other three must agree with it,
+    # never with a hardcoded release number (that pin broke on every release)
+    assert mv == cv == rv == vv, (mv, cv, rv, vv)
