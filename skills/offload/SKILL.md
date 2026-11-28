@@ -48,8 +48,7 @@ the answer is not "a localhost port" or "a free provider's API", it was not free
    - `free:dispatch` — STATELESS, text only: `python3 bin/free-agent-tool.py` with
      `{"prompt": ..., "files": [paths]}` (no disk; `--list` = preference order).
    - `free:session` — files/commands: a headless SESSION, `run_in_background`:
-     `remote-session.sh <alias> --prompt-file <brief.md> -- -p --output-format json < /dev/null`
-     (local: `launch-claude-agent.sh --prompt-file <brief.md> <alias> -- -p …`).
+     `remote-session.sh <alias> --prompt-file <brief.md> -- -p --output-format json < /dev/null`.
    - `free:handover` — interactive successor window: `free-session-handover`.
 2. **Plans: tag EVERY task** `free:dispatch|session|handover` or `cloud:<checkable reason>`;
    tool use is never a cloud reason. Untagged plans are refused (opt out:

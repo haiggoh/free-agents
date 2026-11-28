@@ -23,6 +23,7 @@ def _load():
     spec = importlib.util.spec_from_file_location("plan_route_guard", ROOT / "hooks" / "plan-route-guard.py")
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["plan_route_guard"] = mod   # dataclass PEP-563 lookup needs the registry entry
     spec.loader.exec_module(mod)
     return mod
 
@@ -163,6 +164,35 @@ class DecideTests(unittest.TestCase):
         import cloud_session_env as cse
         cse.save_plan_check(False)
         self.assertIsNone(guard.decide(str(self.plan), PLAN_UNTAGGED, self.env()))
+
+    # --- rulings recovered from the deleted plan ledger (peer handover 2026-11-28) ----------
+
+    def test_left_boundary_toll_free_is_not_a_tag(self):
+        text = "# P\n## Task 1: Alpha\ntoll-free:session is not a tag\n\n## Task 2: Beta — cloud:spec\n"
+        reason = guard.decide(str(self.plan), text, self.env())
+        self.assertIsNotNone(reason, "toll-free: must not count as a tag (left boundary)")
+
+    def test_nested_step_inherits_enclosing_task_tag(self):
+        text = ("# P\n## Task 1: Alpha — free:session\n### Step 1.1\nbody\n\n"
+                "## Task 2: Beta — cloud:spec\n")
+        self.assertIsNone(guard.decide(str(self.plan), text, self.env()))
+
+    def test_tag_in_third_non_empty_line_counts(self):
+        text = ("# P\n## Task 1: Alpha\nsome intro\nmore intro\n- free:session\n\n"
+                "## Task 2: Beta — cloud:spec\n")
+        self.assertIsNone(guard.decide(str(self.plan), text, self.env()))
+
+    def test_empty_cloud_reason_invalid(self):
+        text = "# P\n## Task 1: Alpha — free:session\n## Task 2: Beta — cloud:\n"
+        reason = guard.decide(str(self.plan), text, self.env())
+        self.assertIsNotNone(reason)
+        self.assertIn("invalid cloud reason", reason)
+
+    def test_cloud_reason_stops_at_next_tag(self):
+        text = ("# P\n## Task 1: Alpha — free:session\n"
+                "## Task 2: Beta — cloud:spec, see free:session notes on tool use\n")
+        self.assertIsNone(guard.decide(str(self.plan), text, self.env()),
+                          "the reason must stop at the next route tag on the line")
 
     def test_edit_judged_on_resulting_file(self):
         self.plan.write_text(PLAN_UNTAGGED)

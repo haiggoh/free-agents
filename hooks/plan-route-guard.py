@@ -15,6 +15,8 @@ stderr line, exit 0) — the guard never blocks on its own failure.
 
 Hook I/O: PreToolUse JSON on stdin; deny = the reason on stderr + exit 2.
 """
+from __future__ import annotations   # hooks run as bare python3 (macOS stock 3.9)
+
 import argparse
 import json
 import os
@@ -24,10 +26,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+# The lookbehind is the left boundary — not a word char and not a hyphen — so "toll-free:"
+# is NOT a tag (ledger ruling 2026-11-28).
 TAG_TOKEN_RE = re.compile(
-    r"\b(free:dispatch|free:session|free:handover|local:[A-Za-z0-9_-]+|remote:[A-Za-z0-9_-]+"
-    r"|cloud:)(/[A-Za-z0-9_-]+)?")
-HEADING_RE = re.compile(r"^#{2,4} (?:Task|Step|Phase)\b")
+    r"(?<![\w-])(free:dispatch|free:session|free:handover|local:[A-Za-z0-9_-]+"
+    r"|remote:[A-Za-z0-9_-]+|cloud:)(/[A-Za-z0-9_-]+)?")
+ANY_HEADING_RE = re.compile(r"^(#{1,6}) ")
+TASK_HEADING_RE = re.compile(r"^#{2,4} (?:Task|Step|Phase)\b")
 ROUTING_RE = re.compile(r"^Routing:\s*(.*)$")
 INVALID_CLOUD = ("tool use", "tool-use", "tools", "too hard", "too complex",
                  "local is slow", "slow", "not delegatable")
@@ -46,10 +51,11 @@ def _tag_in_line(line: str) -> Optional[str]:
         return None
     tag = m.group(0)
     if tag.startswith("cloud:"):
-        reason = line[m.end(1):].strip()
-        if m.group(2) and m.group(2) in reason:
-            reason = reason[:reason.find(m.group(2))]
-        reason = reason.rstrip(".,;:)]`'\"")
+        rest = line[m.end():]
+        nxt = TAG_TOKEN_RE.search(rest)
+        # a cloud reason runs to the next route tag on the same line or to EOL (ledger ruling);
+        # an empty reason stays "cloud:" and is invalid in _tag_kind
+        reason = (rest[:nxt.start()] if nxt else rest).strip().rstrip(".,;:)]`'\"")
         tag = "cloud:" + reason.strip()
     return tag
 
@@ -60,6 +66,8 @@ def _tag_kind(tag: Optional[str]) -> str:
     if tag.startswith(("free:", "local:", "remote:")):
         return "free"
     reason = tag[len("cloud:"):].lower()
+    if not reason.strip():
+        return "invalid"
     for bad in INVALID_CLOUD:
         if bad in reason:
             return "invalid"
@@ -67,25 +75,44 @@ def _tag_kind(tag: Optional[str]) -> str:
 
 
 def parse_plan(text: str) -> Optional[PlanReport]:
-    """Tasks = headings + the tag found in the section's first non-empty lines (heading line
-    plus the first block, so a tag in a list item directly under the heading counts)."""
+    """Tasks = ^#{2,4} (Task|Step|Phase) headings. A task's tag is found on the heading line or
+    in the section's first 3 non-empty lines; a nested Step/Phase without its own tag INHERITS
+    the nearest enclosing tagged heading (ledger ruling: never block legitimate plans)."""
     lines = text.splitlines()
     tasks = []
     routing_line = None
+    stack = []                       # (level, tag) of enclosing task headings
     for idx, line in enumerate(lines):
-        if HEADING_RE.match(line):
-            block = [line]
-            j = idx + 1
-            while j < len(lines) and lines[j].strip():
-                block.append(lines[j])
-                j += 1
-            tag = None
-            for bl in block:
-                tag = _tag_in_line(bl)
-                if tag:
-                    break
-            tasks.append((line.strip(), tag))
-        elif routing_line is None:
+        hm = ANY_HEADING_RE.match(line)
+        if hm:
+            level = len(hm.group(1))
+            if level == 1:
+                stack = []
+            else:
+                while stack and stack[-1][0] >= level:
+                    stack.pop()
+            if TASK_HEADING_RE.match(line):
+                block = [line]
+                nonempty = 0
+                j = idx + 1
+                while j < len(lines) and nonempty < 3 and lines[j].strip():
+                    block.append(lines[j])
+                    nonempty += 1
+                    j += 1
+                tag = None
+                for bl in block:
+                    tag = _tag_in_line(bl)
+                    if tag:
+                        break
+                if tag is None:      # inherit the nearest enclosing tagged heading
+                    for _lv, t in reversed(stack):
+                        if t is not None:
+                            tag = t
+                            break
+                tasks.append((line.strip(), tag))
+                stack.append((level, tag))
+            continue
+        if routing_line is None:
             rm = ROUTING_RE.match(line)
             if rm:
                 routing_line = rm.group(1).strip()
