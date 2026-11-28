@@ -179,4 +179,4 @@ def test_version_surfaces_agree():
     rv = re.search(r"^## Current released version\s*\n\s*`(\d+\.\d+\.\d+)`",
                    (REPO / "docs" / "ROADMAP.md").read_text(), re.M).group(1)
     vv = (REPO / "VERSION").read_text().strip()
-    assert mv == cv == rv == vv == "0.65.2", (mv, cv, rv, vv)
+    assert mv == cv == rv == vv == "0.65.3", (mv, cv, rv, vv)
