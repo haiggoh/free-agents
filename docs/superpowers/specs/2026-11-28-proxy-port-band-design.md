@@ -93,3 +93,7 @@ No question needed the user; each was answered by the code or settled as a build
 8. **Invalid `LA_PORT_QUEUE_WAIT_S`**: exit non-zero with a message naming the variable before any port is touched; never a fallback (already stated above).
 9. **Process tree**: Claude Code spawns the statusline command as its own child, so variables the launcher exports before starting `claude` reach it; the delivery test runs the statusline with the variables set AND unset.
 10. **Code vs prose**: `guard-own-endpoint.py` PRIMER, `bin/fa_capture.py` standing rule 7 and `skills/free-session-handover/SKILL.md` carry the range in prose only; `la-evict.sh` and `la-session-identity.sh` are the code consumers (verified on main e362c76).
+
+## Prerequisite found after the builder check (ponytail audit must-fix #2, verified 2026-11-28)
+
+`_alloc_lock`'s dead-holder break (`bin/remote-session.sh:661-663`) is not atomic: two waiters reading the same stale holder can both end up holding the lock (the second deletes the first's fresh lock). The queue in this design re-enters that lock every 5 s per waiter, which multiplies the race window — so the builder fixes it FIRST: break by atomic rename (`mv "$lock" "$lock.stale.$$"`, only one rename wins), then retry `mkdir`; barrier test with two waiters on a planted dead holder, mutation-checked.
