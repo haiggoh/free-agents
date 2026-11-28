@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.65.3] — 2026-11-28
+## [0.66.0] — 2026-11-28
 
 ### Added — plan routing barrier: a paid session cannot write a plan whose tasks lack a route tag
 - New PreToolUse guard `hooks/plan-route-guard.py` on `Write|Edit|MultiEdit` (timeout 5): plan
