@@ -48,7 +48,8 @@ class RoutingBlockTests(unittest.TestCase):
         self.assertLessEqual(len(block.encode()), 1500, "routing block must stay <= 1,500 bytes")
         for literal in ("free-agent-tool.py", "remote-session.sh <alias>",
                         "brief-the-delegate", "paid_fallback_allowed", "dispatching-parallel-agents",
-                        "config/local-agent-system-prompt.txt",
+                        # config/local-agent-system-prompt.txt was renamed to remote-… (R1); pinning the
+                        # dead name made this test red on main since 0.65.1 (2026-11-28).
                         "config/remote-agent-system-prompt.txt"):
             self.assertIn(literal, block, f"routing block missing {literal!r}")
         low = block.lower()
