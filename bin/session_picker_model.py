@@ -1970,15 +1970,15 @@ class RemoteScreen(Screen):
                 pinned = size_sorted(pinned, lambda a: self._catalog_size(prov, a.model_id))
             if self.search:
                 pinned = [a for a in pinned if self._matches(a.model_id, a.display)]
-            items = [Item(a.alias, self._pin_row_label(prov, a))
-                     for a in pinned]
-            items += self._catalog_items(prov, pinned)
-            # R5: grey out reachable models per-provider; a mark means the probe
+            # R5: grey out unreachable models per-provider; a mark means the probe
             # saw the target and it is not reachable. The infobox sentence explains why.
+            # The rebuild iterates the AGENTS (pinned) — never the built Item list,
+            # which has no .alias (2026-11-28: R5 regression, 44 picker tests red on main).
             marks = _unreachable_marks()
             items = [Item(a.alias, self._pin_row_label(prov, a) + "  · not reachable"
                          if marks.get(a.alias) else self._pin_row_label(prov, a))
-                     for a in items]
+                     for a in pinned]
+            items += self._catalog_items(prov, pinned)
             # 0.51.0 (user): when local-capable rows ARE shown, they sit at the very BOTTOM
             # of their provider group (by default they are filtered out entirely by
             # _visible — pinned rows get the verdict annotated in the app's _loaded).

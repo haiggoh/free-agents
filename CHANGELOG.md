@@ -15,6 +15,10 @@
   `FileExistsError` exit 4), concurrent writers keep both trust keys (goes red when the
   flock is mutated out); existing pre-trust, remote-session and launch suites stay green.
 
+## [0.65.1] — 2026-11-28
+
+- fix(picker): R5 grey-out rebuilt rows from the built Item list — Item.alias crash, 44 tests red on main
+
 ## [0.65.0] — 2026-11-27
 
 ### Feature — csl greys out listed-but-unreachable models (R5)
