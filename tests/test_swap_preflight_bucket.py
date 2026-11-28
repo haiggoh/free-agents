@@ -118,7 +118,83 @@ def _reap_stale_stub_roots():
             shutil.rmtree(root, ignore_errors=True)
 
 
-atexit.register(_reap_stale_stub_roots)
+def _claim_free_band(count, floor=20000, start=None, tag=""):
+    """Claim a contiguous free band, race-free across concurrent runs.
+
+    Under a shared flock: sweep dead claims, read live ones, probe-bind a band that
+    avoids both claimed ranges and bound ports, write the claim, release. The claim
+    closes the window between this probe and our stubs binding — two runs probing
+    at the same instant would otherwise derive the SAME band (the probe releases
+    its binds before returning)."""
+    base = tempfile.gettempdir()
+    lock_fh = open(os.path.join(base, "fa-swap-band-claim.lock"), "w")
+    fcntl.flock(lock_fh, fcntl.LOCK_EX)
+    try:
+        claims = []
+        for cf in glob.glob(os.path.join(base, "fa-swap-band-*.json")):
+            try:
+                data = json.loads(Path(cf).read_text())
+                if _proc_start(int(data["pid"])) == data["start"]:
+                    claims.append((int(data["lo"]), int(data["hi"])))
+                else:
+                    os.unlink(cf)   # dead or reused pid — sweep the stale claim
+            except (OSError, ValueError, KeyError, TypeError):
+                try:
+                    os.unlink(cf)
+                except OSError:
+                    pass
+        if start is not None:
+            lo = max(floor, start)
+        else:
+            s = socket.socket()
+            s.bind(("127.0.0.1", 0))
+            lo = max(floor, s.getsockname()[1])
+            s.close()
+        while lo + count <= 65535:
+            held = []
+            blocked = None
+            for p in range(lo, lo + count):
+                if any(clo <= p <= chi for clo, chi in claims):
+                    blocked = p
+                    break
+                sk = socket.socket()
+                try:
+                    sk.bind(("127.0.0.1", p))
+                    held.append(sk)
+                except OSError:
+                    sk.close()
+                    blocked = p
+                    break
+            for sk in held:
+                sk.close()
+            if blocked is None:
+                break
+            lo = blocked + 1
+        else:
+            raise RuntimeError(f"no contiguous free band of {count} ports below 65535")
+        Path(os.path.join(base, f"fa-swap-band-{os.getpid()}-{tag or 'main'}.json")).write_text(
+            json.dumps({"pid": os.getpid(), "start": _proc_start(os.getpid()),
+                        "lo": lo, "hi": lo + count - 1}))
+        return lo
+    finally:
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
+
+
+def _release_band_claim(tag=""):
+    try:
+        os.unlink(os.path.join(tempfile.gettempdir(),
+                               f"fa-swap-band-{os.getpid()}-{tag or 'main'}.json"))
+    except OSError:
+        pass
+
+
+def _cleanup_at_exit():
+    _reap_stale_stub_roots()
+    _release_band_claim()
+
+
+atexit.register(_cleanup_at_exit)
 
 # Extended stub: health always unless ctrl/<port>.nohealth exists; /v1/messages answers
 # 200 unless ctrl/<port>.failcode (one-shot, its content is the HTTP code) or
@@ -145,7 +221,7 @@ if port is not None:
     # timeout-killed (tearDown never runs) — reaped by marker, never by port.
     _start = subprocess.check_output(["ps", "-o", "lstart=", "-p", str(os.getpid())], text=True).strip()
     with open(os.path.join(ctrl, f"{port}.stub.pid"), "w") as f:
-        f.write(f"{os.getpid()} {_start}\n")
+        print(f"{os.getpid()} {_start}", file=f)
 with open(os.path.join(ctrl, f"{port}.env"), "w") as f:
     f.write("LA_PROXY_HOOKS_RATE_LIMIT=" + os.environ.get("LA_PROXY_HOOKS_RATE_LIMIT", "<unset>") + "\\n")
 if cfg:
@@ -227,15 +303,22 @@ class SwapPreflightBucketTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         _reap_stale_stub_roots()   # 0.66.2: reap stubs leaked by a timeout-killed prior run
-        # per-checkout lock: two worktrees may run this file concurrently (derived bands);
+        # per-checkout lock: two worktrees may run this file concurrently (claimed bands);
         # runs within one checkout still serialize.
         digest = hashlib.md5(str(ROOT).encode()).hexdigest()[:8]
         cls._lock_fh = open(os.path.join(tempfile.gettempdir(),
                                          f"free-agents-swap-tests-{digest}.lock"), "w")
         fcntl.flock(cls._lock_fh, fcntl.LOCK_EX)
+        # 0.66.2: claim the sandbox band once per class run — a free contiguous range
+        # (MIN..MAX plus scratch MAX+1..MAX+20 = 121 ports) recorded as a claim file,
+        # so concurrent runs from other worktrees derive DISJOINT bands.
+        cls.band_lo = _claim_free_band(121)
+        cls.port_min, cls.port_max = cls.band_lo, cls.band_lo + 100
+        cls.scratch_ports = range(cls.band_lo + 101, cls.band_lo + 121)
 
     @classmethod
     def tearDownClass(cls):
+        _release_band_claim()
         fcntl.flock(cls._lock_fh, fcntl.LOCK_UN)
         cls._lock_fh.close()
 
@@ -243,12 +326,6 @@ class SwapPreflightBucketTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="fa-swap-test-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        # 0.66.2: derive the sandbox band from a free contiguous range — MIN..MAX plus the
-        # MAX+1..MAX+20 swap scratch band = 121 ports — instead of a fixed range, so
-        # concurrent runs from other worktrees cannot collide.
-        band_lo = _free_band(121)
-        self.port_min, self.port_max = band_lo, band_lo + 100
-        self.scratch_ports = range(band_lo + 101, band_lo + 121)
         for d in ('bin', 'config', 'keys', 'stubs', 'home', 'ctrl'):
             (self.root / d).mkdir()
         for rel in ('bin/remote-session.sh', 'bin/remote-provider-registry.sh',
@@ -517,6 +594,53 @@ class SwapTestIsolationTests(unittest.TestCase):
         finally:
             for r in roots.values():
                 shutil.rmtree(r, ignore_errors=True)
+
+    def test_claim_avoids_live_claims_and_sweeps_dead_ones(self):
+        base = Path(tempfile.gettempdir())
+        x = _free_band(1)   # a currently-free anchor port
+        live_claim = base / f"fa-swap-band-{os.getpid()}-testlive.json"
+        live_claim.write_text(json.dumps({"pid": os.getpid(), "start": _proc_start(os.getpid()),
+                                           "lo": x, "hi": x + 120}))
+        dead = subprocess.Popen(["sleep", "0"])
+        dead.wait()
+        dead_claim = base / f"fa-swap-band-{dead.pid}-testdead.json"
+        dead_claim.write_text(json.dumps({"pid": dead.pid, "start": "whatever",
+                                           "lo": x + 500, "hi": x + 620}))
+        blocker = socket.socket()
+        blocker.bind(("127.0.0.1", x))   # bind-probe alone would slide to x+1, INSIDE the claim
+        try:
+            lo = _claim_free_band(8, start=x - 3, tag="testlive2")
+            self.assertFalse(any(x <= p <= x + 120 for p in range(lo, lo + 8)),
+                             "a live claim must be avoided even where the ports bind free")
+            self.assertFalse(dead_claim.exists(), "a dead pid's claim must be swept")
+        finally:
+            blocker.close()
+            _release_band_claim(tag="testlive2")
+            live_claim.unlink(missing_ok=True)
+            dead_claim.unlink(missing_ok=True)
+
+    def test_concurrent_claims_are_disjoint(self):
+        import threading
+        results: list = [None] * 4   # filled by the worker threads
+        barrier = threading.Barrier(4)
+
+        def worker(i):
+            barrier.wait()
+            results[i] = _claim_free_band(50, tag=f"t{i}")
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertTrue(all(r is not None for r in results), "a claim failed")
+        for i in range(4):
+            for j in range(i + 1, 4):
+                a = set(range(results[i], results[i] + 50))
+                b = set(range(results[j], results[j] + 50))
+                self.assertFalse(a & b, f"claims {results[i]} and {results[j]} overlap")
+        for i in range(4):
+            _release_band_claim(tag=f"t{i}")
 
 
 if __name__ == "__main__":
