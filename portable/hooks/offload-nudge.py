@@ -100,8 +100,8 @@ def paid_nudge(root: str, modes: dict | None = None) -> str:
         )
     return (
         "free-agents is installed and this session runs on PAID inference, so FREE OFFLOADING IS "
-        "THE DEFAULT for delegated work — before ANY Agent/Task/Workflow call, fan-out or "
-        "parallel subagents, route the work to a free model instead of a paid subagent (the "
+        "THE DEFAULT for delegated work — before you write a plan or make ANY Agent/Task/Workflow "
+        "call, fan-out or parallel subagents, route the work to a free model instead of a paid subagent (the "
         "native Agent tool can only start a paid model).\n"
         + _routing_block(root)
     )
