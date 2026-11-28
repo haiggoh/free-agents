@@ -59,6 +59,7 @@
     "hooks/hooks.json": "97c5d006d09dbdb2ea96da738a528e8f5888481924ba4a316fb12336f7494f98",
     "hooks/knowledge-primer.py": "9c1a0d92a79cf8efaa501d9744152bfa9ccd922ec9eff11c88e7e525e4c49b66",
     "hooks/offload-nudge.py": "64629c4aa8b554c033bd26a957fd4d8e6e1eecb461e59023071ff2f50b35cb05",
+    "hooks/plan-route-guard.py": "779ff83c5dcd6a9eeb038c0338e3b3513e1dd1be10baeaa7e25f368655b32d78",
     "hooks/read-pages-guard.py": "b83026eba0f623c87ca2cd0ff844f159629f5be4424414c2ce66459861ddd267",
     "hooks/session-title-prefix.py": "6cc1c79242391db3e09d8910c6b6461dcdc0973f978a9e306c7a90938a4506f6",
     "hooks/transcript-identity.py": "2ce181688f6408debb8fd82c5c08eb17d56ea8403b4ebdacb15e38e53dad99f6",
@@ -73,7 +74,7 @@
     "skills/verify-delegated-work/SKILL.md": "bca40230e044016a7f50a7656c87b0e3dacd008d67cb8afe8bf84f33800c6474"
   },
   "schema": "haiggoh-portable-build/1",
-  "source_commit": "f5a1ae3ad49a476c851b44241064bc022bb148b3",
+  "source_commit": "24ef40b37eb5c1679af0c90fdf0c9b37bf5564ad",
   "source_repo": "haiggoh/free-agents",
   "transform_version": "1"
 }
