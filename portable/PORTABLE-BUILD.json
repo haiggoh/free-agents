@@ -52,7 +52,7 @@
     }
   ],
   "files": {
-    ".claude-plugin/plugin.json": "28350199ff5bc736a03ace3377ecd22a313bee9f20b588781c925dcee346dae6",
+    ".claude-plugin/plugin.json": "61de17fb4037223d200fe85117b17bece03afed90bf634ade2619f20ace4ee2c",
     "hooks/cloud-agent-intercept.py": "97111f1ce6464e229e1346f7477ed9b72a8cf247716a01020a74285f3edaa5e0",
     "hooks/guard-own-endpoint.py": "a568dd8a352cbe34ec3454b98ebc6e77d09f487f183fa6b0296a58ea899ad5a8",
     "hooks/guard-tool-owned-state.py": "84810c40d06eb709ae08e8656d35a4690654bfb074d2f7ab9210f4ab39fc11ef",
@@ -73,7 +73,7 @@
     "skills/verify-delegated-work/SKILL.md": "bca40230e044016a7f50a7656c87b0e3dacd008d67cb8afe8bf84f33800c6474"
   },
   "schema": "haiggoh-portable-build/1",
-  "source_commit": "102ea83af5fe3e004dc15b0b523f0863ce8bbd67",
+  "source_commit": "f38d9d2504f87c913dabf5eb644c86dcd41c07fa",
   "source_repo": "haiggoh/free-agents",
   "transform_version": "1"
 }
