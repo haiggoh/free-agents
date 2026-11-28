@@ -38,6 +38,9 @@ os.environ.setdefault("LA_URL_OPENER", "true")
 # Subprocesses inherit it. Tests that exercise the override itself use monkeypatch.setenv.
 import tempfile as _tempfile  # noqa: E402
 os.environ["FA_QUOTA_LEDGER_DIR"] = _tempfile.mkdtemp(prefix="fa-quota-test-")
+# free-agent-tool.py appends this machine's csl-registered local models by default (0.65.4);
+# FORCED off so the suite never sees real aliases. Tests of the fallback set it themselves.
+os.environ["FA_DISPATCH_LOCAL_FALLBACK"] = "0"
 
 # 0.54.0 Task 1 Step 0 — fence the machine-wide shared state BEFORE any new test exists.
 # The scrub above deleted every inherited LA_*, which makes rate limiting ON at its DEFAULT

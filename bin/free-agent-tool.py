@@ -546,13 +546,26 @@ def local_fallback_entries(env, role=None) -> list:
     return out
 
 
+def _local_fallback_on(env) -> bool:
+    """FA_DISPATCH_LOCAL_FALLBACK: unset or 1 = append the csl-registered local models after the
+    curated order (the 0.56.14 default; it was gated on LA_CONFIG_SOURCE, which nothing exports,
+    so it never ran in production); 0 = off (conftest fences the suite off). Read from env, then
+    os.environ, so the fence also reaches callers that pass their own env dict."""
+    v = env.get("FA_DISPATCH_LOCAL_FALLBACK", os.environ.get("FA_DISPATCH_LOCAL_FALLBACK"))
+    if v in (None, "", "1"):
+        return True
+    if v == "0":
+        return False
+    raise ValueError(f"FA_DISPATCH_LOCAL_FALLBACK must be 0 or 1, got {v!r}")
+
+
 def _local_agents_only(env) -> bool:
     """The opt-in setting (0.56.14, user): 'no remote API agents in local sessions' —
-    stored as local_registry['agents_local_only'] in the session settings."""
+    stored as local_registry['agents_local_only'] in the session-menu settings, which live in
+    session_menu_state.config_dir() (NOT CLAUDE_CONFIG_DIR: reading that dir failed open)."""
     try:
         import session_menu_state as sms
-        cfg = env.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
-        return bool(sms.load(Path(cfg)).local_registry.get("agents_local_only"))
+        return bool(sms.load(sms.config_dir()).local_registry.get("agents_local_only"))
     except Exception:
         return False
 
@@ -577,16 +590,27 @@ def availability(entry, env, local_ok=None) -> str:
     return f"unknown kind {entry.get('kind')!r}"
 
 
+class UnknownRole(ValueError):
+    """A caller asked for a role name the roster does not use (a typo)."""
+
+
 def request_role(input_data):
     """The role a request asks for: an explicit "role", else one implied by subagent_type.
-    None (no filter) for general-purpose work, so the plain preference order applies."""
+    None (no filter) for general-purpose work, so the plain preference order applies.
+    An unknown explicit role raises UnknownRole: it would match no entry, so the chain would
+    silently reorder instead of failing (measured 2026-11-26: role=reviewer)."""
     if input_data.get("role"):
-        return input_data["role"]
+        role = input_data["role"]
+        if role not in ROLE_THINKING_DEFAULT:
+            raise UnknownRole(f"role {role!r} is not a dispatch role (valid: "
+                              f"{', '.join(sorted(ROLE_THINKING_DEFAULT))}) — an unknown name "
+                              "matches no entry, so the dispatch chain would silently reorder")
+        return role
     st = input_data.get("subagent_type", "general-purpose")
     return None if st == "general-purpose" else ROLE_MAP.get(st)
 
 
-def candidates(prefs, env, local_ok=None, role=None, avoid_family=None, local_fallback=False) -> list:
+def candidates(prefs, env, local_ok=None, role=None, avoid_family=None, local_fallback=None) -> list:
     """Available entries in preference order. A role is a SUGGESTION, not a hard requirement
     (user 2026-11-09: the lines are blurred — any model can fill another role when it needs
     to): entries listing the role come first, every other available entry follows as fallback.
@@ -604,8 +628,11 @@ def candidates(prefs, env, local_ok=None, role=None, avoid_family=None, local_fa
             rest.append(e)
     # 0.56.14 (user): the auto-generated LOCAL list rides at the END of the order — a
     # fallback for after the curated dispatch preferences are exhausted (remote sessions too).
-    # Opt-in via local_fallback=True (run() passes it): unit tests calling candidates()
-    # without it see only the curated order, so real machine aliases never leak into them.
+    # On by default for EVERY route (run, run_background, --list); local_fallback=None means
+    # "ask FA_DISPATCH_LOCAL_FALLBACK", which conftest fences to 0 so real machine aliases never
+    # leak into unit tests. An explicit True/False always wins.
+    if local_fallback is None:
+        local_fallback = _local_fallback_on(env)
     if local_fallback:
         seen = {e.get("id") for e in matching + rest}
         for e in local_fallback_entries(env, role):
@@ -672,7 +699,7 @@ def rank_entries(entries, *, need_context, need_output, limits, headroom, rng):
     return out
 
 
-def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None, local_fallback=False):
+def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None, local_fallback=None):
     """candidates() with avoid_family relaxed when it would leave nothing (user 2026-10-23).
     Role is already soft inside candidates() (matching entries first, the rest after), so it
     never has to give way. Returns (order, role_honoured, family_avoided); an empty order means
@@ -1017,7 +1044,12 @@ def run(input_data, env, out_path=None) -> int:
     full_prompt = attach_files(f"{description}\n\n{prompt}" if description else prompt,
                                input_data.get("files"))
     prefs = load_preferences(env)
-    role, avoid = request_role(input_data), input_data.get("avoid_family")
+    try:
+        role = request_role(input_data)
+    except UnknownRole as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return 1
+    avoid = input_data.get("avoid_family")
     families = {e["family"] for e in prefs.get("order", []) if e.get("family")}
     if avoid and prefs.get("order") and avoid not in families:
         # An unknown name is a caller typo (measured 2026-10-29: "zai" for "zhipu"): it matches
@@ -1032,9 +1064,9 @@ def run(input_data, env, out_path=None) -> int:
         return 1
     order, role_matched, family_avoided = degraded_candidates(
         prefs, env, role=role, avoid_family=avoid,
-        # 0.56.14: the local fallback list only when a real live config is named — unit
-        # tests (no LA_CONFIG_SOURCE) must not see this machine's registered aliases
-        local_fallback=bool(env.get("LA_CONFIG_SOURCE")))
+        # a named sandbox config (LA_CONFIG_SOURCE) forces the local fallback on; otherwise
+        # candidates() asks FA_DISPATCH_LOCAL_FALLBACK (default on, conftest fences it off)
+        local_fallback=True if env.get("LA_CONFIG_SOURCE") else None)
     # (the 0.56.14 opt-in 'agents_local_only' filter lives in candidates(), so every caller gets it)
     if not order:
         print(json.dumps({"error": "no dispatch model is available (no keys, no local weights) — "
@@ -1287,7 +1319,12 @@ def run_background(input_data, env, run_dir, resume=False, extend=None):
             description = (input_data or {}).get("description", "")
             full_prompt = attach_files(f"{description}\n\n{prompt}" if description else prompt,
                                        (input_data or {}).get("files"))
-            role, avoid = request_role(input_data), (input_data or {}).get("avoid_family")
+            try:
+                role = request_role(input_data or {})
+            except UnknownRole as exc:
+                print(json.dumps({"error": str(exc)}), file=sys.stderr)
+                return 2
+            avoid = (input_data or {}).get("avoid_family")
             order, _role_matched, _family_avoided = degraded_candidates(
                 prefs, env, role=role, avoid_family=avoid)
             if not order:
