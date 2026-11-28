@@ -546,19 +546,6 @@ def local_fallback_entries(env, role=None) -> list:
     return out
 
 
-def _local_fallback_on(env) -> bool:
-    """FA_DISPATCH_LOCAL_FALLBACK: unset or 1 = append the csl-registered local models after the
-    curated order (the 0.56.14 default; it was gated on LA_CONFIG_SOURCE, which nothing exports,
-    so it never ran in production); 0 = off (conftest fences the suite off). Read from env, then
-    os.environ, so the fence also reaches callers that pass their own env dict."""
-    v = env.get("FA_DISPATCH_LOCAL_FALLBACK", os.environ.get("FA_DISPATCH_LOCAL_FALLBACK"))
-    if v in (None, "", "1"):
-        return True
-    if v == "0":
-        return False
-    raise ValueError(f"FA_DISPATCH_LOCAL_FALLBACK must be 0 or 1, got {v!r}")
-
-
 def _local_agents_only(env) -> bool:
     """The opt-in setting (0.56.14, user): 'no remote API agents in local sessions' —
     stored as local_registry['agents_local_only'] in the session-menu settings, which live in
@@ -610,7 +597,7 @@ def request_role(input_data):
     return None if st == "general-purpose" else ROLE_MAP.get(st)
 
 
-def candidates(prefs, env, local_ok=None, role=None, avoid_family=None, local_fallback=None) -> list:
+def candidates(prefs, env, local_ok=None, role=None, avoid_family=None, local_fallback=False) -> list:
     """Available entries in preference order. A role is a SUGGESTION, not a hard requirement
     (user 2026-11-09: the lines are blurred — any model can fill another role when it needs
     to): entries listing the role come first, every other available entry follows as fallback.
@@ -628,11 +615,8 @@ def candidates(prefs, env, local_ok=None, role=None, avoid_family=None, local_fa
             rest.append(e)
     # 0.56.14 (user): the auto-generated LOCAL list rides at the END of the order — a
     # fallback for after the curated dispatch preferences are exhausted (remote sessions too).
-    # On by default for EVERY route (run, run_background, --list); local_fallback=None means
-    # "ask FA_DISPATCH_LOCAL_FALLBACK", which conftest fences to 0 so real machine aliases never
-    # leak into unit tests. An explicit True/False always wins.
-    if local_fallback is None:
-        local_fallback = _local_fallback_on(env)
+    # Opt-in via local_fallback=True (run() passes it): unit tests calling candidates()
+    # without it see only the curated order, so real machine aliases never leak into them.
     if local_fallback:
         seen = {e.get("id") for e in matching + rest}
         for e in local_fallback_entries(env, role):
@@ -699,7 +683,7 @@ def rank_entries(entries, *, need_context, need_output, limits, headroom, rng):
     return out
 
 
-def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None, local_fallback=None):
+def degraded_candidates(prefs, env, role=None, avoid_family=None, local_ok=None, local_fallback=False):
     """candidates() with avoid_family relaxed when it would leave nothing (user 2026-10-23).
     Role is already soft inside candidates() (matching entries first, the rest after), so it
     never has to give way. Returns (order, role_honoured, family_avoided); an empty order means
@@ -1064,9 +1048,9 @@ def run(input_data, env, out_path=None) -> int:
         return 1
     order, role_matched, family_avoided = degraded_candidates(
         prefs, env, role=role, avoid_family=avoid,
-        # a named sandbox config (LA_CONFIG_SOURCE) forces the local fallback on; otherwise
-        # candidates() asks FA_DISPATCH_LOCAL_FALLBACK (default on, conftest fences it off)
-        local_fallback=True if env.get("LA_CONFIG_SOURCE") else None)
+        # 0.56.14: the local fallback list only when a real live config is named — unit
+        # tests (no LA_CONFIG_SOURCE) must not see this machine's registered aliases
+        local_fallback=bool(env.get("LA_CONFIG_SOURCE")))
     # (the 0.56.14 opt-in 'agents_local_only' filter lives in candidates(), so every caller gets it)
     if not order:
         print(json.dumps({"error": "no dispatch model is available (no keys, no local weights) — "
