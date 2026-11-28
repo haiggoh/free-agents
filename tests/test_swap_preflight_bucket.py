@@ -14,10 +14,14 @@ and a copy of its config. Verdicts come from _swap_probe's PREFLIGHT lines.
   - a dead current route (402) allows a paid_only target, labelled
   - LA_SWAP_SKIP_PREFLIGHT=1 (the superseded branch's knob) has NO effect
 """
+import atexit
 import fcntl
+import glob
+import hashlib
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -28,13 +32,101 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# 0.66.2 isolation (waypoint swap-model-preflight-rate): no fixed sandbox ports. The band is
+# derived at setUp from a free contiguous range (probed by bind), and stub cleanup survives a
+# timeout-killed worker: every stub records "<pid> <lstart>" in <tmp>/ctrl/<port>.stub.pid,
+# and the next run's setUpClass (plus atexit) reaps roots whose markers are dead, reused, or
+# orphaned (ppid 1) — never by port, which belongs to whichever run derived it.
+
+
+def _proc_start(pid):
+    """macOS lstart of pid ("" when gone) — the pid-reuse guard."""
+    r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _proc_ppid(pid):
+    r = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True)
+    try:
+        return int(r.stdout.strip())
+    except ValueError:
+        return -1
+
+
+def _free_band(count, floor=20000, start=None):
+    """First run of `count` contiguous ports that all bind right now (held, then released).
+
+    Probed by bind, never a fixed range: concurrent runs from other worktrees must not
+    collide. `floor` keeps the band clear of the live proxy/local bands; `start` forces the
+    search to begin at a chosen port (tests)."""
+    if start is not None:
+        lo = max(floor, start)
+    else:
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        lo = max(floor, s.getsockname()[1])
+        s.close()
+    while lo + count <= 65535:
+        held = []
+        blocked = None
+        for p in range(lo, lo + count):
+            sk = socket.socket()
+            try:
+                sk.bind(("127.0.0.1", p))
+                held.append(sk)
+            except OSError:
+                sk.close()
+                blocked = p
+                break
+        for sk in held:
+            sk.close()
+        if blocked is None:
+            return lo
+        lo = blocked + 1
+    raise RuntimeError(f"no contiguous free band of {count} ports below 65535")
+
+
+def _reap_stale_stub_roots():
+    """Reap stub proxies leaked by a timeout-killed worker, by marker — never by port."""
+    base = tempfile.gettempdir()
+    by_root = {}
+    for marker in glob.glob(os.path.join(base, "fa-swap-test-*", "ctrl", "*.stub.pid")):
+        by_root.setdefault(Path(marker).parents[1], []).append(marker)
+    for root, markers in by_root.items():
+        live = False
+        for marker in markers:
+            try:
+                # split(None, 1): lstart is multi-word ("Mon Nov 28 11:20:00 2026")
+                parts = Path(marker).read_text().split(None, 1)
+                if len(parts) != 2:
+                    continue
+                pid = int(parts[0])
+                start = parts[1].strip()
+            except (OSError, ValueError):
+                continue
+            cur = _proc_start(pid)
+            if cur and cur == start:
+                if _proc_ppid(pid) == 1:
+                    try:
+                        os.kill(pid, 9)   # orphaned stub of a dead worker
+                    except OSError:
+                        pass
+                else:
+                    live = True   # another live run owns this root — leave it alone
+                    break
+        if not live:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+atexit.register(_reap_stale_stub_roots)
+
 # Extended stub: health always unless ctrl/<port>.nohealth exists; /v1/messages answers
 # 200 unless ctrl/<port>.failcode (one-shot, its content is the HTTP code) or
 # ctrl/<port>.failalways (persistent) exists; ctrl/<port>.slow holds seconds to sleep
 # BEFORE binding while logging every second (progress-based readiness must not abort it).
 # At startup it records its env knob and copies its config into ctrl/.
 STUB = """#!/usr/bin/env python3
-import http.server, json, os, shutil, signal, sys, time
+import http.server, json, os, shutil, signal, subprocess, sys, time
 
 port = None
 cfg = None
@@ -48,6 +140,12 @@ ctrl = os.environ["LA_SWAP_TEST_DIR"]
 fast = os.environ.get("LA_SWAP_TEST_FAST") == "1"
 
 os.makedirs(ctrl, exist_ok=True)
+if port is not None:
+    # 0.66.2: record "<pid> <lstart>" so a LATER run can reap this stub if our worker is
+    # timeout-killed (tearDown never runs) — reaped by marker, never by port.
+    _start = subprocess.check_output(["ps", "-o", "lstart=", "-p", str(os.getpid())], text=True).strip()
+    with open(os.path.join(ctrl, f"{port}.stub.pid"), "w") as f:
+        f.write(f"{os.getpid()} {_start}\n")
 with open(os.path.join(ctrl, f"{port}.env"), "w") as f:
     f.write("LA_PROXY_HOOKS_RATE_LIMIT=" + os.environ.get("LA_PROXY_HOOKS_RATE_LIMIT", "<unset>") + "\\n")
 if cfg:
@@ -128,7 +226,12 @@ class SwapPreflightBucketTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._lock_fh = open(os.path.join(tempfile.gettempdir(), "free-agents-swap-tests.lock"), "w")
+        _reap_stale_stub_roots()   # 0.66.2: reap stubs leaked by a timeout-killed prior run
+        # per-checkout lock: two worktrees may run this file concurrently (derived bands);
+        # runs within one checkout still serialize.
+        digest = hashlib.md5(str(ROOT).encode()).hexdigest()[:8]
+        cls._lock_fh = open(os.path.join(tempfile.gettempdir(),
+                                         f"free-agents-swap-tests-{digest}.lock"), "w")
         fcntl.flock(cls._lock_fh, fcntl.LOCK_EX)
 
     @classmethod
@@ -137,9 +240,15 @@ class SwapPreflightBucketTests(unittest.TestCase):
         cls._lock_fh.close()
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(prefix="fa-swap-test-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        # 0.66.2: derive the sandbox band from a free contiguous range — MIN..MAX plus the
+        # MAX+1..MAX+20 swap scratch band = 121 ports — instead of a fixed range, so
+        # concurrent runs from other worktrees cannot collide.
+        band_lo = _free_band(121)
+        self.port_min, self.port_max = band_lo, band_lo + 100
+        self.scratch_ports = range(band_lo + 101, band_lo + 121)
         for d in ('bin', 'config', 'keys', 'stubs', 'home', 'ctrl'):
             (self.root / d).mkdir()
         for rel in ('bin/remote-session.sh', 'bin/remote-provider-registry.sh',
@@ -165,8 +274,8 @@ class SwapPreflightBucketTests(unittest.TestCase):
                         LA_LITELLM_CMD=str(stub),
                         LA_SWAP_PROBE_TIMEOUT='15',
                         PYTEST_CURRENT_TEST='1',
-                        LA_REMOTE_PROXY_PORT_MIN='47100',
-                        LA_REMOTE_PROXY_PORT_MAX='47200')
+                        LA_REMOTE_PROXY_PORT_MIN=str(self.port_min),
+                        LA_REMOTE_PROXY_PORT_MAX=str(self.port_max))
         self.rundir = self.root / 'local-agents-remote'
 
     def _stub_proxies_for_root(self):
@@ -249,7 +358,7 @@ class SwapPreflightBucketTests(unittest.TestCase):
         self.age_log(port)
         ctrl = self.root / 'ctrl'
         # every scratch port in the band answers 410 once; the live port stays healthy
-        for p in range(47201, 47221):   # the SWAP SCRATCH band is MAX+1..+20
+        for p in self.scratch_ports:   # the SWAP SCRATCH band is MAX+1..+20 (derived at setUp)
             if p != port:
                 (ctrl / f"{p}.failcode").write_text("410")
         r = self.swap(port, self.ALIAS_TO)
@@ -263,7 +372,7 @@ class SwapPreflightBucketTests(unittest.TestCase):
         self.age_log(port)
         ctrl = self.root / 'ctrl'
         # every scratch port in the band answers 429 once; the live port stays healthy
-        for p in range(47201, 47221):   # the SWAP SCRATCH band is MAX+1..+20
+        for p in self.scratch_ports:   # the SWAP SCRATCH band is MAX+1..+20 (derived at setUp)
             if p != port:
                 (ctrl / f"{p}.failcode").write_text("429")
         r = self.swap(port, self.ALIAS_TO)
@@ -272,9 +381,9 @@ class SwapPreflightBucketTests(unittest.TestCase):
         self.assertIn("throttled", r.stderr.lower())
         self.assertEqual(int((self.rundir / f'proxy-{port}.pid').read_text().split()[0]), pid)
         # with --force the throttled pre-flight is overridden and the swap proceeds
-        for p in range(47201, 47221):   # the SWAP SCRATCH band is MAX+1..+20
+        for p in self.scratch_ports:   # the SWAP SCRATCH band is MAX+1..+20 (derived at setUp)
             (ctrl / f"{p}.failcode").unlink(missing_ok=True)
-        for p in range(47201, 47221):   # the SWAP SCRATCH band is MAX+1..+20
+        for p in self.scratch_ports:   # the SWAP SCRATCH band is MAX+1..+20 (derived at setUp)
             if p != port:
                 (ctrl / f"{p}.failcode").write_text("429")
         r2 = self.swap(port, self.ALIAS_TO, force=True)
@@ -311,7 +420,7 @@ class SwapPreflightBucketTests(unittest.TestCase):
         port, pid = self.start_old_session()
         self.age_log(port)
         ctrl = self.root / 'ctrl'
-        for p in range(47201, 47221):   # the SWAP SCRATCH band is MAX+1..+20
+        for p in self.scratch_ports:   # the SWAP SCRATCH band is MAX+1..+20 (derived at setUp)
             if p != port:
                 (ctrl / f"{p}.nohealth").write_text("1")
         r = self.swap(port, self.ALIAS_TO, extra_env={"LA_SWAP_TEST_FAST": "1"})
@@ -346,6 +455,68 @@ class SwapPreflightBucketTests(unittest.TestCase):
         # reverted: the live config is back to the old model
         yaml = (self.rundir / f'proxy-{port}.yaml').read_text()
         self.assertIn("nemotron", yaml, "auto-revert must restore the old model's config")
+
+
+class SwapTestIsolationTests(unittest.TestCase):
+    """0.66.2 isolation helpers (waypoint swap-model-preflight-rate) — fast, no proxy started."""
+
+    def test_free_band_returns_a_contiguous_bindable_run(self):
+        lo = _free_band(8)
+        held = []
+        try:
+            for p in range(lo, lo + 8):
+                sk = socket.socket()
+                sk.bind(("127.0.0.1", p))   # raises unless the whole run was free
+                held.append(sk)
+        finally:
+            for sk in held:
+                sk.close()
+        self.assertGreaterEqual(lo, 20000)   # never the live proxy/local bands
+
+    def test_free_band_slides_past_a_taken_port(self):
+        blocker = socket.socket()
+        blocker.bind(("127.0.0.1", 0))
+        x = blocker.getsockname()[1]
+        try:
+            lo = _free_band(8, start=x - 3)   # force the candidate run to straddle x
+            self.assertNotIn(x, range(lo, lo + 8), "a taken port must never be in the band")
+            held = []
+            try:
+                for p in range(lo, lo + 8):
+                    sk = socket.socket()
+                    sk.bind(("127.0.0.1", p))
+                    held.append(sk)
+            finally:
+                for sk in held:
+                    sk.close()
+        finally:
+            blocker.close()
+
+    def test_reaper_reaps_dead_and_reused_markers_but_keeps_a_live_run(self):
+        live = subprocess.Popen(["sleep", "30"])
+        dead = subprocess.Popen(["sleep", "0"])
+        dead.wait()
+        self.addCleanup(lambda: live.kill() if live.poll() is None else None)
+        base = Path(tempfile.gettempdir())
+        cases = (("dead", dead.pid, "whatever"),
+                 ("reused", os.getpid(), "bogus-lstart"),
+                 ("live", live.pid, _proc_start(live.pid)))
+        roots = {}
+        for name, pid, start in cases:
+            root = base / f"fa-swap-test-reap-{name}-{os.getpid()}"
+            (root / "ctrl").mkdir(parents=True)
+            (root / "ctrl" / "1.stub.pid").write_text(f"{pid} {start}\n")
+            roots[name] = root
+        try:
+            _reap_stale_stub_roots()
+            self.assertFalse(roots["dead"].exists(), "dead-pid root must be reaped")
+            self.assertFalse(roots["reused"].exists(), "pid-reused root must be reaped")
+            self.assertTrue(roots["live"].exists(), "a live non-orphan run's root must survive")
+            self.assertIsNone(live.poll(), "the reaper must never kill the live marker's process")
+            os.kill(os.getpid(), 0)
+        finally:
+            for r in roots.values():
+                shutil.rmtree(r, ignore_errors=True)
 
 
 if __name__ == "__main__":
