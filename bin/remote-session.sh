@@ -648,7 +648,7 @@ swap_scratch_port() {
 # picked 4144, two proxies failed to bind, and two sessions ran the third one's model. Picking
 # and claiming now happen under one lock, so a concurrent launcher sees the claim and moves on.
 _alloc_lock() { # mkdir is atomic; the holder record lets a waiter break a lock whose holder died
-    local lock="$RUNDIR/.port-alloc.lock" holder="" wait="${LA_PORT_LOCK_WAIT_S:-60}" deadline
+    local lock="$RUNDIR/.port-alloc.lock" holder="" claimed="" stale="" wait="${LA_PORT_LOCK_WAIT_S:-60}" deadline
     [[ "$wait" =~ ^[0-9]+$ ]] || { echo "remote-session: LA_PORT_LOCK_WAIT_S must be whole seconds, got '$wait'" >&2; return 1; }
     [[ -d "$RUNDIR" ]] || { echo "remote-session: runtime dir $RUNDIR missing — cannot allocate a port" >&2; return 1; }
     # WALL-CLOCK cap (SECONDS): one liveness check can take over a second on a loaded box
@@ -660,7 +660,24 @@ _alloc_lock() { # mkdir is atomic; the holder record lets a waiter break a lock 
         fi
         holder="$(cat "$lock/holder" 2>/dev/null)"
         if [[ -n "$holder" ]] && ! _owner_alive "$holder"; then
-            rm -f "$lock/holder"; rmdir "$lock" 2>/dev/null; continue
+            # 0.67.0: break a dead holder's lock by ATOMIC RENAME of the holder FILE out of
+            # the lock — only one waiter's mv can win (the file is gone for the others).
+            # The winner re-checks the CLAIMED holder: if it raced a FRESH (alive) holder
+            # in, it restores it instead of breaking. (The old rm -f holder + rmdir lock
+            # could delete a fresh holder another waiter had just written, letting two
+            # waiters hold the lock at once; renaming the lock DIR has the same hole.)
+            stale="$RUNDIR/.port-alloc.holder.stale.$$.$RANDOM"
+            if mv "$lock/holder" "$stale" 2>/dev/null; then
+                claimed="$(cat "$stale" 2>/dev/null)"
+                rm -f "$stale"
+                if [[ -n "$claimed" ]] && _owner_alive "$claimed"; then
+                    mkdir -p "$lock" 2>/dev/null
+                    echo "$claimed" > "$lock/holder"   # raced a live holder — put it back
+                else
+                    rmdir "$lock" 2>/dev/null          # genuinely stale — drop the lock
+                fi
+            fi
+            continue
         fi
         (( SECONDS >= deadline )) && break
         sleep 0.1
